@@ -1,4 +1,4 @@
-save_loc: "/glade/work/schreck/repos/global/miles-credit/results/fuxi/"
+save_loc: "/glade/work/$USER/repos/global/miles-credit/results/fuxi/"
 seed: 1000
 
 data:
@@ -14,7 +14,7 @@ data:
     time_step: 1
     
 trainer:
-    mode: ddp # none, ddp, fsdp
+    mode: none # none, ddp, fsdp
     train_batch_size: 1
     valid_batch_size: 1
     batches_per_epoch: 0 # Set to 0 to use len(dataloader)

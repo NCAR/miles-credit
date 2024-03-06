@@ -1,4 +1,4 @@
-save_loc: "/glade/work/schreck/repos/global/miles-credit/results/test_configs"
+save_loc: "/glade/work/$USER/repos/global/miles-credit/results/test_configs"
 seed: 1000
 
 data:

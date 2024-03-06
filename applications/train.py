@@ -164,7 +164,7 @@ def distributed_model_wrapper(conf, vae, device):
 def load_model_and_optimizer(conf, model, device):
 
     start_epoch = conf['trainer']['start_epoch']
-    save_loc = conf['save_loc']
+    save_loc = os.path.expandvars(conf['save_loc'])
     learning_rate = float(conf['trainer']['learning_rate'])
     weight_decay = float(conf['trainer']['weight_decay'])
     amp = conf['trainer']['amp']
@@ -443,9 +443,10 @@ if __name__ == "__main__":
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     # Create directories if they do not exist and copy yml file
-    os.makedirs(conf["save_loc"], exist_ok=True)
-    if not os.path.exists(os.path.join(conf["save_loc"], "model.yml")):
-        shutil.copy(config, os.path.join(conf["save_loc"], "model.yml"))
+    save_loc = os.path.expandvars(conf["save_loc"])
+    os.makedirs(save_loc, exist_ok=True)
+    if not os.path.exists(os.path.join(save_loc, "model.yml")):
+        shutil.copy(config, os.path.join(save_loc, "model.yml"))
 
     # Launch PBS jobs
     if launch:

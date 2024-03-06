@@ -1,4 +1,4 @@
-save_loc: "/glade/work/schreck/repos/global/miles-credit/results/crossformer/"
+save_loc: "/glade/work/$USER/repos/global/miles-credit/results/crossformer/"
 seed: 1000
 
 data:
