@@ -314,7 +314,7 @@ def predict(rank, world_size, conf, pool, smm):
     model.eval()
 
     # Set up metrics and containers
-    metrics = LatWeightedMetrics(conf)
+    metrics = LatWeightedMetrics(conf, train=False)
     metrics_results = defaultdict(list)
     loss_fn = VariableTotalLoss2D(conf, validation=True)
 

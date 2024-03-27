@@ -6,8 +6,9 @@ from weatherbench2.derived_variables import ZonalEnergySpectrum
 
 class LatWeightedMetrics:
 
-    def __init__(self, conf):
+    def __init__(self, conf, train=True):
         self.conf = conf
+        self.train = train
         lat_file = conf['loss']['latitude_weights']
         atmos_vars = conf['data']['variables']
         surface_vars = conf['data']['surface_variables']
@@ -72,11 +73,12 @@ class LatWeightedMetrics:
 
         # additional metrics where xarray computations are needed
         # put metric configs here
-        zonal_metric = ZonalSpectrumMetric(self.conf, 
-                                           w_lat, 
-                                           x_variables=["U", "V"],
-                                           single_level_variables=['SP'])
-        loss_dict = loss_dict | zonal_metric(pred, y) # merge two dictionaries
+        if not self.train:
+            zonal_metric = ZonalSpectrumMetric(self.conf, 
+                                            w_lat, 
+                                            x_variables=["U", "V"],
+                                            single_level_variables=['SP'])
+            loss_dict = loss_dict | zonal_metric(pred, y) # merge two dictionaries
 
         return loss_dict
 
