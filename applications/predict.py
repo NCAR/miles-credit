@@ -36,7 +36,7 @@ from credit.data import PredictForecast
 from credit.loss import VariableTotalLoss2D
 from credit.models import load_model
 from credit.metrics import LatWeightedMetrics
-from credit.transforms import ToTensor, NormalizeState
+from credit.transforms import load_transforms, NormalizeState
 from credit.seed import seed_everything
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
@@ -403,7 +403,9 @@ def predict(rank, world_size, conf, pool, smm):
             print_str += f"Date: {utc_datetime.strftime('%Y-%m-%d %H:%M:%S')} "
             print_str += f"Hour: {batch['forecast_hour'].item()} "
             print_str += f"MAE: {mae.item()} "
-            print_str += f"ACC: {metrics_dict['acc']}"
+            print_str += f"ACC: {metrics_dict['acc']} "
+            print_str += f"spectrumMSE: {metrics_dict['spectrum_mse']}"
+
             logger.info(print_str)
 
             # convert the current step result as x-array

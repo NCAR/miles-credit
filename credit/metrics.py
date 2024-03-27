@@ -1,11 +1,13 @@
 import torch
 import numpy as np
 import xarray as xr
-
+from credit.data_conversions import dataConverter
+from weatherbench2.derived_variables import ZonalEnergySpectrum
 
 class LatWeightedMetrics:
 
     def __init__(self, conf):
+        self.conf = conf
         lat_file = conf['loss']['latitude_weights']
         atmos_vars = conf['data']['variables']
         surface_vars = conf['data']['surface_variables']
@@ -68,7 +70,83 @@ class LatWeightedMetrics:
         loss_dict["mse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mse_" in k and "rmse_" not in k])
         loss_dict["mae"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mae_" in k])
 
+        # additional metrics where xarray computations are needed
+        # put metric configs here
+        zonal_metric = ZonalSpectrumMetric(self.conf, 
+                                           w_lat, 
+                                           x_variables=["U", "V"],
+                                           single_level_variables=['SP'])
+        loss_dict = loss_dict | zonal_metric(pred, y) # merge two dictionaries
+
         return loss_dict
+
+class ZonalSpectrumMetric:
+    def __init__(self, conf, w_lat, #w_var - not implemented yet 
+                 x_variables=["U", "V"], single_level_variables=[]):
+        '''
+        _variables arguments determine which data vars to compute spectra metric
+        '''
+        self.conf = conf
+        self.converter = dataConverter(self.conf) # can move this out to the latweightedmetrics class
+        self.w_lat = w_lat
+        self.variables = x_variables + single_level_variables
+        self.x_variables = x_variables
+        self.single_level_variables = single_level_variables
+        self.zonal_spectrum_calculator = ZonalEnergySpectrum(self.variables)
+
+    def __call__(self, pred, y):
+        '''
+        pred, y can be normalized or unnormalized tensors.
+        trying to achieve minimal interface with LatWeightedMetrics 
+        '''
+        # first dim is the batch dim
+        pred_ds = self.converter.tensor_to_Dataset(pred, range(pred.shape[0]))
+        y_ds = self.converter.tensor_to_Dataset(y, range(y.shape[0]))
+        loss_dict = {}
+
+        # add additional metrics this way if needed
+        # for metric, metric_header_str in [
+        #     (self.lat_weighted_spectrum_diff, 'spectrum_mse')
+        # ]:
+        loss = self.lat_weighted_spectrum_diff(pred_ds, y_ds)
+        loss_dict = self.store_metrics(loss, loss_dict, 'spectrum_mse')
+        
+        return loss_dict
+
+    def store_metrics(self, loss, loss_dict, metric_header_str):
+        '''
+        loss: dataset
+            w/ each variable dim must include level if atmos var, 
+            ow no need for single level vars
+        sums over remaining dimensions, and writes to loss_dict
+        '''
+        keys = []
+        for v in self.x_variables:
+            for k in range(self.conf['model']['levels']):
+                label = f"{metric_header_str}_{v}_{k}"
+                keys.append(label)
+                loss_dict[label] = loss[v].sel(level=k).sum() #latitudes already weighted
+
+        for v in self.single_level_variables:
+            label = f"{metric_header_str}_{v}"
+            keys.append(label)
+            loss_dict[label] = loss[v].sum() #latitudes already weighted
+        
+        loss_dict[f"{metric_header_str}"] = np.mean([loss_dict[k] for k in keys])
+        return loss_dict
+
+    def lat_weighted_spectrum_diff(self, pred_ds, y_ds):
+        # using squared distance
+        # variables to compute spectra on determined by class init
+        # Add epsilon to avoid division by zero
+        epsilon = 1e-7
+
+        pred_spectrum = self.zonal_spectrum_calculator.compute(pred_ds) + epsilon
+        y_spectrum = self.zonal_spectrum_calculator.compute(y_ds) + epsilon
+        sq_diff = np.square(np.log10(pred_spectrum) - np.log10(y_spectrum))
+        sq_diff = sq_diff.sum(dim=['datetime', 'zonal_wavenumber'])
+        return sq_diff * self.w_lat.squeeze().numpy()
+    
 
 
 def anomaly_correlation_coefficient(pred, true):

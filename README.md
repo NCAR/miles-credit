@@ -18,6 +18,13 @@ mamba env create -f environment.yml
 conda activate credit
 ```
 
+Some metrics use WeatherBench2 for computation. Install with:
+```bash
+git clone git@github.com:google-research/weatherbench2.git
+cd weatherbench2
+pip install .
+````
+
 To enable GPU support, install pytorch-cuda:
 ```bash
 mamba install pytorch-cuda=12.1 -c pytorch -c nvidia
