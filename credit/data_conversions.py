@@ -1,5 +1,6 @@
 import torch
 import xarray as xr
+from geocat.comp.interpolation import interp_hybrid_to_pressure
 
 class dataConverter:
     '''
@@ -14,7 +15,7 @@ class dataConverter:
         self.lon = static_ds.longitude.values
 
     def tensor_to_Dataset(self, tensor, forecast_datetimes):
-        return self.dataArrays_to_dataset(*self.tensor_to_dataArray(tensor, forecast_datetimes))
+        return self.dataArrays_to_dataset(* self.tensor_to_dataArray(tensor, forecast_datetimes))
 
     def concat_and_reshape(self, x1, x2): # will be useful for getting back to tensor
         x1 = x1.view(x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5])
@@ -82,3 +83,6 @@ class dataConverter:
         
         # dataset as output
         return ds
+
+    def dataset_to_pressure_levels(self, dataset):
+        pass

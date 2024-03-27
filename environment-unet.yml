@@ -27,6 +27,7 @@ dependencies:
   - dask-jobqueue
   - zarr
   - jupyter
+  - geocat-comp
   - pip:
     - einops
     - echo-opt
