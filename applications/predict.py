@@ -36,7 +36,7 @@ from credit.data import PredictForecast
 from credit.loss import VariableTotalLoss2D
 from credit.models import load_model
 from credit.metrics import LatWeightedMetrics
-from credit.transforms import load_transforms, NormalizeState
+from credit.transforms import ToTensor, NormalizeState
 from credit.seed import seed_everything
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
@@ -314,7 +314,7 @@ def predict(rank, world_size, conf, pool, smm):
     model.eval()
 
     # Set up metrics and containers
-    metrics = LatWeightedMetrics(conf, train=False)
+    metrics = LatWeightedMetrics(conf)
     metrics_results = defaultdict(list)
     loss_fn = VariableTotalLoss2D(conf, validation=True)
 
