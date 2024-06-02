@@ -34,16 +34,36 @@ def accum_log(log, new_logs):
 
 
 class TOADataLoader:
-    # This should get moved to solar.py at some point
     def __init__(self, conf):
-        self.TOA = xr.open_dataset(conf["data"]["TOA_forcing_path"])
+        self.TOA = xr.open_dataset(conf["data"]["TOA_forcing_path"]).load()
         self.times_b = pd.to_datetime(self.TOA.time.values)
+
+        # Precompute day of year and hour arrays
+        self.days_of_year = self.times_b.dayofyear
+        self.hours_of_day = self.times_b.hour
 
     def __call__(self, datetime_input):
         doy = datetime_input.dayofyear
         hod = datetime_input.hour
-        mask_toa = [doy == time.dayofyear and hod == time.hour for time in self.times_b]
-        return torch.tensor(((self.TOA['tsi'].sel(time=mask_toa))/2540585.74).to_numpy()).unsqueeze(0)
+
+        # Use vectorized comparison for masking
+        mask_toa = (self.days_of_year == doy) & (self.hours_of_day == hod)
+        selected_tsi = self.TOA['tsi'].sel(time=mask_toa) / 2540585.74
+
+        # Convert to tensor and add dimension
+        return torch.tensor(selected_tsi.to_numpy()).unsqueeze(0)
+
+# class TOADataLoader:
+#     # This should get moved to solar.py at some point
+#     def __init__(self, conf):
+#         self.TOA = xr.open_dataset(conf["data"]["TOA_forcing_path"]).load()
+#         self.times_b = pd.to_datetime(self.TOA.time.values)
+
+#     def __call__(self, datetime_input):
+#         doy = datetime_input.dayofyear
+#         hod = datetime_input.hour
+#         mask_toa = [doy == time.dayofyear and hod == time.hour for time in self.times_b]
+#         return torch.tensor(((self.TOA['tsi'].sel(time=mask_toa))/2540585.74).to_numpy()).unsqueeze(0)
 
 
 class Trainer:
@@ -198,16 +218,28 @@ class Trainer:
             optimizer.zero_grad()
 
             # Handle batch_loss
-            batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
-            if distributed:
-                dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
-            results_dict["train_loss"].append(batch_loss[0].item())
+            if isinstance(logs["loss"], torch.Tensor):
+                batch_loss = logs["loss"].to(self.device)
+            else:
+                batch_loss = torch.tensor([logs["loss"]], device=self.device)
+
+            batch_loss_list = [torch.zeros_like(batch_loss) for _ in range(dist.get_world_size())]
+            dist.all_gather(batch_loss_list, batch_loss)
+            batch_loss = torch.mean(torch.stack(batch_loss_list))
+            results_dict["train_loss"].append(batch_loss.item())
+            # Handle batch_loss
+            # batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
+            # if distributed:
+            #     dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+            # results_dict["train_loss"].append(batch_loss[0].item())
 
             if 'forecast_hour' in batch:
                 forecast_hour_tensor = batch['forecast_hour'].to(self.device)
                 if distributed:
-                    dist.all_reduce(forecast_hour_tensor, dist.ReduceOp.AVG, async_op=False)
-                    forecast_hour_avg = forecast_hour_tensor[-1].item()
+                    forecast_hour_list = [torch.zeros_like(forecast_hour_tensor) for _ in range(dist.get_world_size())]
+                    dist.all_gather(forecast_hour_list, forecast_hour_tensor)
+                    forecast_hour_avg = torch.mean(torch.stack([x.float() for x in forecast_hour_list]), dim=0)
+                    forecast_hour_avg = forecast_hour_avg.item()
                 else:
                     forecast_hour_avg = batch['forecast_hour'][-1].item()
 
@@ -590,7 +622,10 @@ class Trainer:
             ][0]
             offset = epoch - best_epoch
             if offset >= conf['trainer']['stopping_patience']:
-                logging.info(f"Trial {trial.number} is stopping early")
+                if trial:
+                    logging.info(f"Trial {trial.number} is stopping early")
+                else:
+                    logging.info("Stopping early")
                 break
 
             # Stop training if we get too close to the wall time

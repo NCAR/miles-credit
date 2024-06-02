@@ -78,7 +78,7 @@ class Trainer:
             )
 
         batch_group_generator = tqdm.tqdm(
-            range(batches_per_epoch), total=batches_per_epoch, leave=True
+            range(batches_per_epoch), total=conf["data"]["forecast_len"]*batches_per_epoch, leave=True
         )
 
         self.model.train()
@@ -95,24 +95,49 @@ class Trainer:
 
             with autocast(enabled=amp):
 
+                y_pred = None  # Place holder that gets updated after first roll-out
+                
                 while not stop_forecast:
 
                     batch = next(dl)
 
-                    y_pred = None  # Place holder that gets updated after first roll-out
                     for i, forecast_hour in enumerate(batch["forecast_hour"]):
 
                         if forecast_hour == 0:  # use true x -- initial condition time-step
-                            x_atmo = batch["x"]
-                            x_surf = batch["x_surf"]
-                            x = self.model.concat_and_reshape(x_atmo, x_surf).to(self.device)
-                        elif torch.rand(1).item() < teacher_forcing_ratio:  # Teacher forcing - use true x input with probability p
-                            x_atmo = batch["x"]
-                            x_surf = batch["x_surf"]
-                            x = self.model.concat_and_reshape(x_atmo, x_surf).to(self.device)
+                            x = self.model.concat_and_reshape(
+                                batch["x"],
+                                batch["x_surf"]
+                            ).to(self.device)
+
+                            if "static" in batch:
+                                if len(batch["static"]) > 0:
+                                    static = batch["static"].to(self.device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
+                                    x = torch.cat((x, static.clone()), dim=1)
+            
+                            if "TOA" in batch:
+                                if len(batch["TOA"]) > 0:
+                                    toa = batch["TOA"].to(self.device)
+                                    x = torch.cat([x, toa.unsqueeze(1)], dim=1)
+                        
+                        # elif torch.rand(1).item() < teacher_forcing_ratio:  # Teacher forcing - use true x input with probability p
+                        #     x_atmo = batch["x"]
+                        #     x_surf = batch["x_surf"]
+                        #     x = self.model.concat_and_reshape(x_atmo, x_surf).to(self.device)
+
                         else:  # use model's predictions
                             x_detach = x[:, :, 1:].detach()
-                            x = torch.cat([x_detach, y_pred.detach()], dim=2)
+
+                            if "static" in batch:
+                                if len(batch["static"]) > 0:
+                                    static = batch["static"].to(self.device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
+                                    y_pred = torch.cat((y_pred.detach(), static[:, :, 1:2, :, :].clone()), dim=1)
+            
+                            if "TOA" in batch:
+                                if len(batch["TOA"]) > 0:
+                                    toa = batch["TOA"].to(self.device)
+                                    y_pred = torch.cat([y_pred, toa.unsqueeze(1)[:, :, 1:2, :, :]], dim=1)
+
+                            x = torch.cat([x_detach, y_pred], dim=2)
 
                         y_pred = self.model(x)
 
@@ -142,6 +167,37 @@ class Trainer:
                                 scaler.step(optimizer)
                                 scaler.update()
                                 optimizer.zero_grad()
+
+                                batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
+                                if distributed:
+                                    dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+                                results_dict["train_loss"].append(batch_loss[0].item())
+                                if 'forecast_hour' in batch:
+                                    forecast_hour_stop = batch['forecast_hour'][-1].item()
+                                    results_dict["train_forecast_len"].append(forecast_hour_stop+1)
+                                else:
+                                    results_dict["train_forecast_len"].append(1)
+                    
+                                if not np.isfinite(np.mean(results_dict["train_loss"])):
+                                    try:
+                                        raise optuna.TrialPruned()
+                                    except Exception as E:
+                                        raise E
+                    
+                                # agg the results
+                                to_print = "Epoch: {} train_loss: {:.6f} train_acc: {:.6f} train_mae: {:.6f} forecast_len {:.6}".format(
+                                    epoch,
+                                    np.mean(results_dict["train_loss"]),
+                                    np.mean(results_dict["train_acc"]),
+                                    np.mean(results_dict["train_mae"]),
+                                    np.mean(results_dict["train_forecast_len"])
+                                )
+                                to_print += " lr: {:.12f}".format(optimizer.param_groups[0]["lr"])
+                                if self.rank == 0:
+                                    batch_group_generator.update(1)
+                                    batch_group_generator.set_description(to_print)
+
+                                
                                 loss = 0
 
                             if batch['stop_forecast'][i]:
@@ -242,12 +298,38 @@ class Trainer:
                 for i in batch["forecast_hour"]:
 
                     if i == 0:  # use true x -- initial condition time-step
-                        x_atmo = batch["x"]
-                        x_surf = batch["x_surf"]
-                        x = self.model.concat_and_reshape(x_atmo, x_surf).to(self.device)
+                        x = self.model.concat_and_reshape(
+                            batch["x"],
+                            batch["x_surf"]
+                        ).to(self.device)
+                        if "static" in batch:
+                            if len(batch["static"]) > 0:
+                                static = batch["static"].to(self.device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
+                                x = torch.cat((x, static.clone()), dim=1)
+                        if "TOA" in batch:
+                            if len(batch["TOA"]) > 0:
+                                toa = batch["TOA"].to(self.device)
+                                x = torch.cat([x, toa.unsqueeze(1)], dim=1)
+                        
                     else:  # use model's predictions
                         x_detach = x[:, :, 1:].detach()
-                        x = torch.cat([x_detach, y_pred.detach()], dim=2)
+                        if "static" in batch:
+                            if len(batch["static"]) > 0:
+                                static = batch["static"].to(self.device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
+                                y_pred = torch.cat((y_pred.detach(), static[:, :, 1:2, :, :].clone()), dim=1)
+                        if "TOA" in batch:
+                            if len(batch["TOA"]) > 0:
+                                toa = batch["TOA"].to(self.device)
+                                y_pred = torch.cat([y_pred, toa.unsqueeze(1)[:, :, 1:2, :, :]], dim=1)
+                        x = torch.cat([x_detach, y_pred], dim=2)
+
+                    # if i == 0:  # use true x -- initial condition time-step
+                    #     x_atmo = batch["x"]
+                    #     x_surf = batch["x_surf"]
+                    #     x = self.model.concat_and_reshape(x_atmo, x_surf).to(self.device)
+                    # else:  # use model's predictions
+                    #     x_detach = x[:, :, 1:].detach()
+                    #     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
                     y_pred = self.model(x)
 

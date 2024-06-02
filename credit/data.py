@@ -13,6 +13,7 @@ from functools import reduce
 from glob import glob
 from itertools import repeat
 from timeit import timeit
+import random
 
 
 def get_forward_data(filename) -> xr.DataArray:
@@ -369,6 +370,8 @@ class ERA5(torch.utils.data.Dataset):
         self.rng = np.random.default_rng(seed=seed)
         self.max_forecast_len = max_forecast_len
 
+        np.random.seed(seed)
+
         # set data places:
         indo = 0
         self.meta_data_dict = {}
@@ -397,15 +400,36 @@ class ERA5(torch.utils.data.Dataset):
         self.forecast_len = new_forecast_len
         self.total_seq_len = self.history_len + self.forecast_len
 
+    def sample_forecast_len(self, forecast_len, max_forecast_len, std1, std2, num_samples=1000):
+        samples = []
+        for _ in range(num_samples):
+            if random.random() < 0.5:
+                # Sample from the left side
+                sampled_forecast_len = int(np.random.normal(loc=forecast_len, scale=std1))
+                while sampled_forecast_len >= forecast_len:
+                    sampled_forecast_len = int(np.random.normal(loc=forecast_len, scale=std1))
+            else:
+                # Sample from the right side
+                sampled_forecast_len = int(np.random.normal(loc=forecast_len, scale=std2))
+                while sampled_forecast_len < forecast_len:
+                    sampled_forecast_len = int(np.random.normal(loc=forecast_len, scale=std2))
+
+            sampled_forecast_len = np.clip(sampled_forecast_len, 0, max_forecast_len-1)
+            samples.append(sampled_forecast_len)
+
+        return samples
+
     def __getitem__(self, index):
 
         # Update forecast_len if needed
         if isinstance(self.max_forecast_len, int):
             self._forecast_len = self.forecast_len
-            std_dev = 1.0
-            new_len = int(np.random.normal(loc=self._forecast_len, scale=std_dev, size=1))
-            new_len = np.clip(new_len, 1, 120)
-            self.update_forecast_len(new_len)
+            std_dev1 = 5.0
+            std_dev2 = 1.0
+            max_len = 120
+            num_samples = 1
+            new_len = self.sample_forecast_len(self._forecast_len, max_len, std_dev1, std_dev2, num_samples)
+            self.update_forecast_len(new_len[0])
 
         # find the result key:
         result_key = find_key_for_number(index, self.meta_data_dict)
