@@ -12,9 +12,9 @@ data:
     TOA_forcing_path: '/glade/derecho/scratch/dgagne/credit_scalers/solar_radiation_2024-03-29_0204.nc' 
     scaler_type: 'std' # 'std'
     history_len: 2 
-    forecast_len: 2 # larger than 0 for multi step
+    forecast_len: 6 # larger than 0 for multi step
     valid_history_len: 2
-    valid_forecast_len: 2 # 
+    valid_forecast_len: 6 # 
     one_shot: True
     skip_periods: null
     
@@ -22,7 +22,7 @@ trainer:
     mode: fsdp
     train_batch_size: 1
     valid_batch_size: 1
-    batches_per_epoch: 2500 # Set to 0 to use len(dataloader)
+    batches_per_epoch: 2400 # Set to 0 to use len(dataloader)
     valid_batches_per_epoch: 20
     learning_rate: 1.0e-07
     weight_decay: 1.0e-05
@@ -91,7 +91,7 @@ loss:
 predict:
     forecasts: [
         #["1989-12-31 00:00:00", "1990-01-02 00:00:00"],
-        ["2018-06-01 00:00:00", "2018-06-01 02:00:00"]
+        ["2018-06-01 00:00:00", "2018-06-01 23:00:00"]
     ]
     use_laplace_filter: True
     save_format: "nc"

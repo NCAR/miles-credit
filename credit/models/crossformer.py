@@ -50,10 +50,15 @@ class CubeEmbedding(nn.Module):
 
     def forward(self, x: torch.Tensor):
         B, T, C, Lat, Lon = x.shape
-        x = self.proj(x).reshape(B, self.embed_dim, -1).transpose(1, 2)  # B T*Lat*Lon C
+        x = self.proj(x)
+        
+        # ----------------------------------- #
+        # Layer norm on T*lat*lon
+        x = x.reshape(B, self.embed_dim, -1).transpose(1, 2)  # B T*Lat*Lon C
         if self.norm is not None:
             x = self.norm(x)
         x = x.transpose(1, 2).reshape(B, self.embed_dim, *self.patches_resolution)
+        
         return x.squeeze(2)
 
 
@@ -303,6 +308,7 @@ class CrossFormer(BaseModel):
         channels=4,
         surface_channels=7,
         static_channels=3,
+        diagnostic_channels=0,
         levels=15,
         dim=(64, 128, 256, 512),
         depth=(2, 2, 8, 2),
@@ -336,8 +342,12 @@ class CrossFormer(BaseModel):
         self.pad_lon = pad_lon
         self.pad_lat = pad_lat
         self.use_spectral_norm = use_spectral_norm
+
+        # input channels
         input_channels = channels * levels + surface_channels + static_channels
-        output_channels = channels * levels + surface_channels
+
+        # output channels
+        output_channels = channels * levels + surface_channels + diagnostic_channels
 
         dim = cast_tuple(dim, 4)
         depth = cast_tuple(depth, 4)

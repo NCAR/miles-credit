@@ -1,0 +1,164 @@
+T:
+  standard_name: "air_temperature"
+  long_name: "Temperature"
+  short_name: "t"
+  units: "K"
+  original_format: "WMO GRIB 2"
+  wmo_discipline: 0
+  wmo_master_table: 5
+  wmo_local_table: 0
+  wmo_center: 98
+  wmo_parameter_category: 0
+  wmo_parameter_number: 0
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+Q:
+  standard_name: "specific_humidity"
+  long_name: "Specific humidity"
+  short_name: "q"
+  units: "kg kg**-1"
+  wmo_discipline: 0
+  wmo_master_table: 5
+  wmo_local_table: 0
+  wmo_center: 98
+  wmo_parameter_category: 1
+  wmo_parameter_number: 0
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+U:
+  long_name: "U component of wind" 
+  standard_name: "eastward_wind" 
+  short_name: "u"
+  units: "m s**-1"
+  original_format: "WMO GRIB 2"
+  wmo_discipline: 0
+  wmo_master_table: 5
+  wmo_local_table: 0
+  wmo_center: 98
+  wmo_parameter_category: 2
+  wmo_parameter_number: 2
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+V:
+  long_name: "V component of wind"
+  standard_name: "northward_wind"
+  short_name: "v"
+  units: "m s**-1"
+  original_format: "WMO GRIB 2"
+  wmo_discipline: 0
+  wmo_master_table: 5
+  wmo_local_table: 0
+  wmo_center: 98
+  wmo_parameter_category: 2
+  wmo_parameter_number: 3
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+SP:
+  long_name: "Surface pressure"
+  standard_name: "surface_air_pressure"
+  short_name: "sp"
+  units: "Pa"
+  original_format: "WMO GRIB 1"
+  wmo_center: 98
+  ecmwf_local_table: 128
+  ecmwf_parameter_number: 134
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+time:
+  long_name: "time"
+  units: "hours since 1900-01-01 00:00:00"
+  calendar: "gregorian"
+Z:
+  long_name: "Geopotential (at the surface)"
+  short_name: "z"
+  standard_name: "surface_geopotential"
+  units: "m**2 s**-2"
+  original_format: "WMO GRIB 1 with ECMWF local table"
+  ecmwf_local_table: 128
+  ecmwf_parameter: 129
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+latitude:
+  long_name: "latitude"
+  short_name: "lat"
+  units: "degrees_north"
+  qualifier: "Gaussian"
+longitude:
+  long_name: "longitude"
+  short_name: "lon"
+  units: "degrees_east"
+  qualifier: "Gaussian"
+t2m:
+  long_name: "2 metre temperature"
+  short_name: "2t"
+  standard_name: "air_temperature"
+  units: "K"
+  original_format: "WMO GRIB 1 with ECMWF local table"
+  ecmwf_local_table: 128
+  ecmwf_parameter: 167
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+U500:
+  long_name: "U component of wind (at 500 hPa)"
+  standard_name: "eastward_wind"
+  short_name: "u500"
+  units: "m s**-1"
+  original_format: "WMO GRIB 2"
+  wmo_discipline: 0
+  wmo_master_table: 5
+  wmo_local_table: 0
+  wmo_center: 98
+  wmo_parameter_category: 2
+  wmo_parameter_number: 2
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+V500:
+  long_name: "V component of wind (at 500 hPa)"
+  standard_name: "northward_wind"
+  short_name: "v500"
+  units: "m s**-1"
+  original_format: "WMO GRIB 2"
+  wmo_discipline: 0
+  wmo_master_table: 5
+  wmo_local_table: 0
+  wmo_center: 98
+  wmo_parameter_category: 2
+  wmo_parameter_number: 3
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+Z500:
+  long_name: "Geopotential (at 500 hPa)"
+  short_name: "z500"
+  units: "m**2 s**-2"
+  original_format: "WMO GRIB 1 with ECMWF local table"
+  ecmwf_local_table: 128
+  ecmwf_parameter: 129
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+T500:
+  standard_name: "air_temperature (at 500 hPa)"
+  long_name: "Temperature"
+  short_name: "t500"
+  units: "K"
+  original_format: "WMO GRIB 2"
+  wmo_discipline: 0
+  wmo_master_table: 5
+  wmo_local_table: 0
+  wmo_center: 98
+  wmo_parameter_category: 0
+  wmo_parameter_number: 0
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f
+Q500:
+  standard_name: "specific_humidity"
+  long_name: "Specific humidity (at 500 hPa)"
+  short_name: "q500"
+  units: "kg kg**-1"
+  wmo_discipline: 0
+  wmo_master_table: 5
+  wmo_local_table: 0
+  wmo_center: 98
+  wmo_parameter_category: 1
+  wmo_parameter_number: 0
+  _FillValue: 9.999e+20f
+  missing_value: 9.999e+20f

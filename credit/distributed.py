@@ -46,6 +46,11 @@ def distributed_model_wrapper(conf, neural_network, device):
             from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
             transformer_layers_cls = {SwinTransformerV2Stage}
 
+        # Swin by itself
+        elif "swin" in conf["model"]["type"]:
+            from credit.models.swin import SwinTransformerV2CrBlock, WindowMultiHeadAttentionNoPos, WindowMultiHeadAttention
+            transformer_layers_cls = {SwinTransformerV2CrBlock, WindowMultiHeadAttentionNoPos, WindowMultiHeadAttention}
+
         # other models not supported
         else:
             raise OSError("You asked for FSDP but only crossformer and fuxi are currently supported.")

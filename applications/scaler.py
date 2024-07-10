@@ -9,8 +9,7 @@ from bridgescaler.distributed import DQuantileScaler
 from bridgescaler import print_scaler, read_scaler
 from os.path import exists, join
 from mpi4py import MPI
-import gc
-from memory_profiler import profile
+
 
 def main():
     parser = argparse.ArgumentParser()

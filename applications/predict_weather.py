@@ -265,7 +265,7 @@ def distributed_model_wrapper(conf, neural_network, device):
         # Define the sharding policies
 
         if "crossformer" in conf["model"]["type"]:
-            from credit.models.crossformer_skip import Attention as Attend
+            from credit.models.crossformer import Attention as Attend
         elif "fuxi" in conf["model"]["type"]:
             from credit.models.fuxi import UTransformer as Attend
         else:

@@ -1,4 +1,7 @@
-import warnings
+'''
+train.py 
+-------------------------------------------------------
+'''
 import os
 import sys
 import glob
@@ -7,6 +10,7 @@ import wandb
 import optuna
 import shutil
 import logging
+import warnings
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -19,15 +23,19 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from credit.distributed import distributed_model_wrapper
 
-from credit.models import load_model
+from credit.seed import seed_everything
 from credit.loss import VariableTotalLoss2D
-from credit.data import ERA5Dataset, Dataset_BridgeScaler
+from credit.data import ERA5Dataset, ERA5_and_Forcing_Dataset, Dataset_BridgeScaler
 from credit.transforms import load_transforms
 from credit.scheduler import load_scheduler, annealed_probability
+
 from credit.trainer import Trainer
+# <-------------- the new pipeline
+from credit.trainer_new import Trainer as Trainer_New
+
 from credit.metrics import LatWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
-from credit.seed import seed_everything
+from credit.models import load_model
 from credit.models.checkpoint import (
     FSDPOptimizerWrapper,
     TorchFSDPCheckpointIO
@@ -117,6 +125,117 @@ def load_dataset_and_sampler(conf, files, world_size, rank, is_train, seed=42):
 
     return dataset, sampler
 
+def load_dataset_and_sampler_zscore_only(conf, all_ERA_files, surface_files, diagnostic_files, world_size, rank, is_train, seed=42):
+
+    # convert $USER to the actual user name
+    conf['save_loc'] = os.path.expandvars(conf['save_loc'])
+
+    # ======================================================== #
+    # parse intputs
+    
+    # file names
+    varname_upper_air = conf['data']['variables']
+    
+    if ('forcing_variables' in conf['data']) and (len(conf['data']['forcing_variables']) > 0):
+        forcing_files = conf['data']['save_loc_forcing']
+        varname_forcing = conf['data']['forcing_variables']
+    else:
+        forcing_files = None
+        varname_forcing = None
+    
+    if ('static_variables' in conf['data']) and (len(conf['data']['static_variables']) > 0):
+        static_files = conf['data']['save_loc_static']
+        varname_static = conf['data']['static_variables']
+    else:
+        static_files = None
+        varname_static = None
+    
+    if surface_files is not None:
+        varname_surface = conf['data']['surface_variables']
+    else:
+        varname_surface = None
+        
+    if diagnostic_files is not None:
+        varname_diagnostic = conf['data']['diagnostic_variables']
+    else:
+        varname_diagnostic = None
+        
+    # number of previous lead time inputs
+    history_len = conf["data"]["history_len"]
+    valid_history_len = conf["data"]["valid_history_len"]
+
+    # number of lead times to forecast
+    forecast_len = conf["data"]["forecast_len"]
+    valid_forecast_len = conf["data"]["valid_forecast_len"]
+    
+    if is_train:
+        history_len = history_len
+        forecast_len = forecast_len
+        # print out training / validation
+        name = "training"
+    else:
+        history_len = valid_history_len
+        forecast_len = valid_forecast_len
+        name = 'validation'
+        
+    # max_forecast_len
+    if "max_forecast_len" not in conf["data"]:
+        max_forecast_len = None
+    else:
+        max_forecast_len = conf["data"]["max_forecast_len"]
+
+    # skip_periods
+    if "skip_periods" not in conf["data"]:
+        skip_periods = None
+    else:
+        skip_periods = conf["data"]["skip_periods"]
+        
+    # one_shot
+    if "one_shot" not in conf["data"]:
+        one_shot = None
+    else:
+        one_shot = conf["data"]["one_shot"]
+
+    # shufle
+    shuffle = is_train
+    
+    # data preprocessing utils
+    transforms = load_transforms(conf)
+
+    # Z-score
+    dataset = ERA5_and_Forcing_Dataset(
+        varname_upper_air=varname_upper_air,
+        varname_surface=varname_surface,
+        varname_forcing=varname_forcing,
+        varname_static=varname_static,
+        varname_diagnostic=varname_diagnostic,
+        filenames=all_ERA_files,
+        filename_surface=surface_files,
+        filename_forcing=forcing_files,
+        filename_static=static_files,
+        filename_diagnostic=diagnostic_files,
+        history_len=history_len,
+        forecast_len=forecast_len,
+        skip_periods=skip_periods,
+        one_shot=one_shot,
+        max_forecast_len=max_forecast_len,
+        transform=transforms
+    )
+    
+    # Pytorch sampler
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=world_size,
+        rank=rank,
+        seed=seed,
+        shuffle=shuffle,
+        drop_last=True
+    )
+    
+    logging.info(f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len + 1})")
+
+    return dataset, sampler
+
 
 def load_model_states_and_optimizer(conf, model, device):
 
@@ -133,7 +252,8 @@ def load_model_states_and_optimizer(conf, model, device):
     load_weights = False if 'load_weights' not in conf['trainer'] else conf['trainer']['load_weights']
 
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
-    if start_epoch == 0 and not load_weights:  # Loaded after loading model weights when reloading
+    #if start_epoch == 0 and not load_weights: 
+    if not load_weights:  # Loaded after loading model weights when reloading
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
         if conf["trainer"]["mode"] == "fsdp":
             optimizer = FSDPOptimizerWrapper(optimizer, model)
@@ -187,57 +307,91 @@ def main(rank, world_size, conf, trial=False):
 
     # convert $USER to the actual user name
     conf['save_loc'] = os.path.expandvars(conf['save_loc'])
-
+    
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"])
-
+    
     # infer device id from rank
-
+    
     device = torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
     torch.cuda.set_device(rank % torch.cuda.device_count())
-
+    
     # Config settings
     seed = 1000 if "seed" not in conf else conf["seed"]
     seed_everything(seed)
-
+    
     train_batch_size = conf['trainer']['train_batch_size']
     valid_batch_size = conf['trainer']['valid_batch_size']
     thread_workers = conf['trainer']['thread_workers']
     valid_thread_workers = conf['trainer']['valid_thread_workers'] if 'valid_thread_workers' in conf['trainer'] else thread_workers
-
-    # datasets (zarr reader)
-
+    
+    # get file names
     all_ERA_files = sorted(glob.glob(conf["data"]["save_loc"]))
-    # filenames = list(map(os.path.basename, all_ERA_files))
-    # all_years = sorted([re.findall(r'(?:_)(\d{4})', fn)[0] for fn in filenames])
-
-    # Specify the years for each set
-    # if conf["data"][train_test_split]:
-    #    normalized_split = conf["data"][train_test_split] / sum(conf["data"][train_test_split])
-    #    n_years = len(all_years)
-    #    train_years, sklearn.model_selection.train_test_split¶
-
-    train_years = [str(year) for year in range(1979, 2014)]
-    valid_years = [str(year) for year in range(2014, 2018)]  # can make CV splits if we want to later on
-    test_years = [str(year) for year in range(2018, 2022)]  # same as graphcast -- always hold out
-
-    # train_years = [str(year) for year in range(1995, 2013) if year != 2007]
-    # valid_years = [str(year) for year in range(2014, 2015)]  # can make CV splits if we want to later on
-    # test_years = [str(year) for year in range(2015, 2016)]  # same as graphcast -- always hold out
-
-    # Filter the files for each set
-
+    
+    # <------------------------------------------ std_new
+    if conf['data']['scaler_type'] == 'std_new':
+    
+        if "save_loc_surface" in conf["data"]:
+            surface_files = sorted(glob.glob(conf["data"]["save_loc_surface"]))
+        else:
+            surface_files = None
+    
+        if "save_loc_diagnostic" in conf["data"]:
+            diagnostic_files = sorted(glob.glob(conf["data"]["save_loc_diagnostic"]))
+        else:
+            diagnostic_files = None
+    
+    
+    # -------------------------------------------------- #
+    # import training / validation years from conf
+    
+    if 'train_years' in conf['data']:
+        train_years_range = conf['data']['train_years']
+    else:
+        train_years_range = [1979, 2014]
+    
+    if 'valid_years' in conf['data']:
+        valid_years_range = conf['data']['valid_years']
+    else:
+        valid_years_range = [2014, 2018]
+    
+    # convert year info to str for file name search
+    train_years = [str(year) for year in range(train_years_range[0], train_years_range[1])]
+    valid_years = [str(year) for year in range(valid_years_range[0], valid_years_range[1])]
+    
+    # Filter the files for training / validation
     train_files = [file for file in all_ERA_files if any(year in file for year in train_years)]
     valid_files = [file for file in all_ERA_files if any(year in file for year in valid_years)]
-    test_files = [file for file in all_ERA_files if any(year in file for year in test_years)]
-
+    
+    # <----------------------------------- std_new
+    if conf['data']['scaler_type'] == 'std_new':
+        train_surface_files = [file for file in surface_files if any(year in file for year in train_years)]
+        valid_surface_files = [file for file in surface_files if any(year in file for year in valid_years)]
+        
+        train_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in train_years)]
+        valid_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in valid_years)]
+    
     # load dataset and sampler
-
-    train_dataset, train_sampler = load_dataset_and_sampler(conf, train_files, world_size, rank, is_train=True)
-    valid_dataset, valid_sampler = load_dataset_and_sampler(conf, valid_files, world_size, rank, is_train=False)
-
+    # <----------------------------------- std_new
+    if conf['data']['scaler_type'] == 'std_new':
+        # training set and sampler
+        train_dataset, train_sampler = load_dataset_and_sampler_zscore_only(conf, 
+                                                                            train_files, 
+                                                                            train_surface_files, 
+                                                                            train_diagnostic_files, 
+                                                                            world_size, rank, is_train=True)
+        # validation set and sampler
+        valid_dataset, valid_sampler = load_dataset_and_sampler_zscore_only(conf, 
+                                                                            valid_files, 
+                                                                            valid_surface_files, 
+                                                                            valid_diagnostic_files,
+                                                                            world_size, rank, is_train=False)
+    else:
+        train_dataset, train_sampler = load_dataset_and_sampler(conf, train_files, world_size, rank, is_train=True)
+        valid_dataset, valid_sampler = load_dataset_and_sampler(conf, valid_files, world_size, rank, is_train=False)
+    
     # setup the dataloder for this process
-
+    
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=train_batch_size,
@@ -248,7 +402,7 @@ def main(rank, world_size, conf, trial=False):
         num_workers=thread_workers,
         drop_last=True
     )
-
+    
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
         batch_size=valid_batch_size,
@@ -288,8 +442,11 @@ def main(rank, world_size, conf, trial=False):
     metrics = LatWeightedMetrics(conf)
 
     # Initialize a trainer object
-
-    trainer = Trainer(model, rank, module=(conf["trainer"]["mode"] == "ddp"))
+    # <----------------------------------- replace
+    if conf['data']['scaler_type'] == 'std_new':
+        trainer = Trainer_New(model, rank, module=(conf["trainer"]["mode"] == "ddp"))
+    else:
+        trainer = Trainer(model, rank, module=(conf["trainer"]["mode"] == "ddp"))
 
     # Fit the model
 

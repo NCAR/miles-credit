@@ -283,6 +283,7 @@ class Fuxi(BaseModel):
                  channels=4,
                  surface_channels=7,
                  static_channels=0,
+                 diagnostic_channels=0,
                  num_heads=8,
                  depth=48,
                  window_size=7,
@@ -301,7 +302,7 @@ class Fuxi(BaseModel):
         #in_chans = out_chans = levels * channels + surface_channels
         
         in_chans = channels * levels + surface_channels + static_channels
-        out_chans = channels * levels + surface_channels
+        out_chans = channels * levels + surface_channels + diagnostic_channels
         
         # input resolution = number of embedded patches / 2
         # divide by two because "u_trasnformer" has a down-sampling block
@@ -423,6 +424,7 @@ if __name__ == "__main__":
     channels = 4          # Channels (default: 4)
     surface_channels = 7  # Surface channels (default: 7)
     static_channels = 2
+    diagnostic_channels = 0
     num_heads = 8         # Number of heads (default: 8)
     window_size = 7       # Window size (default: 7)
     depth = 8            # Depth of the swin transformer (default: 48)
@@ -439,6 +441,7 @@ if __name__ == "__main__":
         channels=channels,
         surface_channels=surface_channels,
         static_channels=static_channels,
+        diagnostic_channels=diagnostic_channels,
         levels=levels,
         image_height=image_height,
         image_width=image_width,

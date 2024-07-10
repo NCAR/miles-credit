@@ -121,7 +121,7 @@ class Trainer:
                 y = self.model.concat_and_reshape(
                     batch["y"],
                     batch["y_surf"]
-                )
+                ) # !! <------- .to(self.device)
 
                 k = 0
                 while True:

@@ -4,7 +4,7 @@ seed: 1000
 data:
     variables: ['U','V','T','Q']
     surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
-    static_variables: ['Z_GDS4_SFC','LSM','tsi'] # []
+    static_variables: ['Z_GDS4_SFC','LSM','tsi']
     save_loc: '/glade/derecho/scratch/dgagne/STAGING/TOTAL_*'
     mean_path: '/glade/derecho/scratch/schreck/STAGING/All_2010_staged.mean.Lev.SLO.nc'
     std_path: '/glade/derecho/scratch/schreck/STAGING/All_2010_staged.std.Lev.SLO.nc'

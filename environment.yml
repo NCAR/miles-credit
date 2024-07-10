@@ -18,7 +18,7 @@ dependencies:
   - xarray
   - netcdf4
   - pytorch
-  - pytorch-cuda=12.1
+  #- pytorch-cuda=12.1
   - torchvision
   - wandb
   - pyyaml
@@ -30,6 +30,7 @@ dependencies:
   - jupyter
   - geocat-comp
   - pyg
+  - xesmf
   - pip:
     - einops
     - echo-opt

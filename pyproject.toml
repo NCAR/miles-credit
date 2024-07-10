@@ -10,7 +10,7 @@ license = {file = "LICENSE"}
 dynamic = ["version"]
 requires-python = ">=3.8"
 dependencies = [
-    "numpy<1.24",
+    "numpy<2",
     "pandas",
     "matplotlib",
     "cartopy",
@@ -28,7 +28,6 @@ dependencies = [
     "distributed",
     "dask-jobqueue",
     "zarr",
-    "jupyter",
     "einops",
     "echo-opt",
     "bridgescaler",
@@ -36,11 +35,13 @@ dependencies = [
     "segmentation-models-pytorch",
     "vector-quantize-pytorch",
     "haversine",
-    "pvlib"
+    "pvlib",
+    "sphinx",
+    "geocat-comp",
    ]
 
 [tool.setuptools]
-packages = ["credit", "credit.models"]
+packages = ["credit", "credit.models", "credit.metadata"]
 
 [tool.setuptools.dynamic]
 version = {file = "credit/VERSION"}

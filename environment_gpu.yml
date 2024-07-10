@@ -29,6 +29,7 @@ dependencies:
   - zarr
   - jupyter
   - pyg
+  - xesmf
   - pip:
     - einops
     - echo-opt
@@ -38,5 +39,6 @@ dependencies:
     - vector_quantize_pytorch
     - haversine
     - timm>=0.9.12
+    - torchsummary
     - .
 

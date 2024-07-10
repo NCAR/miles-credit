@@ -27,6 +27,7 @@ dependencies:
   - dask-jobqueue
   - zarr
   - jupyter
+  - xesmf
   - geocat-comp
   - pip:
     - einops
@@ -37,5 +38,6 @@ dependencies:
     - vector_quantize_pytorch
     - timm==0.6.12
     - ffmpeg
+    - torchsummary
     - .
 
