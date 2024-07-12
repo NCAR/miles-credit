@@ -9,7 +9,7 @@ data:
     - PSFC
     - Q2
 #    - SNOW
-#    - TD2
+    - TD2
     - T2
 #    - totalVap
 #    - Q500
