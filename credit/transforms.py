@@ -32,6 +32,8 @@ def load_transforms(conf):
         transform_scaler = NormalizeState_Quantile(conf)
     elif conf["data"]["scaler_type"] == 'quantile-cached':
         transform_scaler = NormalizeState_Quantile_Bridgescalar(conf)
+    elif conf["data"]["scaler_type"] == "bridgescaler":
+        transform_scaler = BridgescalerScaleState(conf)
     elif conf["data"]["scaler_type"] == 'std':
         transform_scaler = NormalizeState(conf)
     elif conf["data"]["scaler_type"] == 'std_new':
@@ -372,7 +374,79 @@ class Normalize_ERA5_and_Forcing:
                 transformed_x = transformed_upper_air
         
         return transformed_x.to(device)
-        
+
+
+class BridgescalerScaleState(object):
+    def __init__(self, conf):
+        self.scaler_file = conf['data']['quant_path']
+        self.variables = conf['data']['variables']
+        self.surface_variables = conf['data']['surface_variables']
+        if "level_ids" in conf["data"].keys():
+            self.level_ids = conf["data"]["level_ids"]
+        else:
+            self.level_ids = np.array([10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136],
+                                      dtype=np.int64)
+        self.n_levels = int(conf['model']['levels'])
+        self.var_levels = []
+        for variable in self.variables:
+            for level in self.level_ids:
+                self.var_levels.append(f"{variable}_{level:d}")
+        self.n_surface_variables = len(self.surface_variables)
+        self.n_3dvar_levels = len(self.variables) * self.n_levels
+        self.scaler_df = pd.read_parquet(self.scaler_file)
+        self.scaler_3d = np.sum(self.scaler_df["scaler_3d"].apply(read_scaler))
+        self.scaler_surf = np.sum(self.scaler_df["scaler_surface"].apply(read_scaler))
+
+    def inverse_transform(self, x: torch.Tensor) -> torch.Tensor:
+        device = x.device
+        x_3d = x[:, :self.n_3dvar_levels].cpu()
+        x_surface = x[:, self.n_3dvar_levels:].cpu()
+        x_3d_transformed = x_3d.clone()
+        x_surface_transformed = x_surface.clone()
+        x_3d_da = xr.DataArray(x_3d.numpy(),
+                               dims=("time", "variable", "latitude", "longitude"),
+                               coords=dict(variable=self.var_levels))
+        x_3d_transformed.numpy()[:] = self.scaler_3d.inverse_transform(x_3d_da, channels_last=False).values
+        x_surface_da = xr.DataArray(x_surface.numpy(), dims=("time", "variable", "latitude", "longitude"),
+                                    coords=dict(variable=self.surface_variables))
+        x_surface_transformed.numpy()[:] = self.scaler_surf.inverse_transform(x_surface_da, channels_last=False).values
+        x_transformed = torch.cat((x_3d_transformed, x_surface_transformed), dim=1)
+        return x_transformed.to(device)
+
+    def transform_array(self, x: torch.Tensor) -> torch.Tensor:
+        device = x.device
+        x_3d = x[:, :self.n_3dvar_levels].cpu()
+        x_surface = x[:, self.n_3dvar_levels:].cpu()
+        x_3d_transformed = x_3d.clone()
+        x_surface_transformed = x_surface.clone()
+        x_3d_da = xr.DataArray(x_3d.numpy(),
+                               dims=("time", "variable", "latitude", "longitude"),
+                               coords=dict(variable=self.var_levels))
+        x_3d_transformed.numpy()[:] = self.scaler_3d.transform(x_3d_da, channels_last=False).values
+        x_surface_da = xr.DataArray(x_surface.numpy(), dims=("time", "variable", "latitude", "longitude"),
+                                    coords=dict(variable=self.surface_variables))
+        x_surface_transformed.numpy()[:] = self.scaler_surf.transform(x_surface_da, channels_last=False).values
+        x_transformed = torch.cat((x_3d_transformed, x_surface_transformed), dim=1)
+        return x_transformed.to(device)
+
+    def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        normalized_sample = {}
+        for data_id, ds in sample.items():
+            if isinstance(ds, xr.Dataset):
+                normalized_sample[data_id] = xr.Dataset()
+                for variable in self.variables:
+                    single_var = ds[variable]
+                    single_var["level"] = [f"{variable}_{lev:d}" for lev in ds["level"]]
+                    transformed_var = self.scaler_3d.transform(single_var, channels_last=False)
+                    transformed_var["level"] = ds["level"]
+                    normalized_sample[data_id][variable] = transformed_var
+                surface_ds = ds[self.surface_variables].to_dataarray().transpose("time",
+                                                                                 "variable", "latitude", "longitude")
+                surface_ds_transformed = self.scaler_surf.transform(surface_ds, channels_last=False)
+                normalized_sample[data_id] = normalized_sample[data_id].merge(surface_ds_transformed.to_dataset(dim="variable"))
+        return normalized_sample
+
+
 class NormalizeState_Quantile:
     """Class to use the bridgescaler Quantile functionality.
     Some hoops have to be jumped thorugh, and the efficiency could be

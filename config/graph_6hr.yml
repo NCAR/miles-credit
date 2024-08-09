@@ -15,10 +15,10 @@ data:
     mean_path: '/glade/u/home/ksha/CREDIT/data/mean_zero.nc'
     std_path: '/glade/u/home/ksha/CREDIT/data/std_one.nc'
     scaler_type: 'std_new'
-    history_len: 1 
+    history_len: 1
     forecast_len: 0 # larger than 0 for multi step
     valid_history_len: 1
-    valid_forecast_len: 0 # 
+    valid_forecast_len: 0 #
     one_shot: True
     skip_periods: null
     
@@ -48,7 +48,7 @@ trainer:
     update_learning_rate: True
     train_one_epoch: False
     scheduler: {'scheduler_type': 'lambda'}
-    
+
 model:
     type: "graph"
     levels: 15           # Number of levels (default: 15)

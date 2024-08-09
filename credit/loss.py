@@ -276,3 +276,19 @@ class VariableTotalLoss2D(torch.nn.Module):
             loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=self.lat_weights).mean()
 
         return loss
+
+
+def load_loss(loss_type, reduction='mean'):
+    if loss_type in losses.keys():
+        return losses[loss_type](reduction=reduction)
+    else:
+        raise KeyError(f"Loss type {loss_type} not supported")
+
+
+losses = {"mse": nn.MSELoss,
+          "mae": nn.L1Loss,
+          "msle": MSLELoss,
+          "huber": nn.HuberLoss,
+          "logcosh": LogCoshLoss,
+          "xtanh": XTanhLoss,
+          "xsigmoid": XSigmoidLoss,}

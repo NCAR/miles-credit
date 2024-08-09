@@ -108,6 +108,7 @@ def get_forward_data(filename) -> xr.DataArray:
         dataset = xr.open_zarr(filename, consolidated=True)
     return dataset
 
+
 class Sample(TypedDict):
     """Simple class for structuring data for the ML model.
 
@@ -284,7 +285,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         one_shot=None,
         max_forecast_len=None
     ):
-        
+
         '''
         Initialize the ERA5_and_Forcing_Dataset
 
@@ -306,17 +307,17 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         - transform (callable, optional): Transformation function to apply to the data.
         - seed (int, optional): Random seed for reproducibility. Default is 42.
         - skip_periods (int, optional): Number of periods to skip between samples.
-        - one_shot(bool, optional): Whether to return all states or just 
+        - one_shot(bool, optional): Whether to return all states or just
                                     the final state of the training target. Default is None
         - max_forecast_len (int, optional): Maximum length of the forecast sequence.
         - shuffle (bool, optional): Whether to shuffle the data. Default is True.
 
         Returns:
-        - sample (dict): A dictionary containing historical_ERA5_images, 
-                                                 target_ERA5_images, 
+        - sample (dict): A dictionary containing historical_ERA5_images,
+                                                 target_ERA5_images,
                                                  datetime index, and additional information.
         '''
-        
+
         self.history_len = history_len
         self.forecast_len = forecast_len
         self.transform = transform
@@ -340,7 +341,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
 
         # ======================================================== #
         # upper-air files
-        
+
         all_files = []
         filenames = sorted(filenames)
         
@@ -367,20 +368,20 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         # ======================================================== #
         # surface files
         if filename_surface is not None:
-        
+
             surface_files = []
             filename_surface = sorted(filename_surface)
-        
+
             for fn in filename_surface:
 
                 # drop variables if they are not in the config
                 xarray_dataset = get_forward_data(filename=fn)
                 xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_surface)
-                
+
                 surface_files.append(xarray_dataset)
-                
+
             self.surface_files = surface_files
-            
+
         else:
             self.surface_files = False
 
@@ -388,23 +389,23 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         # ======================================================== #
         # dynamic forcing files
         if filename_dyn_forcing is not None:
-        
+
             dyn_forcing_files = []
             filename_dyn_forcing = sorted(filename_dyn_forcing)
-        
+
             for fn in filename_dyn_forcing:
 
                 # drop variables if they are not in the config
                 xarray_dataset = get_forward_data(filename=fn)
                 xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_dyn_forcing)
-                
+
                 dyn_forcing_files.append(xarray_dataset)
-                
+
             self.dyn_forcing_files = dyn_forcing_files
-            
+
         else:
             self.dyn_forcing_files = False
-        
+
         # ======================================================== #
         # diagnostic file
         self.filename_diagnostic = filename_diagnostic
@@ -423,10 +424,10 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
                 diagnostic_files.append(xarray_dataset)
                 
             self.diagnostic_files = diagnostic_files
-            
+
         else:
             self.diagnostic_files = False
-        
+
         # ======================================================== #
         # forcing file
         self.filename_forcing = filename_forcing
@@ -437,7 +438,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_forcing)
             xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_forcing)
-            
+
             self.xarray_forcing = xarray_dataset
         else:
             self.xarray_forcing = False
@@ -456,7 +457,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
             self.xarray_static = xarray_dataset
         else:
             self.xarray_static = False
-            
+
     def __post_init__(self):
         # Total sequence length of each sample.
         self.total_seq_len = self.history_len + self.forecast_len
@@ -483,7 +484,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         ind_largest = len(self.all_files[int(ind_file)]['time'])-(self.history_len+self.forecast_len+1)
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
-            
+
         # ========================================================================== #
         # subset xarray on time dimension
         
@@ -495,7 +496,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
 
         # ========================================================================== #
         # merge surface into the dataset
-        
+
         if self.surface_files:
             ## subset surface variables
             surface_subset = self.surface_files[int(ind_file)].isel(
@@ -528,9 +529,9 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
                 time=slice(ind_start_in_file, ind_end_in_file+1))
             dyn_forcing_subset = dyn_forcing_subset.isel(
                 time=slice(0, self.history_len, self.skip_periods)).load() # <-- load into memory
-            
+
             historical_ERA5_images = historical_ERA5_images.merge(dyn_forcing_subset)
-            
+
         # ========================================================================== #
         # merge forcing inputs
         if self.xarray_forcing:
@@ -626,7 +627,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
     '''
     Same as ERA5_and_Forcing_Dataset() but work with rollout_to_netcdf_new.py
 
-    *ksha: dynamic forcing has been added to the rollout-only Dataset, but it has 
+    *ksha: dynamic forcing has been added to the rollout-only Dataset, but it has
     not been tested. Once the new tsi is ready, this dataset class will be tested
     '''
     def __init__(self,
@@ -707,7 +708,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
             
         if self.skip_periods is None:
             self.skip_periods = 1
-            
+
     def ds_read_and_subset(self, filename, time_start, time_end, varnames):
         sliced_x = xr.open_zarr(filename, consolidated=True)
         sliced_x = sliced_x.isel(time=slice(time_start, time_end))
@@ -736,14 +737,14 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
 
         # dynamic forcing variables
         if self.varname_dyn_forcing is not None:
-            sliced_dyn_forcing = self.ds_read_and_subset(self.filename_dyn_forcing[i_file], 
+            sliced_dyn_forcing = self.ds_read_and_subset(self.filename_dyn_forcing[i_file],
                                                          i_init_start,
                                                          i_init_end+1,
                                                          self.varname_dyn_forcing)
             # merge surface to sliced_x
             sliced_dyn_forcing['time'] = sliced_x['time']
             sliced_x = sliced_x.merge(sliced_dyn_forcing)
-        
+
         # forcing / static
         if self.filename_forcing is not None:
             sliced_forcing = xr.open_dataset(self.filename_forcing)
@@ -910,12 +911,12 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                 
                 if output_dict['stop_forecast']:
                     break
-                    
+
 # =============================================== #
 # This dataset works for hourly model only
 # it does not support forcing & static here
 # but it pairs to the ToTensor that adds
-# TOA (which has problem) and other static fields 
+# TOA (which has problem) and other static fields
 # =============================================== #
 class ERA5Dataset(torch.utils.data.Dataset):
 

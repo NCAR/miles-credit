@@ -4,7 +4,7 @@
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/ksha/CREDIT_runs/wxformer_1h/'
+save_loc: '/glade/work/ksha/CREDIT_runs/swin_1h/'
 seed: 1000
 
 data:
@@ -155,7 +155,7 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
         
-    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/wxformer_1h/'
+    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/swin_1h/'
     save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
     
     # turn-off low-pass filter
@@ -167,7 +167,7 @@ predict:
 pbs: #derecho
     conda: "/glade/work/ksha/miniconda3/envs/credit"
     project: "NAML0001"
-    job_name: "wxformer_1h"
+    job_name: "swin_1h"
     walltime: "12:00:00"
     nodes: 8
     ncpus: 64
