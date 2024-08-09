@@ -10,23 +10,23 @@ seed: 1000
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/derecho/scratch/schreck/STAGING/TOTAL_*'
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_TOTAL_*'
 
     # surface variables
     surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/derecho/scratch/schreck/STAGING/TOTAL_*'
+    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_TOTAL_*'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_1h_0.25deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_6h_0.25deg/*.nc'
     
     # static variables
-    static_variables: ['Z_GDS4_SFC','LSM'] 
+    sstatic_variables: ['Z_GDS4_SFC','LSM'] 
     save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT/static_norm_old.nc'
     
     # mean / std path
-    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/ERA5_mean_1h.nc'
-    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/ERA5_std_1h.nc'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/mean_6h_0.25deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/std_6h_0.25deg.nc'
     
     # train / validation split
     train_years: [1979, 2014]
@@ -51,7 +51,7 @@ data:
     one_shot: True
     
     # 1 for hourly model
-    lead_time_periods: 1
+    lead_time_periods: 6
     
     # do not use skip_period
     skip_periods: null
