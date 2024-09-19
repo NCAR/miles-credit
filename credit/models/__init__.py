@@ -5,6 +5,7 @@ from importlib.metadata import version
 
 # Import model classes
 from credit.models.crossformer import CrossFormer
+from credit.models.crossformer_gated import CrossFormer as CrossFormerGRU
 from credit.models.crossformer_may1 import CrossFormer as CrossFormerDep
 from credit.models.simple_vit import SimpleViT
 from credit.models.cube_vit import CubeViT
@@ -16,6 +17,7 @@ from credit.models.unet404 import SegmentationModel404
 from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
 from credit.models.graph import GraphResTransfGRU
+from credit.models.sfno import SphericalFourierNeuralOperatorNet as SFNO
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +29,14 @@ model_types = {
     "simple-vit": (SimpleViT, "Loading a simplified vit rotary transformer architecture ..."),
     "cube-vit": (CubeViT, "Loading a simplified vit rotary transformer architecture with a 3D conv tokenizer ..."),
     "crossformer": (CrossFormer, "Loading the CrossFormer model with a conv decoder head and skip connections ..."),
+    "crossformer-gru": (CrossFormerGRU, "Loading the CrossFormerGRU model with a conv decoder head and skip connections ..."),
     "crossformer-deprecated": (CrossFormerDep, "Loading the CrossFormer model with a conv decoder head and skip connections ..."),
     "unet": (SegmentationModel, "Loading a unet model"),
     "unet404": (SegmentationModel404, "Loading unet404 model"),
     "fuxi": (Fuxi, "Loading Fuxi model"),
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
-    "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model")
+    "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
+    "sfno": (SFNO, "Loading (non-spectral) SFNO model")
 } 
 
 
