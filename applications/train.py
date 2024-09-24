@@ -222,7 +222,7 @@ def load_model_states_and_optimizer(conf, model, device):
 
     # convert $USER to the actual user name
     conf['save_loc'] = save_loc = os.path.expandvars(conf['save_loc'])
-
+    checkpoint_name = conf["checkpoint_name"]
     # training hyperparameters
     learning_rate = float(conf['trainer']['learning_rate'])
     weight_decay = float(conf['trainer']['weight_decay'])
@@ -251,10 +251,10 @@ def load_model_states_and_optimizer(conf, model, device):
             optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
+            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, checkpoint_name))
         else:
             # DDP settings
-            ckpt = os.path.join(save_loc, "checkpoint.pt")
+            ckpt = os.path.join(save_loc, checkpoint_name)
             checkpoint = torch.load(ckpt, map_location=device)
             if conf["trainer"]["mode"] == "ddp":
                 logging.info(f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
@@ -270,7 +270,7 @@ def load_model_states_and_optimizer(conf, model, device):
 
     # load optimizer and grad scaler states
     else:
-        ckpt = os.path.join(save_loc, "checkpoint.pt")
+        ckpt = os.path.join(save_loc, checkpoint_name)
         checkpoint = torch.load(ckpt, map_location=device)
 
         # FSDP checkpoint settings
@@ -279,7 +279,7 @@ def load_model_states_and_optimizer(conf, model, device):
             optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
+            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, checkpoint_name))
             if 'load_optimizer' in conf['trainer'] and conf['trainer']['load_optimizer']:
                 checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
 

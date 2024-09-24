@@ -280,6 +280,13 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         assert 'mode' in conf['trainer'], "Resource type ('mode') is missing from conf['trainer']"
         assert 'type' in conf['trainer'], "Training strategy ('type') is missing from conf['trainer']"
         
+        if "checkpoint_name" not in conf:
+            conf["checkpoint_name"] = ("model_checkpoint.pt" if conf["trainer"]["mode"] == "fsdp" 
+                                       else "checkpoint.pt")
+        if (conf['trainer']['mode'] == 'fsdp' 
+            and conf["checkpoint_name"] == "checkpoint.pt"):
+            conf["checkpoint_name"] = "model_checkpoint.pt"
+
         assert 'load_weights' in conf['trainer'], "must specify 'load_weights' in conf['trainer']"
         assert 'learning_rate' in conf['trainer'], "must specify 'learning_rate' in conf['trainer']"
         

@@ -10,6 +10,7 @@
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
 save_loc: '/glade/work/$USER/CREDIT_runs/fuxi_6h/'
+checkpoint_name: "checkpoint.pt"
 seed: 1000 # random seeed
 
 data:
