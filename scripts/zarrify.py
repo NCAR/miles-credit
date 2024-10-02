@@ -55,8 +55,19 @@ ds = xarray.open_mfdataset(inglob)
 ## delete all global attributes (WRF has *many* superfluous & obfuscatory atts)
 ds.attrs = {}
 
-## manual dataset.chunk()-ing goes here if needed
-## Default for conus404 is 1 day, all space, which seems like a good start
+## With lossy compression applied, xarray autochunking creates too
+## many files; specify it manually.  We want each chunk to be 1 day
+## (24 hours) over all space; i.e., the same as the netcdf input
+## files.
+
+chunks = dict(ds.sizes)
+timedim = list(chunks.keys())[0]
+chunks[timedim] = 24
+
+ds = ds.chunk(chunks)
+
+## >> If chunking is the same as the netcdf files, would virtual
+## >> zarrfiles from kerchunk work well here?
 
 ds.to_zarr(zarrfile)
 
