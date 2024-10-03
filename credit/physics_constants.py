@@ -5,15 +5,25 @@ Reference:
 
 Harrop, B.E., Pritchard, M.S., Parishani, H., Gettelman, A., Hagos, S., Lauritzen, P.H., Leung, L.R., Lu, J., Pressel, K.G. and Sakaguchi, K., 2022. Conservation of dry air, water, and energy in CAM and its potential impact on tropical rainfall. Journal of Climate, 35(9), pp.2895-2917.
 """
+from math import pi
+
+# Pi
+PI = pi
 
 # Earth's radius
-RAD_EARTH = 6371000  # m
+RAD_EARTH = 6.37122e6 # m
+
+# Earth's rate of rotation 
+OMEGA: 7.292e-5 # radians/s
 
 # ideal gas constant of water vapor
 RVGAS = 461.5  # J/kg/K
 
 # ideal gas constant of dry air
-RDGAS = 287.05  # J/kg/K
+RDGAS = 287.05 # J/kg/K
+
+# ratio of Rd to Rv
+EPSGAS = RDGAS / RVGAS 
 
 # gravity
 GRAVITY = 9.80665  # m/s^2
