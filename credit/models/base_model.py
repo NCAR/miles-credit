@@ -4,6 +4,8 @@ import torch
 from torch import nn
 import logging
 
+from credit.models.checkpoint import load_state_dict_error_handler
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,10 +82,12 @@ class BaseModel(nn.Module):
             del conf["model"]["type"]
 
         model_class = cls(**conf["model"])
-
-        model_class.load_state_dict(
-            checkpoint if fsdp else checkpoint["model_state_dict"]
+        load_msg = model_class.load_state_dict(
+            checkpoint if fsdp else checkpoint["model_state_dict"],
+            strict=False
         )
+        load_state_dict_error_handler(load_msg)
+
 
         return model_class
 
