@@ -4,21 +4,21 @@
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/$USER/CREDIT_runs/test_1dg_unet/'
+save_loc: '/glade/work/$USER/CREDIT_runs/prod_1dg_cesm_unet/'
 seed: 1000
 
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/derecho/scratch/dkimpara/y_ONEdeg*.zarr'
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/coarse_climate/f.e21.CREDIT_climate_*_coarse.zarr'
     
     # surface variables
     surface_variables: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/derecho/scratch/dkimpara/y_ONEdeg*.zarr'
+    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/coarse_climate/f.e21.CREDIT_climate_*_coarse.zarr'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dkimpara/credit_solar_1h_1deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/coarse_climate/f.e21.CREDIT_climate_*_coarse.zarr'
     
     # static variables
     static_variables: ['Z_GDS4_SFC','LSM'] 

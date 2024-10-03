@@ -206,8 +206,9 @@ def load_model_states_and_optimizer(conf, model, device):
     elif load_weights and not (
         load_optimizer_conf or load_scaler_conf or load_scheduler_conf
     ):
+        logging.warning("loading weights only")
         optimizer = torch.optim.AdamW(
-            model.parameters(),
+            filter(lambda p: p.requires_grad, model.parameters()), # only train weights with requires_grad=True
             lr=learning_rate,
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
@@ -260,7 +261,8 @@ def load_model_states_and_optimizer(conf, model, device):
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-
+        optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), # only train weights with requires_grad
+                                      lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
         # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
             logging.info(
