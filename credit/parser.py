@@ -328,6 +328,7 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         conf['model']['post_conf']['model'] = {k: v for k,v in conf['model'].items() if k != 'post_conf'}
         # copy data configs to post_conf (for de-normalize variables)
         conf['model']['post_conf']['data'] = {k: v for k,v in conf['data'].items()}
+        conf['model']['post_conf'].setdefault('grid', 'legendre-gauss')
 
         # --------------------------------------------------------------------- #
         # get the full list of input / output variables for post_conf
@@ -363,7 +364,25 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             
     # SKEBS
     if conf['model']['post_conf']['skebs']['activate']:
-        pass
+        conf['model']['post_conf']['skebs'].setdefault('lmax', None)
+        conf['model']['post_conf']['skebs'].setdefault('mmax', None)
+        
+        if conf['model']['post_conf']['skebs']['lmax'] in ['none', 'None']:
+            conf['model']['post_conf']['skebs']['lmax'] = None
+        if conf['model']['post_conf']['skebs']['mmax'] in ['none', 'None']:
+            conf['model']['post_conf']['skebs']['mmax'] = None
+
+        U_inds = [
+            i_var for i_var, var in enumerate(varname_output) if var=="U"
+        ]
+        
+        V_inds = [
+            i_var for i_var, var in enumerate(varname_output) if var=="V"
+        ]
+        conf['model']['post_conf']['skebs']['U_inds'] = U_inds
+        conf['model']['post_conf']['skebs']['V_inds'] = V_inds
+
+
 
     # --------------------------------------------------------------------- #
     # tracer fixer

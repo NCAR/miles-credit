@@ -1,24 +1,47 @@
+import yaml
+import os
+
 import torch
 from credit.postblock import PostBlock
 from credit.postblock import SKEBS, TracerFixer, GlobalMassFixer, GlobalEnergyFixer
+from credit.parser import CREDIT_main_parser
+
+TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
+CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]),
+                      "config")
 
 def test_SKEBS_rand():
-    image_width = 100
-    conf = {"post_conf": {"skebs": {'activate': True}, 
-                          "model": {"image_width": image_width,}}}
-    conf['post_conf']['tracer_fixer'] = {'activate': False}
-    conf['post_conf']['global_mass_fixer'] = {'activate': False}
-    conf['post_conf']['global_energy_fixer'] = {'activate': False}
+    config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    with open(config) as cf:
+        conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    input_tensor = torch.randn(image_width)
-    postblock = PostBlock(**conf)
+    conf = CREDIT_main_parser(conf) # parser will copy model configs to post_conf
+    post_conf = conf['model']['post_conf']
+    
+    image_height = post_conf["model"]["image_height"]
+    image_width = post_conf["model"]["image_width"]
+    channels = post_conf["model"]["channels"]
+    levels = post_conf["model"]["levels"]
+    surface_channels = post_conf["model"]["surface_channels"]
+    output_only_channels = post_conf["model"]["output_only_channels"]
+    input_only_channels = post_conf["model"]["input_only_channels"]
+    frames = post_conf["model"]["frames"]
+
+    in_channels = channels * levels + surface_channels + input_only_channels
+    x = torch.randn(1, in_channels, frames, image_height, image_width)
+    out_channels = channels * levels + surface_channels + output_only_channels
+    y_pred = torch.randn(1, out_channels, frames, image_height, image_width)
+
+    postblock = PostBlock(post_conf)
     assert any([isinstance(module, SKEBS) for module in postblock.modules()])
 
-    input_dict = {"y_pred": input_tensor}
+    input_dict = {"x": x,
+                  "y_pred": y_pred}
 
-    y_pred = postblock(input_dict)
+    skebs_pred = postblock(input_dict)
 
-    assert y_pred.shape == input_tensor.shape
+    assert skebs_pred.shape == y_pred.shape
+    assert not torch.isnan(skebs_pred).any()
 
 def test_TracerFixer_rand():
     '''
@@ -146,3 +169,6 @@ def test_SKEBS_era5():
     """
     pass
 
+if __name__ == "__main__":
+    test_SKEBS_rand()
+    test_tracer_fixer_rand()

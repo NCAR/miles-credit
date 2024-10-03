@@ -1,6 +1,13 @@
+import math
+
+# Pi
+PI = math.pi
 
 # Earth's radius
-RAD_EARTH = 6371000 # m
+RAD_EARTH = 6.37122e6 # m
+
+# Earth's rate of rotation 
+OMEGA: 7.292e-5 # radians/s
 
 # ideal gas constant of water vapor
 RVGAS = 461.5 # J/kg/K

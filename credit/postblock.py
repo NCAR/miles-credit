@@ -12,9 +12,11 @@ Content:
 
 import torch
 from torch import nn
+import torch_harmonics as harmonics
 import numpy as np
 
 from credit.data import get_forward_data
+from torch.nn.parameter import Parameter, UninitializedParameter
 from credit.transforms import load_transforms
 from credit.physics_core import physics_pressure_level
 from credit.physics_constants import (RAD_EARTH, GRAVITY, 
@@ -552,25 +554,126 @@ class SKEBS(nn.Module):
     """
     def __init__(self, post_conf):
         super().__init__()
-        self.image_width = post_conf['model']['image_width']
-        final_layer_size = self.image_width
+        self.nlon = post_conf["model"]["image_width"]
+        self.nlat = post_conf["model"]["image_height"]
+        self.channels = post_conf["model"]["channels"]
+        self.levels = post_conf["model"]["levels"]
+        self.surface_channels = post_conf["model"]["surface_channels"]
+        self.output_only_channels = post_conf["model"]["output_only_channels"]
+        self.input_only_channels = post_conf["model"]["input_only_channels"]
+        self.frames = post_conf["model"]["frames"]
+
+        self.lmax = post_conf["skebs"]["lmax"]
+        self.mmax = post_conf["skebs"]["mmax"]
+        self.grid = post_conf["grid"]
+        self.U_inds = post_conf["skebs"]["U_inds"]
+        self.V_inds = post_conf["skebs"]["V_inds"]
+
+        self.initialize_sht()
+        self.initialize_pattern()
+
+        final_layer_size = self.nlon
         self.additional_layer = nn.Linear(final_layer_size, final_layer_size)#.to(self.device) # Example: another layer
+    def initialize_sht(self):
+        """
+        Initialize spherical harmonics and inverse spherical harmonics transformations
+        for both scalar and vector fields.
+        """
+        # Initialize spherical harmonics transformation objects
+        # self.sht = harmonics.RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        self.isht = harmonics.InverseRealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        # self.vsht = harmonics.RealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        # self.ivsht = harmonics.InverseRealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        self.lmax = self.isht.lmax
+        self.mmax = self.isht.mmax
     
+    def initialize_pattern(self):
+        """
+            initialize the random pattern.
+            in Berner et al 
+                m is zonal wavenumber -> mmax
+                n is total wavenumber -> lmax
+        """
+        self.lrange = torch.arange(1, self.lmax + 1).unsqueeze(1) # (lmax, 1)
+        self.spec_coef = torch.zeros((self.lmax, self.mmax), dtype=torch.cfloat)
+
+        # parameters we want to learn: (init to berner 2009 values for now)
+        self.alpha = Parameter(torch.tensor(0.5, requires_grad=True))
+        self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
+        self.p = Parameter(torch.tensor(-1.27, requires_grad=True))
+        self.dE = Parameter(torch.tensor(10e-4, requires_grad=True))
+        
+        self.spec_coef = self.cycle_pattern(self.spec_coef)
+
+    def cycle_pattern(self, spec_coef):
+        Gamma = torch.sum(self.lrange * (self.lrange + 1.) * (self.lrange + 2.) * self.lrange ** (2.0 * self.p)) # scalar
+        b = torch.sqrt((4.0 * CONSTANTS.PI * CONSTANTS.RAD_EARTH ** 2.) / (self.variance * Gamma) * self.alpha * self.dE) # scalar
+        g_n = b * self.lrange ** self.p # (lmax, 1)
+        noise = self.variance * torch.randn(spec_coef.shape) # (lmax, mmax) std normal noise diff for all n?
+
+        new_coef = (1.0 - self.alpha) * spec_coef + g_n * torch.sqrt(self.alpha) * noise # (lmax, mmax)
+        return new_coef
+
+        
     def forward(self, x):
+        self.spec_coef = self.cycle_pattern(self.spec_coef) # cycle from prev step
+        pattern_on_grid = self.isht(self.spec_coef)
+        backscatter_pred = torch.ones((self.levels, self.nlat, self.nlon))
+        forcing = backscatter_pred * pattern_on_grid
+
         x = x["y_pred"]
-        return self.additional_layer(x)
 
+        u_squared, v_squared = x[:, self.U_inds, -1] ** 2, x[:, self.V_inds, -1] ** 2
+        wind_squared = u_squared + v_squared
+        u_frac = u_squared / wind_squared
+        v_frac = v_squared / wind_squared
 
+        x[:, self.U_inds, -1] += forcing * u_frac
+        x[:, self.V_inds, -1] += forcing * v_frac
+        return x
+    
+# import yaml
+# import os
 
-if __name__ == "__main__":
-    image_width = 100
-    conf = {"post_conf": {"use_skebs": True, "image_width": image_width}}
+# import torch
+# from credit.parser import CREDIT_main_parser
 
-    input_tensor = torch.randn(image_width)
-    postblock = PostBlock(**conf)
-    assert any([isinstance(module, SKEBS) for module in postblock.modules()])
+# TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
+# CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]),
+#                     "config")
 
-    y_pred = postblock(input_tensor)
-    print("Predicted shape:", y_pred.shape)
+# def test_SKEBS_rand():
+#     config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+#     with open(config) as cf:
+#         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
+#     conf = CREDIT_main_parser(conf) # parser will copy model configs to post_conf
+#     post_conf = conf['model']['post_conf']
+    
+#     image_height = post_conf["model"]["image_height"]
+#     image_width = post_conf["model"]["image_width"]
+#     channels = post_conf["model"]["channels"]
+#     levels = post_conf["model"]["levels"]
+#     surface_channels = post_conf["model"]["surface_channels"]
+#     output_only_channels = post_conf["model"]["output_only_channels"]
+#     input_only_channels = post_conf["model"]["input_only_channels"]
+#     frames = post_conf["model"]["frames"]
 
+#     in_channels = channels * levels + surface_channels + input_only_channels
+#     x = torch.randn(1, in_channels, frames, image_height, image_width)
+#     out_channels = channels * levels + surface_channels + output_only_channels
+#     y_pred = torch.randn(1, out_channels, frames, image_height, image_width)
+
+#     postblock = PostBlock(post_conf)
+#     assert any([isinstance(module, SKEBS) for module in postblock.modules()])
+
+#     input_dict = {"x": x,
+#                   "y_pred": y_pred}
+
+#     skebs_pred = postblock(input_dict)
+
+#     assert skebs_pred.shape == y_pred.shape
+#     assert not torch.isnan(skebs_pred).any()
+
+# if __name__ == "__main__":
+#     test_SKEBS_rand()
