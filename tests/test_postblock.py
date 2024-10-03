@@ -1,39 +1,171 @@
+import pytest
+import yaml
+import os
+import logging
+
 import torch
-from credit.postblock import PostBlock
-from credit.postblock import (
-    SKEBS,
-    TracerFixer,
-    GlobalMassFixer,
-    GlobalWaterFixer,
-    GlobalEnergyFixer,
-)
+import torch.nn as nn
+from credit.models.crossformer import CrossFormer
+from credit.postblock import GlobalWaterFixer, PostBlock, Backscatter_FCNN
+from credit.postblock import SKEBS, TracerFixer, GlobalMassFixer, GlobalEnergyFixer
+from credit.parser import credit_main_parser
+from credit.postblock import Backscatter_CNN
 
 
+from torchviz import make_dot
+
+TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
+CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]),
+                      "config")
+
+@pytest.mark.skip(reason="need to have model weights, level_info, and surface area to test on gh")
+def test_SKEBS_integration():
+    '''
+    integration testing to make sure everything goes on GPU, is loaded properly etc
+    requires loading weights
+    '''
+    logging.info("integration testing SKEBS")
+    # config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    config = "/glade/work/dkimpara/CREDIT_runs/latest_skebs/latest_skebs.yml"
+    with open(config) as cf:
+        conf = yaml.load(cf, Loader=yaml.FullLoader)
+
+    conf = credit_main_parser(conf) # parser will copy model configs to post_conf
+
+    post_conf = conf['model']['post_conf']
+    ## setting up input
+    image_height = post_conf["model"]["image_height"]
+    image_width = post_conf["model"]["image_width"]
+    channels = post_conf["model"]["channels"]
+    levels = post_conf["model"]["levels"]
+    surface_channels = post_conf["model"]["surface_channels"]
+    output_only_channels = post_conf["model"]["output_only_channels"]
+    input_only_channels = post_conf["model"]["input_only_channels"]
+    frames = post_conf["model"]["frames"]
+    sp_index = post_conf["skebs"]["SP_ind"]
+
+    in_channels = channels * levels + surface_channels + input_only_channels
+    x = torch.randn(2, in_channels, frames, image_height, image_width)
+    out_channels = channels * levels + surface_channels + output_only_channels
+    y_pred = torch.randn(2, out_channels, frames, image_height, image_width)
+    y_pred[:, sp_index] = torch.ones_like(y_pred[:, sp_index]) * 1013
+
+    model = CrossFormer(**conf["model"])
+    device = torch.device(f"cuda:{1 % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
+    model = model.load_model(conf)
+    model.to(device)
+    model.train()
+    pred = model(x.to(device))
+
+    # model = SKEBS(conf["model"]["post_conf"])
+    # device = torch.device(f"cuda:{1 % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
+    # model.to(device)
+    # model.train()
+    # pred = model({"y_pred": y_pred.to(device)})
+
+    loss_fn = nn.MSELoss()
+    loss = loss_fn(pred.float(), y_pred.to(device).float()).mean()
+    # dot = make_dot(loss, params=dict(model.named_parameters()))
+    # dot.format = 'png'
+    # dot.render('model_arch.png')
+    scaler = torch.GradScaler()
+    scaler.scale(loss / 1).backward()
+
+    assert pred.shape == y_pred.shape
+
+@pytest.mark.skip(reason="need to have model weights, level_info, and surface area to test on gh")
 def test_SKEBS_rand():
-    image_width = 100
-    conf = {
-        "post_conf": {
-            "skebs": {"activate": True},
-            "model": {
-                "image_width": image_width,
-            },
-        }
-    }
-    conf["post_conf"]["tracer_fixer"] = {"activate": False}
-    conf["post_conf"]["global_mass_fixer"] = {"activate": False}
-    conf["post_conf"]["global_water_fixer"] = {"activate": False}
-    conf["post_conf"]["global_energy_fixer"] = {"activate": False}
+    ''' unit test for CPU. testing that values make sense
+    '''
+    # config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    config = "/glade/work/dkimpara/CREDIT_runs/latest_skebs/latest_skebs.yml"
+    with open(config) as cf:
+        conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    input_tensor = torch.randn(image_width)
-    postblock = PostBlock(**conf)
+    conf = credit_main_parser(conf) # parser will copy model configs to post_conf
+    post_conf = conf['model']['post_conf']
+    
+    
+    image_height = post_conf["model"]["image_height"]
+    image_width = post_conf["model"]["image_width"]
+    channels = post_conf["model"]["channels"]
+    levels = post_conf["model"]["levels"]
+    surface_channels = post_conf["model"]["surface_channels"]
+    output_only_channels = post_conf["model"]["output_only_channels"]
+    input_only_channels = post_conf["model"]["input_only_channels"]
+    frames = post_conf["model"]["frames"]
+    sp_index = post_conf["skebs"]["SP_ind"]
+
+    in_channels = channels * levels + surface_channels + input_only_channels
+    x = torch.randn(2, in_channels, frames, image_height, image_width)
+    out_channels = channels * levels + surface_channels + output_only_channels
+    y_pred = torch.randn(2, out_channels, frames, image_height, image_width)
+    y_pred[:, sp_index] = torch.ones_like(y_pred[:, sp_index]) * 1013
+
+    post_conf["data"]["forecast_len"] = 2 # to turn on multistep
+   
+    postblock = PostBlock(post_conf)
     assert any([isinstance(module, SKEBS) for module in postblock.modules()])
 
-    input_dict = {"y_pred": input_tensor}
+    input_dict = {"x": x,
+                "y_pred": y_pred}
 
-    y_pred = postblock(input_dict)
+    # testing random pattern generation
+    for i in range(10):
+        skebs_pred = postblock(input_dict)
 
-    assert y_pred.shape == input_tensor.shape
+    # skebs_pred = postblock(input_dict)
+    # FIXME: fix test
+    assert skebs_pred.shape == y_pred.shape
+    assert not torch.isnan(skebs_pred).any()
 
+def test_SKEBS_backscatter():
+    config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    with open(config) as cf:
+        conf = yaml.load(cf, Loader=yaml.FullLoader)
+
+    conf = credit_main_parser(conf) # parser will copy model configs to post_conf
+    post_conf = conf['model']['post_conf']
+    
+    image_height = post_conf["model"]["image_height"]
+    image_width = post_conf["model"]["image_width"]
+    channels = post_conf["model"]["channels"]
+    levels = post_conf["model"]["levels"]
+    surface_channels = post_conf["model"]["surface_channels"]
+    output_only_channels = post_conf["model"]["output_only_channels"]
+    input_only_channels = post_conf["model"]["input_only_channels"]
+    frames = post_conf["model"]["frames"]
+    sp_index = post_conf["skebs"]["SP_ind"]
+
+    in_channels = channels * levels + surface_channels + input_only_channels
+    x = torch.randn(2, in_channels, frames, image_height, image_width)
+    out_channels = channels * levels + surface_channels + output_only_channels
+    y_pred = torch.randn(2, out_channels, frames, image_height, image_width)
+    y_pred[:, sp_index] = torch.ones_like(y_pred[:, sp_index]) * 1013
+
+    model = Backscatter_FCNN(out_channels, levels)
+
+    pred = model(y_pred)
+
+    # assert pred.shape == y_pred.shape
+    # assert not torch.isnan(skebs_pred).any()
+
+def test_backscatter_pad():
+    lat = 2
+    lon = 2
+    batch_size = 1
+    x = torch.arange(batch_size * lat * lon).reshape(batch_size, 1, lat, lon)
+    m = Backscatter_CNN(1,1,lat,lon)
+    
+    target = torch.tensor([[[[0, 1, 0, 1],
+                            [1, 0, 1, 0],
+                            [3, 2, 3, 2],
+                            [2, 3, 2, 3]]]])
+    
+    padded = m.pad(x)
+    assert (padded == target).all()
+
+    assert (m.unpad(padded) == x).all()
 
 def test_TracerFixer_rand():
     """
@@ -216,8 +348,20 @@ def test_GlobalEnergyFixer_rand():
     assert y_pred_fix.shape == y_pred.shape
 
 
-def test_SKEBS_era5():
-    """
-    todo after implementation
-    """
-    pass
+
+
+if __name__ == "__main__":
+    # Set up logger to print stuff
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+
+    # Stream output to stdout
+    ch = logging.StreamHandler()
+    # ch.setLevel(logging.INFO)
+    ch.setFormatter(formatter)
+    root.addHandler(ch)
+
+    # test_SKEBS_integration()
+    # test_SKEBS_rand()
+    test_backscatter_pad()

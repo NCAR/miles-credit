@@ -23,12 +23,14 @@ def load_forecasts(conf):
             days = conf["predict"]["forecasts"].get("days", 10)
             lead_time_periods = conf["data"].get("lead_time_periods", 1)
             duration = conf["predict"]["forecasts"].get("duration", 365)
+            ic_interval_days = conf["predict"]["forecasts"].get("ic_interval_days", 1)
             return generate_forecasts(
                 start_date,
                 lead_time_periods,
                 days=days,
                 duration=duration,
                 start_hours=start_hours,
+                ic_interval_days=ic_interval_days,
             )
         else:
             logger.warning(f"Forecast type '{forecast_type}' not supported")
@@ -39,7 +41,7 @@ def load_forecasts(conf):
 
 # Function to generate forecasts for specified duration
 def generate_forecasts(
-    start_date, lead_time_periods=1, days=10, duration=365, start_hours=(0)
+    start_date, lead_time_periods=1, days=10, duration=365, start_hours=(0), ic_interval_days=1
 ):
     """
     lead_time_periods = 1 for hourly forecast; =6 for 6 hourly forecast
@@ -48,7 +50,7 @@ def generate_forecasts(
     current_date = start_date  # Use the provided start_date directly
 
     # Generate forecast for each day
-    for _ in range(duration):
+    for _ in range(duration // ic_interval_days):
         for hour in start_hours:
             start_datetime = current_date + timedelta(hours=hour)
             end_datetime = start_datetime + timedelta(
@@ -60,7 +62,12 @@ def generate_forecasts(
                     end_datetime.strftime("%Y-%m-%d %H:%M:%S"),
                 ]
             )
-        current_date += timedelta(days=1)
+        current_date += timedelta(days=ic_interval_days)
+
+    if len(forecasts) == 0:
+        raise RuntimeError("No forecasts generated")
+    
+    logger.info(f"Generated{len(forecasts)} unique forecast periods ")
 
     return forecasts
 

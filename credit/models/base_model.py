@@ -6,6 +6,8 @@ import logging
 
 from credit.models.checkpoint import load_state_dict_error_handler
 
+from credit.models.checkpoint import load_state_dict_error_handler
+
 logger = logging.getLogger(__name__)
 
 

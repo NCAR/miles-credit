@@ -410,9 +410,11 @@ predict:
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
         duration: 1152       # number of days to initialize, starting from the (year, mon, day) above
+                             # use in conjunction with ic_interval_days below
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
-        days: 10             # forecast lead time as days (1 means 24-hour forecast)
+        ic_interval_days: 1  # spacing between init days. total number of ICs will be duration // ic_interval_days (default 1)
+        days:  10            # forecast lead time as days (1 means 24-hour forecast)
         
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables

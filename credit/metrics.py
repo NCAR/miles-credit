@@ -287,6 +287,9 @@ class LatWeightedMetricsClimatology:
                 ).mean()
 
 class LatWeightedMetricsEnsemble:
+    """
+    metrics for rollout_ens_batcher. will output full xarrays of rmse, std etc
+    """
     def __init__(self, conf, training_mode=True):
         self.conf = conf
         atmos_vars = conf["data"]["variables"]
@@ -336,11 +339,6 @@ class LatWeightedMetricsEnsemble:
             else 1.0
         )
 
-        if clim is not None:
-            clim = clim.to(device=y.device).unsqueeze(0)
-            pred = pred - clim
-            y = y - clim
-
         loss_dict = {}
         with torch.no_grad():
             pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:]) #b, ensemble, c, t, lat, lon
@@ -348,9 +346,9 @@ class LatWeightedMetricsEnsemble:
             loss_dict["ens_std"] = torch.std(pred, dim=1) # std dev of ensemble for each gridcell/variable
             
             # compute ensemble mean
-            pred = pred.mean(dim=1)
+            pred = pred.mean(dim=1) #b, c, t, lat, lon
             loss_dict["ens_mean"] = pred
-            loss_dict["ens_rmse"] = torch.sqrt((pred - y) ** 2 * w_lat * w_var)
+            loss_dict["ens_rmse"] = torch.sqrt((pred - y) ** 2)
 
         return loss_dict
 

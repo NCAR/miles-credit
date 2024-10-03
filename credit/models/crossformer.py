@@ -425,8 +425,8 @@ class CrossFormer(BaseModel):
         
         if post_conf is None:
             post_conf = {"activate": False}
-        self.use_post_block = post_conf["activate"]
-
+        self.use_post_block = post_conf['activate']
+        
         # input channels
         input_channels = channels * levels + surface_channels + input_only_channels
 
@@ -569,7 +569,8 @@ class CrossFormer(BaseModel):
                 "y_pred": x,
                 "x": x_copy,
             }
-            x = self.postblock(x)
+            with torch.autocast(device_type="cuda", enabled=False): #isht cannot use amp
+                x = self.postblock(x)
 
         return x
 

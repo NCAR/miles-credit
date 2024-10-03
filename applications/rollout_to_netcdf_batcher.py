@@ -3,6 +3,7 @@ import logging
 import multiprocessing as mp
 import os
 import sys
+import time
 import warnings
 from argparse import ArgumentParser
 
@@ -205,6 +206,7 @@ def predict(rank, world_size, conf, p):
         )
 
     # Rollout
+    start_time = time.time()
     with torch.no_grad():
         # forecast count = a constant for each run
         forecast_count = 0
@@ -304,11 +306,10 @@ def predict(rank, world_size, conf, p):
             # Convert to xarray and handle results
             for j in range(batch_size):
                 upper_air_list, single_level_list = [], []
-                for i in range(
-                    ensemble_size
-                ):  # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
+                for i in range(ensemble_size):  
+                    # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
                     darray_upper_air, darray_single_level = make_xarray(
-                        y_pred[j + i : j + i + 1],  # Process each ensemble member
+                        y_pred[j + i : j + i + 1].cpu(),  # Process each ensemble member
                         utc_datetimes[j],
                         latlons.latitude.values,
                         latlons.longitude.values,
@@ -388,7 +389,7 @@ def predict(rank, world_size, conf, p):
 
         if distributed:
             torch.distributed.destroy_process_group()
-
+    logger.info(f"total time: {(time.time() - start_time) / 60:.2f} minutes")
     return 1
 
 
@@ -476,9 +477,17 @@ if __name__ == "__main__":
 
     # Stream output to stdout
     ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
+    # see if we are in debug mode to set logging level
+    gettrace = getattr(sys, 'gettrace', None)
+    debug = gettrace()
+    if debug:
+        ch.setLevel(logging.DEBUG)
+    else:
+        ch.setLevel(logging.INFO)
+    
     ch.setFormatter(formatter)
     root.addHandler(ch)
+    logging.debug("logging set to DEBUG level")
 
     # Load the configuration and get the relevant variables
     with open(config) as cf:
@@ -539,7 +548,7 @@ if __name__ == "__main__":
     seed = conf["seed"]
     seed_everything(seed)
 
-    local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
 
     with mp.Pool(num_cpus) as p:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
