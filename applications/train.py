@@ -340,9 +340,11 @@ def main(rank, world_size, conf, backend, trial=False):
         setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     # infer device id from rank
-
-    device = torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
-    torch.cuda.set_device(rank % torch.cuda.device_count())
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+        torch.cuda.set_device(rank % torch.cuda.device_count())
+    else:
+        device = torch.device("cpu")
 
     # Config settings
     seed = 1000 if "seed" not in conf else conf["seed"]
