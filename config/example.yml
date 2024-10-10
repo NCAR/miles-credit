@@ -20,7 +20,7 @@ data:
     # the time dimension MUST be the same as upper-air variables
     # files must have the listed variable names
     # surface variables will be normalized by the dataloader, users do not need to normalize them
-    surface_variables: ['sp', 't2m']
+    surface_variables: ['SP', 'T2M']
     save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_TOTAL_*'
 
     # dynamic forcing variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
@@ -280,10 +280,10 @@ model:
     use_spectral_norm: True
     
     post_conf: 
-        activate: True
+        activate: False
         
         skebs:
-            activate: True
+            activate: False
         
         tracer_fixer:
             activate: False

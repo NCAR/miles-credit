@@ -19,6 +19,47 @@ import torch
 from typing import Dict, Any, Optional
 from credit.physics_constants import RAD_EARTH, RVGAS, RDGAS, GRAVITY, RHO_WATER, LH_WATER
 
+class compute_pressure_on_mlevs:
+    '''
+    compute pressure levels given SP with (only compatible with torch)
+    SP, a_vals with same units.
+    a_vals, b_vals, with size levels at dimension plev_dim and all other dims with size 1, 
+    e.g. plev_dim = 1; a_vals.shape = (1, levels, 1, 1, 1)
+    matching sp with size 1 at dimension plev_dim e.g. (b, 1, t, lat, lon)
+    '''
+
+    def __init__(self,
+                 a_vals,
+                 b_vals,
+                 plev_dim=1):
+        self.a_vals = a_vals
+        self.b_vals = b_vals
+        self.plev_dim = plev_dim
+        self.zeros = None
+
+    def compute_p(self, sp):
+        plevs = (self.a_vals + self.b_vals * sp)
+        return plevs # shape = sp.shape except at plev_dim which is now nlevel
+    
+    def compute_hlevs(self, plevs):
+        # half levels as averages of model level pressures
+        hlevs = plevs.unfold(dimension=self.plev_dim, size=2, step=1).mean(dim=-1)
+        return hlevs # same shape a plev except plev_dim is 1 less
+    
+    def compute_mlev_thickness(self, sp):
+        plevs = self.compute_p(sp)
+        hlevs = self.compute_hlevs(plevs) 
+
+        if not self.zeros: # initialize zeros
+            self.zeros = torch.zeros_like(sp)
+
+        thicknesses = torch.diff(hlevs, 
+                                 dim=self.plev_dim, 
+                                 prepend=self.zeros, 
+                                 append=sp)
+        return thicknesses #same shape as sp but plev_dim has size levels
+
+ 
 
 class physics_pressure_level:
     '''

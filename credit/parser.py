@@ -364,6 +364,19 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             
     # SKEBS
     if conf['model']['post_conf']['skebs']['activate']:
+        assert "level_info_file" in conf['data'], (
+            'need to specify level_info_file for skebs')
+        assert "level_list" in conf['data'], (
+            'need to specify hybrid sigma level indices for skebs'
+        )
+        assert "timestep" in conf['data'], (
+            'need to specify timestep in seconds for skebs'
+        )
+        assert conf['trainer']["train_batch_size"] == conf['trainer']["valid_batch_size"], (
+            'train and valid batch sizes need to be the same for skebs'
+        )
+        
+
         conf['model']['post_conf']['skebs'].setdefault('lmax', None)
         conf['model']['post_conf']['skebs'].setdefault('mmax', None)
         
@@ -381,7 +394,7 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         ]
         conf['model']['post_conf']['skebs']['U_inds'] = U_inds
         conf['model']['post_conf']['skebs']['V_inds'] = V_inds
-
+        conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("SP")
 
 
     # --------------------------------------------------------------------- #

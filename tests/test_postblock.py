@@ -26,11 +26,13 @@ def test_SKEBS_rand():
     output_only_channels = post_conf["model"]["output_only_channels"]
     input_only_channels = post_conf["model"]["input_only_channels"]
     frames = post_conf["model"]["frames"]
+    sp_index = post_conf["skebs"]["SP_ind"]
 
     in_channels = channels * levels + surface_channels + input_only_channels
-    x = torch.randn(1, in_channels, frames, image_height, image_width)
+    x = torch.randn(2, in_channels, frames, image_height, image_width)
     out_channels = channels * levels + surface_channels + output_only_channels
-    y_pred = torch.randn(1, out_channels, frames, image_height, image_width)
+    y_pred = torch.randn(2, out_channels, frames, image_height, image_width)
+    y_pred[:, sp_index] = torch.ones_like(y_pred[:, sp_index]) * 1013
 
     postblock = PostBlock(post_conf)
     assert any([isinstance(module, SKEBS) for module in postblock.modules()])
@@ -171,4 +173,3 @@ def test_SKEBS_era5():
 
 if __name__ == "__main__":
     test_SKEBS_rand()
-    test_tracer_fixer_rand()

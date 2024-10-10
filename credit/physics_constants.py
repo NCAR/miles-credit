@@ -1,7 +1,7 @@
-import math
+from math import pi
 
 # Pi
-PI = math.pi
+PI = pi
 
 # Earth's radius
 RAD_EARTH = 6.37122e6 # m

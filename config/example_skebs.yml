@@ -10,19 +10,19 @@ seed: 1000
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/derecho/scratch/wchapman/y_TOTAL*'
+    save_loc: '/glade/derecho/scratch/dkimpara/y_ONEdeg*.zarr'
     
     # surface variables
     surface_variables: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/derecho/scratch/wchapman/y_TOTAL*'
+    save_loc_surface: '/glade/derecho/scratch/dkimpara/y_ONEdeg*.zarr'
     
     # dynamic forcing variables
-    dynamic_forcing_variables: [] #['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_1h_0.25deg/*.nc'
+    dynamic_forcing_variables: ['tsi']
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/dkimpara/credit_solar_1h_1deg/*.nc'
     
     # static variables
-    static_variables: [] #['Z_GDS4_SFC','LSM'] 
-    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
+    static_variables:  ['Z_GDS4_SFC','LSM'] 
+    save_loc_static: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_ONEDEG.nc'
     
     # mean / std path
     mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
@@ -53,6 +53,10 @@ data:
 
     sst_forcing:
         activate: False
+    
+    level_info_file: "/glade/u/home/wchapman/MLWPS/DataLoader/ERA5_Lev_Info.nc"
+    level_list: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+    timestep: 3600 # 1h timestep
     
 trainer:
     type: standard # <---------- change to your type
@@ -157,7 +161,7 @@ loss:
     
     # use latitude weighting
     use_latitude_weights: True
-    latitude_weights: "/glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc"
+    latitude_weights: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_ONEDEG.nc'
     
     # turn-off variable weighting
     use_variable_weights: False
@@ -196,7 +200,7 @@ predict:
 #     queue: 'casper'
 
 pbs: #derecho
-    conda: "credit-derecho"
+    conda: "$HOME/credit-derecho"
     project: "NAML0001"
     job_name: "unet_skebs"
     walltime: "00:30:00"
