@@ -3,7 +3,6 @@ import sys
 import shutil
 import logging
 import warnings
-import functools
 
 from pathlib import Path
 from argparse import ArgumentParser

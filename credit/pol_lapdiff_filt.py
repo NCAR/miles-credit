@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.fft as fft
 # from scipy.ndimage import convolve
 #import windspharm
 #from windspharm.standard import VectorWind

@@ -20,6 +20,14 @@ from torch.utils._pytree import tree_map
 
 # utils
 
+def load_state_dict_error_handler(load_msg):
+    if load_msg[1]:
+        raise RuntimeError(str(load_msg))
+    elif load_msg[0]:
+        logging.warning(f"Loaded partial model {load_msg}")
+    else: # all keys matched
+        logging.info(load_msg)
+
 def load_model_state(conf, model, device):
     save_loc = os.path.expandvars(conf['save_loc'])
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
@@ -32,10 +40,12 @@ def load_model_state(conf, model, device):
     else:
         if conf["trainer"]["mode"] == "ddp":
             logging.info(f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            model.module.load_state_dict(checkpoint["model_state_dict"])
+            load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            load_state_dict_error_handler(load_msg)
         else:
             logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            model.load_state_dict(checkpoint["model_state_dict"])
+            load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            load_state_dict_error_handler(load_msg)
     return model
 
 
@@ -148,7 +158,8 @@ class TorchFSDPCheckpointIO:
     def load_unsharded_model(self, model, checkpoint):
         model = model.unwrap()
         checkpoint = load_state_dict(checkpoint)
-        model.load_state_dict(checkpoint)
+        load_msg = model.load_state_dict(checkpoint, strict=False)
+        load_state_dict_error_handler(load_msg)
 
     def load_unsharded_optimizer(self, optimizer, checkpoint):
         checkpoint = load_state_dict(checkpoint)

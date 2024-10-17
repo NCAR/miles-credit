@@ -6,8 +6,6 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 from torch import nn
-import torch.distributed.checkpoint as DCP
-from torch.distributed.fsdp import StateDictType
 
 from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange

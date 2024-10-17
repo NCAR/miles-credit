@@ -3,11 +3,9 @@ import torch
 import logging
 import copy
 import os
-import torch.distributed.checkpoint as DCP
-from torch.distributed.fsdp import StateDictType
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 import torch.nn.functional as F
 #from credit.models.base_model import BaseModel
+from credit.postblock import PostBlock
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -65,6 +63,12 @@ class SegmentationModel(torch.nn.Module):
         conf['model']['architecture']['classes'] = in_out_channels
 
         self.model = load_premade_encoder_model(conf['model']['architecture'])
+        # Additional layers for testing
+
+        self.use_post_block = conf["model"]["post_conf"]["activate"]
+        if self.use_post_block:
+            self.postblock = PostBlock(conf["model"]["post_conf"])
+
 
     def concat_and_reshape(self, x1, x2):
         x1 = x1.view(x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5])
@@ -78,10 +82,22 @@ class SegmentationModel(torch.nn.Module):
         return tensor1, tensor2
 
     def forward(self, x):
+        if self.use_post_block:  # copy tensor to feed into postBlock later
+            x_copy = x.clone().detach()
+
         x = F.avg_pool3d(x, kernel_size=(2, 1, 1)) if x.shape[2] > 1 else x
         x = x.squeeze(2) # squeeze time dim
         x = self.rk4(x) if self.rk4_integration else self.model(x)
-        return x.unsqueeze(2)
+
+        x = x.unsqueeze(2)
+
+        if self.use_post_block:
+            x = {
+                "y_pred": x,
+                "x": x_copy,
+            }
+            x = self.postblock(x)
+        return x
 
     def rk4(self, x):
 

@@ -1,46 +1,43 @@
-# ---------- #
-# System
-import gc
 import os
+import gc
 import sys
 import yaml
-import glob
 import logging
 import warnings
-import traceback
+from glob import glob
 from pathlib import Path
 from argparse import ArgumentParser
 import multiprocessing as mp
+from collections import defaultdict
 
 # ---------- #
 # Numerics
-import datetime
-import pandas as pd
+from datetime import datetime, timedelta
 import xarray as xr
 import numpy as np
+import pandas as pd
 
 # ---------- #
-# AI libs
 import torch
 import torch.distributed as dist
+from torch.utils.data import get_worker_info
+from torch.utils.data.distributed import DistributedSampler
 from torchvision import transforms
-# import wandb
 
 # ---------- #
 # credit
-from credit.data import ERA5Dataset
 from credit.models import load_model
-from credit.transforms import ToTensor, NormalizeState, NormalizeState_Quantile
 from credit.seed import seed_everything
+from credit.data import Predict_Dataset, concat_and_reshape, reshape_only, generate_datetime, nanoseconds_to_year, hour_to_nanoseconds
+from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
+from credit.metrics import LatWeightedMetrics
 from credit.forecast import load_forecasts
 from credit.distributed import distributed_model_wrapper
 from credit.models.checkpoint import load_model_state
-from credit.solar import TOADataLoader
-from credit.output import split_and_reshape, load_metadata, make_xarray, save_netcdf_increment
-from torch.utils.data import get_worker_info
-from torch.utils.data.distributed import DistributedSampler
+from credit.parser import CREDIT_main_parser, predict_data_check
+from credit.output import load_metadata, make_xarray, save_netcdf_increment
 
 
 logger = logging.getLogger(__name__)
@@ -50,156 +47,144 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 
-class PredictForecast(torch.utils.data.IterableDataset):
-    def __init__(self,
-                 filenames,
-                 forecasts,
-                 history_len,
-                 skip_periods,
-                 rank,
-                 world_size,
-                 shuffle=False,
-                 transform=None,
-                 rollout_p=0.0,
-                 which_forecast=None):
-
-        self.dataset = ERA5Dataset(
-            filenames=filenames,
-            history_len=history_len,
-            forecast_len=1,
-            skip_periods=skip_periods,
-            transform=transform
-        )
-        self.meta_data_dict = self.dataset.meta_data_dict
-        self.all_files = self.dataset.all_fils
-        self.history_len = history_len
-        self.filenames = filenames
-        self.transform = transform
-        self.rank = rank
-        self.world_size = world_size
-        self.shuffle = shuffle
-        self.skip_periods = skip_periods
-        self.current_epoch = 0
-        self.rollout_p = rollout_p
-        self.forecasts = forecasts
-        self.skip_periods = skip_periods if skip_periods is not None else 1
-        self.which_forecast = which_forecast
+class Predict_Dataset_Metrics(Predict_Dataset):
 
     def find_start_stop_indices(self, index):
-        start_time = self.forecasts[index][0]
-        date_object = datetime.datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
-        shifted_hours = self.skip_periods * self.history_len
-        date_object = date_object - datetime.timedelta(hours=shifted_hours)
-        self.forecasts[index][0] = date_object.strftime('%Y-%m-%d %H:%M:%S')
+        # ============================================================================ #
+        # shift hours for history_len > 1, becuase more than one init times are needed
+        # <--- !! it MAY NOT work when self.skip_period != 1
+        shifted_hours = self.lead_time_periods * self.skip_periods * (self.history_len-1)
+        # ============================================================================ #
+        # subtrack shifted_hour form the 1st & last init times
+        # convert to datetime object
+        self.init_datetime[index][0] = datetime.strptime(
+            self.init_datetime[index][0], '%Y-%m-%d %H:%M:%S') - timedelta(hours=shifted_hours)
+        self.init_datetime[index][1] = datetime.strptime(
+            self.init_datetime[index][1], '%Y-%m-%d %H:%M:%S') - timedelta(hours=shifted_hours)
 
-        datetime_objs = [np.datetime64(date) for date in self.forecasts[index]]
-        start_time, stop_time = [str(datetime_obj) + '.000000000' for datetime_obj in datetime_objs]
-        self.start_time = np.datetime64(start_time).astype(datetime.datetime)
-        self.stop_time = np.datetime64(stop_time).astype(datetime.datetime)
+        # convert the 1st & last init times to a list of init times
+        self.init_datetime[index] = generate_datetime(self.init_datetime[index][0], self.init_datetime[index][1], self.lead_time_periods)
+        # convert datetime obj to nanosecondes
+        init_time_list_dt = [np.datetime64(date.strftime('%Y-%m-%d %H:%M:%S')) for date in self.init_datetime[index]]
+        
+        # init_time_list_np: a list of python datetime objects, each is a forecast step
+        # init_time_list_np[0]: the first initialization time
+        # init_time_list_np[t]: the forcasted time of the (t-1)th step; the initialization time of the t-th step
+        self.init_time_list_np = [np.datetime64(str(dt_obj) + '.000000000').astype(datetime) for dt_obj in init_time_list_dt]
 
-        info = {}
-
-        for idx, dataset in enumerate(self.all_files):
-            start_time = np.datetime64(dataset['time'].min().values).astype(datetime.datetime)
-            stop_time = np.datetime64(dataset['time'].max().values).astype(datetime.datetime)
-            track_start = False
-            track_stop = False
-
-            if start_time <= self.start_time <= stop_time:
-                # Start time is in this file, use start time index
-                dataset = np.array([np.datetime64(x.values).astype(datetime.datetime) for x in dataset['time']])
-                start_idx = np.searchsorted(dataset, self.start_time)
-                start_idx = max(0, min(start_idx, len(dataset)-1))
-                track_start = True
-
-            elif start_time < self.stop_time and stop_time > self.start_time:
-                # File overlaps time range, use full file
-                start_idx = 0
-                track_start = True
-
-            if start_time <= self.stop_time <= stop_time:
-                # Stop time is in this file, use stop time index
-                if isinstance(dataset, np.ndarray):
-                    pass
-                else:
-                    dataset = np.array([np.datetime64(x.values).astype(datetime.datetime) for x in dataset['time']])
-                stop_idx = np.searchsorted(dataset, self.stop_time)
-                stop_idx = max(0, min(stop_idx, len(dataset)-1))
-                track_stop = True
-
-            elif start_time < self.stop_time and stop_time > self.start_time:
-                # File overlaps time range, use full file
-                stop_idx = len(dataset) - 1
-                track_stop = True
-
-            # Only include files that overlap the time range
-            if track_start and track_stop:
-                info[idx] = ((idx, start_idx), (idx, stop_idx))
-
-        indices = []
-        for dataset_idx, (start, stop) in info.items():
-            for i in range(start[1], stop[1]+1):
-                indices.append((start[0], i))
-        return indices
-
-    def __len__(self):
-        return len(self.forecasts)
+        info = []
+        for init_time in self.init_time_list_np:
+            for i_file, ds in enumerate(self.all_files):
+                # get the year of the current file
+                ds_year = int(np.datetime_as_string(ds['time'][0].values, unit='Y'))
+    
+                # get the first and last years of init times
+                init_year0 = nanoseconds_to_year(init_time)
+    
+                # found the right yearly file
+                if init_year0 == ds_year:
+                    
+                    N_times = len(ds['time'])
+                    # convert ds['time'] to a list of nanosecondes
+                    ds_time_list = [np.datetime64(ds_time.values).astype(datetime) for ds_time in ds['time']]
+                    ds_start_time = ds_time_list[0]
+                    ds_end_time = ds_time_list[-1]
+    
+                    init_time_start = init_time
+                    # if initalization time is within this (yearly) xr.Dataset
+                    if ds_start_time <= init_time_start <= ds_end_time:
+    
+                        # try getting the index of the first initalization time
+                        i_init_start = ds_time_list.index(init_time_start)
+    
+                        # for multiple init time inputs (history_len > 1), init_end is different for init_start
+                        init_time_end = init_time_start + hour_to_nanoseconds(shifted_hours)
+    
+                        # see if init_time_end is alos in this file
+                        if ds_start_time <= init_time_end <= ds_end_time:
+    
+                            # try getting the index
+                            i_init_end = ds_time_list.index(init_time_end)
+                        else:
+                            # this set of initalizations have crossed years
+                            # get the last element of the current file
+                            # we have anthoer section that checks additional input data
+                            i_init_end = len(ds_time_list) - 1
+    
+                        info.append([i_file, i_init_start, i_init_end, N_times])
+        return info
 
     def __iter__(self):
         worker_info = get_worker_info()
         num_workers = worker_info.num_workers if worker_info is not None else 1
         worker_id = worker_info.id if worker_info is not None else 0
-        sampler = DistributedSampler(self, num_replicas=num_workers*self.world_size, rank=self.rank*num_workers+worker_id, shuffle=self.shuffle)
-
+        sampler = DistributedSampler(self,
+                                     num_replicas=num_workers*self.world_size,
+                                     rank=self.rank*num_workers+worker_id,
+                                     shuffle=False)
         for index in sampler:
-
+            # get the init time info for the current sample
             data_lookup = self.find_start_stop_indices(index)
 
-            for k, (file_key, time_key) in enumerate(data_lookup):
+            for k, _ in enumerate(self.init_time_list_np):
 
-                if k == 0:
-                    concatenated_samples = {'x': [], 'x_surf': []}
-                    sliced_x = xr.open_zarr(self.filenames[file_key], consolidated=True).isel(time=slice(time_key, time_key+self.history_len+1))
+                # the first initialization time: get initalization from data
+                i_file, i_init_start, i_init_end, N_times = data_lookup[k]
 
-                    # Check if additional data from the next file is needed
-                    if len(sliced_x['time']) < self.history_len + 1:
-                        # Load excess data from the next file
-                        next_file_idx = self.filenames.index(self.filenames[file_key]) + 1
-                        if next_file_idx == len(self.filenames):
-                            raise OSError("You have reached the end of the available data. Exiting.")
-                        sliced_x_next = xr.open_zarr(
-                            self.filenames[next_file_idx],
-                            consolidated=True).isel(time=slice(0, self.history_len+1-len(sliced_x['time'])))
+                # allocate output dict
+                output_dict = {}
+
+                # get all inputs in one xr.Dataset
+                sliced_x = self.load_zarr_as_input(i_file, i_init_start, i_init_end)
+                #print(i_file, i_init_start, i_init_end, N_times)
+                #print(sliced_x['time'])
+                
+                # Check if additional data from the next file is needed
+                if (len(sliced_x['time']) < self.history_len) or (i_init_end+1 >= N_times):
+
+                    # Load excess data from the next file
+                    next_file_idx = self.filenames.index(self.filenames[i_file]) + 1
+
+                    if next_file_idx >= len(self.filenames):
+                        # not enough input data to support this forecast
+                        raise OSError("You have reached the end of the available data. Exiting.")
+
+                    else:
+                        # i_init_start = 0 because we need the beginning of the next file only
+                        sliced_x_next = self.load_zarr_as_input(next_file_idx, 0, self.history_len)
 
                         # Concatenate excess data from the next file with the current data
-                        sliced_x = xr.concat([sliced_x, sliced_x_next], dim='time')
-
-                    sample_x = {
-                        'x': sliced_x.isel(time=slice(0, self.history_len))
-                    }
-
-                    if self.transform:
-                        sample_x = self.transform(sample_x)
-                        # Add static vars, if any, to the return dictionary
-                        if "static" in sample_x:
-                            concatenated_samples["static"] = []
-                        if "TOA" in sample_x:
-                            concatenated_samples["TOA"] = []
-
-                    for key in concatenated_samples.keys():
-                        concatenated_samples[key] = sample_x[key].squeeze(0) if self.history_len == 1 else sample_x[key]
-
-                    concatenated_samples['forecast_hour'] = k + 1
-                    concatenated_samples['stop_forecast'] = (k == (len(data_lookup)-self.history_len-1))  # Adjust stopping condition
-                    concatenated_samples['datetime'] = sliced_x.time.values.astype('datetime64[s]').astype(int)[-1]
+                        sliced_xy = xr.concat([sliced_x, sliced_x_next], dim='time')
+                        sliced_x = sliced_xy.isel(time=slice(0, self.history_len))
+                        
+                        sliced_y = sliced_xy.isel(time=slice(self.history_len, self.history_len+1))
+                        #self.load_zarr_as_input(next_file_idx, self.history_len, self.history_len+1)
 
                 else:
-                    concatenated_samples['forecast_hour'] = k + 1
-                    concatenated_samples['stop_forecast'] = (k == (len(data_lookup)-self.history_len-1))  # Adjust stopping condition
+                    sliced_y = self.load_zarr_as_input(i_file, i_init_end+1, i_init_end+1)
 
-                yield concatenated_samples
+                # Prepare data for transform application
+                # print(sliced_x['time'])
+                # print(sliced_y['time'])
+                
+                sample_x = {'historical_ERA5_images': sliced_x, 'target_ERA5_images': sliced_y}
 
-                if concatenated_samples['stop_forecast']:
+                if self.transform:
+                    sample_x = self.transform(sample_x)
+
+                for key in sample_x.keys():
+                    output_dict[key] = sample_x[key]
+
+                # <--- !! 'forecast_hour' is actually "forecast_step" but named by assuming hourly
+                output_dict['forecast_hour'] = k + 1
+                # Adjust stopping condition
+                output_dict['stop_forecast'] = k == (len(self.init_time_list_np) - 1)
+                output_dict['datetime'] = sliced_x.time.values.astype('datetime64[s]').astype(int)[-1]
+                
+                # return output_dict
+                yield output_dict
+
+                if output_dict['stop_forecast']:
                     break
 
 
@@ -210,8 +195,9 @@ def setup(rank, world_size, mode):
 
 def predict(rank, world_size, conf, p):
 
-    if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
-        setup(rank, world_size, conf["trainer"]["mode"])
+    # setup rank and world size for GPU-based rollout
+    if conf["predict"]["mode"] in ["fsdp", "ddp"]:
+        setup(rank, world_size, conf["predict"]["mode"])
 
     # infer device id from rank
     if torch.cuda.is_available():
@@ -220,40 +206,78 @@ def predict(rank, world_size, conf, p):
     else:
         device = torch.device("cpu")
 
-    # Config settings
+    # config settings
     seed = 1000 if "seed" not in conf else conf["seed"]
     seed_everything(seed)
 
+    # number of input time frames
     history_len = conf["data"]["history_len"]
-    time_step = conf["data"]["time_step"] if "time_step" in conf["data"] else None
 
-    # Load paths to all ERA5 data available
-    all_ERA_files = sorted(glob.glob(conf["data"]["save_loc"]))
+    # length of forecast steps
+    lead_time_periods = conf['data']['lead_time_periods']
 
-    # Preprocessing transformations
-    if conf["data"]["scaler_type"] == "std":
-        state_transformer = NormalizeState(conf)
+    # transform and ToTensor class
+    transform = load_transforms(conf)
+    if conf["data"]["scaler_type"] == 'std_new':
+        state_transformer = Normalize_ERA5_and_Forcing(conf)
     else:
-        state_transformer = NormalizeState_Quantile(conf)
-    transform = transforms.Compose(
-        [
-            state_transformer,
-            ToTensor(conf),
-        ]
-    )
+        print('Scaler type {} not supported'.format(conf["data"]["scaler_type"]))
+        raise
+    # ----------------------------------------------------------------- #
+    # parse varnames and save_locs from config
 
-    dataset = PredictForecast(
+    # upper air variables
+    all_ERA_files = sorted(glob(conf["data"]["save_loc"]))
+    varname_upper_air = conf['data']['variables']
+
+    # surface variables
+    varname_surface = conf['data']['surface_variables']
+
+    if conf["data"]['flag_surface']:
+        surface_files = sorted(glob(conf["data"]["save_loc_surface"]))
+    else:
+        surface_files = None
+
+    # dynamic forcing variables
+    varname_dyn_forcing = conf['data']['dynamic_forcing_variables']
+
+    if conf["data"]['flag_dyn_forcing']:
+        dyn_forcing_files = sorted(glob(conf["data"]["save_loc_dynamic_forcing"]))
+    else:
+        dyn_forcing_files = None
+
+    # forcing variables
+    forcing_files = conf['data']['save_loc_forcing']
+    varname_forcing = conf['data']['forcing_variables']
+
+    # static variables
+    static_files = conf['data']['save_loc_static']
+    varname_static = conf['data']['static_variables']
+
+    # ----------------------------------------------------------------- #\
+    # get dataset
+    dataset = Predict_Dataset_Metrics(
+        conf,
+        varname_upper_air,
+        varname_surface,
+        varname_dyn_forcing,
+        varname_forcing,
+        varname_static,
         filenames=all_ERA_files,
-        forecasts=load_forecasts(conf),
+        filename_surface=surface_files,
+        filename_dyn_forcing=dyn_forcing_files,
+        filename_forcing=forcing_files,
+        filename_static=static_files,
+        fcst_datetime=load_forecasts(conf),
         history_len=history_len,
-        skip_periods=time_step,
-        transform=transform,
         rank=rank,
         world_size=world_size,
-        shuffle=False,
+        transform=transform,
+        rollout_p=0.0,
+        which_forecast=None
     )
 
-    # setup the dataloder for this process
+    # setup the dataloder
     data_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
@@ -267,10 +291,10 @@ def predict(rank, world_size, conf, p):
     model = load_model(conf, load_weights=True).to(device)
 
     # Warning -- see next line
-    distributed = conf["trainer"]["mode"] in ["ddp", "fsdp"]
+    distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
     if distributed:  # A new field needs to be added to predict
         model = distributed_model_wrapper(conf, model, device)
-        if conf["trainer"]["mode"] == "fsdp":
+        if conf["predict"]["mode"] == "fsdp":
             # Load model weights (if any), an optimizer, scheduler, and gradient scaler
             model = load_model_state(conf, model, device)
 
@@ -278,8 +302,12 @@ def predict(rank, world_size, conf, p):
 
     # get lat/lons from x-array
     latlons = xr.open_dataset(conf["loss"]["latitude_weights"])
-
-    meta_data = load_metadata("era5")
+    
+    meta_data = load_metadata(conf)
+    
+    # Set up metrics and containers
+    metrics = LatWeightedMetrics(conf, predict_mode=True)
+    metrics_results = defaultdict(list)
 
     # Set up the diffusion and pole filters
     if (
@@ -308,40 +336,46 @@ def predict(rank, world_size, conf, p):
             # get the datetime and forecasted hours
             date_time = batch["datetime"].item()
             forecast_hour = batch["forecast_hour"].item()
-
             # initialization on the first forecast hour
             if forecast_hour == 1:
+
                 # Initialize x and x_surf with the first time step
-                x = model.concat_and_reshape(batch["x"], batch["x_surf"]).to(device)
-
-                init_datetime_str = datetime.datetime.utcfromtimestamp(date_time)
-                init_datetime_str = init_datetime_str.strftime('%Y-%m-%dT%HZ')
-
-            # Add statics
-            if "static" in batch:
-                if static is None:
-                    static = batch["static"].to(device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
-                x = torch.cat((x, static.clone()), dim=1)
-
-            # Add solar "statics"
-            if "static_variables" in conf["data"] and "tsi" in conf["data"]["static_variables"]:
-                if k == 0:
-                    toaDL = TOADataLoader(conf)
-                elapsed_time = pd.Timedelta(hours=k)
-                tnow = pd.to_datetime(datetime.datetime.utcfromtimestamp(batch["datetime"]))
-                tnow = tnow + elapsed_time
-                if history_len == 1:
-                    current_times = [pd.to_datetime(datetime.datetime.utcfromtimestamp(_t)) + elapsed_time for _t in tnow]
+                if "x_surf" in batch:
+                    # combine x and x_surf
+                    # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
+                    # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
+                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(device).float()
                 else:
-                    current_times = [tnow if hl == 0 else tnow - pd.Timedelta(hours=hl) for hl in range(history_len)]
+                    # no x_surf
+                    x = reshape_only(batch["x"]).to(device).float()
 
-                toa = torch.cat([toaDL(_t) for _t in current_times], dim=0).to(device)
-                toa = toa.squeeze().unsqueeze(0)
-                x = torch.cat([x, toa.unsqueeze(1).to(device).float()], dim=1)
+                init_datetime = datetime.utcfromtimestamp(date_time)
+                init_datetime_str = init_datetime.strftime('%Y-%m-%dT%HZ')
 
-            # Predict and convert to real space for laplace filter and metrics
+            # -------------------------------------------------------------------------------------- #
+            # add forcing and static variables (regardless of fcst hours)
+            if 'x_forcing_static' in batch:
+
+                # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
+                x_forcing_batch = batch['x_forcing_static'].to(device).permute(0, 2, 1, 3, 4).float()
+
+                # concat on var dimension
+                x = torch.cat((x, x_forcing_batch), dim=1)
+
+            # -------------------------------------------------------------------------------------- #
+            # Load y-truth
+            if "y_surf" in batch:
+                # combine y and y_surf
+                y = concat_and_reshape(batch["y"], batch["y_surf"]).to(device).float()
+            else:
+                # no y_surf
+                y = reshape_only(batch["y"]).to(device).float()
+
+            # -------------------------------------------------------------------------------------- #
+            # start prediction
             y_pred = model(x)
             y_pred = state_transformer.inverse_transform(y_pred.cpu())
+            y = state_transformer.inverse_transform(y.cpu())
 
             if ("use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]):
                 y_pred = (
@@ -351,8 +385,14 @@ def predict(rank, world_size, conf, p):
                     .cpu()
                 )
 
+            # Compute metrics
+            metrics_dict = metrics(y_pred.float(), y.float(), forecast_datetime=forecast_hour)
+            for k, m in metrics_dict.items():
+                metrics_results[k].append(m.item())
+            metrics_results["forecast_hour"].append(forecast_hour)
+
             # Save the current forecast hour data in parallel
-            utc_datetime = datetime.datetime.utcfromtimestamp(date_time) + datetime.timedelta(hours=forecast_hour)
+            utc_datetime = init_datetime + timedelta(hours=lead_time_periods*forecast_hour)
 
             # convert the current step result as x-array
             darray_upper_air, darray_single_level = make_xarray(
@@ -362,13 +402,28 @@ def predict(rank, world_size, conf, p):
                 latlons.longitude.values,
                 conf,
             )
-
+            
             # Save the current forecast hour data in parallel
             result = p.apply_async(
                 save_netcdf_increment,
-                (darray_upper_air, darray_single_level, init_datetime_str, forecast_hour, meta_data, conf)
+                (
+                    darray_upper_air, 
+                     darray_single_level, 
+                     init_datetime_str, 
+                     lead_time_periods*forecast_hour, 
+                     meta_data, 
+                     conf
+                )
             )
             results.append(result)
+            
+            
+            metrics_results["datetime"].append(utc_datetime)
+
+            print_str = f"Forecast: {forecast_count} "
+            print_str += f"Date: {utc_datetime.strftime('%Y-%m-%d %H:%M:%S')} "
+            print_str += f"Hour: {batch['forecast_hour'].item()} "
+            print_str += f"ACC: {metrics_dict['acc']} "
 
             # Update the input
             # setup for next iteration, transform to z-space and send to device
@@ -378,8 +433,11 @@ def predict(rank, world_size, conf, p):
                 x = y_pred.detach()
             else:
                 # use multiple past forecast steps as inputs
-                static_dim_size = abs(x.shape[1] - y_pred.shape[1])  # static channels will get updated on next pass
-                x_detach = x[:, :-static_dim_size, 1:].detach() if static_dim_size else x[:, :, 1:].detach()  # if static_dim_size=0 then :0 gives empty range
+                # static channels will get updated on next pass
+                static_dim_size = abs(x.shape[1] - y_pred.shape[1])
+
+                # if static_dim_size=0 then :0 gives empty range
+                x_detach = x[:, :-static_dim_size, 1:].detach() if static_dim_size else x[:, :, 1:].detach()
                 x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
             # Explicitly release GPU memory
@@ -390,15 +448,15 @@ def predict(rank, world_size, conf, p):
                 # Wait for all processes to finish in order
                 for result in results:
                     result.get()
-
-                # Now merge all the files into one and delete leftovers
-                # merge_netcdf_files(init_datetime_str, conf)
+                    
+                # save metrics file
+                save_location = os.path.join(os.path.expandvars(conf["save_loc"]), "forecasts", "metrics")
+                os.makedirs(save_location, exist_ok=True)  # should already be made above
+                df = pd.DataFrame(metrics_results)
+                df.to_csv(os.path.join(save_location, f"metrics{init_datetime_str}.csv"))
 
                 # forecast count = a constant for each run
                 forecast_count += 1
-
-                # update lists
-                results = []
 
                 # y_pred allocation
                 y_pred = None
@@ -506,14 +564,30 @@ if __name__ == "__main__":
     # Load the configuration and get the relevant variables
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
+
+    # ======================================================== #
+    if conf['data']['scaler_type'] == 'std_new':
+        conf = CREDIT_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
+        predict_data_check(conf, print_summary=False)
+    # ======================================================== #
+
     # create a save location for rollout
-    forecast_save_loc = os.path.join(os.path.expandvars(conf['save_loc']), 'forecasts')
+    # ---------------------------------------------------- #
+    assert 'save_forecast' in conf['predict'], "Please specify the output dir through conf['predict']['save_forecast']"
+
+    forecast_save_loc = conf['predict']['save_forecast']
     os.makedirs(forecast_save_loc, exist_ok=True)
+
+    print('Save roll-outs to {}'.format(forecast_save_loc))
+
+    # Create a project directory (to save launch.sh and model.yml) if they do not exist
+    save_loc = os.path.expandvars(conf["save_loc"])
+    os.makedirs(save_loc, exist_ok=True)
 
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:
         logger.info(f"Setting the running mode to {mode}")
-        conf["trainer"]["mode"] = mode
+        conf["predict"]["mode"] = mode
 
     # Launch PBS jobs
     if launch:
@@ -546,7 +620,7 @@ if __name__ == "__main__":
     seed_everything(seed)
 
     with mp.Pool(num_cpus) as p:
-        if conf["trainer"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
+        if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
             _ = predict(int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"]), conf, p=p)
         else:  # single device inference
             _ = predict(0, 1, conf, p=p)

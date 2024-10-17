@@ -2,11 +2,11 @@ import copy
 import math
 import torch
 from torch.optim.lr_scheduler import LRScheduler
-from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau, CosineAnnealingLR
+from credit.models.checkpoint import FSDPOptimizerWrapper
 
-
-update_on_batch = ["cosine-annealing"]
-update_on_epoch = ['lambda', 'plateau']
+update_on_batch = ["cosine-annealing-restarts"]
+update_on_epoch = ['lambda', 'plateau', "cosine-annealing"]
 
 
 def load_scheduler(optimizer, conf):
@@ -22,6 +22,9 @@ def load_scheduler(optimizer, conf):
     """
     conf = copy.deepcopy(conf)
 
+    if isinstance(optimizer, FSDPOptimizerWrapper):
+        optimizer = optimizer.optim
+
     if conf['trainer']['use_scheduler']:
         scheduler_type = conf['trainer']['scheduler']['scheduler_type']
         del conf['trainer']['scheduler']['scheduler_type']
@@ -30,6 +33,8 @@ def load_scheduler(optimizer, conf):
         elif scheduler_type == 'plateau':
             scheduler = ReduceLROnPlateau(optimizer, **conf['trainer']['scheduler'])
         elif scheduler_type == "cosine-annealing":
+            scheduler = CosineAnnealingLR(optimizer, **conf['trainer']['scheduler'])
+        elif scheduler_type == "cosine-annealing-restarts":
             scheduler = CosineAnnealingWarmupRestarts(optimizer, **conf['trainer']['scheduler'])
         else:
             raise ValueError(f"Invalid scheduler_type: {scheduler_type}")

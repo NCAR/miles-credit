@@ -6,14 +6,15 @@ import yaml
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+from torch.utils.checkpoint import checkpoint
 
-from timm.layers import DropPath, Mlp, ClassifierHead, to_2tuple, _assert
+from timm.layers import DropPath, Mlp, to_2tuple, _assert
+from credit.models.base_model import BaseModel
 
 """
 Adapted from timm v0.9.2:
  https://github.com/huggingface/pytorch-image-models/blob/v0.9.2/timm/models/swin_transformer_v2_cr.py
- 
+
  which is a PyTorch impl of : `Swin Transformer V2: Scaling Up Capacity and Resolution`
     - https://arxiv.org/pdf/2111.09883
 
@@ -31,6 +32,7 @@ Functions:
 
 # Adapted from timm v0.9.2:
 # https://github.com/huggingface/pytorch-image-models/blob/v0.9.2/timm/models/swin_transformer_v2_cr.py
+
 
 def apply_spectral_norm(model):
     for module in model.modules():
@@ -56,7 +58,7 @@ def swin_from_yaml(fname, checkpoint_stages=False):
     with open(fname) as f:
         hparams = yaml.load(f, Loader=yaml.FullLoader)
     params = SimpleNamespace()
-    for k,v in hparams.items():
+    for k, v in hparams.items():
         setattr(params, k, v)
     return swinv2net(params, checkpoint_stages=checkpoint_stages)
 
@@ -66,7 +68,7 @@ def swinv2net(params, checkpoint_stages=False):
     return SwinTransformerV2Cr(
                   img_size=params.img_size,
                   patch_size=params.patch_size,
-                  depths = (params.depth,),   
+                  depths=(params.depth,),
                   num_heads=(params.num_heads,),
                   in_chans=params.n_in_channels,
                   out_chans=params.n_out_channels,
@@ -79,18 +81,6 @@ def swinv2net(params, checkpoint_stages=False):
                   checkpoint_stages=act_ckpt,
                   residual=params.residual
     )
-                  
-
-
-
-def bchw_to_bhwc(x: torch.Tensor) -> torch.Tensor:
-    """Permutes a tensor from the shape (B, C, H, W) to (B, H, W, C). """
-    return x.permute(0, 2, 3, 1)
-
-
-def bhwc_to_bchw(x: torch.Tensor) -> torch.Tensor:
-    """Permutes a tensor from the shape (B, H, W, C) to (B, C, H, W). """
-    return x.permute(0, 3, 1, 2)
 
 
 def window_partition(x, window_size: Tuple[int, int]):
@@ -106,7 +96,6 @@ def window_partition(x, window_size: Tuple[int, int]):
     x = x.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1], C)
     windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size[0], window_size[1], C)
     return windows
-
 
 
 def window_reverse(windows, window_size: Tuple[int, int], img_size: Tuple[int, int]):
@@ -162,7 +151,6 @@ class WindowMultiHeadAttentionNoPos(nn.Module):
         self.proj_drop = nn.Dropout(drop_proj)
         # NOTE old checkpoints used inverse of logit_scale ('tau') following the paper, see conversion fn
         self.logit_scale = nn.Parameter(torch.log(10 * torch.ones(num_heads)))
-
 
     def update_input_size(self, new_window_size: int, **kwargs: Any) -> None:
         """Method updates the window size and so the pair-wise relative positions
@@ -410,7 +398,7 @@ class SwinTransformerV2CrBlock(nn.Module):
     def _make_attention_mask(self) -> None:
         """Method generates the attention mask used in shift case."""
         # Make masks for shift case
-        
+
         if any(self.shift_size):
             # calculate attention mask for SW-MSA
             H, W = self.feat_size
@@ -422,12 +410,12 @@ class SwinTransformerV2CrBlock(nn.Module):
                 img_mask[:, h, :, :] = cnt
                 cnt += 1
             mask_windows = window_partition(img_mask, self.window_size)  # num_windows, window_size, window_size, 1
-            mask_windows = mask_windows.view(-1, self.window_area) # num_windows, window_size*window_size
+            mask_windows = mask_windows.view(-1, self.window_area)  # num_windows, window_size*window_size
             attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
             attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
         else:
             attn_mask = None
-        
+
         self.register_buffer("attn_mask", attn_mask, persistent=False)
 
     def init_weights(self):
@@ -460,9 +448,8 @@ class SwinTransformerV2CrBlock(nn.Module):
             # FIXME PyTorch XLA needs cat impl, roll not lowered
             # x = torch.cat([x[:, sh:], x[:, :sh]], dim=1)
             # x = torch.cat([x[:, :, sw:], x[:, :, :sw]], dim=2)
-            
+
             x = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
-        
 
         # partition windows
         x_windows = window_partition(x, self.window_size)  # num_windows * B, window_size, window_size, C
@@ -661,7 +648,8 @@ class SwinTransformerV2CrStage(nn.Module):
         x = bhwc_to_bchw(x)
         return x
 
-class SwinTransformerV2Cr(nn.Module):
+
+class SwinTransformerV2Cr(BaseModel):
     r""" Swin Transformer V2
         A PyTorch impl of : `Swin Transformer V2: Scaling Up Capacity and Resolution`  -
           https://arxiv.org/pdf/2111.09883
@@ -693,8 +681,14 @@ class SwinTransformerV2Cr(nn.Module):
         patch_size: int = 4,
         window_size: Optional[int] = None,
         img_window_ratio: int = 32,
-        in_chans: int = 3,
-        out_chans: int = 3,
+        channels: int = 4,
+        levels: int = 15,
+        surface_channels: int = 7,
+        input_only_channels: int = 3,
+        output_only_channels: int = 0,
+        # in_chans: int = 3,
+        frames: int = 1,
+        # out_chans: int = 3,
         embed_dim: int = 96,
         depths: Tuple[int, ...] = (2, 2, 6, 2),
         num_heads: Tuple[int, ...] = (3, 6, 12, 24),
@@ -736,7 +730,9 @@ class SwinTransformerV2Cr(nn.Module):
         self.img_size: Tuple[int, int] = img_size
         self.window_size: int = window_size
         self.num_features: int = int(embed_dim)
-        self.out_chans: int = out_chans
+        self.frames = frames
+        self.in_chans = channels * levels + surface_channels + input_only_channels
+        self.out_chans = channels * levels + surface_channels + output_only_channels
         self.feature_info = []
         self.full_pos_embed = full_pos_embed
         self.checkpoint_stages = checkpoint_stages
@@ -749,7 +745,7 @@ class SwinTransformerV2Cr(nn.Module):
         self.patch_embed = PatchEmbed(
             img_size=img_size,
             patch_size=patch_size,
-            in_chans=in_chans,
+            in_chans=self.in_chans,
             embed_dim=embed_dim,
             norm_layer=norm_layer,
         )
@@ -797,7 +793,7 @@ class SwinTransformerV2Cr(nn.Module):
 
         self.use_spectral_norm = use_spectral_norm
         if self.use_spectral_norm:
-            #logger.info("Adding spectral norm to all conv and linear layers")
+            logging.info("Adding spectral norm to all conv and linear layers")
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             # Move the model to the device
             self.to(device)
@@ -837,7 +833,10 @@ class SwinTransformerV2Cr(nn.Module):
             # Reshape the tensor back to (B, C, 2, new lat, lon) using the values from x_shape
             x = torch.reshape(x, (x_shape[0], x_shape[1], x_shape[2], x_shape[3] + 2 * self.pad_lat, x_shape[4]))
 
-        x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
+        if self.frames > 1:
+            x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
+        else:  # case where only using one time-step as input
+            x = x.squeeze(2)
 
         if self.residual:
             skip = x
@@ -846,7 +845,7 @@ class SwinTransformerV2Cr(nn.Module):
         x = self.forward_features(x)
         x = self.forward_head(x)
 
-        x = x + skip[:,:self.out_chans,:,:]
+        x = x + skip[:, :self.out_chans, :, :]
 
         if self.pad_lon > 0:
             # Slice to original size
@@ -938,31 +937,39 @@ def init_weights(module: nn.Module, name: str = ''):
         module.init_weights()
 
 
-
 if __name__ == "__main__":
     image_height = 640  # 640, 192
     image_width = 1280  # 1280, 288
     levels = 15
-    frames = 2
+    frames = 1
     channels = 4
     surface_channels = 7
-    static_channels = 3
+    input_only_channels = 3
+    output_only_channels = 0
     frame_patch_size = 2
-    pad_lat = 40 # 48
-    pad_lon = 40 # 32
+    pad_lat = 40  # 48
+    pad_lon = 40  # 32
 
-    in_chans = channels * levels + surface_channels + static_channels
-    out_chans = channels * levels + surface_channels
+    patch_size = 16 # 4
+    depths = 12
+    num_heads = 8
+
+    in_chans = channels * levels + surface_channels + input_only_channels
+    out_chans = channels * levels + surface_channels + output_only_channels
 
     input_tensor = torch.randn(1, in_chans, frames, image_height, image_width).to("cuda")
 
     model = SwinTransformerV2Cr(
-        img_size = (image_height, image_width),
-        patch_size=4,
-        depths=(12,),   
-        num_heads=(8,),
-        in_chans=in_chans,
-        out_chans=out_chans,
+        img_size=(image_height, image_width),
+        patch_size=patch_size,
+        depths=(depths,),
+        num_heads=(num_heads,),
+        channels=channels,
+        surface_channels=surface_channels,
+        input_only_channels=input_only_channels,
+        output_only_channels=output_only_channels,
+        levels=levels,
+        frames=frames,
         embed_dim=768,
         img_window_ratio=80,
         drop_path_rate=0.1,
@@ -979,5 +986,6 @@ if __name__ == "__main__":
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Number of parameters in the model: {num_params}")
 
+    print("Input shape:", input_tensor.shape)
     y_pred = model(input_tensor.to("cuda"))
     print("Predicted shape:", y_pred.shape)

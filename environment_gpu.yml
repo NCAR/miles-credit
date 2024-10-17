@@ -8,37 +8,47 @@ channels:
 dependencies:
   - python=3.11
   - pip
+  - jupyter
   - numpy<1.24
   - pandas
-  - matplotlib
-  - cartopy
-  - scikit-learn
   - pyarrow
+  - pyyaml
+  - distributed
+
+## dev and ML ops
   - pytest
+  - ruff
+  - wandb
+
+## Earth sciences and visualization
   - xarray
   - netcdf4
-  - pytorch
-  - pytorch-cuda=12.1
-  - torchvision
-  - wandb
-  - pyyaml
-  - cartopy
-  - dask
-  - distributed
-  - dask-jobqueue
   - zarr
-  - jupyter
-  - pyg
   - xesmf
+  - geocat-comp
+  - dask
+  - dask-jobqueue
+  - matplotlib
+  - cartopy
+  - ffmpeg
+
+## ML
+  - scikit-learn
+
   - pip:
+    - mpi4py
     - einops
     - echo-opt
+    - optuna==3.6.0
     - bridgescaler
+    - torch 
+    - torchvision 
     - rotary-embedding-torch
-    - segmentation-models-pytorch
+    - segmentation-models-pytorch>=0.3.4
     - vector_quantize_pytorch
+    - torch-harmonics
+    - torch_geometric
     - haversine
-    - timm>=0.9.12
     - torchsummary
     - .
 

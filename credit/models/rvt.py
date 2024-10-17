@@ -7,8 +7,6 @@ from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 
 import torch.nn.functional as F
-import torch.distributed.checkpoint as DCP
-from torch.distributed.fsdp import StateDictType
 
 from credit.pe import SurfacePosEmb2D
 from credit.models.base_model import BaseModel

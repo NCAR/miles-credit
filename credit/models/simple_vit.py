@@ -5,8 +5,6 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 from torch import nn
-import torch.distributed.checkpoint as DCP
-from torch.distributed.fsdp import StateDictType
 
 import xarray as xr
 
@@ -14,7 +12,6 @@ from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 from rotary_embedding_torch import RotaryEmbedding
 from credit.pe import SurfacePosEmb2D
-from vector_quantize_pytorch import VectorQuantize
 from credit.models.base_model import BaseModel
 
 logger = logging.getLogger(__name__)

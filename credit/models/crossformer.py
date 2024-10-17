@@ -7,6 +7,8 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
+from credit.postblock import PostBlock
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +53,14 @@ class CubeEmbedding(nn.Module):
     def forward(self, x: torch.Tensor):
         B, T, C, Lat, Lon = x.shape
         x = self.proj(x)
-        
+
         # ----------------------------------- #
         # Layer norm on T*lat*lon
         x = x.reshape(B, self.embed_dim, -1).transpose(1, 2)  # B T*Lat*Lon C
         if self.norm is not None:
             x = self.norm(x)
         x = x.transpose(1, 2).reshape(B, self.embed_dim, *self.patches_resolution)
-        
+
         return x.squeeze(2)
 
 
@@ -307,8 +309,8 @@ class CrossFormer(BaseModel):
         frames=2,
         channels=4,
         surface_channels=7,
-        static_channels=3,
-        diagnostic_channels=0,
+        input_only_channels=3,
+        output_only_channels=0,
         levels=15,
         dim=(64, 128, 256, 512),
         depth=(2, 2, 8, 2),
@@ -322,6 +324,7 @@ class CrossFormer(BaseModel):
         pad_lon=0,
         pad_lat=0,
         use_spectral_norm=True,
+        post_conf={"activate": False},
         **kwargs
     ):
         super().__init__()
@@ -336,6 +339,7 @@ class CrossFormer(BaseModel):
         self.image_width = image_width
         self.patch_height = patch_height
         self.patch_width = patch_width
+        self.frames = frames
         self.channels = channels
         self.surface_channels = surface_channels
         self.levels = levels
@@ -344,10 +348,10 @@ class CrossFormer(BaseModel):
         self.use_spectral_norm = use_spectral_norm
 
         # input channels
-        input_channels = channels * levels + surface_channels + static_channels
+        input_channels = channels * levels + surface_channels + input_only_channels
 
         # output channels
-        output_channels = channels * levels + surface_channels + diagnostic_channels
+        output_channels = channels * levels + surface_channels + output_only_channels
 
         dim = cast_tuple(dim, 4)
         depth = cast_tuple(depth, 4)
@@ -400,8 +404,15 @@ class CrossFormer(BaseModel):
             logger.info(f"Padding each longitudinal boundary with {self.pad_lon} pixels from the other side")
         if self.pad_lat > 0:
             logger.info(f"Padding each pole using a reflection with {self.pad_lat} pixels")
+        
+        
+        self.use_post_block = post_conf['activate']
+        if self.use_post_block:
+            self.postblock = PostBlock(post_conf)
 
     def forward(self, x):
+        if self.use_post_block:  # copy tensor to feed into postBlock later
+            x_copy = x.clone().detach()
 
         if self.pad_lon > 0:
             x = circular_pad1d(x, pad=self.pad_lon)
@@ -420,8 +431,10 @@ class CrossFormer(BaseModel):
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
-        else:
+        elif self.frames > 1:
             x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
+        else:  # case where only using one time-step as input
+            x = x.squeeze(2)
 
         encodings = []
         for cel, transformer in self.layers:
@@ -446,8 +459,18 @@ class CrossFormer(BaseModel):
             x = x[..., self.pad_lat:-self.pad_lat, :]
 
         x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
+        x = x.unsqueeze(2)
 
-        return x.unsqueeze(2)
+        # ------------------------------ #
+        # postblock scope
+        if self.use_post_block:
+            x = {
+                "y_pred": x,
+                "x": x_copy,
+            }
+            x = self.postblock(x)
+        # ------------------------------ #
+        return x
 
     def rk4(self, x):
 
@@ -508,12 +531,12 @@ if __name__ == "__main__":
     frames = 2
     channels = 4
     surface_channels = 7
-    static_channels = 3
+    input_only_channels = 3
     frame_patch_size = 2
     pad_lon = 80
     pad_lat = 80
 
-    input_tensor = torch.randn(1, channels * levels + surface_channels + static_channels, frames, image_height, image_width).to("cuda")
+    input_tensor = torch.randn(1, channels * levels + surface_channels + input_only_channels, frames, image_height, image_width).to("cuda")
 
     model = CrossFormer(
         image_height=image_height,
@@ -522,7 +545,7 @@ if __name__ == "__main__":
         frame_patch_size=frame_patch_size,
         channels=channels,
         surface_channels=surface_channels,
-        static_channels=static_channels,
+        input_only_channels=input_only_channels,
         levels=levels,
         dim=(128, 256, 512, 1024),
         depth=(2, 2, 18, 2),

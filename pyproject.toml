@@ -21,7 +21,6 @@ dependencies = [
     "netcdf4",
     "torch",
     "torchvision",
-    "wandb",
     "pyyaml",
     "cartopy",
     "dask",
@@ -36,12 +35,11 @@ dependencies = [
     "vector-quantize-pytorch",
     "haversine",
     "pvlib",
-    "sphinx",
     "geocat-comp",
    ]
 
 [tool.setuptools]
-packages = ["credit", "credit.models", "credit.metadata"]
+packages = ["credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
 
 [tool.setuptools.dynamic]
 version = {file = "credit/VERSION"}

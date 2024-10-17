@@ -1,0 +1,192 @@
+save_loc: "/glade/derecho/scratch/akn7/STAGING/miles-credit/results/graph_new/one/"
+seed: 1000
+
+data:
+    variables: ['U','V','T','Q']
+    surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    forcing_variables: ['TSI'] #
+    static_variables: ['Z_GDS4_SFC','LSM']
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/STD_SixHourly_TOTAL_*'
+    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/STD_SixHourly_TOTAL_*'
+    save_loc_forcing: '/glade/u/home/ksha/CREDIT/data/forcing_norm_6h.nc'
+    save_loc_static: '/glade/u/home/ksha/CREDIT/data/static_norm_old.nc'
+    train_years: [1979, 2014]
+    valid_years: [2014, 2018]
+    mean_path: '/glade/u/home/ksha/CREDIT/data/mean_zero.nc'
+    std_path: '/glade/u/home/ksha/CREDIT/data/std_one.nc'
+    scaler_type: 'std_new'
+    history_len: 1
+    forecast_len: 0 # larger than 0 for multi step
+    valid_history_len: 1
+    valid_forecast_len: 0 #
+    one_shot: True
+    skip_periods: null
+    
+trainer:
+    mode: none # none, ddp, fsdp
+    train_batch_size: 1
+    valid_batch_size: 1
+    batches_per_epoch: 1000 # Set to 0 to use len(dataloader)
+    valid_batches_per_epoch: 10
+    learning_rate: 5.0e-04
+    weight_decay: 1.0e-05
+    start_epoch: 1
+    epochs: 20
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+    thread_workers: 4
+    valid_thread_workers: 4
+    stopping_patience: 50
+    teacher_forcing_ratio: 0.5 #0.9886539666794065
+    stop_rollout: 0.9
+    skip_validation: False
+    load_weights: False
+    load_optimizer: False
+    use_scheduler: False
+    cpu_offload: True
+    update_learning_rate: True
+    train_one_epoch: False
+    scheduler: {'scheduler_type': 'lambda'}
+
+model:
+    type: "graph"
+    levels: 15           # Number of levels (default: 15)
+    history_len: 2      # Number of time steps used as input (default: 2)
+    n_variables: 4          # Atmospheric variables (default: 4)
+    n_surface_variables: 7  # Surface channels (default: 7)
+    n_static_variables: 3
+    hidden_size: 256      # Dimension of latent vectors (default: 128)
+    dim_head: 64                # Dim of heads (default: 32)
+    dropout: 0.                      # Dropout probability for attention layers (default: 0.0)
+    n_blocks: 4                       # Number of GraphTransform blocks (default: 2)
+    edge_path: "/glade/derecho/scratch/dgagne/credit_scalers/grid_edge_pairs_k_49_onedeg_ball.nc"
+    use_spectral_norm: True
+    use_edge_attr: True
+    
+loss: 
+    training_loss: "mse"
+    use_vgg: False
+    use_power_loss: False # use either power or spectral loss
+    use_spectral_loss: False
+    spectral_wavenum_init: 20
+    spectral_lambda_reg: 0.1 # power loss is order of 1e1 (usually between 1-10)
+    use_latitude_weights: True
+    latitude_weights: "/glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc"
+    use_variable_weights: False
+    variable_weights:
+        U: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        V: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        T: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        Q: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        SP: 0.1
+        t2m: 1.0
+        V500: 0.1
+        U500: 0.1
+        T500: 0.1
+        Z500: 0.1
+        Q500: 0.1
+
+predict:
+    forecasts: 
+        type: "custom"
+        start_year: 2018
+        start_month: 6
+        start_day: 1
+        days: 10
+        duration: 32
+    # forecasts: [
+    #     ["2020-01-01 00:00:00", "2020-01-10 23:00:00"],
+    #     ["2020-02-01 00:00:00", "2020-02-10 23:00:00"],
+    #     ["2020-03-01 00:00:00", "2020-03-10 23:00:00"],
+    #     ["2020-04-01 00:00:00", "2020-04-10 23:00:00"],
+    #     ["2020-05-01 00:00:00", "2020-05-10 23:00:00"],
+    #     ["2020-06-01 00:00:00", "2020-06-10 23:00:00"],
+    #     ["2020-07-01 00:00:00", "2020-07-10 23:00:00"],
+    #     ["2020-08-01 00:00:00", "2020-08-10 23:00:00"],
+    #     ["2020-09-01 00:00:00", "2020-09-10 23:00:00"],
+    #     ["2020-10-01 00:00:00", "2020-10-10 23:00:00"],
+    #     ["2020-11-01 00:00:00", "2020-11-10 23:00:00"],
+    #     ["2020-12-01 00:00:00", "2020-12-10 23:00:00"]
+    # ]
+    use_laplace_filter: True
+    save_format: "nc"
+
+visualization:
+    sigma_level_visualize:
+        variable_keys: ['U','V','T','Q']  # variable keys as defined in **[data][variables][...]**
+        visualize_levels: [5, 10,]     # sigma levels (by their indices) to visualize 
+        variable_names: ['U wind [m/s]', # the name of each variable
+                         'V wind [m/s]', # must be consistent with **variable_indices**
+                         'Air temperature [$^\circ$K]',
+                         'Specific humidity [kg/kg]']
+        variable_factors: [1, 1, 1, 1]
+        variable_range: [auto, auto, auto, auto] # use auto or provide a list of [min_var, max_var]; it applies to all levels
+        colormaps: ['Spectral_r', 'Spectral_r', 'viridis_plasma', 'YlGn']
+        file_name_prefix: 'global_sigma'
+    diagnostic_variable_visualize:
+        variable_keys: ['V500', 'U500','T500','Z500','Q500']
+        visualize_levels: ['none', 'none', 'none', 'none', 'none'] # none for single level variables
+        variable_names: ['500 hPa V Wind [m/s]', 
+                         '500 hPa U Wind [m/s]',
+                         '500 hPa Air temperature [$^\circ$K]',
+                         '500 hPa Geopotential Height [km]',
+                         '500 hPa Specific humidity [kg/kg]']
+        variable_factors: [1, 1, 1, 0.001, 1]
+        variable_range: [[-20, 20], [-30, 30], [220, 300], [50, 60], [-0.003, 0.003]]
+        colormaps: ['Spectral_r', 'Spectral_r', 'viridis_plasma', 'Spectral_r', 'YlGn']
+        file_name_prefix: 'global_diagnostics'
+    surface_visualize:
+        variable_keys: ['SP','t2m']
+        visualize_levels: ['none', 'none']
+        variable_names: ['Surface Pressure [hPa]', 
+                         '2-m Air Temperature [$^\circ$K]']
+        variable_factors: [0.01, 1]
+        variable_range: [[650, 1100], [200, 350]]
+        colormaps: ['Spectral', 'viridis_plasma',]
+        file_name_prefix: 'global_surface'
+    map_projection: 'EckertIII' # PlateCarree, LambertCylindrical, Miller, EckertIII, Mollweide, Robinson
+    save_options: {'dpi':250, 
+                   'orientation':'portrait', 
+                   'bbox_inches':'tight', 
+                   'pad_inches':0.1, 
+                   'transparent':False,
+                   'format':'png'}
+    video_format: 'mp4' # gif, mp4, none
+diagnostics:
+    summary_plot_fhs: [1, 20, 60, 120] # what forecast hours to plot as a summary plot
+    use_spectrum_vis: False
+    spectrum_vis:
+        atmos_variables: ["U", "V", "T", "Q"]
+        atmos_levels: [8, 10]
+        single_level_variables: ["SP", "t2m", "Z500"]
+        figsize: () # empty tuple for auto
+    plev_summary_only: True  # pressure level conversion is really slow, use this option to compute pressure level diagnostics only at summary fhs (above), will disable KE metrics output
+    use_KE_diagnostics: True # disable all KE diagnostics including KE metrics
+    ke_vis:
+        use_KE_spectrum_vis: True
+        use_KE_difference_vis: True
+
+pbs: #derecho
+    conda: "/glade/work/ksha/miniconda3/envs/credit"
+    project: "NAML0001"
+    job_name: "wxformer"
+    walltime: "12:00:00"
+    nodes: 8
+    ncpus: 64
+    ngpus: 4
+    mem: '480GB'
+    queue: 'main'
+    
+# pbs: # casper
+#     conda: "/glade/work/schreck/miniconda3/envs/evidential"
+#     job_name: 'latlon'
+#     nodes: 1
+#     ncpus: 8
+#     ngpus: 1
+#     mem: '128GB'
+#     walltime: '12:00:00'
+#     gpu_type: 'a100'
+#     cpu_type: 'milan'
+#     project: 'NAML0001'
+#     queue: 'casper'

@@ -1,5 +1,9 @@
 
+import torch.distributed as dist
+import numpy as np
+import socket
 import torch
+import sys
 import os
 
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
@@ -24,7 +28,83 @@ import functools
 import logging
 
 
+def setup(rank, world_size, mode, backend="nccl"):
+    """Initializes the distributed process group.
+
+    Args:
+        rank (int): The rank of the process within the distributed setup.
+        world_size (int): The total number of processes in the distributed setup.
+        mode (str): The mode of operation (e.g., 'fsdp', 'ddp').
+        backend (str, optional): The backend to use for distributed training. Defaults to 'nccl'.
+    """
+
+    logging.info(f"Running {mode.upper()} on rank {rank} with world_size {world_size} using {backend}.")
+    dist.init_process_group(backend, rank=rank, world_size=world_size)
+
+
+def get_rank_info(trainer_mode):
+    """Gets rank and size information for distributed training.
+
+    Args:
+        trainer_mode (str): The mode of training (e.g., 'fsdp', 'ddp').
+
+    Returns:
+        tuple: A tuple containing LOCAL_RANK (int), WORLD_RANK (int), and WORLD_SIZE (int).
+    """
+
+    if trainer_mode in ["fsdp", "ddp"]:
+        try:
+            from mpi4py import MPI
+            comm = MPI.COMM_WORLD
+            shmem_comm = comm.Split_type(MPI.COMM_TYPE_SHARED)
+
+            LOCAL_RANK = shmem_comm.Get_rank()
+            WORLD_SIZE = comm.Get_size()
+            WORLD_RANK = comm.Get_rank()
+
+        except Exception:
+            if "LOCAL_RANK" in os.environ:
+                # Environment variables set by torch.distributed.launch or torchrun
+                LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+                WORLD_SIZE = int(os.environ["WORLD_SIZE"])
+                WORLD_RANK = int(os.environ["RANK"])
+            elif "OMPI_COMM_WORLD_LOCAL_RANK" in os.environ:
+                # Environment variables set by mpirun
+                LOCAL_RANK = int(os.environ["OMPI_COMM_WORLD_LOCAL_RANK"])
+                WORLD_SIZE = int(os.environ["OMPI_COMM_WORLD_SIZE"])
+                WORLD_RANK = int(os.environ["OMPI_COMM_WORLD_RANK"])
+            elif "PMI_RANK" in os.environ:
+                # Environment variables set by cray-mpich
+                LOCAL_RANK = int(os.environ["PMI_LOCAL_RANK"])
+                WORLD_SIZE = int(os.environ["PMI_SIZE"])
+                WORLD_RANK = int(os.environ["PMI_RANK"])
+            else:
+                sys.exit("Can't find the environment variables for local rank")
+
+        # Set MASTER_ADDR and MASTER_PORT if not already set
+        if "MASTER_ADDR" not in os.environ:
+            os.environ['MASTER_ADDR'] = socket.gethostbyname(socket.gethostname())
+        if "MASTER_PORT" not in os.environ:
+            os.environ['MASTER_PORT'] = str(np.random.randint(1000, 8000))
+    else:
+        LOCAL_RANK = 0
+        WORLD_RANK = 0
+        WORLD_SIZE = 1
+
+    return LOCAL_RANK, WORLD_RANK, WORLD_SIZE
+
+
 def distributed_model_wrapper(conf, neural_network, device):
+    """Wraps the neural network model for distributed training.
+
+    Args:
+        conf (dict): The configuration dictionary containing training settings.
+        neural_network (torch.nn.Module): The neural network model to be wrapped.
+        device (torch.device): The device on which the model will be trained.
+
+    Returns:
+        torch.nn.Module: The wrapped model ready for distributed training.
+    """
 
     # convert $USER to the actual user name
     conf['save_loc'] = os.path.expandvars(conf['save_loc'])

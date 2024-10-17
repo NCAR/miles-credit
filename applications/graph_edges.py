@@ -19,6 +19,7 @@ def main():
     lon = coords["longitude"].values
     lon[lon > 180] = lon[lon > 180] - 360.0
     lat = coords["latitude"].values
+    resolution = 'onedeg' if abs(lat[1] - lat[0]) > 0.5 else 'quarter'
     lon_grid, lat_grid = np.meshgrid(lon, lat)
     lon_flat = lon_grid.ravel()
     lat_flat = lat_grid.ravel()
@@ -43,7 +44,7 @@ def main():
     if not exists(args.out):
         makedirs(args.out)
     print("Saving to " + args.out)
-    output_ds.to_netcdf(join(args.out, f"grid_edge_pairs_{args.dist:0.0f}.nc"))
+    output_ds.to_netcdf(join(args.out, f"grid_edge_pairs_{args.dist:0.0f}_{resolution}.nc"))
     return
 
 

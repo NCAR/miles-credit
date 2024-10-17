@@ -2,7 +2,6 @@ import warnings
 import os
 import sys
 import yaml
-import wandb
 import shutil
 import logging
 
@@ -34,108 +33,15 @@ def setup(rank, world_size, mode):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
 
-# def distributed_model_wrapper(conf, neural_network, device):
-
-#     if conf["trainer"]["mode"] == "fsdp":
-
-#         # Define the sharding policies
-
-#         if "crossformer" in conf["model"]["type"]:
-#             from credit.models.crossformer_skip import Attention as Attend
-#         elif "fuxi" in conf["model"]["type"]:
-#             from credit.models.fuxi import UTransformer as Attend
-#         else:
-#             raise OSError("You asked for FSDP but only crossformer and fuxi are currently supported.")
-
-#         auto_wrap_policy1 = functools.partial(
-#             transformer_auto_wrap_policy,
-#             transformer_layer_cls={Attend}
-#         )
-
-#         auto_wrap_policy2 = functools.partial(
-#             size_based_auto_wrap_policy, min_num_params=1_000
-#         )
-
-#         def combined_auto_wrap_policy(module, recurse, nonwrapped_numel):
-#             # Define a new policy that combines policies
-#             p1 = auto_wrap_policy1(module, recurse, nonwrapped_numel)
-#             p2 = auto_wrap_policy2(module, recurse, nonwrapped_numel)
-#             return p1 or p2
-
-#         # Mixed precision
-
-#         use_mixed_precision = conf["trainer"]["use_mixed_precision"] if "use_mixed_precision" in conf["trainer"] else False
-
-#         logging.info(f"Using mixed_precision: {use_mixed_precision}")
-
-#         if use_mixed_precision:
-#             for key, val in conf["trainer"]["mixed_precision"].items():
-#                 conf["trainer"]["mixed_precision"][key] = parse_dtype(val)
-#             mixed_precision_policy = MixedPrecision(**conf["trainer"]["mixed_precision"])
-#         else:
-#             mixed_precision_policy = None
-
-#         # CPU offloading
-
-#         cpu_offload = conf["trainer"]["cpu_offload"] if "cpu_offload" in conf["trainer"] else False
-
-#         logging.info(f"Using CPU offloading: {cpu_offload}")
-
-#         # FSDP module
-
-#         model = TorchFSDPModel(
-#             neural_network,
-#             use_orig_params=True,
-#             auto_wrap_policy=combined_auto_wrap_policy,
-#             mixed_precision=mixed_precision_policy,
-#             cpu_offload=CPUOffload(offload_params=cpu_offload)
-#         )
-
-#         # activation checkpointing on the transformer blocks
-
-#         activation_checkpoint = conf["trainer"]["activation_checkpoint"] if "activation_checkpoint" in conf["trainer"] else False
-
-#         logging.info(f"Activation checkpointing: {activation_checkpoint}")
-
-#         if activation_checkpoint:
-
-#             # https://pytorch.org/blog/efficient-large-scale-training-with-pytorch/
-
-#             non_reentrant_wrapper = functools.partial(
-#                 checkpoint_wrapper,
-#                 checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-#             )
-
-#             check_fn = lambda submodule: isinstance(submodule, Attend)
-
-#             apply_activation_checkpointing(
-#                 model,
-#                 checkpoint_wrapper_fn=non_reentrant_wrapper,
-#                 check_fn=check_fn
-#             )
-
-#     elif conf["trainer"]["mode"] == "ddp":
-#         model = DDP(neural_network, device_ids=[device])
-#     else:
-#         model = neural_network
-
-#     return model
-
-
-def main(rank, world_size, conf, trial=False):
+def main(rank, world_size, conf, frames=1, height=640, width=1280):
 
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"])
 
     # Config settings
-
-    channels = conf["model"]["levels"] * len(conf["data"]["variables"]) + len(conf["data"]["surface_variables"])
-    if "static_variables" in conf["data"]:
-        channels += len(conf["data"]["static_variables"])
-
-    frames = conf["model"]["frames"]
-    height = conf["model"]["image_height"]
-    width = conf["model"]["image_width"]
+    single_level_vars = ["surface_variables", "static_variables", "diagnostic_variables", "dynamic_forcing_variables"]
+    channels = conf["model"]["levels"] * len(conf["data"]["variables"])
+    channels += sum(len(conf["data"].get(key, [])) for key in single_level_vars)
 
     # Set device
 
@@ -183,18 +89,45 @@ if __name__ == "__main__":
         help="Submit workers to PBS.",
     )
     parser.add_argument(
-        "-w",
-        "--wandb",
-        dest="wandb",
+        "-t",
+        "--num_timesteps",
+        dest="t",
         type=int,
-        default=0,
-        help="Use wandb. Default = False"
+        default=1,
+        help="The number of time steps the model reqiures on input"
     )
+    parser.add_argument(
+        "-lat",
+        "--latitide",
+        dest="lat",
+        type=int,
+        default=640,
+        help="The number of pixels along latitude (default: 640)"
+    )
+    parser.add_argument(
+        "-lon",
+        "--longitude",
+        dest="lon",
+        type=int,
+        default=1280,
+        help="The number of pixels along longitude (default: 1240)"
+    )
+    parser.add_argument(
+        "-m",
+        "--mode",
+        type=str,
+        default=0,
+        help="Update the config to use none, DDP, or FSDP",
+    )
+
     args = parser.parse_args()
     args_dict = vars(args)
     config = args_dict.pop("model_config")
     launch = int(args_dict.pop("launch"))
-    use_wandb = int(args_dict.pop("wandb"))
+    num_timesteps = int(args_dict.pop("t"))
+    image_height = int(args_dict.pop("lat"))
+    image_width = int(args_dict.pop("lon"))
+    mode = str(args_dict.pop("mode"))
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -217,6 +150,11 @@ if __name__ == "__main__":
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
         shutil.copy(config, os.path.join(save_loc, "model.yml"))
 
+    # Update config using override options
+    if mode in ["none", "ddp", "fsdp"]:
+        logging.info(f"Setting the running mode to {mode}")
+        conf["trainer"]["mode"] = mode
+
     # Launch PBS jobs
     if launch:
         # Where does this script live?
@@ -229,19 +167,21 @@ if __name__ == "__main__":
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    if use_wandb:  # this needs updated
-        wandb.init(
-            # set the wandb project where this run will be logged
-            project="Derecho parallelism",
-            name=f"Worker {os.environ['RANK']} {os.environ['WORLD_SIZE']}",
-            # track hyperparameters and run metadata
-            config=conf
-        )
-
     seed = 1000 if "seed" not in conf else conf["seed"]
     seed_everything(seed)
 
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
-        main(int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"]), conf)
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
     else:
-        main(0, 1, conf)
+        rank = 0
+        world_size = 1
+
+    main(
+        rank=rank,
+        world_size=world_size,
+        conf=conf,
+        frames=num_timesteps,
+        height=image_height,
+        width=image_width
+    )

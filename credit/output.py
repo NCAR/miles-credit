@@ -1,25 +1,36 @@
-import xarray as xr
-import yaml
-from os.path import join
+'''
+output.py 
+-------------------------------------------------------
+Content:
+    - load_metadata()
+    - make_xarray()
+    - save_netcdf_increment()
+'''
+
 import os
-import traceback
+
+import yaml
 import logging
+import traceback
+import xarray as xr
+
 logger = logging.getLogger(__name__)
 
+from credit.data import drop_var_from_dataset
 
-def load_metadata(dataset="era5"):
+def load_metadata(conf):
     """
     Load metadata attributes from yaml file in credit/metadata directory
-
-    Args:
-        dataset (str): `era5` or `conus404` (TBD)
-
-    Returns:
-
     """
-    meta_file = join(__file__, "metadata", dataset + ".yaml")
-    with open(meta_file) as f:
-        meta_data = yaml.load(f, Loader=yaml.SafeLoader)
+    # set priorities for user-specified metadata
+    if conf['predict']['metadata']:
+        meta_file = conf['predict']['metadata']
+        with open(meta_file) as f:
+            meta_data = yaml.load(f, Loader=yaml.SafeLoader)
+    else:
+        print("conf['predict']['metadata'] not given. Skip.")
+        meta_data = False
+        
     return meta_data
 
 
@@ -77,7 +88,8 @@ def make_xarray(pred, forecast_datetime, lat, lon, conf):
         ),
     )
 
-    # save diagnostics and surface variables
+    # save surface variables
+    # !!! need to add diagnostic vars !!!
     darray_single_level = xr.DataArray(
         tensor_single_level.squeeze(2),
         dims=["time", "vars", "lat", "lon"],
@@ -103,30 +115,45 @@ def save_netcdf_increment(darray_upper_air, darray_single_level, nc_filename, fo
 
         # Merge datasets
         ds_merged = xr.merge([ds_upper, ds_single])
-
-        # Add metadata attributes to every model variable if available
-        for var in ds_merged.variables:
-            if var in meta_data.keys():
-                ds_merged[var].attrs.update(meta_data[var])
-
+        
         # Add forecast_hour coordinate
         ds_merged['forecast_hour'] = forecast_hour
 
         # Add CF convention version
         ds_merged.attrs["Conventions"] = "CF-1.11"
 
-        # Add model config file parameters
-        ds_merged.attrs.update(conf)
-
+        # Add model config file parameters (x)
+        #ds_merged.attrs.update(conf)
+        
         logger.info(f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
 
         save_location = os.path.join(conf["predict"]["save_forecast"], nc_filename)
         os.makedirs(save_location, exist_ok=True)
+        
         unique_filename = os.path.join(save_location, f"pred_{nc_filename}_{forecast_hour:03d}.nc")
 
-        # Convert to Dask array if not already
-        ds_merged = ds_merged.chunk({'datetime': 1})
+        # ---------------------------------------------------- #
+        # If conf['predict']['save_vars'] provided --> drop useless vars
+        if 'save_vars' in conf['predict']:
+            if len(conf['predict']['save_vars']) > 0:
+                ds_merged = drop_var_from_dataset(ds_merged, conf['predict']['save_vars'])
 
+        # when there's no metafile --> meta_data = False
+        if meta_data is not False:
+            # Add metadata attributes to every model variable if available
+            for var in ds_merged.variables:
+                if var in meta_data.keys():
+                    if var != 'time':
+                        # use attrs.update for non-datetime variables
+                        ds_merged[var].attrs.update(meta_data[var])
+                    else:
+                        # use time.encoding for datetime variables/coords
+                        for metadata_time in meta_data['time']:
+                            ds_merged.time.encoding[metadata_time] = meta_data['time'][metadata_time]
+        
+        # Convert to Dask array if not already
+        ds_merged = ds_merged.chunk({'time': 1})
+        
         # Use Dask to write the dataset in parallel
         ds_merged.to_netcdf(unique_filename, mode='w')
 

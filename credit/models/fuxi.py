@@ -5,6 +5,7 @@ from timm.layers.helpers import to_2tuple
 from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
 import logging
 
+from credit.postblock import PostBlock
 from credit.models.base_model import BaseModel
 
 
@@ -282,14 +283,16 @@ class Fuxi(BaseModel):
                  num_groups=32,
                  channels=4,
                  surface_channels=7,
-                 static_channels=0,
-                 diagnostic_channels=0,
+                 input_only_channels=0,
+                 output_only_channels=0,
                  num_heads=8,
                  depth=48,
                  window_size=7,
                  pad_lon=80,
                  pad_lat=80,
-                 use_spectral_norm=False):
+                 use_spectral_norm=True,
+                 post_conf={"activate": False},
+                 **kwargs):
 
         super().__init__()
         # input tensor size (time, lat, lon)
@@ -301,13 +304,13 @@ class Fuxi(BaseModel):
         # number of channels = levels * varibales per level + surface variables
         #in_chans = out_chans = levels * channels + surface_channels
         
-        in_chans = channels * levels + surface_channels + static_channels
-        out_chans = channels * levels + surface_channels + diagnostic_channels
+        in_chans = channels * levels + surface_channels + input_only_channels
+        out_chans = channels * levels + surface_channels + output_only_channels
         
         # input resolution = number of embedded patches / 2
         # divide by two because "u_trasnformer" has a down-sampling block
-        input_resolution = int(img_size[1] / patch_size[1] / 2), int(img_size[2] / patch_size[2] / 2)
-
+        # input_resolution = int(img_size[1] / patch_size[1] / 2), int(img_size[2] / patch_size[2] / 2)
+        input_resolution = round(img_size[1] / patch_size[1] / 2), round(img_size[2] / patch_size[2] / 2)
         # FuXi cube embedding layer
         self.cube_embedding = CubeEmbedding(img_size, patch_size, in_chans, dim)
 
@@ -344,8 +347,15 @@ class Fuxi(BaseModel):
         if self.pad_lat > 0:
             logger.info(f"Padding each pole using a reflection with {self.pad_lat} pixels")
 
+        self.use_post_block = post_conf['activate']
+        if self.use_post_block:
+            self.postblock = PostBlock(post_conf)
+    
     def forward(self, x: torch.Tensor):
-
+        # copy tensor to feed into postblock later
+        if self.use_post_block:  
+            x_copy = x.clone().detach()
+            
         if self.pad_lon > 0:
             x = circular_pad1d(x, pad=self.pad_lon)
 
@@ -403,9 +413,16 @@ class Fuxi(BaseModel):
         # if lat/lon grids (i.e., img_size) cannot be divided by the patche size completely
         # this will preserve the output size
         x = F.interpolate(x, size=img_size[1:], mode="bilinear")
-
         # unfold the time dimension
-        return x.unsqueeze(2)
+        x = x.unsqueeze(2)
+        
+        if self.use_post_block:
+            x = {
+                "y_pred": x,
+                "x": x_copy,
+            }
+            x = self.postblock(x)
+        return x
 
 
 if __name__ == "__main__":
@@ -423,8 +440,8 @@ if __name__ == "__main__":
     num_groups = 32       # Number of groups (default: 32)
     channels = 4          # Channels (default: 4)
     surface_channels = 7  # Surface channels (default: 7)
-    static_channels = 2
-    diagnostic_channels = 0
+    input_only_channels = 2
+    output_only_channels = 0
     num_heads = 8         # Number of heads (default: 8)
     window_size = 7       # Window size (default: 7)
     depth = 8            # Depth of the swin transformer (default: 48)
@@ -440,8 +457,8 @@ if __name__ == "__main__":
     model = Fuxi(
         channels=channels,
         surface_channels=surface_channels,
-        static_channels=static_channels,
-        diagnostic_channels=diagnostic_channels,
+        input_only_channels=input_only_channels,
+        output_only_channels=output_only_channels,
         levels=levels,
         image_height=image_height,
         image_width=image_width,
@@ -452,14 +469,15 @@ if __name__ == "__main__":
         dim=dim,
         pad_lat=pad_lat,
         pad_lon=pad_lon,
-        use_spectral_norm=use_spectral_norm
+        use_spectral_norm=use_spectral_norm,
+        post_conf={"use_skebs": False}
     ).to("cuda")
-
+    
     # ============================================================= #
     # test the model
     
     # pass an input tensor to test the graph
-    input_tensor = torch.randn(2, channels * levels + surface_channels + static_channels, 
+    input_tensor = torch.randn(2, channels * levels + surface_channels + input_only_channels, 
                                frames, image_height, image_width).to("cuda")    
     
     y_pred = model(input_tensor.to("cuda"))

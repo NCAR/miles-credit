@@ -52,12 +52,7 @@ import pandas as pd
 from dask.diagnostics import ProgressBar
 import time
 from dask import delayed
-from dask import delayed, persist
 import dask
-import dask.array as da
-import xarray as xr
-from dask import delayed
-from dask.diagnostics import ProgressBar
 import re
 import argparse
 os.environ['ESMFMKFILE'] = '/glade/work/wchapman/miniconda3.1/envs/MLWPS/lib/esmf.mk' #WEC

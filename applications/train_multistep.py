@@ -1,32 +1,39 @@
-import warnings
+'''
+train.py
+-------------------------------------------------------
+'''
 import os
 import sys
-import glob
 import yaml
+import wandb
 import optuna
 import shutil
 import logging
+import warnings
+from glob import glob
 
 from pathlib import Path
 from argparse import ArgumentParser
 from echo.src.base_objective import BaseObjective
 
 import torch
-import torch.distributed as dist
 from torch.cuda.amp import GradScaler
+from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from credit.distributed import distributed_model_wrapper
-from torchvision import transforms
+from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 
-from credit.models import load_model
+from credit.seed import seed_everything
 from credit.loss import VariableTotalLoss2D
-from credit.data import DistributedSequentialDataset
-from credit.transforms import ToTensor, NormalizeState
-from credit.scheduler import load_scheduler, annealed_probability
-from credit.trainer_multistep import Trainer
+# from credit.datasets.sequential_multistep import DistributedSequentialDataset
+from credit.datasets.era5_multistep import ERA5_and_Forcing_MultiStep
+from credit.transforms import load_transforms
+from credit.scheduler import load_scheduler
+from credit.trainers import load_trainer
+from credit.parser import CREDIT_main_parser, training_data_check
+
 from credit.metrics import LatWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
-from credit.seed import seed_everything
+from credit.models import load_model
 from credit.models.checkpoint import (
     FSDPOptimizerWrapper,
     TorchFSDPCheckpointIO
@@ -35,150 +42,146 @@ from credit.models.checkpoint import (
 
 warnings.filterwarnings("ignore")
 
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+# https://stackoverflow.com/questions/59129812/how-to-avoid-cuda-out-of-memory-in-pytorch
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 
-def setup(rank, world_size, mode):
-    logging.info(f"Running {mode.upper()} on rank {rank} with world_size {world_size}.")
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+def load_dataset_and_sampler(conf,
+                             all_ERA_files,
+                             surface_files,
+                             dyn_forcing_files,
+                             diagnostic_files,
+                             world_size,
+                             rank,
+                             is_train=True,
+                             seed=42):
+    """
+    Load the dataset and sampler for training or validation.
 
+    Args:
+        conf (dict): Configuration dictionary containing dataset and training parameters.
+        files (list): List of file paths for the dataset.
+        world_size (int): Number of processes participating in the job.
+        rank (int): Rank of the current process.
+        is_train (bool): Flag indicating whether the dataset is for training or validation.
+        seed (int, optional): Seed for random number generation. Defaults to 42.
 
-def load_dataset_and_sampler(conf, files, world_size, rank, is_train, seed=42):
-    history_len = conf["data"]["history_len"]
-    forecast_len = conf["data"]["forecast_len"]
-    valid_history_len = conf["data"]["valid_history_len"]
-    valid_forecast_len = conf["data"]["valid_forecast_len"]
-    rollout_p = conf["trainer"]["rollout_p"]
+    Returns:
+        tuple: A tuple containing the dataset and the distributed sampler.
+    """
+    # --------------------------------------------------- #
+    # separate training set and validation set cases
+    if is_train:
+        history_len = conf["data"]["history_len"]
+        forecast_len = conf["data"]["forecast_len"]
+        name = "training"
+    else:
+        history_len = conf["data"]["valid_history_len"]
+        forecast_len = conf["data"]["valid_forecast_len"]
+        name = 'validation'
+        
+    # transforms
+    transforms = load_transforms(conf)
 
-    history_len = history_len if is_train else valid_history_len
-    forecast_len = forecast_len if is_train else valid_forecast_len
-    shuffle = is_train
-    name = "Train" if is_train else "Valid"
-    dataset = DistributedSequentialDataset(
-        filenames=files,
+    # Z-score
+    dataset = ERA5_and_Forcing_MultiStep(
+        varname_upper_air=conf['data']['variables'],
+        varname_surface=conf['data']['surface_variables'],
+        varname_dyn_forcing=conf['data']['dynamic_forcing_variables'],
+        varname_forcing=conf['data']['forcing_variables'],
+        varname_static=conf['data']['static_variables'],
+        varname_diagnostic=conf['data']['diagnostic_variables'],
+        filenames=all_ERA_files,
+        filename_surface=surface_files,
+        filename_dyn_forcing=dyn_forcing_files,
+        filename_forcing=conf['data']['save_loc_forcing'],
+        filename_static=conf['data']['save_loc_static'],
+        filename_diagnostic=diagnostic_files,
         history_len=history_len,
         forecast_len=forecast_len,
-        skip_periods=1,
-        world_size=world_size,
+        skip_periods=conf["data"]["skip_periods"],
+        max_forecast_len=conf["data"]["max_forecast_len"],
+        transform=transforms,
         rank=rank,
-        shuffle=shuffle,
-        rollout_p=rollout_p if is_train else 0.0,
-        transform=transforms.Compose([
-            NormalizeState(conf["data"]["mean_path"], conf["data"]["std_path"]),
-            ToTensor(history_len=history_len, forecast_len=forecast_len),
-        ]),
+        world_size=world_size,
+        seed=seed
     )
-    sampler = None
-    logging.info(
-        f"{name} (forecast length = {forecast_len + 1}): Loaded a distributed sequential ERA dataset which contains its own distributed sampler"
+
+    # Pytorch sampler
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=world_size,
+        rank=rank,
+        seed=seed,
+        shuffle=is_train,
+        drop_last=True
     )
+
+    logging.info(f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len + 1})")
+
     return dataset, sampler
 
 
-# def distributed_model_wrapper(conf, neural_network, device):
-
-#     if conf["trainer"]["mode"] == "fsdp":
-
-#         # Define the sharding policies
-
-#         if "crossformer" in conf["model"]["type"]:
-#             from credit.models.crossformer_skip import Attention as Attend
-#         elif "fuxi" in conf["model"]["type"]:
-#             from credit.models.fuxi import UTransformer as Attend
-#         else:
-#             raise OSError("You asked for FSDP but only crossformer and fuxi are currently supported.")
-
-#         auto_wrap_policy1 = functools.partial(
-#             transformer_auto_wrap_policy,
-#             transformer_layer_cls={Attend}
-#         )
-
-#         auto_wrap_policy2 = functools.partial(
-#             size_based_auto_wrap_policy, min_num_params=1_000
-#         )
-
-#         def combined_auto_wrap_policy(module, recurse, nonwrapped_numel):
-#             # Define a new policy that combines policies
-#             p1 = auto_wrap_policy1(module, recurse, nonwrapped_numel)
-#             p2 = auto_wrap_policy2(module, recurse, nonwrapped_numel)
-#             return p1 or p2
-
-#         # Mixed precision
-
-#         use_mixed_precision = conf["trainer"]["use_mixed_precision"] if "use_mixed_precision" in conf["trainer"] else False
-
-#         logging.info(f"Using mixed_precision: {use_mixed_precision}")
-
-#         if use_mixed_precision:
-#             for key, val in conf["trainer"]["mixed_precision"].items():
-#                 conf["trainer"]["mixed_precision"][key] = parse_dtype(val)
-#             mixed_precision_policy = MixedPrecision(**conf["trainer"]["mixed_precision"])
-#         else:
-#             mixed_precision_policy = None
-
-#         # CPU offloading
-
-#         cpu_offload = conf["trainer"]["cpu_offload"] if "cpu_offload" in conf["trainer"] else False
-
-#         logging.info(f"Using CPU offloading: {cpu_offload}")
-
-#         # FSDP module
-
-#         model = TorchFSDPModel(
-#             neural_network,
-#             use_orig_params=True,
-#             auto_wrap_policy=combined_auto_wrap_policy,
-#             mixed_precision=mixed_precision_policy,
-#             cpu_offload=CPUOffload(offload_params=cpu_offload)
-#         )
-
-#         # activation checkpointing on the transformer blocks
-
-#         activation_checkpoint = conf["trainer"]["activation_checkpoint"] if "activation_checkpoint" in conf["trainer"] else False
-
-#         logging.info(f"Activation checkpointing: {activation_checkpoint}")
-
-#         if activation_checkpoint:
-
-#             # https://pytorch.org/blog/efficient-large-scale-training-with-pytorch/
-
-#             non_reentrant_wrapper = functools.partial(
-#                 checkpoint_wrapper,
-#                 checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-#             )
-
-#             check_fn = lambda submodule: isinstance(submodule, Attend)
-
-#             apply_activation_checkpointing(
-#                 model,
-#                 checkpoint_wrapper_fn=non_reentrant_wrapper,
-#                 check_fn=check_fn
-#             )
-
-#     elif conf["trainer"]["mode"] == "ddp":
-#         model = DDP(neural_network, device_ids=[device])
-#     else:
-#         model = neural_network
-
-#     return model
-
-
 def load_model_states_and_optimizer(conf, model, device):
+    """
+    Load the model states, optimizer, scheduler, and gradient scaler.
 
-    start_epoch = conf['trainer']['start_epoch']
-    save_loc = os.path.expandvars(conf['save_loc'])
+    Args:
+        conf (dict): Configuration dictionary containing training parameters.
+        model (torch.nn.Module): The model to be trained.
+        device (torch.device): The device (CPU or GPU) where the model is located.
+
+    Returns:
+        tuple: A tuple containing the updated configuration, model, optimizer, scheduler, and scaler.
+    """
+
+    # convert $USER to the actual user name
+    conf['save_loc'] = save_loc = os.path.expandvars(conf['save_loc'])
+
+    # training hyperparameters
     learning_rate = float(conf['trainer']['learning_rate'])
     weight_decay = float(conf['trainer']['weight_decay'])
     amp = conf['trainer']['amp']
+
+    # load weights / states flags
     load_weights = False if 'load_weights' not in conf['trainer'] else conf['trainer']['load_weights']
+    load_optimizer_conf = False if 'load_optimizer' not in conf['trainer'] else conf['trainer']['load_optimizer']
+    load_scaler_conf = False if 'load_scaler' not in conf['trainer'] else conf['trainer']['load_scaler']
+    load_scheduler_conf = False if 'load_scheduler' not in conf['trainer'] else conf['trainer']['load_scheduler']
 
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
-    if start_epoch == 0 and not load_weights:  # Loaded after loading model weights when reloading
+    if not load_weights:  # Loaded after loading model weights when reloading
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
         if conf["trainer"]["mode"] == "fsdp":
             optimizer = FSDPOptimizerWrapper(optimizer, model)
+        scheduler = load_scheduler(optimizer, conf)
+        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+
+    # Multi-step training case -- when starting, only load the model weights (then after load all states)
+    elif load_weights and not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+        # FSDP checkpoint settings
+        if conf["trainer"]["mode"] == "fsdp":
+            logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
+            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+            optimizer = FSDPOptimizerWrapper(optimizer, model)
+            checkpoint_io = TorchFSDPCheckpointIO()
+            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
+        else:
+            # DDP settings
+            ckpt = os.path.join(save_loc, "checkpoint.pt")
+            checkpoint = torch.load(ckpt, map_location=device)
+            if conf["trainer"]["mode"] == "ddp":
+                logging.info(f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
+                model.module.load_state_dict(checkpoint["model_state_dict"])
+            else:
+                logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
+                model.load_state_dict(checkpoint["model_state_dict"])
+        # Load the learning rate scheduler and mixed precision grad scaler
         scheduler = load_scheduler(optimizer, conf)
         scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
 
@@ -186,6 +189,8 @@ def load_model_states_and_optimizer(conf, model, device):
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
+
+        # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
             logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
             optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
@@ -194,7 +199,9 @@ def load_model_states_and_optimizer(conf, model, device):
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
             if 'load_optimizer' in conf['trainer'] and conf['trainer']['load_optimizer']:
                 checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
+
         else:
+            # DDP settings
             if conf["trainer"]["mode"] == "ddp":
                 logging.info(f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
                 model.module.load_state_dict(checkpoint["model_state_dict"])
@@ -207,22 +214,47 @@ def load_model_states_and_optimizer(conf, model, device):
 
         scheduler = load_scheduler(optimizer, conf)
         scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
-        if scheduler is not None:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        scaler.load_state_dict(checkpoint['scaler_state_dict'])
+
+        # Update the config file to the current epoch
+        if "reload_epoch" in conf["trainer"] and conf["trainer"]["reload_epoch"]:
+            conf["trainer"]["start_epoch"] = checkpoint["epoch"] + 1
+
+        if conf["trainer"]["start_epoch"] > 0:
+            # Only reload the scheduler state if not starting over from epoch 0
+            if scheduler is not None:
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+            # reload the AMP gradient scaler
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
 
     # Enable updating the lr if not using a policy
     if (conf["trainer"]["update_learning_rate"] if "update_learning_rate" in conf["trainer"] else False):
         for param_group in optimizer.param_groups:
             param_group['lr'] = learning_rate
 
-    return model, optimizer, scheduler, scaler
+    return conf, model, optimizer, scheduler, scaler
 
 
-def main(rank, world_size, conf, trial=False):
+def main(rank, world_size, conf, backend, trial=False):
+    """
+    Main function to set up training and validation processes.
+
+    Args:
+        rank (int): Rank of the current process.
+        world_size (int): Number of processes participating in the job.
+        conf (dict): Configuration dictionary containing model, data, and training parameters.
+        backend (str): Backend to be used for distributed training.
+        trial (bool, optional): Flag for whether this is an Optuna trial. Defaults to False.
+
+    Returns:
+        Any: The result of the training process.
+    """
+
+    # convert $USER to the actual user name
+    conf['save_loc'] = os.path.expandvars(conf['save_loc'])
 
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
-        setup(rank, world_size, conf["trainer"]["mode"])
+        setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     # infer device id from rank
 
@@ -235,39 +267,99 @@ def main(rank, world_size, conf, trial=False):
 
     train_batch_size = conf['trainer']['train_batch_size']
     valid_batch_size = conf['trainer']['valid_batch_size']
-    thread_workers = conf['trainer']['thread_workers']
-    valid_thread_workers = conf['trainer']['valid_thread_workers'] if 'valid_thread_workers' in conf['trainer'] else thread_workers
 
-    # datasets (zarr reader)
+    # get file names
+    all_ERA_files = sorted(glob(conf["data"]["save_loc"]))
 
-    all_ERA_files = sorted(glob.glob(conf["data"]["save_loc"]))
-    # filenames = list(map(os.path.basename, all_ERA_files))
-    # all_years = sorted([re.findall(r'(?:_)(\d{4})', fn)[0] for fn in filenames])
+    # <------------------------------------------ std_new or 'std_cached'
+    if conf['data']['scaler_type'] == 'std_new' or 'std_cached':
 
-    # Specify the years for each set
-    # if conf["data"][train_test_split]:
-    #    normalized_split = conf["data"][train_test_split] / sum(conf["data"][train_test_split])
-    #    n_years = len(all_years)
-    #    train_years, sklearn.model_selection.train_test_split¶
+        # check and glob surface files
+        if ('surface_variables' in conf['data']) and (len(conf['data']['surface_variables']) > 0):
+            surface_files = sorted(glob(conf["data"]["save_loc_surface"]))
 
-    train_years = [str(year) for year in range(1979, 2014)]
-    valid_years = [str(year) for year in range(2014, 2018)]  # can make CV splits if we want to later on
-    test_years = [str(year) for year in range(2018, 2022)]  # same as graphcast -- always hold out
+        else:
+            surface_files = None
 
-    # train_years = [str(year) for year in range(1995, 2013) if year != 2007]
-    # valid_years = [str(year) for year in range(2014, 2015)]  # can make CV splits if we want to later on
-    # test_years = [str(year) for year in range(2015, 2016)]  # same as graphcast -- always hold out
+        # check and glob dyn forcing files
+        if ('dynamic_forcing_variables' in conf['data']) and (len(conf['data']['dynamic_forcing_variables']) > 0):
+            dyn_forcing_files = sorted(glob(conf["data"]["save_loc_dynamic_forcing"]))
 
-    # Filter the files for each set
+        else:
+            dyn_forcing_files = None
 
+        # check and glob diagnostic files
+        if ('diagnostic_variables' in conf['data']) and (len(conf['data']['diagnostic_variables']) > 0):
+            diagnostic_files = sorted(glob(conf["data"]["save_loc_diagnostic"]))
+
+        else:
+            diagnostic_files = None
+
+    # -------------------------------------------------- #
+    # import training / validation years from conf
+
+    if 'train_years' in conf['data']:
+        train_years_range = conf['data']['train_years']
+    else:
+        train_years_range = [1979, 2014]
+
+    if 'valid_years' in conf['data']:
+        valid_years_range = conf['data']['valid_years']
+    else:
+        valid_years_range = [2014, 2018]
+
+    # convert year info to str for file name search
+    train_years = [str(year) for year in range(train_years_range[0], train_years_range[1])]
+    valid_years = [str(year) for year in range(valid_years_range[0], valid_years_range[1])]
+
+    # Filter the files for training / validation
     train_files = [file for file in all_ERA_files if any(year in file for year in train_years)]
     valid_files = [file for file in all_ERA_files if any(year in file for year in valid_years)]
-    test_files = [file for file in all_ERA_files if any(year in file for year in test_years)]
+
+    # <----------------------------------- std_new or 'std_cached'
+    if conf['data']['scaler_type'] == 'std_new' or 'std_cached':
+
+        if surface_files is not None:
+
+            train_surface_files = [file for file in surface_files if any(year in file for year in train_years)]
+            valid_surface_files = [file for file in surface_files if any(year in file for year in valid_years)]
+            
+        else:
+            train_surface_files = None
+            valid_surface_files = None
+
+        if dyn_forcing_files is not None:
+
+            train_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in train_years)]
+            valid_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in valid_years)]
+
+        else:
+            train_dyn_forcing_files = None
+            valid_dyn_forcing_files = None
+
+        if diagnostic_files is not None:
+
+            train_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in train_years)]
+            valid_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in valid_years)]
+
+        else:
+            train_diagnostic_files = None
+            valid_diagnostic_files = None
 
     # load dataset and sampler
-
-    train_dataset, train_sampler = load_dataset_and_sampler(conf, train_files, world_size, rank, is_train=True)
-    valid_dataset, valid_sampler = load_dataset_and_sampler(conf, valid_files, world_size, rank, is_train=False)
+    train_dataset, train_sampler = load_dataset_and_sampler(conf,
+                                                            train_files,
+                                                            train_surface_files,
+                                                            train_dyn_forcing_files,
+                                                            train_diagnostic_files,
+                                                            world_size, rank, is_train=True)
+    # validation set and sampler
+    valid_dataset, valid_sampler = load_dataset_and_sampler(conf,
+                                                            valid_files,
+                                                            valid_surface_files,
+                                                            valid_dyn_forcing_files,
+                                                            valid_diagnostic_files,
+                                                            world_size, rank, is_train=False)
 
     # setup the dataloder for this process
 
@@ -277,9 +369,10 @@ def main(rank, world_size, conf, trial=False):
         shuffle=False,
         sampler=train_sampler,
         pin_memory=True,
-        persistent_workers=True if thread_workers > 0 else False,
-        num_workers=thread_workers,
-        drop_last=True
+        persistent_workers=False,
+        num_workers=1,  # multiprocessing is handled in the dataset
+        drop_last=True,
+        prefetch_factor=4
     )
 
     valid_loader = torch.utils.data.DataLoader(
@@ -288,30 +381,30 @@ def main(rank, world_size, conf, trial=False):
         shuffle=False,
         sampler=valid_sampler,
         pin_memory=False,
-        num_workers=valid_thread_workers,
-        drop_last=True
+        num_workers=1,  # multiprocessing is handled in the dataset
+        drop_last=True,
+        prefetch_factor=4
     )
 
     # model
 
-    vae = load_model(conf)
-
-    num_params = sum(p.numel() for p in vae.parameters())
-    if rank == 0:
-        logging.info(f"Number of parameters in the model: {num_params}")
-    # summary(vae, input_size=(channels, height, width))
+    m = load_model(conf)
 
     # have to send the module to the correct device first
 
-    vae.to(device)
+    m.to(device)
+
+    # move out of eager-mode
+    if conf["trainer"].get("compile", False):
+        m = torch.compile(m)
 
     # Wrap in DDP or FSDP module, or none
 
-    model = distributed_model_wrapper(conf, vae, device)
+    model = distributed_model_wrapper(conf, m, device)
 
-    # Load an optimizer, scheduler, and gradient scaler from disk if epoch > 0
+    # Load model weights (if any), an optimizer, scheduler, and gradient scaler
 
-    model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
+    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
     # Train and validation losses
 
@@ -325,35 +418,61 @@ def main(rank, world_size, conf, trial=False):
     metrics = LatWeightedMetrics(conf)
 
     # Initialize a trainer object
-
-    trainer = Trainer(model, rank, module=(conf["trainer"]["mode"] == "ddp"))
+    trainer_cls = load_trainer(conf)
+    trainer = trainer_cls(model, rank, module=(conf["trainer"]["mode"] == "ddp"))
 
     # Fit the model
 
     result = trainer.fit(
         conf,
-        train_loader,
-        valid_loader,
-        optimizer,
-        train_criterion,
-        valid_criterion,
-        scaler,
-        scheduler,
-        metrics,
-        rollout_scheduler=annealed_probability,
-        trial=trial
+        train_loader=train_loader,
+        valid_loader=valid_loader,
+        optimizer=optimizer,
+        train_criterion=train_criterion,
+        valid_criterion=valid_criterion,
+        scaler=scaler,
+        scheduler=scheduler,
+        metrics=metrics,
+        trial=trial  # Optional
     )
 
     return result
 
 
 class Objective(BaseObjective):
+    """
+    Optuna objective class for hyperparameter optimization.
+
+    Attributes:
+        config (dict): Configuration dictionary containing training parameters.
+        metric (str): Metric to optimize, defaults to "val_loss".
+        device (str): Device for training, defaults to "cpu".
+    """
+
     def __init__(self, config, metric="val_loss", device="cpu"):
+        """
+        Initialize the Objective class.
+
+        Args:
+            config (dict): Configuration dictionary containing training parameters.
+            metric (str, optional): Metric to optimize. Defaults to "val_loss".
+            device (str, optional): Device for training. Defaults to "cpu".
+        """
 
         # Initialize the base class
         BaseObjective.__init__(self, config, metric, device)
 
     def train(self, trial, conf):
+        """
+        Train the model using the given trial configuration.
+
+        Args:
+            trial (optuna.trial.Trial): Optuna trial object.
+            conf (dict): Configuration dictionary for the current trial.
+
+        Returns:
+            Any: The result of the training process.
+        """
 
         conf['model']['dim_head'] = conf['model']['dim']
         conf['model']['vq_codebook_dim'] = conf['model']['dim']
@@ -383,6 +502,7 @@ if __name__ == "__main__":
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "-c",
+        "--config",
         dest="model_config",
         type=str,
         default=False,
@@ -397,15 +517,25 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-w",
-        "--world-size",
+        "--wandb",
+        dest="wandb",
         type=int,
-        default=4,
-        help="Number of processes (world size) for multiprocessing"
+        default=0,
+        help="Use wandb. Default = False"
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        help="Backend for distribted training.",
+        default="nccl",
+        choices=["nccl", "gloo", "mpi"],
     )
     args = parser.parse_args()
     args_dict = vars(args)
     config = args_dict.pop("model_config")
     launch = int(args_dict.pop("launch"))
+    backend = args_dict.pop("backend")
+    use_wandb = int(args_dict.pop("wandb"))
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -422,10 +552,18 @@ if __name__ == "__main__":
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
+    # ======================================================== #
+    if conf['data']['scaler_type'] == 'std_new' or 'std_cached':
+        conf = CREDIT_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
+        training_data_check(conf, print_summary=False)
+    # ======================================================== #
+
     # Create directories if they do not exist and copy yml file
-    os.makedirs(conf["save_loc"], exist_ok=True)
-    if not os.path.exists(os.path.join(conf["save_loc"], "model.yml")):
-        shutil.copy(config, os.path.join(conf["save_loc"], "model.yml"))
+    save_loc = os.path.expandvars(conf["save_loc"])
+    os.makedirs(save_loc, exist_ok=True)
+
+    if not os.path.exists(os.path.join(save_loc, "model.yml")):
+        shutil.copy(config, os.path.join(save_loc, "model.yml"))
 
     # Launch PBS jobs
     if launch:
@@ -439,18 +577,17 @@ if __name__ == "__main__":
             launch_script_mpi(config, script_path)
         sys.exit()
 
-#     wandb.init(
-#         # set the wandb project where this run will be logged
-#         project="Derecho parallelism",
-#         name=f"Worker {os.environ["RANK"]} {os.environ["WORLD_SIZE"]}"
-#         # track hyperparameters and run metadata
-#         config=conf
-#     )
+    if use_wandb:  # this needs updated
+        wandb.init(
+            # set the wandb project where this run will be logged
+            project="Derecho parallelism",
+            name=f"Worker {os.environ['RANK']} {os.environ['WORLD_SIZE']}",
+            # track hyperparameters and run metadata
+            config=conf
+        )
 
     seed = 1000 if "seed" not in conf else conf["seed"]
     seed_everything(seed)
 
-    if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
-        main(int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"]), conf)
-    else:
-        main(0, 1, conf)
+    local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    main(world_rank, world_size, conf, backend)

@@ -1,6 +1,6 @@
-import numpy as np
-import xarray as xr
 import torch
+import numpy as np
+from credit.loss import latitude_weights
 
 # from credit.data_conversions import dataConverter
 # from weatherbench2.derived_variables import ZonalEnergySpectrum
@@ -12,27 +12,28 @@ class LatWeightedMetrics:
     def __init__(self, conf, predict_mode=False):
         self.conf = conf
         self.predict_mode = predict_mode
-        lat_file = conf['loss']['latitude_weights']
+        # lat_file = conf['loss']['latitude_weights']
         atmos_vars = conf['data']['variables']
         surface_vars = conf['data']['surface_variables']
+        diag_vars = conf['data']['diagnostic_variables']
+        
         levels = conf['model']['levels'] if 'levels' in conf['model'] else conf['model']['frames']
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
-
+        self.vars += diag_vars
+        
         self.w_lat = None
         if conf["loss"]["use_latitude_weights"]:
-            lat = xr.open_dataset(lat_file)["latitude"].values
-            w_lat = np.cos(np.deg2rad(lat))
-            w_lat = w_lat / w_lat.mean()
-            self.w_lat = torch.from_numpy(w_lat).unsqueeze(0).unsqueeze(-1)
+            self.w_lat = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
 
+        # DO NOT apply these weights during metrics computations, only on the loss during
         self.w_var = None
-        if conf["loss"]["use_variable_weights"]:
-            var_weights = [value if isinstance(value, list) else [value] for value in
-                           conf["loss"]["variable_weights"].values()]
-            var_weights = [item for sublist in var_weights for item in sublist]
-            self.w_var = torch.from_numpy(var_weights).unsqueeze(0).unsqueeze(-1)
+        # if conf["loss"]["use_variable_weights"]:
+        #     var_weights = [value if isinstance(value, list) else [value] for value in
+        #                    conf["loss"]["variable_weights"].values()]
+        #     var_weights = np.array([item for sublist in var_weights for item in sublist])
+        #     self.w_var = torch.from_numpy(var_weights).unsqueeze(0).unsqueeze(-1)
 
         # if self.predict_mode:
         #    self.zonal_metrics = ZonalSpectrumMetric(self.conf)

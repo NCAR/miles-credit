@@ -55,6 +55,7 @@ model:
         encoder_weights: "imagenet"
     
 trainer:
+    type: "conus404"
     mode: none # none, ddp, fsdp
     train_batch_size: 4
     valid_batch_size: 4

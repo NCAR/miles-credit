@@ -5,15 +5,8 @@ Contact: wchapman@ucar.edu
 This script takes the gathered ERA5 zarr data and creates the scaling libraries
 """
 
-from typing import Optional, Callable, TypedDict, Union, Iterable, Tuple, NamedTuple, List
-from dataclasses import dataclass
-import datetime
-from itertools import product
-from concurrent import futures
 
 # Scientific python
-import numpy as np
-import pandas as pd
 import xarray as xr
 import matplotlib.pyplot as plt
 import bokeh

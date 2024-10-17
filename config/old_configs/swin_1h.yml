@@ -1,0 +1,194 @@
+save_loc: "/glade/derecho/scratch/schreck/repos/miles-credit/results/swin/quarter/"
+seed: 1000
+
+data:
+    variables: ['U','V','T','Q']
+    surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    static_variables: ['Z_GDS4_SFC','LSM','tsi'] # []
+    save_loc: '/glade/derecho/scratch/schreck/STAGING/TOTAL_*'
+    mean_path: '/glade/derecho/scratch/schreck/STAGING/All_2010_staged.mean.Lev.SLO.nc'
+    std_path: '/glade/derecho/scratch/schreck/STAGING/All_2010_staged.std.Lev.SLO.nc'
+    quant_path: '/glade/derecho/scratch/dgagne/credit_scalers/era5_quantile_scalers_2024-03-30_00:28.parquet'
+    TOA_forcing_path: '/glade/derecho/scratch/dgagne/credit_scalers/solar_radiation_2024-03-29_0204.nc' 
+    scaler_type: 'std' #'std', 'quantile'
+    history_len: 2
+    forecast_len: 0
+    valid_history_len: 2
+    valid_forecast_len: 0
+    one_shot: True
+    skip_periods: null
+    bs_years_train: ['1979-01-01','2014-01-01'] #only used with bridgescalar developed datasets
+    bs_years_val: ['2014-01-01','2018-01-01'] #only used with bridgescalar developed datasets
+    bs_years_test: ['2018-01-01','2021-01-01'] #only used with bridgescalar developed datasets
+    bs_data_path: '/glade/derecho/scratch/dgagne/era5_quantile/' #only used with bridgescalar developed datasets
+    bs_file_format: 'TOTAL_%Y-%m-%dT%H:%M:%S_quantile.nc' #only used with bridgescalar developed datasets
+    
+trainer:
+    type: "standard"
+    mode: fsdp # none, ddp, fsdp
+    train_batch_size: 1
+    valid_batch_size: 1
+    batches_per_epoch: 1000 # Set to 0 to use len(dataloader)
+    valid_batches_per_epoch: 100
+    learning_rate: 5.0e-04
+    weight_decay: 1.0e-05
+    start_epoch: 0
+    epochs: 5
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+    thread_workers: 4
+    valid_thread_workers: 4
+    stopping_patience: 50
+    teacher_forcing_ratio: 0.5 #0.9886539666794065
+    stop_rollout: 0.9
+    skip_validation: True
+    load_weights: False
+    load_optimizer: False
+    use_scheduler: False
+    activation_checkpoint: True
+    cpu_offload: True
+    update_learning_rate: True
+    #scheduler: {'scheduler_type': 'cosine-annealing', first_cycle_steps: 500, cycle_mult: 6.0, max_lr: 5.0e-04, min_lr: 5.0e-07, warmup_steps: 499, gamma: 0.7}
+    # scheduler: {scheduler_type: plateau, mode: min, factor: 0.1, patience: 5, cooldown: 2, min_lr: 1e-6, epsilon: 1e-8, verbose: true, threshold: 1e-4}
+    scheduler: {'scheduler_type': 'lambda'}
+  
+model:
+    type: "swin"
+    img_size: 
+    - 640
+    - 1280
+    patch_size: 4
+    depths:
+    - 12
+    num_heads: 
+    - 8
+    in_chans: 70
+    out_chans: 67
+    embed_dim: 768
+    img_window_ratio: 80
+    drop_path_rate: 0.1
+    full_pos_embed: true
+    rel_pos: false
+    mlp_ratio: 4
+    checkpoint_stages: false
+    residual: false
+    pad_lat: 0
+    pad_lon: 0
+    use_spectral_norm: true
+
+    
+loss: 
+    training_loss: "mse"
+    use_vgg: False
+    use_power_loss: False # use either power or spectral loss
+    use_spectral_loss: False
+    spectral_wavenum_init: 20
+    spectral_lambda_reg: 0.1 # power loss is order of 1e1 (usually between 1-10)
+    use_latitude_weights: True
+    latitude_weights: "/glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc"
+    use_variable_weights: False
+    variable_weights:
+        U: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        V: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        T: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        Q: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        SP: 0.1
+        t2m: 1.0
+        V500: 0.1
+        U500: 0.1
+        T500: 0.1
+        Z500: 0.1
+        Q500: 0.1
+
+predict:
+    forecasts: 
+        type: "custom"
+        start_year: 2020
+        start_month: 6
+        start_day: 1
+        days: 5
+        duration: 1
+    # forecasts: [
+    #     ["2020-01-01 00:00:00", "2020-01-10 23:00:00"],
+    #     ["2020-02-01 00:00:00", "2020-02-10 23:00:00"],
+    #     ["2020-03-01 00:00:00", "2020-03-10 23:00:00"],
+    #     ["2020-04-01 00:00:00", "2020-04-10 23:00:00"],
+    #     ["2020-05-01 00:00:00", "2020-05-10 23:00:00"],
+    #     ["2020-06-01 00:00:00", "2020-06-10 23:00:00"],
+    #     ["2020-07-01 00:00:00", "2020-07-10 23:00:00"],
+    #     ["2020-08-01 00:00:00", "2020-08-10 23:00:00"],
+    #     ["2020-09-01 00:00:00", "2020-09-10 23:00:00"],
+    #     ["2020-10-01 00:00:00", "2020-10-10 23:00:00"],
+    #     ["2020-11-01 00:00:00", "2020-11-10 23:00:00"],
+    #     ["2020-12-01 00:00:00", "2020-12-10 23:00:00"]
+    # ]
+    use_laplace_filter: True
+    save_format: "nc"
+
+visualization:
+    sigma_level_visualize:
+        variable_keys: ['U','V','T','Q']  # variable keys as defined in **[data][variables][...]**
+        visualize_levels: [5, 10,]     # sigma levels (by their indices) to visualize 
+        variable_names: ['U wind [m/s]', # the name of each variable
+                         'V wind [m/s]', # must be consistent with **variable_indices**
+                         'Air temperature [$^\circ$K]',
+                         'Specific humidity [kg/kg]']
+        variable_factors: [1, 1, 1, 1]
+        variable_range: [auto, auto, auto, auto] # use auto or provide a list of [min_var, max_var]; it applies to all levels
+        colormaps: ['Spectral_r', 'Spectral_r', 'viridis_plasma', 'YlGn']
+        file_name_prefix: 'global_sigma'
+    diagnostic_variable_visualize:
+        variable_keys: ['V500', 'U500','T500','Z500','Q500']
+        visualize_levels: ['none', 'none', 'none', 'none', 'none'] # none for single level variables
+        variable_names: ['500 hPa V Wind [m/s]', 
+                         '500 hPa U Wind [m/s]',
+                         '500 hPa Air temperature [$^\circ$K]',
+                         '500 hPa Geopotential Height [km]',
+                         '500 hPa Specific humidity [kg/kg]']
+        variable_factors: [1, 1, 1, 0.001, 1]
+        variable_range: [auto, auto, [220, 300], [50, 60], auto]
+        colormaps: ['Spectral_r', 'Spectral_r', 'viridis_plasma', 'Spectral_r', 'YlGn']
+        file_name_prefix: 'global_diagnostics'
+    surface_visualize:
+        variable_keys: ['SP','t2m']
+        visualize_levels: ['none', 'none']
+        variable_names: ['Surface Pressure [hPa]', 
+                         '2-m Air Temperature [$^\circ$K]']
+        variable_factors: [0.01, 1]
+        variable_range: [[650, 1100], [200, 350]]
+        colormaps: ['Spectral', 'viridis_plasma',]
+        file_name_prefix: 'global_surface'
+    map_projection: 'EckertIII' # PlateCarree, LambertCylindrical, Miller, EckertIII, Mollweide, Robinson
+    save_options: {'dpi':250, 
+                   'orientation':'portrait', 
+                   'bbox_inches':'tight', 
+                   'pad_inches':0.1, 
+                   'transparent':False,
+                   'format':'png'}
+    video_format: 'mp4' # gif, mp4, none
+
+
+pbs: #derecho
+    conda: "credit"
+    project: "NAML0001"
+    job_name: "xformer-fsdp"
+    walltime: "12:00:00"
+    nodes: 1
+    ncpus: 64
+    ngpus: 4
+    mem: '480GB'
+    queue: 'main'
+    
+# pbs: # casper
+#     conda: "/glade/work/schreck/miniconda3/envs/evidential"
+#     job_name: 'latlon'
+#     nodes: 1
+#     ncpus: 8
+#     ngpus: 1
+#     mem: '128GB'
+#     walltime: '12:00:00'
+#     gpu_type: 'a100'
+#     cpu_type: 'milan'
+#     project: 'NAML0001'
+#     queue: 'casper'

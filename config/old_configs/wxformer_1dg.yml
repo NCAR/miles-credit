@@ -1,0 +1,132 @@
+save_loc: "/glade/work/$USER/repos/global/miles-credit/results/crossformer/one"
+seed: 1000
+
+data:
+    variables: ['U','V','T','Q']
+    surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    static_variables: ['SP','LSM'] # []
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/ONE*zarr'
+    mean_path: '/glade/derecho/scratch/schreck/STAGING/All_2010_staged.mean.Lev.SLO.nc'
+    std_path: '/glade/derecho/scratch/schreck/STAGING/All_2010_staged.std.Lev.SLO.nc'
+    quant_path: '/glade/campaign/cisl/aiml/credit_scalers/era5_quantile_scalers_2024-02-13_07:33.parquet'
+    scaler_type: 'std' # 'std'
+    history_len: 2 
+    forecast_len: 0
+    valid_history_len: 2
+    valid_forecast_len: 0
+    one_shot: True
+    
+trainer:
+    type: "standard"
+    mode: none # none, ddp, fsdp
+    train_batch_size: 2
+    valid_batch_size: 2
+    batches_per_epoch: 0 # Set to 0 to use len(dataloader)
+    valid_batches_per_epoch: 100
+    learning_rate: 5.0e-04
+    weight_decay: 1.0e-05
+    start_epoch: 0
+    epochs: 10
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+    thread_workers: 4
+    valid_thread_workers: 4
+    stopping_patience: 50
+    teacher_forcing_ratio: 0.5 #0.9886539666794065
+    stop_rollout: 0.9
+    load_weights: False
+    load_optimizer: False
+    use_scheduler: False
+    # scheduler: {'scheduler_type': 'cosine-annealing', first_cycle_steps: 2000, cycle_mult: 6.0, max_lr: 5.0e-04, min_lr: 5.0e-07, warmup_steps: 1999, gamma: 0.7}
+    # scheduler: {scheduler_type: plateau, mode: min, factor: 0.1, patience: 5, cooldown: 2, min_lr: 1e-6, epsilon: 1e-8, verbose: true, threshold: 1e-4}
+    # scheduler: {'scheduler_type': 'lambda'}
+  
+model:
+    type: "crossformer"
+    image_height: 192    # Image height (default: 640)
+    image_width: 288     # Image width (default: 1280)
+    levels: 15           # Number of levels (default: 15)
+    frames: 2            # Number of frames (default: 2)
+    channels: 4          # Channels (default: 4)
+    surface_channels: 7  # Surface channels (default: 7)
+    static_channels: 3   # Static channels (default: 3)
+    dim: [64, 128, 256, 512]              # Dimensionality of each layer (default: [64, 128, 256, 512])
+    depth: [2, 2, 8, 2]                   # Depth of each layer (default: [2, 2, 8, 2])
+    global_window_size: [4, 4, 2, 1]      # Global window size for each layer (default: [10, 5, 2, 1])
+    local_window_size: 3                  # Local window size (default: 10)
+    cross_embed_kernel_sizes:             # Kernel sizes for cross-embedding (default: [[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]])
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+    cross_embed_strides: [2, 2, 2, 2]     # Strides for cross-embedding (default: [4, 2, 2, 2])
+    attn_dropout: 0.                      # Dropout probability for attention layers (default: 0.0)
+    ff_dropout: 0.                        # Dropout probability for feed-forward layers (default: 0.0)
+    pad_lon: 48
+    pad_lat: 48
+    use_spectral_norm: True
+    
+loss: 
+    training_loss: "mse"
+    use_vgg: False
+    use_power_loss: False # use either power or spectral loss
+    use_spectral_loss: False
+    spectral_wavenum_init: 15
+    spectral_lambda_reg: 0.025791372491084097
+    use_latitude_weights: True
+    latitude_weights: "/glade/u/home/wchapman/MLWPS/DataLoader/static_variables_ERA5_zhght_onedeg.nc"
+    use_variable_weights: False
+    variable_weights:
+        U: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        V: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        T: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        Q: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+        SP: 0.1
+        t2m: 1.0
+        V500: 0.1
+        U500: 0.1
+        T500: 0.1
+        Z500: 0.1
+        Q500: 0.1
+
+predict:
+    forecasts: [
+        #["1989-12-31 00:00:00", "1990-01-02 00:00:00"],
+        ["2018-06-01 00:00:00", "2018-06-02 00:00:00"]
+    ]
+diagnostics:
+    summary_plot_fhs: [1, 20, 60, 120] # what forecast hours to plot as a summary plot
+    use_spectrum_vis: False
+    spectrum_vis:
+        atmos_variables: ["U", "V", "T", "Q"]
+        atmos_levels: [8, 10]
+        single_level_variables: ["SP", "t2m", "Z500"]
+        figsize: () # empty tuple for auto
+    plev_summary_only: True  # pressure level conversion is really slow, use this option to compute pressure level diagnostics only at summary fhs (above), will disable KE metrics output
+    use_KE_diagnostics: True # disable all KE diagnostics including KE metrics
+    ke_vis:
+        use_KE_spectrum_vis: True
+        use_KE_difference_vis: True
+#     conda: "holodec"
+#     project: "NAML0001"
+#     job_name: "xformer-1dg"
+#     walltime: "24:00:00"
+#     nodes: 8
+#     ncpus: 64
+#     ngpus: 4
+#     mem: '480GB'
+#     queue: 'preempt'
+    
+pbs: # casper
+    conda: "$HOME/credit310"
+    job_name: 'x1dg'
+    nodes: 1
+    ncpus: 2
+    ngpus: 1
+    mem: '10GB'
+    walltime: '00:10:00'
+    gpu_type: 'a100'
+    cpu_type: 'milan'
+    project: 'NAML0001'
+    queue: 'casper'

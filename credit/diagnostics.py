@@ -207,7 +207,7 @@ class KE_Diagnostic:
             for ax in self.KE_axs:  # overwrite every time in case of crash
                 ax.legend()
             self.KE_fig.savefig(join(self.plot_save_loc, f"ke_spectra_summary{fh}"))
-            logger.info(f"saved summary plot to {join(self.plot_save_loc, f'ke_spectra_summary')}")
+            logger.info(f"saved summary plot to {join(self.plot_save_loc, 'ke_spectra_summary')}")
 
     def plot_avg_spectrum(self, avg_pred_spectrum, avg_y_spectrum,
                           fig, axs, alpha=1, label=None):
