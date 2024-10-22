@@ -684,7 +684,11 @@ class SKEBS(nn.Module):
         u_frac = u_squared / wind_squared # (b, levels, 1, lat, lon)
         v_frac = v_squared / wind_squared
 
-        add_wind_magnitude = torch.sqrt(2.0 * total_forcing / mlev_mass + wind_squared) - torch.sqrt(wind_squared)
+        # use torch.sign so sqrt doesnt deal with negative values
+        add_wind_magnitude = (torch.sign(total_forcing) 
+                              * (torch.sqrt(2.0 * torch.abs(total_forcing) / mlev_mass + wind_squared) 
+                              - torch.sqrt(wind_squared))
+                              )
         x[:, self.U_inds] += add_wind_magnitude * u_frac
         x[:, self.V_inds] += add_wind_magnitude * v_frac
         return x
