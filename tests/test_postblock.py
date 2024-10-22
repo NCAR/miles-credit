@@ -2,7 +2,7 @@ import yaml
 import os
 
 import torch
-from credit.postblock import PostBlock
+from credit.postblock import PostBlock, Backscatter_FCNN
 from credit.postblock import SKEBS, TracerFixer, GlobalMassFixer, GlobalEnergyFixer
 from credit.parser import CREDIT_main_parser
 
@@ -44,6 +44,37 @@ def test_SKEBS_rand():
 
     assert skebs_pred.shape == y_pred.shape
     assert not torch.isnan(skebs_pred).any()
+
+def test_SKEBS_backscatter():
+    config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    with open(config) as cf:
+        conf = yaml.load(cf, Loader=yaml.FullLoader)
+
+    conf = CREDIT_main_parser(conf) # parser will copy model configs to post_conf
+    post_conf = conf['model']['post_conf']
+    
+    image_height = post_conf["model"]["image_height"]
+    image_width = post_conf["model"]["image_width"]
+    channels = post_conf["model"]["channels"]
+    levels = post_conf["model"]["levels"]
+    surface_channels = post_conf["model"]["surface_channels"]
+    output_only_channels = post_conf["model"]["output_only_channels"]
+    input_only_channels = post_conf["model"]["input_only_channels"]
+    frames = post_conf["model"]["frames"]
+    sp_index = post_conf["skebs"]["SP_ind"]
+
+    in_channels = channels * levels + surface_channels + input_only_channels
+    x = torch.randn(2, in_channels, frames, image_height, image_width)
+    out_channels = channels * levels + surface_channels + output_only_channels
+    y_pred = torch.randn(2, out_channels, frames, image_height, image_width)
+    y_pred[:, sp_index] = torch.ones_like(y_pred[:, sp_index]) * 1013
+
+    model = Backscatter_FCNN(out_channels, levels)
+
+    pred = model(y_pred)
+
+    # assert pred.shape == y_pred.shape
+    # assert not torch.isnan(skebs_pred).any()
 
 def test_TracerFixer_rand():
     '''
@@ -172,4 +203,5 @@ def test_SKEBS_era5():
     pass
 
 if __name__ == "__main__":
-    test_SKEBS_rand()
+    # test_SKEBS_rand()
+    test_SKEBS_backscatter()

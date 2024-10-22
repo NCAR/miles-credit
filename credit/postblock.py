@@ -551,6 +551,30 @@ def concat_fix(y_pred, q_pred_correct, q_ind_start, q_ind_end, N_vars):
     return torch.cat(var_list, dim=1)
 
 
+class Backscatter_FCNN(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 levels):
+        # could also predict with x_prev and y
+        super().__init__()
+        self.in_channels = in_channels
+        self.levels = levels
+        self.fc1 = nn.Linear(in_channels, in_channels // 2)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Linear(in_channels // 2, self.levels)
+
+    def forward(self, x):
+        x = x.permute(0, 2, 3, 4, 1) # put channels last
+        print(x.shape)
+        x = self.fc1(x)
+        x = self.relu1(x)
+        x = self.fc2(x)
+        print(x.shape)
+        x = x.permute(0, -1, 1, 2, 3) # put channels back to 1st dim
+        print(x.shape)
+        return x
+        # return torch.ones((x.shape[0], self.levels, 1, self.nlat, self.nlon)) 
+
 class SKEBS(nn.Module):
     """
     post_conf: dictionary with config options for PostBlock.
@@ -591,6 +615,8 @@ class SKEBS(nn.Module):
         self.spec_coef = None
 
         self.initialize_sht()
+        num_channels = self.levels * self.channels + self.surface_channels + self.output_only_channels
+        self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
 
     def initialize_sht(self):
         """
@@ -671,7 +697,7 @@ class SKEBS(nn.Module):
         pattern_on_grid = self.isht(self.spec_coef) # b, 1, 1, lat, lon
         print(f"pattern on grid: {pattern_on_grid.shape}")
         # todo: placeholder for backscatter prediction
-        backscatter_pred = torch.ones((x.shape[0], self.levels, 1, self.nlat, self.nlon)) 
+        backscatter_pred = self.backscatter_network(x)
 
         # skebs gives us an instantaneous forcing term, need to multiply by timestep
         total_forcing = self.timestep * backscatter_pred * pattern_on_grid 
