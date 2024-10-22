@@ -4,7 +4,7 @@
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/$USER/CREDIT_runs/test_1dg_unet/'
+save_loc: '/glade/work/$USER/CREDIT_runs/blah/'
 seed: 1000
 
 data:
@@ -186,6 +186,7 @@ pbs: # casper
     walltime: '00:10:00'
     gpu_type: 'a100'
     queue: 'casper'
+
 
 # pbs: #derecho
 #     conda: "credit-derecho"

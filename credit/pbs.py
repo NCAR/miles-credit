@@ -27,6 +27,20 @@ def launch_script(config_file, script_path, launch=True):
     save_loc = os.path.expandvars(config["save_loc"])
     config_save_path = os.path.join(save_loc, "model.yml")
 
+    source_path = config_file
+    destination_path = config_save_path
+
+    # Only delete the original if the source and destination paths are different
+    if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
+        os.remove(destination_path)
+        logger.info(f'Removed the old model.yml at {destination_path}')
+
+    try:
+        shutil.copy(source_path, destination_path)
+        logger.info(f'Copied the new {source_path} to {destination_path}')
+    except shutil.SameFileError:
+        pass
+
     # Generate the PBS script
     script = f"""#!/bin/bash -l
     #PBS -N {pbs_options['job_name']}
@@ -52,19 +66,33 @@ def launch_script(config_file, script_path, launch=True):
         script_file.write(script)
 
     if launch:
-        jobid = subprocess.Popen(
+        source_path = "launch.sh"
+        destination_path = os.path.join(save_loc, "launch.sh")
+
+        # Only delete the original if the source and destination paths are different
+        if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
+            os.remove(destination_path)
+            logger.info(f'Removed the old launch.sh at {destination_path}')
+
+        try: # copies new launch script to destination_path
+            shutil.copy(source_path, destination_path)
+            logger.info(f'Generated the new script at {destination_path}')
+        except shutil.SameFileError:
+            pass
+        os.remove("launch.sh")
+
+        jobid, err = subprocess.Popen(
             "qsub launch.sh",
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=save_loc,
-        ).communicate()[0]
+        ).communicate()
         jobid = jobid.decode("utf-8").strip("\n")
         logger.info(jobid)
-        save_loc = os.path.expandvars(config["save_loc"])
-        if not os.path.exists(os.path.join(save_loc, "launch.sh")):
-            shutil.copy('launch.sh', os.path.join(save_loc, "launch.sh"))
-        os.remove("launch.sh")
+        err = err.decode("utf-8")
+        if err:
+            logger.error(f"Error: {err}")
 
 
 def launch_script_mpi(config_file, script_path, launch=True, backend='nccl'):
@@ -176,16 +204,6 @@ def launch_script_mpi(config_file, script_path, launch=True, backend='nccl'):
         script_file.write(script)
 
     if launch:
-        jobid = subprocess.Popen(
-            "qsub launch.sh",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=save_loc
-        ).communicate()[0]
-        jobid = jobid.decode("utf-8").strip("\n")
-        logger.info(jobid)
-
         # Copy launch.sh to the design location
         # Define the source and destination paths
         source_path = "launch.sh"
@@ -196,11 +214,25 @@ def launch_script_mpi(config_file, script_path, launch=True, backend='nccl'):
             os.remove(destination_path)
             logger.info(f'Removed the old launch.sh at {destination_path}')
 
-        try:
+        try: # copies new launch script to destination_path
             shutil.copy(source_path, destination_path)
             logger.info(f'Generated the new script at {destination_path}')
         except shutil.SameFileError:
             pass
+        os.remove("launch.sh")
+
+        jobid, err = subprocess.Popen(
+            "qsub launch.sh",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=save_loc,
+        ).communicate()
+        jobid = jobid.decode("utf-8").strip("\n")
+        logger.info(jobid)
+        err = err.decode("utf-8")
+        if err:
+            logger.error(f"Error: {err}")
 
 
 if __name__ == "__main__":
