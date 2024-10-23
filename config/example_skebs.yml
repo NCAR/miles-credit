@@ -4,7 +4,7 @@
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/dkimpara/CREDIT_runs/post_test/'
+save_loc: '/glade/work/dkimpara/CREDIT_runs/skebs_test/'
 seed: 1000
 
 data:
@@ -21,15 +21,15 @@ data:
     save_loc_dynamic_forcing: '/glade/derecho/scratch/dkimpara/credit_solar_1h_1deg/*.nc'
     
     # static variables
-    static_variables:  ['Z_GDS4_SFC','LSM'] 
-    save_loc_static: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_ONEDEG.nc'
+    static_variables: ['Z_GDS4_SFC','LSM'] 
+    save_loc_static: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_onedeg.nc'
     
     # mean / std path
     mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
     # regular z-score version
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
+    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
     # residual norm version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
     
     # train / validation split
     train_years: [1979, 2018]
@@ -37,9 +37,10 @@ data:
     
     scaler_type: 'std_new'
     
-    history_len: 2
-    valid_history_len: 2
-
+    # state-in-state-out
+    history_len: 1
+    valid_history_len: 1
+    
     # single step
     forecast_len: 0
     valid_forecast_len: 0
@@ -50,9 +51,6 @@ data:
     
     # compatible with the old 'std'
     static_first: True
-
-    sst_forcing:
-        activate: False
     
     level_info_file: "/glade/u/home/wchapman/MLWPS/DataLoader/ERA5_Lev_Info.nc"
     level_list: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
@@ -65,8 +63,8 @@ trainer:
     cpu_offload: False
     activation_checkpoint: False
     
-    load_weights: False
-    load_optimizer: False
+    load_weights: True # for skebs, if you are loading base model weights only, set only load_weights to TRue
+    load_optimizer: False 
     load_scaler: False
     load_sheduler: False
     
@@ -79,8 +77,8 @@ trainer:
     learning_rate: 1.0e-03 # <-- change to your lr
     weight_decay: 0
     
-    train_batch_size: 1
-    valid_batch_size: 1
+    train_batch_size: 2
+    valid_batch_size: 2
     
     batches_per_epoch: 1 # use 50% of full epoch; full epoch = 10681(batches) * 32(samples)
     valid_batches_per_epoch: 0
@@ -140,6 +138,7 @@ model:
             activate: True
             lmax: None
             mmax: None
+            freeze_base_model_weights: True
         grid: 'legendre-gauss'
         
         tracer_fixer:
@@ -161,7 +160,7 @@ loss:
     
     # use latitude weighting
     use_latitude_weights: True
-    latitude_weights: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_ONEDEG.nc'
+    latitude_weights: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_onedeg.nc'
     
     # turn-off variable weighting
     use_variable_weights: False
@@ -187,25 +186,25 @@ predict:
     # deprecated
     # save_format: "nc"
 
-# pbs: # casper
-#     conda: "/glade/work/ksha/miniconda3/envs/credit"
-#     job_name: 'unet'
-#     nodes: 1
-#     ncpus: 8
-#     ngpus: 1
-#     mem: '128GB'
-#     walltime: '24:00:00'
-#     gpu_type: 'a100'
-#     project: 'NAML0001'
-#     queue: 'casper'
-
-pbs: #derecho
-    conda: "$HOME/credit-derecho"
-    project: "NAML0001"
-    job_name: "unet_skebs"
-    walltime: "00:30:00"
+pbs: # casper
+    conda: "$HOME/credit"
+    job_name: 'skebs_test'
     nodes: 1
-    ncpus: 64
-    ngpus: 4
-    mem: '480GB'
-    queue: 'main'
+    ncpus: 4
+    ngpus: 1
+    mem: '30GB'
+    walltime: '00:10:00'
+    gpu_type: 'v100'
+    project: 'NAML0001'
+    queue: 'casper'
+
+# pbs: #derecho
+#     conda: "$HOME/credit-derecho"
+#     project: "NAML0001"
+#     job_name: "unet_skebs"
+#     walltime: "00:30:00"
+#     nodes: 1
+#     ncpus: 64
+#     ngpus: 4
+#     mem: '480GB'
+#     queue: 'main'

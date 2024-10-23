@@ -364,6 +364,9 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             
     # SKEBS
     if conf['model']['post_conf']['skebs']['activate']:
+        assert "freeze_base_model_weights" in conf['model']['post_conf']['skebs'], (
+            'need to specify freeze_base_model_weights in skebs config'
+        )
         assert "level_info_file" in conf['data'], (
             'need to specify level_info_file for skebs')
         assert "level_list" in conf['data'], (

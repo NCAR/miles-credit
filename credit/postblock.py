@@ -44,7 +44,7 @@ class PostBlock(nn.Module):
         """
         super().__init__()
 
-        self.operations = nn.ModuleList()
+        self.operations = nn.ModuleDict()
 
         # The general order of postblock processes:
         # (1) negative tracer fixer --> global mass fixer --> SKEB --> global energy fixer
@@ -53,27 +53,27 @@ class PostBlock(nn.Module):
         if post_conf["tracer_fixer"]["activate"]:
             logger.info("TracerFixer registered")
             opt = TracerFixer(post_conf)
-            self.operations.append(opt)
+            self.operations["tracer_fixer"] = opt
 
         # stochastic kinetic energy backscattering (SKEB)
         if post_conf["skebs"]["activate"]:
             logging.info("using SKEBS")
-            self.operations.append(SKEBS(post_conf))
+            self.operations['skebs'] = SKEBS(post_conf)
 
         # global mass fixer
         if post_conf["global_mass_fixer"]["activate"]:
             logger.info("GlobalMassFixer registered")
             opt = GlobalMassFixer(post_conf)
-            self.operations.append(opt)
+            self.operations["global_mass_fixer"] = opt
 
         # global energy fixer
         if post_conf["global_energy_fixer"]["activate"]:
             logger.info("GlobalEnergyFixer registered")
             opt = GlobalEnergyFixer(post_conf)
-            self.operations.append(opt)
+            self.operations["global_energy_fixer"] = opt
 
     def forward(self, x):
-        for op in self.operations:
+        for op in self.operations.values():
             x = op(x)
 
         if isinstance(x, dict):
@@ -565,13 +565,13 @@ class Backscatter_FCNN(nn.Module):
 
     def forward(self, x):
         x = x.permute(0, 2, 3, 4, 1) # put channels last
-        print(x.shape)
+        logger.debug(x.shape)
         x = self.fc1(x)
         x = self.relu1(x)
         x = self.fc2(x)
-        print(x.shape)
+        logger.debug(x.shape)
         x = x.permute(0, -1, 1, 2, 3) # put channels back to 1st dim
-        print(x.shape)
+        logger.debug(x.shape)
         return x
         # return torch.ones((x.shape[0], self.levels, 1, self.nlat, self.nlon)) 
 
@@ -610,14 +610,15 @@ class SKEBS(nn.Module):
         self.timestep = post_conf["data"]["timestep"]
         self.level_info = xr.open_dataset(post_conf["data"]["level_info_file"])
         self.level_list = post_conf["data"]["level_list"]
-        self.surface_area = xr.open_dataset(post_conf["data"]["save_loc_static"]).surface_area.to_numpy()
-        self.device = None
-        self.spec_coef = None
+        self.surface_area = xr.open_dataset(post_conf["data"]["save_loc_static"])["surface_area"].to_numpy()
+        self.spec_coef_is_initialized = False
 
         self.initialize_sht()
+        self.initialize_skebs_parameters()
+        self.initialize_mass_calc()
+
         num_channels = self.levels * self.channels + self.surface_channels + self.output_only_channels
         self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
-
     def initialize_sht(self):
         """
         Initialize spherical harmonics and inverse spherical harmonics transformations
@@ -631,6 +632,18 @@ class SKEBS(nn.Module):
         self.lmax = self.isht.lmax
         self.mmax = self.isht.mmax
 
+    def initialize_skebs_parameters(self):
+        self.register_buffer('lrange', 
+                             torch.arange(1, self.lmax + 1).unsqueeze(1),
+                             persistent=False) # (lmax, 1)
+        # assume (b, c, t, ,lat,lon)
+
+        # parameters we want to learn: (init to berner 2009 values for now)
+        self.alpha = Parameter(torch.tensor(0.5, requires_grad=True))
+        self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
+        self.p = Parameter(torch.tensor(-1.27, requires_grad=True))
+        self.dE = Parameter(torch.tensor(10e-4, requires_grad=True))
+
     def initialize_pattern(self, y_pred):
         """
         initialize the random pattern.
@@ -639,21 +652,13 @@ class SKEBS(nn.Module):
             n is total wavenumber -> lmax
         """
         y_shape = y_pred.shape
-        self.lrange = torch.arange(1, self.lmax + 1).unsqueeze(1)  # (lmax, 1)
-        # assume (b, ... ,lat,lon)
-        self.spec_coef = torch.zeros(
-            (y_shape[0], 1, 1, self.lmax, self.mmax),  # b, 1, 1, lat, lon
-            dtype=torch.cfloat,
-        )
-        # for _ in range(len(self.spec_coef.shape), len(y_shape)):
-        #     # unsqueeze to achieve b, 1, ..., 1, lat, lon matching y_pred
-        #     self.spec_coef = self.spec_coef.unsqueeze(1)
 
-        # parameters we want to learn: (init to berner 2009 values for now)
-        self.alpha = Parameter(torch.tensor(0.5, requires_grad=True))
-        self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
-        self.p = Parameter(torch.tensor(-1.27, requires_grad=True))
-        self.dE = Parameter(torch.tensor(10e-4, requires_grad=True))
+        self.register_buffer('spec_coef', 
+                             torch.zeros(
+                                 (y_shape[0], 1, 1, self.lmax, self.mmax),  # b, 1, 1, lat, lon
+                                 dtype=torch.cfloat,),
+                             persistent=False)
+
         # initialize pattern todo: how many iters?
         for _ in range(10):
             self.spec_coef = self.cycle_pattern(self.spec_coef)
@@ -661,8 +666,8 @@ class SKEBS(nn.Module):
     def cycle_pattern(self, spec_coef):
         Gamma = torch.sum(self.lrange * (self.lrange + 1.0) * (self.lrange + 2.0) * self.lrange ** (2.0 * self.p))  # scalar
         b = torch.sqrt((4.0 * PI * RAD_EARTH**2.0) / (self.variance * Gamma) * self.alpha * self.dE)  # scalar
-        g_n = b * self.lrange**self.p  # (lmax, 1)
-        print(f"g_n: {g_n.shape}")
+        g_n = b * self.lrange ** self.p  # (lmax, 1)
+        logger.debug(f"g_n: {g_n.shape}")
         noise = self.variance * torch.randn(spec_coef.shape)  # (b, 1, 1, lmax, mmax) std normal noise diff for all n?
 
         new_coef = (1.0 - self.alpha) * spec_coef + g_n * torch.sqrt(self.alpha) * noise  # (lmax, mmax)
@@ -671,11 +676,17 @@ class SKEBS(nn.Module):
     def initialize_mass_calc(self):
         a_vals = self.level_info["a_model"].sel(level=self.level_list).to_numpy()
         b_vals = self.level_info["b_model"].sel(level=self.level_list).to_numpy()
-        a_tensor = torch.from_numpy(a_vals).to(self.device).view(1, self.levels, 1, 1, 1) / 100
-        b_tensor = torch.from_numpy(b_vals).to(self.device).view(1, self.levels, 1, 1, 1)
-        self.surface_area_tensor = torch.from_numpy(self.surface_area).to(self.device).view(1, 1, 1, self.nlat, 1)
-        print(f"surface_area_tensor: {self.surface_area_tensor.shape}")
-        self.compute_plev_quantities = compute_pressure_on_mlevs(a_vals=a_tensor, b_vals=b_tensor, plev_dim=1)
+        self.register_buffer('a_tensor',
+                         torch.from_numpy(a_vals).view(1, self.levels, 1, 1, 1) / 100,
+                         persistent=False)
+        self.register_buffer('b_tensor',
+                             torch.from_numpy(b_vals).view(1, self.levels, 1, 1, 1),
+                             persistent=False)
+        self.register_buffer('surface_area_tensor',
+                             torch.from_numpy(self.surface_area).view(1, 1, 1, self.nlat, 1),
+                             persistent=False)
+        logger.debug(f"surface_area_tensor: {self.surface_area_tensor.shape}")
+        self.compute_plev_quantities = compute_pressure_on_mlevs(a_vals=self.a_tensor, b_vals=self.b_tensor, plev_dim=1)
         
     def calculate_mass(self, sp):
         # 1 / g * A * integral(dp) [thickness]
@@ -687,15 +698,14 @@ class SKEBS(nn.Module):
     def forward(self, x):
         x = x["y_pred"]
 
-        if not self.device and not self.spec_coef:  # if one is not set, a runtime error will be thrown later
+        if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
             self.initialize_pattern(x)
-            self.device = x.device
-            self.initialize_mass_calc()
+            self.spec_coef_is_initialized = True
 
         self.spec_coef = self.cycle_pattern(self.spec_coef)  # cycle from prev step
         # b, 1, 1, lmax, mmax
         pattern_on_grid = self.isht(self.spec_coef) # b, 1, 1, lat, lon
-        print(f"pattern on grid: {pattern_on_grid.shape}")
+        logger.debug(f"pattern on grid: {pattern_on_grid.shape}")
         # todo: placeholder for backscatter prediction
         backscatter_pred = self.backscatter_network(x)
 
