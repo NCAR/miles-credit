@@ -1,3 +1,4 @@
+import pytest
 import yaml
 import os
 
@@ -15,6 +16,7 @@ def test_main_parser():
     conf = CREDIT_main_parser(conf, print_summary=True) # parser will copy model configs to post_conf
     return conf
 
+@pytest.mark.skip(reason="need to be on glade filesystem")
 def test_training_data_check():
     conf = test_main_parser()
     conf = training_data_check(conf, print_summary=True)

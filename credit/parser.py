@@ -372,9 +372,6 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         assert "level_list" in conf['data'], (
             'need to specify hybrid sigma level indices for skebs'
         )
-        assert "timestep" in conf['data'], (
-            'need to specify timestep in seconds for skebs'
-        )
         assert conf['trainer']["train_batch_size"] == conf['trainer']["valid_batch_size"], (
             'train and valid batch sizes need to be the same for skebs'
         )

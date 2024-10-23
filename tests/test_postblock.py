@@ -1,12 +1,15 @@
 import pytest
 import yaml
 import os
+import logging
 
 import torch
+import torch.nn as nn
 from credit.models.crossformer import CrossFormer
 from credit.postblock import PostBlock, Backscatter_FCNN
 from credit.postblock import SKEBS, TracerFixer, GlobalMassFixer, GlobalEnergyFixer
 from credit.parser import CREDIT_main_parser
+
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
 CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]),
@@ -18,6 +21,7 @@ def test_SKEBS_integration():
     integration testing to make sure everything goes on GPU, is loaded properly etc
     requires loading weights
     '''
+    logging.info("integration testing SKEBS")
     config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
@@ -42,9 +46,15 @@ def test_SKEBS_integration():
     y_pred[:, sp_index] = torch.ones_like(y_pred[:, sp_index]) * 1013
 
     model = CrossFormer(**conf["model"])
-    model.to("cpu")
-    model = model.load_model(conf)
-    pred = model(x)
+    device = torch.device(f"cuda:{1 % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
+    # model = model.load_model(conf)
+    model.to(device)
+    logging.info(f"model: {device}")
+
+    pred = model(x.to(device))
+    loss_fn = nn.MSELoss()
+    loss = loss_fn(pred.float(), y_pred.to(device).float())
+    loss.backward()
 
     assert pred.shape == y_pred.shape
 
@@ -244,5 +254,16 @@ def test_SKEBS_era5():
     pass
 
 if __name__ == "__main__":
-    # test_SKEBS_integration()
+    # Set up logger to print stuff
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+
+    # Stream output to stdout
+    ch = logging.StreamHandler()
+    # ch.setLevel(logging.INFO)
+    ch.setFormatter(formatter)
+    root.addHandler(ch)
+
+    test_SKEBS_integration()
     test_SKEBS_rand()

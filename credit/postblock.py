@@ -550,6 +550,19 @@ def concat_fix(y_pred, q_pred_correct, q_ind_start, q_ind_end, N_vars):
 
     return torch.cat(var_list, dim=1)
 
+def concat_for_inplace_ops(y_orig, y_inplace_slice, ind_start, ind_end):
+    """
+    alternate way to concat tensors along first dim, 
+    given a set of indices to replace that are contiguous 
+    """
+    tensors = [
+        y_orig[:, :ind_start],
+        y_inplace_slice,
+        y_orig[:, ind_end + 1:]
+    ]
+    new_tensor = torch.concat(tensors, dim=1)
+    return new_tensor
+
 
 class Backscatter_FCNN(nn.Module):
     def __init__(self,
@@ -565,15 +578,11 @@ class Backscatter_FCNN(nn.Module):
 
     def forward(self, x):
         x = x.permute(0, 2, 3, 4, 1) # put channels last
-        logger.debug(x.shape)
         x = self.fc1(x)
         x = self.relu1(x)
         x = self.fc2(x)
-        logger.debug(x.shape)
         x = x.permute(0, -1, 1, 2, 3) # put channels back to 1st dim
-        logger.debug(x.shape)
         return x
-        # return torch.ones((x.shape[0], self.levels, 1, self.nlat, self.nlon)) 
 
 class SKEBS(nn.Module):
     """
@@ -606,8 +615,12 @@ class SKEBS(nn.Module):
         self.V_inds = post_conf["skebs"]["V_inds"]
         self.sp_index = post_conf["skebs"]["SP_ind"]
 
+        # check for contiguous indices, need this for concat operation
+        assert np.all(np.diff(self.U_inds) == 1) and np.all(self.U_inds[:-1] <= self.U_inds[1:])
+        assert np.all(np.diff(self.V_inds) == 1) and np.all(self.V_inds[:-1] <= self.V_inds[1:])
+
         # need this info
-        self.timestep = post_conf["data"]["timestep"]
+        self.timestep = post_conf["data"]["lead_time_periods"] * 3600
         self.level_info = xr.open_dataset(post_conf["data"]["level_info_file"])
         self.level_list = post_conf["data"]["level_list"]
         self.surface_area = xr.open_dataset(post_conf["data"]["save_loc_static"])["surface_area"].to_numpy()
@@ -619,6 +632,9 @@ class SKEBS(nn.Module):
 
         num_channels = self.levels * self.channels + self.surface_channels + self.output_only_channels
         self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
+
+        self.state_trans = load_transforms(post_conf, scaler_only=True)
+
     def initialize_sht(self):
         """
         Initialize spherical harmonics and inverse spherical harmonics transformations
@@ -637,7 +653,6 @@ class SKEBS(nn.Module):
                              torch.arange(1, self.lmax + 1).unsqueeze(1),
                              persistent=False) # (lmax, 1)
         # assume (b, c, t, ,lat,lon)
-
         # parameters we want to learn: (init to berner 2009 values for now)
         self.alpha = Parameter(torch.tensor(0.5, requires_grad=True))
         self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
@@ -653,23 +668,28 @@ class SKEBS(nn.Module):
         """
         y_shape = y_pred.shape
 
-        self.register_buffer('spec_coef', 
-                             torch.zeros(
+        self.spec_coef = torch.zeros(
                                  (y_shape[0], 1, 1, self.lmax, self.mmax),  # b, 1, 1, lat, lon
-                                 dtype=torch.cfloat,),
-                             persistent=False)
+                                 dtype=torch.cfloat,
+                                 device=y_pred.device)
+        logger.info(f"spec_coef device: {self.spec_coef.device}")
+        # self.register_buffer('spec_coef', 
+        #                      torch.zeros(
+        #                          (y_shape[0], 1, 1, self.lmax, self.mmax),  # b, 1, 1, lat, lon
+        #                          dtype=torch.cfloat,),
+        #                      persistent=False)
 
         # initialize pattern todo: how many iters?
-        for _ in range(10):
+        for i in range(1):
             self.spec_coef = self.cycle_pattern(self.spec_coef)
 
     def cycle_pattern(self, spec_coef):
         Gamma = torch.sum(self.lrange * (self.lrange + 1.0) * (self.lrange + 2.0) * self.lrange ** (2.0 * self.p))  # scalar
         b = torch.sqrt((4.0 * PI * RAD_EARTH**2.0) / (self.variance * Gamma) * self.alpha * self.dE)  # scalar
         g_n = b * self.lrange ** self.p  # (lmax, 1)
-        logger.debug(f"g_n: {g_n.shape}")
-        noise = self.variance * torch.randn(spec_coef.shape)  # (b, 1, 1, lmax, mmax) std normal noise diff for all n?
 
+        logger.debug(f"spec_coef device: {spec_coef.device}")
+        noise = self.variance * torch.randn(self.spec_coef.shape, device=spec_coef.device)  # (b, 1, 1, lmax, mmax) std normal noise diff for all n?
         new_coef = (1.0 - self.alpha) * spec_coef + g_n * torch.sqrt(self.alpha) * noise  # (lmax, mmax)
         return new_coef
 
@@ -685,7 +705,6 @@ class SKEBS(nn.Module):
         self.register_buffer('surface_area_tensor',
                              torch.from_numpy(self.surface_area).view(1, 1, 1, self.nlat, 1),
                              persistent=False)
-        logger.debug(f"surface_area_tensor: {self.surface_area_tensor.shape}")
         self.compute_plev_quantities = compute_pressure_on_mlevs(a_vals=self.a_tensor, b_vals=self.b_tensor, plev_dim=1)
         
     def calculate_mass(self, sp):
@@ -696,7 +715,11 @@ class SKEBS(nn.Module):
                 )
 
     def forward(self, x):
+        logger.debug(f"lrange device: {self.lrange.device}")
+        logger.debug(f"sa tensor device: {self.surface_area_tensor.device}")
         x = x["y_pred"]
+        logger.debug(f"x device: {x.device}")
+        # x = self.state_trans.inverse_transform(x)
 
         if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
             self.initialize_pattern(x)
@@ -713,7 +736,11 @@ class SKEBS(nn.Module):
         total_forcing = self.timestep * backscatter_pred * pattern_on_grid 
         # shape (b, levels, t, lat, lon)
 
-        mlev_mass = self.calculate_mass(x[:, self.sp_index : self.sp_index + 1])  # slice to keep dims
+
+        # assert torch.min(x[:, self.sp_index]) >= 0., "sp less than 0" 
+        sp = torch.ones_like(x[:, self.sp_index : self.sp_index + 1], device = x.device) * 1013.
+        mlev_mass = self.calculate_mass(sp)  # slice to keep dims
+        assert torch.min(mlev_mass) >= 0., "mass is less than 0"
         # (b, levels, 1, lat, lon)
         u_squared, v_squared = x[:, self.U_inds] ** 2, x[:, self.V_inds] ** 2
         wind_squared = u_squared + v_squared
@@ -724,9 +751,12 @@ class SKEBS(nn.Module):
         add_wind_magnitude = (torch.sign(total_forcing) 
                               * (torch.sqrt(2.0 * torch.abs(total_forcing) / mlev_mass + wind_squared) 
                               - torch.sqrt(wind_squared))
-                              )
-        x[:, self.U_inds] += add_wind_magnitude * u_frac
-        x[:, self.V_inds] += add_wind_magnitude * v_frac
+                              ) # (b, levels, 1, lat, lon)
+        x_u_wind = x[:, self.U_inds] + add_wind_magnitude * u_frac
+        x_v_wind = x[:, self.V_inds] + add_wind_magnitude * v_frac
+
+        x = concat_for_inplace_ops(x, x_u_wind, min(self.U_inds), max(self.U_inds))
+        x = concat_for_inplace_ops(x, x_v_wind, min(self.V_inds), max(self.V_inds))
         return x
 
 

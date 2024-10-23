@@ -34,8 +34,13 @@ class compute_pressure_on_mlevs(nn.Module):
                  b_vals,
                  plev_dim=1):
         super().__init__()
-        self.a_vals = a_vals
-        self.b_vals = b_vals
+        self.register_buffer('a_vals',
+                                a_vals,
+                                persistent=False)
+        self.register_buffer('b_vals',
+                             b_vals,
+                             persistent=False)
+
         self.plev_dim = plev_dim
         self.is_fully_initialized = False
     def compute_p(self, sp):
