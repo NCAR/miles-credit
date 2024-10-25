@@ -310,8 +310,14 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # turn-off post if post_conf does not exist
     conf['model'].setdefault('post_conf', {'activate': False})
 
-    # set defaults for post modules
     post_list = ['skebs', 'tracer_fixer', 'global_mass_fixer', 'global_energy_fixer']
+
+    # if activate is false, set all post modules to false
+    if not conf['model']['post_conf']['activate']:
+        for post_module in post_list:
+            conf['model']['post_conf'][post_module] = {'activate': False}
+
+    # set defaults for post modules
     for post_module in post_list:
         conf['model']['post_conf'].setdefault(post_module, {'activate': False})
 

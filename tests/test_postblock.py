@@ -11,6 +11,8 @@ from credit.postblock import SKEBS, TracerFixer, GlobalMassFixer, GlobalEnergyFi
 from credit.parser import CREDIT_main_parser
 
 
+from torchviz import make_dot
+
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
 CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]),
                       "config")
@@ -22,11 +24,13 @@ def test_SKEBS_integration():
     requires loading weights
     '''
     logging.info("integration testing SKEBS")
-    config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    # config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    config = "/glade/work/dkimpara/CREDIT_runs/skebs_test/model.yml"
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     conf = CREDIT_main_parser(conf) # parser will copy model configs to post_conf
+
     post_conf = conf['model']['post_conf']
     
     image_height = post_conf["model"]["image_height"]
@@ -47,14 +51,24 @@ def test_SKEBS_integration():
 
     model = CrossFormer(**conf["model"])
     device = torch.device(f"cuda:{1 % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
-    # model = model.load_model(conf)
+    model = model.load_model(conf)
     model.to(device)
-    logging.info(f"model: {device}")
-
+    model.train()
     pred = model(x.to(device))
+
+    # model = SKEBS(conf["model"]["post_conf"])
+    # device = torch.device(f"cuda:{1 % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
+    # model.to(device)
+    # model.train()
+    # pred = model({"y_pred": y_pred.to(device)})
+
     loss_fn = nn.MSELoss()
-    loss = loss_fn(pred.float(), y_pred.to(device).float())
-    loss.backward()
+    loss = loss_fn(pred.float(), y_pred.to(device).float()).mean()
+    # dot = make_dot(loss, params=dict(model.named_parameters()))
+    # dot.format = 'png'
+    # dot.render('model_arch.png')
+    scaler = torch.GradScaler()
+    scaler.scale(loss / 1).backward()
 
     assert pred.shape == y_pred.shape
 
@@ -266,4 +280,4 @@ if __name__ == "__main__":
     root.addHandler(ch)
 
     test_SKEBS_integration()
-    test_SKEBS_rand()
+    # test_SKEBS_rand()

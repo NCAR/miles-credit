@@ -590,7 +590,6 @@ class SKEBS(nn.Module):
                 if post_conf is not specified in config,
                 defaults are set in the parser
 
-    This class is currently a placeholder for SKEBS
     """
 
     def __init__(self, post_conf):
@@ -684,6 +683,7 @@ class SKEBS(nn.Module):
             self.spec_coef = self.cycle_pattern(self.spec_coef)
 
     def cycle_pattern(self, spec_coef):
+        spec_coef = spec_coef.detach()
         Gamma = torch.sum(self.lrange * (self.lrange + 1.0) * (self.lrange + 2.0) * self.lrange ** (2.0 * self.p))  # scalar
         b = torch.sqrt((4.0 * PI * RAD_EARTH**2.0) / (self.variance * Gamma) * self.alpha * self.dE)  # scalar
         g_n = b * self.lrange ** self.p  # (lmax, 1)
@@ -738,7 +738,8 @@ class SKEBS(nn.Module):
 
 
         # assert torch.min(x[:, self.sp_index]) >= 0., "sp less than 0" 
-        sp = torch.ones_like(x[:, self.sp_index : self.sp_index + 1], device = x.device) * 1013.
+        # sp = torch.ones_like(x[:, self.sp_index : self.sp_index + 1], device = x.device) * 1013.
+        sp = x[:, self.sp_index : self.sp_index + 1]
         mlev_mass = self.calculate_mass(sp)  # slice to keep dims
         assert torch.min(mlev_mass) >= 0., "mass is less than 0"
         # (b, levels, 1, lat, lon)
