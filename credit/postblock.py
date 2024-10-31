@@ -10,6 +10,7 @@ Content:
 
 """
 
+import os
 import torch
 from torch import nn
 import torch_harmonics as harmonics
@@ -18,6 +19,7 @@ import xarray as xr
 
 from credit.data import get_forward_data
 from torch.nn.parameter import Parameter
+from torch.distributions.multivariate_normal import MultivariateNormal
 from credit.transforms import load_transforms
 from credit.physics_core import compute_pressure_on_mlevs, physics_pressure_level
 from credit.physics_constants import PI, RAD_EARTH, GRAVITY, RHO_WATER, LH_WATER, CP_DRY, CP_VAPOR
@@ -578,9 +580,12 @@ class Backscatter_FCNN(nn.Module):
 
     def forward(self, x):
         x = x.permute(0, 2, 3, 4, 1) # put channels last
+
         x = self.fc1(x)
         x = self.relu1(x)
         x = self.fc2(x)
+        x = torch.clamp(x, min=0.) # prevent prediction of negative backscatter
+
         x = x.permute(0, -1, 1, 2, 3) # put channels back to 1st dim
         return x
 
@@ -607,6 +612,8 @@ class SKEBS(nn.Module):
         self.input_only_channels = post_conf["model"]["input_only_channels"]
         self.frames = post_conf["model"]["frames"]
 
+        self.forecast_len = post_conf["data"]["forecast_len"]
+        self.multistep = self.forecast_len > 1
         self.lmax = post_conf["skebs"]["lmax"]
         self.mmax = post_conf["skebs"]["mmax"]
         self.grid = post_conf["grid"]
@@ -630,9 +637,13 @@ class SKEBS(nn.Module):
         self.initialize_mass_calc()
 
         num_channels = self.levels * self.channels + self.surface_channels + self.output_only_channels
-        self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
+        if post_conf["skebs"]["uniform_dissipation"]:
+            self.backscatter_network = lambda x: Parameter(torch.full((1,1,1,self.nlat,self.nlon), 2.5)) 
+        else:
+            self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
 
         self.state_trans = load_transforms(post_conf, scaler_only=True)
+        self.iteration = 0
 
     def initialize_sht(self):
         """
@@ -646,6 +657,7 @@ class SKEBS(nn.Module):
         # self.ivsht = harmonics.InverseRealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
         self.lmax = self.isht.lmax
         self.mmax = self.isht.mmax
+        logging.info(f"lmax: {self.lmax}, mmax: {self.mmax}")
 
     def initialize_skebs_parameters(self):
         self.register_buffer('lrange', 
@@ -653,11 +665,24 @@ class SKEBS(nn.Module):
                              persistent=False) # (lmax, 1)
         # assume (b, c, t, ,lat,lon)
         # parameters we want to learn: (init to berner 2009 values for now)
-        self.alpha = Parameter(torch.tensor(0.5, requires_grad=True))
+        if self.multistep:
+            logger.info("multi-step skebs")
+            self.alpha = Parameter(torch.tensor(0.125, requires_grad=True))
+        else:
+            logger.info("single-step skebs")
+            self.alpha = Parameter(torch.tensor(1.0, requires_grad=False))
         self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
         self.p = Parameter(torch.tensor(-1.27, requires_grad=True))
         self.dE = Parameter(torch.tensor(10e-4, requires_grad=True))
-
+        self.r = Parameter(torch.tensor(0.1, requires_grad=True))
+        # tunable filter
+        self.spectral_filter = Parameter(torch.cat([
+                                                    torch.ones(10),
+                                                    torch.linspace(1., 0.3, 19),
+                                                    torch.zeros(self.lmax - 29)
+                                                    ]).view(1,1,1,self.lmax, 1))
+        # self.spectral_filter = Parameter(torch.ones(self.lmax).view(1,1,1,self.lmax,1),
+        #                                  requires_grad=True)
     def initialize_pattern(self, y_pred):
         """
         initialize the random pattern.
@@ -668,29 +693,26 @@ class SKEBS(nn.Module):
         y_shape = y_pred.shape
 
         self.spec_coef = torch.zeros(
-                                 (y_shape[0], 1, 1, self.lmax, self.mmax),  # b, 1, 1, lat, lon
+                                 (y_shape[0], 1, 1, self.lmax, self.mmax),  # b, 1, 1, lmax, mmax
                                  dtype=torch.cfloat,
                                  device=y_pred.device)
-        logger.info(f"spec_coef device: {self.spec_coef.device}")
-        # self.register_buffer('spec_coef', 
-        #                      torch.zeros(
-        #                          (y_shape[0], 1, 1, self.lmax, self.mmax),  # b, 1, 1, lat, lon
-        #                          dtype=torch.cfloat,),
-        #                      persistent=False)
 
         # initialize pattern todo: how many iters?
-        for i in range(1):
+        iters = 500
+        logger.debug(f"initializing pattern with {iters} iterations")
+        for i in range(iters):
             self.spec_coef = self.cycle_pattern(self.spec_coef)
 
     def cycle_pattern(self, spec_coef):
         spec_coef = spec_coef.detach()
-        Gamma = torch.sum(self.lrange * (self.lrange + 1.0) * (self.lrange + 2.0) * self.lrange ** (2.0 * self.p))  # scalar
-        b = torch.sqrt((4.0 * PI * RAD_EARTH**2.0) / (self.variance * Gamma) * self.alpha * self.dE)  # scalar
-        g_n = b * self.lrange ** self.p  # (lmax, 1)
+        Gamma = torch.sum(self.lrange * (self.lrange + 1.0) * (2 * self.lrange + 1.0) * self.lrange ** (2.0 * self.p))  # scalar
+        self.b = torch.sqrt((4.0 * PI * RAD_EARTH**2.0) / (self.variance * Gamma) * self.alpha * self.dE)  # scalar
+        self.g_n = self.b * self.lrange ** self.p  # (lmax, 1)
 
-        logger.debug(f"spec_coef device: {spec_coef.device}")
-        noise = self.variance * torch.randn(self.spec_coef.shape, device=spec_coef.device)  # (b, 1, 1, lmax, mmax) std normal noise diff for all n?
-        new_coef = (1.0 - self.alpha) * spec_coef + g_n * torch.sqrt(self.alpha) * noise  # (lmax, mmax)
+        # noise = self.variance * torch.randn(self.spec_coef.shape, device=spec_coef.device)  # (b, 1, 1, lmax, mmax) std normal noise diff for all n?
+        cmplx_noise = torch.view_as_complex(MultivariateNormal(torch.zeros(2), torch.eye(2)).sample(self.spec_coef.shape))
+        noise = self.variance * cmplx_noise
+        new_coef = (1.0 - self.alpha) * spec_coef + self.g_n * torch.sqrt(self.alpha) * noise  # (lmax, mmax)
         return new_coef
 
     def initialize_mass_calc(self):
@@ -715,33 +737,43 @@ class SKEBS(nn.Module):
                 )
 
     def forward(self, x):
-        logger.debug(f"lrange device: {self.lrange.device}")
-        logger.debug(f"sa tensor device: {self.surface_area_tensor.device}")
         x = x["y_pred"]
-        logger.debug(f"x device: {x.device}")
-        # x = self.state_trans.inverse_transform(x)
+        # todo: get topography and other input vars
+        x = self.state_trans.inverse_transform(x)
 
         if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
             self.initialize_pattern(x)
             self.spec_coef_is_initialized = True
 
-        self.spec_coef = self.cycle_pattern(self.spec_coef)  # cycle from prev step
+        self.spec_coef = self.cycle_pattern(self.spec_coef) * self.spectral_filter  # cycle from prev step
         # b, 1, 1, lmax, mmax
         pattern_on_grid = self.isht(self.spec_coef) # b, 1, 1, lat, lon
-        logger.debug(f"pattern on grid: {pattern_on_grid.shape}")
-        # todo: placeholder for backscatter prediction
+
+        # debug pattern:
+        logger.info("saving patterns")
+        debug_save = "/glade/work/dkimpara/CREDIT_runs/test_skebs/debug_pattern"
+        save_pattern = pattern_on_grid[0, 0, 0]
+        torch.save(save_pattern, os.path.join(debug_save, f"iter_{self.iteration}"))
+        save_coef = self.spec_coef[0, 0, 0]
+        torch.save(save_coef, os.path.join(debug_save, f"coef_{self.iteration}"))
+        torch.save(self.g_n, os.path.join(debug_save, f"g_n_{self.iteration}"))
+        torch.save(self.b, os.path.join(debug_save, f"b_{self.iteration}"))
+
+        self.iteration += 1
+
         backscatter_pred = self.backscatter_network(x)
 
         # skebs gives us an instantaneous forcing term, need to multiply by timestep
-        total_forcing = self.timestep * backscatter_pred * pattern_on_grid 
+        total_forcing = (self.timestep 
+                         * torch.sqrt(self.r * backscatter_pred * self.timestep / self.dE) 
+                         * pattern_on_grid )
         # shape (b, levels, t, lat, lon)
-
 
         # assert torch.min(x[:, self.sp_index]) >= 0., "sp less than 0" 
         # sp = torch.ones_like(x[:, self.sp_index : self.sp_index + 1], device = x.device) * 1013.
         sp = x[:, self.sp_index : self.sp_index + 1]
         mlev_mass = self.calculate_mass(sp)  # slice to keep dims
-        assert torch.min(mlev_mass) >= 0., "mass is less than 0"
+        assert torch.min(mlev_mass) >= 0., "ERROR: mass is less than 0"
         # (b, levels, 1, lat, lon)
         u_squared, v_squared = x[:, self.U_inds] ** 2, x[:, self.V_inds] ** 2
         wind_squared = u_squared + v_squared
@@ -758,6 +790,7 @@ class SKEBS(nn.Module):
 
         x = concat_for_inplace_ops(x, x_u_wind, min(self.U_inds), max(self.U_inds))
         x = concat_for_inplace_ops(x, x_v_wind, min(self.V_inds), max(self.V_inds))
+        x = self.state_trans.transform_array(x)
         return x
 
 

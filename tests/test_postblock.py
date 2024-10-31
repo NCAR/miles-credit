@@ -25,7 +25,7 @@ def test_SKEBS_integration():
     '''
     logging.info("integration testing SKEBS")
     # config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
-    config = "/glade/work/dkimpara/CREDIT_runs/skebs_test/model.yml"
+    config = "/glade/work/dkimpara/CREDIT_runs/skebs_test/test_skebs_quarter_casper.yml"
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
@@ -83,6 +83,7 @@ def test_SKEBS_rand():
     conf = CREDIT_main_parser(conf) # parser will copy model configs to post_conf
     post_conf = conf['model']['post_conf']
     
+    
     image_height = post_conf["model"]["image_height"]
     image_width = post_conf["model"]["image_width"]
     channels = post_conf["model"]["channels"]
@@ -99,13 +100,19 @@ def test_SKEBS_rand():
     y_pred = torch.randn(2, out_channels, frames, image_height, image_width)
     y_pred[:, sp_index] = torch.ones_like(y_pred[:, sp_index]) * 1013
 
+    post_conf["data"]["forecast_len"] = 2 # to turn on multistep
+
     postblock = PostBlock(post_conf)
     assert any([isinstance(module, SKEBS) for module in postblock.modules()])
 
     input_dict = {"x": x,
                   "y_pred": y_pred}
 
-    skebs_pred = postblock(input_dict)
+    # testing random pattern generation
+    for i in range(10):
+        skebs_pred = postblock(input_dict)
+
+    # skebs_pred = postblock(input_dict)
 
     assert skebs_pred.shape == y_pred.shape
     assert not torch.isnan(skebs_pred).any()
@@ -279,5 +286,5 @@ if __name__ == "__main__":
     ch.setFormatter(formatter)
     root.addHandler(ch)
 
-    test_SKEBS_integration()
-    # test_SKEBS_rand()
+    # test_SKEBS_integration()
+    test_SKEBS_rand()

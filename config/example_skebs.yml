@@ -4,7 +4,7 @@
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/dkimpara/CREDIT_runs/skebs_test/'
+save_loc: '/glade/work/dkimpara/CREDIT_runs/test_skebs/'
 seed: 1000
 
 data:
@@ -139,7 +139,9 @@ model:
             lmax: None
             mmax: None
             freeze_base_model_weights: True
-        grid: 'legendre-gauss'
+            multistep: False
+            uniform_dissipation: True # tunable fixed dissipation rate array else, use a backscatter FCNN 
+        grid: 'equiangular'
         
         tracer_fixer:
             activate: False
