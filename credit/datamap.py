@@ -35,12 +35,14 @@ Content:
 import os
 from dataclasses import dataclass, field
 from glob import glob
+from sklearn.preprocessing import minmax_scale
 from warnings import warn
 import netCDF4 as nc
 
 
+
 @dataclass
-class datamap:
+class DataMap:
     ''' Class for reading in data from multiple files.
 
     rootpath: pathway to the files
@@ -50,7 +52,7 @@ class datamap:
         static: no time dimension; data is loaded on initialization
         3D: data has z-dimension; unstack Z to pseudo-variables when reading
         2D: default: time-varying 2D data
-    normalize: if dim=='static' & normalize == True, scale data to range [-1,1]
+    normalize: if dim=='static' & normalize == True, scale data to range [0,1]
     boundary, prognostic, diagnostic, unused: lists of variable names in files
     '''
     rootpath:    str
@@ -78,10 +80,26 @@ class datamap:
             warn(f"credit.datamap: normalize does nothing if dim != 'static'")
             
         if self.static():
+            if len(glob(self.glob, self.rootpath)) != 1:
+                warn("credit.datamap: dim='static' requires a single file")
+                ## TODO (someday): support multiple static files
+                raise
+            if len(prognostic) > 0 or len(diagnostic) > 0:
+                warn("credit.datamap: static vars must be boundary, not prognostic or diagnostic")
+                raise
             ## load data from netcdf
+            staticfile = nc.Dataset(self.rootpath + '/' + self.glob)
+            ## [:] forces data to load
+            staticdata = [staticfile[v][:] for v in self.boundary]
+            self.data = dict(zip(self.boundary, staticdata))
+            ## cleanup
+            staticfile.close()
+            del staticfile, staticdata
+            
             if self.normalize:
-                pass
-                ## normalize loaded data
+                for k in self.data.keys():
+                    self.data[k] = minmax_scale(self.data[k])
+                    
         else:
             self.filepaths = sorted(glob(self.glob, root_dir=self.rootpath))
             ## open first file
@@ -90,13 +108,19 @@ class datamap:
             ## get length of all files; construct starts array
             ## get total length of dataset, minus sample padding
 
+    ## total effective length (length - sample_length + 1
     def __len__(self):
-        ## return total length of self
-        pass
+        if self.static:
+            return 1
+        else:
+            pass
 
     def __getitem__(self, index):
 
-        ## if static, short-circuit and just return data
+        if self.static:
+            return self.data
+
+        else:
         
         segment = np.searchsorted(self.ends, index)
         subindex = index - starts[segment]
