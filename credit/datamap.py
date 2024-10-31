@@ -35,10 +35,19 @@ Content:
 import os
 from dataclasses import dataclass, field
 from glob import glob
-from sklearn.preprocessing import minmax_scale
 from warnings import warn
 import netCDF4 as nc
 
+
+def rescale_minmax(x):
+    '''rescale data to [0,1].  Don't use
+    sklearn.preprocessing.minmax_scale() because it requires reshaping
+    the data, which is silly for a use case this simple.
+
+    '''
+    x = x - np.min(x)
+    x = x / np.max(x)
+    return x
 
 
 @dataclass
@@ -116,7 +125,6 @@ class DataMap:
             pass
 
     def __getitem__(self, index):
-
         if self.static:
             return self.data
 
