@@ -21,6 +21,9 @@
 save_loc: /glade/work/$USER/CREDIT_runs/c404/
 seed: 2222  # RNG seed
 
+history_len:  &histlen 2 
+forecast_len: &forelen 1
+
 
 # file globs are defined relative to the top-level data rootpath
 
@@ -56,7 +59,7 @@ seed: 2222  # RNG seed
 # rewrite their outputs alphabetize variables.
 
 data:
-    rootpath: /glade/derecho/scratch/mcginnis/conus404
+    rootpath: &default /glade/derecho/scratch/mcginnis/conus404
     datasets:
     
         ## extracted from 'wrfconstants_usgs404.nc'
@@ -65,9 +68,11 @@ data:
         ## (or to [0,1] range)
         
         static:
+            rootpath: *default
             glob: 'conus404.static.nc'
-	    encoder: hires
+            label: hires
             dim: static
+            normalize: True   # scale min,max == [-1,1] iff dim = static
             boundary:
               - COSALPHA  # local cosine of map rotation
               - E         # coriolis cosine latitude term
@@ -76,19 +81,20 @@ data:
               - LANDMASK  # land/sea mask (0=water, 1=land)
               - SINALPHA  # local sine of map rotation
               - VAR       # orographic variance
-              - VAR_SS0   # variance of subgrid-scale orography
+              - VAR_SSO   # variance of subgrid-scale orography
             unused:
               - XLAT      # latitude
               - XLONG     # longitude
 
 
-        ## calculated by miles-credit applications script
+        ## calculated using miles-credit applications script
         ## calc_global_solar.py, regridded to coarsened CONUS404 grid
         ## hourly, 1979-2024
         
         solar:
+            rootpath: *default
             glob: 'solar/tisr.*.nc'
-	    encoder: lores
+            label: lores
             dim: 2D
             boundary:
               - tisr      # TOA incident solar radiation (J/m^2, integral dt)
@@ -99,8 +105,9 @@ data:
         ## hourly, 1979-2023
 
         era5:
+            rootpath: *default
             glob: 'era5/*nc'  ## FILL IN
-	    encoder: lores
+            label: lores
             dim: 3D
             boundary: [Q, T, U, V, Z]   # 3D humidity, temp, winds, geopotential
 
@@ -114,20 +121,23 @@ data:
         ## of the non-staggered grids.
     
         conus404_3D:
+            rootpath: *default
             glob: 'data/*/conus404.3d.*.nc'
-	    encoder: hires
+            label: hires
             dim: 3D
             prognostic:
-              - P'      # total pressure (dataset uses hybrid sigma coordinates)
+              - P       # total pressure (dataset uses hybrid sigma coordinates)
               - QVAPOR  # water vapor mixing ratio
               - TK      # air temperature
               - U       # U-component of wind *with respect to model grid*
               - V       # V-component of wind *with respect to model grid*
-            diagnostic: [Z]  # geopotential height
+            diagnostic:
+              - Z       # geopotential height
 
         conus404_2D:
+            rootpath: *default
             glob: 'data/*/conus404.2d.*.nc'
-	    encoder: hires
+            label: hires
             dim: 2D
             boundary: [COSZEN]  #
             prognostic:
@@ -142,9 +152,13 @@ data:
               - totalVap    # column-integrated water vapor content 
             unused:
               - SNOW       # snow water equivalent
-                      
 
-#     ## HERE
+    history_len:  *histlen
+    forecast_len: *forelen
+
+
+
+#     ## NOT YET UPDATED BELOW HERE
 # 
 #     # z-score files, they must be zarr or nc with (level,) coords
 #     # they MUST include all the
