@@ -6,37 +6,38 @@ seed: 1000
 
 data:
     # upper-air variables
-    variables: ['U', 'V', 'T', 'Z', 'specific_total_water']
-    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
+    variables: ['specific_total_water', 'temperature', 'u_component_of_wind','v_component_of_wind']
+    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
     
     # surface variables
-    surface_variables: ['MSL', 'VAR_2T', 'SKT']
-    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
+    surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
     
     # diagnostic variables
-    diagnostic_variables: ['evaporation', 'total_precipitation', 'TCC',
+    diagnostic_variables: ['evaporation', 'total_precipitation',
                            'surface_net_solar_radiation',
                            'surface_net_thermal_radiation',
                            'surface_sensible_heat_flux',
                            'surface_latent_heat_flux',
                            'top_net_solar_radiation',
                            'top_net_thermal_radiation']
-    save_loc_diagnostic: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
+                           
+    save_loc_diagnostic: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
     
     # static variables
     static_variables: ['z_norm', 'soil_type'] 
-    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
+    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
 
     # physics file
-    save_loc_physics: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
+    save_loc_physics: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
     
     # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
     
     # train / validation split
     train_years: [1979, 2019]
@@ -45,19 +46,12 @@ data:
     # data workflow
     scaler_type: 'std_new'  
     
-    # number of input states
-    # FuXi has 2 input states
     history_len: 2
     valid_history_len: 2
     
-    # number of forecast steps to compute loss
-    # 0 for single step training / validation
-    # larger than 0 for multi-step training / validation
     forecast_len: 0
     valid_forecast_len: 0
-    
-    # one_shot: True --> compute loss on the last forecast step only
-    # one_shot: False --> compute loss on all forecast steps
+
     one_shot: False
     
     # 1 for hourly model
@@ -70,9 +64,7 @@ data:
     static_first: True
     
     sst_forcing:
-        activate: True
-        varname_skt: 'SKT'
-        varname_ocean_mask: 'land_sea_CI_mask'
+        activate: False
 
 trainer:
     type: standard # <---------- change to your type
@@ -92,8 +84,8 @@ trainer:
     
     save_backup_weights: True
     save_best_weights: True
-    save_metric_vars: ['Z_21', 'specific_total_water_30', 'total_precipitation']
-    
+    save_metric_vars: ['VAR_10U', 'specific_total_water_30', 'total_precipitation']
+
     learning_rate: 1.0e-03 # <-- change to your lr
     weight_decay: 0
     
@@ -107,7 +99,7 @@ trainer:
     start_epoch: 0
 
     reload_epoch: True
-    epochs: &epochs 100
+    epochs: &epochs 70
     
     use_scheduler: True
     scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
@@ -130,11 +122,11 @@ model:
     frames: 2                # number of input states
     image_height: 181        # number of latitude grids
     image_width: 360        # number of longitude grids
-    levels: 37               # number of upper-air variable levels
-    channels: 5              # upper-air variable channels
-    surface_channels: 3      # surface variable channels
+    levels: 46               # number of upper-air variable levels
+    channels: 4              # upper-air variable channels
+    surface_channels: 4      # surface variable channels
     input_only_channels: 4   # dynamic forcing, forcing, static channels
-    output_only_channels: 9  # diagnostic variable channels
+    output_only_channels: 8  # diagnostic variable channels
     
     # patchify layer
     patch_height: 32         # number of latitude grids in each 3D patch
@@ -160,7 +152,7 @@ model:
         mode: mirror
         pad_lat: 40
         pad_lon: 40
-        
+
     post_conf: 
         activate: True
         
@@ -170,17 +162,19 @@ model:
         tracer_fixer:
             activate: True
             denorm: True
-            tracer_name: ['specific_total_water', 'total_precipitation', 'TCC']
-            tracer_thres: [0, 0, 0]
+            tracer_name: ['specific_total_water', 'total_precipitation']
+            tracer_thres: [0, 0]
             
         global_mass_fixer:
             activate: True
             activate_outside_model: False
             simple_demo: False
             denorm: True
-            midpoint: False
+            grid_type: 'sigma'
+            midpoint: True
             fix_level_num: 14
-            lon_lat_level_name: ['lon2d', 'lat2d', 'p_level']
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
             specific_total_water_name: ['specific_total_water']
 
         global_water_fixer:
@@ -188,28 +182,32 @@ model:
             activate_outside_model: False
             simple_demo: False
             denorm: True
-            midpoint: False
-            lon_lat_level_name: ['lon2d', 'lat2d', 'p_level']
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
             specific_total_water_name: ['specific_total_water']
             precipitation_name: ['total_precipitation']
             evaporation_name: ['evaporation']
             
         global_energy_fixer:
             activate: True
-            activate_outside_model: True
+            activate_outside_model: False
             simple_demo: False
             denorm: True
-            midpoint: False
-            lon_lat_level_name: ['lon2d', 'lat2d', 'p_level']
-            air_temperature_name: ['T']
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            air_temperature_name: ['temperature']
             specific_total_water_name: ['specific_total_water']
-            u_wind_name: ['U']
-            v_wind_name: ['V']
+            u_wind_name: ['u_component_of_wind']
+            v_wind_name: ['v_component_of_wind']
             surface_geopotential_name: ['geopotential_at_surface']
             TOA_net_radiation_flux_name: ['top_net_solar_radiation', 'top_net_thermal_radiation']
             surface_net_radiation_flux_name: ['surface_net_solar_radiation', 'surface_net_thermal_radiation']
             surface_energy_flux_name: ['surface_sensible_heat_flux', 'surface_latent_heat_flux',]
-    
+
 loss: 
     # the main training loss
     training_loss: "mse"
@@ -220,8 +218,8 @@ loss:
     
     # use latitude weighting
     use_latitude_weights: True
-    latitude_weights: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
-    
+    latitude_weights: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
     # turn-off variable weighting
     use_variable_weights: False
     
@@ -247,13 +245,3 @@ predict:
     # deprecated
     # save_format: "nc"
     
-pbs: #derecho
-    conda: "/glade/work/ksha/miniconda3/envs/credit"
-    project: "NAML0001"
-    job_name: "fuxi_6h"
-    walltime: "12:00:00"
-    nodes: 8
-    ncpus: 64
-    ngpus: 4
-    mem: '480GB'
-    queue: 'main'

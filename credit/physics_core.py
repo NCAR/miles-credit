@@ -343,11 +343,21 @@ class physics_hybrid_sigma_level:
         Returns:
             Pressure level integrals of q
         '''
-        surface_pressure = surface_pressure.unsqueeze(1)  # (batch, 1, lat, lon)
-        pressure = self.coef_a + self.coef_b * surface_pressure  # (batch, level, lat, lon)
-        delta_p = pressure.diff(dim=1).to(q_mid.device)  # (batch, level-1, lat, lon)
-        q_area = q_mid * delta_p  # Element-wise multiplication
-        q_integral = torch.sum(q_area, dim=1)  # Sum over level dimension
+        # (batch, 1, lat, lon)
+        surface_pressure = surface_pressure.unsqueeze(1)
+
+        # (batch, level, lat, lon)
+        pressure = self.coef_a.to(q_mid.device) + self.coef_b.to(q_mid.device) * surface_pressure
+
+        # (batch, level-1, lat, lon)
+        delta_p = pressure.diff(dim=1).to(q_mid.device)
+
+        # Element-wise multiplication
+        q_area = q_mid * delta_p
+
+        # Sum over level dimension
+        q_integral = torch.sum(q_area, dim=1)
+        
         return q_integral
         
     def pressure_integral_midpoint_sliced(self,
@@ -359,9 +369,15 @@ class physics_hybrid_sigma_level:
         As in `pressure_integral_midpoint`, but supports pressure level indexing,
         so it can calculate integrals of a subset of levels.
         '''
-        surface_pressure = surface_pressure.unsqueeze(1)  # (batch, 1, lat, lon)
-        pressure = self.coef_a + self.coef_b * surface_pressure  # (batch, level, lat, lon)
-        pressure_thickness = pressure.diff(dim=1)  # (batch, level-1, lat, lon)
+        # (batch, 1, lat, lon)
+        surface_pressure = surface_pressure.unsqueeze(1)
+
+        # (batch, level, lat, lon)
+        pressure = self.coef_a.to(q_mid.device) + self.coef_b.to(q_mid.device) * surface_pressure
+
+        # (batch, level-1, lat, lon)
+        pressure_thickness = pressure.diff(dim=1)
+        
         delta_p = pressure_thickness[:, ind_start:ind_end, ...].to(q_mid.device)
         
         q_mid_sliced = q_mid[:, ind_start:ind_end, ...]
@@ -381,13 +397,21 @@ class physics_hybrid_sigma_level:
         Returns:
             Pressure level integrals of q
         '''
-        surface_pressure = surface_pressure.unsqueeze(1)  # (batch, 1, lat, lon)
-        pressure = self.coef_a + self.coef_b * surface_pressure  # (batch, level, lat, lon)
-        delta_p = pressure.diff(dim=1).to(q.device)  # (batch, level-1, lat, lon)
-        q1 = q[:, :-1, ...]  # (batch, level-1, lat, lon)
-        q2 = q[:, 1:, ...]   # (batch, level-1, lat, lon)
-        q_area = 0.5 * (q1 + q2) * delta_p  # Trapezoidal rule
-        q_trapz = torch.sum(q_area, dim=1)  # Sum over level dimension
+        # (batch, 1, lat, lon)
+        surface_pressure = surface_pressure.unsqueeze(1)
+
+        # (batch, level, lat, lon)
+        pressure = self.coef_a.to(q.device) + self.coef_b.to(q.device) * surface_pressure
+
+        # (batch, level-1, lat, lon)
+        delta_p = pressure.diff(dim=1).to(q.device)
+
+        # trapz
+        q1 = q[:, :-1, ...]
+        q2 = q[:, 1:, ...]
+        q_area = 0.5 * (q1 + q2) * delta_p
+        q_trapz = torch.sum(q_area, dim=1)
+        
         return q_trapz
 
     def pressure_integral_trapz_sliced(self,
@@ -399,15 +423,21 @@ class physics_hybrid_sigma_level:
         As in `pressure_integral_trapz`, but supports pressure level indexing,
         so it can calculate integrals of a subset of levels.
         '''
-        surface_pressure = surface_pressure.unsqueeze(1)  # (batch, 1, lat, lon)
-        pressure = self.coef_a + self.coef_b * surface_pressure  # (batch, level, lat, lon)
-        delta_p = pressure[:, ind_start:ind_end, ...].diff(dim=1).to(q.device)
+        # (batch, 1, lat, lon)
+        surface_pressure = surface_pressure.unsqueeze(1)
+
+        # (batch, level, lat, lon)
+        pressure = self.coef_a.to(q.device) + self.coef_b.to(q.device) * surface_pressure
         
+        delta_p = pressure[:, ind_start:ind_end, ...].diff(dim=1).to(q.device)
+
+        # trapz
         q_slice = q[:, ind_start:ind_end, ...]
         q1 = q_slice[:, :-1, ...]
         q2 = q_slice[:, 1:, ...]
         q_area = 0.5 * (q1 + q2) * delta_p
         q_trapz = torch.sum(q_area, dim=1)
+        
         return q_trapz
 
     def weighted_sum(self,

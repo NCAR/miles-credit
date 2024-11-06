@@ -266,6 +266,8 @@ class GlobalMassFixer(nn.Module):
 
         # y_pred (batch, var, time, lat, lon) 
         # pick the first time-step, y_pred is expected to have the next step only
+        # !!! Note: time dimension is collapsed throughout !!!
+        
         q_input = x_input[:, self.q_ind_start:self.q_ind_end, -1, ...]
         q_pred = y_pred[:, self.q_ind_start:self.q_ind_end, 0, ...]
 
@@ -302,7 +304,7 @@ class GlobalMassFixer(nn.Module):
         q_correct_ratio = (mass_dry_sum_t0 - mass_dry_sum_t1_hold) / mass_dry_sum_t1_fix
         #q_correct_ratio = torch.clamp(q_correct_ratio, min=0.9, max=1.1)
         
-        # broadcast: (batch, 1, 1, 1, 1)
+        # broadcast: (batch, 1, 1, 1)
         q_correct_ratio = q_correct_ratio.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
         
         # ===================================================================== #
@@ -321,8 +323,8 @@ class GlobalMassFixer(nn.Module):
         # model level only
         
         if self.flag_sigma_level:
-            delta_coef_a = self.coef_a.diff()
-            delta_coef_b = self.coef_b.diff()
+            delta_coef_a = self.coef_a.diff().to(q_pred.device)
+            delta_coef_b = self.coef_b.diff().to(q_pred.device)
             
             if self.flag_midpoint:
                 p_dry_a = ((delta_coef_a.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_pred)).sum(1)
@@ -331,9 +333,10 @@ class GlobalMassFixer(nn.Module):
                 q_mid = (q_pred[:, :-1, ...] + q_pred[:, 1:, ...]) / 2
                 p_dry_a = ((delta_coef_a.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_mid)).sum(1)
                 p_dry_b = ((delta_coef_b.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_mid)).sum(1)
-            
-            mass_dry_a = (p_dry_a * self.core_compute.area.unsqueeze(0)).sum((-2, -1)) / GRAVITY
-            mass_dry_b = (p_dry_b * sp_pred * self.core_compute.area.unsqueeze(0)).sum((-2, -1)) / GRAVITY
+
+            grid_area = self.core_compute.area.unsqueeze(0).to(q_pred.device)
+            mass_dry_a = (p_dry_a * grid_area).sum((-2, -1)) / GRAVITY
+            mass_dry_b = (p_dry_b * sp_pred * grid_area).sum((-2, -1)) / GRAVITY
             
             # sp correction ratio using t0 dry air mass and t1 moisture
             sp_correct_ratio = (mass_dry_sum_t0 - mass_dry_a) / mass_dry_b            
@@ -345,7 +348,7 @@ class GlobalMassFixer(nn.Module):
             y_pred = concat_fix(y_pred, sp_pred, self.sp_ind, self.sp_ind, N_vars)
             
         # ===================================================================== #
-        # return fixed q and precip back to y_pred
+        # return fixed q back to y_pred
 
         # expand fixed vars to (batch, level, time, lat, lon)
         q_pred = q_pred.unsqueeze(2)
