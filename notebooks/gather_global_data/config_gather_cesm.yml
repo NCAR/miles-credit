@@ -1,0 +1,35 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# CESM State-in-State-out ML Dataset Configuration
+# 
+# This YAML file configures the gathering and preprocessing of CESM (Community Earth System Model) 
+# state-in-state-out data for machine learning applications. Designed for use on NCAR's high-performance 
+# computing systems (Casper and Derecho), this configuration supports tailored processing of upper-air 
+# and surface variables for machine learning workflows.
+# --------------------------------------------------------------------------------------------------------------------- #
+
+save_loc: '/glade/work/$USER/CREDIT_runs/post_test/'  # Base directory for saving processed data
+seed: 1000  # Random seed for reproducibility
+
+data:
+    # Upper-air variables to include in the dataset
+    variables: ['U', 'V', 'T', 'Q', 'ZMMU', 'RAINQM', 'SNOWQM']
+    
+    # Directory with archived CESM files
+    archive_loc: '/glade/derecho/scratch/wchapman/archive/f.e21.CREDIT_climate/' 
+    
+    # Intermediate output directory for data gathering
+    output_dir: '/glade/derecho/scratch/wchapman/test_gather/'
+    
+    # Path for saving final Zarr files
+    zarr_save_path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/'
+    
+    # File pattern to match CESM files for each day
+    file_prefix: 'f.e21.CREDIT_climate.cam.h1.*.nc'
+    
+    # Surface variables to include in the dataset
+    surface_variables: ['PS','PSL','TREFHT','LANDFRAC','OCNFRAC','ICEFRAC','TAUX','TAUY','SHFLX','CLDMED','CLDHGH','CLDLOW','CLDTOT','SOLIN','FLUT','FLDS','FSDS','FLNS','FSNS','FSUTOA','FLNT','FSNT','FSNTOA','QFLX','PRECT','PRECSL','PRECSC','SST','U10','hyam','hybm','hyai', 'hybi']
+    
+    # Level ranges for coarsening upper-air data (in indices)
+    coarse_levs: [
+        [0, 6], [6, 12], [12, 14], [14, 17], [17, 19], [19, 20], [20, 21], [21, 25], [25, 27], [27, 32]
+    ]
