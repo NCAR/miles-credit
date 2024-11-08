@@ -244,6 +244,8 @@ class GlobalMassFixer(nn.Module):
             self.state_trans = load_transforms(post_conf, scaler_only=True)
         else:
             self.state_trans = None
+
+        self.post_conf = post_conf
             
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
@@ -275,7 +277,7 @@ class GlobalMassFixer(nn.Module):
             sp_input = x_input[:, self.sp_ind, -1, ...]
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
-        if post_conf['requires_scaling']:
+        if self.post_conf['requires_scaling']:
             q_input = q_input*post_conf['scaling_coefs']['Q']
             q_pred = q_pred*post_conf['scaling_coefs']['Q']
             sp_input = sp_input*post_conf['scaling_coefs']['SP']
@@ -351,7 +353,7 @@ class GlobalMassFixer(nn.Module):
             # expand fixed vars to (batch, level, time, lat, lon)
             sp_pred = sp_pred.unsqueeze(1).unsqueeze(2)
             
-            if post_conf['requires_scaling']:
+            if self.post_conf['requires_scaling']:
                 sp_input = sp_input/post_conf['scaling_coefs']['SP']
                 sp_pred = sp_pred/post_conf['scaling_coefs']['SP']
             
@@ -365,7 +367,7 @@ class GlobalMassFixer(nn.Module):
         q_pred = q_pred.unsqueeze(2)
 
 
-        if post_conf['requires_scaling']:
+        if self.post_conf['requires_scaling']:
             q_input = q_input/post_conf['scaling_coefs']['Q']
             q_pred = q_pred/post_conf['scaling_coefs']['Q']
              
@@ -462,6 +464,8 @@ class GlobalWaterFixer(nn.Module):
             self.state_trans = load_transforms(post_conf, scaler_only=True)
         else:
             self.state_trans = None
+
+        self.post_conf = post_conf
             
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
@@ -496,7 +500,7 @@ class GlobalWaterFixer(nn.Module):
             sp_input = x_input[:, self.sp_ind, -1, ...]
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
-        if post_conf['requires_scaling']:
+        if self.post_conf['requires_scaling']:
             q_input = q_input*post_conf['scaling_coefs']['Q']
             q_pred = q_pred*post_conf['scaling_coefs']['Q']
             sp_input = sp_input*post_conf['scaling_coefs']['SP']
@@ -540,7 +544,7 @@ class GlobalWaterFixer(nn.Module):
         precip = precip * P_correct_ratio
 
         # apply correction on precip
-        if post_conf['requires_scaling']:
+        if self.post_conf['requires_scaling']:
             precip = precip / post_conf['scaling_coefs']['tot_precip'] 
             q_input = q_input/post_conf['scaling_coefs']['Q']
             q_pred = q_pred/post_conf['scaling_coefs']['Q']
@@ -673,6 +677,8 @@ class GlobalEnergyFixer(nn.Module):
             if post_conf['requires_scaling']:
                 self.GPH_surf = self.GPH_surf*post_conf['scaling_coefs']['gph_surf']
 
+            self.post_conf = post_conf
+
         # ------------------------------------------------------------------------------------ #
         # identify variables of interest
         self.T_ind_start = int(post_conf["global_energy_fixer"]["T_inds"][0])
@@ -751,7 +757,7 @@ class GlobalEnergyFixer(nn.Module):
             sp_input = x_input[:, self.sp_ind, -1, ...]
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
-        if post_conf['requires_scaling']:
+        if self.post_conf['requires_scaling']:
             q_input = q_input*post_conf['scaling_coefs']['Q']
             q_pred = q_pred*post_conf['scaling_coefs']['Q']
             T_input = T_input*post_conf['scaling_coefs']['T']
@@ -838,7 +844,7 @@ class GlobalEnergyFixer(nn.Module):
         # expand fixed vars to (batch level, time, lat, lon)
         T_pred = T_pred.unsqueeze(2)
 
-        if post_conf['requires_scaling']:
+        if self.post_conf['requires_scaling']:
             q_input = q_input/post_conf['scaling_coefs']['Q']
             q_pred = q_pred/post_conf['scaling_coefs']['Q']
             T_input = T_input/post_conf['scaling_coefs']['T']
