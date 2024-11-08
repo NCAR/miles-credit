@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import xarray as xr
 import numpy as np
 import pandas as pd
+import csv
 
 # ---------- #
 import torch
@@ -599,6 +600,24 @@ def predict(rank, world_size, conf, p):
         )
 
     # Rollout
+    #open the forcing file.
+    DSforc = xr.open_dataset(conf["predict"]["forcing_file"]).load()
+    #grab forcing only .. 
+
+    df_variables = conf["data"]["dynamic_forcing_variables"]
+    sf_variables = conf["data"]["static_variables"]
+
+    if conf["data"]["static_first"]:
+        df_sf_variables = conf["data"]["static_variables"] + conf["data"]["dynamic_forcing_variables"]
+    else:
+        df_sf_variables = conf["data"]["dynamic_forcing_variables"] + conf["data"]["static_variables"]
+
+    DSforc_norm = state_transformer.transform_dataset(DSforc)
+    DSforc = DSforc[df_sf_variables]
+    print('forcing file opened and loaded')
+
+    #transform the forcing file
+    
     with torch.no_grad():
         # forecast count = a constant for each run
         forecast_count = 0
@@ -611,6 +630,7 @@ def predict(rank, world_size, conf, p):
             # get the datetime and forecasted hours
             date_time = batch["datetime"].item()
             forecast_hour = batch["forecast_hour"].item()
+            print('forecast hour: ', forecast_hour)
             # initialization on the first forecast hour
             if forecast_hour == 1:
                 # Initialize x and x_surf with the first time step
@@ -637,7 +657,7 @@ def predict(rank, world_size, conf, p):
                 x_forcing_batch = (
                     batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
                 )
-
+                print('braaaap: ', x_forcing_batch.shape)
                 # concat on var dimension
                 x = torch.cat((x, x_forcing_batch), dim=1)
 
@@ -652,6 +672,12 @@ def predict(rank, world_size, conf, p):
 
             # -------------------------------------------------------------------------------------- #
             # start prediction
+            # Save the current forecast hour data in parallel
+            utc_datetime = init_datetime + timedelta(
+                hours=lead_time_periods * forecast_hour
+            )
+            print(utc_datetime)
+            
             y_pred = model(x)
 
             # ============================================= #
@@ -680,39 +706,34 @@ def predict(rank, world_size, conf, p):
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
             # ============================================= #
+            # WEC
+            # # y_pred with unit
+            # y_pred = state_transformer.inverse_transform(y_pred.cpu())
+            # # y_target with unit
+            # y = state_transformer.inverse_transform(y.cpu())
 
-            # y_pred with unit
-            y_pred = state_transformer.inverse_transform(y_pred.cpu())
-            # y_target with unit
-            y = state_transformer.inverse_transform(y.cpu())
+            # if (
+            #     "use_laplace_filter" in conf["predict"]
+            #     and conf["predict"]["use_laplace_filter"]
+            # ):
+            #     y_pred = (
+            #         dpf.diff_lap2d_filt(y_pred.to(device).squeeze())
+            #         .unsqueeze(0)
+            #         .unsqueeze(2)
+            #         .cpu()
+            #     )
 
-            if (
-                "use_laplace_filter" in conf["predict"]
-                and conf["predict"]["use_laplace_filter"]
-            ):
-                y_pred = (
-                    dpf.diff_lap2d_filt(y_pred.to(device).squeeze())
-                    .unsqueeze(0)
-                    .unsqueeze(2)
-                    .cpu()
-                )
-
-            # Compute metrics
-            metrics_dict = metrics(
-                y_pred.float(), y.float(), forecast_datetime=forecast_hour
-            )
-            for k, m in metrics_dict.items():
-                metrics_results[k].append(m.item())
-            metrics_results["forecast_hour"].append(forecast_hour)
-
-            # Save the current forecast hour data in parallel
-            utc_datetime = init_datetime + timedelta(
-                hours=lead_time_periods * forecast_hour
-            )
+            # # Compute metrics
+            # metrics_dict = metrics(
+            #     y_pred.float(), y.float(), forecast_datetime=forecast_hour
+            # )
+            # for k, m in metrics_dict.items():
+            #     metrics_results[k].append(m.item())
+            # metrics_results["forecast_hour"].append(forecast_hour)
 
             # convert the current step result as x-array
             darray_upper_air, darray_single_level = make_xarray(
-                y_pred,
+                y_pred.cpu(),
                 utc_datetime,
                 latlons.latitude.values,
                 latlons.longitude.values,
@@ -738,11 +759,11 @@ def predict(rank, world_size, conf, p):
             print_str = f"Forecast: {forecast_count} "
             print_str += f"Date: {utc_datetime.strftime('%Y-%m-%d %H:%M:%S')} "
             print_str += f"Hour: {batch['forecast_hour'].item()} "
-            print_str += f"ACC: {metrics_dict['acc']} "
+            # print_str += f"ACC: {metrics_dict['acc']} "
 
             # Update the input
             # setup for next iteration, transform to z-space and send to device
-            y_pred = state_transformer.transform_array(y_pred).to(device)
+            # y_pred = state_transformer.transform_array(y_pred).to(device)
 
             # ============================================================ #
             # use previous step y_pred as the next step input
@@ -801,6 +822,207 @@ def predict(rank, world_size, conf, p):
                 if distributed:
                     torch.distributed.barrier()
 
+            break
+        add_it = 0
+        for k in range(conf["predict"]["climate_timesteps"]):
+            forecast_hour = k+2
+            utc_datetime = init_datetime + timedelta(
+                hours=lead_time_periods * forecast_hour
+            )
+
+            # -------------------------------------------------------------------------------------- #
+            # add forcing and static variables (regardless of fcst hours)               
+
+                
+            if k ==0 and "x_forcing_static" in batch:
+                # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
+                x_forcing_batch = (
+                    batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                )
+                print('braaaap: ', x_forcing_batch.shape)
+                # concat on var dimension
+                #x = torch.cat((x, x_forcing_batch), dim=1)
+                
+                selected_data = DSforc.sel(time=utc_datetime.strftime('%Y-%m-%d %H:%M:%S'))
+                print(selected_data['time'])
+                time_selection = utc_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Find the index of the specified time
+                forc_time_index = DSforc.get_index('time').get_loc(time_selection).start
+                print(f"The index for time {time_selection} is {forc_time_index}")
+
+                total_len_forc_file = len(DSforc['time'])
+                print(f"The the len of the forcing time ind is {total_len_forc_file}")
+
+            if (forc_time_index+k) > total_len_forc_file:
+                forc_time_index = 0
+                add_it = 0
+
+            if conf["data"]["static_first"]:
+                for bb,sfv in enumerate(sf_variables):
+                    x_forcing_batch[:,bb,:,:,:] = torch.tensor(DSforc[sfv].values)
+                    
+                for bb,dfv in enumerate(df_variables):
+                    x_forcing_batch[:,len(sf_variables)+bb,:,:,:] = torch.tensor(DSforc_norm[dfv].isel(time=forc_time_index+add_it).values)
+                with open('output_solin.csv', 'a', newline='') as csvfile:
+                    writer = csv.writer(csvfile)
+                    valval = DSforc_norm[dfv].isel(time=forc_time_index + add_it).squeeze().values[30, 100]
+                    writer.writerow([valval])
+        
+            else:
+                for bb,dfv in enumerate(df_variables):
+                    x_forcing_batch[:,bb,:,:,:] = torch.tensor(DSforc_norm[dfv].isel(time=forc_time_index+add_it).values) 
+                    
+                for bb,sfv in enumerate(sf_variables):
+                    x_forcing_batch[:,len(df_variables)+bb,:,:,:] = torch.tensor(DSforc[sfv].values)
+
+            x = torch.cat((x, x_forcing_batch), dim=1)
+
+
+            y_pred = model(x)
+
+            # ============================================= #
+            # postblock opts outside of model
+
+            # backup init state
+            if flag_mass_conserve:
+                if forecast_hour == 1:
+                    x_init = x.clone()
+
+            # mass conserve using initialization as reference
+            if flag_mass_conserve:
+                input_dict = {"y_pred": y_pred, "x": x_init}
+                input_dict = opt_mass(input_dict)
+                y_pred = input_dict["y_pred"]
+
+            # water conserve use previous step output as reference
+            if flag_water_conserve:
+                input_dict = {"y_pred": y_pred, "x": x}
+                input_dict = opt_water(input_dict)
+                y_pred = input_dict["y_pred"]
+
+            # energy conserve use previous step output as reference
+            if flag_energy_conserve:
+                input_dict = {"y_pred": y_pred, "x": x}
+                input_dict = opt_energy(input_dict)
+                y_pred = input_dict["y_pred"]
+            y_pred = state_transformer.inverse_transform(y_pred.cpu())
+
+            # if (
+            #     "use_laplace_filter" in conf["predict"]
+            #     and conf["predict"]["use_laplace_filter"]
+            # ):
+            #     y_pred = (
+            #         dpf.diff_lap2d_filt(y_pred.to(device).squeeze())
+            #         .unsqueeze(0)
+            #         .unsqueeze(2)
+            #         .cpu()
+            #     )
+
+            # # Compute metrics
+            # metrics_dict = metrics(
+            #     y_pred.float(), y.float(), forecast_datetime=forecast_hour
+            # )
+            # for k, m in metrics_dict.items():
+            #     metrics_results[k].append(m.item())
+            # metrics_results["forecast_hour"].append(forecast_hour)
+
+            # convert the current step result as x-array
+            darray_upper_air, darray_single_level = make_xarray(
+                y_pred.cpu(),
+                utc_datetime,
+                latlons.latitude.values,
+                latlons.longitude.values,
+                conf,
+            )
+
+            # Save the current forecast hour data in parallel
+            result = p.apply_async(
+                save_netcdf_increment,
+                (
+                    darray_upper_air,
+                    darray_single_level,
+                    init_datetime_str,
+                    lead_time_periods * forecast_hour,
+                    meta_data,
+                    conf,
+                ),
+            )
+            results.append(result)
+
+            metrics_results["datetime"].append(utc_datetime)
+
+            print_str = f"Forecast: {forecast_count} "
+            print_str += f"Date: {utc_datetime.strftime('%Y-%m-%d %H:%M:%S')} "
+            print_str += f"Hour: {batch['forecast_hour'].item()} "
+            # print_str += f"ACC: {metrics_dict['acc']} "
+
+            # Update the input
+            # setup for next iteration, transform to z-space and send to device
+            y_pred = state_transformer.transform_array(y_pred).to(device)
+
+            # ============================================================ #
+            # use previous step y_pred as the next step input
+            if history_len == 1:
+                # cut diagnostic vars from y_pred, they are not inputs
+                if "y_diag" in batch:
+                    x = y_pred[:, :-varnum_diag, ...].detach()
+                else:
+                    x = y_pred.detach()
+
+            # multi-step in
+            else:
+                if static_dim_size == 0:
+                    x_detach = x[:, :, 1:, ...].detach()
+                else:
+                    x_detach = x[:, :-static_dim_size, 1:, ...].detach()
+
+                # cut diagnostic vars from y_pred, they are not inputs
+                if "y_diag" in batch:
+                    x = torch.cat(
+                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
+                    )
+                else:
+                    x = torch.cat([x_detach, y_pred.detach()], dim=2)
+            # ============================================================ #
+
+            # Explicitly release GPU memory
+            torch.cuda.empty_cache()
+            gc.collect()
+            add_it+=1
+
+            if k == (conf["predict"]["climate_timesteps"] -1 ):
+                # Wait for all processes to finish in order
+                for result in results:
+                    result.get()
+
+                # save metrics file
+                save_location = os.path.join(
+                    os.path.expandvars(conf["save_loc"]), "forecasts", "metrics"
+                )
+                os.makedirs(
+                    save_location, exist_ok=True
+                )  # should already be made above
+                df = pd.DataFrame(metrics_results)
+                df.to_csv(
+                    os.path.join(save_location, f"metrics{init_datetime_str}.csv")
+                )
+
+                # forecast count = a constant for each run
+                forecast_count += 1
+
+                # y_pred allocation
+                y_pred = None
+
+                gc.collect()
+
+                if distributed:
+                    torch.distributed.barrier()                        
+                break
+                    
+            # -------------------------------------------------------------------------------------- #
+
+    
     if distributed:
         torch.distributed.barrier()
 

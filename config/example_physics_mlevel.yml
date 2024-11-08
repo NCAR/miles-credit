@@ -15,7 +15,7 @@ data:
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
+    save_loc_dynamic_forcing: 'a'
     
     # diagnostic variables
     diagnostic_variables: ['evaporation', 'total_precipitation',
@@ -230,7 +230,7 @@ predict:
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 2         # number of days to initialize, starting from the (year, mon, day) above
+        duration: 1         # number of days to initialize, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)

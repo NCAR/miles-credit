@@ -1,4 +1,4 @@
-name: credit
+name: credit-casper-v3
 channels:
   - conda-forge
 

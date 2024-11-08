@@ -7,39 +7,56 @@
 save_loc: '/glade/work/$USER/CREDIT_runs/wxformer_1dg_cesm_data/'
 seed: 1000
 
-#net short top of model: FSNTOA
+#net short top of model: FSNT
 #net short bot of model: FSNS
 #net long top of model: FLNT
 #net long bot of model: FLNS
 #note Q is vapor + condensed (total liquid)
+#Fnet_sfc = FSNS - FLNS - LHFLX - SHFLX <<<<<<-------
+#Fnet_TOA = 
+
+#The net radiative flux at "top of atmosphere" is sometimes called RESTOA ("RES" for residual), and at "top of model" it is called RESTOM. These are typically diagnosed from model output as
+
+#RESTOM = FSNT - FLNT <<<<<<-------
+#RESTOA = FSNTOA - FLUT
+
+#The RHS of these are the net shortwave and longwave fluxes. They are computed as differences:
+
+#FSNT = SOLIN - FSUT
+#FSNTOA = SOLIN - FSUTOA
+#FLNT = FLUT - [FLDT]
+
+#FLDT is not usually output from the model, but FLNT and FLUT are. SOLIN is the insolation.
 
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_*.zarr'
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_????.zarr'
     
     # surface variables
-    surface_variables: ['PS','PSL','TREFHT','SST']
-    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_*.zarr'
+    surface_variables: ['PS','PSL','TREFHT']
+    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_????.zarr'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['SOLIN']
-    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_*.zarr'
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_????.zarr'
     
     # static variables
     static_variables: ['z_norm','LANDM_COSLAT'] 
-    save_loc_static: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg.nc'
+    save_loc_static: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon.nc'
 
     # diagnostic variables
-    diagnostic_variables: ['PRECT','CLDTOT','TAUX','TAUY','U10', 'QFLX','FSNS','SHFLX','FLNS','FSNTOA','FLNT']
-    save_loc_diagnostic: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_*.zarr'
+    diagnostic_variables: ['PRECT','CLDTOT','CLDHGH','CLDLOW','CLDMED','TAUX','TAUY','U10', 'QFLX','FSNS','FLNS','FSNT','FLNT','SHFLX','LHFLX']
+    save_loc_diagnostic: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_????.zarr'
+
+    save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon.nc'
      
     # mean / std path
-    mean_path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/mean_6h_1979_2010_32lev_1.0deg.nc'
+    mean_path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/mean_6h_1979_2010_32lev_1.0deg_new.nc'
     # regular z-score version
     # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
     # residual norm version
-    std_path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/std_6h_1979_2010_32lev_1.0deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/std_6h_1979_2010_32lev_1.0deg_new.nc'
     
     # train / validation split
     train_years: [1979, 2009]
@@ -56,7 +73,7 @@ data:
     valid_forecast_len: 0
     
     one_shot: True
-    lead_time_periods: 1
+    lead_time_periods: 6
     skip_periods: null
     
     # compatible with the old 'std'
@@ -69,10 +86,10 @@ trainer:
     cpu_offload: False
     activation_checkpoint: True
     
-    load_weights: True
-    load_optimizer: True
-    load_scaler: True
-    load_sheduler: True
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_sheduler: False
     num_epoch: 2
     
     skip_validation: False
@@ -86,13 +103,14 @@ trainer:
         
     train_batch_size: 10
     valid_batch_size: 5
+    long_rollout: True
         
     batches_per_epoch: 1000
     valid_batches_per_epoch: 4
     stopping_patience: 999
     
     start_epoch: 0
-    num_epoch: 20
+    num_epoch: 50
     reload_epoch: False
     epochs: &epochs 100
      
@@ -115,9 +133,9 @@ model:
     image_width: 288                 # number of longitude grids (default: 1280)
     levels: 32                       # number of upper-air variable levels (default: 15)
     channels: 4                       # upper-air variable channels
-    surface_channels: 4               # surface variable channels
+    surface_channels: 3               # surface variable channels
     input_only_channels: 3            # dynamic forcing, forcing, static channels
-    output_only_channels: 11           # diagnostic variable channels
+    output_only_channels: 15          # diagnostic variable channels
     
     patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
     patch_height: 1                   # number of longitude grids in each 3D patch (default: 1)
@@ -139,6 +157,76 @@ model:
     # map boundary padding
     pad_lon: 48             # number of grids to pad on 0 and 360 deg lon
     pad_lat: 48             # number of grids to pad on -90 and 90 deg lat
+
+    post_conf: 
+        activate: False
+        
+        requires_scaling: True
+        scaling_coefs:
+            tot_precip_coef: 86400 #model timestep in seconds m/day -> m/s
+            surf_net_solar: 21600 #model timestep in seconds (W/s) -> J/s
+            surf_net_therm: -21600 #model timestep in seconds (W/s) -> J/s
+            surf_shflx: -21600 #model timestep in seconds (W/s) -> J/s
+            surf_lhflx: -21600 #model timestep in seconds (W/s) -> J/s
+            top_net_solar: 21600 #model timestep in seconds (W/s) -> J/s
+            top_net_therm: -21600 #model timestep in seconds (W/s) -> J/s
+            evap: -1
+            SP: 1
+            gph_surf: 1
+            temp: 1
+            
+        
+        skebs:
+            activate: False
+        
+        tracer_fixer:
+            activate: False
+            denorm: True
+            tracer_name: ['Q','PRECT','U10','CLDTOT','CLDHGH','CLDLOW','CLDMED']
+            tracer_thres: [0, 0, 0, 0, 0, 0, 0]
+            
+        global_mass_fixer:
+            activate: False
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            fix_level_num: 14
+            lon_lat_level_name: ['lon2d', 'lat2d', 'hyai', 'hybi']
+            surface_pressure_name: ['PS']
+            specific_total_water_name: ['Q']
+
+        global_water_fixer:
+            activate: False
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'hyai', 'hybi']
+            surface_pressure_name: ['SP']
+            specific_total_water_name: ['Q']
+            precipitation_name: ['PRECT']
+            evaporation_name: ['QFLX']
+            
+        global_energy_fixer:
+            activate: False
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'hyai', 'hybi']
+            surface_pressure_name: ['PS']
+            air_temperature_name: ['T']
+            specific_total_water_name: ['Q']
+            u_wind_name: ['U']
+            v_wind_name: ['V']
+            surface_geopotential_name: ['PHIS']
+            TOA_net_radiation_flux_name: ['FSNT', 'FLNT']
+            surface_net_radiation_flux_name: ['FSNS', 'FLNS']
+            surface_energy_flux_name: ['SHFLX', 'LHFLX',]
     
 loss: 
     # the main training loss
@@ -150,7 +238,7 @@ loss:
     
     # use latitude weighting
     use_latitude_weights: True
-    latitude_weights: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_onedeg.nc'
+    latitude_weights: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/LSM_static_variables_ERA5_zhght_onedeg.nc'
     
     # turn-off variable weighting
     use_variable_weights: False
@@ -161,14 +249,16 @@ predict:
         start_year: 2010     # year of the first initialization (where rollout will start)
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
-        start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 30         # number of days to initialize, starting from the (year, mon, day) above
+        start_hours: [0] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
+        duration: 1        # number of days to initialize, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
-        days: 2              # forecast lead time as days (1 means 24-hour forecast)
+        days: 10              # forecast lead time as days (1 means 24-hour forecast)
         
     save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/cesm_wxformer/'
-    save_vars: ['PS','QFLX','TREFHT','TAUX','TAUY','PRECT','CLDTOT']
+    save_vars: ['PRECT','CLDTOT','CLDHGH','CLDLOW','CLDMED','TAUX','TAUY','U10','QFLX','FSNS','FLNS','FSNT','FLNT','SHFLX','LHFLX']
+    forcing_file: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.climaterun.statics_1.0deg.nc'
+    climate_timesteps: 2190
     
     # turn-off low-pass filter
     use_laplace_filter: False
