@@ -163,7 +163,7 @@ model:
         
         requires_scaling: True
         scaling_coefs:
-            tot_precip_coef: 86400 #model timestep in seconds m/day -> m/s
+            tot_precip: 86400 #model timestep in seconds m/day -> m/s
             surf_net_solar: 21600 #model timestep in seconds (W/s) -> J/s
             surf_net_therm: -21600 #model timestep in seconds (W/s) -> J/s
             surf_shflx: -21600 #model timestep in seconds (W/s) -> J/s
@@ -172,8 +172,11 @@ model:
             top_net_therm: -21600 #model timestep in seconds (W/s) -> J/s
             evap: -1
             SP: 1
+            U: 1
+            V: 1
             gph_surf: 1
             temp: 1
+            Q: 1
             
         
         skebs:
