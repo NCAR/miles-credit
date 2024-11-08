@@ -224,6 +224,8 @@ class GlobalMassFixer(nn.Module):
                                                            lat2d, 
                                                            p_level, 
                                                            midpoint=self.flag_midpoint)
+
+            self.requires_scaling = post_conf['requires_scaling']
             # -------------------------------------------------------------------------- #
             self.ind_fix = self.N_levels - int(post_conf['global_mass_fixer']['fix_level_num']) + 1
 
@@ -246,7 +248,7 @@ class GlobalMassFixer(nn.Module):
         else:
             self.state_trans = None
 
-        self.requires_scaling = post_conf['requires_scaling']
+        
             
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
@@ -449,7 +451,8 @@ class GlobalWaterFixer(nn.Module):
                                                            lat2d, 
                                                            p_level, 
                                                            midpoint=self.flag_midpoint)
-                
+
+            self.requires_scaling = post_conf['requires_scaling']
             self.N_seconds = int(post_conf['data']['lead_time_periods']) * 3600
             
         # ------------------------------------------------------------------------------------ #
@@ -467,7 +470,6 @@ class GlobalWaterFixer(nn.Module):
         else:
             self.state_trans = None
 
-        self.requires_scaling = post_conf['requires_scaling']
             
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
