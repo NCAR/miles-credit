@@ -185,6 +185,7 @@ class GlobalMassFixer(nn.Module):
                                                        midpoint=self.flag_midpoint)
             self.N_levels = len(p_level_demo)
             self.ind_fix = len(p_level_demo) - int(post_conf['global_mass_fixer']['fix_level_num']) + 1
+            self.requires_scaling = False
             
         else:
             # the actual setup for model runs
@@ -245,7 +246,7 @@ class GlobalMassFixer(nn.Module):
         else:
             self.state_trans = None
 
-        self.post_conf = post_conf
+        self.requires_scaling = post_conf['requires_scaling']
             
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
@@ -277,7 +278,7 @@ class GlobalMassFixer(nn.Module):
             sp_input = x_input[:, self.sp_ind, -1, ...]
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
-        if self.post_conf['requires_scaling']:
+        if self.requires_scaling:
             q_input = q_input*post_conf['scaling_coefs']['Q']
             q_pred = q_pred*post_conf['scaling_coefs']['Q']
             sp_input = sp_input*post_conf['scaling_coefs']['SP']
@@ -353,7 +354,7 @@ class GlobalMassFixer(nn.Module):
             # expand fixed vars to (batch, level, time, lat, lon)
             sp_pred = sp_pred.unsqueeze(1).unsqueeze(2)
             
-            if self.post_conf['requires_scaling']:
+            if self.requires_scaling:
                 sp_input = sp_input/post_conf['scaling_coefs']['SP']
                 sp_pred = sp_pred/post_conf['scaling_coefs']['SP']
             
@@ -367,7 +368,7 @@ class GlobalMassFixer(nn.Module):
         q_pred = q_pred.unsqueeze(2)
 
 
-        if self.post_conf['requires_scaling']:
+        if self.requires_scaling:
             q_input = q_input/post_conf['scaling_coefs']['Q']
             q_pred = q_pred/post_conf['scaling_coefs']['Q']
              
@@ -408,6 +409,7 @@ class GlobalWaterFixer(nn.Module):
                                                        midpoint=self.flag_midpoint)
             self.N_levels = len(p_level_demo)
             self.N_seconds = int(post_conf['data']['lead_time_periods']) * 3600
+            self.requires_scaling = False
             
         else:
             # the actual setup for model runs
@@ -465,7 +467,7 @@ class GlobalWaterFixer(nn.Module):
         else:
             self.state_trans = None
 
-        self.post_conf = post_conf
+        self.requires_scaling = post_conf['requires_scaling']
             
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
@@ -500,7 +502,7 @@ class GlobalWaterFixer(nn.Module):
             sp_input = x_input[:, self.sp_ind, -1, ...]
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
-        if self.post_conf['requires_scaling']:
+        if self.requires_scaling:
             q_input = q_input*post_conf['scaling_coefs']['Q']
             q_pred = q_pred*post_conf['scaling_coefs']['Q']
             sp_input = sp_input*post_conf['scaling_coefs']['SP']
@@ -544,7 +546,7 @@ class GlobalWaterFixer(nn.Module):
         precip = precip * P_correct_ratio
 
         # apply correction on precip
-        if self.post_conf['requires_scaling']:
+        if self.requires_scaling:
             precip = precip / post_conf['scaling_coefs']['tot_precip'] 
             q_input = q_input/post_conf['scaling_coefs']['Q']
             q_pred = q_pred/post_conf['scaling_coefs']['Q']
@@ -629,6 +631,7 @@ class GlobalEnergyFixer(nn.Module):
 
             gph_surf_demo = np.ones((10, 18))
             self.GPH_surf = torch.from_numpy(gph_surf_demo)
+            self.requires_scaling = False
 
         else:
             # the actual setup for model runs
@@ -674,10 +677,10 @@ class GlobalEnergyFixer(nn.Module):
             varname_gph = post_conf["global_energy_fixer"]["surface_geopotential_name"]
             self.GPH_surf = torch.from_numpy(ds_physics[varname_gph[0]].values).float()
             
-            if post_conf['requires_scaling']:
+            if self.requires_scaling:
                 self.GPH_surf = self.GPH_surf*post_conf['scaling_coefs']['gph_surf']
 
-            self.post_conf = post_conf
+            self.requires_scaling = post_conf['requires_scaling']
 
         # ------------------------------------------------------------------------------------ #
         # identify variables of interest
@@ -757,7 +760,7 @@ class GlobalEnergyFixer(nn.Module):
             sp_input = x_input[:, self.sp_ind, -1, ...]
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
-        if self.post_conf['requires_scaling']:
+        if self.requires_scaling:
             q_input = q_input*post_conf['scaling_coefs']['Q']
             q_pred = q_pred*post_conf['scaling_coefs']['Q']
             T_input = T_input*post_conf['scaling_coefs']['T']
@@ -844,7 +847,7 @@ class GlobalEnergyFixer(nn.Module):
         # expand fixed vars to (batch level, time, lat, lon)
         T_pred = T_pred.unsqueeze(2)
 
-        if self.post_conf['requires_scaling']:
+        if self.requires_scaling:
             q_input = q_input/post_conf['scaling_coefs']['Q']
             q_pred = q_pred/post_conf['scaling_coefs']['Q']
             T_input = T_input/post_conf['scaling_coefs']['T']
