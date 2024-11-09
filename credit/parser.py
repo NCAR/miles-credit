@@ -1284,8 +1284,9 @@ def training_data_check(conf, print_summary=False):
         ), "Static file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_static:
-            assert ds_upper_air.coords[coord_name].equals(
-                ds_static.coords[coord_name]
+            assert (ds_upper_air[coord_name] ==  
+                    ds_static.coords[coord_name]).all(
+            
             ), "coordinate {} mismatched between upper-air and static files".format(
                 coord_name
             )

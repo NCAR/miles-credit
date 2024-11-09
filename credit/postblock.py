@@ -248,7 +248,7 @@ class GlobalMassFixer(nn.Module):
         else:
             self.state_trans = None
 
-        
+        self.post_conf = post_conf
             
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
@@ -281,10 +281,10 @@ class GlobalMassFixer(nn.Module):
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
         if self.requires_scaling:
-            q_input = q_input*post_conf['scaling_coefs']['Q']
-            q_pred = q_pred*post_conf['scaling_coefs']['Q']
-            sp_input = sp_input*post_conf['scaling_coefs']['SP']
-            sp_pred = sp_pred*post_conf['scaling_coefs']['SP']
+            q_input = q_input*self.post_conf['scaling_coefs']['Q']
+            q_pred = q_pred*self.post_conf['scaling_coefs']['Q']
+            sp_input = sp_input*self.post_conf['scaling_coefs']['SP']
+            sp_pred = sp_pred*self.post_conf['scaling_coefs']['SP']
         # ------------------------------------------------------------------------------ #
         # global dry air mass conservation
         if self.flag_sigma_level:
@@ -357,8 +357,8 @@ class GlobalMassFixer(nn.Module):
             sp_pred = sp_pred.unsqueeze(1).unsqueeze(2)
             
             if self.requires_scaling:
-                sp_input = sp_input/post_conf['scaling_coefs']['SP']
-                sp_pred = sp_pred/post_conf['scaling_coefs']['SP']
+                sp_input = sp_input/self.post_conf['scaling_coefs']['SP']
+                sp_pred = sp_pred/self.post_conf['scaling_coefs']['SP']
             
             y_pred = concat_fix(y_pred, sp_pred, self.sp_ind, self.sp_ind, N_vars)
             
@@ -371,8 +371,8 @@ class GlobalMassFixer(nn.Module):
 
 
         if self.requires_scaling:
-            q_input = q_input/post_conf['scaling_coefs']['Q']
-            q_pred = q_pred/post_conf['scaling_coefs']['Q']
+            q_input = q_input/self.post_conf['scaling_coefs']['Q']
+            q_pred = q_pred/self.post_conf['scaling_coefs']['Q']
              
         y_pred = concat_fix(y_pred, q_pred, self.q_ind_start, self.q_ind_end, N_vars)
         
@@ -469,7 +469,7 @@ class GlobalWaterFixer(nn.Module):
             self.state_trans = load_transforms(post_conf, scaler_only=True)
         else:
             self.state_trans = None
-
+        self.post_conf = post_conf
             
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
@@ -505,12 +505,12 @@ class GlobalWaterFixer(nn.Module):
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
         if self.requires_scaling:
-            q_input = q_input*post_conf['scaling_coefs']['Q']
-            q_pred = q_pred*post_conf['scaling_coefs']['Q']
-            sp_input = sp_input*post_conf['scaling_coefs']['SP']
-            sp_pred = sp_pred*post_conf['scaling_coefs']['SP']
-            evapor = evapor*post_conf['scaling_coefs']['evap'] 
-            precip = precip*post_conf['scaling_coefs']['tot_precip'] 
+            q_input = q_input*self.post_conf['scaling_coefs']['Q']
+            q_pred = q_pred*self.post_conf['scaling_coefs']['Q']
+            sp_input = sp_input*self.post_conf['scaling_coefs']['SP']
+            sp_pred = sp_pred*self.post_conf['scaling_coefs']['SP']
+            evapor = evapor*self.post_conf['scaling_coefs']['evap'] 
+            precip = precip*self.post_conf['scaling_coefs']['tot_precip'] 
                     
         # ------------------------------------------------------------------------------ #
         # global water balance
@@ -549,12 +549,12 @@ class GlobalWaterFixer(nn.Module):
 
         # apply correction on precip
         if self.requires_scaling:
-            precip = precip / post_conf['scaling_coefs']['tot_precip'] 
-            q_input = q_input/post_conf['scaling_coefs']['Q']
-            q_pred = q_pred/post_conf['scaling_coefs']['Q']
-            sp_input = sp_input/post_conf['scaling_coefs']['SP']
-            sp_pred = sp_pred/post_conf['scaling_coefs']['SP']
-            evapor = evapor/post_conf['scaling_coefs']['evap'] 
+            precip = precip /self.post_conf['scaling_coefs']['tot_precip'] 
+            q_input = q_input/self.post_conf['scaling_coefs']['Q']
+            q_pred = q_pred/self.post_conf['scaling_coefs']['Q']
+            sp_input = sp_input/self.post_conf['scaling_coefs']['SP']
+            sp_pred = sp_pred/self.post_conf['scaling_coefs']['SP']
+            evapor = evapor/self.post_conf['scaling_coefs']['evap'] 
 
         # ===================================================================== #
         # return fixed precip back to y_pred
@@ -678,11 +678,13 @@ class GlobalEnergyFixer(nn.Module):
 
             varname_gph = post_conf["global_energy_fixer"]["surface_geopotential_name"]
             self.GPH_surf = torch.from_numpy(ds_physics[varname_gph[0]].values).float()
+
+            self.requires_scaling = post_conf['requires_scaling']
             
             if self.requires_scaling:
                 self.GPH_surf = self.GPH_surf*post_conf['scaling_coefs']['gph_surf']
 
-            self.requires_scaling = post_conf['requires_scaling']
+            self.post_conf = post_conf
 
         # ------------------------------------------------------------------------------------ #
         # identify variables of interest
@@ -715,7 +717,7 @@ class GlobalEnergyFixer(nn.Module):
             self.state_trans = load_transforms(post_conf, scaler_only=True)
         else:
             self.state_trans = None
-
+        self.post_conf = post_conf
     def forward(self, x):
         # ------------------------------------------------------------------------------ #
         # get tensors
@@ -763,22 +765,22 @@ class GlobalEnergyFixer(nn.Module):
             sp_pred = y_pred[:, self.sp_ind, 0, ...]
 
         if self.requires_scaling:
-            q_input = q_input*post_conf['scaling_coefs']['Q']
-            q_pred = q_pred*post_conf['scaling_coefs']['Q']
-            T_input = T_input*post_conf['scaling_coefs']['T']
-            T_pred = T_pred*post_conf['scaling_coefs']['T']
-            U_input = U_input*post_conf['scaling_coefs']['U']
-            U_pred = U_pred*post_conf['scaling_coefs']['U']
-            V_input = V_input*post_conf['scaling_coefs']['V']
-            V_pred = V_pred*post_conf['scaling_coefs']['V']
-            TOA_solar_pred = TOA_solar_pred*post_conf['scaling_coefs']['top_net_solar']
-            TOA_OLR_pred = TOA_OLR_pred*post_conf['scaling_coefs']['top_net_therm']
-            surf_solar_pred = surf_solar_pred*post_conf['scaling_coefs']['surf_net_solar']
-            surf_LR_pred = surf_LR_pred*post_conf['scaling_coefs']['surf_net_therm']
-            surf_SH_pred = surf_SH_pred*post_conf['scaling_coefs']['surf_shflx']
-            surf_LH_pred = surf_LH_pred*post_conf['scaling_coefs']['surf_lhflx']
-            sp_input = sp_input*post_conf['scaling_coefs']['SP']
-            sp_pred = sp_pred*post_conf['scaling_coefs']['SP']
+            q_input = q_input*self.post_conf['scaling_coefs']['Q']
+            q_pred = q_pred*self.post_conf['scaling_coefs']['Q']
+            T_input = T_input*self.post_conf['scaling_coefs']['T']
+            T_pred = T_pred*self.post_conf['scaling_coefs']['T']
+            U_input = U_input*self.post_conf['scaling_coefs']['U']
+            U_pred = U_pred*self.post_conf['scaling_coefs']['U']
+            V_input = V_input*self.post_conf['scaling_coefs']['V']
+            V_pred = V_pred*self.post_conf['scaling_coefs']['V']
+            TOA_solar_pred = TOA_solar_pred*self.post_conf['scaling_coefs']['top_net_solar']
+            TOA_OLR_pred = TOA_OLR_pred*self.post_conf['scaling_coefs']['top_net_therm']
+            surf_solar_pred = surf_solar_pred*self.post_conf['scaling_coefs']['surf_net_solar']
+            surf_LR_pred = surf_LR_pred*self.post_conf['scaling_coefs']['surf_net_therm']
+            surf_SH_pred = surf_SH_pred*self.post_conf['scaling_coefs']['surf_shflx']
+            surf_LH_pred = surf_LH_pred*self.post_conf['scaling_coefs']['surf_lhflx']
+            sp_input = sp_input*self.post_conf['scaling_coefs']['SP']
+            sp_pred = sp_pred*self.post_conf['scaling_coefs']['SP']
             
         
         # ------------------------------------------------------------------------------ #
@@ -850,22 +852,22 @@ class GlobalEnergyFixer(nn.Module):
         T_pred = T_pred.unsqueeze(2)
 
         if self.requires_scaling:
-            q_input = q_input/post_conf['scaling_coefs']['Q']
-            q_pred = q_pred/post_conf['scaling_coefs']['Q']
-            T_input = T_input/post_conf['scaling_coefs']['T']
-            T_pred = T_pred/post_conf['scaling_coefs']['T']
-            U_input = U_input/post_conf['scaling_coefs']['U']
-            U_pred = U_pred/post_conf['scaling_coefs']['U']
-            V_input = V_input/post_conf['scaling_coefs']['V']
-            V_pred = V_pred/post_conf['scaling_coefs']['V']
-            TOA_solar_pred = TOA_solar_pred/post_conf['scaling_coefs']['top_net_solar']
-            TOA_OLR_pred = TOA_OLR_pred/post_conf['scaling_coefs']['top_net_therm']
-            surf_solar_pred = surf_solar_pred/post_conf['scaling_coefs']['surf_net_solar']
-            surf_LR_pred = surf_LR_pred/post_conf['scaling_coefs']['surf_net_therm']
-            surf_SH_pred = surf_SH_pred/post_conf['scaling_coefs']['surf_shflx']
-            surf_LH_pred = surf_LH_pred/post_conf['scaling_coefs']['surf_lhflx']
-            sp_input = sp_input/post_conf['scaling_coefs']['SP']
-            sp_pred = sp_pred/post_conf['scaling_coefs']['SP']
+            q_input = q_input/self.post_conf['scaling_coefs']['Q']
+            q_pred = q_pred/self.post_conf['scaling_coefs']['Q']
+            T_input = T_input/self.post_conf['scaling_coefs']['T']
+            T_pred = T_pred/self.post_conf['scaling_coefs']['T']
+            U_input = U_input/self.post_conf['scaling_coefs']['U']
+            U_pred = U_pred/self.post_conf['scaling_coefs']['U']
+            V_input = V_input/self.post_conf['scaling_coefs']['V']
+            V_pred = V_pred/self.post_conf['scaling_coefs']['V']
+            TOA_solar_pred = TOA_solar_pred/self.post_conf['scaling_coefs']['top_net_solar']
+            TOA_OLR_pred = TOA_OLR_pred/self.post_conf['scaling_coefs']['top_net_therm']
+            surf_solar_pred = surf_solar_pred/self.post_conf['scaling_coefs']['surf_net_solar']
+            surf_LR_pred = surf_LR_pred/self.post_conf['scaling_coefs']['surf_net_therm']
+            surf_SH_pred = surf_SH_pred/self.post_conf['scaling_coefs']['surf_shflx']
+            surf_LH_pred = surf_LH_pred/self.post_conf['scaling_coefs']['surf_lhflx']
+            sp_input = sp_input/self.post_conf['scaling_coefs']['SP']
+            sp_pred = sp_pred/self.post_conf['scaling_coefs']['SP']
 
         y_pred = concat_fix(y_pred, T_pred, self.T_ind_start, self.T_ind_end, N_vars)
 

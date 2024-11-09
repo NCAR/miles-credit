@@ -43,13 +43,13 @@ data:
     
     # static variables
     static_variables: ['z_norm','LANDM_COSLAT'] 
-    save_loc_static: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon.nc'
+    save_loc_static: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_v2.nc'
 
     # diagnostic variables
     diagnostic_variables: ['PRECT','CLDTOT','CLDHGH','CLDLOW','CLDMED','TAUX','TAUY','U10', 'QFLX','FSNS','FLNS','FSNT','FLNT','SHFLX','LHFLX']
     save_loc_diagnostic: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate_????.zarr'
 
-    save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon.nc'
+    save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_v2.nc'
      
     # mean / std path
     mean_path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/mean_6h_1979_2010_32lev_1.0deg_new.nc'
@@ -86,10 +86,10 @@ trainer:
     cpu_offload: False
     activation_checkpoint: True
     
-    load_weights: False
-    load_optimizer: False
-    load_scaler: False
-    load_sheduler: False
+    load_weights: True
+    load_optimizer: True
+    load_scaler: True
+    load_sheduler: True
     num_epoch: 2
     
     skip_validation: False
@@ -101,7 +101,7 @@ trainer:
     learning_rate: 1.0e-04 # <-- change to your lr
     weight_decay: 0
         
-    train_batch_size: 10
+    train_batch_size: 5
     valid_batch_size: 5
     long_rollout: True
         
@@ -159,8 +159,11 @@ model:
     pad_lat: 48             # number of grids to pad on -90 and 90 deg lat
 
     post_conf: 
-        activate: False
-        
+        activate: True
+
+
+        #this scaling maps your variables to the ERA5 units 
+        #make sure to adjust if your timestep is not 6 hours 
         requires_scaling: True
         scaling_coefs:
             tot_precip: 86400 #model timestep in seconds m/day -> m/s
@@ -177,19 +180,20 @@ model:
             gph_surf: 1
             temp: 1
             Q: 1
+            T: 1
             
         
         skebs:
             activate: False
         
         tracer_fixer:
-            activate: False
+            activate: True
             denorm: True
             tracer_name: ['Q','PRECT','U10','CLDTOT','CLDHGH','CLDLOW','CLDMED']
             tracer_thres: [0, 0, 0, 0, 0, 0, 0]
             
         global_mass_fixer:
-            activate: False
+            activate: True
             activate_outside_model: False
             simple_demo: False
             denorm: True
@@ -201,20 +205,20 @@ model:
             specific_total_water_name: ['Q']
 
         global_water_fixer:
-            activate: False
+            activate: True
             activate_outside_model: False
             simple_demo: False
             denorm: True
             grid_type: 'sigma'
             midpoint: True
             lon_lat_level_name: ['lon2d', 'lat2d', 'hyai', 'hybi']
-            surface_pressure_name: ['SP']
+            surface_pressure_name: ['PS']
             specific_total_water_name: ['Q']
             precipitation_name: ['PRECT']
             evaporation_name: ['QFLX']
             
         global_energy_fixer:
-            activate: False
+            activate: True
             activate_outside_model: False
             simple_demo: False
             denorm: True
