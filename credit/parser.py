@@ -400,7 +400,10 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         ]
         conf['model']['post_conf']['skebs']['U_inds'] = U_inds
         conf['model']['post_conf']['skebs']['V_inds'] = V_inds
-        conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("SP")
+        if "SP" in varname_output:
+            conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("SP")
+        else:
+            conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("PS")
 
 
     # --------------------------------------------------------------------- #
