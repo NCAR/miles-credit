@@ -48,7 +48,7 @@ from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state
 from credit.parser import credit_main_parser, predict_data_check
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock import GlobalMassFixer#, GlobalWaterFixer, GlobalEnergyFixer
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -278,7 +278,8 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         for init_time in self.init_time_list_np:
             for i_file, ds in enumerate(self.all_files):
                 # get the year of the current file
-                ds_year = int(np.datetime_as_string(ds["time"][0].values, unit="Y"))
+                # ds = ds.set_index({"time": ds.indexes["time"].to_datetimeindex()})
+                ds_year = int(np.datetime_as_string(ds["time"][0].values.astype('datetime64[ns]'), unit="Y"))
 
                 # get the first and last years of init times
                 init_year0 = nanoseconds_to_year(init_time)
@@ -288,7 +289,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                     N_times = len(ds["time"])
                     # convert ds['time'] to a list of nanosecondes
                     ds_time_list = [
-                        np.datetime64(ds_time.values).astype(datetime)
+                        np.datetime64(ds_time.values.astype('datetime64[ns]')).astype(datetime)
                         for ds_time in ds["time"]
                     ]
                     ds_start_time = ds_time_list[0]
@@ -646,7 +647,7 @@ def predict(rank, world_size, conf, p):
 
             # -------------------------------------------------------------------------------------- #
             # start prediction
-            y_pred = model(x)
+            y_pred = model(x).float()
 
             # ============================================= #
             # postblock opts outside of model
