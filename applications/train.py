@@ -251,11 +251,12 @@ def load_model_states_and_optimizer(conf, model, device):
 
     # Multi-step training case -- when starting, only load the model weights (then after load all states)
     elif load_weights and not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
-        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+        logging.warning("loading weights only")
+        optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), # only train weights with requires_grad
+                                      lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
         # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
             logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
@@ -279,11 +280,11 @@ def load_model_states_and_optimizer(conf, model, device):
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-
+        optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), # only train weights with requires_grad
+                                      lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
         # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
             logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
@@ -298,7 +299,6 @@ def load_model_states_and_optimizer(conf, model, device):
             else:
                 logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
                 model.load_state_dict(checkpoint["model_state_dict"])
-            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
             if 'load_optimizer' in conf['trainer'] and conf['trainer']['load_optimizer']:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
