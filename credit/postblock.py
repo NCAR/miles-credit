@@ -11,6 +11,7 @@ Content:
 """
 
 import os
+from os.path import join
 import torch
 from torch import nn
 import torch_harmonics as harmonics
@@ -665,6 +666,11 @@ class SKEBS(nn.Module):
             self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
 
         self.state_trans = load_transforms(post_conf, scaler_only=True)
+
+        ## debugging and analysis features
+        self.write_debug_files = False
+        self.debug_save_loc = join(post_conf['skebs']["save_loc"], "debug_skebs")
+        os.makedirs(self.debug_save_loc, exist_ok=True)  
         self.iteration = 0
 
     def initialize_sht(self):
@@ -785,9 +791,11 @@ class SKEBS(nn.Module):
         x = self.state_trans.inverse_transform(x)
         
         if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
+            self.write_debug_files = not self.training # check if we are in rollout mode. this attr is set by model.eval() or model.train()
+            logger.info("writing SKEBS debugging files" if self.write_debug_files else "SKEBS in train mode")
             self.initialize_pattern(x)
             self.spec_coef_is_initialized = True
-        elif not self.multistep: # reinitialize pattern for each batch
+        elif not self.multistep: # reinitialize pattern for each batch todo: change this option with self.training
             self.clip_parameters()
             self.initialize_pattern(x)
         else:
@@ -807,7 +815,6 @@ class SKEBS(nn.Module):
         # torch.save(self.g_n, os.path.join(debug_save, f"g_n_{self.iteration}"))
         # torch.save(self.b, os.path.join(debug_save, f"b_{self.iteration}"))
 
-        self.iteration += 1
 
         backscatter_pred = self.backscatter_network(x)
 
@@ -831,14 +838,23 @@ class SKEBS(nn.Module):
                               * (torch.sqrt(2.0 * torch.abs(total_forcing) / mlev_mass + wind_squared) 
                               - torch.sqrt(wind_squared))
                               ) # (b, levels, 1, lat, lon)
+        ## debug skebs, write out physical values 
+        if self.write_debug_files:
+            torch.save(add_wind_magnitude, join(self.debug_save_loc, f"perturb_{self.iteration}"))
+            torch.save(x, join(self.debug_save_loc, f"x_{self.iteration}"))
+
         x_u_wind = x[:, self.U_inds] + add_wind_magnitude * u_frac
         x_v_wind = x[:, self.V_inds] + add_wind_magnitude * v_frac
         
         x = concat_for_inplace_ops(x, x_u_wind, min(self.U_inds), max(self.U_inds))
         x = concat_for_inplace_ops(x, x_v_wind, min(self.V_inds), max(self.V_inds))
+
+        
         assert not torch.isnan(x).any()
         x = self.state_trans.transform_array(x)
         assert not torch.isnan(x).any()
+
+        self.iteration += 1
         return x
 
 

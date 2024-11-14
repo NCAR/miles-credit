@@ -381,7 +381,7 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         assert conf['trainer']["train_batch_size"] == conf['trainer']["valid_batch_size"], (
             'train and valid batch sizes need to be the same for skebs'
         )
-        
+
 
         conf['model']['post_conf']['skebs'].setdefault('lmax', None)
         conf['model']['post_conf']['skebs'].setdefault('mmax', None)
@@ -405,6 +405,8 @@ def CREDIT_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         else:
             conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("PS")
 
+        ###### debug mode setup #######
+        conf['model']['post_conf']['skebs']['save_loc'] = conf['save_loc']
 
     # --------------------------------------------------------------------- #
     # tracer fixer
