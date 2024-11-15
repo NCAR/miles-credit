@@ -61,7 +61,9 @@ forecast_len: &forelen 1
 data:
     history_len:  *histlen
     forecast_len: *forelen
-    
+    first_date:   &first "1980-01-01"
+    last_date:    &last "2021-12-31"
+
     rootpath: &default /glade/derecho/scratch/mcginnis/credit
     datasets:
     
@@ -117,7 +119,7 @@ data:
             label: lores
             dim: 2D
             boundary: [SP, MSL, VAR_2T, TCWV, VAR_10U, VAR_10V]
-	    # 2D surface pressures, temp, total column water vapor, winds
+            # 2D surface pressures, temp, total column water vapor, winds
 
 
         ## CONUS404 data on native grid, 1979-10 to 2022-09
@@ -157,7 +159,7 @@ data:
               - V10    # v-wind at 10 meters
             diagnostic:
               - PREC_ACC_NC # total precip (mm) over previous (1-hr) timestep
-	      - SWDNB       # shortwave downwelling at bottom (instantaneous)
+              - SWDNB       # shortwave downwelling at bottom (instantaneous)
               - totalVap    # column-integrated water vapor content 
             unused:
               - SNOW       # snow water equivalent
