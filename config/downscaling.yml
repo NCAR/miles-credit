@@ -59,10 +59,16 @@ forecast_len: &forelen 1
 # rewrite their outputs alphabetize variables.
 
 data:
+    # common values across datasets
+    
+    # note: first_date and last_date must be quoted so that they
+    # remain strings; otherwise the yaml parser converts them to
+    # datetime objects, which can't handle non-standard GCM calendars.
+    
     history_len:  *histlen
     forecast_len: *forelen
-    first_date:   &first "1980-01-01"
-    last_date:    &last "2021-12-31"
+    first_date:   "1980-01-01"
+    last_date:    "2021-12-31"
 
     rootpath: &default /glade/derecho/scratch/mcginnis/credit
     datasets:

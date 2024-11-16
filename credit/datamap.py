@@ -140,15 +140,14 @@ def rescale_minmax(x):
 #--------------------------------------------------------------
 
 
+# Written as a dataclass to avoid acres of boilerplate and for free repr(), etc.
 
 @dataclass
 class DataMap:
-    ''' Class for reading in data from multiple files.
+    '''Class for reading in data from multiple files.
 
     rootpath: pathway to the files
     glob: filename glob of netcdf files
-    history_len: number of input timesteps
-    forecast_len: number of output timesteps
     label: used by higher-level classes to decide how to use the datamap
     dim: dimensions of the data:
         static: no time dimension; data is loaded on initialization
@@ -159,8 +158,14 @@ class DataMap:
     diagnostic: list of diagnostic (output-only) variable names
     prognostic: list of prognostic (state / input-output) variable names
     unused: list of unused variables (optional)
+    history_len: number of input timesteps
+    forecast_len: number of output timesteps
+    first_date: restrict dataset to timesteps >= this point in time
+    last_date: restrict dataset to timesteps <= this point in time
 
-    Written as a dataclass to avoid acres of boilerplate and for free repr(), etc.
+    first_date and last_date default to None, which means use the
+    first/last timestep in the dataset.  Note that they must be
+    YYYY-MM-DD strings (with optional HH:MM:SS), not datetime objects.
     '''
     rootpath:     str
     glob:         str
@@ -214,19 +219,20 @@ class DataMap:
                     
         else:
             fileglob = sorted(glob(self.glob, root_dir=self.rootpath))
-            self.filepaths = [os.path.join(self.roothpath, f) for f in fileglob]
+            self.filepaths = [os.path.join(self.rootpath, f) for f in fileglob]
 
             ## get time coordinate characteristics from first file
             ## calendar & units used to convert date <=> time coordinate
             ## t0 & dt used to convert time coordinates <=> timestep index
             nc0 = nc.Dataset(self.filepaths[0])
             time0 = nc0.variables["time"]
-            nc0.close()
             
             self.calendar = time0.calendar
             self.units = time0.units
             self.t0 = float(time0[0])
             self.dt = float(time0[1]) - self.t0
+
+            nc0.close()
 
             ## get last timestep index in each file
             ## do this in a loop to avoid many-many open filehandles at once
@@ -242,20 +248,26 @@ class DataMap:
             if(self.first_date is None):
                 self.first = 0
             else:
-                self.first = self.time2tindex(self.date2timecoord(self.first_date))
+                self.first = self.timecoord2tindex(
+                    self.date2timecoord(
+                        self.first_date))
 
             if(self.last_date is None):
                 self.last = self.ends[-1]
             else:
-                self.last = self.time2tindex(self.date2timecoord(self.last_date))
+                self.last = self.timecoord2tindex(
+                    self.date2timecoord(
+                        self.last_date))
                 
     # end of __post_init__   
                 
-    def date2timecoord(self, date, time="00:00:00"):
+    def date2timecoord(self, datestring):
         """Convert YYYY-MM-DD string to dataset time coordinate"""
-        ## assert date = YYYY-MM-DD
-        year, mon, day = date.split("-")
-        hour, min, sec = time.split(":")
+        ## assert: datestring = YYYY-MM-DD [HH:MM:SS]
+        bits = datestring.split()
+        if(len(bits) == 1): bits.append("00:00:00")
+        year, mon, day = [int(x) for x in bits[0].split("-")]
+        hour, min, sec = [int(x) for x in bits[1].split(":")]
         cfdt = cf.datetime(year, mon, day, hour, min, sec, calendar=self.calendar)
         timecoord = cf.date2num(cfdt, self.units, self.calendar)
         return timecoord

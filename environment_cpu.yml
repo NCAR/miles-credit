@@ -30,6 +30,7 @@ dependencies:
   - xesmf
   - mpi4py
   - mpich
+  - cftime
   - pip:
     - einops
     - echo-opt
