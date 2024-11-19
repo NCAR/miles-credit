@@ -64,7 +64,7 @@ def rescale_minmax(x):
 # using 3 timesteps of history and 2 timesteps of forecast, for a
 # total sample length of 5.  The time coordinates of the data are
 # stored netcdf-style as minutes since 2000-01-01.  The effective
-# length of this dataset is 362 samples.
+# length of this dataset is 361 samples.
 
 # If the dataset is large, you don't want to read everything into
 # memory; you want to load data lazily when it's needed.  This can be
@@ -92,51 +92,73 @@ def rescale_minmax(x):
 # 29-30 of the former and 0-2 of the latter, and combine and return
 # them as a 5-timestep sample.
 
+# The leftmost column of the table is the time index, which is the
+# number of the timestep within the concatenated collection of netcdf
+# files.  If you have a list of the last time indexes in each file,
+# you can np.searchsorted to find which file it it's in; you then
+# subtract the first time index in that file (= last time index of
+# previous file + 1) to get the index of the timestep within the file.
+# The time index also has a linear relationsip with the time
+# coordinate (multiply by dt and add the offset from epoch), and you
+# can convert the time coordinate to/from a date using the cftime
+# library.  The rightmost column is the sample index, which is the
+# number of the sample with that timestep as the first forecast
+# sample, taking into consideration the starting point of the split
+# and the number of historical timesteps in the split (since a full
+# sample has to fit entirely within the split).  The sample index is
+# the timestep index minus an offset, which is the timestep index of
+# the first timestep in the split and minus the number of historical
+# timesteps.
+
+# Time index is the numbering that gets used internally to find data
+# within files.  Sample index is the numbering that's exposed to the
+# outside world via __getitem__.
+
 #  i  | file | fidx | time | mon | day | split | sample | index
 #--------------------------------------------------------------
-#   1 |  0   |  0   |      | Dec |  1  |       |        |  -     
-#   2 |  0   |  1   |      | '00 |  2  |       |        |  -     
-#   3 |  0   |  2   |      |  "  |  3  |       |        |  -     
+#   0 |  0   |  0   |      | Dec |  1  |       |        |  -     
+#   1 |  0   |  1   |      | '00 |  2  |       |        |  -     
+#   2 |  0   |  2   |      |  "  |  3  |       |        |  -     
 # ... |  "   | ...  |      |  "  | ... |       |        |       
-#  21 |  0   |      |      |  "  |  21 |       | (1st)  |  -     
-#  22 |  0   |      |      |  "  |  22 | first | hist0  |  -     
-#  23 |  0   |      |      |  "  |  23 |       | hist1  |  -     
-#  24 |  0   |      |      |  "  |  24 |       | hist2  |  -     
-#  25 |  0   |      |      |  "  |  25 |       | fore0  |  0    
-#  26 |  0   |      |      |  "  |  26 |       | fore1  |  1    
+#  20 |  0   |      |      |  "  |  21 |       | (1st)  |  -     
+#  21 |  0   |      |      |  "  |  22 | first | hist0  |  -     
+#  22 |  0   |      |      |  "  |  23 |       | hist1  |  -     
+#  23 |  0   |      |      |  "  |  24 |       | hist2  |  -     
+#  24 |  0   |      |      |  "  |  25 |       | fore0  |  0    
+#  25 |  0   |      |      |  "  |  26 |       | fore1  |  1    
 # ... |  "   | ...  | ...  |  "  | ... |       |        | ...      
-#  29 |  0   |  28  | -72  |  "  |  29 |       | ( #8 ) |  4     
-#  30 |  0   |  29  | -48  |  "  |  30 |       | hist0  |  5     
-#  31 |  0   |  30  | -24  |  "  |  31 |       | hist1  |  6     
+#  28 |  0   |  28  | -72  |  "  |  29 |       | ([8])  |  4     
+#  29 |  0   |  29  | -48  |  "  |  30 |       | hist0  |  5     
+#  30 |  0   |  30  | -24  |  "  |  31 |       | hist1  |  6     
 #--------------------------------------------------------------
-#  32 |  1   |  0   |  0   | Jan |  1  |       | hist2  |  7     
-#  33 |  1   |  1   |  24  | '01 |  2  |       | fore0  |  8     
-#  34 |  1   |  2   |  48  |  "  |  3  |       | fore1  |  9     
+#  31 |  1   |  0   |  0   | Jan |  1  |       | hist2  |  7     
+#  32 |  1   |  1   |  24  | '01 |  2  |       | fore0  |  8     
+#  33 |  1   |  2   |  48  |  "  |  3  |       | fore1  |  9     
 # ... |  1   | ...  | ...  |  "  | ... |       |        | ...      
-#  61 |  1   |  29  | 719  | Jan |  30 |       |        |       
-#  62 |  1   |  30  | 720  | Jan |  31 |       |        |       
+#  60 |  1   |  29  | 719  | Jan |  30 |       |        |       
+#  61 |  1   |  30  | 720  | Jan |  31 |       |        |       
 #--------------------------------------------------------------
-#  63 |  2   |  0   | 744  | Feb |  1  |       |        |       
-#  64 |  2   |  1   | 768  |  "  |  2  |       |        |       
+#  62 |  2   |  0   | 744  | Feb |  1  |       |        |       
+#  63 |  2   |  1   | 768  |  "  |  2  |       |        |       
 # ... |  2   | ...  | ...  |  "  | ... |       |        | ...      
 #--------------------------------------------------------------
 # ...   ...    ...    ...    ...   ...                    ...      
 #--------------------------------------------------------------
 # ... |  11  | ...  | ...  | Nov | ... |       |        | ...   
-# 364 |  11  |  28  |      |  "  |  29 |       |        |       
-# 365 |  11  |  29  |      | Nov |  30 |       |        |       
+# 363 |  11  |  28  |      |  "  |  29 |       |        |       
+# 364 |  11  |  29  |      | Nov |  30 |       |        |       
 #--------------------------------------------------------------
-# 366 |  12  |  0   |      | Dec |  1  |       |        |       
+# 365 |  12  |  0   |      | Dec |  1  |       |        |       
 # ... |  12  | ...  |      | '01 | ... |       | (last) | ...   
-# 382 |  12  |  16  |      |  "  |  17 |       | hist0  | 358   
-# 383 |  12  |  17  |      |  "  |  18 |       | hist1  | 359   
-# 384 |  12  |  18  |      |  "  |  19 |       | hist2  | 360   
-# 385 |  12  |  19  |      |  "  |  20 |       | fore0  | 361   
-# 386 |  12  |  20  |      |  "  |  21 | last  | fore1  |  -    
-# 387 |  12  |  21  |      |  "  |  22 |       |        |  -    
+# 381 |  12  |  16  |      |  "  |  17 |       | hist0  | 357   
+# 382 |  12  |  17  |      |  "  |  18 |       | hist1  | 358   
+# 383 |  12  |  18  |      |  "  |  19 |       | hist2  | 359   
+# 384 |  12  |  19  |      |  "  |  20 |       | fore0  | 360   
+# 385 |  12  |  20  |      |  "  |  21 | last  | fore1  |  -    
+# 386 |  12  |  21  |      |  "  |  22 |       |        |  -    
 # ... |  "   | ...  | ...  |  "  | ... |       |        |       
-# 395 |  12  |  29  |      |  "  |  30 |       |        |  -    
-# 396 |  12  |  30  |      | Dec |  31 |       |        |  -    
+# 394 |  12  |  29  |      |  "  |  30 |       |        |  -    
+# 395 |  12  |  30  |      | Dec |  31 |       |        |  -    
 #--------------------------------------------------------------
 
 
@@ -218,6 +240,10 @@ class DataMap:
                     self.data[k] = rescale_minmax(self.data[k])
                     
         else:
+            ## this gets repeatedly used in read(), so create & cache up-front
+            uses = ('boundary', 'prognostic', 'diagnostic')
+            self.vardict = {k: self.__dict__[k] for k in uses}
+            
             fileglob = sorted(glob(self.glob, root_dir=self.rootpath))
             self.filepaths = [os.path.join(self.rootpath, f) for f in fileglob]
 
@@ -242,90 +268,107 @@ class DataMap:
                 file_lens.append(len(ncf.variables["time"]))
                 ncf.close()
 
-            ## Do I need to subtract 1 from all of these?
-            self.ends = list(np.cumsum(file_lens))
+            self.ends = list(np.cumsum(file_lens) - 1)
 
             if(self.first_date is None):
                 self.first = 0
             else:
-                self.first = self.timecoord2tindex(
-                    self.date2timecoord(
-                        self.first_date))
+                self.first = self.date2tindex(self.first_date)
 
             if(self.last_date is None):
                 self.last = self.ends[-1]
             else:
-                self.last = self.timecoord2tindex(
-                    self.date2timecoord(
-                        self.last_date))
+                self.last = self.date2tindex(self.last_date)
+
+            self.length = self.last - self.first + 1 - (self.sample_len - 1)
                 
     # end of __post_init__   
-                
-    def date2timecoord(self, datestring):
-        """Convert YYYY-MM-DD string to dataset time coordinate"""
-        ## assert: datestring = YYYY-MM-DD [HH:MM:SS]
+
+    def date2tindex(self, datestring):
+        '''Convert datestring (in ISO8601 YYYY-MM-DD format) to
+        internal time index.  Datestring can optionally also have an
+        HH:MM:SS component; if absent, it defaults to 00:00:00.'''
+        ## todo: check that sting matches expected format
         bits = datestring.split()
         if(len(bits) == 1): bits.append("00:00:00")
         year, mon, day = [int(x) for x in bits[0].split("-")]
         hour, min, sec = [int(x) for x in bits[1].split(":")]
         cfdt = cf.datetime(year, mon, day, hour, min, sec, calendar=self.calendar)
-        timecoord = cf.date2num(cfdt, self.units, self.calendar)
-        return timecoord
+        time = cf.date2num(cfdt, self.units, self.calendar)
+        tindex = int((time - self.t0) / self.dt)
+        return tindex
 
-    def timecoord2tindex(self, time):
-        """Convert time coordinate value to timestep index"""
-        return int((time - self.t0)/self.dt)
-
-    def tindex2sindex(self, tindex):
-        """Convert timestep index to sample index"""
-        return tindex - self.first
-
-    def sindex2tindex(self, sindex):
-        """Convert sample index to timestep index"""
-        return sindex + self.first
-
+    def sindex2date(self, sindex):
+        '''Convert sample index to ISO8601 datetime string using cftime library.'''
+        tindex = sindex + self.first
+        timecoord = self.t0 + tindex * self.dt
+        cfdate = cf.num2date(timecoord, self.units, self.calendar)
+        return str(cfdate)
     
+        
     def __len__(self):
        if self.dim == "static":
            return 1
        else:
-           return self.last - self.first - self.sample_len + 1
+           return self.length
 
     def __getitem__(self, index):
-        if self.static:
+        if self.dim == "static":
             return self.data
 
+        # error if index is not int
+        # error if index > length-1
+        # error if index < 0 - does not support direct slicing / negative indexing
+
+        start = index + self.first
+        finish = start + self.sample_len - 1
+
+        # get segment (which file) and subindex (within file) for start & finish
+        # subindexes are all negative, but that works fine & makes math simpler
+        
+        startseg = np.searchsorted(self.ends, start)
+        finishseg = np.searchsorted(self.ends, finish)
+        startsub = start - (self.ends[startseg] + 1)
+        finishsub = finish - (self.ends[finishseg])
+
+        if startseg == finishseg:
+            result = self.read(startseg, startsub, finishsub)
         else:
-
-            t = sindex2tindex(index)
-            start = t - self.hist_len
-            end = t + self.fore_len - 1
-            segment = np.searchsorted(self.ends, start)
-            subindex = index - starts[segment]  ## ... HERE
-
-        ## get segment & subindex for start & end
-
-        ## if startseg != endseg, sample spans file boundary
-        ## sample startseg from startsubindex to end of file
-        ## and endseg from beginning of file to endsubindex
-
-        ## add method read so we can loop it easily?
+            data1 = self.read(startseg, startsub, None)
+            data2 = self.read(finishseg, None, finishsub)
+            result = dict()
+            for use in data1.keys():
+                result[use] = dict()
+                for var in data1[use].keys():
+                    a1 = data1[use][var]
+                    a2 = data2[use][var]
+                    result[use][var] = np.concatenate((a1,a2))
         
-        ## open filepaths[segment]
-        ## read data from that segment
-
-        ## mode: training -- get all variables, organize into subdicts by use
-        ##       inference: only get boundary vars
-        ##       initialize: get boundary & prognostic vars
-
-        ## result: dictionary of key = varname, value = array
-        
-        ## return result
+        return result
         pass
 
-    ## normalization (except for static) & structural transformation
-    ## (unstacking z, concatenate to tensor) happen in parent class.
-    ## Datamap just gets you data from a file.
-
-    ## need to deal with input & target slicing
+    ## If needed for speed / efficiency, we could add a "mode"
+    ## attribute to the DataMap that read() would use to decide which
+    ## variables to read in:
+    ##     training = everything
+    ##     intitalize = boundary & prognostic (skip diagnostic)
+    ##     inference = boundary vars only
     
+    def read(self, segment, start, finish):
+        ds = nc.Dataset(self.filepaths[segment])
+        data = dict()
+        for use in self.vardict.keys():
+            data[use] = dict()
+            for var in self.vardict[use]:
+                if self.dim == "3D":
+                    data[use][var] = ds[var][start:finish,:,:,:]
+                else:
+                    data[use][var] = ds[var][start:finish,:,:]
+        ds.close()
+        return data
+    
+    ## normalization (except for static) & structural transformations
+    ## (split to hist/fore, unstack z, concatenate variables to
+    ## tensor) happen in parent class.  DataMap just gets you data
+    ## from file(s).
+
