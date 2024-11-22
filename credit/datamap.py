@@ -176,6 +176,7 @@ class DataMap:
         3D: data has z-dimension; unstack Z to pseudo-variables when reading
         2D: default: time-varying 2D data
     normalize: if dim=='static' & normalize == True, scale data to range [0,1]
+    unstack: if dim=='3d' & unstack == True, convert 3D layers to pseudo-vars
     boundary: list of variable names to use as (input-only) boundary conditions
     diagnostic: list of diagnostic (output-only) variable names
     prognostic: list of prognostic (state / input-output) variable names
@@ -194,6 +195,7 @@ class DataMap:
     label:        str = None
     dim:          str = "2D"
     normalize:    bool = False
+    unstack:      bool = False
     boundary:     List[str] = field(default_factory=list)
     prognostic:   List[str] = field(default_factory=list)
     diagnostic:   List[str] = field(default_factory=list)
@@ -258,6 +260,16 @@ class DataMap:
             self.t0 = float(time0[0])
             self.dt = float(time0[1]) - self.t0
 
+            if self.dim=='3D' and self.unstack:
+                ## get coord values to use as names when unstacking z-dim
+                ## note that some datasets may have more than one z coord
+                ## e.g., ERA5 has level, but CONUS404 has lev & ilev
+                self.znames = dict()
+                for use in uses:
+                    for v in self.vardict[use]:
+                        zdimname = nc0[v].dimensions[1]  ## standard dim ordering
+                        self.znames[zdimname] = [str(int(z)) for z in nc0[zdimname]]
+            
             nc0.close()
 
             ## get last timestep index in each file
@@ -314,7 +326,7 @@ class DataMap:
 
     def __getitem__(self, index):
         if self.dim == "static":
-            return self.data
+            return {static:self.data}
 
         # error if index is not int
         # error if index > length-1
@@ -355,13 +367,21 @@ class DataMap:
     ##     inference = boundary vars only
     
     def read(self, segment, start, finish):
+        '''open file & read data from start to finish for each variable in varlist'''
         ds = nc.Dataset(self.filepaths[segment])
         data = dict()
         for use in self.vardict.keys():
             data[use] = dict()
             for var in self.vardict[use]:
                 if self.dim == "3D":
-                    data[use][var] = ds[var][start:finish,:,:,:]
+                    if self.unstack:
+                        zdn = ds[var].dimensions[1]
+                        for z in range(0, len(self.znames[zdn])-1):
+                            varz = var + self.znames[zdn][z]
+                            data[use][varz] = ds[var][start:finish,z,:,:]
+                    else:
+                        ## 3D data not unstacked
+                        data[use][var] = ds[var][start:finish,:,:,:]
                 else:
                     data[use][var] = ds[var][start:finish,:,:]
         ds.close()

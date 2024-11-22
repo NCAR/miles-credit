@@ -77,7 +77,7 @@ data:
 
         static:
             rootpath: *default
-            glob: 'conus404/INVARIANT/conus404.static.nc'
+            glob: 'conus404/conus404.static.nc'
             label: hires
             dim: static
             normalize: True   # scale min,max == [0,1] iff dim = static
@@ -112,16 +112,17 @@ data:
         ## data is interpolated to pressure levels and global 0.25 degree grid
         ## hourly, 1979-2023
 
-        era5_3d:
+        era5_3D:
             rootpath: *default
-            glob: 'era5/3d/*/era5.*.nc'
+            glob: 'era5/3d/*/era5.3d.*.nc'
             label: lores
             dim: 3D
+            unstack: True
             boundary: [T, U, V, Z, R]   # 3D temp, winds, geopotential, humidity
 
-        era5_2d:
+        era5_2D:
             rootpath: *default
-            glob: 'era5/2d/*/era5.*.nc'
+            glob: 'era5/2d/*/era5.2d.*.nc'
             label: lores
             dim: 2D
             boundary: [SP, MSL, VAR_2T, TCWV, VAR_10U, VAR_10V]
@@ -138,9 +139,10 @@ data:
     
         conus404_3D:
             rootpath: *default
-            glob: 'conus404/wy*/*/conus404.3d.*.nc'
+            glob: 'conus404/3d/*/conus404.3d.*.nc'
             label: hires
             dim: 3D
+            unstack: True
             prognostic:
               - P       # total pressure (dataset uses hybrid sigma coordinates)
               - QVAPOR  # water vapor mixing ratio
@@ -152,7 +154,7 @@ data:
 
         conus404_2D:
             rootpath: *default
-            glob: 'conus404/wy*/*/conus404.2d.*.nc'
+            glob: 'conus404/2d/*/conus404.2d.*.nc'
             label: hires
             dim: 2D
             boundary: [COSZEN]  # cosine of solar zenith angle
