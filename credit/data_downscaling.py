@@ -282,10 +282,6 @@ class DownscalingDataset(torch.utils.data.Dataset):
         def __getitem__(self, index):
             items = {k:self.datasets[k][index] for k in self.datasets.keys()}
 
-            ## okay, need to put static into a dict with key 'static'
-
-            
-            
             ## combine results by use
             # result = dict()
             # loop on use:
@@ -295,7 +291,6 @@ class DownscalingDataset(torch.utils.data.Dataset):
             
             
             # transforms to tensor
-            # (includes unstacking z-dim)
             # applies normalization
             # (and any other transformations)
             pass

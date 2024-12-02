@@ -185,6 +185,8 @@ class DataMap:
     forecast_len: number of output timesteps
     first_date: restrict dataset to timesteps >= this point in time
     last_date: restrict dataset to timesteps <= this point in time
+    mode: which variables to return by use type:
+      "train" = all; "init" = all but diagnostic; "infer" = static + boundary
 
     first_date and last_date default to None, which means use the
     first/last timestep in the dataset.  Note that they must be
@@ -204,6 +206,7 @@ class DataMap:
     forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
+    mode:         str = "train"
     
     def __post_init__(self):
         super().__init__()
@@ -272,16 +275,6 @@ class DataMap:
             
             nc0.close()
 
-            ## get last timestep index in each file
-            ## do this in a loop to avoid many-many open filehandles at once
-            file_lens = list()
-            for f in self.filepaths:
-                ncf = nc.Dataset(f)
-                file_lens.append(len(ncf.variables["time"]))
-                ncf.close()
-
-            self.ends = list(np.cumsum(file_lens) - 1)
-
             if(self.first_date is None):
                 self.first = 0
             else:
@@ -293,6 +286,20 @@ class DataMap:
                 self.last = self.date2tindex(self.last_date)
 
             self.length = self.last - self.first + 1 - (self.sample_len - 1)
+
+            ## get last timestep index in each file
+            ## do this in a loop to avoid many-many open filehandles at once
+
+            self.ends = list()
+            cumlen = -1
+            for f in self.filepaths:
+                ncf = nc.Dataset(f)
+                cumlen = cumlen + len(ncf.variables["time"])
+                self.ends.append(cumlen)
+                ncf.close()
+                ## file opens are slow; stop early if possible
+                if cumlen > self.last:
+                    break
                 
     # end of __post_init__   
 
@@ -326,14 +333,16 @@ class DataMap:
 
     def __getitem__(self, index):
         if self.dim == "static":
-            return {static:self.data}
+            return {"static":self.data}
 
-        # error if index is not int
-        # error if index > length-1
-        # error if index < 0 - does not support direct slicing / negative indexing
-
-        start = index + self.first
-        finish = start + self.sample_len - 1
+        if index < 0 or index > self.length-1:
+            raise(IndexError())
+        
+        start = index + self.first + 1
+        if self.mode == "train":
+            finish = start + self.sample_len - 1
+        else:
+            finish = start + self.history_len - 1
 
         # get segment (which file) and subindex (within file) for start & finish
         # subindexes are all negative, but that works fine & makes math simpler
@@ -355,22 +364,31 @@ class DataMap:
                     a1 = data1[use][var]
                     a2 = data2[use][var]
                     result[use][var] = np.concatenate((a1,a2))
-        
+
+        result["dates"] = {"start":self.sindex2date(start-self.first),
+                           "finish":self.sindex2date(finish-self.first),
+                           }
         return result
         pass
 
-    ## If needed for speed / efficiency, we could add a "mode"
-    ## attribute to the DataMap that read() would use to decide which
-    ## variables to read in:
-    ##     training = everything
-    ##     intitalize = boundary & prognostic (skip diagnostic)
-    ##     inference = boundary vars only
     
     def read(self, segment, start, finish):
-        '''open file & read data from start to finish for each variable in varlist'''
+        '''open file & read data from start to finish for needed variables'''
+
+        # Note: static DataMaps never call read; they short-circuit in getitem
+        match self.mode:
+            case "train":
+                uses = ("boundary","prognostic","diagnostic")
+            case "init":
+                uses = ("boundary","prognostic")
+            case "infer":
+                uses = ("boundary",)
+            case _:
+                raise ValueError("invalid DataMap mode")
+
         ds = nc.Dataset(self.filepaths[segment])
         data = dict()
-        for use in self.vardict.keys():
+        for use in uses:
             data[use] = dict()
             for var in self.vardict[use]:
                 if self.dim == "3D":
@@ -386,9 +404,7 @@ class DataMap:
                     data[use][var] = ds[var][start:finish,:,:]
         ds.close()
         return data
-    
-    ## normalization (except for static) & structural transformations
-    ## (split to hist/fore, unstack z, concatenate variables to
-    ## tensor) happen in parent class.  DataMap just gets you data
-    ## from file(s).
 
+    ## todo: normalization
+    ## todo: splitting to input / target
+    ## concatenation to tensor happens in dataset class
