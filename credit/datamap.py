@@ -185,8 +185,6 @@ class DataMap:
     forecast_len: number of output timesteps
     first_date: restrict dataset to timesteps >= this point in time
     last_date: restrict dataset to timesteps <= this point in time
-    mode: which variables to return by use type:
-      "train" = all; "init" = all but diagnostic; "infer" = static + boundary
 
     first_date and last_date default to None, which means use the
     first/last timestep in the dataset.  Note that they must be
@@ -206,12 +204,14 @@ class DataMap:
     forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
-    mode:         str = "train"
+#    mode:         str = "train"
     
     def __post_init__(self):
         super().__init__()
 
         self.sample_len = self.history_len + self.forecast_len
+
+        self._mode = "train"
         
         ## todo: accept & canonicalize different capitalization
         if self.dim not in ['static', '2D', '3D']:
@@ -365,13 +365,27 @@ class DataMap:
                     a2 = data2[use][var]
                     result[use][var] = np.concatenate((a1,a2))
 
-        result["dates"] = {"start":self.sindex2date(start-self.first),
-                           "finish":self.sindex2date(finish-self.first),
-                           }
+        # result["dates"] = {"start":self.sindex2date(start-self.first),
+        #                    "finish":self.sindex2date(finish-self.first),
+        #                    }
         return result
         pass
 
+
+    # the mode property determines which variables to return by use type:
+    # "train" = all; "init" = all but diagnostic; "infer" = static + boundary
+
+    @property
+    def mode(self) -> str:
+        return self._mode
     
+    @mode.setter
+    def mode(self, mode: str):
+        if mode not in ('train', 'init', 'infer'):
+            raise ValueError("invalid DataMap mode")
+        self._mode = mode
+
+        
     def read(self, segment, start, finish):
         '''open file & read data from start to finish for needed variables'''
 
