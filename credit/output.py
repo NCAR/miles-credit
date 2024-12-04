@@ -232,7 +232,7 @@ def save_netcdf_increment(
             for pres_var in conf["data"]["variables"]:
                 encoding_dict[pres_var] = conf["predict"]["pressure_var_encoding"]
         # Use Dask to write the dataset in parallel
-        ds_merged.to_netcdf(unique_filename, encoding=encoding_dict)
+        ds_merged.to_netcdf(unique_filename, mode="w", encoding=encoding_dict)
 
         logger.info(f"Saved forecast hour {forecast_hour} to {unique_filename}")
     except Exception:
