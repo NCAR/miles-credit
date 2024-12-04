@@ -1,0 +1,263 @@
+# yaml file for the conus404 dataset
+
+#---------------------
+# CONUS404 data is (assumed to be) hourly data stored in daily netcdf
+# files organized by year.  Each file contains 24 timesteps and all
+# variables of the appropriate dimensionality.  Data has been
+# compressed with lossy compression, and is chunked so that each file
+# is a single chunk (i.e., 1 chunk = all space, 24 timesteps).
+# 
+# Naming convention: $path/YYYY/conus404.Nd.YYYY-MM-DD.nc
+#
+# data is normalized (using functions in transforms.py) in the
+# dataloader in applications/train.py; no need for users to normalize
+# them by hand.
+#---------------------
+
+# the location to save your workspace, it will have
+# (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
+# if save_loc does not exist, it will be created automatically
+
+save_loc: /glade/work/$USER/CREDIT_runs/c404/
+seed: 2222  # RNG seed
+
+history_len:  &histlen 2 
+forecast_len: &forelen 1
+
+
+# file globs are defined relative to the top-level data rootpath
+
+# A downscaling model has two encoders, one for the high-res
+# downscaled data (the output from the model being emulated) and one
+# for the low-res driver data (the boundary conditions coming from a
+# GCM or reanalysis).  These two encoders are merged at the feature
+# level of the network.  All data going into a given encoder must have
+# the same dimensions in X & Y.  (The Z dimension gets unstacked into
+# the 'variable' dimension; i.e., different levels of a 3D variable
+# are treated as different variables.)
+
+# The low-res data needs to be be interpolated onto a coarsened
+# version of the high-res data, so that the spatial features are
+# coregistered in feature space.  [TODO: do some experiments and check
+# that this is true.]
+
+# 'boundary' variables are input-only, used in both training and
+#  inference
+
+# 'diagnostic' variables are output-only
+
+# 'prognostic' variables are input-output; the value predicted as an
+#  output for time T is recycled as an input for predicting time T+1 in
+#  inference
+
+# 'unused' variables don't actually need to be listed in the yaml
+# file, they're just here for reference and convenience when changing
+#  around the model configuration
+
+# listing variables in the order they appear in the netcdf file should
+# result in faster reads from disk.  By default, NCO commands that
+# rewrite their outputs alphabetize variables.
+
+data:
+    rootpath: &default /glade/derecho/scratch/mcginnis/conus404
+    datasets:
+    
+        ## extracted from 'wrfconstants_usgs404.nc'
+
+        ## Note that these should be PRE-NORMALIZED to mean 0, stdev 1
+        ## (or to [0,1] range)
+        
+        static:
+            rootpath: *default
+            glob: 'conus404.static.nc'
+            label: hires
+            dim: static
+            normalize: True   # scale min,max == [-1,1] iff dim = static
+            boundary:
+              - COSALPHA  # local cosine of map rotation
+              - E         # coriolis cosine latitude term
+              - F         # coriolis sine latitude term
+              - HGT       # terrain height / orography
+              - LANDMASK  # land/sea mask (0=water, 1=land)
+              - SINALPHA  # local sine of map rotation
+              - VAR       # orographic variance
+              - VAR_SSO   # variance of subgrid-scale orography
+            unused:
+              - XLAT      # latitude
+              - XLONG     # longitude
+
+
+        ## calculated using miles-credit applications script
+        ## calc_global_solar.py, regridded to coarsened CONUS404 grid
+        ## hourly, 1979-2024
+        
+        solar:
+            rootpath: *default
+            glob: 'solar/tisr.*.nc'
+            label: lores
+            dim: 2D
+            boundary:
+              - tisr      # TOA incident solar radiation (J/m^2, integral dt)
+
+
+        ## ERA5 data regridded to coarsened CONUS404 grid.  Source
+        ## data is interpolated to pressure levels and global 0.25 degree grid
+        ## hourly, 1979-2023
+
+        era5:
+            rootpath: *default
+            glob: 'era5/*nc'  ## FILL IN
+            label: lores
+            dim: 3D
+            boundary: [Q, T, U, V, Z]   # 3D humidity, temp, winds, geopotential
+
+
+        ## CONUS404 data on native grid, 1979-10 to 2022-09
+        
+        ## NOTE that U and V are on staggered grids that are 1 larger
+        ## in the x- and y- dimensions (respectively) than the other
+        ## variables; they have been trimmed by 1 on the western and
+        ## southern edges (respectively) to match the dimensionality
+        ## of the non-staggered grids.
+    
+        conus404_3D:
+            rootpath: *default
+            glob: 'data/*/conus404.3d.*.nc'
+            label: hires
+            dim: 3D
+            prognostic:
+              - P       # total pressure (dataset uses hybrid sigma coordinates)
+              - QVAPOR  # water vapor mixing ratio
+              - TK      # air temperature
+              - U       # U-component of wind *with respect to model grid*
+              - V       # V-component of wind *with respect to model grid*
+            diagnostic:
+              - Z       # geopotential height
+
+        conus404_2D:
+            rootpath: *default
+            glob: 'data/*/conus404.2d.*.nc'
+            label: hires
+            dim: 2D
+            boundary: [COSZEN]  #
+            prognostic:
+              - PSFC   # surface pressure
+              - Q2     # water vapor mixing ratio at 2 meters
+              - T2     # 2-meter air temperature
+              - TD2    # 2-d dewpoint temperature
+              - U10    # u-wind at 10 meters
+              - V10    # v-wind at 10 meters
+            diagnostic:
+              - PREC_ACC_NC # total precip (mm) over previous timestep
+              - totalVap    # column-integrated water vapor content 
+            unused:
+              - SNOW       # snow water equivalent
+
+    history_len:  *histlen
+    forecast_len: *forelen
+
+
+
+#     ## NOT YET UPDATED BELOW HERE
+# 
+#     # z-score files, they must be zarr or nc with (level,) coords
+#     # they MUST include all the
+#     #     'variables', 'surface_variables', 'dynamic_forcing_variables', 'diagnostic_variables' above
+#     mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/mean_6h_0.25deg.nc'  ## FILL IN
+#     std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/std_6h_0.25deg.nc'          ## FILL IN
+# 
+# 
+# 
+#     scaler_type: "std"
+#     zarrpath: '/glade/campaign/ral/risc/DATA/conus404/zarr'
+#     save_loc: './'
+#     mean_path: '/glade/derecho/scratch/mcginnis/conus404/stats/all.avg.C404.nc'
+#     std_path: '/glade/derecho/scratch/mcginnis/conus404/stats/all.std.C404.nc'
+#     history_len: 2 
+#     forecast_len: 1
+#     valid_history_len: 2
+#     valid_forecast_len: 1
+#     time_step: 1
+#     start: "1979-10-01"
+#     finish: "2012-09-30"
+
+model:
+    type: "unet404"
+    image_height: 512
+    image_width: 512
+    frames: 3
+    architecture:
+        name: "unet"
+        encoder_name: "resnet34"
+        encoder_weights: "imagenet"
+    
+trainer:
+    type: "conus404"
+    mode: none # none, ddp, fsdp
+    train_batch_size: 4
+    valid_batch_size: 4
+    batches_per_epoch: 10 # Set to 0 to use len(dataloader)
+    valid_batches_per_epoch: 100
+    learning_rate: 1.0e-04
+    weight_decay: 1.0e-05
+    start_epoch: 0
+    epochs: 4  # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+    thread_workers: 4
+    valid_thread_workers: 0
+    stopping_patience: 50
+    teacher_forcing_ratio: 0.5 #0.9886539666794065
+    stop_rollout: 0.9
+    skip_validation: True
+    load_weights: False
+    load_optimizer: False
+    use_scheduler: False
+    update_learning_rate: True
+    #scheduler: {'scheduler_type': 'cosine-annealing', first_cycle_steps: 500, cycle_mult: 6.0, max_lr: 5.0e-04, min_lr: 5.0e-07, warmup_steps: 499, gamma: 0.7}
+    # scheduler: {scheduler_type: plateau, mode: min, factor: 0.1, patience: 5, cooldown: 2, min_lr: 1e-6, epsilon: 1e-8, verbose: true, threshold: 1e-4}
+    scheduler: {'scheduler_type': 'lambda'}
+     
+loss: 
+   training_loss: "mse"
+   use_vgg: False
+   use_spectral_loss: False
+   spectral_wavenum_init: 15
+   spectral_lambda_reg: 0.025791372491084097
+   use_latitude_weights: False
+   use_variable_weights: False
+   latitude_weights: False
+
+
+predict:
+    start: "2017-11-01"
+    finish: "2017-11-03"
+#    finish: "2022-09-30"
+    autoregressive: False
+    use_laplace_filter: False
+    save_format: "nc"
+
+
+#visualization:
+#    surface_visualize: 
+#        variable_keys: ['U10','U1000','U250','U500','U850','V10','V1000','V250','V500','V850']
+#        variable_names: ['U10','U1000','U250','U500','U850','V10','V1000','V250','V500','V850']
+#        file_name_prefix: "unet-03-wind"
+#    save_options: {'dpi': 250,
+#                   'format':'png'}
+#    video_format: 'none'
+
+    
+pbs: # casper
+    conda: "credit"
+    job_name: 'unet-debug'
+    nodes: 1
+    ncpus: 8
+    ngpus: 1
+    mem: '128GB'
+    walltime: '4:00:00'
+#    walltime: '24:00:00'
+    gpu_type: 'v100'
+    project: 'NRIS0001'
+    queue: 'casper'
