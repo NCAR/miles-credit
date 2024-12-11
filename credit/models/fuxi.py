@@ -226,15 +226,16 @@ class UTransformer(nn.Module):
     """
 
     def __init__(
-        self, embed_dim, 
-        num_groups, 
-        input_resolution, 
-        num_heads, 
-        window_size, 
+        self,
+        embed_dim,
+        num_groups,
+        input_resolution,
+        num_heads,
+        window_size,
         depth,
         proj_drop,
         attn_drop,
-        drop_path
+        drop_path,
     ):
         super().__init__()
         num_groups = to_2tuple(num_groups)
@@ -256,15 +257,15 @@ class UTransformer(nn.Module):
 
         # SwinT block
         self.layer = SwinTransformerV2Stage(
-            embed_dim, 
-            embed_dim, 
-            input_resolution, 
-            depth, 
-            num_heads, 
+            embed_dim,
+            embed_dim,
+            input_resolution,
+            depth,
+            num_heads,
             window_size[0],
             proj_drop=proj_drop,
             attn_drop=attn_drop,
-            drop_path=drop_path
+            drop_path=drop_path,
         )  # <--- window_size[0] get window_size[int] from tuple
 
         # up-sampling block
@@ -342,15 +343,15 @@ class Fuxi(BaseModel):
 
         self.use_interp = interp
         self.use_spectral_norm = use_spectral_norm
-        
+
         if padding_conf is None:
             padding_conf = {"activate": False}
-            
+
         self.use_padding = padding_conf["activate"]
-        
+
         if post_conf is None:
             post_conf = {"activate": False}
-            
+
         self.use_post_block = post_conf["activate"]
 
         # input tensor size (time, lat, lon)
@@ -385,17 +386,20 @@ class Fuxi(BaseModel):
         self.cube_embedding = CubeEmbedding(img_size, patch_size, in_chans, dim)
 
         # Downsampling --> SwinTransformerV2 stacks --> Upsampling
-        logger.info(f"Define UTransforme with proj_drop={proj_drop}, attn_drop={attn_drop}, drop_path={drop_path}")
-        
+        logger.info(
+            f"Define UTransforme with proj_drop={proj_drop}, attn_drop={attn_drop}, drop_path={drop_path}"
+        )
+
         self.u_transformer = UTransformer(
-            dim, num_groups, 
-            input_resolution, 
-            num_heads, 
-            window_size, 
+            dim,
+            num_groups,
+            input_resolution,
+            num_heads,
+            window_size,
             depth=depth,
             proj_drop=proj_drop,
             attn_drop=attn_drop,
-            drop_path=drop_path
+            drop_path=drop_path,
         )
 
         # dense layer applied on channel dmension
@@ -418,7 +422,7 @@ class Fuxi(BaseModel):
         # Move the model to the device
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.to(device)
-        
+
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")
             apply_spectral_norm(self)

@@ -31,13 +31,7 @@ from credit.distributed import get_rank_info
 from credit.data import (
     concat_and_reshape,
     reshape_only,
-    drop_var_from_dataset,
-    generate_datetime,
-    nanoseconds_to_year,
-    hour_to_nanoseconds,
-    get_forward_data,
-    extract_month_day_hour,
-    find_common_indices,
+    Predict_Dataset_Iter,
 )
 
 from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
@@ -58,368 +52,6 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 
-class Predict_Dataset(torch.utils.data.IterableDataset):
-    """
-    Same as ERA5_and_Forcing_Dataset() but work with rollout_to_netcdf_new.py
-
-    *ksha: dynamic forcing has been added to the rollout-only Dataset, but it has
-    not been tested. Once the new tsi is ready, this dataset class will be tested
-    """
-
-    def __init__(
-        self,
-        conf,
-        varname_upper_air,
-        varname_surface,
-        varname_dyn_forcing,
-        varname_forcing,
-        varname_static,
-        varname_diagnostic,
-        filenames,
-        filename_surface,
-        filename_dyn_forcing,
-        filename_forcing,
-        filename_static,
-        filename_diagnostic,
-        fcst_datetime,
-        history_len,
-        rank,
-        world_size,
-        transform=None,
-        rollout_p=0.0,
-        which_forecast=None,
-    ):
-        # ------------------------------------------------------------------------------ #
-
-        ## no diagnostics because they are output only
-        # varname_diagnostic = None
-
-        self.rank = rank
-        self.world_size = world_size
-        self.transform = transform
-        self.history_len = history_len
-        self.init_datetime = fcst_datetime
-
-        self.which_forecast = (
-            which_forecast  # <-- got from the old roll-out script. Dont know
-        )
-
-        # -------------------------------------- #
-        # file names
-        self.filenames = filenames  # <------------------------ a list of files
-        self.filename_surface = filename_surface  # <---------- a list of files
-        self.filename_dyn_forcing = filename_dyn_forcing  # <-- a list of files
-        self.filename_forcing = filename_forcing  # <-- single file
-        self.filename_static = filename_static  # <---- single file
-        self.filename_diagnostic = filename_diagnostic  # <---- single file
-
-        # -------------------------------------- #
-        # var names
-        self.varname_upper_air = varname_upper_air
-        self.varname_surface = varname_surface
-        self.varname_dyn_forcing = varname_dyn_forcing
-        self.varname_forcing = varname_forcing
-        self.varname_static = varname_static
-        self.varname_diagnostic = varname_diagnostic
-
-        # ====================================== #
-        # import all upper air zarr files
-        all_files = []
-        for fn in self.filenames:
-            # drop variables if they are not in the config
-            xarray_dataset = get_forward_data(filename=fn)
-            xarray_dataset = drop_var_from_dataset(
-                xarray_dataset, self.varname_upper_air
-            )
-            # collect yearly datasets within a list
-            all_files.append(xarray_dataset)
-        self.all_files = all_files
-        # ====================================== #
-
-        # -------------------------------------- #
-        # other settings
-        self.current_epoch = 0
-        self.rollout_p = rollout_p
-
-        self.lead_time_periods = conf["data"]["lead_time_periods"]
-        self.skip_periods = conf["data"]["skip_periods"]
-
-    def ds_read_and_subset(self, filename, time_start, time_end, varnames):
-        sliced_x = get_forward_data(filename)
-        sliced_x = sliced_x.isel(time=slice(time_start, time_end))
-        sliced_x = drop_var_from_dataset(sliced_x, varnames)
-        return sliced_x
-
-    def load_zarr_as_input(self, i_file, i_init_start, i_init_end, mode="input"):
-        # get the needed file from a list of zarr files
-        # open the zarr file as xr.dataset and subset based on the needed time
-
-        # sliced_x: the final output, starts with an upper air xr.dataset
-        sliced_x = self.ds_read_and_subset(
-            self.filenames[i_file], i_init_start, i_init_end + 1, self.varname_upper_air
-        )
-        # surface variables
-        if self.filename_surface is not None:
-            sliced_surface = self.ds_read_and_subset(
-                self.filename_surface[i_file],
-                i_init_start,
-                i_init_end + 1,
-                self.varname_surface,
-            )
-            # merge surface to sliced_x
-            sliced_surface["time"] = sliced_x["time"]
-            sliced_x = sliced_x.merge(sliced_surface)
-
-        if mode == "input":
-            # dynamic forcing variables
-            if self.filename_dyn_forcing is not None:
-                sliced_dyn_forcing = self.ds_read_and_subset(
-                    self.filename_dyn_forcing[i_file],
-                    i_init_start,
-                    i_init_end + 1,
-                    self.varname_dyn_forcing,
-                )
-                # merge surface to sliced_x
-                sliced_dyn_forcing["time"] = sliced_x["time"]
-                sliced_x = sliced_x.merge(sliced_dyn_forcing)
-
-            # forcing / static
-            if self.filename_forcing is not None:
-                sliced_forcing = get_forward_data(self.filename_forcing)
-                sliced_forcing = drop_var_from_dataset(
-                    sliced_forcing, self.varname_forcing
-                )
-
-                # See also `ERA5_and_Forcing_Dataset`
-                # =============================================================================== #
-                # matching month, day, hour between forcing and upper air [time]
-                # this approach handles leap year forcing file and non-leap-year upper air file
-                month_day_forcing = extract_month_day_hour(
-                    np.array(sliced_forcing["time"])
-                )
-                month_day_inputs = extract_month_day_hour(np.array(sliced_x["time"]))
-                # indices to subset
-                ind_forcing, _ = find_common_indices(
-                    month_day_forcing, month_day_inputs
-                )
-                sliced_forcing = sliced_forcing.isel(time=ind_forcing)
-                # forcing and upper air have different years but the same mon/day/hour
-                # safely replace forcing time with upper air time
-                sliced_forcing["time"] = sliced_x["time"]
-                # =============================================================================== #
-
-                # merge forcing to sliced_x
-                sliced_x = sliced_x.merge(sliced_forcing)
-
-            if self.filename_static is not None:
-                sliced_static = get_forward_data(self.filename_static)
-                sliced_static = drop_var_from_dataset(
-                    sliced_static, self.varname_static
-                )
-                sliced_static = sliced_static.expand_dims(
-                    dim={"time": len(sliced_x["time"])}
-                )
-                sliced_static["time"] = sliced_x["time"]
-                # merge static to sliced_x
-                sliced_x = sliced_x.merge(sliced_static)
-
-        elif mode == "target":
-            # diagnostic
-            if self.filename_diagnostic is not None:
-                sliced_diagnostic = self.ds_read_and_subset(
-                    self.filename_diagnostic[i_file],
-                    i_init_start,
-                    i_init_end + 1,
-                    self.varname_diagnostic,
-                )
-                # merge diagnostics to sliced_x
-                sliced_diagnostic["time"] = sliced_x["time"]
-                sliced_x = sliced_x.merge(sliced_diagnostic)
-
-        return sliced_x
-
-    def find_start_stop_indices(self, index):
-        # ============================================================================ #
-        # shift hours for history_len > 1, becuase more than one init times are needed
-        # <--- !! it MAY NOT work when self.skip_period != 1
-        shifted_hours = (
-            self.lead_time_periods * self.skip_periods * (self.history_len - 1)
-        )
-        # ============================================================================ #
-        # subtrack shifted_hour form the 1st & last init times
-        # convert to datetime object
-        self.init_datetime[index][0] = datetime.strptime(
-            self.init_datetime[index][0], "%Y-%m-%d %H:%M:%S"
-        ) - timedelta(hours=shifted_hours)
-        self.init_datetime[index][1] = datetime.strptime(
-            self.init_datetime[index][1], "%Y-%m-%d %H:%M:%S"
-        ) - timedelta(hours=shifted_hours)
-
-        # convert the 1st & last init times to a list of init times
-        self.init_datetime[index] = generate_datetime(
-            self.init_datetime[index][0],
-            self.init_datetime[index][1],
-            self.lead_time_periods,
-        )
-        # convert datetime obj to nanosecondes
-        init_time_list_dt = [
-            np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S"))
-            for date in self.init_datetime[index]
-        ]
-
-        # init_time_list_np: a list of python datetime objects, each is a forecast step
-        # init_time_list_np[0]: the first initialization time
-        # init_time_list_np[t]: the forcasted time of the (t-1)th step; the initialization time of the t-th step
-        self.init_time_list_np = [
-            np.datetime64(str(dt_obj) + ".000000000").astype(datetime)
-            for dt_obj in init_time_list_dt
-        ]
-
-        info = []
-        for init_time in self.init_time_list_np:
-            for i_file, ds in enumerate(self.all_files):
-                # get the year of the current file
-                ds_year = int(np.datetime_as_string(ds["time"][0].values, unit="Y"))
-
-                # get the first and last years of init times
-                init_year0 = nanoseconds_to_year(init_time)
-
-                # found the right yearly file
-                if init_year0 == ds_year:
-                    N_times = len(ds["time"])
-                    # convert ds['time'] to a list of nanosecondes
-                    ds_time_list = [
-                        np.datetime64(ds_time.values).astype(datetime)
-                        for ds_time in ds["time"]
-                    ]
-                    ds_start_time = ds_time_list[0]
-                    ds_end_time = ds_time_list[-1]
-
-                    init_time_start = init_time
-                    # if initalization time is within this (yearly) xr.Dataset
-                    if ds_start_time <= init_time_start <= ds_end_time:
-                        # try getting the index of the first initalization time
-                        i_init_start = ds_time_list.index(init_time_start)
-
-                        # for multiple init time inputs (history_len > 1), init_end is different for init_start
-                        init_time_end = init_time_start + hour_to_nanoseconds(
-                            shifted_hours
-                        )
-
-                        # see if init_time_end is alos in this file
-                        if ds_start_time <= init_time_end <= ds_end_time:
-                            # try getting the index
-                            i_init_end = ds_time_list.index(init_time_end)
-                        else:
-                            # this set of initalizations have crossed years
-                            # get the last element of the current file
-                            # we have anthoer section that checks additional input data
-                            i_init_end = len(ds_time_list) - 1
-
-                        info.append([i_file, i_init_start, i_init_end, N_times])
-        return info
-
-    def __len__(self):
-        return len(self.init_datetime)
-
-    def __iter__(self):
-        worker_info = get_worker_info()
-        num_workers = worker_info.num_workers if worker_info is not None else 1
-        worker_id = worker_info.id if worker_info is not None else 0
-        sampler = DistributedSampler(
-            self,
-            num_replicas=num_workers * self.world_size,
-            rank=self.rank * num_workers + worker_id,
-            shuffle=False,
-        )
-        for index in sampler:
-            # get the init time info for the current sample
-            data_lookup = self.find_start_stop_indices(index)
-
-            for k, _ in enumerate(self.init_time_list_np):
-                # the first initialization time: get initalization from data
-                i_file, i_init_start, i_init_end, N_times = data_lookup[k]
-
-                # allocate output dict
-                output_dict = {}
-
-                # get all inputs in one xr.Dataset
-                sliced_x = self.load_zarr_as_input(
-                    i_file, i_init_start, i_init_end, mode="input"
-                )
-
-                # Check if additional data from the next file is needed
-                if (len(sliced_x["time"]) < self.history_len) or (
-                    i_init_end + 1 >= N_times
-                ):
-                    # Load excess data from the next file
-                    next_file_idx = self.filenames.index(self.filenames[i_file]) + 1
-
-                    if next_file_idx >= len(self.filenames):
-                        # not enough input data to support this forecast
-                        raise OSError(
-                            "You have reached the end of the available data. Exiting."
-                        )
-
-                    else:
-                        sliced_y = self.load_zarr_as_input(
-                            i_file, i_init_end, i_init_end, mode="target"
-                        )
-
-                        # i_init_start = 0 because we need the beginning of the next file only
-                        sliced_x_next = self.load_zarr_as_input(
-                            next_file_idx, 0, self.history_len, mode="input"
-                        )
-                        sliced_y_next = self.load_zarr_as_input(
-                            next_file_idx, 0, 1, mode="target"
-                        )
-                        # 1 becuase taregt is one step a time
-
-                        # Concatenate excess data from the next file with the current data
-                        sliced_x_combine = xr.concat(
-                            [sliced_x, sliced_x_next], dim="time"
-                        )
-                        sliced_y_combine = xr.concat(
-                            [sliced_y, sliced_y_next], dim="time"
-                        )
-
-                        sliced_x = sliced_x_combine.isel(
-                            time=slice(0, self.history_len)
-                        )
-                        sliced_y = sliced_y_combine.isel(
-                            time=slice(self.history_len, self.history_len + 1)
-                        )
-                else:
-                    sliced_y = self.load_zarr_as_input(
-                        i_file, i_init_end + 1, i_init_end + 1, mode="target"
-                    )
-
-                sample_x = {
-                    "historical_ERA5_images": sliced_x,
-                    "target_ERA5_images": sliced_y,
-                }
-
-                if self.transform:
-                    sample_x = self.transform(sample_x)
-
-                for key in sample_x.keys():
-                    output_dict[key] = sample_x[key]
-
-                # <--- !! 'forecast_hour' is actually "forecast_step" but named by assuming hourly
-                output_dict["forecast_hour"] = k + 1
-                # Adjust stopping condition
-                output_dict["stop_forecast"] = k == (len(self.init_time_list_np) - 1)
-                output_dict["datetime"] = sliced_x.time.values.astype(
-                    "datetime64[s]"
-                ).astype(int)[-1]
-
-                # return output_dict
-                yield output_dict
-
-                if output_dict["stop_forecast"]:
-                    break
-
-
 def predict(rank, world_size, conf, p):
     # setup rank and world size for GPU-based rollout
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
@@ -433,7 +65,7 @@ def predict(rank, world_size, conf, p):
         device = torch.device("cpu")
 
     # config settings
-    seed = 1000 if "seed" not in conf else conf["seed"]
+    seed = conf["seed"]
     seed_everything(seed)
 
     # number of input time frames
@@ -497,7 +129,7 @@ def predict(rank, world_size, conf, p):
         + len(conf["data"]["forcing_variables"])
         + len(conf["data"]["static_variables"])
     )
-    
+
     # ------------------------------------------------------- #
     # clamp to remove outliers
     if conf["data"]["data_clamp"] is None:
@@ -506,7 +138,7 @@ def predict(rank, world_size, conf, p):
         flag_clamp = True
         clamp_min = float(conf["data"]["data_clamp"][0])
         clamp_max = float(conf["data"]["data_clamp"][1])
-        
+
     # ====================================================== #
     # postblock opts outside of model
     post_conf = conf["model"]["post_conf"]
@@ -536,7 +168,7 @@ def predict(rank, world_size, conf, p):
 
     # ----------------------------------------------------------------- #\
     # get dataset
-    dataset = Predict_Dataset(
+    dataset = Predict_Dataset_Iter(
         conf,
         varname_upper_air,
         varname_surface,
@@ -653,7 +285,14 @@ def predict(rank, world_size, conf, p):
             else:
                 # no y_surf
                 y = reshape_only(batch["y"]).to(device).float()
-
+                
+            # adding diagnostic vars to y
+            if "y_diag" in batch:
+                y_diag_batch = (
+                    batch["y_diag"].to(device).permute(0, 2, 1, 3, 4)
+                )
+                y = torch.cat((y, y_diag_batch), dim=1).to(device).float()
+                
             # -------------------------------------------------------------------------------------- #
             # start prediction
 
@@ -661,8 +300,8 @@ def predict(rank, world_size, conf, p):
             # clamp
             if flag_clamp:
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
-                #y = torch.clamp(y, min=clamp_min, max=clamp_max)
-            
+                # y = torch.clamp(y, min=clamp_min, max=clamp_max)
+
             y_pred = model(x)
 
             # ============================================= #

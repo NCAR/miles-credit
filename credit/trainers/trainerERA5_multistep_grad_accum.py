@@ -78,7 +78,7 @@ class Trainer(BaseTrainer):
         Returns:
             dict: Dictionary containing training metrics and loss for the epoch.
         """
-        
+
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_max_norm = conf["trainer"]["grad_max_norm"]
         amp = conf["trainer"]["amp"]
@@ -121,7 +121,7 @@ class Trainer(BaseTrainer):
             flag_clamp = True
             clamp_min = float(conf["data"]["data_clamp"][0])
             clamp_max = float(conf["data"]["data_clamp"][1])
-        
+
         # ====================================================== #
         # postblock opts outside of model
         post_conf = conf["model"]["post_conf"]
@@ -209,7 +209,7 @@ class Trainer(BaseTrainer):
                         # clamp
                         if flag_clamp:
                             x = torch.clamp(x, min=clamp_min, max=clamp_max)
-                        
+
                         # predict with the model
                         y_pred = self.model(x)
 
@@ -265,7 +265,7 @@ class Trainer(BaseTrainer):
                             # clamp
                             if flag_clamp:
                                 y = torch.clamp(y, min=clamp_min, max=clamp_max)
-                                
+
                             loss = criterion(y.to(y_pred.dtype), y_pred).mean()
 
                             # track the loss
@@ -313,8 +313,13 @@ class Trainer(BaseTrainer):
 
                 if distributed:
                     torch.distributed.barrier()
-                    
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=grad_max_norm)
+
+                # apply gradient clipping if the config val is not None
+                if grad_max_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), max_norm=grad_max_norm
+                    )
+
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
@@ -434,7 +439,7 @@ class Trainer(BaseTrainer):
             flag_clamp = True
             clamp_min = float(conf["data"]["data_clamp"][0])
             clamp_max = float(conf["data"]["data_clamp"][1])
-        
+
         # ====================================================== #
         # postblock opts outside of model
         post_conf = conf["model"]["post_conf"]
@@ -500,7 +505,7 @@ class Trainer(BaseTrainer):
                     # clamp
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
-                        
+
                     y_pred = self.model(x)
 
                     # ============================================= #
@@ -555,7 +560,7 @@ class Trainer(BaseTrainer):
                         # clamp
                         if flag_clamp:
                             y = torch.clamp(y, min=clamp_min, max=clamp_max)
-                        
+
                         # ----------------------------------------------------------------------- #
                         # calculate rolling loss
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()

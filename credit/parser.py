@@ -252,7 +252,7 @@ def credit_main_parser(
     ## I/O data sizes
 
     conf["data"].setdefault("data_clamp", None)
-    
+
     if parse_training:
         assert (
             "train_years" in conf["data"]
@@ -267,7 +267,7 @@ def credit_main_parser(
         assert (
             "forecast_len" in conf["data"]
         ), "Number of time frames for loss compute ('forecast_len') is missing from conf['data']"
-        
+
         if "valid_history_len" not in conf["data"]:
             # use "history_len" for "valid_history_len"
             conf["data"]["valid_history_len"] = conf["data"]["history_len"]
@@ -317,6 +317,16 @@ def credit_main_parser(
 
     # --------------------------------------------------------- #
     # conf['model'] section
+
+    # spectral norm default to false
+    conf["model"].setdefault("use_spectral_norm", False)
+
+    if (conf["model"]["type"] == "fuxi") and (
+        conf["model"]["use_spectral_norm"] is False
+    ):
+        warnings.warn(
+            "FuXi may not work with 'use_spectral_norm: False' in fsdp training."
+        )
 
     # use interpolation
     if "interp" not in conf["model"]:
@@ -423,8 +433,8 @@ def credit_main_parser(
         )
 
         # # debug only
-        conf['model']['post_conf']['varname_input'] = varname_input
-        conf['model']['post_conf']['varname_output'] = varname_output
+        conf["model"]["post_conf"]["varname_input"] = varname_input
+        conf["model"]["post_conf"]["varname_output"] = varname_output
         # --------------------------------------------------------------------- #
 
     # SKEBS
@@ -481,7 +491,9 @@ def credit_main_parser(
         conf["model"]["post_conf"]["global_mass_fixer"].setdefault("denorm", True)
         conf["model"]["post_conf"]["global_mass_fixer"].setdefault("simple_demo", False)
         conf["model"]["post_conf"]["global_mass_fixer"].setdefault("midpoint", False)
-        conf['model']['post_conf']['global_mass_fixer'].setdefault('grid_type', 'pressure')
+        conf["model"]["post_conf"]["global_mass_fixer"].setdefault(
+            "grid_type", "pressure"
+        )
 
         assert (
             "fix_level_num" in conf["model"]["post_conf"]["global_mass_fixer"]
@@ -491,11 +503,13 @@ def credit_main_parser(
             assert (
                 "lon_lat_level_name" in conf["model"]["post_conf"]["global_mass_fixer"]
             ), "Must specifiy var names for lat/lon/level in physics reference file"
-        
-        if conf['model']['post_conf']['global_mass_fixer']['grid_type'] == 'sigma':
-            assert 'surface_pressure_name' in conf['model']['post_conf']['global_mass_fixer'], (
-                'Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates')
-        
+
+        if conf["model"]["post_conf"]["global_mass_fixer"]["grid_type"] == "sigma":
+            assert (
+                "surface_pressure_name"
+                in conf["model"]["post_conf"]["global_mass_fixer"]
+            ), "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
+
         q_inds = [
             i_var
             for i_var, var in enumerate(varname_output)
@@ -506,13 +520,17 @@ def credit_main_parser(
         ]
         conf["model"]["post_conf"]["global_mass_fixer"]["q_inds"] = q_inds
 
-        if conf['model']['post_conf']['global_mass_fixer']['grid_type'] == 'sigma':
+        if conf["model"]["post_conf"]["global_mass_fixer"]["grid_type"] == "sigma":
             sp_inds = [
-                i_var for i_var, var in enumerate(varname_output) 
-                if var in conf['model']['post_conf']['global_mass_fixer']['surface_pressure_name']
-            ]        
-            conf['model']['post_conf']['global_mass_fixer']['sp_inds'] = sp_inds[0]
-    
+                i_var
+                for i_var, var in enumerate(varname_output)
+                if var
+                in conf["model"]["post_conf"]["global_mass_fixer"][
+                    "surface_pressure_name"
+                ]
+            ]
+            conf["model"]["post_conf"]["global_mass_fixer"]["sp_inds"] = sp_inds[0]
+
     # --------------------------------------------------------------------- #
     # global water fixer
     flag_water = (
@@ -533,17 +551,21 @@ def credit_main_parser(
             "simple_demo", False
         )
         conf["model"]["post_conf"]["global_water_fixer"].setdefault("midpoint", False)
-        conf['model']['post_conf']['global_water_fixer'].setdefault('grid_type', 'pressure')
+        conf["model"]["post_conf"]["global_water_fixer"].setdefault(
+            "grid_type", "pressure"
+        )
 
         if conf["model"]["post_conf"]["global_water_fixer"]["simple_demo"] is False:
             assert (
                 "lon_lat_level_name" in conf["model"]["post_conf"]["global_water_fixer"]
             ), "Must specifiy var names for lat/lon/level in physics reference file"
 
-        if conf['model']['post_conf']['global_water_fixer']['grid_type'] == 'sigma':
-            assert 'surface_pressure_name' in conf['model']['post_conf']['global_water_fixer'], (
-                'Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates')
-        
+        if conf["model"]["post_conf"]["global_water_fixer"]["grid_type"] == "sigma":
+            assert (
+                "surface_pressure_name"
+                in conf["model"]["post_conf"]["global_water_fixer"]
+            ), "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
+
         q_inds = [
             i_var
             for i_var, var in enumerate(varname_output)
@@ -571,13 +593,17 @@ def credit_main_parser(
         conf["model"]["post_conf"]["global_water_fixer"]["precip_ind"] = precip_inds[0]
         conf["model"]["post_conf"]["global_water_fixer"]["evapor_ind"] = evapor_inds[0]
 
-        if conf['model']['post_conf']['global_water_fixer']['grid_type'] == 'sigma':
+        if conf["model"]["post_conf"]["global_water_fixer"]["grid_type"] == "sigma":
             sp_inds = [
-                i_var for i_var, var in enumerate(varname_output) 
-                if var in conf['model']['post_conf']['global_water_fixer']['surface_pressure_name']
-            ]        
-            conf['model']['post_conf']['global_water_fixer']['sp_inds'] = sp_inds[0]
-    
+                i_var
+                for i_var, var in enumerate(varname_output)
+                if var
+                in conf["model"]["post_conf"]["global_water_fixer"][
+                    "surface_pressure_name"
+                ]
+            ]
+            conf["model"]["post_conf"]["global_water_fixer"]["sp_inds"] = sp_inds[0]
+
     # --------------------------------------------------------------------- #
     # global energy fixer
     flag_energy = (
@@ -598,7 +624,9 @@ def credit_main_parser(
             "simple_demo", False
         )
         conf["model"]["post_conf"]["global_energy_fixer"].setdefault("midpoint", False)
-        conf['model']['post_conf']['global_energy_fixer'].setdefault('grid_type', 'pressure')
+        conf["model"]["post_conf"]["global_energy_fixer"].setdefault(
+            "grid_type", "pressure"
+        )
 
         if conf["model"]["post_conf"]["global_energy_fixer"]["simple_demo"] is False:
             assert (
@@ -606,10 +634,12 @@ def credit_main_parser(
                 in conf["model"]["post_conf"]["global_energy_fixer"]
             ), "Must specifiy var names for lat/lon/level in physics reference file"
 
-        if conf['model']['post_conf']['global_energy_fixer']['grid_type'] == 'sigma':
-            assert 'surface_pressure_name' in conf['model']['post_conf']['global_energy_fixer'], (
-                'Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates')
-        
+        if conf["model"]["post_conf"]["global_energy_fixer"]["grid_type"] == "sigma":
+            assert (
+                "surface_pressure_name"
+                in conf["model"]["post_conf"]["global_energy_fixer"]
+            ), "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
+
         T_inds = [
             i_var
             for i_var, var in enumerate(varname_output)
@@ -677,13 +707,17 @@ def credit_main_parser(
             surf_flux_inds
         )
 
-        if conf['model']['post_conf']['global_energy_fixer']['grid_type'] == 'sigma':
+        if conf["model"]["post_conf"]["global_energy_fixer"]["grid_type"] == "sigma":
             sp_inds = [
-                i_var for i_var, var in enumerate(varname_output) 
-                if var in conf['model']['post_conf']['global_energy_fixer']['surface_pressure_name']
-            ]        
-            conf['model']['post_conf']['global_energy_fixer']['sp_inds'] = sp_inds[0]
-    
+                i_var
+                for i_var, var in enumerate(varname_output)
+                if var
+                in conf["model"]["post_conf"]["global_energy_fixer"][
+                    "surface_pressure_name"
+                ]
+            ]
+            conf["model"]["post_conf"]["global_energy_fixer"]["sp_inds"] = sp_inds[0]
+
     # --------------------------------------------------------- #
     # conf['trainer'] section
 
@@ -691,6 +725,13 @@ def credit_main_parser(
         assert (
             "mode" in conf["trainer"]
         ), "Resource type ('mode') is missing from conf['trainer']"
+
+        assert conf["trainer"]["mode"] in [
+            "fsdp",
+            "ddp",
+            "none",
+        ], "conf['trainer']['mode'] accepts fsdp, ddp, and none"
+
         assert (
             "type" in conf["trainer"]
         ), "Training strategy ('type') is missing from conf['trainer']"
@@ -824,8 +865,11 @@ def credit_main_parser(
         if "grad_accum_every" not in conf["trainer"]:
             conf["trainer"]["grad_accum_every"] = 1
 
-        if "grad_max_norm" not in conf["trainer"]:
-            conf["trainer"]["grad_max_norm"] = 1.0
+        # gradient clipping
+        conf["trainer"].setdefault("grad_max_norm", None)
+
+        if conf["trainer"]["grad_max_norm"] == 0:
+            conf["trainer"]["grad_max_norm"] = None
 
     # --------------------------------------------------------- #
     # conf['loss'] section
@@ -1330,6 +1374,16 @@ def training_data_check(conf, print_summary=False):
         coord_name in coord_upper_air for coord_name in coord_latlon
     ), "conf['loss']['latitude_weights'] file coordinate names mismatched with upper-air files"
 
+    # model level consistency final checks
+    N_level_mean = len(ds_mean[varnames_upper_air[0]].values)
+    N_level_model = conf["model"]["levels"]
+
+    assert (
+        N_level_mean == N_level_model
+    ), "number of upper air levels mismatched between model config {} and input data {}".format(
+        N_level_model, N_level_mean
+    )
+
     if print_summary:
         print("Coordinate checking passed")
         print(
@@ -1360,6 +1414,9 @@ def predict_data_check(conf, print_summary=False):
     # a rough estimate of how manys years of initializations are needed
     # !!! Can be improved !!!
     if "duration" in conf["predict"]["forecasts"]:
+        assert (
+            "start_year" in conf["predict"]["forecasts"]
+        ), "Must specify which year to start predict."
         N_years = conf["predict"]["forecasts"]["duration"] // 365
         N_years = N_years + 1
     else:
@@ -1379,11 +1436,9 @@ def predict_data_check(conf, print_summary=False):
         file for file in all_ERA_files if any(year in file for year in pred_years)
     ]
 
-    for i_year, year in enumerate(pred_years):
-        assert (
-            year in pred_ERA_files[i_year]
-        ), "[Year {}] is missing from [upper-air files {}]".format(
-            year, conf["data"]["save_loc"]
+    if len(pred_years) != len(pred_ERA_files[i_year]):
+        warnings.warn(
+            "Provided initializations in upper air files may not cover all forecasted dates"
         )
 
     ## surface files
@@ -1394,11 +1449,9 @@ def predict_data_check(conf, print_summary=False):
             file for file in surface_files if any(year in file for year in pred_years)
         ]
 
-        for i_year, year in enumerate(pred_years):
-            assert (
-                year in pred_surface_files[i_year]
-            ), "[Year {}] is missing from [surface files {}]".format(
-                year, conf["data"]["save_loc_surface"]
+        if len(pred_years) != len(pred_surface_files[i_year]):
+            warnings.warn(
+                "Provided initializations in surface files may not cover all forecasted dates"
             )
 
     ## dynamic forcing files
@@ -1411,11 +1464,9 @@ def predict_data_check(conf, print_summary=False):
             if any(year in file for year in pred_years)
         ]
 
-        for i_year, year in enumerate(pred_years):
-            assert (
-                year in pred_dyn_forcing_files[i_year]
-            ), "[Year {}] is missing from [dynamic forcing files {}]".format(
-                year, conf["data"]["save_loc_dynamic_forcing"]
+        if len(pred_years) != len(pred_dyn_forcing_files[i_year]):
+            warnings.warn(
+                "Provided initializations in surface files may not cover all forecasted dates"
             )
 
     if print_summary:

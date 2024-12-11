@@ -721,7 +721,7 @@ if __name__ == "__main__":
             # track hyperparameters and run metadata
             config=conf,
         )
-        
+
     seed = conf["seed"]
     seed_everything(seed)
 

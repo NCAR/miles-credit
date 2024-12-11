@@ -395,11 +395,11 @@ def variable_weights(conf, channels, frames):
 
     # surface + diag channels
     N_channels_single = len(varname_surface) + len(varname_diagnostics)
-    
+
     weights_upper_air = torch.tensor(
         [conf["loss"]["variable_weights"][var] for var in varname_upper_air]
     ).view(1, channels * frames, 1, 1)
-    
+
     weights_single = torch.tensor(
         [
             conf["loss"]["variable_weights"][var]
@@ -460,19 +460,19 @@ class VariableTotalLoss2D(torch.nn.Module):
         self.var_weights = None
         if conf["loss"]["use_variable_weights"]:
             logger.info("Using variable weights in loss calculations")
-            
+
             var_weights = [
                 value if isinstance(value, list) else [value]
                 for value in conf["loss"]["variable_weights"].values()
             ]
-            
+
             var_weights = np.array(
                 [item for sublist in var_weights for item in sublist]
             )
-            
+
             self.var_weights = torch.from_numpy(var_weights)
         # ------------------------------------------------------------- #
-        
+
         self.use_spectral_loss = conf["loss"]["use_spectral_loss"]
         if self.use_spectral_loss:
             self.spectral_lambda_reg = conf["loss"]["spectral_lambda_reg"]

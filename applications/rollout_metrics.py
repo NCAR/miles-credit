@@ -26,14 +26,13 @@ import torch
 # credit
 from credit.models import load_model
 from credit.seed import seed_everything
+
 from credit.data import (
-    Predict_Dataset,
     concat_and_reshape,
     reshape_only,
-    generate_datetime,
-    nanoseconds_to_year,
-    hour_to_nanoseconds,
+    Predict_Dataset_Iter,
 )
+
 from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
@@ -52,181 +51,10 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 
-class Predict_Dataset_Metrics(Predict_Dataset):
-    def find_start_stop_indices(self, index):
-        # ============================================================================ #
-        # shift hours for history_len > 1, becuase more than one init times are needed
-        # <--- !! it MAY NOT work when self.skip_period != 1
-        shifted_hours = (
-            self.lead_time_periods * self.skip_periods * (self.history_len - 1)
-        )
-        # ============================================================================ #
-        # subtrack shifted_hour form the 1st & last init times
-        # convert to datetime object
-        self.init_datetime[index][0] = datetime.strptime(
-            self.init_datetime[index][0], "%Y-%m-%d %H:%M:%S"
-        ) - timedelta(hours=shifted_hours)
-        self.init_datetime[index][1] = datetime.strptime(
-            self.init_datetime[index][1], "%Y-%m-%d %H:%M:%S"
-        ) - timedelta(hours=shifted_hours)
-
-        # convert the 1st & last init times to a list of init times
-        self.init_datetime[index] = generate_datetime(
-            self.init_datetime[index][0],
-            self.init_datetime[index][1],
-            self.lead_time_periods,
-        )
-        # convert datetime obj to nanosecondes
-        init_time_list_dt = [
-            np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S"))
-            for date in self.init_datetime[index]
-        ]
-
-        # init_time_list_np: a list of python datetime objects, each is a forecast step
-        # init_time_list_np[0]: the first initialization time
-        # init_time_list_np[t]: the forcasted time of the (t-1)th step; the initialization time of the t-th step
-        self.init_time_list_np = [
-            np.datetime64(str(dt_obj) + ".000000000").astype(datetime)
-            for dt_obj in init_time_list_dt
-        ]
-
-        info = []
-        for init_time in self.init_time_list_np:
-            for i_file, ds in enumerate(self.all_files):
-                # get the year of the current file
-                ds_year = int(np.datetime_as_string(ds["time"][0].values, unit="Y"))
-
-                # get the first and last years of init times
-                init_year0 = nanoseconds_to_year(init_time)
-
-                # found the right yearly file
-                if init_year0 == ds_year:
-                    N_times = len(ds["time"])
-                    # convert ds['time'] to a list of nanosecondes
-                    ds_time_list = [
-                        np.datetime64(ds_time.values).astype(datetime)
-                        for ds_time in ds["time"]
-                    ]
-                    ds_start_time = ds_time_list[0]
-                    ds_end_time = ds_time_list[-1]
-
-                    init_time_start = init_time
-                    # if initalization time is within this (yearly) xr.Dataset
-                    if ds_start_time <= init_time_start <= ds_end_time:
-                        # try getting the index of the first initalization time
-                        i_init_start = ds_time_list.index(init_time_start)
-
-                        # for multiple init time inputs (history_len > 1), init_end is different for init_start
-                        init_time_end = init_time_start + hour_to_nanoseconds(
-                            shifted_hours
-                        )
-
-                        # see if init_time_end is alos in this file
-                        if ds_start_time <= init_time_end <= ds_end_time:
-                            # try getting the index
-                            i_init_end = ds_time_list.index(init_time_end)
-                        else:
-                            # this set of initalizations have crossed years
-                            # get the last element of the current file
-                            # we have anthoer section that checks additional input data
-                            i_init_end = len(ds_time_list) - 1
-
-                        info.append([i_file, i_init_start, i_init_end, N_times])
-        return info
-
-    def __iter__(self):
-        worker_info = get_worker_info()
-        num_workers = worker_info.num_workers if worker_info is not None else 1
-        worker_id = worker_info.id if worker_info is not None else 0
-        sampler = DistributedSampler(
-            self,
-            num_replicas=num_workers * self.world_size,
-            rank=self.rank * num_workers + worker_id,
-            shuffle=False,
-        )
-        for index in sampler:
-            # get the init time info for the current sample
-            data_lookup = self.find_start_stop_indices(index)
-
-            for k, _ in enumerate(self.init_time_list_np):
-                # the first initialization time: get initalization from data
-                i_file, i_init_start, i_init_end, N_times = data_lookup[k]
-
-                # allocate output dict
-                output_dict = {}
-
-                # get all inputs in one xr.Dataset
-                sliced_x = self.load_zarr_as_input(i_file, i_init_start, i_init_end)
-                # print(i_file, i_init_start, i_init_end, N_times)
-                # print(sliced_x['time'])
-
-                # Check if additional data from the next file is needed
-                if (len(sliced_x["time"]) < self.history_len) or (
-                    i_init_end + 1 >= N_times
-                ):
-                    # Load excess data from the next file
-                    next_file_idx = self.filenames.index(self.filenames[i_file]) + 1
-
-                    if next_file_idx >= len(self.filenames):
-                        # not enough input data to support this forecast
-                        raise OSError(
-                            "You have reached the end of the available data. Exiting."
-                        )
-
-                    else:
-                        # i_init_start = 0 because we need the beginning of the next file only
-                        sliced_x_next = self.load_zarr_as_input(
-                            next_file_idx, 0, self.history_len
-                        )
-
-                        # Concatenate excess data from the next file with the current data
-                        sliced_xy = xr.concat([sliced_x, sliced_x_next], dim="time")
-                        sliced_x = sliced_xy.isel(time=slice(0, self.history_len))
-
-                        sliced_y = sliced_xy.isel(
-                            time=slice(self.history_len, self.history_len + 1)
-                        )
-                        # self.load_zarr_as_input(next_file_idx, self.history_len, self.history_len+1)
-
-                else:
-                    sliced_y = self.load_zarr_as_input(
-                        i_file, i_init_end + 1, i_init_end + 1
-                    )
-
-                # Prepare data for transform application
-                # print(sliced_x['time'])
-                # print(sliced_y['time'])
-
-                sample_x = {
-                    "historical_ERA5_images": sliced_x,
-                    "target_ERA5_images": sliced_y,
-                }
-
-                if self.transform:
-                    sample_x = self.transform(sample_x)
-
-                for key in sample_x.keys():
-                    output_dict[key] = sample_x[key]
-
-                # <--- !! 'forecast_hour' is actually "forecast_step" but named by assuming hourly
-                output_dict["forecast_hour"] = k + 1
-                # Adjust stopping condition
-                output_dict["stop_forecast"] = k == (len(self.init_time_list_np) - 1)
-                output_dict["datetime"] = sliced_x.time.values.astype(
-                    "datetime64[s]"
-                ).astype(int)[-1]
-
-                # return output_dict
-                yield output_dict
-
-                if output_dict["stop_forecast"]:
-                    break
-
-
-def predict(rank, world_size, conf, backend, p):
+def predict(rank, world_size, conf, p):
     # setup rank and world size for GPU-based rollout
-    if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
-        setup(rank, world_size, conf["trainer"]["mode"], backend)
+    if conf["predict"]["mode"] in ["fsdp", "ddp"]:
+        setup(rank, world_size, conf["predict"]["mode"])
 
     # infer device id from rank
     if torch.cuda.is_available():
@@ -236,7 +64,7 @@ def predict(rank, world_size, conf, backend, p):
         device = torch.device("cpu")
 
     # config settings
-    seed = 1000 if "seed" not in conf else conf["seed"]
+    seed = conf["seed"]
     seed_everything(seed)
 
     # number of input time frames
@@ -267,6 +95,14 @@ def predict(rank, world_size, conf, backend, p):
     else:
         surface_files = None
 
+    # diagnostic variables
+    varname_diagnostic = conf["data"]["diagnostic_variables"]
+
+    if conf["data"]["flag_diagnostic"]:
+        diagnostic_files = sorted(glob(conf["data"]["save_loc_diagnostic"]))
+    else:
+        diagnostic_files = None
+
     # dynamic forcing variables
     varname_dyn_forcing = conf["data"]["dynamic_forcing_variables"]
 
@@ -283,20 +119,68 @@ def predict(rank, world_size, conf, backend, p):
     static_files = conf["data"]["save_loc_static"]
     varname_static = conf["data"]["static_variables"]
 
+    # number of diagnostic variables
+    varnum_diag = len(conf["data"]["diagnostic_variables"])
+
+    # number of dynamic forcing + forcing + static
+    static_dim_size = (
+        len(conf["data"]["dynamic_forcing_variables"])
+        + len(conf["data"]["forcing_variables"])
+        + len(conf["data"]["static_variables"])
+    )
+
+    # ------------------------------------------------------- #
+    # clamp to remove outliers
+    if conf["data"]["data_clamp"] is None:
+        flag_clamp = False
+    else:
+        flag_clamp = True
+        clamp_min = float(conf["data"]["data_clamp"][0])
+        clamp_max = float(conf["data"]["data_clamp"][1])
+
+    # ====================================================== #
+    # postblock opts outside of model
+    post_conf = conf["model"]["post_conf"]
+    flag_mass_conserve = False
+    flag_water_conserve = False
+    flag_energy_conserve = False
+
+    if post_conf["activate"]:
+        if post_conf["global_mass_fixer"]["activate"]:
+            if post_conf["global_mass_fixer"]["activate_outside_model"]:
+                logger.info("Activate GlobalMassFixer outside of model")
+                flag_mass_conserve = True
+                opt_mass = GlobalMassFixer(post_conf)
+
+        if post_conf["global_water_fixer"]["activate"]:
+            if post_conf["global_water_fixer"]["activate_outside_model"]:
+                logger.info("Activate GlobalWaterFixer outside of model")
+                flag_water_conserve = True
+                opt_water = GlobalWaterFixer(post_conf)
+
+        if post_conf["global_energy_fixer"]["activate"]:
+            if post_conf["global_energy_fixer"]["activate_outside_model"]:
+                logger.info("Activate GlobalEnergyFixer outside of model")
+                flag_energy_conserve = True
+                opt_energy = GlobalEnergyFixer(post_conf)
+    # ====================================================== #
+
     # ----------------------------------------------------------------- #\
     # get dataset
-    dataset = Predict_Dataset_Metrics(
+    dataset = Predict_Dataset_Iter(
         conf,
         varname_upper_air,
         varname_surface,
         varname_dyn_forcing,
         varname_forcing,
         varname_static,
+        varname_diagnostic,
         filenames=all_ERA_files,
         filename_surface=surface_files,
         filename_dyn_forcing=dyn_forcing_files,
         filename_forcing=forcing_files,
         filename_static=static_files,
+        filename_diagnostic=diagnostic_files,
         fcst_datetime=load_forecasts(conf),
         history_len=history_len,
         rank=rank,
@@ -397,10 +281,53 @@ def predict(rank, world_size, conf, backend, p):
                 # no y_surf
                 y = reshape_only(batch["y"]).to(device).float()
 
+            # adding diagnostic vars to y
+            if "y_diag" in batch:
+                y_diag_batch = (
+                    batch["y_diag"].to(device).permute(0, 2, 1, 3, 4)
+                )
+                y = torch.cat((y, y_diag_batch), dim=1).to(device).float()
+            
             # -------------------------------------------------------------------------------------- #
             # start prediction
+
+            # --------------------------------------------- #
+            # clamp
+            if flag_clamp:
+                x = torch.clamp(x, min=clamp_min, max=clamp_max)
+
             y_pred = model(x)
+
+            # ============================================= #
+            # postblock opts outside of model
+
+            # backup init state
+            if flag_mass_conserve:
+                if forecast_hour == 1:
+                    x_init = x.clone()
+
+            # mass conserve using initialization as reference
+            if flag_mass_conserve:
+                input_dict = {"y_pred": y_pred, "x": x_init}
+                input_dict = opt_mass(input_dict)
+                y_pred = input_dict["y_pred"]
+
+            # water conserve use previous step output as reference
+            if flag_water_conserve:
+                input_dict = {"y_pred": y_pred, "x": x}
+                input_dict = opt_water(input_dict)
+                y_pred = input_dict["y_pred"]
+
+            # energy conserve use previous step output as reference
+            if flag_energy_conserve:
+                input_dict = {"y_pred": y_pred, "x": x}
+                input_dict = opt_energy(input_dict)
+                y_pred = input_dict["y_pred"]
+            # ============================================= #
+
+            # y_pred with unit
             y_pred = state_transformer.inverse_transform(y_pred.cpu())
+            # y_target with unit
             y = state_transformer.inverse_transform(y.cpu())
 
             if (
@@ -437,20 +364,30 @@ def predict(rank, world_size, conf, backend, p):
             # setup for next iteration, transform to z-space and send to device
             y_pred = state_transformer.transform_array(y_pred).to(device)
 
+            # ============================================================ #
+            # use previous step y_pred as the next step input
             if history_len == 1:
-                x = y_pred.detach()
-            else:
-                # use multiple past forecast steps as inputs
-                # static channels will get updated on next pass
-                static_dim_size = abs(x.shape[1] - y_pred.shape[1])
+                # cut diagnostic vars from y_pred, they are not inputs
+                if "y_diag" in batch:
+                    x = y_pred[:, :-varnum_diag, ...].detach()
+                else:
+                    x = y_pred.detach()
 
-                # if static_dim_size=0 then :0 gives empty range
-                x_detach = (
-                    x[:, :-static_dim_size, 1:].detach()
-                    if static_dim_size
-                    else x[:, :, 1:].detach()
-                )
-                x = torch.cat([x_detach, y_pred.detach()], dim=2)
+            # multi-step in
+            else:
+                if static_dim_size == 0:
+                    x_detach = x[:, :, 1:, ...].detach()
+                else:
+                    x_detach = x[:, :-static_dim_size, 1:, ...].detach()
+
+                # cut diagnostic vars from y_pred, they are not inputs
+                if "y_diag" in batch:
+                    x = torch.cat(
+                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
+                    )
+                else:
+                    x = torch.cat([x_detach, y_pred.detach()], dim=2)
+            # ============================================================ #
 
             # Explicitly release GPU memory
             torch.cuda.empty_cache()
