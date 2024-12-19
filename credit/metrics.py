@@ -10,7 +10,7 @@ class LatWeightedMetrics:
         atmos_vars = conf["data"]["variables"]
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
-
+        
         levels = (
             conf["model"]["levels"]
             if "levels" in conf["model"]
@@ -28,10 +28,16 @@ class LatWeightedMetrics:
         # DO NOT apply these weights during metrics computations, only on the loss during
         self.w_var = None
 
+        self.ensemble_size = conf["trainer"]["ensemble_size"]
+
     def __call__(self, pred, y, clim=None, transform=None, forecast_datetime=0):
         if transform is not None:
             pred = transform(pred)
             y = transform(y)
+
+        # calculate ensemble mean, if ensemble_size=1, does nothing
+        pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:]) #b, ensemble, c, t, lat, lon
+        pred = pred.mean(dim=1)
 
         # Get latitude and variable weights
         w_lat = (

@@ -90,7 +90,7 @@ trainer:
     cpu_offload: False
     activation_checkpoint: True
     
-    load_weights: True
+    load_weights: False
     load_optimizer: False
     load_scaler: False
     load_sheduler: False
@@ -109,12 +109,12 @@ trainer:
     ensemble_size: 2
     long_rollout: True
         
-    batches_per_epoch: 1000
-    valid_batches_per_epoch: 4
+    batches_per_epoch: 1
+    valid_batches_per_epoch: 1
     stopping_patience: 999
     
     start_epoch: 0
-    num_epoch: 50
+    num_epoch: 1
     reload_epoch: False
     epochs: &epochs 100
      
@@ -185,7 +185,7 @@ model:
             T: 1
             
         skebs:
-            activate: True
+            activate: False
             lmax: None
             mmax: None
             freeze_base_model_weights: True
@@ -281,12 +281,14 @@ predict:
     # save_format: "nc"
 
 pbs: #derecho
-    conda: "/glade/u/home/dkimpara/credit-derecho"
+    conda: "/glade/u/home/dkimpara/credit"
     project: "NAML0001"
-    job_name: "wxformer_1h"
-    walltime: "12:00:00"
-    nodes: 2
-    ncpus: 64
-    ngpus: 4
-    mem: '480GB'
-    queue: 'main'
+    job_name: "test_cesm_ensemble"
+    walltime: "00:15:00"
+    nodes: 1
+    ncpus: 8
+    ngpus: 1
+    mem: '32GB'
+    gpu_type: 'v100'
+    project: 'NAML0001'
+    queue: 'casper'
