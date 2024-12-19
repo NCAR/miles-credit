@@ -321,7 +321,7 @@ class ERA5_and_Forcing_MultiStep(torch.utils.data.Dataset):
 
         # ------------------------------------------------------------------ #
         # blocks that can handle no-sharing (each group has it own file)
-        ## surface
+        # surface
         if filename_surface is not None:
             surface_files = []
             filename_surface = sorted(filename_surface)
@@ -339,7 +339,7 @@ class ERA5_and_Forcing_MultiStep(torch.utils.data.Dataset):
         else:
             self.surface_files = False
 
-        ## dynamic forcing
+        # dynamic forcing
         if filename_dyn_forcing is not None:
             dyn_forcing_files = []
             filename_dyn_forcing = sorted(filename_dyn_forcing)
@@ -357,7 +357,7 @@ class ERA5_and_Forcing_MultiStep(torch.utils.data.Dataset):
         else:
             self.dyn_forcing_files = False
 
-        ## diagnostics
+        # diagnostics
         if filename_diagnostic is not None:
             diagnostic_files = []
             filename_diagnostic = sorted(filename_diagnostic)
@@ -511,388 +511,64 @@ class ERA5_and_Forcing_MultiStep(torch.utils.data.Dataset):
         return sample
 
 
-# class ERA5_and_Forcing_MultiStep(torch.utils.data.Dataset):
-#     '''
-#     A Pytorch Dataset class that works on:
-#         - upper-air variables (time, level, lat, lon)
-#         - surface variables (time, lat, lon)
-#         - dynamic forcing variables (time, lat, lon)
-#         - foring variables (time, lat, lon)
-#         - diagnostic variables (time, lat, lon)
-#         - static variables (lat, lon)
-#     '''
-
-#     def __init__(
-#         self,
-#         varname_upper_air,
-#         varname_surface,
-#         varname_dyn_forcing,
-#         varname_forcing,
-#         varname_static,
-#         varname_diagnostic,
-#         filenames,
-#         filename_surface=None,
-#         filename_dyn_forcing=None,
-#         filename_forcing=None,
-#         filename_static=None,
-#         filename_diagnostic=None,
-#         history_len=2,
-#         forecast_len=0,
-#         transform=None,
-#         seed=42,
-#         skip_periods=None,
-#         one_shot=None,
-#         max_forecast_len=None,
-#         rank=0,
-#         world_size=1
-#     ):
-
-#         '''
-#         Initialize the ERA5_and_Forcing_Dataset
-
-#         Parameters:
-#         - varname_upper_air (list): List of upper air variable names.
-#         - varname_surface (list): List of surface variable names.
-#         - varname_dyn_forcing (list): List of dynamic forcing variable names.
-#         - varname_forcing (list): List of forcing variable names.
-#         - varname_static (list): List of static variable names.
-#         - varname_diagnostic (list): List of diagnostic variable names.
-#         - filenames (list): List of filenames for upper air data.
-#         - filename_surface (list, optional): List of filenames for surface data.
-#         - filename_dyn_forcing (list, optional): List of filenames for dynamic forcing data.
-#         - filename_forcing (str, optional): Filename for forcing data.
-#         - filename_static (str, optional): Filename for static data.
-#         - filename_diagnostic (list, optional): List of filenames for diagnostic data.
-#         - history_len (int, optional): Length of the history sequence. Default is 2.
-#         - forecast_len (int, optional): Length of the forecast sequence. Default is 0.
-#         - transform (callable, optional): Transformation function to apply to the data.
-#         - seed (int, optional): Random seed for reproducibility. Default is 42.
-#         - skip_periods (int, optional): Number of periods to skip between samples.
-#         - one_shot(bool, optional): Whether to return all states or just
-#                                     the final state of the training target. Default is None
-#         - max_forecast_len (int, optional): Maximum length of the forecast sequence.
-#         - shuffle (bool, optional): Whether to shuffle the data. Default is True.
-
-#         Returns:
-#         - sample (dict): A dictionary containing historical_ERA5_images,
-#                                                  target_ERA5_images,
-#                                                  datetime index, and additional information.
-#         '''
-
-#         self.history_len = history_len
-#         self.forecast_len = forecast_len
-#         self.transform = transform
-
-#         # skip periods
-#         self.skip_periods = skip_periods
-#         if self.skip_periods is None:
-#             self.skip_periods = 1
-
-#         # one shot option
-#         self.one_shot = one_shot
-
-#         # total number of needed forecast lead times
-#         self.total_seq_len = self.history_len + self.forecast_len
-
-#         # set random seed
-#         self.rng = np.random.default_rng(seed=seed)
-
-#         # max possible forecast len
-#         self.max_forecast_len = max_forecast_len
-
-#         # ======================================================== #
-#         # upper-air files
-
-#         all_files = []
-#         filenames = sorted(filenames)
-
-#         for fn in filenames:
-#             # drop variables if they are not in the config
-#             xarray_dataset = get_forward_data(filename=fn)
-#             xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_upper_air)
-
-#             # collect yearly datasets within a list
-#             all_files.append(xarray_dataset)
-
-#         self.all_files = all_files
-
-#         # get sample indices from ERA5 upper-air files:
-#         ind_start = 0
-#         self.ERA5_indices = {} # <------ change
-#         for ind_file, ERA5_xarray in enumerate(self.all_files):
-#             # [number of samples, ind_start, ind_end]
-#             self.ERA5_indices[str(ind_file)] = [len(ERA5_xarray['time']),
-#                                                 ind_start,
-#                                                 ind_start + len(ERA5_xarray['time'])]
-#             ind_start += len(ERA5_xarray['time']) + 1
-
-#         # ======================================================== #
-#         # surface files
-#         if filename_surface is not None:
-
-#             surface_files = []
-#             filename_surface = sorted(filename_surface)
-
-#             for fn in filename_surface:
-
-#                 # drop variables if they are not in the config
-#                 xarray_dataset = get_forward_data(filename=fn)
-#                 xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_surface)
-
-#                 surface_files.append(xarray_dataset)
-
-#             self.surface_files = surface_files
-
-#         else:
-#             self.surface_files = False
-
-
-#         # ======================================================== #
-#         # dynamic forcing files
-#         if filename_dyn_forcing is not None:
-
-#             dyn_forcing_files = []
-#             filename_dyn_forcing = sorted(filename_dyn_forcing)
-
-#             for fn in filename_dyn_forcing:
-
-#                 # drop variables if they are not in the config
-#                 xarray_dataset = get_forward_data(filename=fn)
-#                 xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_dyn_forcing)
-
-#                 dyn_forcing_files.append(xarray_dataset)
-
-#             self.dyn_forcing_files = dyn_forcing_files
-
-#         else:
-#             self.dyn_forcing_files = False
-
-#         # ======================================================== #
-#         # diagnostic file
-#         self.filename_diagnostic = filename_diagnostic
-
-#         if self.filename_diagnostic is not None:
-
-#             diagnostic_files = []
-#             filename_diagnostic = sorted(filename_diagnostic)
-
-#             for fn in filename_diagnostic:
-
-#                 # drop variables if they are not in the config
-#                 xarray_dataset = get_forward_data(filename=fn)
-#                 xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_diagnostic)
-
-#                 diagnostic_files.append(xarray_dataset)
-
-#             self.diagnostic_files = diagnostic_files
-
-#         else:
-#             self.diagnostic_files = False
-
-#         # ======================================================== #
-#         # forcing file
-#         self.filename_forcing = filename_forcing
-
-#         if self.filename_forcing is not None:
-#             # drop variables if they are not in the config
-#             xarray_dataset = get_forward_data(filename_forcing)
-#             xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_forcing)
-
-#             self.xarray_forcing = xarray_dataset
-#         else:
-#             self.xarray_forcing = False
-
-#         # ======================================================== #
-#         # static file
-#         self.filename_static = filename_static
-
-#         if self.filename_static is not None:
-#             # drop variables if they are not in the config
-#             xarray_dataset = get_forward_data(filename_static)
-#             xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_static)
-
-#             self.xarray_static = xarray_dataset
-#         else:
-#             self.xarray_static = False
-
-#         self.start_index = self._get_random_start_index()
-#         self.forecast_step = 0
-#         self.total_length = len(self.ERA5_indices)
-
-#     def _get_random_start_index(self):
-#         """Generate a random start index based on the length of the dataset."""
-#         dataset_length = len(self)
-#         return 0 #random.randint(0, dataset_length - 1)
-
-#     def __post_init__(self):
-#         # Total sequence length of each sample.
-#         self.total_seq_len = self.history_len + self.forecast_len
-
-#     def __len__(self):
-#         # compute the total number of length
-#         total_len = 0
-#         for ERA5_xarray in self.all_files:
-#             total_len += len(ERA5_xarray['time']) - self.total_seq_len + 1
-#         return total_len
-
-#     def set_epoch(self, epoch):
-#         self.current_epoch = epoch
-#         self.forecast_step_count = 0
-#         self.current_index = None
-#         self.initial_index = None
-
-#     def _get_new_start_index(self, worker_id=0, num_workers=1):
-#         # Divide the data among workers such that there's no overlap
-#         total_steps = len(self.ERA5_indices) // num_workers
-#         worker_offset = worker_id * total_steps
-#         return worker_offset + (self.start_index % total_steps)
-
-#     def __getitem__(self, index):
-
-#         if (self.forecast_step_count == self.forecast_len + 1) or (self.current_index is None):
-#             # We've completed the last forecast or we're starting for the first time
-#             # Start a new forecast using the sampler index
-#             self.current_index = index  # self._get_random_start_index()
-#             self.forecast_step_count = 0
-#             index = self.current_index
-#             self.initial_index = self.current_index
-#         else:
-#             # Ignore the sampler index and continue the forecast
-#             self.current_index += 1
-#             index = self.current_index
-
-#         # select the ind_file based on the iter index
-#         ind_file = find_key_for_number(index, self.ERA5_indices)
-
-#         # get the ind within the current file
-#         ind_start = self.ERA5_indices[ind_file][1]
-#         ind_start_in_file = index - ind_start
-
-#         # handle out-of-bounds
-#         ind_largest = len(self.all_files[int(ind_file)]['time'])-(self.history_len+self.forecast_len+1)
-#         if ind_start_in_file > ind_largest:
-#             ind_start_in_file = ind_largest
-
-#         # ========================================================================== #
-#         # subset xarray on time dimension
-
-#         ind_end_in_file = ind_start_in_file+self.history_len
-
-#         ## ERA5_subset: a xarray dataset that contains training input and target (for the current batch)
-#         ERA5_subset = self.all_files[int(ind_file)].isel(
-#             time=slice(ind_start_in_file, ind_end_in_file+1)) #.load() NOT load into memory
-
-#         # ========================================================================== #
-#         # merge surface into the dataset
-
-#         if self.surface_files:
-#             ## subset surface variables
-#             surface_subset = self.surface_files[int(ind_file)].isel(
-#                 time=slice(ind_start_in_file, ind_end_in_file+1)) #.load() NOT load into memory
-
-#             ## merge upper-air and surface here:
-#             ERA5_subset = ERA5_subset.merge(surface_subset) # <-- lazy merge, ERA5 and surface both not loaded
-
-#         # ==================================================== #
-#         # split ERA5_subset into training inputs and targets
-#         #   + merge with dynamic forcing, forcing, and static
-
-#         # the ind_end of the ERA5_subset
-#         ind_end_time = len(ERA5_subset['time'])
-
-#         # datetiem information as int number (used in some normalization methods)
-#         datetime_as_number = ERA5_subset.time.values.astype('datetime64[s]').astype(int)
-
-#         # ==================================================== #
-#         # xarray dataset as input
-#         ## historical_ERA5_images: the final input
-
-#         historical_ERA5_images = ERA5_subset.isel(
-#             time=slice(0, self.history_len, self.skip_periods)).load() # <-- load into memory
-
-#         # ========================================================================== #
-#         # merge dynamic forcing inputs
-#         if self.dyn_forcing_files:
-#             dyn_forcing_subset = self.dyn_forcing_files[int(ind_file)].isel(
-#                 time=slice(ind_start_in_file, ind_end_in_file+1))
-#             dyn_forcing_subset = dyn_forcing_subset.isel(
-#                 time=slice(0, self.history_len, self.skip_periods)).load() # <-- load into memory
-
-#             historical_ERA5_images = historical_ERA5_images.merge(dyn_forcing_subset)
-
-#         # ========================================================================== #
-#         # merge forcing inputs
-#         if self.xarray_forcing:
-#             # ------------------------------------------------------------------------------- #
-#             # matching month, day, hour between forcing and upper air [time]
-#             # this approach handles leap year forcing file and non-leap-year upper air file
-#             month_day_forcing = extract_month_day_hour(np.array(self.xarray_forcing['time']))
-#             month_day_inputs = extract_month_day_hour(np.array(historical_ERA5_images['time'])) # <-- upper air
-#             # indices to subset
-#             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
-#             forcing_subset_input = self.xarray_forcing.isel(time=ind_forcing).load() # <-- load into memory
-#             # forcing and upper air have different years but the same mon/day/hour
-#             # safely replace forcing time with upper air time
-#             forcing_subset_input['time'] = historical_ERA5_images['time']
-#             # ------------------------------------------------------------------------------- #
-
-#             # merge
-#             historical_ERA5_images = historical_ERA5_images.merge(forcing_subset_input)
-
-#         # ========================================================================== #
-#         # merge static inputs
-#         if self.xarray_static:
-#             # expand static var on time dim
-#             N_time_dims = len(ERA5_subset['time'])
-#             static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
-#             # assign coords 'time'
-#             static_subset_input = static_subset_input.assign_coords({'time': ERA5_subset['time']})
-
-#             # slice + load to the GPU
-#             static_subset_input = static_subset_input.isel(
-#                 time=slice(0, self.history_len, self.skip_periods)).load() # <-- load into memory
-
-#             # update
-#             static_subset_input['time'] = historical_ERA5_images['time']
-
-#             # merge
-#             historical_ERA5_images = historical_ERA5_images.merge(static_subset_input)
-
-#         # ==================================================== #
-#         # xarray dataset as target
-#         ## target_ERA5_images: the final target
-
-#         target_ERA5_images = ERA5_subset.isel(time=slice(-1, None)).load() # <-- load into memory
-
-#         ## merge diagnoisc input here:
-#         if self.diagnostic_files:
-#             diagnostic_subset = self.diagnostic_files[int(ind_file)].isel(
-#                 time=slice(ind_start_in_file, ind_end_in_file+1))
-
-#             diagnostic_subset = diagnostic_subset.isel(
-#                 time=slice(-1, None)).load() # <-- load into memory
-
-#             target_ERA5_images = target_ERA5_images.merge(diagnostic_subset)
-
-#         # pipe xarray datasets to the sampler
-#         sample = Sample(
-#             historical_ERA5_images=historical_ERA5_images,
-#             target_ERA5_images=target_ERA5_images,
-#             datetime_index=datetime_as_number
-#         )
-
-#         # ==================================== #
-#         # data normalization
-#         if self.transform:
-#             sample = self.transform(sample)
-
-#         # assign sample index
-#         sample["datetime"] = datetime_as_number
-#         sample["forecast_step"] = self.forecast_step + 1
-#         sample["index"] = index
-#         sample["stop_forecast"] = (self.forecast_step == self.forecast_len)
-
-#         # update the step count
-#         self.forecast_step += 1
-
-#         return sample
+if __name__ == "__main__":
+
+    import torch
+    import yaml
+    from torch.utils.data import DataLoader
+    from credit.transforms import load_transforms
+    from credit.parser import credit_main_parser, training_data_check
+    from credit.datasets import setup_data_loading, set_globals
+
+    with open(
+        "/glade/derecho/scratch/schreck/repos/miles-credit/production/multistep/wxformer_6h/model.yml"
+    ) as cf:
+        conf = yaml.load(cf, Loader=yaml.FullLoader)
+
+    conf = credit_main_parser(
+        conf, parse_training=True, parse_predict=False, print_summary=False
+    )
+    training_data_check(conf, print_summary=False)
+
+    data_config = setup_data_loading(conf)
+
+    data_config["forecast_len"] = 6
+    batch_size = 2
+
+    set_globals(data_config, namespace=globals())
+
+    dataset_multi = ERA5_and_Forcing_MultiStep(
+        varname_upper_air=data_config['varname_upper_air'],
+        varname_surface=data_config['varname_surface'],
+        varname_dyn_forcing=data_config['varname_dyn_forcing'],
+        varname_forcing=data_config['varname_forcing'],
+        varname_static=data_config['varname_static'],
+        varname_diagnostic=data_config['varname_diagnostic'],
+        filenames=data_config['all_ERA_files'],
+        filename_surface=data_config['surface_files'],
+        filename_dyn_forcing=data_config['dyn_forcing_files'],
+        filename_forcing=data_config['forcing_files'],
+        filename_static=data_config['static_files'],
+        filename_diagnostic=data_config['diagnostic_files'],
+        history_len=data_config['history_len'],
+        forecast_len=data_config['forecast_len'],
+        skip_periods=data_config['skip_periods'],
+        one_shot=False,
+        max_forecast_len=data_config['max_forecast_len'],
+        transform=load_transforms(conf)
+    )
+
+    dataloader = DataLoader(
+        dataset_multi,
+        batch_size=1,  # Adjust the batch size as needed
+        shuffle=True,   # Shuffle the dataset if needed
+        num_workers=1,  # Number of subprocesses to use for data loading (adjust as needed)
+        drop_last=True,  # Drop the last incomplete batch if not divisible by batch_size,
+        prefetch_factor=4
+    )
+
+    dataloader.dataset.set_epoch(0)
+    for (k, sample) in enumerate(dataloader):
+        print(k, sample['index'], sample['datetime'], sample['forecast_step'], sample['stop_forecast'])
+        if k == 20:
+            break
