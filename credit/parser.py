@@ -710,6 +710,9 @@ def credit_main_parser(
             "train_batch_size" in conf["trainer"]
         ), "Training set batch size ('train_batch_size') is missing from onf['trainer']"
 
+        if "ensemble_size" not in conf["trainer"]:
+            conf["trainer"]["ensemble_size"] = 1
+
         if "load_scaler" not in conf["trainer"]:
             conf["trainer"]["load_scaler"] = False
 
