@@ -1,14 +1,24 @@
+# Configuration for job submission (qsub) and paths for scripts and data locations
 qsub:
     qsub_loc: '/glade/work/wchapman/miles_branchs/verify_forecasts/verification/qsub/'
+    # Location where qsub scripts will be saved/generated
     scripts_loc: '/glade/work/wchapman/miles_branchs/verify_forecasts/verification/verification/scripts/'
+    # Directory containing forecast verification scripts
     plot_data_loc: '/glade/work/wchapman/miles_branchs/verify_forecasts/verification/PLOT_data/'
+    # Path to store plot output data
     project_code: 'NAML0001'
+    # Project code for accounting and job tracking on HPC
     conda_env: 'credit'
+    # Conda environment to be activated during job execution
 
+# Geographical and regridding configuration
 geo:
     geo_file_nc: '/glade/campaign/cisl/aiml/ksha/CREDIT/ML_grid.nc'
+    # NetCDF file containing the geographical grid
     regrid_weights_numpy: '/glade/campaign/cisl/aiml/ksha/CREDIT/griddata_weights.npy'
+    # Numpy array file with regridding weights for spatial interpolation
 
+# ERA5 reanalysis data (WeatherBench)
 ERA5_weatherbench:
     save_loc: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/VERIF/verif_6h/ERA5_clim/'
     save_loc_clim: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/VERIF/verif_6h/ERA5_clim/'
@@ -30,11 +40,16 @@ ERA5_weatherbench:
         surface_pressure: 'SP'
         2m_temperature: 't2m'
 
+# Custom ERA5 data for project-specific processing
 ERA5_ours:
     save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
+    # Path to save intermediate ERA5 data.. this is your training data
     save_loc_verif: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/VERIF/verif_1h/ERA5_clim/'
+    # Verification data for 1-hour intervals
     year_range: [2019, 2023]
+    # Year range for custom ERA5 data
     verif_variables: 
+        # Variables for verification (no specific levels, full column)
         V500: null
         U500: null
         T500: null
@@ -43,14 +58,22 @@ ERA5_ours:
         SP:  null
         t2m: null
 
+# IFS (Integrated Forecasting System) data processing and verification (likely you wont change this).
 IFS:
     save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT/gathered/IFS/'
+    # Path to save gathered IFS data
     save_loc_gather: '/glade/campaign/cisl/aiml/ksha/CREDIT/gathered/IFS/'
+    # Location to gather IFS data
     save_loc_verif: '/glade/derecho/scratch/ksha/CREDIT/verif/IFS/'
+    # Path for verification outputs
     year_range: [2018, 2020]
+    # Year range of IFS data used for verification
     lead_range: [6, 240]
+    # Forecast lead times (hours) for data generation
     verif_lead_range: [6, 240]
+    # Lead times for verification (match lead_range)
     verif_variables:
+        # Same variable list as ERA5 for consistency
         geopotential: [500,]
         specific_humidity: [500,]
         temperature: [500,]
@@ -67,14 +90,24 @@ IFS:
         surface_pressure: 'SP'
         2m_temperature: 't2m'
 
+# This is your newly rolled out model. 
 forecastmodel:
     save_loc_rollout: '/glade/derecho/scratch/schreck/finetune/wxformer_1h/netcdf/'
-    save_loc_gather: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/GATHER/wxformer_1h_20241228/'
+    # Path to save model forecast rollouts
+    save_loc_gather: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/GATHER/wxformer_1h_20241229/'
+    # Path for gathering forecast model data
     save_loc_verif: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/VERIF/verif_1h/wxformer_1h/'
+    # Location for verification outputs
     year_range: [2019, 2022]
+    # Year range of forecast model outputs
     lead_range: [6, 240]
+    # Lead time intervals (forecast steps), and how many hours out [6hr interval, out to 240hrs lead time]
     verif_lead_range: [6, 240]
+    # Lead time intervals (forecast steps), and how many hours out [6hr interval, out to 240hrs lead time]
     verif_variables: 
+        # Variables to verify (custom model outputs)
+        # ex U: 11 -> is u at the 11nth level
+        # ex V500: null -> singel level variables
         V500: null
         U500: null
         T500: null

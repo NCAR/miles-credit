@@ -41,7 +41,7 @@ verif_ind_start = int(args['verif_ind_start'])
 verif_ind_end = int(args['verif_ind_end'])
 
 # ====================== #
-model_name = 'wxformer'
+model_name = 'forecastmodel'
 lead_range = conf[model_name]['lead_range']
 verif_lead_range = conf[model_name]['verif_lead_range']
 
@@ -154,6 +154,9 @@ for fn_ours in filename_OURS:
     
 # Combine ACC results
 ds_acc = xr.concat(acc_results, dim='days')
+
+# Ensure directory exists before saving the file
+os.makedirs(os.path.dirname(path_verif), exist_ok=True)
 
 # Save
 print('Save to {}'.format(path_verif))

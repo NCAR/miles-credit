@@ -5,7 +5,7 @@ the same initialization.
 The script runs with config file `verif_config_1h.yml` and produces netCDF4 files
 with one file per initialization on a given range:
 ```
-python STEP00_gather_wxformer.py 0 365
+python STEP00_gather_ForecastModel.py 0 365
 ```
 where 0 and 365 are the first and the last initialization.
 
@@ -45,13 +45,17 @@ verif_ind_start = int(args['verif_ind_start'])
 verif_ind_end = int(args['verif_ind_end'])
 
 # ==================== #
-model_name = 'wxformer'
+model_name = 'forecastmodel'
 # ==================== #
 
 variables_levels = conf[model_name]['verif_variables']
 
 base_dir = conf[model_name]['save_loc_rollout']
 output_dir = conf[model_name]['save_loc_gather']
+
+# Ensure directory exists before saving the file
+os.makedirs(os.path.dirname(output_dir), exist_ok=True)
+
 time_intervals = None
 
 # Get list of NetCDF files

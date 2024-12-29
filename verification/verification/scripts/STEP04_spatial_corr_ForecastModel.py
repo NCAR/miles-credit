@@ -34,9 +34,8 @@ args = vars(parser.parse_args())
 verif_ind_start = int(args['verif_ind_start'])
 verif_ind_end = int(args['verif_ind_end'])
 # ====================== #
-model_name = 'wxformer'
+model_name = 'forecastmodel'
 lead_range = conf[model_name]['lead_range']
-verif_lead_range = [40,]
 
 leads_exist = list(np.arange(lead_range[0], lead_range[-1]+lead_range[0], lead_range[0]))
 leads_verif = list(np.arange(verif_lead_range[0], verif_lead_range[-1]+verif_lead_range[0], verif_lead_range[0]))

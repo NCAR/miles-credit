@@ -40,7 +40,7 @@ verif_ind_start = int(args['verif_ind_start'])
 verif_ind_end = int(args['verif_ind_end'])
 
 # ====================== #
-model_name = 'wxformer'
+model_name = 'forecastmodel'
 lead_range = conf[model_name]['lead_range']
 verif_lead_range = conf[model_name]['verif_lead_range']
 
@@ -82,6 +82,7 @@ variables_levels = {
     'SP': None,
     't2m': None
 }
+variables_levels = conf['ERA5_ours']['verif_variables']
 
 # subset merged ERA5 and unify coord names
 levels = ds_ERA5_merge['level'].values
@@ -131,11 +132,9 @@ for fn_ours in filename_OURS:
 # Combine verif results
 ds_verif = xr.concat(verif_results, dim='days')
 
+# Ensure directory exists before saving the file
+os.makedirs(os.path.dirname(path_verif), exist_ok=True)
+
 # Save the combined dataset
 print('Save to {}'.format(path_verif))
 ds_verif.to_netcdf(path_verif, mode='w')
-
-
-
-
-
