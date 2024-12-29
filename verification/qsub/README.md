@@ -1,5 +1,3 @@
----
-
 # QSUB Scripts – Forecast Verification  
 **Directory:** `./verification/qsub`  
 
