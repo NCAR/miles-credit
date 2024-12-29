@@ -110,7 +110,7 @@ f.close()
    - The directories where NetCDF files are saved (`save_loc_verif`) must exist.  
    - Use `os.makedirs(path, exist_ok=True)` to create directories if needed.  
 - **Cluster Specifics:**  
-   - These scripts are optimized for NCAR’s Cheyenne/Derecho clusters. Adjust for other HPC environments if necessary.
+   - These scripts are optimized for NCAR’s Casper/Derecho clusters. Adjust for other HPC environments if necessary.
 
 ---
 
