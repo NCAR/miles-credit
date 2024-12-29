@@ -1,0 +1,85 @@
+qsub:
+    qsub_loc: '/glade/work/wchapman/miles_branchs/verify_forecasts/verification/qsub/'
+    scripts_loc: '/glade/work/wchapman/miles_branchs/verify_forecasts/verification/verification/scripts/'
+    plot_data_loc: '/glade/work/wchapman/miles_branchs/verify_forecasts/verification/PLOT_data/'
+    project_code: 'NAML0001'
+    conda_env: 'credit'
+
+geo:
+    geo_file_nc: '/glade/campaign/cisl/aiml/ksha/CREDIT/ML_grid.nc'
+    regrid_weights_numpy: '/glade/campaign/cisl/aiml/ksha/CREDIT/griddata_weights.npy'
+
+ERA5_weatherbench:
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/VERIF/verif_6h/ERA5_clim/'
+    save_loc_clim: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/VERIF/verif_6h/ERA5_clim/'
+    year_range: [2018, 2022]
+    verif_variables:
+        geopotential: [500,]
+        specific_humidity: [500,]
+        temperature: [500,]
+        u_component_of_wind: [500,]
+        v_component_of_wind: [500,]
+        surface_pressure: null
+        2m_temperature: null
+    rename_variables:
+        geopotential: 'Z500'
+        specific_humidity: 'Q500'
+        temperature: 'T500'
+        u_component_of_wind: 'U500'
+        v_component_of_wind: 'V500'
+        surface_pressure: 'SP'
+        2m_temperature: 't2m'
+
+ERA5_ours:
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
+    save_loc_verif: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/VERIF/verif_1h/ERA5_clim/'
+    year_range: [2019, 2023]
+    verif_variables: 
+        V500: null
+        U500: null
+        T500: null
+        Q500: null
+        Z500: null
+        SP:  null
+        t2m: null
+
+IFS:
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT/gathered/IFS/'
+    save_loc_gather: '/glade/campaign/cisl/aiml/ksha/CREDIT/gathered/IFS/'
+    save_loc_verif: '/glade/derecho/scratch/ksha/CREDIT/verif/IFS/'
+    year_range: [2018, 2020]
+    lead_range: [6, 240]
+    verif_lead_range: [6, 240]
+    verif_variables:
+        geopotential: [500,]
+        specific_humidity: [500,]
+        temperature: [500,]
+        u_component_of_wind: [500,]
+        v_component_of_wind: [500,]
+        surface_pressure: null
+        2m_temperature: null
+    rename_variables:
+        geopotential: 'Z500'
+        specific_humidity: 'Q500'
+        temperature: 'T500'
+        u_component_of_wind: 'U500'
+        v_component_of_wind: 'V500'
+        surface_pressure: 'SP'
+        2m_temperature: 't2m'
+
+forecastmodel:
+    save_loc_rollout: '/glade/derecho/scratch/schreck/finetune/wxformer_1h/netcdf/'
+    save_loc_gather: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/GATHER/wxformer_1h_20241228/'
+    save_loc_verif: '/glade/campaign/cisl/aiml/wchapman/CREDIT_arXiv/VERIF/verif_1h/wxformer_1h/'
+    year_range: [2019, 2022]
+    lead_range: [6, 240]
+    verif_lead_range: [6, 240]
+    verif_variables: 
+        V500: null
+        U500: null
+        T500: null
+        Q500: null
+        Z500: null
+        SP:  null
+        t2m: null
+        
