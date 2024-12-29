@@ -62,21 +62,41 @@ Generates qsub scripts to gather forecast data from various sources and formats 
 
 **Critical Code Example:**
 ```python
-f = open('{}verif_ZES_WX_{:03d}.sh'.format(conf['qsub']['qsub_loc'], i), 'w') 
+for i, ind_start in enumerate(INDs[:-1]):
+    
+    ind_end = INDs[i+1]
+    
+    f = open('{}gather_ForecastModel_{:03d}.sh'.format(conf['qsub']['qsub_loc'], i), 'w') 
+    
+    heads = '''#!/bin/bash -l
 
-heads = '''#!/bin/bash -l
-#PBS -N ZES_MF
+#PBS -N gather_ForecastModel
 #PBS -A {project_code}
 #PBS -l walltime=23:59:59
 #PBS -l select=1:ncpus=4:mem=32GB
 #PBS -q casper
-#PBS -o verif_ZES_MF.log
-#PBS -e verif_ZES_MF.err
+#PBS -o gather_ForecastModel.log
+#PBS -e gather_ForecastModel.err
 
-conda activate credit
-cd {}
-python STEP03_ZES_ModelForecast.py {} {}
-'''.format(conf['qsub']['scripts_loc'], ind_start, ind_end, ind_start, ind_end)
+module load conda
+conda activate {conda_env}
+cd {scripts_loc}
+python STEP00_gather_ForecastModel.py {ind_start} {ind_end}
+'''.format(project_code=conf['qsub']['project_code'],
+           conda_env=conf['qsub']['conda_env'],
+           scripts_loc=conf['qsub']['scripts_loc'], 
+           ind_start=ind_start, 
+           ind_end=ind_end)
+    
+    print(heads, file=f)    
+    f.close()
+
+f = open('{}step00_gather_ForecastModel_all.sh'.format(conf['qsub']['qsub_loc']), 'w')
+
+for i, ind_start in enumerate(INDs[:-1]):
+    print('qsub gather_ForecastModel_{:03d}.sh'.format(i), file=f)
+    
+f.close()
 ```
 
 ---
