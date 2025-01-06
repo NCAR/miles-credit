@@ -24,7 +24,7 @@ from torch.utils.data import IterableDataset
 
 import optuna
 from credit.data import concat_and_reshape, reshape_only
-from credit.models.checkpoint import TorchFSDPCheckpointIO
+from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_batch, update_on_epoch
 from credit.trainers.utils import cleanup, accum_log, cycle
 from credit.trainers.base_trainer import BaseTrainer
@@ -754,6 +754,9 @@ class Trainer(BaseTrainer):
                         }
                         torch.save(state_dict, f"{save_loc}/checkpoint.pt")
 
+                        if conf.get("trainer", {}).get("save_every_epoch", False):
+                            copy_checkpoint(f"{save_loc}/checkpoint.pt", epoch)
+
                 else:
                     logging.info(
                         f"Saving FSDP model, optimizer, grad scaler, and learning rate scheduler states to {save_loc}"
@@ -790,6 +793,9 @@ class Trainer(BaseTrainer):
                     }
 
                     torch.save(state_dict, os.path.join(save_loc, "checkpoint.pt"))
+
+                    if conf.get("trainer", {}).get("save_every_epoch", False):
+                        copy_checkpoint(os.path.join(save_loc, "checkpoint.pt"), epoch)
 
                 # This needs updated!
                 # valid_loss = np.mean(valid_results["valid_loss"])

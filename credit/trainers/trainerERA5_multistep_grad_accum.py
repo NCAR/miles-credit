@@ -832,6 +832,9 @@ class Trainer(BaseTrainer):
                         }
                         torch.save(state_dict, f"{save_loc}/checkpoint.pt")
 
+                        if conf.get("trainer", {}).get("save_every_epoch", False):
+                            copy_checkpoint(f"{save_loc}/checkpoint.pt", epoch)
+
                 else:
                     logger.info(
                         f"Saving FSDP model, optimizer, grad scaler, and learning rate scheduler states to {save_loc}"
