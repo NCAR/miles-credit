@@ -1,4 +1,5 @@
 import os
+import shutil
 import torch
 import torch.nn as nn
 import logging
@@ -17,9 +18,27 @@ from torch.utils._pytree import tree_map
 
 # adapted from https://github.com/hpcaitech/ColossalAI/blob/f2e8b9ef9ff3032513732a699d766bcde1a3506e/colossalai/booster/plugin/torch_fsdp_plugin.py
 
-
 # utils
 
+def get_file_extension(file_path):
+    _, ext = os.path.splitext(file_path)
+    return ext
+    
+def copy_checkpoint(checkpoint_file_path: str, number) -> None:
+    """
+    Copy every checkpoint afterit's saved.
+
+    Args:
+        state_dict (dict): state dict.
+        checkpoint_file_path (str): path to the checkpoint file.
+        use_safetensors (bool): whether to use safetensors to save the checkpoint.
+    """
+    
+    exty = get_file_extension(checkpoint_file_path)
+    
+    checkpoint_file_path_new = f'{checkpoint_file_path}{number:05}{exty}'
+    
+    shutil.copy(checkpoint_file_path, checkpoint_file_path_new)
 
 def load_state_dict_error_handler(load_msg):
     if load_msg[1]:

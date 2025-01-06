@@ -250,9 +250,6 @@ def credit_main_parser(
     )
 
     ## I/O data sizes
-
-    conf["data"].setdefault("data_clamp", None)
-    
     if parse_training:
         assert (
             "train_years" in conf["data"]
@@ -267,7 +264,7 @@ def credit_main_parser(
         assert (
             "forecast_len" in conf["data"]
         ), "Number of time frames for loss compute ('forecast_len') is missing from conf['data']"
-        
+
         if "valid_history_len" not in conf["data"]:
             # use "history_len" for "valid_history_len"
             conf["data"]["valid_history_len"] = conf["data"]["history_len"]
@@ -368,8 +365,10 @@ def credit_main_parser(
         "skebs",
         "tracer_fixer",
         "global_mass_fixer",
+        "global_drymass_fixer",
         "global_water_fixer",
         "global_energy_fixer",
+        
     ]
     for post_module in post_list:
         conf["model"]["post_conf"].setdefault(post_module, {"activate": False})
@@ -512,6 +511,55 @@ def credit_main_parser(
                 if var in conf['model']['post_conf']['global_mass_fixer']['surface_pressure_name']
             ]        
             conf['model']['post_conf']['global_mass_fixer']['sp_inds'] = sp_inds[0]
+
+    # global mass fixer
+    flag_drymass = (
+        conf["model"]["post_conf"]["activate"]
+        and conf["model"]["post_conf"]["global_drymass_fixer"]["activate"]
+    )
+
+    if flag_drymass:
+        # when global mass fixer is on, get tensor indices of q, precip, evapor
+        # these variables must be outputs
+
+        # global mass fixer defaults
+        conf["model"]["post_conf"]["global_drymass_fixer"].setdefault(
+            "activate_outside_model", False
+        )
+        conf["model"]["post_conf"]["global_drymass_fixer"].setdefault("denorm", True)
+        conf["model"]["post_conf"]["global_drymass_fixer"].setdefault("simple_demo", False)
+        conf["model"]["post_conf"]["global_drymass_fixer"].setdefault("midpoint", False)
+        conf['model']['post_conf']['global_drymass_fixer'].setdefault('grid_type', 'pressure')
+
+        assert (
+            "fix_level_num" in conf["model"]["post_conf"]["global_drymass_fixer"]
+        ), "Must specifiy what level to fix on specific total water"
+
+        if conf["model"]["post_conf"]["global_drymass_fixer"]["simple_demo"] is False:
+            assert (
+                "lon_lat_level_name" in conf["model"]["post_conf"]["global_drymass_fixer"]
+            ), "Must specifiy var names for lat/lon/level in physics reference file"
+        
+        if conf['model']['post_conf']['global_drymass_fixer']['grid_type'] == 'sigma':
+            assert 'surface_pressure_name' in conf['model']['post_conf']['global_drymass_fixer'], (
+                'Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates')
+        
+        q_inds = [
+            i_var
+            for i_var, var in enumerate(varname_output)
+            if var
+            in conf["model"]["post_conf"]["global_drymass_fixer"][
+                "specific_total_water_name"
+            ]
+        ]
+        conf["model"]["post_conf"]["global_drymass_fixer"]["q_inds"] = q_inds
+
+        if conf['model']['post_conf']['global_drymass_fixer']['grid_type'] == 'sigma':
+            sp_inds = [
+                i_var for i_var, var in enumerate(varname_output) 
+                if var in conf['model']['post_conf']['global_drymass_fixer']['surface_pressure_name']
+            ]        
+            conf['model']['post_conf']['global_drymass_fixer']['sp_inds'] = sp_inds[0]
     
     # --------------------------------------------------------------------- #
     # global water fixer
@@ -1287,8 +1335,9 @@ def training_data_check(conf, print_summary=False):
         ), "Static file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_static:
-            assert ds_upper_air.coords[coord_name].equals(
-                ds_static.coords[coord_name]
+            assert (ds_upper_air[coord_name] ==  
+                    ds_static.coords[coord_name]).all(
+            
             ), "coordinate {} mismatched between upper-air and static files".format(
                 coord_name
             )

@@ -1,6 +1,7 @@
 import torch
 import logging
 import numpy as np
+import cftime
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from credit.data import (
@@ -234,14 +235,37 @@ def worker(
         # stop_forecast = ((ind_start_current_step - index) == forecast_len)
         # sample['forecast_step'] = ind_start_current_step - index + 1
         # sample['stop_forecast'] = stop_forecast
-        sample["datetime"] = [
-            int(
-                historical_ERA5_images.time.values[0]
-                .astype("datetime64[s]")
-                .astype(int)
-            ),
-            int(target_ERA5_images.time.values[0].astype("datetime64[s]").astype(int)),
-        ]
+        # sample["datetime"] = [
+        #     int(
+        #         historical_ERA5_images.time.values[0]
+        #         .astype("datetime64[s]")
+        #         .astype(int)
+        #     ),
+        #     int(target_ERA5_images.time.values[0].astype("datetime64[s]").astype(int)),
+        # ]
+
+        if isinstance(historical_ERA5_images.time.values[0], cftime.DatetimeNoLeap):
+            historical_ERA5_images_t_int = np.datetime64(historical_ERA5_images.time.values[0].strftime("%Y-%m-%d %H:%M:%S"), 'ns')
+            target_ERA5_images_t_int = np.datetime64(target_ERA5_images.time.values[0].strftime("%Y-%m-%d %H:%M:%S"), 'ns')
+
+            sample["datetime"] = [
+                int(
+                    historical_ERA5_images_t_int
+                    .astype("datetime64[s]")
+                    .astype(int)
+                ),
+                int(target_ERA5_images_t_int.astype("datetime64[s]").astype(int)),
+            ]
+
+        else:
+            sample["datetime"] = [
+                int(
+                    historical_ERA5_images.time.values[0]
+                    .astype("datetime64[s]")
+                    .astype(int)
+                ),
+                int(target_ERA5_images.time.values[0].astype("datetime64[s]").astype(int)),
+            ]
 
     except Exception as e:
         logger.error(f"Error processing index {tuple_index}: {e}")

@@ -18,10 +18,10 @@ import optuna
 import os
 import pandas as pd
 import torch
-from credit.models.checkpoint import TorchFSDPCheckpointIO
+from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
 from credit.trainers.utils import cleanup
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer, GlobalDryMassFixer
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,12 @@ class Trainer(BaseTrainer):
                     logger.info("Activate GlobalMassFixer outside of model")
                     flag_mass_conserve = True
                     opt_mass = GlobalMassFixer(post_conf)
+
+            if post_conf["global_drymass_fixer"]["activate"]:
+                if post_conf["global_mass_fixer"]["activate_outside_model"]:
+                    logger.info("Activate GlobalDryMassFixer outside of model")
+                    flag_mass_conserve = True
+                    opt_mass = GlobalDryMassFixer(post_conf)
 
             if post_conf["global_water_fixer"]["activate"]:
                 if post_conf["global_water_fixer"]["activate_outside_model"]:
@@ -454,6 +460,12 @@ class Trainer(BaseTrainer):
                     logger.info("Activate GlobalMassFixer outside of model")
                     flag_mass_conserve = True
                     opt_mass = GlobalMassFixer(post_conf)
+
+            if post_conf["global_drymass_fixer"]["activate"]:
+                if post_conf["global_drymass_fixer"]["activate_outside_model"]:
+                    logger.info("Activate GlobalDryMassFixer outside of model")
+                    flag_mass_conserve = True
+                    opt_mass = GlobalDryMassFixer(post_conf)
 
             if post_conf["global_water_fixer"]["activate"]:
                 if post_conf["global_water_fixer"]["activate_outside_model"]:
@@ -856,6 +868,9 @@ class Trainer(BaseTrainer):
                     }
 
                     torch.save(state_dict, os.path.join(save_loc, "checkpoint.pt"))
+
+                    if conf.get("trainer", {}).get("save_every_epoch", False):
+                        copy_checkpoint(f"{save_loc}/checkpoint.pt", epoch)
 
                 # This needs updated!
                 # valid_loss = np.mean(valid_results["valid_loss"])
