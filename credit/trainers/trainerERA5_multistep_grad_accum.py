@@ -213,7 +213,7 @@ class Trainer(BaseTrainer):
                                 .to(self.device)
                                 .permute(0, 2, 1, 3, 4)
                             )  # .float()
-
+                            
                             # concat on var dimension
                             x = torch.cat((x, x_forcing_batch), dim=1)
 

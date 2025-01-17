@@ -1086,6 +1086,7 @@ class GlobalEnergyFixer(nn.Module):
 
         # column integrated total energy
         if self.flag_sigma_level:
+            
             TE_t0 = self.core_compute.integral(E_level_t0, sp_input) / GRAVITY
             TE_t1 = self.core_compute.integral(E_level_t1, sp_pred) / GRAVITY
         else:

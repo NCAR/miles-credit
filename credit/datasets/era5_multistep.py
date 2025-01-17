@@ -96,7 +96,7 @@ def worker(
         # the ind_end of the ERA5_subset
         # ind_end_time = len(ERA5_subset['time'])
 
-        # datetiem information as int number (used in some normalization methods)
+        # datetime information as int number (used in some normalization methods)
         datetime_as_number = ERA5_subset.time.values.astype("datetime64[s]").astype(int)
 
         # ==================================================== #

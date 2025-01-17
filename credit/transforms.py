@@ -116,6 +116,10 @@ class NormalizeState:
 
         return transformed_x.to(device)
 
+    def transform_dataset(self, DS: xr.Dataset) -> xr.Dataset:
+        DS = (DS - self.mean_ds)/self.std_ds
+        return DS
+
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         normalized_sample = {}
         for key, value in sample.items():
@@ -237,6 +241,10 @@ class Normalize_ERA5_and_Forcing:
         else:
             # Transformation
             return self.transform(sample)
+
+    def transform_dataset(self, DS: xr.Dataset) -> xr.Dataset:
+        DS = (DS - self.mean_ds)/self.std_ds
+        return DS
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
         """

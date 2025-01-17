@@ -1,0 +1,32 @@
+
+# the storage space of result files
+data:
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_arXiv/PLOT_data/'
+
+geo:
+    geo_file_nc: '/glade/u/home/ksha/CREDIT/data/ML_grid.nc'
+    regrid_weights_numpy: '/glade/u/home/ksha/CREDIT/data/griddata_weights.npy'
+    
+example:
+    save_loc_base: '/glade/campaign/cisl/aiml/gathered/'
+    save_loc_ours: '/glade/campaign/cisl/aiml/ksha/CREDIT/gathered/wxformer/'
+    save_loc_target: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/TOTAL_2*'
+    year_range: [2018, 2020]
+    verif_variables: # null means ignore the 'level' coord of that variable
+        V500: null
+        U500: null
+        T500: null
+        Q500: null
+        Z500: null
+        SP:  null
+        t2m: null
+
+# Matplotlib figure export settings
+figure:
+    save_loc: '/glade/u/home/ksha/figures/'
+    keys:
+        dpi: 250
+        orientation: 'portrait' 
+        bbox_inches: 'tight' 
+        pad_inches: 0.1 
+        transparent: False
