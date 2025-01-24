@@ -621,9 +621,7 @@ if __name__ == "__main__":
 
     with mp.Pool(num_cpus) as p:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
-            _ = predict(
-                int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"]), conf, p=p
-            )
+            _ = predict(world_rank, world_size, conf, p=p)
         else:  # single device inference
             _ = predict(0, 1, conf, p=p)
 

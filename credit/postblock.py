@@ -49,7 +49,7 @@ class PostBlock(nn.Module):
         """
         super().__init__()
 
-        self.operations = nn.ModuleDict()
+        self.operations = nn.ModuleList()
 
         # The general order of postblock processes:
         # (1) tracer fixer --> mass fixer --> SKEB / water fixer --> energy fixer
@@ -86,7 +86,7 @@ class PostBlock(nn.Module):
                 self.operations.append(opt)
 
     def forward(self, x):
-        for op in self.operations.values():
+        for op in self.operations:
             x = op(x)
 
         if isinstance(x, dict):
@@ -808,13 +808,25 @@ class Backscatter_fixed(nn.Module):
         return self.backscatter_array
 class Backscatter_fixed_col(nn.Module):
     def __init__(self,
-                 levels):
+                 levels,
+                 std_path,
+                 sigma_max,
+                 perturb_frac):
         super().__init__()
-        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 2.5)) 
+        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 1.0))
+
+        std = xr.open_dataset(std_path)
+        std_wind = np.sqrt(std.U.values ** 2 + std.V.values ** 2)
+        self.register_buffer("max_perturb",
+                             (torch.tensor(std_wind[::-1] * sigma_max * perturb_frac)
+                            .view(1, levels, 1, 1, 1)),
+                            persistent=False)
+        # self.max_perturb = 1.0
 
     def forward(self, x):
-        # self.backscatter_array = self.backscatter_array.clamp(0.)
-        return self.backscatter_array
+        self.backscatter_array.data = self.backscatter_array.data.clamp(0., 10.)
+        return self.backscatter_array * self.max_perturb ** 2  # this will be inside sqrt
+
 
 class SKEBS(nn.Module):
     """
@@ -830,6 +842,7 @@ class SKEBS(nn.Module):
         if predict_mode=True, batch_size=1
         """
         super().__init__()
+        self.trainable = post_conf["skebs"]["trainable"]
         self.nlon = post_conf["model"]["image_width"]
         self.nlat = post_conf["model"]["image_height"]
         self.channels = post_conf["model"]["channels"]
@@ -839,7 +852,8 @@ class SKEBS(nn.Module):
         self.input_only_channels = post_conf["model"]["input_only_channels"]
         self.frames = post_conf["model"]["frames"]
 
-        self.forecast_len = post_conf["data"]["forecast_len"]
+        self.forecast_len = post_conf["data"]["forecast_len"] + 1
+        self.valid_forecast_len = post_conf["data"]["valid_forecast_len"] + 1
         self.multistep = self.forecast_len > 1
         self.lmax = post_conf["skebs"]["lmax"]
         self.mmax = post_conf["skebs"]["mmax"]
@@ -858,11 +872,11 @@ class SKEBS(nn.Module):
         # need this info
         self.timestep = post_conf["data"]["lead_time_periods"] * 3600
         self.level_info = xr.open_dataset(post_conf["data"]["level_info_file"])
-        self.level_list = post_conf["data"]["level_list"]
-        self.surface_area = xr.open_dataset(post_conf["data"]["save_loc_static"])["surface_area"].to_numpy()
+        # self.level_list = post_conf["data"]["level_list"]
+        # self.surface_area = xr.open_dataset(post_conf["data"]["save_loc_static"])["surface_area"].to_numpy()
         self.spec_coef_is_initialized = False
 
-        self.eps = 1e-15
+        self.eps = 1e-12
 
         self.initialize_sht()
         self.initialize_skebs_parameters()
@@ -871,14 +885,23 @@ class SKEBS(nn.Module):
         num_channels = self.levels * self.channels + self.surface_channels + self.output_only_channels
         if post_conf["skebs"]["uniform_dissipation"]:
             # self.backscatter_network = Backscatter_fixed(self.nlat, self.nlon)
-            self.backscatter_network = Backscatter_fixed_col(self.levels)
+            self.backscatter_network = Backscatter_fixed_col(self.levels,
+                                                             post_conf["data"]["std_path"],
+                                                             post_conf["skebs"]["sigma_max"],
+                                                             post_conf["skebs"]["perturb_frac"])
         else:
             self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
 
         self.state_trans = load_transforms(post_conf, scaler_only=True)
 
+        if not self.trainable:
+            logger.warning("freezing all skebs parameters due to skebs config")
+            for param in self.parameters():
+                param.requires_grad = False
+
         ## debugging and analysis features
         self.write_debug_files = False
+
         self.debug_save_loc = join(post_conf['skebs']["save_loc"], "debug_skebs")
         os.makedirs(self.debug_save_loc, exist_ok=True)  
         self.iteration = 0
@@ -913,7 +936,7 @@ class SKEBS(nn.Module):
         self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
         self.p = Parameter(torch.tensor(-1.27, requires_grad=True))
         self.dE = Parameter(torch.tensor(10e-4, requires_grad=True))
-        self.r = Parameter(torch.tensor(3e-14, requires_grad=False)) # see berner 2009, section 4a
+        self.r = Parameter(torch.tensor(0.01, requires_grad=False)) # see berner 2009, section 4a
         self.r.requires_grad = False
         # tunable filter
         self.spectral_filter = Parameter(torch.cat([
@@ -924,11 +947,14 @@ class SKEBS(nn.Module):
                                                     requires_grad=False)
         # self.spectral_filter = Parameter(torch.ones(self.lmax).view(1,1,1,self.lmax,1),
         #                                  requires_grad=True)
+
+        self.spectral_adjustment = 1.0 / (3.5 * 10 ** 7.5)
+
     def clip_parameters(self):
         self.alpha.data = self.alpha.data.clamp(self.eps, 1.)
         self.variance.data = self.variance.clamp(self.eps, 10.)
         self.p.data = self.p.data.clamp(-10, -self.eps)
-        self.dE.data = self.dE.data.clamp(self.eps, 10.)
+        self.dE.data = self.dE.data.clamp(self.eps, 1.)
         self.r.data = self.r.data.clamp(self.eps, 1.)
         self.spectral_filter.data = self.spectral_filter.data.clamp(0., 1.)
 
@@ -966,10 +992,10 @@ class SKEBS(nn.Module):
         assert not new_coef.isnan().any()
         return new_coef * self.spectral_filter 
 
-    def initialize_hya_b_era5(self):
-        a_vals = self.level_info["a_model"].sel(level=self.level_list).to_numpy() / 100
-        b_vals = self.level_info["b_model"].sel(level=self.level_list).to_numpy()
-        return a_vals, b_vals
+    # def initialize_hya_b_era5(self):
+    #     a_vals = self.level_info["a_model"].sel(level=self.level_list).to_numpy() / 100
+    #     b_vals = self.level_info["b_model"].sel(level=self.level_list).to_numpy()
+    #     return a_vals, b_vals
     
     def initialize_hya_b_cesm(self):
         a_vals = self.level_info["hyam"].to_numpy() * 103000. #CESM is in Pa
@@ -984,9 +1010,9 @@ class SKEBS(nn.Module):
         self.register_buffer('b_tensor',
                              torch.from_numpy(b_vals).view(1, self.levels, 1, 1, 1),
                              persistent=False)
-        self.register_buffer('surface_area_tensor',
-                             torch.from_numpy(self.surface_area).view(1, 1, 1, self.nlat, 1),
-                             persistent=False)
+        # self.register_buffer('surface_area_tensor',
+        #                      torch.from_numpy(self.surface_area).view(1, 1, 1, self.nlat, 1),
+                            #  persistent=False)
         self.compute_plev_quantities = compute_pressure_on_mlevs(a_vals=self.a_tensor, b_vals=self.b_tensor, plev_dim=1)
 
 
@@ -1007,35 +1033,38 @@ class SKEBS(nn.Module):
         x = self.state_trans.inverse_transform(x)
         
         if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
-            self.write_debug_files = not self.training # check if we are in rollout mode. this attr is set by model.eval() or model.train()
+            self.steps = 0
+            # self.write_debug_files = not self.training # check if we are in rollout mode. this attr is set by model.eval() or model.train()
             logger.info("writing SKEBS debugging files" if self.write_debug_files else "SKEBS in train mode")
             self.initialize_pattern(x)
             self.spec_coef_is_initialized = True
-        elif not self.multistep: # reinitialize pattern for each batch todo: change this option with self.training
-            self.clip_parameters()
-            self.initialize_pattern(x)
         else:
             self.clip_parameters()
 
         self.spec_coef = self.cycle_pattern(self.spec_coef) # cycle from prev step
         # b, 1, 1, lmax, mmax
         pattern_on_grid = self.isht(self.spec_coef) # b, 1, 1, lat, lon
-        logger.info(f"pattern max/min: {pattern_on_grid.max():.2f}, {pattern_on_grid.min():.2f}")
+        # logger.info(f"pattern max/min: {pattern_on_grid.max():.2f}, {pattern_on_grid.min():.2f}")
         # debug pattern:
-        logger.info("saving patterns")
-        debug_save = "/glade/work/dkimpara/CREDIT_runs/test_skebs_density/debug_pattern"
-        save_pattern = pattern_on_grid[0, 0, 0]
-        torch.save(save_pattern, os.path.join(debug_save, f"iter_{self.iteration}"))
-        save_coef = self.spec_coef[0, 0, 0]
-        torch.save(save_coef, os.path.join(debug_save, f"coef_{self.iteration}"))
-        torch.save(self.g_n, os.path.join(debug_save, f"g_n_{self.iteration}"))
-        torch.save(self.b, os.path.join(debug_save, f"b_{self.iteration}"))
+        # logger.info("saving patterns")
+        # debug_save = "/glade/work/dkimpara/CREDIT_runs/test_skebs_density/debug_pattern"
+        # save_pattern = pattern_on_grid[0, 0, 0]
+        # torch.save(save_pattern, os.path.join(debug_save, f"iter_{self.iteration}"))
+        # save_coef = self.spec_coef[0, 0, 0]
+        # torch.save(save_coef, os.path.join(debug_save, f"coef_{self.iteration}"))
+        # torch.save(self.g_n, os.path.join(debug_save, f"g_n_{self.iteration}"))
+        # torch.save(self.b, os.path.join(debug_save, f"b_{self.iteration}"))
 
 
         backscatter_pred = self.backscatter_network(x)
 
-        total_forcing = (self.r * torch.sqrt(backscatter_pred * self.timestep / self.dE) #taking out of sqrt so i can fix magnitude issue
-                         * pattern_on_grid )
+        # with fixed col, we adjust the perturbations to make sense using
+        # min/max scaling
+        # forcing / forcing_max * perturb_frac * sigma_max * std
+        # perturb_max is the maximum perturbation fraction wrt to sigma_max*std
+        # where we have pre-calculated forcing_max
+        total_forcing = (torch.sqrt(self.r * backscatter_pred / self.dE) #taking out of sqrt so i can fix magnitude issue
+                         * pattern_on_grid * self.spectral_adjustment )
         # shape (b, levels, t, lat, lon)
 
         # sp = torch.ones_like(x[:, self.sp_index : self.sp_index + 1], device = x.device) * 1013.
@@ -1056,12 +1085,16 @@ class SKEBS(nn.Module):
         # skebs gives us an instantaneous forcing term, need to multiply by timestep (euler step)
         # du/dt = 1 / rho * forcing
         # euler step: u_1 = u_0 + dt * 1/rho * forcing
-        add_wind_magnitude = (1. / density) * total_forcing * self.timestep 
+        add_wind_magnitude = total_forcing * self.timestep 
+
+        # still debugging this part
+        # add_wind_magnitude = (1. / density) * total_forcing * self.timestep  
 
         ## debug skebs, write out physical values 
         if self.write_debug_files:
             torch.save(add_wind_magnitude, join(self.debug_save_loc, f"perturb_{self.iteration}"))
-            torch.save(x, join(self.debug_save_loc, f"x_{self.iteration}"))
+            torch.save(pattern_on_grid, join(self.debug_save_loc, f"pattern_{self.iteration}"))
+            # torch.save(x, join(self.debug_save_loc, f"x_{self.iteration}"))
 
         x_u_wind = x[:, self.U_inds] + add_wind_magnitude * u_frac
         x_v_wind = x[:, self.V_inds] + add_wind_magnitude * v_frac
@@ -1075,6 +1108,16 @@ class SKEBS(nn.Module):
         assert not torch.isnan(x).any()
 
         self.iteration += 1
+
+        # TODO: make this more robust
+        self.steps += 1  # this one for model state
+        if torch.is_grad_enabled(): # means we are in a training script (not always true, but good enough for now for rolling out)
+            if self.training and self.steps >= self.forecast_len:
+                self.spec_coef_is_initialized = False
+                logger.info(f"skebs is reset after train step {self.steps} total iter {self.iteration}")
+            elif not self.training and self.steps >= self.valid_forecast_len:
+                self.spec_coef_is_initialized = False
+                logger.info(f"skebs is reset after valid step {self.steps} total iter {self.iteration}")
         return x
 
 
