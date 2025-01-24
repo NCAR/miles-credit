@@ -451,9 +451,6 @@ def credit_main_parser(
         )
         assert "level_info_file" in conf['data'], (
             'need to specify level_info_file for skebs')
-        assert "level_list" in conf['data'], (
-            'need to specify hybrid sigma level indices for skebs'
-        )
         assert conf['trainer']["train_batch_size"] == conf['trainer']["valid_batch_size"], (
             'train and valid batch sizes need to be the same for skebs'
         )
@@ -478,7 +475,7 @@ def credit_main_parser(
             i_var for i_var, var in enumerate(varname_output) if var=="T"
         ]
         Q_inds = [
-            i_var for i_var, var in enumerate(varname_output) if var=="Q"
+            i_var for i_var, var in enumerate(varname_output) if var in ["Q", "Qtot"]
         ]
         conf['model']['post_conf']['skebs']['U_inds'] = U_inds
         conf['model']['post_conf']['skebs']['V_inds'] = V_inds

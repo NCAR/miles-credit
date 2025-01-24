@@ -6,9 +6,9 @@ import logging
 import torch
 import torch.nn as nn
 from credit.models.crossformer import CrossFormer
-from credit.postblock import PostBlock, Backscatter_FCNN
+from credit.postblock import GlobalWaterFixer, PostBlock, Backscatter_FCNN
 from credit.postblock import SKEBS, TracerFixer, GlobalMassFixer, GlobalEnergyFixer
-from credit.parser import CREDIT_main_parser
+from credit.parser import credit_main_parser
 
 
 from torchviz import make_dot
@@ -25,14 +25,14 @@ def test_SKEBS_integration():
     '''
     logging.info("integration testing SKEBS")
     # config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
-    config = "/glade/work/dkimpara/CREDIT_runs/skebs_test/test_skebs_quarter_casper.yml"
+    config = "/glade/work/dkimpara/CREDIT_runs/latest_skebs/latest_skebs.yml"
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = CREDIT_main_parser(conf) # parser will copy model configs to post_conf
+    conf = credit_main_parser(conf) # parser will copy model configs to post_conf
 
     post_conf = conf['model']['post_conf']
-    
+    ## setting up input
     image_height = post_conf["model"]["image_height"]
     image_width = post_conf["model"]["image_width"]
     channels = post_conf["model"]["channels"]
@@ -76,11 +76,12 @@ def test_SKEBS_integration():
 def test_SKEBS_rand():
     ''' unit test for CPU. testing that values make sense
     '''
-    config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    # config = os.path.join(CONFIG_FILE_DIR, "example_skebs.yml")
+    config = "/glade/work/dkimpara/CREDIT_runs/latest_skebs/latest_skebs.yml"
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = CREDIT_main_parser(conf) # parser will copy model configs to post_conf
+    conf = credit_main_parser(conf) # parser will copy model configs to post_conf
     post_conf = conf['model']['post_conf']
     
     
@@ -101,19 +102,21 @@ def test_SKEBS_rand():
     y_pred[:, sp_index] = torch.ones_like(y_pred[:, sp_index]) * 1013
 
     post_conf["data"]["forecast_len"] = 2 # to turn on multistep
+   
+    with torch.no_grad():
 
-    postblock = PostBlock(post_conf)
-    assert any([isinstance(module, SKEBS) for module in postblock.modules()])
+        postblock = PostBlock(post_conf)
+        assert any([isinstance(module, SKEBS) for module in postblock.modules()])
 
-    input_dict = {"x": x,
-                  "y_pred": y_pred}
+        input_dict = {"x": x,
+                    "y_pred": y_pred}
 
-    # testing random pattern generation
-    for i in range(10):
-        skebs_pred = postblock(input_dict)
+        # testing random pattern generation
+        for i in range(10):
+            skebs_pred = postblock(input_dict)
 
     # skebs_pred = postblock(input_dict)
-
+    # FIXME: fix test
     assert skebs_pred.shape == y_pred.shape
     assert not torch.isnan(skebs_pred).any()
 
@@ -122,7 +125,7 @@ def test_SKEBS_backscatter():
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = CREDIT_main_parser(conf) # parser will copy model configs to post_conf
+    conf = credit_main_parser(conf) # parser will copy model configs to post_conf
     post_conf = conf['model']['post_conf']
     
     image_height = post_conf["model"]["image_height"]
