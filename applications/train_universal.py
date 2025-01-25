@@ -35,7 +35,7 @@ from credit.datasets.load_dataset_and_dataloader import (
 from credit.metrics import LatWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
-from credit.models.checkpoint import FSDPOptimizerWrapper, TorchFSDPCheckpointIO
+from credit.models.checkpoint import FSDPOptimizerWrapper, TorchFSDPCheckpointIO, load_state_dict_error_handler
 
 
 warnings.filterwarnings("ignore")
@@ -47,12 +47,11 @@ os.environ["MKL_NUM_THREADS"] = "1"
 # https://stackoverflow.com/questions/59129812/how-to-avoid-cuda-out-of-memory-in-pytorch
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-
 def load_model_states_and_optimizer(conf, model, device):
     """
     Load the model states, optimizer, scheduler, and gradient scaler.
 
-    Args:
+    Args:jo
         conf (dict): Configuration dictionary containing training parameters.
         model (torch.nn.Module): The model to be trained.
         device (torch.device): The device (CPU or GPU) where the model is located.
@@ -94,7 +93,7 @@ def load_model_states_and_optimizer(conf, model, device):
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
     if not load_weights:  # Loaded after loading model weights when reloading
         optimizer = torch.optim.AdamW(
-            model.parameters(),
+            filter(lambda p: p.requires_grad, model.parameters()),
             lr=learning_rate,
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
@@ -113,7 +112,7 @@ def load_model_states_and_optimizer(conf, model, device):
         load_optimizer_conf or load_scaler_conf or load_scheduler_conf
     ):
         optimizer = torch.optim.AdamW(
-            model.parameters(),
+            filter(lambda p: p.requires_grad, model.parameters()),
             lr=learning_rate,
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
@@ -124,7 +123,7 @@ def load_model_states_and_optimizer(conf, model, device):
                 f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
             )
             optimizer = torch.optim.AdamW(
-                model.parameters(),
+                filter(lambda p: p.requires_grad, model.parameters()),
                 lr=learning_rate,
                 weight_decay=weight_decay,
                 betas=(0.9, 0.95),
@@ -142,12 +141,17 @@ def load_model_states_and_optimizer(conf, model, device):
                 logging.info(
                     f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                model.module.load_state_dict(checkpoint["model_state_dict"])
+                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"],
+                                                 strict=False)
+                load_state_dict_error_handler(load_msg)
             else:
                 logging.info(
                     f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                model.load_state_dict(checkpoint["model_state_dict"])
+                load_msg = model.load_state_dict(checkpoint["model_state_dict"],
+                                                 strict=False)
+                load_state_dict_error_handler(load_msg)
+
         # Load the learning rate scheduler and mixed precision grad scaler
         scheduler = load_scheduler(optimizer, conf)
         scaler = (
@@ -167,7 +171,7 @@ def load_model_states_and_optimizer(conf, model, device):
                 f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
             )
             optimizer = torch.optim.AdamW(
-                model.parameters(),
+                filter(lambda p: p.requires_grad, model.parameters()),
                 lr=learning_rate,
                 weight_decay=weight_decay,
                 betas=(0.9, 0.95),
@@ -191,14 +195,19 @@ def load_model_states_and_optimizer(conf, model, device):
                 logging.info(
                     f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                model.module.load_state_dict(checkpoint["model_state_dict"])
+                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"],
+                                                 strict=False)
+                load_state_dict_error_handler(load_msg)
             else:
                 logging.info(
                     f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                model.load_state_dict(checkpoint["model_state_dict"])
+                load_msg = model.load_state_dict(checkpoint["model_state_dict"],
+                                                 strict=False)
+                load_state_dict_error_handler(load_msg)
+
             optimizer = torch.optim.AdamW(
-                model.parameters(),
+                filter(lambda p: p.requires_grad, model.parameters()),
                 lr=learning_rate,
                 weight_decay=weight_decay,
                 betas=(0.9, 0.95),
