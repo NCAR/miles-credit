@@ -15,6 +15,7 @@ from credit.models.unet404 import SegmentationModel404
 from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
 from credit.models.graph import GraphResTransfGRU
+from credit.models.debugger_model import DebuggerModel
 
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ model_types = {
     "fuxi": (Fuxi, "Loading Fuxi model"),
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
+    "debugger": (DebuggerModel, "Loading the debugger model")
 }
 
 
