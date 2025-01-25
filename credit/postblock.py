@@ -842,7 +842,7 @@ class SKEBS(nn.Module):
         if predict_mode=True, batch_size=1
         """
         super().__init__()
-        self.trainable = post_conf["skebs"]["trainable"]
+
         self.nlon = post_conf["model"]["image_width"]
         self.nlat = post_conf["model"]["image_height"]
         self.channels = post_conf["model"]["channels"]
@@ -863,7 +863,9 @@ class SKEBS(nn.Module):
         self.T_inds = post_conf["skebs"]["T_inds"]
         self.Q_inds = post_conf["skebs"]["Q_inds"]
         self.sp_index = post_conf["skebs"]["SP_ind"]
-
+        
+        self.state_trans = load_transforms(post_conf, scaler_only=True)
+        self.eps = 1e-12
 
         # check for contiguous indices, need this for concat operation
         assert np.all(np.diff(self.U_inds) == 1) and np.all(self.U_inds[:-1] <= self.U_inds[1:])
@@ -874,14 +876,20 @@ class SKEBS(nn.Module):
         self.level_info = xr.open_dataset(post_conf["data"]["level_info_file"])
         # self.level_list = post_conf["data"]["level_list"]
         # self.surface_area = xr.open_dataset(post_conf["data"]["save_loc_static"])["surface_area"].to_numpy()
-        self.spec_coef_is_initialized = False
-
-        self.eps = 1e-12
-
         self.initialize_sht()
         self.initialize_skebs_parameters()
         self.initialize_plev_calc()
+        
+        # coeffs havent been spun up yet (need to cycle the coeffs)
+        self.spec_coef_is_initialized = False
 
+        # freeze pattern weights before init backscatter
+        if post_conf["skebs"].get("freeze_pattern_weights", False):
+            logger.warning("freezing all skebs pattern weights")
+            for param in self.parameters():
+                param.requires_grad = False
+
+        # initialize backscatter prediction
         num_channels = self.levels * self.channels + self.surface_channels + self.output_only_channels
         if post_conf["skebs"]["uniform_dissipation"]:
             # self.backscatter_network = Backscatter_fixed(self.nlat, self.nlon)
@@ -891,17 +899,21 @@ class SKEBS(nn.Module):
                                                              post_conf["skebs"]["perturb_frac"])
         else:
             self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
-
-        self.state_trans = load_transforms(post_conf, scaler_only=True)
-
-        if not self.trainable:
-            logger.warning("freezing all skebs parameters due to skebs config")
+        
+        # freeze backscatter weights if needed
+        if post_conf["skebs"].get("freeze_dissipation_weights", False):
+            logger.warning("freezing all dissipation predictor weights")
+            for param in self.backscatter_network.parameters():
+                param.requires_grad = False
+        # turn off training for all skebs params
+        if not post_conf["skebs"].get("trainable", True):
+            logger.warning("freezing all SKEBS parameters due to skebs config")
             for param in self.parameters():
                 param.requires_grad = False
 
-        ## debugging and analysis features
-        self.write_debug_files = False
 
+        ########### debugging and analysis features #############
+        self.write_debug_files = False
         self.debug_save_loc = join(post_conf['skebs']["save_loc"], "debug_skebs")
         os.makedirs(self.debug_save_loc, exist_ok=True)  
         self.iteration = 0

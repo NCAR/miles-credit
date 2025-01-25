@@ -103,17 +103,15 @@ def test_SKEBS_rand():
 
     post_conf["data"]["forecast_len"] = 2 # to turn on multistep
    
-    with torch.no_grad():
+    postblock = PostBlock(post_conf)
+    assert any([isinstance(module, SKEBS) for module in postblock.modules()])
 
-        postblock = PostBlock(post_conf)
-        assert any([isinstance(module, SKEBS) for module in postblock.modules()])
+    input_dict = {"x": x,
+                "y_pred": y_pred}
 
-        input_dict = {"x": x,
-                    "y_pred": y_pred}
-
-        # testing random pattern generation
-        for i in range(10):
-            skebs_pred = postblock(input_dict)
+    # testing random pattern generation
+    for i in range(10):
+        skebs_pred = postblock(input_dict)
 
     # skebs_pred = postblock(input_dict)
     # FIXME: fix test
@@ -329,11 +327,7 @@ def test_GlobalEnergyFixer_rand():
     assert y_pred_fix.shape == y_pred.shape
 
 
-def test_SKEBS_era5():
-    """
-    todo after implementation
-    """
-    pass
+
 
 if __name__ == "__main__":
     # Set up logger to print stuff
