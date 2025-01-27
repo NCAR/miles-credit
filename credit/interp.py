@@ -21,6 +21,8 @@ def full_state_pressure_interpolation(
     lon_var: str = "longitude",
     pres_var: str = "pressure",
     level_var: str = "level",
+    coef_a: str = "model_a",
+    coef_b: str = "model_b",
     model_level_file: str = "../credit/metadata/ERA5_Lev_Info.nc",
     verbose: int = 1,
 ) -> xr.Dataset:
@@ -50,8 +52,8 @@ def full_state_pressure_interpolation(
     path_to_file = os.path.abspath(os.path.dirname(__file__))
     model_level_file = os.path.join(path_to_file, model_level_file)
     with xr.open_dataset(model_level_file) as mod_lev_ds:
-        model_a = mod_lev_ds["a_model"].loc[state_dataset[level_var]].values
-        model_b = mod_lev_ds["b_model"].loc[state_dataset[level_var]].values
+        model_a = mod_lev_ds[coef_a].loc[state_dataset[level_var]].values
+        model_b = mod_lev_ds[coef_b].loc[state_dataset[level_var]].values
     pres_dims = (time_var, pres_var, lat_var, lon_var)
     coords = {
         time_var: state_dataset[time_var],
