@@ -486,8 +486,13 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         info = []
         for init_time in self.init_time_list_np:
             for i_file, ds in enumerate(self.all_files):
-                # get the year of the current file
-                ds_year = int(np.datetime_as_string(ds["time"][0].values, unit="Y"))
+                # get the year of the current file 
+                # looks messy because extra code needed to handle cftime
+                ds_year = int((
+                    np.datetime_as_string(ds["time"][0]
+                                          .astype('datetime64[ns]')
+                                          .values, 
+                                          unit="Y")))
 
                 # get the first and last years of init times
                 init_year0 = nanoseconds_to_year(init_time)
@@ -497,7 +502,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                     N_times = len(ds["time"])
                     # convert ds['time'] to a list of nanosecondes
                     ds_time_list = [
-                        np.datetime64(ds_time.values).astype(datetime)
+                        ds_time.astype('datetime64[ns]').values.astype(datetime)
                         for ds_time in ds["time"]
                     ]
                     ds_start_time = ds_time_list[0]

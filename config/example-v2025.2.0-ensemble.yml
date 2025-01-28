@@ -255,7 +255,7 @@ trainer:
   
 model:
     # NCAR WXFormer example
-    type: "crossformer"
+    type: "crossformer"               # use "debugger" with any config to use debugger model type. compatible with basic model args
     frames: 1                         # number of input states (default: 1)
     image_height: 640                 # number of latitude grids (default: 640)
     image_width: 1280                 # number of longitude grids (default: 1280)
@@ -397,6 +397,8 @@ predict:
 
     # Set the batch_size for the prediction inference mode (default is 1)
     batch_size: 1
+    # set the ensemble size for inference mode (default is 1 if not set)
+    ensemble_size: 1
 
     forecasts:
         type: "custom"       # keep it as "custom". See also credit.forecast

@@ -96,7 +96,7 @@ def worker(
         # ind_end_time = len(ERA5_subset['time'])
 
         # datetiem information as int number (used in some normalization methods)
-        datetime_as_number = ERA5_subset.time.values.astype("datetime64[s]").astype(int)
+        datetime_as_number = ERA5_subset.time.astype("datetime64[s]").values.astype(int)
 
         # ==================================================== #
         # xarray dataset as input
@@ -236,11 +236,12 @@ def worker(
         # sample['stop_forecast'] = stop_forecast
         sample["datetime"] = [
             int(
-                historical_ERA5_images.time.values[0]
+                historical_ERA5_images.time[0]
                 .astype("datetime64[s]")
+                .values
                 .astype(int)
             ),
-            int(target_ERA5_images.time.values[0].astype("datetime64[s]").astype(int)),
+            int(target_ERA5_images.time[0].astype("datetime64[s]").values.astype(int)),
         ]
 
     except Exception as e:

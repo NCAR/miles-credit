@@ -422,6 +422,7 @@ class CrossFormer(BaseModel):
         if padding_conf is None:
             padding_conf = {"activate": False}
         self.use_padding = padding_conf["activate"]
+        
         if post_conf is None:
             post_conf = {"activate": False}
         self.use_post_block = post_conf["activate"]
@@ -514,6 +515,14 @@ class CrossFormer(BaseModel):
             apply_spectral_norm(self)
 
         if self.use_post_block:
+            # freeze base model weights before postblock init
+            if (post_conf["skebs"].get("activate", False) 
+                and post_conf["skebs"].get("freeze_base_model_weights", False)):
+                logger.warning("freezing all base model weights due to skebs config")
+                for param in self.parameters():
+                    param.requires_grad = False
+            
+            logger.info("using postblock")
             self.postblock = PostBlock(post_conf)
 
     def forward(self, x):
