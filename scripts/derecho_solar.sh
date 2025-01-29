@@ -14,8 +14,8 @@ cd ..
 mpiexec -n 512 -ppn 128 python -u applications/calc_global_solar.py \
   -s "${PBS_ARRAY_INDEX}-01-01" \
   -e "${PBS_ARRAY_INDEX}-12-31 18:00" \
-  -i /glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc \
+  -i /glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght_ONEDEG.nc \
   -t 6h \
   -u 1Min \
-  -o /glade/derecho/scratch/dgagne/credit_solar_6h_0.25deg/
+  -o /glade/derecho/scratch/dgagne/credit_solar_6h_1deg/
 #  -o /glade/derecho/scratch/dgagne/credit_solar_1h_0.25deg/

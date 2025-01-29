@@ -3,12 +3,6 @@ T:
     long_name: "Temperature"
     short_name: "t"
     units: "K"
-    wmo_discipline: 0
-    wmo_master_table: 5
-    wmo_local_table: 0
-    wmo_center: 98
-    wmo_parameter_category: 0
-    wmo_parameter_number: 0
     _FillValue: 9.999e+20
     
 Q:
@@ -16,12 +10,6 @@ Q:
     long_name: "Specific humidity"
     short_name: "q"
     units: "kg kg**-1"
-    wmo_discipline: 0
-    wmo_master_table: 5
-    wmo_local_table: 0
-    wmo_center: 98
-    wmo_parameter_category: 1
-    wmo_parameter_number: 0
     _FillValue: 9.999e+20
     
 U:
@@ -29,12 +17,6 @@ U:
     standard_name: "eastward_wind" 
     short_name: "u"
     units: "m s**-1"
-    wmo_discipline: 0
-    wmo_master_table: 5
-    wmo_local_table: 0
-    wmo_center: 98
-    wmo_parameter_category: 2
-    wmo_parameter_number: 2
     _FillValue: 9.999e+20
     
 V:
@@ -43,11 +25,6 @@ V:
     short_name: "v"
     units: "m s**-1"
     wmo_discipline: 0
-    wmo_master_table: 5
-    wmo_local_table: 0
-    wmo_center: 98
-    wmo_parameter_category: 2
-    wmo_parameter_number: 3
     _FillValue: 9.999e+20
     
 SP:
@@ -56,9 +33,6 @@ SP:
     short_name: "sp"
     units: "Pa"
     original_format: "WMO GRIB 1"
-    wmo_center: 98
-    ecmwf_local_table: 128
-    ecmwf_parameter_number: 134
     _FillValue: 9.999e+20
     
 time:
@@ -72,8 +46,6 @@ Z:
     standard_name: "surface_geopotential"
     units: "m**2 s**-2"
     original_format: "WMO GRIB 1 with ECMWF local table"
-    ecmwf_local_table: 128
-    ecmwf_parameter: 129
     _FillValue: 9.999e+20
     
 latitude:
@@ -93,9 +65,6 @@ t2m:
     short_name: "2t"
     standard_name: "air_temperature"
     units: "K"
-    original_format: "WMO GRIB 1 with ECMWF local table"
-    ecmwf_local_table: 128
-    ecmwf_parameter: 167
     _FillValue: 9.999e+20
     
 U500:
@@ -103,12 +72,6 @@ U500:
     standard_name: "eastward_wind"
     short_name: "u500"
     units: "m s**-1"
-    wmo_discipline: 0
-    wmo_master_table: 5
-    wmo_local_table: 0
-    wmo_center: 98
-    wmo_parameter_category: 2
-    wmo_parameter_number: 2
     _FillValue: 9.999e+20
     
 V500:
@@ -116,21 +79,12 @@ V500:
     standard_name: "northward_wind"
     short_name: "v500"
     units: "m s**-1"
-    wmo_discipline: 0
-    wmo_master_table: 5
-    wmo_local_table: 0
-    wmo_center: 98
-    wmo_parameter_category: 2
-    wmo_parameter_number: 3
     _FillValue: 9.999e+20
     
 Z500:
     long_name: "Geopotential (at 500 hPa)"
     short_name: "z500"
     units: "m**2 s**-2"
-    original_format: "WMO GRIB 1 with ECMWF local table"
-    ecmwf_local_table: 128
-    ecmwf_parameter: 129
     _FillValue: 9.999e+20
     
 T500:
@@ -138,12 +92,6 @@ T500:
     long_name: "Temperature"
     short_name: "t500"
     units: "K"
-    wmo_discipline: 0
-    wmo_master_table: 5
-    wmo_local_table: 0
-    wmo_center: 98
-    wmo_parameter_category: 0
-    wmo_parameter_number: 0
     _FillValue: 9.999e+20
     
 Q500:
@@ -151,11 +99,5 @@ Q500:
     long_name: "Specific humidity (at 500 hPa)"
     short_name: "q500"
     units: "kg kg**-1"
-    wmo_discipline: 0
-    wmo_master_table: 5
-    wmo_local_table: 0
-    wmo_center: 98
-    wmo_parameter_category: 1
-    wmo_parameter_number: 0
     _FillValue: 9.999e+20
   

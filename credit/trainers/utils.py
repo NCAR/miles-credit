@@ -13,6 +13,6 @@ def cycle(dl):
 
 def accum_log(log, new_logs):
     for key, new_value in new_logs.items():
-        old_value = log.get(key, 0.)
+        old_value = log.get(key, 0.0)
         log[key] = old_value + new_value
     return log

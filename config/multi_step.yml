@@ -15,15 +15,14 @@ data:
     train_years: [1979, 2014]
     valid_years: [2014, 2018]
     scaler_type: 'std_new'  
-    history_len: 1
-    valid_history_len: 1
-    forecast_len: 4
-    valid_forecast_len: 0
+    history_len: 0
+    valid_history_len: 0
     one_shot: True
     lead_time_periods: 6
     skip_periods: null
     static_first: True
-    
+    dataset_type: ERA5_and_Forcing_Singlestep # ERA5_and_Forcing_Singlestep, ERA5_and_Forcing_MultiStep, ERA5_MultiStep_Batcher, MultiprocessingBatcher, MultiprocessingBatcherPrefetch
+
 trainer:
     type: multi-step # <---------- change to your type
     mode: fsdp
@@ -50,6 +49,7 @@ trainer:
     grad_max_norm: 1.0
     thread_workers: 1
     valid_thread_workers: 0
+    prefetch_factor: 4 # Use with MultiprocessingBatcherPrefetch
   
 model:
     # crossformer example

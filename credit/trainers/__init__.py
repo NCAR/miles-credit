@@ -1,4 +1,3 @@
-
 import copy
 import logging
 
@@ -6,8 +5,12 @@ import logging
 from credit.trainers.trainerERA5_v1 import Trainer as TrainerDeprecated
 from credit.trainers.trainerERA5_v2 import Trainer as TrainerStandard
 from credit.trainers.trainerERA5_multistep_v1 import Trainer as TrainerMultiStepV1
-from credit.trainers.trainerERA5_multistep_grad_accum import Trainer as TrainerMultiStepGradAccum
-from credit.trainers.trainerERA5_multistep_concat import Trainer as TrainerMultiStepConcat
+from credit.trainers.trainerERA5_multistep_grad_accum import (
+    Trainer as TrainerMultiStepGradAccum,
+)
+from credit.trainers.trainerERA5_multistep_concat import (
+    Trainer as TrainerMultiStepConcat,
+)
 from credit.trainers.trainerERA5_multistep_sum import Trainer as TrainerMultiStepSum
 from credit.trainers.trainer404 import Trainer as Trainer404
 
@@ -16,13 +19,29 @@ logger = logging.getLogger(__name__)
 
 # Define trainer types and their corresponding classes
 trainer_types = {
-    "standard-deprecated": (TrainerDeprecated, "Loading a deprecated version of the standard trainer. It will not work with forcing config options."),
+    "standard-deprecated": (
+        TrainerDeprecated,
+        "Loading a deprecated version of the standard trainer. It will not work with forcing config options.",
+    ),
     "standard": (TrainerStandard, "Loading a standard trainer."),
     "multi-step-deprecated": (TrainerMultiStepV1, "Loading a multi-step trainer."),
-    "multi-step": (TrainerMultiStepGradAccum, "Loading a multi-step trainer that uses gradient accumulation."),
-    "multi-step-concat": (TrainerMultiStepConcat, "Loading a multi-step trainer that uses concatenation (see modulus-makani)."),
-    "multi-step-sum": (TrainerMultiStepSum, "Loading a multi-step trainer that sums the loss over a forecast."),
-    "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset.")
+    "multi-step": (
+        TrainerMultiStepGradAccum,
+        "Loading a multi-step trainer that uses gradient accumulation.",
+    ),
+    "universal": (
+        TrainerMultiStepGradAccum,
+        "Loading a single or multi-step trainer that uses gradient accumulation on forecast lengths > 1.",
+    ),
+    "multi-step-concat": (
+        TrainerMultiStepConcat,
+        "Loading a multi-step trainer that uses concatenation (see modulus-makani).",
+    ),
+    "multi-step-sum": (
+        TrainerMultiStepSum,
+        "Loading a multi-step trainer that sums the loss over a forecast.",
+    ),
+    "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
 }
 
 

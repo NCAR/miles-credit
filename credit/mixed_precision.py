@@ -26,7 +26,7 @@ def parse_dtype(dtype_str: str) -> torch.dtype:
         "int64": torch.int64,
         "short": torch.int16,  # Alias for int16
         "long": torch.int64,  # Alias for int64
-        "bool": torch.bool
+        "bool": torch.bool,
     }
 
     # Convert the dtype string to lowercase for case-insensitive matching

@@ -6,7 +6,7 @@
 # the location to save your workspace, it will have 
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
-save_loc: '/glade/work/$USER/CREDIT_runs/fuxi_6h/'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/fuxi_6h/'
 seed: 1000 # random seeed
 
 data:
@@ -138,7 +138,7 @@ trainer:
     #       run train_multistep.py for multi-step
     type: standard
 
-    # (optional) use torch.compile: False. May not be compatiable with custom models
+    # (optional) use torch.compile: False. May not be compatible with custom models
     compile: False
     
     # load existing weights / optimizer / mixed-precision grad scaler / learning rate scheduler state(s)
@@ -223,9 +223,9 @@ model:
     
     # fuxi example
     frames: 2               # number of input states
-    image_height: 640       # number of latitude grids
-    image_width: 1280       # number of longitude grids
-    levels: 15              # number of upper-air variable levels
+    image_height: &height 640       # number of latitude grids
+    image_width: &width 1280       # number of longitude grids
+    levels: &levels 16              # number of upper-air variable levels
     channels: 4             # upper-air variable channels
     surface_channels: 7     # surface variable channels
     input_only_channels: 3  # dynamic forcing, forcing, static channels
@@ -368,10 +368,32 @@ predict:
     # users can use $repo/credit/metadata/era5.yaml as an example to create their own
     metadata: '/glade/u/home/ksha/miles-credit/credit/metadata/era5.yaml'
 
+    interp_pressure:
+        pressure_levels: [300.0, 500.0, 850.0, 925.0]
+
+    ua_var_encoding:
+        zlib: True
+        complevel: 1
+        shuffle: True
+        chunksizes: [1, *levels, *height, *width]
+
+    pressure_var_encoding:
+        zlib: True
+        complevel: 1
+        shuffle: True
+        chunksizes: [ 1, 4, *height, *width]
+
+    surface_var_encoding:
+        zlib: true
+        complevel: 1
+        shuffle: True
+        chunksizes: [1, *height, *width]
+
+
 # credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
 pbs: 
     # example for derecho
-    conda: "/glade/work/ksha/miniconda3/envs/credit"
+    conda: "/glade/u/home/dgagne/conda-envs/hcredit"
     project: "NAML0001"
     job_name: "train_model"
     walltime: "12:00:00"

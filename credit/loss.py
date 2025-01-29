@@ -9,21 +9,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def load_loss(loss_type, reduction='mean'):
+def load_loss(loss_type, reduction="mean"):
     """Load a specified loss function by its type.
+    Helper function of VariableTotalLoss2D
 
-    This function returns a loss function based on the specified 
-    `loss_type`. It supports several common loss functions, including 
-    MSE, MAE, MSLE, Huber, Log-Cosh, X-Tanh, and X-Sigmoid. The loss 
-    function can also be customized to use different reduction methods 
-    (e.g., 'mean', 'sum'). Use reduction=none if using latitude or variable 
+    This function returns a loss function based on the specified
+    `loss_type`. It supports several common loss functions, including
+    MSE, MAE, MSLE, Huber, Log-Cosh, X-Tanh, and X-Sigmoid. The loss
+    function can also be customized to use different reduction methods
+    (e.g., 'mean', 'sum'). Use reduction=none if using latitude or variable
     weights
 
     Args:
-        loss_type (str): The type of loss function to load. Supported 
-            values are "mse", "mae", "msle", "huber", "logcosh", 
+        loss_type (str): The type of loss function to load. Supported
+            values are "mse", "mae", "msle", "huber", "logcosh",
             "xtanh", and "xsigmoid".
-        reduction (str, optional): Specifies the reduction to apply to 
+        reduction (str, optional): Specifies the reduction to apply to
             the output: 'mean' (default) or 'sum'.
 
     Returns:
@@ -44,6 +45,7 @@ def load_loss(loss_type, reduction='mean'):
         "logcosh": LogCoshLoss,
         "xtanh": XTanhLoss,
         "xsigmoid": XSigmoidLoss,
+        "KCRPS": KCRPSLoss,
     }
 
     if loss_type in losses:
@@ -63,13 +65,9 @@ class LogCoshLoss(torch.nn.Module):
     Args:
         reduction (str): Specifies the reduction to apply to the output:
             'mean' | 'none'. 'mean': the output is averaged; 'none': no reduction is applied.
-
-    Methods:
-        forward(y_t, y_prime_t): Computes the Log-Cosh loss between the
-            target and predicted values.
-
     """
-    def __init__(self, reduction='mean'):
+
+    def __init__(self, reduction="mean"):
         super().__init__()
         self.reduction = reduction
 
@@ -84,27 +82,26 @@ class LogCoshLoss(torch.nn.Module):
             torch.Tensor: Log-Cosh loss value.
         """
         ey_t = y_t - y_prime_t
-        return torch.mean(torch.log(torch.cosh(ey_t + 1e-12))) if self.reduction == 'mean' else torch.log(
-            torch.cosh(ey_t + 1e-12))
+        return (
+            torch.mean(torch.log(torch.cosh(ey_t + 1e-12)))
+            if self.reduction == "mean"
+            else torch.log(torch.cosh(ey_t + 1e-12))
+        )
 
 
 class XTanhLoss(torch.nn.Module):
     """X-Tanh Loss Function.
 
-    This loss function computes the element-wise product of the prediction error 
-    and the hyperbolic tangent of the error. This loss function aims to be more 
+    This loss function computes the element-wise product of the prediction error
+    and the hyperbolic tangent of the error. This loss function aims to be more
     robust to outliers than traditional MSE.
 
     Args:
-        reduction (str): Specifies the reduction to apply to the output: 
+        reduction (str): Specifies the reduction to apply to the output:
             'mean' | 'none'. 'mean': the output is averaged; 'none': no reduction is applied.
-
-    Methods:
-        forward(y_t, y_prime_t): Computes the X-Tanh loss between the 
-            target and predicted values.
-
     """
-    def __init__(self, reduction='mean'):
+
+    def __init__(self, reduction="mean"):
         super().__init__()
         self.reduction = reduction
 
@@ -119,25 +116,25 @@ class XTanhLoss(torch.nn.Module):
             torch.Tensor: X-Tanh loss value.
         """
         ey_t = y_t - y_prime_t + 1e-12
-        return torch.mean(ey_t * torch.tanh(ey_t)) if self.reduction == 'mean' else ey_t * torch.tanh(ey_t)
+        return (
+            torch.mean(ey_t * torch.tanh(ey_t))
+            if self.reduction == "mean"
+            else ey_t * torch.tanh(ey_t)
+        )
 
 
 class XSigmoidLoss(torch.nn.Module):
     """X-Sigmoid Loss Function.
 
-    This loss function computes a modified loss by using a sigmoid function 
+    This loss function computes a modified loss by using a sigmoid function
     transformation. It is designed to handle large errors in a non-linear fashion.
 
     Args:
-        reduction (str): Specifies the reduction to apply to the output: 
+        reduction (str): Specifies the reduction to apply to the output:
             'mean' | 'none'. 'mean': the output is averaged; 'none': no reduction is applied.
-
-    Methods:
-        forward(y_t, y_prime_t): Computes the X-Sigmoid loss between the 
-            target and predicted values.
-
     """
-    def __init__(self, reduction='mean'):
+
+    def __init__(self, reduction="mean"):
         super().__init__()
         self.reduction = reduction
 
@@ -152,27 +149,26 @@ class XSigmoidLoss(torch.nn.Module):
             torch.Tensor: X-Sigmoid loss value.
         """
         ey_t = y_t - y_prime_t + 1e-12
-        return torch.mean(2 * ey_t / (1 + torch.exp(-ey_t)) - ey_t) if self.reduction == 'mean' else 2 * ey_t / (
-                    1 + torch.exp(-ey_t)) - ey_t
+        return (
+            torch.mean(2 * ey_t / (1 + torch.exp(-ey_t)) - ey_t)
+            if self.reduction == "mean"
+            else 2 * ey_t / (1 + torch.exp(-ey_t)) - ey_t
+        )
 
 
 class MSLELoss(nn.Module):
     """Mean Squared Logarithmic Error (MSLE) Loss Function.
 
-    This loss function computes the mean squared logarithmic error between the 
-    predicted and target values. It is useful for handling targets that span 
+    This loss function computes the mean squared logarithmic error between the
+    predicted and target values. It is useful for handling targets that span
     several orders of magnitude.
 
     Args:
-        reduction (str): Specifies the reduction to apply to the output: 
+        reduction (str): Specifies the reduction to apply to the output:
             'mean' | 'none'. 'mean': the output is averaged; 'none': no reduction is applied.
-
-    Methods:
-        forward(prediction, target): Computes the MSLE loss between the 
-            predicted and target values.
-
     """
-    def __init__(self, reduction='mean'):
+
+    def __init__(self, reduction="mean"):
         super(MSLELoss, self).__init__()
         self.reduction = reduction
 
@@ -186,30 +182,91 @@ class MSLELoss(nn.Module):
         Returns:
             torch.Tensor: MSLE loss value.
         """
-        log_prediction = torch.log(prediction.abs() + 1)  # Adding 1 to avoid logarithm of zero
+        log_prediction = torch.log(
+            prediction.abs() + 1
+        )  # Adding 1 to avoid logarithm of zero
         log_target = torch.log(target.abs() + 1)
         loss = F.mse_loss(log_prediction, log_target, reduction=self.reduction)
         return loss
 
 
+class KCRPSLoss(nn.Module):
+    """Adapted from Nvidia Modulus 
+    
+    Estimate the CRPS from a finite ensemble
+
+    Computes the local Continuous Ranked Probability Score (CRPS) by using
+    the kernel version of CRPS. The cost is O(m log m).
+
+    Creates a map of CRPS and does not accumulate over lat/lon regions.
+    Approximates:
+    .. math::
+        CRPS(X, y) = E[X - y] - 0.5 E[X-X']
+
+    with
+    .. math::
+        sum_i=1^m |X_i - y| / m - 1/(2m^2) sum_i,j=1^m |x_i - x_j|
+    """
+
+    def __init__(self, reduction, biased: bool = False):
+        super().__init__()
+        self.biased = biased
+        self.batched_forward = torch.vmap(self.single_sample_forward)
+    
+    def forward(self, target, pred):
+        # integer division but will error out next op if there is a remainder
+        ensemble_size = pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
+        pred = pred.view(target.shape[0], ensemble_size, *target.shape[1:]) #b, ensemble, c, t, lat, lon
+        # apply single_sample_forward to each dim
+        target = target.unsqueeze(1)
+        return self.batched_forward(target, pred).squeeze(1)
+
+    def single_sample_forward(self, target, pred):
+        """Forward pass for KCRPS loss for a single sample 
+
+        Args:
+            prediction (torch.Tensor): Predicted tensor.
+            target (torch.Tensor): Target tensor.
+
+        Returns:
+            torch.Tensor: CRPS loss values at each lat/lon
+        """
+        pred = torch.movedim(pred, 0, -1)
+        return self._kernel_crps_implementation(pred, target, self.biased)
+    
+    def _kernel_crps_implementation(self, pred: torch.Tensor, obs: torch.Tensor, biased: bool) -> torch.Tensor:
+        """An O(m log m) implementation of the kernel CRPS formulas"""
+        skill = torch.abs(pred - obs[..., None]).mean(-1)
+        pred, _ = torch.sort(pred)
+
+        # derivation of fast implementation of spread-portion of CRPS formula when x is sorted
+        # sum_(i,j=1)^m |x_i - x_j| = sum_(i<j) |x_i -x_j| + sum_(i > j) |x_i - x_j|
+        #                           = 2 sum_(i <= j) |x_i -x_j|
+        #                           = 2 sum_(i <= j) (x_j - x_i)
+        #                           = 2 sum_(i <= j) x_j - 2 sum_(i <= j) x_i
+        #                           = 2 sum_(j=1)^m j x_j - 2 sum (m - i + 1) x_i
+        #                           = 2 sum_(i=1)^m (2i - m - 1) x_i
+        m = pred.size(-1)
+        i = torch.arange(1, m + 1, device=pred.device, dtype=pred.dtype)
+        denom = m * m if biased else m * (m - 1)
+        factor = (2 * i - m - 1) / denom
+        spread = torch.sum(factor * pred, dim=-1)
+        return skill - spread
+
 class SpectralLoss2D(torch.nn.Module):
     """Spectral Loss in 2D.
 
-    This loss function compares the spectral (frequency domain) content of the 
-    predicted and target outputs using FFT. It is useful for ensuring that the 
+    This loss function compares the spectral (frequency domain) content of the
+    predicted and target outputs using FFT. It is useful for ensuring that the
     predicted output has similar frequency characteristics as the target.
 
     Args:
         wavenum_init (int): The initial wavenumber to start considering in the loss calculation.
-        reduction (str): Specifies the reduction to apply to the output: 
+        reduction (str): Specifies the reduction to apply to the output:
             'mean' | 'none'. 'mean': the output is averaged; 'none': no reduction is applied.
-
-    Methods:
-        forward(output, target, weights=None, fft_dim=-1): Computes the spectral loss between the 
-            predicted and target values.
-
     """
-    def __init__(self, wavenum_init=20, reduction='none'):
+
+    def __init__(self, wavenum_init=20, reduction="none"):
         super(SpectralLoss2D, self).__init__()
         self.wavenum_init = wavenum_init
         self.reduction = reduction
@@ -266,7 +323,10 @@ class SpectralLoss2D(torch.nn.Module):
             target_fft_mean = torch.mean(target_fft_abs, dim=(fft_dim - 1))
 
         # Compute MSE, no sqrt according to FouRKS paper/ repo
-        loss = torch.square(out_fft_mean[..., self.wavenum_init:] - target_fft_mean[..., self.wavenum_init:])
+        loss = torch.square(
+            out_fft_mean[..., self.wavenum_init :]
+            - target_fft_mean[..., self.wavenum_init :]
+        )
         loss = loss.mean()
         return loss.to(device=device, dtype=dtype)
 
@@ -274,18 +334,14 @@ class SpectralLoss2D(torch.nn.Module):
 class PSDLoss(nn.Module):
     """Power Spectral Density (PSD) Loss Function.
 
-    This loss function calculates the Power Spectral Density (PSD) of the 
-    predicted and target outputs and compares them to ensure similar frequency 
+    This loss function calculates the Power Spectral Density (PSD) of the
+    predicted and target outputs and compares them to ensure similar frequency
     content in the predictions.
 
     Args:
         wavenum_init (int): The initial wavenumber to start considering in the loss calculation.
-
-    Methods:
-        forward(target, pred, weights=None): Computes the PSD loss between the 
-            predicted and target values.
-
     """
+
     def __init__(self, wavenum_init=20):
         super(PSDLoss, self).__init__()
         self.wavenum_init = wavenum_init
@@ -318,16 +374,19 @@ class PSDLoss(nn.Module):
         # Calculate mean of squared distance weighted by latitude
         lat_shape = pred_psd.shape[-2]
         if weights is None:  # weights for a normal average
-            weights = torch.full(
-                (1, lat_shape),
-                1 / lat_shape,
-                dtype=torch.float32
-            ).to(device=device, dtype=dtype)
+            weights = torch.full((1, lat_shape), 1 / lat_shape, dtype=torch.float32).to(
+                device=device, dtype=dtype
+            )
         else:
-            weights = weights.permute(0, 2, 1).to(device=device, dtype=dtype) / weights.sum()
+            weights = (
+                weights.permute(0, 2, 1).to(device=device, dtype=dtype) / weights.sum()
+            )
             # (1, lat, 1) -> (1, 1, lat)
         # (B, C, t, lat, coeffs)
-        sq_diff = (true_psd_log[..., self.wavenum_init:] - pred_psd_log[..., self.wavenum_init:]) ** 2
+        sq_diff = (
+            true_psd_log[..., self.wavenum_init :]
+            - pred_psd_log[..., self.wavenum_init :]
+        ) ** 2
 
         loss = torch.mean(torch.matmul(weights, sq_diff))
         # (B, C, t, lat, coeffs) -> (B, C, t, 1, coeffs) -> ()
@@ -335,8 +394,10 @@ class PSDLoss(nn.Module):
 
     def get_psd(self, f_x, device, dtype):
         # (B, C, t, lat, lon)
-        f_k = torch.fft.rfft(f_x, dim=-1, norm='forward')
-        mult_by_two = torch.full(f_k.shape[-1:], 2.0, dtype=torch.float32).to(device=device, dtype=dtype)
+        f_k = torch.fft.rfft(f_x, dim=-1, norm="forward")
+        mult_by_two = torch.full(f_k.shape[-1:], 2.0, dtype=torch.float32).to(
+            device=device, dtype=dtype
+        )
         mult_by_two[0] = 1.0  # except first coord
         magnitudes = torch.real(f_k * torch.conj(f_k)) * mult_by_two
         # (B, C, t, lat, coeffs)
@@ -345,17 +406,17 @@ class PSDLoss(nn.Module):
 
 def latitude_weights(conf):
     """Calculate latitude-based weights for loss function.
-    This function calculates weights based on latitude values 
-    to be used in loss functions for geospatial data. The weights 
-    are derived from the cosine of the latitude and normalized 
+    This function calculates weights based on latitude values
+    to be used in loss functions for geospatial data. The weights
+    are derived from the cosine of the latitude and normalized
     by their mean.
 
     Args:
-        conf (dict): Configuration dictionary containing the 
+        conf (dict): Configuration dictionary containing the
             path to the latitude weights file.
 
     Returns:
-        torch.Tensor: A 2D tensor of weights with dimensions 
+        torch.Tensor: A 2D tensor of weights with dimensions
             corresponding to latitude and longitude.
     """
     # Open the dataset and extract latitude and longitude information
@@ -373,91 +434,81 @@ def latitude_weights(conf):
     return L
 
 
-def variable_weights(conf, channels, surface_channels, frames):
-    """Create variable-specific weights for different atmospheric 
+def variable_weights(conf, channels, frames):
+    """Create variable-specific weights for different atmospheric
     and surface channels.
 
-    This function loads weights for different atmospheric variables 
-    (e.g., U, V, T, Q) and surface variables (e.g., SP, t2m) from 
-    the configuration file. It then combines them into a single 
+    This function loads weights for different atmospheric variables
+    (e.g., U, V, T, Q) and surface variables (e.g., SP, t2m) from
+    the configuration file. It then combines them into a single
     weight tensor for use in loss calculations.
 
     Args:
-        conf (dict): Configuration dictionary containing the 
+        conf (dict): Configuration dictionary containing the
             variable weights.
         channels (int): Number of channels for atmospheric variables.
-        surface_channels (int): Number of channels for surface variables.
         frames (int): Number of time frames.
 
     Returns:
-        torch.Tensor: A tensor containing the combined weights for 
+        torch.Tensor: A tensor containing the combined weights for
             all variables.
     """
     # Load weights for U, V, T, Q
-    varname_upper_air = conf['data']['variables']
-    varname_surface = conf['data']['surface_variables']
-    varname_diagnostics = conf['data']['diagnostic_variables']
-    #N_levels = conf['data']['levels']
-    
-    # weights_UVTQ = torch.tensor([
-    #     conf["loss"]["variable_weights"]["U"],
-    #     conf["loss"]["variable_weights"]["V"],
-    #     conf["loss"]["variable_weights"]["T"],
-    #     conf["loss"]["variable_weights"]["Q"]
-    # ]).view(1, channels * frames, 1, 1)
+    varname_upper_air = conf["data"]["variables"]
+    varname_surface = conf["data"]["surface_variables"]
+    varname_diagnostics = conf["data"]["diagnostic_variables"]
 
-    weights_UVTQ = torch.tensor([
-        conf["loss"]["variable_weights"][var] for var in varname_upper_air
-    ]).view(1, channels * frames, 1, 1)
-    
-    # Load weights for SP, t2m, V500, U500, T500, Z500, Q500
-    # weights_sfc = torch.tensor([
-    #     conf["loss"]["variable_weights"]["SP"],
-    #     conf["loss"]["variable_weights"]["t2m"],
-    #     conf["loss"]["variable_weights"]["V500"],
-    #     conf["loss"]["variable_weights"]["U500"],
-    #     conf["loss"]["variable_weights"]["T500"],
-    #     conf["loss"]["variable_weights"]["Z500"],
-    #     conf["loss"]["variable_weights"]["Q500"]
-    # ]).view(1, surface_channels, 1, 1)
+    # surface + diag channels
+    N_channels_single = len(varname_surface) + len(varname_diagnostics)
 
-    weights_sfc = torch.tensor([
-        conf["loss"]["variable_weights"][var] for var in (varname_surface + varname_diagnostics)
-    ]).view(1, surface_channels, 1, 1)
-    
+    weights_upper_air = torch.tensor(
+        [conf["loss"]["variable_weights"][var] for var in varname_upper_air]
+    ).view(1, channels * frames, 1, 1)
+
+    weights_single = torch.tensor(
+        [
+            conf["loss"]["variable_weights"][var]
+            for var in (varname_surface + varname_diagnostics)
+        ]
+    ).view(1, N_channels_single, 1, 1)
+
     # Combine all weights along the color channel
-    variable_weights = torch.cat([weights_UVTQ, weights_sfc], dim=1)
+    var_weights = torch.cat([weights_upper_air, weights_single], dim=1)
 
-    return variable_weights
+    return var_weights
 
 
 class VariableTotalLoss2D(torch.nn.Module):
-    """Custom loss function class for 2D geospatial data 
+    """Custom loss function class for 2D geospatial data
     with optional spectral and power loss components.
 
-    This class defines a loss function that combines a base loss 
-    (e.g., L1, MSE) with optional spectral and power loss components 
-    for 2D geospatial data. The loss function can incorporate latitude 
+    This class defines a loss function that combines a base loss
+    (e.g., L1, MSE) with optional spectral and power loss components
+    for 2D geospatial data. The loss function can incorporate latitude
     and variable-specific weights.
 
     Args:
-        conf (dict): Configuration dictionary containing loss 
+        conf (dict): Configuration dictionary containing loss
             function settings and weights.
-        validation (bool, optional): If True, the loss function 
+        validation (bool, optional): If True, the loss function
             is used in validation mode. Defaults to False.
     """
-    def __init__(self, conf, validation=False):
 
+    def __init__(self, conf, validation=False):
         super(VariableTotalLoss2D, self).__init__()
 
         self.conf = conf
         self.training_loss = conf["loss"]["training_loss"]
-        
-        atmos_vars = conf['data']['variables']
-        surface_vars = conf['data']['surface_variables']
-        diag_vars = conf['data']['diagnostic_variables']
-        
-        levels = conf['model']['levels'] if 'levels' in conf['model'] else conf['model']['frames']
+
+        atmos_vars = conf["data"]["variables"]
+        surface_vars = conf["data"]["surface_variables"]
+        diag_vars = conf["data"]["diagnostic_variables"]
+
+        levels = (
+            conf["model"]["levels"]
+            if "levels" in conf["model"]
+            else conf["model"]["frames"]
+        )
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
@@ -468,37 +519,56 @@ class VariableTotalLoss2D(torch.nn.Module):
             logger.info("Using latitude weights in loss calculations")
             self.lat_weights = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
 
+        # ------------------------------------------------------------- #
+        # variable weights
+        # order: upper air --> surface --> diagnostics
         self.var_weights = None
         if conf["loss"]["use_variable_weights"]:
             logger.info("Using variable weights in loss calculations")
-            var_weights = [value if isinstance(value, list) else [value] for value in conf["loss"]["variable_weights"].values()]
-            var_weights = np.array([item for sublist in var_weights for item in sublist])
+
+            var_weights = [
+                value if isinstance(value, list) else [value]
+                for value in conf["loss"]["variable_weights"].values()
+            ]
+
+            var_weights = np.array(
+                [item for sublist in var_weights for item in sublist]
+            )
+
             self.var_weights = torch.from_numpy(var_weights)
+        # ------------------------------------------------------------- #
 
         self.use_spectral_loss = conf["loss"]["use_spectral_loss"]
         if self.use_spectral_loss:
             self.spectral_lambda_reg = conf["loss"]["spectral_lambda_reg"]
             self.spectral_loss_surface = SpectralLoss2D(
-                wavenum_init=conf["loss"]["spectral_wavenum_init"],
-                reduction='none'
+                wavenum_init=conf["loss"]["spectral_wavenum_init"], reduction="none"
             )
 
-        self.use_power_loss = conf["loss"]["use_power_loss"] if "use_power_loss" in conf["loss"] else False
+        self.use_power_loss = (
+            conf["loss"]["use_power_loss"]
+            if "use_power_loss" in conf["loss"]
+            else False
+        )
         if self.use_power_loss:
             self.power_lambda_reg = conf["loss"]["spectral_lambda_reg"]
-            self.power_loss = PSDLoss(wavenum_init=conf["loss"]["spectral_wavenum_init"])
+            self.power_loss = PSDLoss(
+                wavenum_init=conf["loss"]["spectral_wavenum_init"]
+            )
 
         self.validation = validation
-        if self.validation:
-            self.loss_fn = nn.L1Loss(reduction='none')
+        if conf["loss"]["training_loss"] == "KCRPS": # for ensembles, load same loss for train and valid
+            self.loss_fn = load_loss(self.training_loss, reduction="none")
+        elif self.validation:
+            self.loss_fn = nn.L1Loss(reduction="none")
         else:
-            self.loss_fn = load_loss(self.training_loss, reduction='none')
-
+            self.loss_fn = load_loss(self.training_loss, reduction="none")
+    
     def forward(self, target, pred):
         """Calculate the total loss for the given target and prediction.
 
-        This method computes the base loss between the target and prediction, 
-        applies latitude and variable weights, and optionally adds spectral 
+        This method computes the base loss between the target and prediction,
+        applies latitude and variable weights, and optionally adds spectral
         and power loss components.
 
         Args:
@@ -528,9 +598,16 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         # Add the spectral loss
         if not self.validation and self.use_power_loss:
-            loss += self.power_lambda_reg * self.power_loss(target, pred, weights=self.lat_weights)
+            loss += self.power_lambda_reg * self.power_loss(
+                target, pred, weights=self.lat_weights
+            )
 
         if not self.validation and self.use_spectral_loss:
-            loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=self.lat_weights).mean()
+            loss += (
+                self.spectral_lambda_reg
+                * self.spectral_loss_surface(
+                    target, pred, weights=self.lat_weights
+                ).mean()
+            )
 
         return loss

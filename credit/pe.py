@@ -11,7 +11,7 @@ class ChannelAttention(nn.Module):
         self.fc = nn.Sequential(
             nn.Conv2d(channel, channel // reduction, 1, bias=False),
             nn.ReLU(inplace=True),
-            nn.Conv2d(channel // reduction, channel, 1, bias=False)
+            nn.Conv2d(channel // reduction, channel, 1, bias=False),
         )
         self.sigmoid = nn.Sigmoid()
 
@@ -25,7 +25,7 @@ class ChannelAttention(nn.Module):
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
         super(SpatialAttention, self).__init__()
-        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False)
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2, bias=False)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -49,17 +49,26 @@ class CBAM(nn.Module):
 
 
 class SurfacePosEmb2D(nn.Module):
-    def __init__(self, image_height, image_width, patch_height, patch_width, dim, temperature=10000, cls_token=False):
+    def __init__(
+        self,
+        image_height,
+        image_width,
+        patch_height,
+        patch_width,
+        dim,
+        temperature=10000,
+        cls_token=False,
+    ):
         super(SurfacePosEmb2D, self).__init__()
         y, x = torch.meshgrid(
             torch.arange(image_height // patch_height),
             torch.arange(image_width // patch_width),
-            indexing="ij"
+            indexing="ij",
         )
 
         assert (dim % 4) == 0, "feature dimension must be multiple of 4 for sincos emb"
         omega = torch.arange(dim // 4) / (dim // 4 - 1)
-        omega = 1.0 / (temperature ** omega)
+        omega = 1.0 / (temperature**omega)
 
         y = y.flatten()[:, None] * omega[None, :]
         x = x.flatten()[:, None] * omega[None, :]
@@ -77,25 +86,37 @@ class SurfacePosEmb2D(nn.Module):
 
 
 class PosEmb3D(nn.Module):
-    def __init__(self, frames, image_height, image_width, frame_patch_size, patch_height, patch_width, dim, temperature=10000):
+    def __init__(
+        self,
+        frames,
+        image_height,
+        image_width,
+        frame_patch_size,
+        patch_height,
+        patch_width,
+        dim,
+        temperature=10000,
+    ):
         super(PosEmb3D, self).__init__()
         z, y, x = torch.meshgrid(
             torch.arange(frames // frame_patch_size),
             torch.arange(image_height // patch_height),
             torch.arange(image_width // patch_width),
-            indexing='ij'
+            indexing="ij",
         )
 
         fourier_dim = dim // 6
         omega = torch.arange(fourier_dim) / (fourier_dim - 1)
-        omega = 1. / (temperature ** omega)
+        omega = 1.0 / (temperature**omega)
 
         z = z.flatten()[:, None] * omega[None, :]
         y = y.flatten()[:, None] * omega[None, :]
         x = x.flatten()[:, None] * omega[None, :]
 
         pe = torch.cat((x.sin(), x.cos(), y.sin(), y.cos(), z.sin(), z.cos()), dim=1)
-        pe = F.pad(pe, (0, dim - (fourier_dim * 6)))  # pad if feature dimension not cleanly divisible by 6
+        pe = F.pad(
+            pe, (0, dim - (fourier_dim * 6))
+        )  # pad if feature dimension not cleanly divisible by 6
         self.embedding = pe
 
     def forward(self, x):
@@ -108,14 +129,23 @@ class CubeEmbedding(nn.Module):
         img_size: T, Lat, Lon
         patch_size: T, Lat, Lon
     """
-    def __init__(self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm):
+
+    def __init__(
+        self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm
+    ):
         super().__init__()
-        patches_resolution = [img_size[0] // patch_size[0], img_size[1] // patch_size[1], img_size[2] // patch_size[2]]
+        patches_resolution = [
+            img_size[0] // patch_size[0],
+            img_size[1] // patch_size[1],
+            img_size[2] // patch_size[2],
+        ]
 
         self.img_size = img_size
         self.patches_resolution = patches_resolution
         self.embed_dim = embed_dim
-        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv3d(
+            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
+        )
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
         else:

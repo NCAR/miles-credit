@@ -207,10 +207,13 @@ class KE_Diagnostic:
             for ax in self.KE_axs:  # overwrite every time in case of crash
                 ax.legend()
             self.KE_fig.savefig(join(self.plot_save_loc, f"ke_spectra_summary{fh}"))
-            logger.info(f"saved summary plot to {join(self.plot_save_loc, 'ke_spectra_summary')}")
+            logger.info(
+                f"saved summary plot to {join(self.plot_save_loc, 'ke_spectra_summary')}"
+            )
 
-    def plot_avg_spectrum(self, avg_pred_spectrum, avg_y_spectrum,
-                          fig, axs, alpha=1, label=None):
+    def plot_avg_spectrum(
+        self, avg_pred_spectrum, avg_y_spectrum, fig, axs, alpha=1, label=None
+    ):
         # copied from spectrum diagnostic function
         for ax in axs:
             ax.set_yscale("log")
@@ -375,20 +378,20 @@ def interpolate_spectral_frequencies(
     method: str = "linear",
     **interp_kwargs: t.Optional[dict[str, t.Any]],
 ) -> xr.DataArray:
-    """Interpolate frequencies in `spectrum` to common values.
+    """
+    Interpolate frequencies in `spectrum` to common values.
 
     Args:
-    spectrum: Data as produced by ZonalEnergySpectrum.compute.
-    wavenumber_dim: Dimension that indexes wavenumber, e.g. 'zonal_wavenumber'
-      if `spectrum` is produced by ZonalEnergySpectrum.
-    frequencies: Optional 1-D sequence of frequencies to interpolate to. By
-      default, use the most narrow range of frequencies in `spectrum`.
-    method: Interpolation method passed on to DataArray.interp.
-    **interp_kwargs: Additional kwargs passed on to DataArray.interp.
+        spectrum: Data as produced by ZonalEnergySpectrum.compute.
+        wavenumber_dim: Dimension that indexes wavenumber, e.g. 'zonal_wavenumber'
+            if `spectrum` is produced by ZonalEnergySpectrum.
+        frequencies: Optional 1-D sequence of frequencies to interpolate to. By
+          default, use the most narrow range of frequencies in `spectrum`.
+        method: Interpolation method passed on to DataArray.interp.
+        interp_kwargs: Additional kwargs passed on to DataArray.interp.
 
     Returns:
-    New DataArray with dimension "frequency" replacing the "wavenumber" dim in
-      `spectrum`.
+        New DataArray with dimension "frequency" replacing the "wavenumber" dim in `spectrum`.
     """
 
     if set(spectrum.frequency.dims) != set((wavenumber_dim, "latitude")):
@@ -408,7 +411,9 @@ def interpolate_spectral_frequencies(
         raise ValueError(f"Expected 1-D frequencies, found {frequencies.shape=}")
 
     def interp_at_one_lat(da: xr.DataArray) -> xr.DataArray:
-        if len(da.latitude.values.shape) > 0:  # latitude weirdly not squeezed out by groupby sometimes
+        if (
+            len(da.latitude.values.shape) > 0
+        ):  # latitude weirdly not squeezed out by groupby sometimes
             da = da.squeeze("latitude")
         da = (
             da.swap_dims({wavenumber_dim: "frequency"})

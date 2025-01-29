@@ -18,13 +18,14 @@ def launch_script(config_file, script_path, launch=True):
     """
 
     # Load the configuration file
-    with open(config_file, 'r') as file:
+    with open(config_file, "r") as file:
         config = yaml.safe_load(file)
 
     # Extract PBS options from the config
-    pbs_options = config['pbs']
+    pbs_options = config["pbs"]
 
-    config_save_path = os.path.expandvars(os.path.join(config["save_loc"], "model.yml"))
+    save_loc = os.path.expandvars(config["save_loc"])
+    config_save_path = os.path.join(save_loc, "model.yml")
 
     # Generate the PBS script
     script = f"""#!/bin/bash -l
@@ -44,10 +45,10 @@ def launch_script(config_file, script_path, launch=True):
     python {script_path} -c {config_save_path}
     """
 
-    script = re.sub(r'^\s+', '', script, flags=re.MULTILINE)
+    script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)
 
     # Save the script to a file
-    with open('launch.sh', 'w') as script_file:
+    with open("launch.sh", "w") as script_file:
         script_file.write(script)
 
     if launch:
@@ -61,11 +62,11 @@ def launch_script(config_file, script_path, launch=True):
         logger.info(jobid)
         save_loc = os.path.expandvars(config["save_loc"])
         if not os.path.exists(os.path.join(save_loc, "launch.sh")):
-            shutil.copy('launch.sh', os.path.join(save_loc, "launch.sh"))
+            shutil.copy("launch.sh", os.path.join(save_loc, "launch.sh"))
         os.remove("launch.sh")
 
 
-def launch_script_mpi(config_file, script_path, launch=True, backend='nccl'):
+def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     """Generates and optionally launches a PBS script for a multi-node MPI job.
 
     Args:
@@ -79,11 +80,11 @@ def launch_script_mpi(config_file, script_path, launch=True, backend='nccl'):
         config = yaml.load(cf, Loader=yaml.FullLoader)
 
     # Extract PBS options from the config
-    pbs_options = config.get('pbs', {})
+    pbs_options = config.get("pbs", {})
 
-    user = os.environ.get('USER')
-    num_nodes = pbs_options.get('nodes', 1)
-    num_gpus = pbs_options.get('ngpus', 1)
+    user = os.environ.get("USER")
+    num_nodes = pbs_options.get("nodes", 1)
+    num_gpus = pbs_options.get("ngpus", 1)
     total_gpus = num_nodes * num_gpus
     total_ranks = total_gpus
 
@@ -98,18 +99,20 @@ def launch_script_mpi(config_file, script_path, launch=True, backend='nccl'):
     destination_path = config_save_path
 
     # Only delete the original if the source and destination paths are different
-    if os.path.exists(destination_path) and os.path.abspath(source_path) != os.path.abspath(destination_path):
+    if os.path.exists(destination_path) and os.path.realpath(
+        source_path
+    ) != os.path.realpath(destination_path):
         os.remove(destination_path)
-        logger.info(f'Removed the old model.yml at {destination_path}')
+        logger.info(f"Removed the old model.yml at {destination_path}")
 
     try:
         shutil.copy(source_path, destination_path)
-        logger.info(f'Copied the new {source_path} to {destination_path}')
+        logger.info(f"Copied the new {source_path} to {destination_path}")
     except shutil.SameFileError:
         pass
 
     # Generate the PBS script
-    script = f'''#!/bin/bash
+    script = f"""#!/bin/bash
     #PBS -A {pbs_options.get('project', 'default_project')}
     #PBS -N {pbs_options.get('job_name', 'default_job')}
     #PBS -l walltime={pbs_options.get('walltime', '00:10:00')}
@@ -165,12 +168,12 @@ def launch_script_mpi(config_file, script_path, launch=True, backend='nccl'):
     head_node_ip=$(ssh $head_node hostname -i | awk '{{print $1}}')
 
     MASTER_ADDR=$head_node_ip MASTER_PORT=1234 mpiexec -n {total_ranks} --ppn 4 --cpu-bind none python {script_path} -c {config_save_path} --backend {backend}
-    '''
+    """
 
-    script = re.sub(r'^\s+', '', script, flags=re.MULTILINE)
+    script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)
 
     # Save the script to a file
-    with open('launch.sh', 'w') as script_file:
+    with open("launch.sh", "w") as script_file:
         script_file.write(script)
 
     if launch:
@@ -189,13 +192,15 @@ def launch_script_mpi(config_file, script_path, launch=True, backend='nccl'):
         destination_path = os.path.join(save_loc, "launch.sh")
 
         # Only delete the original if the source and destination paths are different
-        if os.path.exists(destination_path) and os.path.abspath(source_path) != os.path.abspath(destination_path):
+        if os.path.exists(destination_path) and os.path.realpath(
+            source_path
+        ) != os.path.realpath(destination_path):
             os.remove(destination_path)
-            logger.info(f'Removed the old launch.sh at {destination_path}')
+            logger.info(f"Removed the old launch.sh at {destination_path}")
 
         try:
             shutil.copy(source_path, destination_path)
-            logger.info(f'Generated the new script at {destination_path}')
+            logger.info(f"Generated the new script at {destination_path}")
         except shutil.SameFileError:
             pass
 

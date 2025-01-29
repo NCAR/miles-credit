@@ -1,8 +1,5 @@
 name: credit
 channels:
-  - pytorch
-  - nvidia
-  - pyg
   - conda-forge
 
 dependencies:
@@ -19,6 +16,8 @@ dependencies:
   - pytest
   - ruff
   - wandb
+  - pre_commit
+  - myst-parser
 
 ## Earth sciences and visualization
   - xarray
@@ -50,5 +49,6 @@ dependencies:
     - torch_geometric
     - haversine
     - torchsummary
+    - sphinx-autoapi
     - .
 

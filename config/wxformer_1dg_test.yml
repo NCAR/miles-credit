@@ -1,8 +1,5 @@
 # --------------------------------------------------------------------------------------------------------------------- #
-# This yaml file implements hourly state-in-state-out crossformer
-# on NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu) 
-# The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
-# Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
+# This config is used for the unit testing of credit.model.Crossformer
 # --------------------------------------------------------------------------------------------------------------------- #
 save_loc: '/glade/work/$USER/CREDIT_runs/wxformer_1h_physics_test/'
 seed: 1000
@@ -125,9 +122,15 @@ model:
     attn_dropout: 0.                  # Dropout probability for attention layers (default: 0.0)
     ff_dropout: 0.                    # Dropout probability for feed-forward layers (default: 0.0)
     
+    # use interpolation to match the output size
+    interp: True
+    
     # map boundary padding
-    pad_lon: 48             # number of grids to pad on 0 and 360 deg lon
-    pad_lat: 48             # number of grids to pad on -90 and 90 deg lat
+    padding_conf:
+        activate: True
+        mode: earth
+        pad_lat: 48
+        pad_lon: 48
     
 loss: 
     # the main training loss
@@ -156,7 +159,7 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
         
-    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/wxformer_1h/'
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT/wxformer_1h/'
     save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
     
     # turn-off low-pass filter

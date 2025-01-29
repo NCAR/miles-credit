@@ -19,8 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class FeedForward(nn.Module):
-
-    def __init__(self, dim, hidden_dim, dropout=0.):
+    def __init__(self, dim, hidden_dim, dropout=0.0):
         super().__init__()
         self.net = nn.Sequential(
             nn.LayerNorm(dim),
@@ -28,7 +27,7 @@ class FeedForward(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, dim),
-            nn.Dropout(dropout)
+            nn.Dropout(dropout),
         )
 
     def forward(self, x):
@@ -36,13 +35,13 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0., rotary_emb=None):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0.0, rotary_emb=None):
         super().__init__()
         inner_dim = dim_head * heads
         project_out = not (heads == 1 and dim_head == dim)
 
         self.heads = heads
-        self.scale = dim_head ** -0.5
+        self.scale = dim_head**-0.5
         self.rotary_emb = rotary_emb
 
         self.norm = nn.LayerNorm(dim)
@@ -51,10 +50,11 @@ class Attention(nn.Module):
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
 
-        self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, dim),
-            nn.Dropout(dropout)
-        ) if project_out else nn.Identity()
+        self.to_out = (
+            nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
+            if project_out
+            else nn.Identity()
+        )
 
         self.dr = dropout
 
@@ -64,7 +64,7 @@ class Attention(nn.Module):
     def forward(self, x):
         x = self.norm(x)
         qkv = self.to_qkv(x).chunk(3, dim=-1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
+        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.heads), qkv)
 
         if self.rotary_emb is not None:
             q = self.rotary_emb.rotate_queries_or_keys(q)
@@ -78,30 +78,40 @@ class Attention(nn.Module):
         # out = torch.matmul(attn, v)
 
         with torch.backends.cuda.sdp_kernel(
-                enable_flash=True,
-                enable_math=False,
-                enable_mem_efficient=True  # should be false but bug somewhere on my end
+            enable_flash=True,
+            enable_math=False,
+            enable_mem_efficient=True,  # should be false but bug somewhere on my end
         ):
             out = F.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask=None,
-                dropout_p=self.dr
+                q, k, v, attn_mask=None, dropout_p=self.dr
             )
 
-        out = rearrange(out, 'b h n d -> b n (h d)')
+        out = rearrange(out, "b h n d -> b n (h d)")
         return self.to_out(out)
 
 
 class LRTransformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.0, rotary_emb=True):
+    def __init__(
+        self, dim, depth, heads, dim_head, mlp_dim, dropout=0.0, rotary_emb=True
+    ):
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = nn.ModuleList([])
         for _ in range(depth):
-            self.layers.append(nn.ModuleList([
-                Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout, rotary_emb=rotary_emb),
-                FeedForward(dim, mlp_dim, dropout=dropout)
-            ]))
+            self.layers.append(
+                nn.ModuleList(
+                    [
+                        Attention(
+                            dim,
+                            heads=heads,
+                            dim_head=dim_head,
+                            dropout=dropout,
+                            rotary_emb=rotary_emb,
+                        ),
+                        FeedForward(dim, mlp_dim, dropout=dropout),
+                    ]
+                )
+            )
 
     def forward(self, x):
         for attn, ff in self.layers:
@@ -111,15 +121,11 @@ class LRTransformer(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, dim, heads, dim_head, mlp_dim, dropout=0.):
+    def __init__(self, dim, heads, dim_head, mlp_dim, dropout=0.0):
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.encoder = nn.TransformerEncoderLayer(
-            dim,
-            heads,
-            mlp_dim,
-            dropout,
-            batch_first=True
+            dim, heads, mlp_dim, dropout, batch_first=True
         )
 
     def forward(self, x):
@@ -127,10 +133,14 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0., rotary_emb=True):
+    def __init__(
+        self, dim, depth, heads, dim_head, mlp_dim, dropout=0.0, rotary_emb=True
+    ):
         super().__init__()
         if rotary_emb:
-            logger.warning("You specified to use rotary embedding but this transformer class does not use it. Only lucidrains transformers are supported")
+            logger.warning(
+                "You specified to use rotary embedding but this transformer class does not use it. Only lucidrains transformers are supported"
+            )
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(TransformerBlock(dim, heads, dim_head, mlp_dim, dropout))
@@ -183,7 +193,9 @@ class PatchDropout(torch.nn.Module):
         if self.sampling == "uniform":
             return self.uniform_mask(x)
         else:
-            return NotImplementedError(f"PatchDropout does ot support {self.sampling} sampling")
+            return NotImplementedError(
+                f"PatchDropout does ot support {self.sampling} sampling"
+            )
 
     def uniform_mask(self, x):
         """
@@ -203,40 +215,39 @@ class PatchDropout(torch.nn.Module):
 
 class ViT3D(BaseModel):
     def __init__(
-            self,
-            image_height,
-            patch_height,
-            image_width,
-            patch_width,
-            frames,
-            frame_patch_size,
-            levels=15,
-            dim=32,
-            channels=60,
-            surface_channels=7,
-            depth=4,
-            heads=8,
-            dim_head=32,
-            mlp_dim=32,
-            dropout=0.0,
-            use_decoder_conv_layers=False,
-            use_rotary=True,
-            use_cls_tokens=False,
-            use_registers=False,
-            num_register_tokens=0,
-            token_dropout=0.0,
-            use_codebook=False,
-            vq_codebook_dim=32,
-            vq_codebook_size=128,
-            vq_decay=0.1,
-            vq_commitment_weight=1.0,
-            vq_kmeans_init=True,
-            vq_use_cosine_sim=True,
-            rk4_integration=False,
-            transformer_type="lucidrains",
-            static_variables=None
+        self,
+        image_height,
+        patch_height,
+        image_width,
+        patch_width,
+        frames,
+        frame_patch_size,
+        levels=15,
+        dim=32,
+        channels=60,
+        surface_channels=7,
+        depth=4,
+        heads=8,
+        dim_head=32,
+        mlp_dim=32,
+        dropout=0.0,
+        use_decoder_conv_layers=False,
+        use_rotary=True,
+        use_cls_tokens=False,
+        use_registers=False,
+        num_register_tokens=0,
+        token_dropout=0.0,
+        use_codebook=False,
+        vq_codebook_dim=32,
+        vq_codebook_size=128,
+        vq_decay=0.1,
+        vq_commitment_weight=1.0,
+        vq_kmeans_init=True,
+        vq_use_cosine_sim=True,
+        rk4_integration=False,
+        transformer_type="lucidrains",
+        static_variables=None,
     ):
-
         super().__init__()
 
         self.channels = channels
@@ -255,7 +266,9 @@ class ViT3D(BaseModel):
         elif transformer_type == "lucidrains":
             transformer = LRTransformer
         else:
-            raise ValueError(f"Transformer type {transformer_type} is not supposed. Choose from pytorch or lucidrains")
+            raise ValueError(
+                f"Transformer type {transformer_type} is not supposed. Choose from pytorch or lucidrains"
+            )
 
         self.transformer_encoder = transformer(
             dim=dim,
@@ -264,7 +277,7 @@ class ViT3D(BaseModel):
             heads=heads,
             mlp_dim=mlp_dim,
             dropout=dropout,
-            rotary_emb=use_rotary
+            rotary_emb=use_rotary,
         )
         self.transformer_decoder = transformer(
             dim=dim,
@@ -273,26 +286,32 @@ class ViT3D(BaseModel):
             heads=heads,
             mlp_dim=mlp_dim,
             dropout=dropout,
-            rotary_emb=use_rotary
+            rotary_emb=use_rotary,
         )
 
         # Input/output dimensions
-        self.num_patches = (image_height // patch_height) * (image_width // patch_width) * (frames // frame_patch_size)
+        self.num_patches = (
+            (image_height // patch_height)
+            * (image_width // patch_width)
+            * (frames // frame_patch_size)
+        )
         input_channels = channels * levels + surface_channels
         input_dim = input_channels * patch_height * patch_width
 
         # Encoder layers
         self.encoder_embed = Rearrange(
-            'b c (f pf) (h p1) (w p2) -> b (f h w) (p1 p2 pf c)',
+            "b c (f pf) (h p1) (w p2) -> b (f h w) (p1 p2 pf c)",
             p1=patch_height,
             p2=patch_width,
-            pf=frame_patch_size
+            pf=frame_patch_size,
         )
 
         if self.static_variables is not None:
             self.encoder_linear = nn.Linear(
-                (len(self.static_variables) + input_channels) * patch_height * patch_width,
-                dim
+                (len(self.static_variables) + input_channels)
+                * patch_height
+                * patch_width,
+                dim,
             )
         else:
             self.encoder_linear = nn.Linear(input_dim, dim)
@@ -303,17 +322,31 @@ class ViT3D(BaseModel):
         self.decoder_linear_2 = nn.Linear(dim * 4, input_dim)
         self.decoder_layer_norm_1 = nn.LayerNorm(4 * dim)
         self.decoder_layer_norm_2 = nn.LayerNorm(input_dim)
-        self.decoder_rearrange = Rearrange('b (h w) (p1 p2 c) -> b c (p1 h) (w p2)',
-                                           h=(image_height // patch_height),
-                                           p1=patch_height,
-                                           p2=patch_width)
+        self.decoder_rearrange = Rearrange(
+            "b (h w) (p1 p2 c) -> b c (p1 h) (w p2)",
+            h=(image_height // patch_height),
+            p1=patch_height,
+            p2=patch_width,
+        )
 
         # Positional embeddings
         self.pos_embedding_enc = PosEmb3D(
-            frames, image_height, image_width, frame_patch_size, patch_height, patch_width, dim
+            frames,
+            image_height,
+            image_width,
+            frame_patch_size,
+            patch_height,
+            patch_width,
+            dim,
         )
         self.pos_embedding_dec = PosEmb3D(
-            frames, image_height, image_width, frame_patch_size, patch_height, patch_width, dim
+            frames,
+            image_height,
+            image_width,
+            frame_patch_size,
+            patch_height,
+            patch_width,
+            dim,
         )
 
         # Conv smoothing layer for decoder
@@ -322,7 +355,7 @@ class ViT3D(BaseModel):
                 in_channels=input_channels,
                 out_channels=input_channels,
                 kernel_size=3,
-                padding=1
+                padding=1,
             )
 
         # CLS paramters
@@ -332,13 +365,19 @@ class ViT3D(BaseModel):
 
         # Token / patch drop
         self.token_dropout_prob = token_dropout
-        self.token_dropout = PatchDropout(1. - token_dropout) if token_dropout > 0.0 else nn.Identity()
+        self.token_dropout = (
+            PatchDropout(1.0 - token_dropout) if token_dropout > 0.0 else nn.Identity()
+        )
 
         # Vision Transformers Need Registers, https://arxiv.org/abs/2309.16588
         self.use_registers = use_registers
         if self.use_registers:
-            self.register_tokens_enc = nn.Parameter(torch.randn(num_register_tokens, dim))
-            self.register_tokens_dec = nn.Parameter(torch.randn(num_register_tokens, dim))
+            self.register_tokens_enc = nn.Parameter(
+                torch.randn(num_register_tokens, dim)
+            )
+            self.register_tokens_dec = nn.Parameter(
+                torch.randn(num_register_tokens, dim)
+            )
 
         # codebook
         self.use_codebook = use_codebook
@@ -349,18 +388,24 @@ class ViT3D(BaseModel):
                 decay=vq_decay,  # the exponential moving average decay, lower means the dictionary will change faster
                 commitment_weight=vq_commitment_weight,  # the weight on the commitment loss
                 kmeans_init=vq_kmeans_init,
-                use_cosine_sim=vq_use_cosine_sim
+                use_cosine_sim=vq_use_cosine_sim,
             )
 
         if self.static_variables is not None:
-            self.static_vars = torch.from_numpy(
-                xr.open_dataset(self.static_variables["cos_lat"])["coslat"].values
-            ).float().unsqueeze(0).unsqueeze(0)
+            self.static_vars = (
+                torch.from_numpy(
+                    xr.open_dataset(self.static_variables["cos_lat"])["coslat"].values
+                )
+                .float()
+                .unsqueeze(0)
+                .unsqueeze(0)
+            )
 
-        logger.info(f"... loaded a {transformer_type} ViT. Rotary embedding: {use_rotary}")
+        logger.info(
+            f"... loaded a {transformer_type} ViT. Rotary embedding: {use_rotary}"
+        )
 
     def encode(self, x):
-
         # encode
         x = self.encoder_embed(x)
         x = self.encoder_linear(x)
@@ -380,13 +425,13 @@ class ViT3D(BaseModel):
             pred_mask = None
 
         if self.use_registers:
-            r = repeat(self.register_tokens_enc, 'n d -> b n d', b=x.shape[0])
-            x, ps = pack([x, r], 'b * d')
+            r = repeat(self.register_tokens_enc, "n d -> b n d", b=x.shape[0])
+            x, ps = pack([x, r], "b * d")
 
         x = self.transformer_encoder(x)
 
         if self.use_registers:
-            x, _ = unpack(x, ps, 'b * d')
+            x, _ = unpack(x, ps, "b * d")
 
         # excise CLS tokens
         if self.use_cls_tokens:
@@ -396,10 +441,15 @@ class ViT3D(BaseModel):
         return x, pred_mask
 
     def decode(self, x, patch_mask=None):
-
         if patch_mask is not None:
             # create a tensor of zeros with the original shape
-            x_zeros = torch.zeros(x.shape[0], self.num_patches + 1, x.shape[-1], dtype=x.dtype, device=x.device)
+            x_zeros = torch.zeros(
+                x.shape[0],
+                self.num_patches + 1,
+                x.shape[-1],
+                dtype=x.dtype,
+                device=x.device,
+            )
             # scatter the original patches back into the tensor of zeros
             x_zeros.scatter_(1, patch_mask.unsqueeze(-1).repeat(1, 1, x.shape[-1]), x)
             # replace x with the new tensor that has zero tokens inserted
@@ -414,11 +464,11 @@ class ViT3D(BaseModel):
         x = self.pos_embedding_dec(x)
 
         if self.use_registers:
-            r = repeat(self.register_tokens_dec, 'n d -> b n d', b=x.shape[0])
-            x, ps = pack([x, r], 'b * d')
+            r = repeat(self.register_tokens_dec, "n d -> b n d", b=x.shape[0])
+            x, ps = pack([x, r], "b * d")
         x = self.transformer_decoder(x)
         if self.use_registers:
-            x, _ = unpack(x, ps, 'b * d')
+            x, _ = unpack(x, ps, "b * d")
 
         x = self.decoder_linear_1(x)
         # x = F.tanh(x)
@@ -448,10 +498,11 @@ class ViT3D(BaseModel):
         return None
 
     def forward(self, x):
-
         # add grid here to the inputs
         if self.static_variables is not None:
-            static_vars = self.static_vars.expand(x.size(0), 1, self.frames, x.size(3), x.size(4))
+            static_vars = self.static_vars.expand(
+                x.size(0), 1, self.frames, x.size(3), x.size(4)
+            )
             x = torch.cat([x, static_vars.to(x.device)], dim=1)
 
         if self.rk4_integration:
@@ -513,7 +564,9 @@ if __name__ == "__main__":
     heads = 4
     depth = 2
 
-    input_tensor = torch.randn(2, channels * levels + surface_channels, frames, image_height, image_width).to("cuda")
+    input_tensor = torch.randn(
+        2, channels * levels + surface_channels, frames, image_height, image_width
+    ).to("cuda")
 
     model = ViT3D(
         image_height,
@@ -535,8 +588,8 @@ if __name__ == "__main__":
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
     import torch.distributed as dist
 
-    os.environ['MASTER_ADDR'] = '127.0.0.1'
-    os.environ['MASTER_PORT'] = '29500'
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = "29500"
     dist.init_process_group("nccl", rank=0, world_size=1)
 
     wrapped_model = FSDP(model, use_orig_params=True)

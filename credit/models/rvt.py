@@ -23,8 +23,16 @@ class DepthWiseConv2d(nn.Module):
     def __init__(self, dim_in, dim_out, kernel_size, padding, stride=1, bias=True):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(dim_in, dim_in, kernel_size=kernel_size, padding=padding, groups=dim_in, stride=stride, bias=bias),
-            nn.Conv2d(dim_in, dim_out, kernel_size=1, bias=bias)
+            nn.Conv2d(
+                dim_in,
+                dim_in,
+                kernel_size=kernel_size,
+                padding=padding,
+                groups=dim_in,
+                stride=stride,
+                bias=bias,
+            ),
+            nn.Conv2d(dim_in, dim_out, kernel_size=1, bias=bias),
         )
 
     def forward(self, x):
@@ -37,14 +45,18 @@ class DepthWiseConv2d(nn.Module):
 class SpatialConv(nn.Module):
     def __init__(self, dim_in, dim_out, kernel, bias=False):
         super().__init__()
-        self.conv = DepthWiseConv2d(dim_in, dim_out, kernel, padding=kernel // 2, bias=False)  # lucid rains padding
-        self.cls_proj = nn.Linear(dim_in, dim_out) if dim_in != dim_out else nn.Identity()
+        self.conv = DepthWiseConv2d(
+            dim_in, dim_out, kernel, padding=kernel // 2, bias=False
+        )  # lucid rains padding
+        self.cls_proj = (
+            nn.Linear(dim_in, dim_out) if dim_in != dim_out else nn.Identity()
+        )
 
     def forward(self, x, fmap_dims):
         cls_token, x = x[:, :1], x[:, 1:]
-        x = rearrange(x, 'b (h w) d -> b d h w', **fmap_dims)
+        x = rearrange(x, "b (h w) d -> b d h w", **fmap_dims)
         x = self.conv(x)
-        x = rearrange(x, 'b d h w -> b (h w) d')
+        x = rearrange(x, "b d h w -> b (h w) d")
         cls_token = self.cls_proj(cls_token)
         return torch.cat((cls_token, x), dim=1)
 
@@ -56,7 +68,7 @@ class GEGLU(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, hidden_dim, dropout=0., use_glu=True):
+    def __init__(self, dim, hidden_dim, dropout=0.0, use_glu=True):
         super().__init__()
         self.net = nn.Sequential(
             nn.LayerNorm(dim),
@@ -64,7 +76,7 @@ class FeedForward(nn.Module):
             GEGLU() if use_glu else nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, dim),
-            nn.Dropout(dropout)
+            nn.Dropout(dropout),
         )
 
     def forward(self, x):
@@ -72,12 +84,21 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0., use_rotary=True, use_ds_conv=True, conv_query_kernel=5):
+    def __init__(
+        self,
+        dim,
+        heads=8,
+        dim_head=64,
+        dropout=0.0,
+        use_rotary=True,
+        use_ds_conv=True,
+        conv_query_kernel=5,
+    ):
         super().__init__()
         inner_dim = dim_head * heads
         self.use_rotary = use_rotary
         self.heads = heads
-        self.scale = dim_head ** -0.5
+        self.scale = dim_head**-0.5
 
         self.norm = nn.LayerNorm(dim)
         self.attend = nn.Softmax(dim=-1)
@@ -85,21 +106,22 @@ class Attention(nn.Module):
 
         self.use_ds_conv = use_ds_conv
 
-        self.to_q = SpatialConv(dim, inner_dim, conv_query_kernel, bias=False) if use_ds_conv else nn.Linear(dim, inner_dim, bias=False)
+        self.to_q = (
+            SpatialConv(dim, inner_dim, conv_query_kernel, bias=False)
+            if use_ds_conv
+            else nn.Linear(dim, inner_dim, bias=False)
+        )
 
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
 
-        self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, dim),
-            nn.Dropout(dropout)
-        )
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
 
         self.pos_emb = RotaryEmbedding(dim=dim_head, freqs_for="pixel", max_freq=1280)
 
     def forward(self, x, fmap_dims):
         _, _, _, h = *x.shape, self.heads
 
-        to_q_kwargs = {'fmap_dims': fmap_dims} if self.use_ds_conv else {}
+        to_q_kwargs = {"fmap_dims": fmap_dims} if self.use_ds_conv else {}
 
         x = self.norm(x)
 
@@ -107,30 +129,53 @@ class Attention(nn.Module):
 
         qkv = (q, *self.to_kv(x).chunk(2, dim=-1))
 
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), qkv)
+        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> (b h) n d", h=h), qkv)
 
         q = self.pos_emb.rotate_queries_or_keys(q)
         k = self.pos_emb.rotate_queries_or_keys(k)
 
-        dots = einsum('b i d, b j d -> b i j', q, k) * self.scale
+        dots = einsum("b i d, b j d -> b i j", q, k) * self.scale
 
         attn = self.attend(dots)
         attn = self.dropout(attn)
 
-        out = einsum('b i j, b j d -> b i d', attn, v)
-        out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
+        out = einsum("b i j, b j d -> b i d", attn, v)
+        out = rearrange(out, "(b h) n d -> b n (h d)", h=h)
         return self.to_out(out)
 
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, image_size, dropout=0., use_rotary=True, use_ds_conv=True, use_glu=True):
+    def __init__(
+        self,
+        dim,
+        depth,
+        heads,
+        dim_head,
+        mlp_dim,
+        image_size,
+        dropout=0.0,
+        use_rotary=True,
+        use_ds_conv=True,
+        use_glu=True,
+    ):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
-            self.layers.append(nn.ModuleList([
-                Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout, use_rotary=use_rotary, use_ds_conv=use_ds_conv),
-                FeedForward(dim, mlp_dim, dropout=dropout, use_glu=use_glu)
-            ]))
+            self.layers.append(
+                nn.ModuleList(
+                    [
+                        Attention(
+                            dim,
+                            heads=heads,
+                            dim_head=dim_head,
+                            dropout=dropout,
+                            use_rotary=use_rotary,
+                            use_ds_conv=use_ds_conv,
+                        ),
+                        FeedForward(dim, mlp_dim, dropout=dropout, use_glu=use_glu),
+                    ]
+                )
+            )
 
     def forward(self, x, fmap_dims):
         for attn, ff in self.layers:
@@ -181,7 +226,9 @@ class PatchDropout(torch.nn.Module):
         if self.sampling == "uniform":
             return self.uniform_mask(x)
         else:
-            return NotImplementedError(f"PatchDropout does ot support {self.sampling} sampling")
+            return NotImplementedError(
+                f"PatchDropout does ot support {self.sampling} sampling"
+            )
 
     def uniform_mask(self, x):
         """
@@ -201,46 +248,46 @@ class PatchDropout(torch.nn.Module):
 
 # Rotary Vision Transformer
 
+
 class RViT(BaseModel):
     def __init__(
-            self,
-            image_height,
-            patch_height,
-            image_width,
-            patch_width,
-            frames,
-            frame_patch_size,
-            dim=32,
-            channels=60,
-            surface_channels=7,
-            depth=4,
-            heads=8,
-            dim_head=32,
-            mlp_dim=32,
-            dropout=0.0,
-            emb_dropout=0.,
-            use_rotary=True,
-            use_ds_conv=True,
-            use_glu=True,
-            use_decoder_conv_layers=False,
-            use_cls_tokens=False,
-            use_registers=False,
-            num_register_tokens=0,
-            token_dropout=0.0,
-            use_codebook=False,
-            vq_codebook_dim=32,
-            vq_codebook_size=128,
-            vq_decay=0.1,
-            vq_commitment_weight=1.0,
-            vq_kmeans_init=True,
-            vq_use_cosine_sim=True,
-            rk4_integration=False,
-            use_visual_ssl=False,  # not implemented
-            visual_ssl_weight=0.0,  # not implemented
-            transformer_type="lucidrains",
-            static_variables=None
+        self,
+        image_height,
+        patch_height,
+        image_width,
+        patch_width,
+        frames,
+        frame_patch_size,
+        dim=32,
+        channels=60,
+        surface_channels=7,
+        depth=4,
+        heads=8,
+        dim_head=32,
+        mlp_dim=32,
+        dropout=0.0,
+        emb_dropout=0.0,
+        use_rotary=True,
+        use_ds_conv=True,
+        use_glu=True,
+        use_decoder_conv_layers=False,
+        use_cls_tokens=False,
+        use_registers=False,
+        num_register_tokens=0,
+        token_dropout=0.0,
+        use_codebook=False,
+        vq_codebook_dim=32,
+        vq_codebook_size=128,
+        vq_decay=0.1,
+        vq_commitment_weight=1.0,
+        vq_kmeans_init=True,
+        vq_use_cosine_sim=True,
+        rk4_integration=False,
+        use_visual_ssl=False,  # not implemented
+        visual_ssl_weight=0.0,  # not implemented
+        transformer_type="lucidrains",
+        static_variables=None,
     ):
-
         super().__init__()
 
         self.channels = channels
@@ -264,7 +311,7 @@ class RViT(BaseModel):
             dropout=dropout,
             use_rotary=use_rotary,
             use_ds_conv=use_ds_conv,
-            use_glu=use_glu
+            use_glu=use_glu,
         )
         self.transformer_decoder = Transformer(
             dim=dim,
@@ -276,24 +323,31 @@ class RViT(BaseModel):
             dropout=dropout,
             use_rotary=use_rotary,
             use_ds_conv=use_ds_conv,
-            use_glu=use_glu
+            use_glu=use_glu,
         )
 
         # Input/output dimensions
-        self.num_patches = int((image_height // patch_height) * (image_width // patch_width))
-        self.fmap_dims = {'h': image_height // patch_height, 'w': image_width // patch_width}
+        self.num_patches = int(
+            (image_height // patch_height) * (image_width // patch_width)
+        )
+        self.fmap_dims = {
+            "h": image_height // patch_height,
+            "w": image_width // patch_width,
+        }
         input_channels = channels * frames + surface_channels
         input_dim = input_channels * patch_height * patch_width
 
         # Encoder layers
-        self.encoder_embed = Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)',
-                                       p1=patch_height,
-                                       p2=patch_width)
+        self.encoder_embed = Rearrange(
+            "b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=patch_height, p2=patch_width
+        )
 
         if self.static_variables is not None:
             self.encoder_linear = nn.Linear(
-                (len(self.static_variables) + input_channels) * patch_height * patch_width,
-                dim
+                (len(self.static_variables) + input_channels)
+                * patch_height
+                * patch_width,
+                dim,
             )
         else:
             self.encoder_linear = nn.Linear(input_dim, dim)
@@ -304,23 +358,40 @@ class RViT(BaseModel):
         self.decoder_linear_2 = nn.Linear(dim * 4, input_dim)
         self.decoder_layer_norm_1 = nn.LayerNorm(4 * dim)
         self.decoder_layer_norm_2 = nn.LayerNorm(input_dim)
-        self.decoder_rearrange = Rearrange('b (h w) (p1 p2 c) -> b c (p1 h) (w p2)',
-                                           h=(image_height // patch_height),
-                                           w=(image_width // patch_width),
-                                           p1=patch_height,
-                                           p2=patch_width)
+        self.decoder_rearrange = Rearrange(
+            "b (h w) (p1 p2 c) -> b c (p1 h) (w p2)",
+            h=(image_height // patch_height),
+            w=(image_width // patch_width),
+            p1=patch_height,
+            p2=patch_width,
+        )
 
         # Positional embeddings
         self.pos_embedding_enc = SurfacePosEmb2D(
-            image_height, image_width, patch_height, patch_width, dim, cls_token=self.use_cls_tokens
+            image_height,
+            image_width,
+            patch_height,
+            patch_width,
+            dim,
+            cls_token=self.use_cls_tokens,
         )
         self.pos_embedding_dec = SurfacePosEmb2D(
-            image_height, image_width, patch_height, patch_width, dim, cls_token=self.use_cls_tokens
+            image_height,
+            image_width,
+            patch_height,
+            patch_width,
+            dim,
+            cls_token=self.use_cls_tokens,
         )
 
         # Conv smoothing layer for decoder
         if self.use_decoder_conv_layers:
-            self.conv = nn.Conv2d(in_channels=input_channels, out_channels=input_channels, kernel_size=3, padding=1)
+            self.conv = nn.Conv2d(
+                in_channels=input_channels,
+                out_channels=input_channels,
+                kernel_size=3,
+                padding=1,
+            )
 
         # CLS paramters
         if self.use_cls_tokens:
@@ -329,13 +400,19 @@ class RViT(BaseModel):
 
         # Token / patch drop
         self.token_dropout_prob = token_dropout
-        self.token_dropout = PatchDropout(1. - token_dropout) if token_dropout > 0.0 else nn.Identity()
+        self.token_dropout = (
+            PatchDropout(1.0 - token_dropout) if token_dropout > 0.0 else nn.Identity()
+        )
 
         # Vision Transformers Need Registers, https://arxiv.org/abs/2309.16588
         self.use_registers = use_registers
         if self.use_registers:
-            self.register_tokens_enc = nn.Parameter(torch.randn(num_register_tokens, dim))
-            self.register_tokens_dec = nn.Parameter(torch.randn(num_register_tokens, dim))
+            self.register_tokens_enc = nn.Parameter(
+                torch.randn(num_register_tokens, dim)
+            )
+            self.register_tokens_dec = nn.Parameter(
+                torch.randn(num_register_tokens, dim)
+            )
 
         # codebook
         self.use_codebook = use_codebook
@@ -346,18 +423,22 @@ class RViT(BaseModel):
                 decay=vq_decay,  # the exponential moving average decay, lower means the dictionary will change faster
                 commitment_weight=vq_commitment_weight,  # the weight on the commitment loss
                 kmeans_init=vq_kmeans_init,
-                use_cosine_sim=vq_use_cosine_sim
+                use_cosine_sim=vq_use_cosine_sim,
             )
 
         if self.static_variables is not None:
-            self.static_vars = torch.from_numpy(
-                xr.open_dataset(self.static_variables["cos_lat"])["coslat"].values
-            ).float().unsqueeze(0).unsqueeze(0)
+            self.static_vars = (
+                torch.from_numpy(
+                    xr.open_dataset(self.static_variables["cos_lat"])["coslat"].values
+                )
+                .float()
+                .unsqueeze(0)
+                .unsqueeze(0)
+            )
 
         logger.info("... loaded a ViT with a rotary embedding in each attention layer")
 
     def encode(self, x):
-
         # encode
         x = self.encoder_embed(x)
         x = self.encoder_linear(x)
@@ -377,13 +458,13 @@ class RViT(BaseModel):
             pred_mask = None
 
         if self.use_registers:
-            r = repeat(self.register_tokens_enc, 'n d -> b n d', b=x.shape[0])
-            x, ps = pack([x, r], 'b * d')
+            r = repeat(self.register_tokens_enc, "n d -> b n d", b=x.shape[0])
+            x, ps = pack([x, r], "b * d")
 
         x = self.transformer_encoder(x, fmap_dims=self.fmap_dims)
 
         if self.use_registers:
-            x, _ = unpack(x, ps, 'b * d')
+            x, _ = unpack(x, ps, "b * d")
 
         # excise CLS tokens
         if self.use_cls_tokens:
@@ -393,10 +474,15 @@ class RViT(BaseModel):
         return x, pred_mask
 
     def decode(self, x, patch_mask=None):
-
         if patch_mask is not None:
             # create a tensor of zeros with the original shape
-            x_zeros = torch.zeros(x.shape[0], self.num_patches + 1, x.shape[-1], dtype=x.dtype, device=x.device)
+            x_zeros = torch.zeros(
+                x.shape[0],
+                self.num_patches + 1,
+                x.shape[-1],
+                dtype=x.dtype,
+                device=x.device,
+            )
             # scatter the original patches back into the tensor of zeros
             x_zeros.scatter_(1, patch_mask.unsqueeze(-1).repeat(1, 1, x.shape[-1]), x)
             # replace x with the new tensor that has zero tokens inserted
@@ -411,11 +497,11 @@ class RViT(BaseModel):
         x = self.pos_embedding_dec(x)
 
         if self.use_registers:
-            r = repeat(self.register_tokens_dec, 'n d -> b n d', b=x.shape[0])
-            x, ps = pack([x, r], 'b * d')
+            r = repeat(self.register_tokens_dec, "n d -> b n d", b=x.shape[0])
+            x, ps = pack([x, r], "b * d")
         x = self.transformer_decoder(x, fmap_dims=self.fmap_dims)
         if self.use_registers:
-            x, _ = unpack(x, ps, 'b * d')
+            x, _ = unpack(x, ps, "b * d")
 
         x = self.decoder_linear_1(x)
         # x = F.tanh(x)
@@ -434,7 +520,7 @@ class RViT(BaseModel):
             x = self.conv(x)
 
         return x
-    
+
     def codebook(self):
         if self.use_codebook:
             return self.vq.codebook
@@ -443,7 +529,9 @@ class RViT(BaseModel):
     def forward(self, x):
         # add grid here to the inputs
         if self.static_variables is not None:
-            x = torch.cat([x, self.static_vars.expand(x.size(0), -1, -1, -1).to(x.device)], dim=1)
+            x = torch.cat(
+                [x, self.static_vars.expand(x.size(0), -1, -1, -1).to(x.device)], dim=1
+            )
 
         if self.rk4_integration:
             x, commit_loss = self.rk4(x)
@@ -486,6 +574,7 @@ class RViT(BaseModel):
 
         return x + (k1 + 2 * k2 + 2 * k3 + k4) / 6, total_commit_loss
 
+
 if __name__ == "__main__":
     image_height = 640  # 640
     patch_height = 64
@@ -502,7 +591,9 @@ if __name__ == "__main__":
     heads = 4
     depth = 2
 
-    input_tensor = torch.randn(1, channels * frames + surface_channels, image_height, image_width)
+    input_tensor = torch.randn(
+        1, channels * frames + surface_channels, image_height, image_width
+    )
 
     model = RViT(
         image_height,
@@ -523,8 +614,8 @@ if __name__ == "__main__":
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
     import torch.distributed as dist
 
-    os.environ['MASTER_ADDR'] = '127.0.0.1'
-    os.environ['MASTER_PORT'] = '29500'
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = "29500"
     dist.init_process_group("nccl", rank=0, world_size=1)
 
     wrapped_model = FSDP(model)

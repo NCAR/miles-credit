@@ -18,7 +18,6 @@ dependencies:
   - pytorch
   - torchvision
   - cpuonly
-  - wandb
   - pyyaml
   - cartopy
   - dask
@@ -31,6 +30,7 @@ dependencies:
   - mpi4py
   - mpich
   - cftime
+  - myst-parser
   - pip:
     - einops
     - echo-opt
@@ -43,4 +43,7 @@ dependencies:
     - haversine
     - torch-harmonics
     - torch_geometric
+    - sphinx-autoapi
+    - timm
+    - wandb
     - .

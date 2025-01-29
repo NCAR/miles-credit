@@ -19,7 +19,6 @@ from credit.trainers.base_trainer import BaseTrainer
 
 
 class Trainer(BaseTrainer):
-
     def __init__(self, model: torch.nn.Module, rank: int, module: bool = False):
         super().__init__(model, rank, module)
         # Add any additional initialization if needed
@@ -27,30 +26,31 @@ class Trainer(BaseTrainer):
 
     # Training function.
     def train_one_epoch(
-        self,
-        epoch,
-        conf,
-        trainloader,
-        optimizer,
-        criterion,
-        scaler,
-        scheduler,
-        metrics
+        self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics
     ):
-
-        batches_per_epoch = conf['trainer']['batches_per_epoch']
-        grad_accum_every = conf['trainer']['grad_accum_every']
+        batches_per_epoch = conf["trainer"]["batches_per_epoch"]
+        grad_accum_every = conf["trainer"]["grad_accum_every"]
         history_len = conf["data"]["history_len"]
         forecast_len = conf["data"]["forecast_len"]
-        amp = conf['trainer']['amp']
+        amp = conf["trainer"]["amp"]
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
-        rollout_p = 1.0 if 'stop_rollout' not in conf['trainer'] else conf['trainer']['stop_rollout']
+        rollout_p = (
+            1.0
+            if "stop_rollout" not in conf["trainer"]
+            else conf["trainer"]["stop_rollout"]
+        )
 
-        if "static_variables" in conf["data"] and "tsi" in conf["data"]["static_variables"]:
+        if (
+            "static_variables" in conf["data"]
+            and "tsi" in conf["data"]["static_variables"]
+        ):
             pass  # not implemented yet
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if conf['trainer']['use_scheduler'] and conf['trainer']['scheduler']['scheduler_type'] == "lambda":
+        if (
+            conf["trainer"]["use_scheduler"]
+            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
+        ):
             scheduler.step()
 
         # set up a custom tqdm
@@ -59,40 +59,44 @@ class Trainer(BaseTrainer):
             trainloader.dataset.set_rollout_prob(rollout_p)
         else:
             batches_per_epoch = (
-                batches_per_epoch if 0 < batches_per_epoch < len(trainloader) else len(trainloader)
+                batches_per_epoch
+                if 0 < batches_per_epoch < len(trainloader)
+                else len(trainloader)
             )
 
         batch_group_generator = tqdm.tqdm(
             enumerate(trainloader),
             total=batches_per_epoch,
             leave=True,
-            disable=True if self.rank > 0 else False
+            disable=True if self.rank > 0 else False,
         )
 
         static = None
         results_dict = defaultdict(list)
 
         for i, batch in batch_group_generator:
-
             logs = {}
 
             commit_loss = 0.0
 
             with autocast(enabled=amp):
-
                 x = batch["x"].to(self.device)
                 y = batch["y"].squeeze(2)
 
                 if "static" in batch:
                     if static is None:
-                        static = batch["static"].to(self.device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
+                        static = (
+                            batch["static"]
+                            .to(self.device)
+                            .unsqueeze(2)
+                            .expand(-1, -1, x.shape[2], -1, -1)
+                            .float()
+                        )
                     x = torch.cat((x, static.clone()), dim=1)
 
                 k = 0
                 while True:
-
                     with torch.no_grad() if k != forecast_len else torch.enable_grad():
-
                         self.model.eval() if k != forecast_len else self.model.train()
 
                         y_pred = self.model(x)
@@ -105,7 +109,9 @@ class Trainer(BaseTrainer):
                         if history_len > 2:
                             x_detach = x.detach()[:, :, 1:]
                             if "static" in batch:
-                                y_pred = torch.cat((y_pred, static[:, :, 0:1].clone()), dim=1)
+                                y_pred = torch.cat(
+                                    (y_pred, static[:, :, 0:1].clone()), dim=1
+                                )
                             x = torch.cat([x_detach, y_pred], dim=2).detach()
                         else:
                             if "static" in batch or "TOA" in batch:
@@ -130,7 +136,7 @@ class Trainer(BaseTrainer):
 
                 scaler.scale(loss / grad_accum_every).backward()
 
-            accum_log(logs, {'loss': loss.item() / grad_accum_every})
+            accum_log(logs, {"loss": loss.item() / grad_accum_every})
 
             if distributed:
                 torch.distributed.barrier()
@@ -143,8 +149,8 @@ class Trainer(BaseTrainer):
             if distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
-            if 'forecast_hour' in batch:
-                forecast_hour_stop = batch['forecast_hour'][-1].item()
+            if "forecast_hour" in batch:
+                forecast_hour_stop = batch["forecast_hour"][-1].item()
                 results_dict["train_forecast_len"].append(forecast_hour_stop)
             else:
                 results_dict["train_forecast_len"].append(forecast_len)
@@ -161,13 +167,16 @@ class Trainer(BaseTrainer):
                 np.mean(results_dict["train_loss"]),
                 np.mean(results_dict["train_acc"]),
                 np.mean(results_dict["train_mae"]),
-                np.mean(results_dict["train_forecast_len"])
+                np.mean(results_dict["train_forecast_len"]),
             )
             to_print += " lr: {:.12f}".format(optimizer.param_groups[0]["lr"])
             if self.rank == 0:
                 batch_group_generator.set_description(to_print)
 
-            if conf['trainer']['use_scheduler'] and conf['trainer']['scheduler']['scheduler_type'] == "cosine-annealing":
+            if (
+                conf["trainer"]["use_scheduler"]
+                and conf["trainer"]["scheduler"]["scheduler_type"] == "cosine-annealing"
+            ):
                 scheduler.step()
 
             if i >= batches_per_epoch and i > 0:
@@ -182,20 +191,20 @@ class Trainer(BaseTrainer):
 
         return results_dict
 
-    def validate(
-        self,
-        epoch,
-        conf,
-        valid_loader,
-        criterion,
-        metrics
-    ):
-
+    def validate(self, epoch, conf, valid_loader, criterion, metrics):
         self.model.eval()
 
-        valid_batches_per_epoch = conf['trainer']['valid_batches_per_epoch']
-        history_len = conf["data"]["valid_history_len"] if "valid_history_len" in conf["data"] else conf["history_len"]
-        forecast_len = conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
+        valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
+        history_len = (
+            conf["data"]["valid_history_len"]
+            if "valid_history_len" in conf["data"]
+            else conf["history_len"]
+        )
+        forecast_len = (
+            conf["data"]["valid_forecast_len"]
+            if "valid_forecast_len" in conf["data"]
+            else conf["forecast_len"]
+        )
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         results_dict = defaultdict(list)
@@ -205,36 +214,42 @@ class Trainer(BaseTrainer):
             valid_batches_per_epoch = valid_batches_per_epoch
         else:
             valid_batches_per_epoch = (
-                valid_batches_per_epoch if 0 < valid_batches_per_epoch < len(valid_loader) else len(valid_loader)
+                valid_batches_per_epoch
+                if 0 < valid_batches_per_epoch < len(valid_loader)
+                else len(valid_loader)
             )
 
         batch_group_generator = tqdm.tqdm(
             enumerate(valid_loader),
             total=valid_batches_per_epoch,
             leave=True,
-            disable=True if self.rank > 0 else False
+            disable=True if self.rank > 0 else False,
         )
 
         static = None
 
         for i, batch in batch_group_generator:
-
             with torch.no_grad():
-
                 commit_loss = 0.0
 
                 x = batch["x"].to(self.device)
 
                 if "static" in batch:
                     if static is None:
-                        static = batch["static"].to(self.device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
+                        static = (
+                            batch["static"]
+                            .to(self.device)
+                            .unsqueeze(2)
+                            .expand(-1, -1, x.shape[2], -1, -1)
+                            .float()
+                        )
                     x = torch.cat((x, static.clone()), dim=1)
 
                 y = batch["y"].to(self.device).squeeze(2)
 
                 k = 0
                 while True:
-                    if getattr(self.model, 'use_codebook', False):
+                    if getattr(self.model, "use_codebook", False):
                         y_pred, cm_loss = self.model(x)
                         commit_loss += cm_loss
                     else:
@@ -248,7 +263,9 @@ class Trainer(BaseTrainer):
                     if history_len > 2:
                         x_detach = x.detach()[:, :, 1:]
                         if "static" in batch:
-                            y_pred = torch.cat((y_pred, static[:, :, 0:1].clone()), dim=1)
+                            y_pred = torch.cat(
+                                (y_pred, static[:, :, 0:1].clone()), dim=1
+                            )
                         x = torch.cat([x_detach, y_pred], dim=2).detach()
                     else:
                         if "static" in batch or "TOA" in batch:
@@ -278,7 +295,7 @@ class Trainer(BaseTrainer):
                     epoch,
                     np.mean(results_dict["valid_loss"]),
                     np.mean(results_dict["valid_acc"]),
-                    np.mean(results_dict["valid_mae"])
+                    np.mean(results_dict["valid_mae"]),
                 )
                 if self.rank == 0:
                     batch_group_generator.set_description(to_print)
@@ -311,12 +328,16 @@ class Trainer(BaseTrainer):
         scheduler,
         metrics,
         rollout_scheduler=None,
-        trial=False
+        trial=False,
     ):
-        save_loc = conf['save_loc']
-        start_epoch = conf['trainer']['start_epoch']
-        epochs = conf['trainer']['epochs']
-        skip_validation = conf['trainer']['skip_validation'] if 'skip_validation' in conf['trainer'] else False
+        save_loc = conf["save_loc"]
+        start_epoch = conf["trainer"]["start_epoch"]
+        epochs = conf["trainer"]["epochs"]
+        skip_validation = (
+            conf["trainer"]["skip_validation"]
+            if "skip_validation" in conf["trainer"]
+            else False
+        )
 
         # Reload the results saved in the training csv if continuing to train
         if start_epoch == 0:
@@ -330,7 +351,6 @@ class Trainer(BaseTrainer):
                 results_dict[key] = list(saved_results[key])
 
         for epoch in range(start_epoch, epochs):
-
             logging.info(f"Beginning epoch {epoch}")
 
             if not isinstance(train_loader.dataset, IterableDataset):
@@ -338,8 +358,10 @@ class Trainer(BaseTrainer):
             else:
                 train_loader.dataset.set_epoch(epoch)
                 if rollout_scheduler is not None:
-                    conf['trainer']['stop_rollout'] = rollout_scheduler(epoch, epochs)
-                    train_loader.dataset.set_rollout_prob(conf['trainer']['stop_rollout'])
+                    conf["trainer"]["stop_rollout"] = rollout_scheduler(epoch, epochs)
+                    train_loader.dataset.set_rollout_prob(
+                        conf["trainer"]["stop_rollout"]
+                    )
 
             ############
             #
@@ -355,7 +377,7 @@ class Trainer(BaseTrainer):
                 train_criterion,
                 scaler,
                 scheduler,
-                metrics
+                metrics,
             )
 
             ############
@@ -365,17 +387,11 @@ class Trainer(BaseTrainer):
             ############
 
             if skip_validation:
-
                 valid_results = train_results
 
             else:
-
                 valid_results = self.validate(
-                    epoch,
-                    conf,
-                    valid_loader,
-                    valid_criterion,
-                    metrics
+                    epoch, conf, valid_loader, valid_criterion, metrics
                 )
 
             #################
@@ -386,14 +402,19 @@ class Trainer(BaseTrainer):
 
             # update the learning rate if epoch-by-epoch updates
 
-            if conf['trainer']['use_scheduler'] and conf['trainer']['scheduler']['scheduler_type'] == "plateau":
+            if (
+                conf["trainer"]["use_scheduler"]
+                and conf["trainer"]["scheduler"]["scheduler_type"] == "plateau"
+            ):
                 scheduler.step(results_dict["valid_acc"][-1])
 
             # Put things into a results dictionary -> dataframe
 
             results_dict["epoch"].append(epoch)
             for name in ["loss", "acc", "mae"]:
-                results_dict[f"train_{name}"].append(np.mean(train_results[f"train_{name}"]))
+                results_dict[f"train_{name}"].append(
+                    np.mean(train_results[f"train_{name}"])
+                )
                 # results_dict[f"valid_{name}"].append(np.mean(valid_results[f"valid_{name}"]))
             # results_dict['train_forecast_len'].append(np.mean(train_results['train_forecast_len']))
             results_dict["learn_rate"].append(optimizer.param_groups[0]["lr"])
@@ -405,7 +426,11 @@ class Trainer(BaseTrainer):
 
             if trial:
                 df.to_csv(
-                    os.path.join(f"{save_loc}", "trial_results", f"training_log_{trial.number}.csv"),
+                    os.path.join(
+                        f"{save_loc}",
+                        "trial_results",
+                        f"training_log_{trial.number}.csv",
+                    ),
                     index=False,
                 )
             else:
@@ -418,27 +443,29 @@ class Trainer(BaseTrainer):
             ############
 
             if not trial:
-
                 if conf["trainer"]["mode"] != "fsdp":
-
                     if self.rank == 0:
-
                         # Save the current model
 
-                        logging.info(f"Saving model, optimizer, grad scaler, and learning rate scheduler states to {save_loc}")
+                        logging.info(
+                            f"Saving model, optimizer, grad scaler, and learning rate scheduler states to {save_loc}"
+                        )
 
                         state_dict = {
                             "epoch": epoch,
                             "model_state_dict": self.model.state_dict(),
                             "optimizer_state_dict": optimizer.state_dict(),
-                            'scheduler_state_dict': scheduler.state_dict() if conf["trainer"]["use_scheduler"] else None,
-                            'scaler_state_dict': scaler.state_dict()
+                            "scheduler_state_dict": scheduler.state_dict()
+                            if conf["trainer"]["use_scheduler"]
+                            else None,
+                            "scaler_state_dict": scaler.state_dict(),
                         }
                         torch.save(state_dict, f"{save_loc}/checkpoint.pt")
 
                 else:
-
-                    logging.info(f"Saving FSDP model, optimizer, grad scaler, and learning rate scheduler states to {save_loc}")
+                    logging.info(
+                        f"Saving FSDP model, optimizer, grad scaler, and learning rate scheduler states to {save_loc}"
+                    )
 
                     # Initialize the checkpoint I/O handler
 
@@ -451,21 +478,23 @@ class Trainer(BaseTrainer):
                         os.path.join(save_loc, "model_checkpoint.pt"),
                         gather_dtensor=True,
                         use_safetensors=False,
-                        rank=self.rank
+                        rank=self.rank,
                     )
                     checkpoint_io.save_unsharded_optimizer(
                         optimizer,
                         os.path.join(save_loc, "optimizer_checkpoint.pt"),
                         gather_dtensor=True,
-                        rank=self.rank
+                        rank=self.rank,
                     )
 
                     # Still need to save the scheduler and scaler states, just in another file for FSDP
 
                     state_dict = {
                         "epoch": epoch,
-                        'scheduler_state_dict': scheduler.state_dict() if conf["trainer"]["use_scheduler"] else None,
-                        'scaler_state_dict': scaler.state_dict()
+                        "scheduler_state_dict": scheduler.state_dict()
+                        if conf["trainer"]["use_scheduler"]
+                        else None,
+                        "scaler_state_dict": scaler.state_dict(),
                     }
 
                     torch.save(state_dict, os.path.join(save_loc, "checkpoint.pt"))
@@ -500,19 +529,21 @@ class Trainer(BaseTrainer):
                 if j == min(results_dict[training_metric])
             ][0]
             offset = epoch - best_epoch
-            if offset >= conf['trainer']['stopping_patience']:
+            if offset >= conf["trainer"]["stopping_patience"]:
                 logging.info(f"Trial {trial.number} is stopping early")
                 break
 
             # Stop training if we get too close to the wall time
-            if 'stop_after_epoch' in conf['trainer']:
-                if conf['trainer']['stop_after_epoch']:
+            if "stop_after_epoch" in conf["trainer"]:
+                if conf["trainer"]["stop_after_epoch"]:
                     break
 
         training_metric = "train_loss" if skip_validation else "valid_loss"
 
         best_epoch = [
-            i for i, j in enumerate(results_dict[training_metric]) if j == min(results_dict[training_metric])
+            i
+            for i, j in enumerate(results_dict[training_metric])
+            if j == min(results_dict[training_metric])
         ][0]
 
         result = {k: v[best_epoch] for k, v in results_dict.items()}

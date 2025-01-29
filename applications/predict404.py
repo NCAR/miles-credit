@@ -28,9 +28,8 @@ from credit.pbs import launch_script, launch_script_mpi
 # ---------- #
 
 logging.basicConfig(
-    format='%(asctime)s %(message)s',
-    level=logging.INFO,
-    datefmt='%Y-%m-%d %H:%M:%S')
+    format="%(asctime)s %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
+)
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -44,7 +43,7 @@ def predict(rank, world_size, conf, dataset):
     list of xarray objects, one for each predicted output.
 
     """
-    autoregressive = conf['predict']['autoregressive']
+    autoregressive = conf["predict"]["autoregressive"]
 
     # infer device id from rank
     if torch.cuda.is_available():
@@ -65,18 +64,16 @@ def predict(rank, world_size, conf, dataset):
 
     # do predictions
     with torch.no_grad():
-
-        outdims = ["t","vars","z","y","x"]  # todo: squeeze bottom_top
+        outdims = ["t", "vars", "z", "y", "x"]  # todo: squeeze bottom_top
 
         # model inference loop
         logging.info("Beginning inference loop")
 
-        for index in range(len(dataset)):   # noqa C0200
-
+        for index in range(len(dataset)):  # noqa C0200
             if autoregressive and index > 0:
-                xin = torch.cat((xin[:,:,1:3,:,:], yout[:,:,0:1,:,:]), dim=2) # noqa F821
+                xin = torch.cat((xin[:, :, 1:3, :, :], yout[:, :, 0:1, :, :]), dim=2)  # noqa F821
             else:
-                xin = dataset[index]['x'].unsqueeze(0).to(device)
+                xin = dataset[index]["x"].unsqueeze(0).to(device)
 
             yout = model(xin)
             y = state_transformer.inverse_transform(yout.cpu())
@@ -107,7 +104,6 @@ def predict(rank, world_size, conf, dataset):
 
 
 if __name__ == "__main__":
-    
     description = "Rollout AI-NWP forecasts"
     parser = ArgumentParser(description=description)
     # -------------------- #
@@ -192,7 +188,6 @@ if __name__ == "__main__":
             launch_script_mpi(config, script_path)
         sys.exit()
 
-
     # main branch if not launching starts here
 
     seed = 1000 if "seed" not in conf else conf["seed"]
@@ -218,8 +213,8 @@ if __name__ == "__main__":
         forecast_len=conf["data"]["forecast_len"],
         transform=transform,
         start=conf["predict"]["start"],
-        finish=conf["predict"]["finish"]
-        )
+        finish=conf["predict"]["finish"],
+    )
 
     # if mode in ["fsdp", "ddp"]:
     #     xarraylist = predict(
@@ -233,7 +228,6 @@ if __name__ == "__main__":
     xarraylist = predict(rank=0, world_size=1, conf=conf, dataset=ds)
     logging.info("Prediction finished")
 
-
     # reconstruct xarray dataset
 
     xcat = xr.concat(xarraylist, dim="t")
@@ -243,22 +237,28 @@ if __name__ == "__main__":
     ds_out = xcat.to_dataset(dim="vars")
 
     sep = "."
-    filename = sep.join([os.path.basename(conf["save_loc"]),
-                         "C404",
-                         conf["predict"]["start"],
-                         conf["predict"]["finish"],
-                         "nc"])
+    filename = sep.join(
+        [
+            os.path.basename(conf["save_loc"]),
+            "C404",
+            conf["predict"]["start"],
+            conf["predict"]["finish"],
+            "nc",
+        ]
+    )
     save_path = os.path.join(conf["save_loc"], filename)
 
     logging.info("Writing results to file")
-    ds_out.to_netcdf(path=save_path,
-                     format="NETCDF4",
-                     engine="netcdf4",
-                     encoding={v: {"zlib": True,
-                                   "complevel": 1,
-                                   "dtype": "float"} for v in conf["data"]["variables"]},
-                     unlimited_dims="Time",
-                     compute=True
-                     )
+    ds_out.to_netcdf(
+        path=save_path,
+        format="NETCDF4",
+        engine="netcdf4",
+        encoding={
+            v: {"zlib": True, "complevel": 1, "dtype": "float"}
+            for v in conf["data"]["variables"]
+        },
+        unlimited_dims="Time",
+        compute=True,
+    )
 
     logging.info("Done!")

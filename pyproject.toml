@@ -43,3 +43,9 @@ packages = ["credit", "credit.models", "credit.metadata", "credit.datasets", "cr
 
 [tool.setuptools.dynamic]
 version = {file = "credit/VERSION"}
+
+[tool.ruff]
+src = ["credit", "applications", "tests"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

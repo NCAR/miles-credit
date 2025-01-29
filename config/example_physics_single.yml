@@ -1,8 +1,5 @@
 # --------------------------------------------------------------------------------------------------------------------- #
-# This yaml file implements 6 hourly FuXi on NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu) 
-# the FuXi architecture has been modified to reduce the overall model size
-# The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask inputs
-# Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
+# example
 # --------------------------------------------------------------------------------------------------------------------- #
 save_loc: '/glade/work/$USER/CREDIT_runs/fuxi_conserve/'
 seed: 1000
@@ -47,6 +44,7 @@ data:
     
     # data workflow
     scaler_type: 'std_new'  
+    data_clamp: [-16, 16]
     
     # number of input states
     # FuXi has 2 input states
@@ -151,13 +149,19 @@ model:
     window_size: 7          # window size (default: 7)
     depth: 2               # number of swin transformers (default: 48)
     
-    # map boundary padding
-    pad_lon: 40             # number of grids to pad on 0 and 360 deg lon
-    pad_lat: 40             # number of grids to pad on -90 and 90 deg lat
-    
     # use spectral norm
     use_spectral_norm: True
 
+    # use interpolation to match the output size
+    interp: True
+    
+    # map boundary padding
+    padding_conf:
+        activate: True
+        mode: mirror
+        pad_lat: 40
+        pad_lon: 40
+        
     post_conf: 
         activate: True
         
@@ -172,10 +176,20 @@ model:
             
         global_mass_fixer:
             activate: True
+            activate_outside_model: False
             simple_demo: False
             denorm: True
             midpoint: False
             fix_level_num: 14
+            lon_lat_level_name: ['lon2d', 'lat2d', 'p_level']
+            specific_total_water_name: ['specific_total_water']
+
+        global_water_fixer:
+            activate: True
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            midpoint: False
             lon_lat_level_name: ['lon2d', 'lat2d', 'p_level']
             specific_total_water_name: ['specific_total_water']
             precipitation_name: ['total_precipitation']
@@ -183,6 +197,7 @@ model:
             
         global_energy_fixer:
             activate: True
+            activate_outside_model: True
             simple_demo: False
             denorm: True
             midpoint: False
@@ -191,7 +206,6 @@ model:
             specific_total_water_name: ['specific_total_water']
             u_wind_name: ['U']
             v_wind_name: ['V']
-            lon_lat_level_name: ['lon2d', 'lat2d', 'p_level']
             surface_geopotential_name: ['geopotential_at_surface']
             TOA_net_radiation_flux_name: ['top_net_solar_radiation', 'top_net_thermal_radiation']
             surface_net_radiation_flux_name: ['surface_net_solar_radiation', 'surface_net_thermal_radiation']
@@ -219,13 +233,14 @@ predict:
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 30         # number of days to initialize, starting from the (year, mon, day) above
+        duration: 2         # number of days to initialize, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
         
-    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/fuxi_6h/'
-    save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT/fuxi_conserve/'
+    
+    # save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
     
     # turn-off low-pass filter
     use_laplace_filter: False

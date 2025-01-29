@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class FeedForward(nn.Module):
-
-    def __init__(self, dim, hidden_dim, dropout=0.):
+    def __init__(self, dim, hidden_dim, dropout=0.0):
         super().__init__()
         self.net = nn.Sequential(
             nn.LayerNorm(dim),
@@ -27,7 +26,7 @@ class FeedForward(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, dim),
-            nn.Dropout(dropout)
+            nn.Dropout(dropout),
         )
 
     def forward(self, x):
@@ -35,13 +34,13 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0., rotary_emb=None):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0.0, rotary_emb=None):
         super().__init__()
         inner_dim = dim_head * heads
         project_out = not (heads == 1 and dim_head == dim)
 
         self.heads = heads
-        self.scale = dim_head ** -0.5
+        self.scale = dim_head**-0.5
         self.rotary_emb = rotary_emb
 
         self.norm = nn.LayerNorm(dim)
@@ -50,10 +49,11 @@ class Attention(nn.Module):
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
 
-        self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, dim),
-            nn.Dropout(dropout)
-        ) if project_out else nn.Identity()
+        self.to_out = (
+            nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout))
+            if project_out
+            else nn.Identity()
+        )
 
         self.dr = dropout
 
@@ -63,7 +63,7 @@ class Attention(nn.Module):
     def forward(self, x):
         x = self.norm(x)
         qkv = self.to_qkv(x).chunk(3, dim=-1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
+        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.heads), qkv)
 
         if self.rotary_emb is not None:
             q = self.rotary_emb.rotate_queries_or_keys(q)
@@ -77,30 +77,40 @@ class Attention(nn.Module):
         # out = torch.matmul(attn, v)
 
         with torch.backends.cuda.sdp_kernel(
-                enable_flash=True,
-                enable_math=False,
-                enable_mem_efficient=True  # should be false but bug somewhere on my end
+            enable_flash=True,
+            enable_math=False,
+            enable_mem_efficient=True,  # should be false but bug somewhere on my end
         ):
             out = F.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask=None,
-                dropout_p=self.dr
+                q, k, v, attn_mask=None, dropout_p=self.dr
             )
 
-        out = rearrange(out, 'b h n d -> b n (h d)')
+        out = rearrange(out, "b h n d -> b n (h d)")
         return self.to_out(out)
 
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.0, rotary_emb=True):
+    def __init__(
+        self, dim, depth, heads, dim_head, mlp_dim, dropout=0.0, rotary_emb=True
+    ):
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = nn.ModuleList([])
         for _ in range(depth):
-            self.layers.append(nn.ModuleList([
-                Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout, rotary_emb=rotary_emb),
-                FeedForward(dim, mlp_dim, dropout=dropout)
-            ]))
+            self.layers.append(
+                nn.ModuleList(
+                    [
+                        Attention(
+                            dim,
+                            heads=heads,
+                            dim_head=dim_head,
+                            dropout=dropout,
+                            rotary_emb=rotary_emb,
+                        ),
+                        FeedForward(dim, mlp_dim, dropout=dropout),
+                    ]
+                )
+            )
 
     def forward(self, x):
         for attn, ff in self.layers:
@@ -111,29 +121,28 @@ class Transformer(nn.Module):
 
 class CubeViT(BaseModel):
     def __init__(
-            self,
-            image_height=640,
-            patch_height=16,
-            image_width=1280,
-            patch_width=16,
-            frames=2,
-            frame_patch_size=2,
-            dim=32,
-            channels=4,
-            surface_channels=7,
-            levels=15,
-            depth=4,
-            heads=8,
-            dim_head=32,
-            mlp_dim=32,
-            dropout=0.0,
-            use_last_conv_layers=False,
-            use_rotary=True,
-            use_registers=False,
-            num_register_tokens=0,
-            static_variables=None
+        self,
+        image_height=640,
+        patch_height=16,
+        image_width=1280,
+        patch_width=16,
+        frames=2,
+        frame_patch_size=2,
+        dim=32,
+        channels=4,
+        surface_channels=7,
+        levels=15,
+        depth=4,
+        heads=8,
+        dim_head=32,
+        mlp_dim=32,
+        dropout=0.0,
+        use_last_conv_layers=False,
+        use_rotary=True,
+        use_registers=False,
+        num_register_tokens=0,
+        static_variables=None,
     ):
-
         super().__init__()
 
         self.channels = channels
@@ -151,11 +160,13 @@ class CubeViT(BaseModel):
             heads=heads,
             mlp_dim=mlp_dim,
             dropout=dropout,
-            rotary_emb=use_rotary
+            rotary_emb=use_rotary,
         )
 
         # Input/output dimensions
-        self.num_patches = int((image_height // patch_height) * (image_width // patch_width))
+        self.num_patches = int(
+            (image_height // patch_height) * (image_width // patch_width)
+        )
         input_channels = channels * levels + surface_channels
         input_dim = input_channels * patch_height * patch_width
 
@@ -163,17 +174,21 @@ class CubeViT(BaseModel):
         self.encoder_embed = CubeEmbedding(
             (frames, image_height, image_width),
             (frame_patch_size, patch_height, patch_width),
-            input_channels if static_variables is None else input_channels + len(static_variables),
-            dim
+            input_channels
+            if static_variables is None
+            else input_channels + len(static_variables),
+            dim,
         )
 
         # Decoder layers
         self.decoder_linear = nn.Linear(dim, input_dim)
-        self.decoder_rearrange = Rearrange('b (h w) (p1 p2 c) -> b c (p1 h) (w p2)',
-                                           h=(image_height // patch_height),
-                                           w=(image_width // patch_width),
-                                           p1=patch_height,
-                                           p2=patch_width)
+        self.decoder_rearrange = Rearrange(
+            "b (h w) (p1 p2 c) -> b c (p1 h) (w p2)",
+            h=(image_height // patch_height),
+            w=(image_width // patch_width),
+            p1=patch_height,
+            p2=patch_width,
+        )
 
         # Positional embeddings
         # self.pos_embedding_enc = SurfacePosEmb2D(
@@ -186,7 +201,7 @@ class CubeViT(BaseModel):
                 in_channels=input_channels,
                 out_channels=input_channels,
                 kernel_size=3,
-                padding=1
+                padding=1,
             )
 
         # Vision Transformers Need Registers, https://arxiv.org/abs/2309.16588
@@ -197,30 +212,36 @@ class CubeViT(BaseModel):
         # static inputs
 
         if self.static_variables is not None:
-            self.static_vars = torch.from_numpy(
-                xr.open_dataset(self.static_variables["cos_lat"])["coslat"].values
-            ).float().unsqueeze(0).unsqueeze(0)
+            self.static_vars = (
+                torch.from_numpy(
+                    xr.open_dataset(self.static_variables["cos_lat"])["coslat"].values
+                )
+                .float()
+                .unsqueeze(0)
+                .unsqueeze(0)
+            )
 
         logger.info(f"... loaded a simple CubeViT. Rotary embedding: {use_rotary}")
 
     def forward(self, x):
-
         # add grid here to the inputs
         if self.static_variables is not None:
-            static_vars = self.static_vars.expand(x.size(0), 1, self.frames, x.size(3), x.size(4))
+            static_vars = self.static_vars.expand(
+                x.size(0), 1, self.frames, x.size(3), x.size(4)
+            )
             x = torch.cat([x, static_vars.to(x.device)], dim=1)
 
         # encode
         x = self.encoder_embed(x)
 
         if self.use_registers:
-            r = repeat(self.register_tokens_enc, 'n d -> b n d', b=x.shape[0])
-            x, ps = pack([x, r], 'b * d')
+            r = repeat(self.register_tokens_enc, "n d -> b n d", b=x.shape[0])
+            x, ps = pack([x, r], "b * d")
 
         x = self.transformer(x)
 
         if self.use_registers:
-            x, _ = unpack(x, ps, 'b * d')
+            x, _ = unpack(x, ps, "b * d")
 
         x = self.decoder_linear(x)
         x = self.decoder_rearrange(x)
@@ -248,7 +269,9 @@ if __name__ == "__main__":
     heads = 4
     depth = 2
 
-    input_tensor = torch.randn(1, channels * frames + surface_channels, image_height, image_width)
+    input_tensor = torch.randn(
+        1, channels * frames + surface_channels, image_height, image_width
+    )
 
     model = CubeViT(
         image_height,
@@ -269,8 +292,8 @@ if __name__ == "__main__":
     from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
     import torch.distributed as dist
 
-    os.environ['MASTER_ADDR'] = '127.0.0.1'
-    os.environ['MASTER_PORT'] = '29500'
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = "29500"
     dist.init_process_group("nccl", rank=0, world_size=1)
 
     wrapped_model = FSDP(model, use_orig_params=True)

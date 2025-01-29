@@ -34,18 +34,26 @@ def setup(rank, world_size, mode):
 
 
 def main(rank, world_size, conf, frames=1, height=640, width=1280):
-
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"])
 
     # Config settings
-    single_level_vars = ["surface_variables", "static_variables", "diagnostic_variables", "dynamic_forcing_variables"]
+    single_level_vars = [
+        "surface_variables",
+        "static_variables",
+        "diagnostic_variables",
+        "dynamic_forcing_variables",
+    ]
     channels = conf["model"]["levels"] * len(conf["data"]["variables"])
     channels += sum(len(conf["data"].get(key, [])) for key in single_level_vars)
 
     # Set device
 
-    device = torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
+    device = (
+        torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
     # Load model
@@ -70,7 +78,6 @@ def main(rank, world_size, conf, frames=1, height=640, width=1280):
 
 
 if __name__ == "__main__":
-
     description = "Train a segmengation model on a hologram data set"
     parser = ArgumentParser(description=description)
     parser.add_argument(
@@ -94,7 +101,7 @@ if __name__ == "__main__":
         dest="t",
         type=int,
         default=1,
-        help="The number of time steps the model reqiures on input"
+        help="The number of time steps the model reqiures on input",
     )
     parser.add_argument(
         "-lat",
@@ -102,7 +109,7 @@ if __name__ == "__main__":
         dest="lat",
         type=int,
         default=640,
-        help="The number of pixels along latitude (default: 640)"
+        help="The number of pixels along latitude (default: 640)",
     )
     parser.add_argument(
         "-lon",
@@ -110,7 +117,7 @@ if __name__ == "__main__":
         dest="lon",
         type=int,
         default=1280,
-        help="The number of pixels along longitude (default: 1240)"
+        help="The number of pixels along longitude (default: 1240)",
     )
     parser.add_argument(
         "-m",
@@ -159,7 +166,7 @@ if __name__ == "__main__":
     if launch:
         # Where does this script live?
         script_path = Path(__file__).absolute()
-        if conf['pbs']['queue'] == 'casper':
+        if conf["pbs"]["queue"] == "casper":
             logging.info("Launching to PBS on Casper")
             launch_script(config, script_path)
         else:
@@ -183,5 +190,5 @@ if __name__ == "__main__":
         conf=conf,
         frames=num_timesteps,
         height=image_height,
-        width=image_width
+        width=image_width,
     )

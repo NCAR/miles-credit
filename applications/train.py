@@ -1,10 +1,11 @@
-'''
+"""
 train.py
 -------------------------------------------------------
 Content
     load_dataset_and_sampler_zscore_only
     load_model_states_and_optimizer
-'''
+"""
+
 import os
 import sys
 import yaml
@@ -26,10 +27,10 @@ from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 
 from credit.seed import seed_everything
 from credit.loss import VariableTotalLoss2D
-from credit.data import ERA5Dataset, ERA5_and_Forcing_Dataset, Dataset_BridgeScaler
+from credit.data import ERA5_and_Forcing_Dataset
 from credit.transforms import load_transforms
 from credit.scheduler import load_scheduler, annealed_probability
-from credit.parser import CREDIT_main_parser, training_data_check
+from credit.parser import credit_main_parser, training_data_check
 from credit.trainers import load_trainer
 
 from credit.metrics import LatWeightedMetrics
@@ -38,7 +39,7 @@ from credit.models import load_model
 from credit.models.checkpoint import (
     FSDPOptimizerWrapper,
     TorchFSDPCheckpointIO,
-    load_state_dict_error_handler
+    load_state_dict_error_handler,
 )
 
 
@@ -52,92 +53,16 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 
-def load_dataset_and_sampler(conf, files, world_size, rank, is_train, seed=42):
-    """
-    Load the dataset and sampler for training or validation.
-
-    Args:
-        conf (dict): Configuration dictionary containing dataset and training parameters.
-        files (list): List of file paths for the dataset.
-        world_size (int): Number of processes participating in the job.
-        rank (int): Rank of the current process.
-        is_train (bool): Flag indicating whether the dataset is for training or validation.
-        seed (int, optional): Seed for random number generation. Defaults to 42.
-
-    Returns:
-        tuple: A tuple containing the dataset and the distributed sampler.
-    """
-
-    # convert $USER to the actual user name
-    conf['save_loc'] = os.path.expandvars(conf['save_loc'])
-
-    # number of previous lead time inputs
-    history_len = conf["data"]["history_len"]
-    valid_history_len = conf["data"]["valid_history_len"]
-    history_len = history_len if is_train else valid_history_len
-
-    # number of lead times to forecast
-    forecast_len = conf["data"]["forecast_len"]
-    valid_forecast_len = conf["data"]["valid_forecast_len"]
-    forecast_len = forecast_len if is_train else valid_forecast_len
-
-    # optional setting: max_forecast_len
-    max_forecast_len = None if "max_forecast_len" not in conf["data"] else conf["data"]["max_forecast_len"]
-
-    # optional setting: skip_periods
-    skip_periods = None if "skip_periods" not in conf["data"] else conf["data"]["skip_periods"]
-
-    # optional setting: one_shot
-    one_shot = None if "one_shot" not in conf["data"] else conf["data"]["one_shot"]
-
-    # shufle dataloader if training
-    shuffle = is_train
-    name = "Train" if is_train else "Valid"
-
-    # data preprocessing utils
-    transforms = load_transforms(conf)
-
-    # quantile transform using BridgeScaler
-    if conf["data"]["scaler_type"] == "quantile-cached":
-        dataset = Dataset_BridgeScaler(
-            conf,
-            conf_dataset='bs_years_train' if is_train else 'bs_years_val',
-            transform=transforms
-        )
-
-    else:
-        # Z-score
-        dataset = ERA5Dataset(
-            filenames=files,
-            history_len=history_len,
-            forecast_len=forecast_len,
-            skip_periods=skip_periods,
-            one_shot=one_shot,
-            max_forecast_len=max_forecast_len,
-            transform=transforms
-        )
-
-    # Pytorch sampler
-    sampler = DistributedSampler(
-        dataset,
-        num_replicas=world_size,
-        rank=rank,
-        seed=seed,
-        shuffle=shuffle,
-        drop_last=True
-    )
-    logging.info(f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len + 1})")
-
-    return dataset, sampler
-
-
-def load_dataset_and_sampler_zscore_only(conf,
-                                         all_ERA_files,
-                                         surface_files,
-                                         dyn_forcing_files,
-                                         diagnostic_files,
-                                         world_size, 
-                                         rank, is_train, seed=42):
+def load_dataset_and_sampler_zscore_only(
+    conf,
+    all_ERA_files,
+    surface_files,
+    dyn_forcing_files,
+    diagnostic_files,
+    world_size,
+    rank,
+    is_train,
+):
     """
     Load the Z-score only dataset and sampler for training or validation.
 
@@ -150,12 +75,11 @@ def load_dataset_and_sampler_zscore_only(conf,
         world_size (int): Number of processes participating in the job.
         rank (int): Rank of the current process.
         is_train (bool): Flag indicating whether the dataset is for training or validation.
-        seed (int, optional): Seed for random number generation. Defaults to 42.
 
     Returns:
         tuple: A tuple containing the dataset and the distributed sampler.
     """
-    
+    seed = conf["seed"]
     # --------------------------------------------------- #
     # separate training set and validation set cases
     if is_train:
@@ -165,40 +89,42 @@ def load_dataset_and_sampler_zscore_only(conf,
     else:
         history_len = conf["data"]["valid_history_len"]
         forecast_len = conf["data"]["valid_forecast_len"]
-        name = 'validation'
-    
-    if conf['data']['sst_forcing']['activate']:
-        sst_forcing = {'varname_skt': conf['data']['sst_forcing']['varname_skt'], 
-                       'varname_ocean_mask': conf['data']['sst_forcing']['varname_ocean_mask']}
+        name = "validation"
+
+    if conf["data"]["sst_forcing"]["activate"]:
+        sst_forcing = {
+            "varname_skt": conf["data"]["sst_forcing"]["varname_skt"],
+            "varname_ocean_mask": conf["data"]["sst_forcing"]["varname_ocean_mask"],
+        }
     else:
         sst_forcing = None
-    
+
     # transforms
     transforms = load_transforms(conf)
-    
+
     # Z-score
     dataset = ERA5_and_Forcing_Dataset(
-        varname_upper_air=conf['data']['variables'],
-        varname_surface=conf['data']['surface_variables'],
-        varname_dyn_forcing=conf['data']['dynamic_forcing_variables'],
-        varname_forcing=conf['data']['forcing_variables'],
-        varname_static=conf['data']['static_variables'],
-        varname_diagnostic=conf['data']['diagnostic_variables'],
+        varname_upper_air=conf["data"]["variables"],
+        varname_surface=conf["data"]["surface_variables"],
+        varname_dyn_forcing=conf["data"]["dynamic_forcing_variables"],
+        varname_forcing=conf["data"]["forcing_variables"],
+        varname_static=conf["data"]["static_variables"],
+        varname_diagnostic=conf["data"]["diagnostic_variables"],
         filenames=all_ERA_files,
         filename_surface=surface_files,
         filename_dyn_forcing=dyn_forcing_files,
-        filename_forcing=conf['data']['save_loc_forcing'],
-        filename_static=conf['data']['save_loc_static'],
+        filename_forcing=conf["data"]["save_loc_forcing"],
+        filename_static=conf["data"]["save_loc_static"],
         filename_diagnostic=diagnostic_files,
         history_len=history_len,
         forecast_len=forecast_len,
         skip_periods=conf["data"]["skip_periods"],
-        one_shot=conf['data']['one_shot'],
+        one_shot=conf["data"]["one_shot"],
         max_forecast_len=conf["data"]["max_forecast_len"],
         transform=transforms,
-        sst_forcing=sst_forcing
+        sst_forcing=sst_forcing,
     )
-    
+
     # sampler
     sampler = DistributedSampler(
         dataset,
@@ -206,10 +132,12 @@ def load_dataset_and_sampler_zscore_only(conf,
         rank=rank,
         seed=seed,
         shuffle=is_train,
-        drop_last=True
+        drop_last=True,
     )
 
-    logging.info(f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len + 1})")
+    logging.info(
+        f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len + 1})"
+    )
 
     return dataset, sampler
 
@@ -228,52 +156,105 @@ def load_model_states_and_optimizer(conf, model, device):
     """
 
     # convert $USER to the actual user name
-    conf['save_loc'] = save_loc = os.path.expandvars(conf['save_loc'])
+    conf["save_loc"] = save_loc = os.path.expandvars(conf["save_loc"])
 
     # training hyperparameters
-    learning_rate = float(conf['trainer']['learning_rate'])
-    weight_decay = float(conf['trainer']['weight_decay'])
-    amp = conf['trainer']['amp']
+    learning_rate = float(conf["trainer"]["learning_rate"])
+    weight_decay = float(conf["trainer"]["weight_decay"])
+    amp = conf["trainer"]["amp"]
 
     # load weights / states flags
-    load_weights = False if 'load_weights' not in conf['trainer'] else conf['trainer']['load_weights']
-    load_optimizer_conf = False if 'load_optimizer' not in conf['trainer'] else conf['trainer']['load_optimizer']
-    load_scaler_conf = False if 'load_scaler' not in conf['trainer'] else conf['trainer']['load_scaler']
-    load_scheduler_conf = False if 'load_scheduler' not in conf['trainer'] else conf['trainer']['load_scheduler']
+    load_weights = (
+        False
+        if "load_weights" not in conf["trainer"]
+        else conf["trainer"]["load_weights"]
+    )
+    load_optimizer_conf = (
+        False
+        if "load_optimizer" not in conf["trainer"]
+        else conf["trainer"]["load_optimizer"]
+    )
+    load_scaler_conf = (
+        False
+        if "load_scaler" not in conf["trainer"]
+        else conf["trainer"]["load_scaler"]
+    )
+    load_scheduler_conf = (
+        False
+        if "load_scheduler" not in conf["trainer"]
+        else conf["trainer"]["load_scheduler"]
+    )
 
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
     if not load_weights:  # Loaded after loading model weights when reloading
-        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+            betas=(0.9, 0.95),
+        )
         if conf["trainer"]["mode"] == "fsdp":
             optimizer = FSDPOptimizerWrapper(optimizer, model)
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp)
+            if conf["trainer"]["mode"] == "fsdp"
+            else GradScaler(enabled=amp)
+        )
 
     # Multi-step training case -- when starting, only load the model weights (then after load all states)
-    elif load_weights and not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
-        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+    elif load_weights and not (
+        load_optimizer_conf or load_scaler_conf or load_scheduler_conf
+    ):
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+            betas=(0.9, 0.95),
+        )
         # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
-            logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+            logging.info(
+                f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+            )
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=learning_rate,
+                weight_decay=weight_decay,
+                betas=(0.9, 0.95),
+            )
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
+            checkpoint_io.load_unsharded_model(
+                model, os.path.join(save_loc, "model_checkpoint.pt")
+            )
         else:
             # DDP settings
             ckpt = os.path.join(save_loc, "checkpoint.pt")
             checkpoint = torch.load(ckpt, map_location=device)
             if conf["trainer"]["mode"] == "ddp":
-                logging.info(f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+                logging.info(
+                    f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                )
+                load_msg = model.module.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
             else:
-                logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-                load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+                logging.info(
+                    f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                )
+                load_msg = model.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
         # Load the learning rate scheduler and mixed precision grad scaler
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp)
+            if conf["trainer"]["mode"] == "fsdp"
+            else GradScaler(enabled=amp)
+        )
 
     # load optimizer and grad scaler states
     else:
@@ -282,28 +263,58 @@ def load_model_states_and_optimizer(conf, model, device):
 
         # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
-            logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+            logging.info(
+                f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+            )
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=learning_rate,
+                weight_decay=weight_decay,
+                betas=(0.9, 0.95),
+            )
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
-            if 'load_optimizer' in conf['trainer'] and conf['trainer']['load_optimizer']:
-                checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
+            checkpoint_io.load_unsharded_model(
+                model, os.path.join(save_loc, "model_checkpoint.pt")
+            )
+            if (
+                "load_optimizer" in conf["trainer"]
+                and conf["trainer"]["load_optimizer"]
+            ):
+                checkpoint_io.load_unsharded_optimizer(
+                    optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt")
+                )
 
         else:
             # DDP settings
             if conf["trainer"]["mode"] == "ddp":
-                logging.info(f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
+                logging.info(
+                    f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                )
                 model.module.load_state_dict(checkpoint["model_state_dict"])
             else:
-                logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
+                logging.info(
+                    f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                )
                 model.load_state_dict(checkpoint["model_state_dict"])
-            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
-            if 'load_optimizer' in conf['trainer'] and conf['trainer']['load_optimizer']:
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=learning_rate,
+                weight_decay=weight_decay,
+                betas=(0.9, 0.95),
+            )
+            if (
+                "load_optimizer" in conf["trainer"]
+                and conf["trainer"]["load_optimizer"]
+            ):
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp)
+            if conf["trainer"]["mode"] == "fsdp"
+            else GradScaler(enabled=amp)
+        )
 
         # Update the config file to the current epoch
         if "reload_epoch" in conf["trainer"] and conf["trainer"]["reload_epoch"]:
@@ -312,15 +323,19 @@ def load_model_states_and_optimizer(conf, model, device):
         if conf["trainer"]["start_epoch"] > 0:
             # Only reload the scheduler state if not starting over from epoch 0
             if scheduler is not None:
-                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
             # reload the AMP gradient scaler
-            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
     # Enable updating the lr if not using a policy
-    if (conf["trainer"]["update_learning_rate"] if "update_learning_rate" in conf["trainer"] else False):
+    if (
+        conf["trainer"]["update_learning_rate"]
+        if "update_learning_rate" in conf["trainer"]
+        else False
+    ):
         for param_group in optimizer.param_groups:
-            param_group['lr'] = learning_rate
+            param_group["lr"] = learning_rate
 
     return conf, model, optimizer, scheduler, scaler
 
@@ -341,47 +356,60 @@ def main(rank, world_size, conf, backend, trial=False):
     """
 
     # convert $USER to the actual user name
-    conf['save_loc'] = os.path.expandvars(conf['save_loc'])
+    conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     # infer device id from rank
 
-    device = torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
+    device = (
+        torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
     # Config settings
-    seed = 1000 if "seed" not in conf else conf["seed"]
+    seed = conf["seed"]
     seed_everything(seed)
 
-    train_batch_size = conf['trainer']['train_batch_size']
-    valid_batch_size = conf['trainer']['valid_batch_size']
-    thread_workers = conf['trainer']['thread_workers']
-    valid_thread_workers = conf['trainer']['valid_thread_workers'] if 'valid_thread_workers' in conf['trainer'] else thread_workers
+    train_batch_size = conf["trainer"]["train_batch_size"]
+    valid_batch_size = conf["trainer"]["valid_batch_size"]
+    thread_workers = conf["trainer"]["thread_workers"]
+    valid_thread_workers = (
+        conf["trainer"]["valid_thread_workers"]
+        if "valid_thread_workers" in conf["trainer"]
+        else thread_workers
+    )
 
     # get file names
     all_ERA_files = sorted(glob(conf["data"]["save_loc"]))
 
     # <------------------------------------------ std_new or 'std_cached'
-    if conf['data']['scaler_type'] == 'std_new' or 'std_cached':
-
+    if conf["data"]["scaler_type"] == "std_new" or "std_cached":
         # check and glob surface files
-        if ('surface_variables' in conf['data']) and (len(conf['data']['surface_variables']) > 0):
+        if ("surface_variables" in conf["data"]) and (
+            len(conf["data"]["surface_variables"]) > 0
+        ):
             surface_files = sorted(glob(conf["data"]["save_loc_surface"]))
 
         else:
             surface_files = None
 
         # check and glob dyn forcing files
-        if ('dynamic_forcing_variables' in conf['data']) and (len(conf['data']['dynamic_forcing_variables']) > 0):
+        if ("dynamic_forcing_variables" in conf["data"]) and (
+            len(conf["data"]["dynamic_forcing_variables"]) > 0
+        ):
             dyn_forcing_files = sorted(glob(conf["data"]["save_loc_dynamic_forcing"]))
 
         else:
             dyn_forcing_files = None
 
         # check and glob diagnostic files
-        if ('diagnostic_variables' in conf['data']) and (len(conf['data']['diagnostic_variables']) > 0):
+        if ("diagnostic_variables" in conf["data"]) and (
+            len(conf["data"]["diagnostic_variables"]) > 0
+        ):
             diagnostic_files = sorted(glob(conf["data"]["save_loc_diagnostic"]))
 
         else:
@@ -390,49 +418,77 @@ def main(rank, world_size, conf, backend, trial=False):
     # -------------------------------------------------- #
     # import training / validation years from conf
 
-    if 'train_years' in conf['data']:
-        train_years_range = conf['data']['train_years']
+    if "train_years" in conf["data"]:
+        train_years_range = conf["data"]["train_years"]
     else:
         train_years_range = [1979, 2014]
 
-    if 'valid_years' in conf['data']:
-        valid_years_range = conf['data']['valid_years']
+    if "valid_years" in conf["data"]:
+        valid_years_range = conf["data"]["valid_years"]
     else:
         valid_years_range = [2014, 2018]
 
     # convert year info to str for file name search
-    train_years = [str(year) for year in range(train_years_range[0], train_years_range[1])]
-    valid_years = [str(year) for year in range(valid_years_range[0], valid_years_range[1])]
+    train_years = [
+        str(year) for year in range(train_years_range[0], train_years_range[1])
+    ]
+    valid_years = [
+        str(year) for year in range(valid_years_range[0], valid_years_range[1])
+    ]
 
     # Filter the files for training / validation
-    train_files = [file for file in all_ERA_files if any(year in file for year in train_years)]
-    valid_files = [file for file in all_ERA_files if any(year in file for year in valid_years)]
+    train_files = [
+        file for file in all_ERA_files if any(year in file for year in train_years)
+    ]
+    valid_files = [
+        file for file in all_ERA_files if any(year in file for year in valid_years)
+    ]
 
     # <----------------------------------- std_new or 'std_cached'
-    if conf['data']['scaler_type'] == 'std_new' or 'std_cached':
-
+    if conf["data"]["scaler_type"] == "std_new" or "std_cached":
         if surface_files is not None:
+            train_surface_files = [
+                file
+                for file in surface_files
+                if any(year in file for year in train_years)
+            ]
+            valid_surface_files = [
+                file
+                for file in surface_files
+                if any(year in file for year in valid_years)
+            ]
 
-            train_surface_files = [file for file in surface_files if any(year in file for year in train_years)]
-            valid_surface_files = [file for file in surface_files if any(year in file for year in valid_years)]
-            
         else:
             train_surface_files = None
             valid_surface_files = None
 
         if dyn_forcing_files is not None:
-
-            train_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in train_years)]
-            valid_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in valid_years)]
+            train_dyn_forcing_files = [
+                file
+                for file in dyn_forcing_files
+                if any(year in file for year in train_years)
+            ]
+            valid_dyn_forcing_files = [
+                file
+                for file in dyn_forcing_files
+                if any(year in file for year in valid_years)
+            ]
 
         else:
             train_dyn_forcing_files = None
             valid_dyn_forcing_files = None
 
         if diagnostic_files is not None:
-
-            train_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in train_years)]
-            valid_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in valid_years)]
+            train_diagnostic_files = [
+                file
+                for file in diagnostic_files
+                if any(year in file for year in train_years)
+            ]
+            valid_diagnostic_files = [
+                file
+                for file in diagnostic_files
+                if any(year in file for year in valid_years)
+            ]
 
         else:
             train_diagnostic_files = None
@@ -440,24 +496,31 @@ def main(rank, world_size, conf, backend, trial=False):
 
     # load dataset and sampler
     # <----------------------------------- std_new or 'std_cached'
-    if conf['data']['scaler_type'] == 'std_new' or 'std_cached':
+    if conf["data"]["scaler_type"] == "std_new" or "std_cached":
         # training set and sampler
-        train_dataset, train_sampler = load_dataset_and_sampler_zscore_only(conf,
-                                                                            train_files,
-                                                                            train_surface_files,
-                                                                            train_dyn_forcing_files,
-                                                                            train_diagnostic_files,
-                                                                            world_size, rank, is_train=True)
+        train_dataset, train_sampler = load_dataset_and_sampler_zscore_only(
+            conf,
+            train_files,
+            train_surface_files,
+            train_dyn_forcing_files,
+            train_diagnostic_files,
+            world_size,
+            rank,
+            is_train=True,
+        )
         # validation set and sampler
-        valid_dataset, valid_sampler = load_dataset_and_sampler_zscore_only(conf,
-                                                                            valid_files,
-                                                                            valid_surface_files,
-                                                                            valid_dyn_forcing_files,
-                                                                            valid_diagnostic_files,
-                                                                            world_size, rank, is_train=False)
+        valid_dataset, valid_sampler = load_dataset_and_sampler_zscore_only(
+            conf,
+            valid_files,
+            valid_surface_files,
+            valid_dyn_forcing_files,
+            valid_diagnostic_files,
+            world_size,
+            rank,
+            is_train=False,
+        )
     else:
-        train_dataset, train_sampler = load_dataset_and_sampler(conf, train_files, world_size, rank, is_train=True)
-        valid_dataset, valid_sampler = load_dataset_and_sampler(conf, valid_files, world_size, rank, is_train=False)
+        raise Exception("unsupported scaler")
 
     # setup the dataloder for this process
 
@@ -469,7 +532,7 @@ def main(rank, world_size, conf, backend, trial=False):
         pin_memory=True,
         persistent_workers=True if thread_workers > 0 else False,
         num_workers=thread_workers,
-        drop_last=True
+        drop_last=True,
     )
 
     valid_loader = torch.utils.data.DataLoader(
@@ -479,7 +542,7 @@ def main(rank, world_size, conf, backend, trial=False):
         sampler=valid_sampler,
         pin_memory=False,
         num_workers=valid_thread_workers,
-        drop_last=True
+        drop_last=True,
     )
 
     # model
@@ -500,7 +563,9 @@ def main(rank, world_size, conf, backend, trial=False):
 
     # Load model weights (if any), an optimizer, scheduler, and gradient scaler
 
-    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
+    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(
+        conf, model, device
+    )
 
     # Train and validation losses
 
@@ -530,7 +595,7 @@ def main(rank, world_size, conf, backend, trial=False):
         scheduler=scheduler,
         metrics=metrics,
         rollout_scheduler=annealed_probability,  # Optional
-        trial=trial  # Optional
+        trial=trial,  # Optional
     )
 
     return result
@@ -571,8 +636,8 @@ class Objective(BaseObjective):
             Any: The result of the training process.
         """
 
-        conf['model']['dim_head'] = conf['model']['dim']
-        conf['model']['vq_codebook_dim'] = conf['model']['dim']
+        conf["model"]["dim_head"] = conf["model"]["dim"]
+        conf["model"]["vq_codebook_dim"] = conf["model"]["dim"]
 
         try:
             return main(0, 1, conf, trial=trial)
@@ -594,7 +659,6 @@ class Objective(BaseObjective):
 
 
 if __name__ == "__main__":
-
     description = "Train a segmengation model on a hologram data set"
     parser = ArgumentParser(description=description)
     parser.add_argument(
@@ -618,7 +682,7 @@ if __name__ == "__main__":
         dest="wandb",
         type=int,
         default=0,
-        help="Use wandb. Default = False"
+        help="Use wandb. Default = False",
     )
     parser.add_argument(
         "--backend",
@@ -650,9 +714,11 @@ if __name__ == "__main__":
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     # ======================================================== #
-    if conf['data']['scaler_type'] == 'std_new' or 'std_cached':
-        conf = CREDIT_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
-        training_data_check(conf, print_summary=False)
+    # handling config args
+    conf = credit_main_parser(
+        conf, parse_training=True, parse_predict=False, print_summary=False
+    )
+    training_data_check(conf, print_summary=False)
     # ======================================================== #
 
     # Create directories if they do not exist and copy yml file
@@ -666,7 +732,7 @@ if __name__ == "__main__":
     if launch:
         # Where does this script live?
         script_path = Path(__file__).absolute()
-        if conf['pbs']['queue'] == 'casper':
+        if conf["pbs"]["queue"] == "casper":
             logging.info("Launching to PBS on Casper")
             launch_script(config, script_path)
         else:
@@ -676,12 +742,13 @@ if __name__ == "__main__":
 
     if use_wandb:  # this needs updated
         import wandb
+
         wandb.init(
             # set the wandb project where this run will be logged
             project="Derecho parallelism",
             name=f"Worker {os.environ['RANK']} {os.environ['WORLD_SIZE']}",
             # track hyperparameters and run metadata
-            config=conf
+            config=conf,
         )
 
     local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])

@@ -25,14 +25,11 @@ from credit.loss404 import VariableTotalLoss2D
 from credit.data404 import CONUS404Dataset
 from credit.transforms404 import NormalizeState, ToTensor
 from credit.scheduler import load_scheduler, annealed_probability
-from credit.trainer404 import Trainer
-from credit.metrics404 import LatWeightedMetrics
+from credit.trainers.trainer404 import Trainer
+from credit.metrics import LatWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
 from credit.seed import seed_everything
-from credit.models.checkpoint import (
-    FSDPOptimizerWrapper,
-    TorchFSDPCheckpointIO
-)
+from credit.models.checkpoint import FSDPOptimizerWrapper, TorchFSDPCheckpointIO
 
 
 warnings.filterwarnings("ignore")
@@ -41,8 +38,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
-os.environ['NCCL_SHM_DISABLE'] = '1'
-os.environ['NCCL_IB_DISABLE'] = '1'
+os.environ["NCCL_SHM_DISABLE"] = "1"
+os.environ["NCCL_IB_DISABLE"] = "1"
 
 
 # https://stackoverflow.com/questions/59129812/how-to-avoid-cuda-out-of-memory-in-pytorch
@@ -56,6 +53,7 @@ def setup(rank, world_size, mode):
 
 def load_dataset_and_sampler(conf, world_size, rank, is_train, seed=42):
     from torchvision import transforms
+
     history_len = conf["data"]["history_len"]
     forecast_len = conf["data"]["forecast_len"]
     valid_history_len = conf["data"]["valid_history_len"]
@@ -68,19 +66,16 @@ def load_dataset_and_sampler(conf, world_size, rank, is_train, seed=42):
     shuffle = is_train
     name = "train" if is_train else "validate"
 
-    transforms = transforms.Compose([
-        NormalizeState(conf),
-        ToTensor(conf)
-    ])
+    transforms = transforms.Compose([NormalizeState(conf), ToTensor(conf)])
 
     dataset = CONUS404Dataset(
         zarrpath="/glade/campaign/ral/risc/DATA/conus404/zarr",
-        varnames=conf['data']['variables'],
-        history_len=conf['data']['history_len'],
-        forecast_len=conf['data']['forecast_len'],
+        varnames=conf["data"]["variables"],
+        history_len=conf["data"]["history_len"],
+        forecast_len=conf["data"]["forecast_len"],
         transform=transforms,
-        start=conf['data']['start'],
-        finish=conf['data']['finish']
+        start=conf["data"]["start"],
+        finish=conf["data"]["finish"],
     )
 
     ## todo: conf['data']['start'][name] ('train' or 'validate') here & in config
@@ -92,63 +87,113 @@ def load_dataset_and_sampler(conf, world_size, rank, is_train, seed=42):
         rank=rank,
         seed=seed,
         shuffle=shuffle,
-        drop_last=True
+        drop_last=True,
     )
-    logging.info(f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len})")
+    logging.info(
+        f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len})"
+    )
 
     return dataset, sampler
 
 
 def load_model_states_and_optimizer(conf, model, device):
-
-    start_epoch = conf['trainer']['start_epoch']
-    save_loc = os.path.expandvars(conf['save_loc'])
-    learning_rate = float(conf['trainer']['learning_rate'])
-    weight_decay = float(conf['trainer']['weight_decay'])
-    amp = conf['trainer']['amp']
-    load_weights = False if 'load_weights' not in conf['trainer'] else conf['trainer']['load_weights']
+    start_epoch = conf["trainer"]["start_epoch"]
+    save_loc = os.path.expandvars(conf["save_loc"])
+    learning_rate = float(conf["trainer"]["learning_rate"])
+    weight_decay = float(conf["trainer"]["weight_decay"])
+    amp = conf["trainer"]["amp"]
+    load_weights = (
+        False
+        if "load_weights" not in conf["trainer"]
+        else conf["trainer"]["load_weights"]
+    )
 
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
-    if start_epoch == 0 and not load_weights:  # Loaded after loading model weights when reloading
-        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+    if (
+        start_epoch == 0 and not load_weights
+    ):  # Loaded after loading model weights when reloading
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+            betas=(0.9, 0.95),
+        )
         if conf["trainer"]["mode"] == "fsdp":
             optimizer = FSDPOptimizerWrapper(optimizer, model)
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp)
+            if conf["trainer"]["mode"] == "fsdp"
+            else GradScaler(enabled=amp)
+        )
 
     # load optimizer and grad scaler states
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
         if conf["trainer"]["mode"] == "fsdp":
-            logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
+            logging.info(
+                f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+            )
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=learning_rate,
+                weight_decay=weight_decay,
+                betas=(0.9, 0.95),
+            )
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
-            if 'load_optimizer' in conf['trainer'] and conf['trainer']['load_optimizer']:
-                checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
+            checkpoint_io.load_unsharded_model(
+                model, os.path.join(save_loc, "model_checkpoint.pt")
+            )
+            if (
+                "load_optimizer" in conf["trainer"]
+                and conf["trainer"]["load_optimizer"]
+            ):
+                checkpoint_io.load_unsharded_optimizer(
+                    optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt")
+                )
         else:
             if conf["trainer"]["mode"] == "ddp":
-                logging.info(f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
+                logging.info(
+                    f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                )
                 model.module.load_state_dict(checkpoint["model_state_dict"])
             else:
-                logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
+                logging.info(
+                    f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                )
                 model.load_state_dict(checkpoint["model_state_dict"])
-            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.95))
-            if 'load_optimizer' in conf['trainer'] and conf['trainer']['load_optimizer']:
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=learning_rate,
+                weight_decay=weight_decay,
+                betas=(0.9, 0.95),
+            )
+            if (
+                "load_optimizer" in conf["trainer"]
+                and conf["trainer"]["load_optimizer"]
+            ):
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp)
+            if conf["trainer"]["mode"] == "fsdp"
+            else GradScaler(enabled=amp)
+        )
         if scheduler is not None:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
     # Enable updating the lr if not using a policy
-    if (conf["trainer"]["update_learning_rate"] if "update_learning_rate" in conf["trainer"] else False):
+    if (
+        conf["trainer"]["update_learning_rate"]
+        if "update_learning_rate" in conf["trainer"]
+        else False
+    ):
         for param_group in optimizer.param_groups:
-            param_group['lr'] = learning_rate
+            param_group["lr"] = learning_rate
 
     return model, optimizer, scheduler, scaler
 
@@ -160,7 +205,9 @@ def model_and_memory_summary(conf):
     frames = conf["model"]["frames"]
     height = conf["model"]["image_height"]
     width = conf["model"]["image_width"]
-    device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    device = (
+        torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    )
 
     # Set seeds
 
@@ -186,23 +233,30 @@ def model_and_memory_summary(conf):
 
 
 def main(rank, world_size, conf, trial=False):
-
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"])
 
     # infer device id from rank
 
-    device = torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
+    device = (
+        torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
     # Config settings
     seed = 1000 if "seed" not in conf else conf["seed"]
     seed_everything(seed)
 
-    train_batch_size = conf['trainer']['train_batch_size']
-    valid_batch_size = conf['trainer']['valid_batch_size']
-    thread_workers = conf['trainer']['thread_workers']
-    valid_thread_workers = conf['trainer']['valid_thread_workers'] if 'valid_thread_workers' in conf['trainer'] else thread_workers
+    train_batch_size = conf["trainer"]["train_batch_size"]
+    valid_batch_size = conf["trainer"]["valid_batch_size"]
+    thread_workers = conf["trainer"]["thread_workers"]
+    valid_thread_workers = (
+        conf["trainer"]["valid_thread_workers"]
+        if "valid_thread_workers" in conf["trainer"]
+        else thread_workers
+    )
 
     # datasets (zarr reader)
 
@@ -232,8 +286,12 @@ def main(rank, world_size, conf, trial=False):
 
     # load dataset and sampler
 
-    train_dataset, train_sampler = load_dataset_and_sampler(conf, world_size, rank, is_train=True)
-    valid_dataset, valid_sampler = load_dataset_and_sampler(conf, world_size, rank, is_train=False)
+    train_dataset, train_sampler = load_dataset_and_sampler(
+        conf, world_size, rank, is_train=True
+    )
+    valid_dataset, valid_sampler = load_dataset_and_sampler(
+        conf, world_size, rank, is_train=False
+    )
 
     # setup the dataloder for this process
 
@@ -245,7 +303,7 @@ def main(rank, world_size, conf, trial=False):
         pin_memory=True,
         persistent_workers=True if thread_workers > 0 else False,
         num_workers=thread_workers,
-        drop_last=True
+        drop_last=True,
     )
 
     valid_loader = torch.utils.data.DataLoader(
@@ -255,7 +313,7 @@ def main(rank, world_size, conf, trial=False):
         sampler=valid_sampler,
         pin_memory=False,
         num_workers=valid_thread_workers,
-        drop_last=True
+        drop_last=True,
     )
 
     # model
@@ -273,7 +331,9 @@ def main(rank, world_size, conf, trial=False):
 
     # Load model weights (if any), an optimizer, scheduler, and gradient scaler
 
-    model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
+    model, optimizer, scheduler, scaler = load_model_states_and_optimizer(
+        conf, model, device
+    )
 
     # Train and validation losses
 
@@ -303,7 +363,7 @@ def main(rank, world_size, conf, trial=False):
         scheduler,
         metrics,
         rollout_scheduler=annealed_probability,
-        trial=trial
+        trial=trial,
     )
 
     return result
@@ -311,14 +371,12 @@ def main(rank, world_size, conf, trial=False):
 
 class Objective(BaseObjective):
     def __init__(self, config, metric="val_loss", device="cpu"):
-
         # Initialize the base class
         BaseObjective.__init__(self, config, metric, device)
 
     def train(self, trial, conf):
-
-        conf['model']['dim_head'] = conf['model']['dim']
-        conf['model']['vq_codebook_dim'] = conf['model']['dim']
+        conf["model"]["dim_head"] = conf["model"]["dim"]
+        conf["model"]["vq_codebook_dim"] = conf["model"]["dim"]
 
         try:
             return main(0, 1, conf, trial=trial)
@@ -340,7 +398,6 @@ class Objective(BaseObjective):
 
 
 if __name__ == "__main__":
-
     description = "Train a segmengation model on a hologram data set"
     parser = ArgumentParser(description=description)
     parser.add_argument(
@@ -364,7 +421,7 @@ if __name__ == "__main__":
         dest="summary",
         type=int,
         default=0,
-        help="Get a summary of the models size and memory footprint"
+        help="Get a summary of the models size and memory footprint",
     )
     parser.add_argument(
         "-w",
@@ -372,7 +429,7 @@ if __name__ == "__main__":
         dest="wandb",
         type=int,
         default=0,
-        help="Use wandb. Default = False"
+        help="Use wandb. Default = False",
     )
     args = parser.parse_args()
     args_dict = vars(args)
@@ -410,7 +467,7 @@ if __name__ == "__main__":
     if launch:
         # Where does this script live?
         script_path = Path(__file__).absolute()
-        if conf['pbs']['queue'] == 'casper':
+        if conf["pbs"]["queue"] == "casper":
             logging.info("Launching to PBS on Casper")
             launch_script(config, script_path)
         else:
@@ -424,7 +481,7 @@ if __name__ == "__main__":
             project="Derecho parallelism",
             name=f"Worker {os.environ['RANK']} {os.environ['WORLD_SIZE']}",
             # track hyperparameters and run metadata
-            config=conf
+            config=conf,
         )
 
     seed = 1000 if "seed" not in conf else conf["seed"]
