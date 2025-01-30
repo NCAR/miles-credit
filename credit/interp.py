@@ -44,6 +44,8 @@ def full_state_pressure_interpolation(
         lon_var (str): longitude coordinate
         pres_var (str): pressure coordinate
         level_var (str): name of level coordinate
+        coef_a (str): name of coefficient a (pressure = a + b * surface_pressure)
+        coef_b (str): name of coefficient b (pressure = a + b * surface_pressure)
         model_level_file (str): relative path to file containing model levels.
         verbose (int): verbosity level. If verbose > 0, print progress.
     Returns:
