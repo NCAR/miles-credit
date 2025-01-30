@@ -21,8 +21,8 @@ def full_state_pressure_interpolation(
     lon_var: str = "longitude",
     pres_var: str = "pressure",
     level_var: str = "level",
-    coef_a: str = "model_a",
-    coef_b: str = "model_b",
+    coef_a: str = "a_model",
+    coef_b: str = "b_model",
     model_level_file: str = "../credit/metadata/ERA5_Lev_Info.nc",
     verbose: int = 1,
 ) -> xr.Dataset:
@@ -49,11 +49,16 @@ def full_state_pressure_interpolation(
     Returns:
         pressure_ds (xr.Dataset): Dataset containing pressure interpolated variables.
     """
+    
     path_to_file = os.path.abspath(os.path.dirname(__file__))
     model_level_file = os.path.join(path_to_file, model_level_file)
+
+    # get model level coeffs
     with xr.open_dataset(model_level_file) as mod_lev_ds:
         model_a = mod_lev_ds[coef_a].loc[state_dataset[level_var]].values
         model_b = mod_lev_ds[coef_b].loc[state_dataset[level_var]].values
+
+    # allocate `pressure_ds` as output
     pres_dims = (time_var, pres_var, lat_var, lon_var)
     coords = {
         time_var: state_dataset[time_var],
@@ -61,6 +66,7 @@ def full_state_pressure_interpolation(
         lat_var: state_dataset[lat_var],
         lon_var: state_dataset[lon_var],
     }
+    
     pressure_ds = xr.Dataset(
         data_vars={
             f + pres_ending: xr.DataArray(
@@ -73,16 +79,25 @@ def full_state_pressure_interpolation(
         },
         coords=coords,
     )
+
+    # add geopotential height to the collection
     pressure_ds[geopotential_var + pres_ending] = xr.DataArray(
         coords=coords, dims=pres_dims, name=geopotential_var
     )
+
+    # verbose
     disable = False
     if verbose == 0:
         disable = True
+
+    # main interpolation loop
     for t, time in tqdm(enumerate(state_dataset[time_var]), disable=disable):
+        # get pressure on model levels
         pressure_grid = create_pressure_grid(
             state_dataset[surface_pressure_var][t].values, model_a, model_b
         )
+
+        # compute geopotential height on model levels
         geopotential_grid = geopotential_from_model_vars(
             state_dataset[surface_geopotential_var][t].values,
             state_dataset[surface_pressure_var][t].values,
@@ -91,6 +106,8 @@ def full_state_pressure_interpolation(
             model_a,
             model_b,
         )
+
+        # interpolate U, V, T, Q to pressure level
         for interp_field in interp_fields:
             pressure_ds[interp_field + pres_ending][t] = (
                 interp_hybrid_to_pressure_levels(
@@ -99,6 +116,8 @@ def full_state_pressure_interpolation(
                     pressure_levels,
                 )
             )
+
+        # interpolate geopotential height to pressure level
         pressure_ds[geopotential_var + pres_ending][t] = (
             interp_hybrid_to_pressure_levels(
                 geopotential_grid, pressure_grid / 100.0, pressure_levels
