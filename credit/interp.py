@@ -51,15 +51,23 @@ def full_state_pressure_interpolation(
     Returns:
         pressure_ds (xr.Dataset): Dataset containing pressure interpolated variables.
     """
+    # ensure that `pressure_levels` is a numpy array
+    pressure_levels = np.array(pressure_levels)
     
     path_to_file = os.path.abspath(os.path.dirname(__file__))
     model_level_file = os.path.join(path_to_file, model_level_file)
 
     # get model level coeffs
     with xr.open_dataset(model_level_file) as mod_lev_ds:
-        model_a = mod_lev_ds[coef_a].loc[state_dataset[level_var]].values
-        model_b = mod_lev_ds[coef_b].loc[state_dataset[level_var]].values
+        
+        # get the needed model levels 
+        ind_model_level = state_dataset[level_var].values
 
+        # the coefs on the needed levels
+        model_a = mod_lev_ds[coef_a].loc[ind_model_level].values
+        model_b = mod_lev_ds[coef_b].loc[ind_model_level].values
+        GPH_surf = mod_lev_ds[surface_geopotential_var].values
+        
     # allocate `pressure_ds` as output
     pres_dims = (time_var, pres_var, lat_var, lon_var)
     coords = {
@@ -101,10 +109,10 @@ def full_state_pressure_interpolation(
 
         # compute geopotential height on model levels
         geopotential_grid = geopotential_from_model_vars(
-            state_dataset[surface_geopotential_var][t].values,
-            state_dataset[surface_pressure_var][t].values,
-            state_dataset[temperature_var][t].values,
-            state_dataset[q_var][t].values,
+            GPH_surf,                                       # geopotential at surface 
+            state_dataset[surface_pressure_var][t].values,  # surface pressure
+            state_dataset[temperature_var][t].values,       # air temperature
+            state_dataset[q_var][t].values,                 # humidity
             model_a,
             model_b,
         )
