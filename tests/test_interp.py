@@ -10,6 +10,9 @@ def test_full_state_pressure_interpolation():
     input_file = os.path.join(path_to_test, "data/test_interp.nc")
     ds = xr.open_dataset(input_file)
 
+    # load static file with interpolation info 
+    model_level_file = os.path.join(path_to_test, "data/test_interp_static.nc")
+    
     # pressure levels to interpolate
     pressure_levels = np.array([200.0, 500.0, 700.0, 850.0, 1000.0])
 
@@ -19,7 +22,7 @@ def test_full_state_pressure_interpolation():
         pressure_levels=pressure_levels, 
         lat_var="lat", 
         lon_var="lon",
-        model_level_file="data/test_interp_static.nc"
+        model_level_file=model_level_file
     )
 
     # validation
