@@ -153,6 +153,8 @@ trainer:
     cpu_offload: False
     # save forward pass activation to checkpoints and free GPU memory
     activation_checkpoint: True
+    # Set to True for all layers with activations otherwise use custom (see credit/distributed.py)
+    checkpoint_all_layers: False
 
     # (optional) use torch.compile: False. May not be compatible with custom models
     compile: False
@@ -239,11 +241,11 @@ trainer:
         reduce_dtype: "float32"
         buffer_dtype: "float32"
 
-    # rescale loss as loss = loss / grad_accum_every
+    # rescale loss as loss = loss / grad_accum_every -- currently is not being used
     grad_accum_every: 1
 
-    # gradient clipping. Set to 0 to ignore
-    grad_max_norm: 1.0
+    # gradient clipping. Set to 'dynamic' to compute global norm (default). Set to 0 to ignore entirely.
+    grad_max_norm: 'dynamic'
     
     # number of CPU workers used in datasets/dataloaders
     thread_workers: 4

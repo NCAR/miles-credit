@@ -74,13 +74,14 @@ class Trainer(BaseTrainer):
         """
 
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
-        grad_max_norm = conf["trainer"]["grad_max_norm"]
+        grad_max_norm = conf["trainer"].get("grad_max_norm", 0.0)
         amp = conf["trainer"]["amp"]
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
         forecast_length = conf["data"]["forecast_len"]
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
         if ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {ensemble_size}")
+        logger.info(f"Using grad-max-norm value: {grad_max_norm}")
 
         # number of diagnostic variables
         varnum_diag = len(conf["data"]["diagnostic_variables"])
@@ -190,10 +191,10 @@ class Trainer(BaseTrainer):
                     else:
                         # no x_surf
                         x = reshape_only(batch["x"]).to(self.device)  # .float()
-                    
+
                     # --------------------------------------------- #
                     # ensemble x and x_surf on initialization
-                    # copies each sample in the batch ensemble_size number of times. 
+                    # copies each sample in the batch ensemble_size number of times.
                     # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                     # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
                     if ensemble_size > 1:
@@ -207,8 +208,10 @@ class Trainer(BaseTrainer):
                     )  # .float()
                     # ---------------- ensemble ----------------- #
                     # ensemble x_forcing_batch for concat. see above for explanation of code
-                    if ensemble_size > 1: 
-                        x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                    if ensemble_size > 1:
+                        x_forcing_batch = torch.repeat_interleave(
+                            x_forcing_batch, ensemble_size, 0
+                        )
                     # --------------------------------------------- #
 
                     # concat on var dimension
@@ -320,10 +323,34 @@ class Trainer(BaseTrainer):
             if distributed:
                 torch.distributed.barrier()
 
+            # Grad norm clipping
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), max_norm=grad_max_norm
-            )
+            if grad_max_norm == "dynamic":
+                # Compute local L2 norm
+                local_norm = torch.norm(
+                    torch.stack(
+                        [
+                            p.grad.detach().norm(2)
+                            for p in self.model.parameters()
+                            if p.grad is not None
+                        ]
+                    )
+                )
+
+                # All-reduce to get global norm across ranks
+                dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
+                global_norm = local_norm.sqrt()  # Compute total global norm
+
+                # Clip gradients using the global norm
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=global_norm
+                )
+            elif grad_max_norm > 0.0:
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=grad_max_norm
+                )
+
+            # Step optimizer
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
@@ -507,7 +534,7 @@ class Trainer(BaseTrainer):
                             x = reshape_only(batch["x"]).to(self.device)  # .float()
                         # --------------------------------------------- #
                         # ensemble x and x_surf on initialization
-                        # copies each sample in the batch ensemble_size number of times. 
+                        # copies each sample in the batch ensemble_size number of times.
                         # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                         # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
                         if ensemble_size > 1:
@@ -523,8 +550,10 @@ class Trainer(BaseTrainer):
                         )  # .float()
                         # ---------------- ensemble ----------------- #
                         # ensemble x_forcing_batch for concat. see above for explanation of code
-                        if ensemble_size > 1: 
-                            x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                        if ensemble_size > 1:
+                            x_forcing_batch = torch.repeat_interleave(
+                                x_forcing_batch, ensemble_size, 0
+                            )
                         # --------------------------------------------- #
 
                         # concat on var dimension

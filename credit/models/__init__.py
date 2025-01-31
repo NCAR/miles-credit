@@ -49,8 +49,57 @@ model_types = {
     "fuxi": (Fuxi, "Loading Fuxi model"),
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
-    "debugger": (DebuggerModel, "Loading the debugger model")
+    "debugger": (DebuggerModel, "Loading the debugger model"),
 }
+
+
+# Define FSDP sharding and/or checkpointing policy
+def load_fsdp_or_checkpoint_policy(conf):
+    # crossformer
+    if "crossformer" in conf["model"]["type"]:
+        from credit.models.crossformer import (
+            Attention,
+            DynamicPositionBias,
+            FeedForward,
+            CrossEmbedLayer,
+        )
+
+        transformer_layers_cls = {
+            Attention,
+            DynamicPositionBias,
+            FeedForward,
+            CrossEmbedLayer,
+        }
+
+    # FuXi
+    # FuXi supports "spectral_norm = True" only
+    elif "fuxi" in conf["model"]["type"]:
+        from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
+
+        transformer_layers_cls = {SwinTransformerV2Stage}
+
+    # Swin by itself
+    elif "swin" in conf["model"]["type"]:
+        from credit.models.swin import (
+            SwinTransformerV2CrBlock,
+            WindowMultiHeadAttentionNoPos,
+            WindowMultiHeadAttention,
+        )
+
+        transformer_layers_cls = {
+            SwinTransformerV2CrBlock,
+            WindowMultiHeadAttentionNoPos,
+            WindowMultiHeadAttention,
+        }
+
+    # other models not supported
+    else:
+        raise OSError(
+            "You asked for FSDP but only crossformer, swin, and fuxi are currently supported.",
+            "See credit/models/__init__.py for examples on adding new models",
+        )
+
+    return transformer_layers_cls
 
 
 def load_model(conf, load_weights=False):

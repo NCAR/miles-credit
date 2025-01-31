@@ -27,15 +27,16 @@ from credit.loss import VariableTotalLoss2D
 from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
 from credit.parser import credit_main_parser, training_data_check
-from credit.datasets.load_dataset_and_dataloader import (
-    load_dataset,
-    load_dataloader
-)
+from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
 
 from credit.metrics import LatWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
-from credit.models.checkpoint import FSDPOptimizerWrapper, TorchFSDPCheckpointIO, load_state_dict_error_handler
+from credit.models.checkpoint import (
+    FSDPOptimizerWrapper,
+    TorchFSDPCheckpointIO,
+    load_state_dict_error_handler,
+)
 
 
 warnings.filterwarnings("ignore")
@@ -46,6 +47,9 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 # https://stackoverflow.com/questions/59129812/how-to-avoid-cuda-out-of-memory-in-pytorch
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# os.environ["NCCL_P2P_DISABLE"] = "1"
+# os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+
 
 def load_model_states_and_optimizer(conf, model, device):
     """
@@ -141,15 +145,17 @@ def load_model_states_and_optimizer(conf, model, device):
                 logging.info(
                     f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"],
-                                                 strict=False)
+                load_msg = model.module.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
             else:
                 logging.info(
                     f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                load_msg = model.load_state_dict(checkpoint["model_state_dict"],
-                                                 strict=False)
+                load_msg = model.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
 
         # Load the learning rate scheduler and mixed precision grad scaler
@@ -195,15 +201,17 @@ def load_model_states_and_optimizer(conf, model, device):
                 logging.info(
                     f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"],
-                                                 strict=False)
+                load_msg = model.module.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
             else:
                 logging.info(
                     f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                load_msg = model.load_state_dict(checkpoint["model_state_dict"],
-                                                 strict=False)
+                load_msg = model.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
 
             optimizer = torch.optim.AdamW(
@@ -287,8 +295,12 @@ def main(rank, world_size, conf, backend, trial=False):
     valid_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=False)
 
     # Load the dataloader
-    train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
-    valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
+    train_loader = load_dataloader(
+        conf, train_dataset, rank=rank, world_size=world_size, is_train=True
+    )
+    valid_loader = load_dataloader(
+        conf, valid_dataset, rank=rank, world_size=world_size, is_train=False
+    )
 
     # model
     m = load_model(conf)
