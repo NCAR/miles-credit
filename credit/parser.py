@@ -435,6 +435,7 @@ def credit_main_parser(
         # # debug only
         conf["model"]["post_conf"]["varname_input"] = varname_input
         conf["model"]["post_conf"]["varname_output"] = varname_output
+        
         # --------------------------------------------------------------------- #
 
     # SKEBS
@@ -495,6 +496,7 @@ def credit_main_parser(
             "grid_type", "pressure"
         )
 
+
         assert (
             "fix_level_num" in conf["model"]["post_conf"]["global_mass_fixer"]
         ), "Must specifiy what level to fix on specific total water"
@@ -519,6 +521,7 @@ def credit_main_parser(
             ]
         ]
         conf["model"]["post_conf"]["global_mass_fixer"]["q_inds"] = q_inds
+
 
         if conf["model"]["post_conf"]["global_mass_fixer"]["grid_type"] == "sigma":
             sp_inds = [
@@ -551,6 +554,7 @@ def credit_main_parser(
             "simple_demo", False
         )
         conf["model"]["post_conf"]["global_water_fixer"].setdefault("midpoint", False)
+
         conf["model"]["post_conf"]["global_water_fixer"].setdefault(
             "grid_type", "pressure"
         )
@@ -565,7 +569,6 @@ def credit_main_parser(
                 "surface_pressure_name"
                 in conf["model"]["post_conf"]["global_water_fixer"]
             ), "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
-
         q_inds = [
             i_var
             for i_var, var in enumerate(varname_output)
@@ -592,6 +595,7 @@ def credit_main_parser(
         conf["model"]["post_conf"]["global_water_fixer"]["q_inds"] = q_inds
         conf["model"]["post_conf"]["global_water_fixer"]["precip_ind"] = precip_inds[0]
         conf["model"]["post_conf"]["global_water_fixer"]["evapor_ind"] = evapor_inds[0]
+
 
         if conf["model"]["post_conf"]["global_water_fixer"]["grid_type"] == "sigma":
             sp_inds = [
@@ -624,6 +628,7 @@ def credit_main_parser(
             "simple_demo", False
         )
         conf["model"]["post_conf"]["global_energy_fixer"].setdefault("midpoint", False)
+
         conf["model"]["post_conf"]["global_energy_fixer"].setdefault(
             "grid_type", "pressure"
         )
@@ -717,7 +722,7 @@ def credit_main_parser(
                 ]
             ]
             conf["model"]["post_conf"]["global_energy_fixer"]["sp_inds"] = sp_inds[0]
-
+            
     # --------------------------------------------------------- #
     # conf['trainer'] section
 

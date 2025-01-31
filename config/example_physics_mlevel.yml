@@ -1,0 +1,247 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# example
+# --------------------------------------------------------------------------------------------------------------------- #
+save_loc: '/glade/work/$USER/CREDIT_runs/fuxi_conserve/'
+seed: 1000
+
+data:
+    # upper-air variables
+    variables: ['specific_total_water', 'temperature', 'u_component_of_wind','v_component_of_wind']
+    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
+    
+    # surface variables
+    surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
+    
+    # dynamic forcing variables
+    dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
+    
+    # diagnostic variables
+    diagnostic_variables: ['evaporation', 'total_precipitation',
+                           'surface_net_solar_radiation',
+                           'surface_net_thermal_radiation',
+                           'surface_sensible_heat_flux',
+                           'surface_latent_heat_flux',
+                           'top_net_solar_radiation',
+                           'top_net_thermal_radiation']
+                           
+    save_loc_diagnostic: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*_conserve.zarr'
+    
+    # static variables
+    static_variables: ['z_norm', 'soil_type'] 
+    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    # physics file
+    save_loc_physics: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    
+    # mean / std path
+    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+    
+    # train / validation split
+    train_years: [1979, 2019]
+    valid_years: [2019, 2020]
+    
+    # data workflow
+    scaler_type: 'std_new'  
+    
+    history_len: 2
+    valid_history_len: 2
+    
+    forecast_len: 0
+    valid_forecast_len: 0
+
+    one_shot: False
+    
+    # 1 for hourly model
+    lead_time_periods: 6
+    
+    # do not use skip_period
+    skip_periods: null
+    
+    # compatible with the old 'std'
+    static_first: True
+    
+    sst_forcing:
+        activate: False
+
+trainer:
+    type: standard # <---------- change to your type
+    
+    mode: none
+    cpu_offload: False
+    activation_checkpoint: True
+    
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_sheduler: False
+    num_epoch: 2
+    
+    skip_validation: False
+    update_learning_rate: False
+    
+    save_backup_weights: True
+    save_best_weights: True
+    save_metric_vars: ['VAR_10U', 'specific_total_water_30', 'total_precipitation']
+
+    learning_rate: 1.0e-03 # <-- change to your lr
+    weight_decay: 0
+    
+    train_batch_size: 1
+    valid_batch_size: 1
+    
+    batches_per_epoch: 2
+    valid_batches_per_epoch: 1
+    stopping_patience: 50
+    
+    start_epoch: 0
+
+    reload_epoch: True
+    epochs: &epochs 70
+    
+    use_scheduler: True
+    scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
+
+    # Automatic Mixed Precision: False
+    amp: False
+    
+    # rescale loss as loss = loss / grad_accum_every
+    grad_accum_every: 1 
+    # gradient clipping
+    grad_max_norm: 1.0
+    
+    # number of workers
+    thread_workers: 4
+    valid_thread_workers: 0
+
+model:
+    type: "fuxi"
+    
+    frames: 2                # number of input states
+    image_height: 181        # number of latitude grids
+    image_width: 360        # number of longitude grids
+    levels: 46               # number of upper-air variable levels
+    channels: 4              # upper-air variable channels
+    surface_channels: 4      # surface variable channels
+    input_only_channels: 4   # dynamic forcing, forcing, static channels
+    output_only_channels: 8  # diagnostic variable channels
+    
+    # patchify layer
+    patch_height: 32         # number of latitude grids in each 3D patch
+    patch_width: 32          # number of longitude grids in each 3D patch
+    frame_patch_size: 2     # number of input states in each 3D patch
+    
+    # hidden layers
+    dim: 128               # dimension (default: 1536)
+    num_groups: 2          # number of groups (default: 32)
+    num_heads: 8            # number of heads (default: 8)
+    window_size: 7          # window size (default: 7)
+    depth: 2               # number of swin transformers (default: 48)
+    
+    # use spectral norm
+    use_spectral_norm: True
+
+    # use interpolation to match the output size
+    interp: True
+    
+    # map boundary padding
+    padding_conf:
+        activate: True
+        mode: mirror
+        pad_lat: 40
+        pad_lon: 40
+
+    post_conf: 
+        activate: True
+        
+        skebs:
+            activate: False
+        
+        tracer_fixer:
+            activate: True
+            denorm: True
+            tracer_name: ['specific_total_water', 'total_precipitation']
+            tracer_thres: [0, 0]
+            
+        global_mass_fixer:
+            activate: True
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            fix_level_num: 14
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            specific_total_water_name: ['specific_total_water']
+
+        global_water_fixer:
+            activate: True
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            specific_total_water_name: ['specific_total_water']
+            precipitation_name: ['total_precipitation']
+            evaporation_name: ['evaporation']
+            
+        global_energy_fixer:
+            activate: True
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            air_temperature_name: ['temperature']
+            specific_total_water_name: ['specific_total_water']
+            u_wind_name: ['u_component_of_wind']
+            v_wind_name: ['v_component_of_wind']
+            surface_geopotential_name: ['geopotential_at_surface']
+            TOA_net_radiation_flux_name: ['top_net_solar_radiation', 'top_net_thermal_radiation']
+            surface_net_radiation_flux_name: ['surface_net_solar_radiation', 'surface_net_thermal_radiation']
+            surface_energy_flux_name: ['surface_sensible_heat_flux', 'surface_latent_heat_flux',]
+
+loss: 
+    # the main training loss
+    training_loss: "mse"
+    
+    # power loss (x), spectral_loss (x)
+    use_power_loss: False 
+    use_spectral_loss: False
+    
+    # use latitude weighting
+    use_latitude_weights: True
+    latitude_weights: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    # turn-off variable weighting
+    use_variable_weights: False
+    
+predict:
+    forecasts:
+        type: "custom"       # keep it as "custom"
+        start_year: 2020     # year of the first initialization (where rollout will start)
+        start_month: 1       # month of the first initialization
+        start_day: 1         # day of the first initialization
+        start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
+        duration: 2         # number of days to initialize, starting from the (year, mon, day) above
+                             # duration should be divisible by the number of GPUs 
+                             # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
+        days: 2              # forecast lead time as days (1 means 24-hour forecast)
+        
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT/fuxi_conserve/'
+    
+    # save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    
+    # turn-off low-pass filter
+    use_laplace_filter: False
+    
+    # deprecated
+    # save_format: "nc"
+    
