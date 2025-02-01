@@ -75,14 +75,15 @@ class BaseModel(nn.Module):
             ckpt,
             map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
         )
-
+        print(checkpoint)
         if "type" in conf["model"]:
             del conf["model"]["type"]
 
         model_class = cls(**conf["model"])
 
         model_class.load_state_dict(
-            checkpoint if fsdp else checkpoint["model_state_dict"]
+            checkpoint if fsdp else checkpoint["model_state_dict"],
+            strict=False
         )
 
         return model_class

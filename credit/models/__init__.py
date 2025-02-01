@@ -24,8 +24,7 @@ model_types = {
     "vit": (ViT2D, "Loading a Vision transformer architecture ..."),
     "vit3d": (ViT3D, "Loading a Vision transformer architecture ..."),
     "rvt": (
-        RViT,
-        "Loading a custom rotary transformer architecture with conv attention ...",
+            RViT, "Loading a custom rotary transformer architecture with conv attention ...",
     ),
     "simple-vit": (
         SimpleViT,

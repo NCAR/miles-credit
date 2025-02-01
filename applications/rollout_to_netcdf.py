@@ -59,6 +59,8 @@ def predict(rank, world_size, conf, p):
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
         torch.cuda.set_device(rank % torch.cuda.device_count())
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
     else:
         device = torch.device("cpu")
 
@@ -230,7 +232,7 @@ def predict(rank, world_size, conf, p):
     meta_data = load_metadata(conf)
 
     # Set up metrics and containers
-    metrics = LatWeightedMetrics(conf, predict_mode=True)
+    metrics = LatWeightedMetrics(conf)
     metrics_results = defaultdict(list)
 
     # Set up the diffusion and pole filters

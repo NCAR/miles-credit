@@ -16,7 +16,7 @@ import xarray as xr
 import netCDF4 as nc
 
 import torch
-from torchvision import transforms as tforms
+from torchvision.transforms import Compose
 
 from credit.data import Sample
 from bridgescaler import read_scaler
@@ -68,7 +68,7 @@ def load_transforms(conf, scaler_only=False):
     else:
         transforms = [to_tensor_scaler]
 
-    return tforms.Compose(transforms)
+    return Compose(transforms)
 
 
 class NormalizeState:
@@ -161,8 +161,13 @@ class Normalize_ERA5_and_Forcing:
         self.std_tensors = {}
 
         for var in varnames_all:
+            print(var)
             mean_array = self.mean_ds[var].values
             std_array = self.std_ds[var].values
+            if mean_array.size == 1:
+                mean_array = mean_array.item()
+                std_array = std_array.item()
+            print(mean_array)
             # convert to tensor
             self.mean_tensors[var] = torch.tensor(mean_array)  # .float()
             self.std_tensors[var] = torch.tensor(std_array)  # .float()
