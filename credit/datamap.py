@@ -173,7 +173,7 @@ class DataMap:
 
     rootpath: pathway to the files
     glob: filename glob of netcdf files
-    label: used by higher-level classes to decide how to use the datamap
+    component: used by higher-level classes to decide how to use the datamap
     dim: dimensions of the data:
         static: no time dimension; data is loaded on initialization
         3D: data has z-dimension; can unstack Z to pseudo-variables when reading
@@ -195,7 +195,7 @@ class DataMap:
     '''
     rootpath:     str
     glob:         str
-    label:        str = None
+    component:    str = None
     dim:          str = "2D"
     normalize:    bool = False
     unstack:      bool = False

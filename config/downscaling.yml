@@ -77,7 +77,7 @@ data:
         conus404_static:
             rootpath: *default
             glob: 'conus404/conus404.static.nc'
-            label: hires
+            component: hires
             dim: static
             normalize: True   # scale min,max == [0,1] iff dim = static
             boundary:
@@ -101,7 +101,7 @@ data:
         solar:
             rootpath: *default
             glob: 'solar/tisr.20km.*.nc'
-            label: lores
+            component: lores
             dim: 2D
             boundary:
               - tisr      # TOA incident solar radiation (J/m^2, integral dt)
@@ -115,7 +115,7 @@ data:
         era5_3D:
             rootpath: *default
             glob: 'era5/3d/*/era5.3d.*.nc'
-            label: lores
+            component: lores
             dim: 3D
             unstack: False
             boundary:
@@ -128,7 +128,7 @@ data:
         era5_2D:
             rootpath: *default
             glob: 'era5/2d/*/era5.2d.*.nc'
-            label: lores
+            component: lores
             dim: 2D
             boundary:
               - SP       # surface pressure
@@ -150,7 +150,7 @@ data:
         conus404_3D:
             rootpath: *default
             glob: 'conus404/3d/*/conus404.3d.*.nc'
-            label: hires
+            component: hires
             dim: 3D
             unstack: False
             prognostic:
@@ -165,7 +165,7 @@ data:
         conus404_2D:
             rootpath: *default
             glob: 'conus404/2d/*/conus404.2d.*.nc'
-            label: hires
+            component: hires
             dim: 2D
             boundary:
               - COSZEN  # cosine of solar zenith angle

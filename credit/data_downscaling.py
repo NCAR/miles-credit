@@ -107,10 +107,10 @@ class DownscalingDataset(torch.utils.data.Dataset):
         self.len = np.max(dlengths)
         # TODO: error if any dlengths != self.len or 1
 
-        self.labels = dict()
+        self.components = dict()
         for dset in self.datasets.keys():
-            lab = self.datasets[dset].label
-            self.labels.setdefault(lab, []).append(dset)
+            comp = self.datasets[dset].component
+            self.components.setdefault(comp, []).append(dset)
 
     def __getitem__(self, index):
 
@@ -123,49 +123,49 @@ class DownscalingDataset(torch.utils.data.Dataset):
         ## where use is one of (static, boundary, prognostic, diagnostic)
         
         ## need to rearrange that into a nested dict of
-        ## {label: {input/target: {var: np.ndarray}}},
+        ## {component: {input/target: {var: np.ndarray}}},
         ## where input is static & bound [hist_len] for 'infer', that
         ## plus prog [hist_len] for 'init' and 'train', and target is
         ## prog [fore_len] & diag[fore_len] for 'train'
         
         result = dict()
-        for lab in self.labels.keys():
-            result[lab] = dict()
+        for comp in self.components.keys():
+            result[comp] = dict()
             
             if self.mode in ("train", "init", "infer"):
-                result[lab]["input"] = dict()
-                for dset in self.labels[lab]:
+                result[comp]["input"] = dict()
+                for dset in self.components[comp]:
                     for u in items[dset].keys():
                         if u in ("static", "boundary"):
-                            result[lab]["input"].update(items[dset][u])
+                            result[comp]["input"].update(items[dset][u])
                                     
             if self.mode in ("train", "init"):
-                for dset in self.labels[lab]:
+                for dset in self.components[comp]:
                     for u in items[dset].keys():
                         if u in ("prognostic"):
-                            result[lab]["input"].update(items[dset][u])
+                            result[comp]["input"].update(items[dset][u])
 
             if self.mode in ("train",):
-                result[lab]["target"] = dict()
-                for dset in self.labels[lab]:
+                result[comp]["target"] = dict()
+                for dset in self.components[comp]:
                     for u in items[dset].keys():
                         if u in ("prognostic", "diagnostic"):
-                            result[lab]["target"].update(items[dset][u])
+                            result[comp]["target"].update(items[dset][u])
                                 
                 ## time subset: modes 'infer' and 'init' return only
                 ## historical timesteps.  For mode 'train', we need to
                 ## split the data into histlen timesteps for 'input' and
                 ## forelen timesteps for 'target'
 
-                for v in result[lab]["input"].keys():
-                    x = result[lab]["input"][v]
+                for v in result[comp]["input"].keys():
+                    x = result[comp]["input"][v]
                     if len(x.shape) == 3:
-                        result[lab]["input"][v] = x[0:hlen,:,:]
+                        result[comp]["input"][v] = x[0:hlen,:,:]
                         
-                for v in result[lab]["target"].keys():
-                    x = result[lab]["target"][v]
+                for v in result[comp]["target"].keys():
+                    x = result[comp]["target"][v]
                     if len(x.shape) == 3:
-                        result[lab]["target"][v] = x[hlen:slen,:,:]
+                        result[comp]["target"][v] = x[hlen:slen,:,:]
 
                         
         # transform to tensor
