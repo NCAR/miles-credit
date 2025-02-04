@@ -164,6 +164,9 @@ def rescale_minmax(x):
 
 # Written as a dataclass to avoid acres of boilerplate and for free repr(), etc.
 
+# Normal use pattern is that all the args come from a yaml file that
+# gets read into a dictionary that is passed via **kwargs
+
 @dataclass
 class DataMap:
     '''Class for reading in data from multiple files.
@@ -173,7 +176,7 @@ class DataMap:
     label: used by higher-level classes to decide how to use the datamap
     dim: dimensions of the data:
         static: no time dimension; data is loaded on initialization
-        3D: data has z-dimension; unstack Z to pseudo-variables when reading
+        3D: data has z-dimension; can unstack Z to pseudo-variables when reading
         2D: default: time-varying 2D data
     normalize: if dim=='static' & normalize == True, scale data to range [0,1]
     unstack: if dim=='3d' & unstack == True, convert 3D layers to pseudo-vars
@@ -231,7 +234,7 @@ class DataMap:
                 warn("credit.datamap: static vars must be boundary")
                 raise
             
-            ## load data from netcdf
+            ## if static, load data from netcdf
             staticfile = nc.Dataset(self.rootpath + '/' + self.glob)
             ## [:] forces data to load
             staticdata = [staticfile[v][:] for v in self.boundary]
@@ -286,6 +289,7 @@ class DataMap:
                 self.last = self.date2tindex(self.last_date)
 
             self.length = self.last - self.first + 1 - (self.sample_len - 1)
+
 
             ## get last timestep index in each file
             ## do this in a loop to avoid many-many open filehandles at once
