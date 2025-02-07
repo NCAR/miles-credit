@@ -1,36 +1,114 @@
-save_loc: '/glade/work/mcginnis/ML/GWC/results/loadtest'
-seed: 2222
+# yaml file for the conus404 dataset
+
+#---------------------
+# CONUS404 data is (assumed to be) hourly data stored in daily netcdf
+# files organized by year.  Each file contains 24 timesteps and all
+# variables of the appropriate dimensionality.  Data has been
+# compressed with lossy compression, and is chunked so that each file
+# is a single chunk (i.e., 1 chunk = all space, 24 timesteps).
+# 
+# Naming convention: $path/YYYY/conus404.Nd.YYYY-MM-DD.nc
+#
+# data is normalized (using functions in transforms.py) in the
+# dataloader in applications/train.py; no need for users to normalize
+# them by hand.
+#---------------------
+
+# the location to save your workspace, it will have
+# (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
+# if save_loc does not exist, it will be created automatically
+
+save_loc: '/glade/work/$USER/CREDIT_runs/c404/'
+seed: 2222  # RNG seed
+
 
 data:
-    variables:
-#    - ACSWDNLSM
-#    - COSZEN
-    - PREC_ACC_NC
-    - PSFC
-    - Q2
-#    - SNOW
-#    - TD2
-    - T2
-#    - totalVap
-#    - Q500
-#    - Q850
-#    - T500
-#    - T850
-#    - U10
-#    - U250
-#    - U500
-#    - U850
-#    - U1000
-#    - V10
-#    - V250
-#    - V500
-#    - V850
-#    - V1000
-#    - Z050
-#    - Z500
-#    - Z850
-#    - Z1000
-    static_variables: []
+
+    # upper-air / 3D variables.  These variables are prognostic state
+    # variables: the output value predicted for time T is used as an
+    # input value for predicting time T+1.
+
+    # NOTE that U and V are on staggered grids that are 1 larger in
+    # the x- and y- dimensions (respectively) than the other
+    # variables; the south and west indexes have been trimmed to match
+    # the dimensionality of the non-staggered grids.
+    
+    variables: [
+    'P',        # total pressure (dataset uses hybrid sigma coordinates)
+    'QVAPOR',   # water vapor mixing ratio
+    'TK',	# air temperature
+    'U',	# U-component of wind *with respect to model grid*
+    'V',	# V-component of wind *with respect to model grid*
+    'Z',	# geopotential height
+    ]
+    save_loc: '/glade/derecho/scratch/mcginnis/conus404/data/*/conus404.3d.*nc'
+
+
+    # surface / 2D variables.  Most of these are also prognostic, but
+    # a few (precipitation in particular) are output-only diagnostic
+    # variables that are not recycled as inputs.  
+    
+    surface_variables: [
+    'PSFC',  	   # surface pressure
+    'Q2',    	   # water vapor mizing ratio at 2 meters
+    # 'SNOW',    	   # snow water equivalent
+    'SWDNB',  	   # instantaneous downwelling shortwave flux at bottom
+    'T2',     	   # temperature at 2 meters
+    'TD2',  	   # 2-m dewpoint temperature
+    'U10',  	   # u-wind at 10 meters
+    'V10',         # v-wind at 10 meters
+    'totalVap',    # column-integrated water vapor content 
+    ]
+    save_loc_surface: '/glade/derecho/scratch/mcginnis/conus404/data/*/conus404.2d.*nc'
+
+
+    # boundary condition / dynamic forcing variables from -- need to also read in TOA incoming
+    # solar from /glade/derecho/scratch/dgagne/credit_solar_6h_0.25deg/*.nc'
+
+    dynamic_forcing_variables: [
+    #  FILL IN
+    ]
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/mcginnis/conus404/era5/*.nc' # FILL IN
+
+
+    # diagnostic variables
+    diagnostic_variables: [
+    'PREC_ACC_NC', # precipitation (over previous hour)
+    ]
+    save_loc_diagnostic: '/glade/derecho/scratch/mcginnis/conus404/data/*/conus404.2d.*nc'
+
+
+    # forcing variables that don't come from ERA5
+    forcing_variables: [
+      'tsi',
+      'COSZEN',      # cosine of solar zenith angle - from C404 2D [omit?]
+    ]
+    save_loc_forcing: '/glade/derecho/scratch/mcginnis/conus404/solar/*.nc'  ## FILL IN
+
+    # static variables - need to be PRE-NORMALIZED by user (i.e., all
+    # values in file are mapped to [0,1] or to mean=0, stdev=1)
+
+    static_variables: [
+    'COSALPHA', # Local cosine of map rotation
+    'E',        # Coriolis cosine latitude term
+    'F',        # Coriolis sine latitude term
+    'HGT',      # terrain height
+    'LANDMASK', # land mask
+    'VAR',      # orographic variance
+    'VAR_SSO',  # variance of subgrid-scale orography
+    'XLAT',     # latitude     # ? omit to prevent cheating?
+    'XLONG',    # longitude    # ? omit to prevent cheating?
+    ]
+    save_loc_static: '/glade/derecho/scratch/mcginnis/conus404/constants/ ???'  ## FILL IN
+
+    ## HERE
+
+    # z-score files, they must be zarr or nc with (level,) coords
+    # they MUST include all the
+    #     'variables', 'surface_variables', 'dynamic_forcing_variables', 'diagnostic_variables' above
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/mean_6h_0.25deg.nc'  ## FILL IN
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/std_6h_0.25deg.nc'	   ## FILL IN
+
     scaler_type: "std"
     zarrpath: '/glade/campaign/ral/risc/DATA/conus404/zarr'
     save_loc: './'
