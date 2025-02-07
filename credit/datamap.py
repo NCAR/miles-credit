@@ -348,7 +348,7 @@ class DataMap:
         else:
             finish = start + self.history_len - 1
 
-        # get segment (which file) and subindex (within file) for start & finish
+        # get segment (which file) and subindex (within file) for start & finish.
         # subindexes are all negative, but that works fine & makes math simpler
         
         startseg = np.searchsorted(self.ends, start)

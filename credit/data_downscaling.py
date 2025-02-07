@@ -119,8 +119,22 @@ class DownscalingDataset(torch.utils.data.Dataset):
         
         items = {k:self.datasets[k][index] for k in self.datasets.keys()}
 
-        ## items is a nested dict of {dataset: {use: {var: np.ndarray}}}.
-        ## where use is one of (static, boundary, prognostic, diagnostic)
+        ## items is a nested dict of {dataset: {usage: {var: np.ndarray}}}.
+        ## where usage is one of (static, boundary, prognostic, diagnostic)
+
+        ## Note that self.mode determines which usages we want to
+        ## return.  The DataMap object understands mode and reads &
+        ## returns only the necessary bits, so we don't need to worry
+        ## about it here.
+        
+        ## We pass each item in the dict (1 item = 1 dataset) to the
+        ## corresponding Normalizer object for normalization
+
+        ## then we pass it to to dict<-> tensor converter, which
+        ## unstacks 3D variables, converts all the arrays to tensors,
+        ## and concatenates them together in the correct arrangment
+        ## The code below all will move there:
+        ## vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
         
         ## need to rearrange that into a nested dict of
         ## {component: {input/target: {var: np.ndarray}}},
@@ -151,12 +165,18 @@ class DownscalingDataset(torch.utils.data.Dataset):
                     for u in items[dset].keys():
                         if u in ("prognostic", "diagnostic"):
                             result[comp]["target"].update(items[dset][u])
-                                
-                ## time subset: modes 'infer' and 'init' return only
-                ## historical timesteps.  For mode 'train', we need to
-                ## split the data into histlen timesteps for 'input' and
-                ## forelen timesteps for 'target'
 
+                
+            ## time subset: modes 'infer' and 'init' return only
+            ## historical timesteps.  For mode 'train', we need to
+            ## split the data into histlen timesteps for 'input' and
+            ## forelen timesteps for 'target'
+
+            ## In the main code, toTensor() returns a dict of tensors
+            ## and Trainer combines them.  This goes better here,
+            ## though.
+
+            if self.mode in ("train",):                
                 for v in result[comp]["input"].keys():
                     x = result[comp]["input"][v]
                     if len(x.shape) == 3:
@@ -167,28 +187,9 @@ class DownscalingDataset(torch.utils.data.Dataset):
                     if len(x.shape) == 3:
                         result[comp]["target"][v] = x[hlen:slen,:,:]
 
-                        
-        # transform to tensor
-        # applies normalization
-        # (and any other transformations)
+        ## ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
         return result
 
-    # actually, does it do tensor transformation?  Or do we write a
-    # ToTensor object that takes a dict of variables & does it?
-
-    # transform code lives in transforms.py.  Given a
-    # credit.data::Sample, there are various functions that normalize,
-    # etc. it.  A Sample is defined as a dict of 3 Arrays, where Array
-    # is Union[np.ndarray, xr.DataArray
-
- 
-    # the mode property determines which variables to return by use type:
-    # "train" = all; "init" = all but diagnostic; "infer" = static + boundary
-
-    ## credit::models::base_model:
-    ## reshape_only = unstack 3d data
-    ## concat_and_reshape = unstack 3d & concat to 2d
-    ## split_and_reshape = split tensor into 2d / 3d and restack 3d
 
     @property
     def mode(self) -> str:
