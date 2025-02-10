@@ -940,7 +940,7 @@ class Backscatter_FCNN(nn.Module):
         x = self.fc1(x)
         x = self.relu1(x)
         x = self.fc2(x)
-        x = torch.clamp(x, min=0.) # prevent prediction of negative backscatter
+        x = torch.clamp(x, min=0., max=10.) # prevent prediction of negative backscatter
 
         x = x.permute(0, -1, 1, 2, 3) # put channels back to 1st dim
         return x
@@ -1040,7 +1040,14 @@ class SKEBS(nn.Module):
                 param.requires_grad = False
 
         # initialize backscatter prediction
-        num_channels = self.levels * self.channels + self.surface_channels + self.output_only_channels
+        num_channels = (self.channels * self.levels 
+                        + post_conf["model"]["surface_channels"]
+                        + post_conf["model"]["output_only_channels"]
+        )
+        # num_channels = (self.channels * self.levels 
+        #                 + len(post_conf["data"]["surface_variables"])
+        #                 + len(post_conf["data"]["diagnostic_variables"])
+        # )
         if post_conf["skebs"]["uniform_dissipation"]:
             # self.backscatter_network = Backscatter_fixed(self.nlat, self.nlon)
             self.backscatter_network = Backscatter_fixed_col(self.levels,
@@ -1060,6 +1067,8 @@ class SKEBS(nn.Module):
             logger.warning("freezing all SKEBS parameters due to skebs config")
             for param in self.parameters():
                 param.requires_grad = False
+
+        logger.info(f"trainable params{[param for param in self.parameters() if param.requires_grad]}")
 
 
         ########### debugging and analysis features #############
@@ -1213,10 +1222,13 @@ class SKEBS(nn.Module):
         return compute_density(pressure, t, q)
 
     def forward(self, x):
+
         x = x["y_pred"]
+        backscatter_pred = self.backscatter_network(x)
+
         # todo: get topography and other input vars
         x = self.state_trans.inverse_transform(x)
-        
+
         if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
             self.steps = 0
             # self.write_debug_files = not self.training # check if we are in rollout mode. this attr is set by model.eval() or model.train()
@@ -1239,7 +1251,6 @@ class SKEBS(nn.Module):
         u_chi, v_chi = self.getgrad(spec_coef)
         u_chi, v_chi = u_chi.unsqueeze(1).unsqueeze(1), v_chi.unsqueeze(1).unsqueeze(1)
         # logger.info(f"pattern max/min: {pattern_on_grid.max():.2f}, {pattern_on_grid.min():.2f}")
-        backscatter_pred = self.backscatter_network(x)
 
         # with fixed col, we adjust the perturbations to make sense using
         # min/max scaling
@@ -1249,14 +1260,14 @@ class SKEBS(nn.Module):
         # total_forcing = (torch.sqrt(self.r * backscatter_pred / self.dE) #taking out of sqrt so i can fix magnitude issue
         #                  * pattern_on_grid * self.spectral_adjustment )
         dissipation_term = torch.sqrt(self.r * backscatter_pred / self.dE)
-        # shape (b, levels, t, lat, lon)
+        # shape (b, levels, 1, lat, lon)
 
         # sp = torch.ones_like(x[:, self.sp_index : self.sp_index + 1], device = x.device) * 1013.
-        sp = x[:, self.sp_index : self.sp_index + 1]  # slice to keep dims
-        t = x[:, self.T_inds]
-        q = x[:, self.Q_inds]
-        density = self.calculate_density(sp, t, q)
-        assert torch.min(density) >= 0., "ERROR: density is less than 0"
+        # sp = x[:, self.sp_index : self.sp_index + 1]  # slice to keep dims
+        # t = x[:, self.T_inds]
+        # q = x[:, self.Q_inds]
+        # density = self.calculate_density(sp, t, q)
+        # assert torch.min(density) >= 0., "ERROR: density is less than 0"
         # (b, levels, 1, lat, lon)
 
         ## compute component magnitudes of wind
