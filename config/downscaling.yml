@@ -57,6 +57,7 @@ forecast_len: &forelen 1
 # result in faster reads from disk.  By default, NCO commands that
 # rewrite their outputs alphabetize variables.
 
+
 data:
     # common values across datasets
     
@@ -69,9 +70,18 @@ data:
     first_date:   "1980-01-01"
     last_date:    "2021-12-31"
 
+    
+#    ## filenames should match dataset names above
+#    normalization: minmax
+#        normpath: *default/norms
+#        minglob: 'min.*.nc'
+#        maxglob: 'max.*.nc'
+
+    
     rootpath: &default /glade/derecho/scratch/mcginnis/credit
     datasets:
-    
+
+      
         ## static WRF fields extracted from 'wrfconstants_usgs404.nc'
 
         conus404_static:
@@ -105,38 +115,6 @@ data:
             dim: 2D
             boundary:
               - tisr      # TOA incident solar radiation (J/m^2, integral dt)
-
-
-        ## ERA5 data regridded to coarsened CONUS404 grid.  Source
-        ## data is interpolated to pressure levels and global 0.25
-        ## degree grid.  (Variables are in alphabetical order except
-        ## for R, which is last.)  hourly, 1979-2023
-
-        era5_3D:
-            rootpath: *default
-            glob: 'era5/3d/*/era5.3d.*.nc'
-            component: lores
-            dim: 3D
-            unstack: False
-            boundary:
-              - T   # temperature
-              - U   # u-winds
-              - V   # v-winds
-              - Z   # geopotential
-              - R   # humidity
-
-        era5_2D:
-            rootpath: *default
-            glob: 'era5/2d/*/era5.2d.*.nc'
-            component: lores
-            dim: 2D
-            boundary:
-              - SP       # surface pressure
-              - MSL      # mean sea-level pressure
-              - VAR_2T   # 2-meter temperature
-              - TCWV     # total column water vapor
-              - VAR_10U  # 10-meter u-wind
-              - VAR_10V  # 10-meter v-wind
 
 
         ## CONUS404 data on native grid; hourly, 1979-10 to 2022-09
@@ -184,11 +162,36 @@ data:
               - SNOW       # snow water equivalent
 
 
-    ## filenames should match dataset names above
-    normalization: minmax
-        normpath: *default/norms
-        minglob: 'min.*.nc'
-        maxglob: 'max.*.nc'
+        ## ERA5 data regridded to coarsened CONUS404 grid.  Source
+        ## data is interpolated to pressure levels and global 0.25
+        ## degree grid.  (Variables are in alphabetical order except
+        ## for R, which is last.)  hourly, 1979-2023
+
+        era5_3D:
+            rootpath: *default
+            glob: 'era5/3d/*/era5.3d.*.nc'
+            component: lores
+            dim: 3D
+            unstack: False
+            boundary:
+              - T   # temperature
+              - U   # u-winds
+              - V   # v-winds
+              - Z   # geopotential
+              - R   # humidity
+
+        era5_2D:
+            rootpath: *default
+            glob: 'era5/2d/*/era5.2d.*.nc'
+            component: lores
+            dim: 2D
+            boundary:
+              - SP       # surface pressure
+              - MSL      # mean sea-level pressure
+              - VAR_2T   # 2-meter temperature
+              - TCWV     # total column water vapor
+              - VAR_10U  # 10-meter u-wind
+              - VAR_10V  # 10-meter v-wind
               
 
 model:
