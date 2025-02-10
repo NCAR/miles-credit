@@ -165,6 +165,9 @@ def load_model_states_and_optimizer(conf, model, device):
             if conf["trainer"]["mode"] == "fsdp"
             else GradScaler(enabled=amp)
         )
+        # Update the config file to the current epoch
+        if "reload_epoch" in conf["trainer"] and conf["trainer"]["reload_epoch"]:
+            conf["trainer"]["start_epoch"] = checkpoint["epoch"] + 1
 
     # load optimizer and grad scaler states
     else:
@@ -452,9 +455,17 @@ if __name__ == "__main__":
 
     # Stream output to stdout
     ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
+    # see if we are in debug mode to set logging level
+    gettrace = getattr(sys, 'gettrace', None)
+    debug = gettrace()
+    if debug:
+        ch.setLevel(logging.DEBUG)
+    else:
+        ch.setLevel(logging.INFO)
     ch.setFormatter(formatter)
     root.addHandler(ch)
+    logging.debug("logging set to DEBUG level")
+
 
     # Load the configuration and get the relevant variables
     with open(config) as cf:

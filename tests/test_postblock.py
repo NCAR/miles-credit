@@ -9,6 +9,7 @@ from credit.models.crossformer import CrossFormer
 from credit.postblock import GlobalWaterFixer, PostBlock, Backscatter_FCNN
 from credit.postblock import SKEBS, TracerFixer, GlobalMassFixer, GlobalEnergyFixer
 from credit.parser import credit_main_parser
+from credit.postblock import Backscatter_CNN
 
 
 from torchviz import make_dot
@@ -148,6 +149,23 @@ def test_SKEBS_backscatter():
 
     # assert pred.shape == y_pred.shape
     # assert not torch.isnan(skebs_pred).any()
+
+def test_backscatter_pad():
+    lat = 2
+    lon = 2
+    batch_size = 1
+    x = torch.arange(batch_size * lat * lon).reshape(batch_size, 1, lat, lon)
+    m = Backscatter_CNN(1,1,lat,lon)
+    
+    target = torch.tensor([[[[0, 1, 0, 1],
+                            [1, 0, 1, 0],
+                            [3, 2, 3, 2],
+                            [2, 3, 2, 3]]]])
+    
+    padded = m.pad(x)
+    assert (padded == target).all()
+
+    assert (m.unpad(padded) == x).all()
 
 def test_TracerFixer_rand():
     """
@@ -345,4 +363,5 @@ if __name__ == "__main__":
     root.addHandler(ch)
 
     # test_SKEBS_integration()
-    test_SKEBS_rand()
+    # test_SKEBS_rand()
+    test_backscatter_pad()

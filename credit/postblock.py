@@ -11,6 +11,7 @@ Content:
 
 """
 
+import copy
 import os
 from os.path import join
 import torch
@@ -25,6 +26,8 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 from credit.transforms import load_transforms
 from credit.physics_core import compute_density, compute_pressure_on_mlevs, physics_pressure_level, physics_hybrid_sigma_level
 from credit.physics_constants import PI, RAD_EARTH, GRAVITY, RHO_WATER, LH_WATER, CP_DRY, CP_VAPOR
+import segmentation_models_pytorch as smp
+
 
 import logging
 
@@ -933,6 +936,11 @@ class Backscatter_FCNN(nn.Module):
         self.fc1 = nn.Linear(in_channels, in_channels // 2)
         self.relu1 = nn.ReLU()
         self.fc2 = nn.Linear(in_channels // 2, self.levels)
+        self.relu2 = nn.ReLU()
+
+
+        self.scale = torch.tensor(100.)
+
 
     def forward(self, x):
         x = x.permute(0, 2, 3, 4, 1) # put channels last
@@ -940,43 +948,168 @@ class Backscatter_FCNN(nn.Module):
         x = self.fc1(x)
         x = self.relu1(x)
         x = self.fc2(x)
-        x = torch.clamp(x, min=0.) # prevent prediction of negative backscatter
+        x = self.relu2(x)
+        x = self.scale * x
 
         x = x.permute(0, -1, 1, 2, 3) # put channels back to 1st dim
         return x
-class Backscatter_fixed(nn.Module):
+
+class Backscatter_CNN(nn.Module):
     def __init__(self,
+                 in_channels,
+                 levels,
                  nlat,
                  nlon):
+        # could also predict with x_prev and y
         super().__init__()
-        self.backscatter_array = Parameter(torch.full((1,1,1,nlat,nlon), 2.5)) 
+        self.nlat = nlat
+        self.nlon = nlon
+        self.in_channels = in_channels
+        self.levels = levels
+
+        # setup padding functions
+        self.pad_lon = torch.nn.CircularPad2d((1,1,0,0))
+        self.pad_lat = torch.nn.ReplicationPad2d((0,0,1,1))
+
+        # setup conv layer
+        self.conv = torch.nn.Conv2d(self.in_channels, self.levels, kernel_size=3)
+        self.relu = nn.ReLU()
+
+        self.scale = torch.tensor(100.)
+        
+
+    def pad(self, x):
+        x = self.pad_lat(x) #reflection padding
+        x[..., [0,-1], :] = torch.roll(x[..., [0,-1], :], self.nlon // 2, -1) # shift reflection by 180
+        x = self.pad_lon(x) #padding across lon
+        return x
+    
+    def unpad(self, x):
+        return x[..., 1:-1, 1:-1]
 
     def forward(self, x):
-        # self.backscatter_array = self.backscatter_array.clamp(0.)
-        return self.backscatter_array
+        x = x.squeeze(2) # squeeze out time dim (see above)
+        x = self.pad(x)
+        # (b,c,lat+2,lon+2)
+        x = self.conv(x) # should take out the pad
+        x = self.relu(x)
+        x = self.scale * x
+
+        x = x.unsqueeze(2)
+        return x
+
+supported_models = {
+    "unet": smp.Unet,
+    "unet++": smp.UnetPlusPlus,
+    "manet": smp.MAnet,
+    "linknet": smp.Linknet,
+    "fpn": smp.FPN,
+    "pspnet": smp.PSPNet,
+    "pan": smp.PAN,
+    "deeplabv3": smp.DeepLabV3,
+    "deeplabv3+": smp.DeepLabV3Plus,
+}
+
+def load_premade_encoder_model(model_conf):
+    model_conf = copy.deepcopy(model_conf)
+    name = model_conf.pop("name")
+    if name in supported_models:
+        logger.info(f"Loading model {name} with settings {model_conf}")
+        return supported_models[name](**model_conf)
+    else:
+        raise OSError(
+            f"Model name {name} not recognized. Please choose from {supported_models.keys()}"
+        )
+
+class Backscatter_unet(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 levels,
+                 nlat,
+                 nlon,
+                 architecture):
+        # could also predict with x_prev and y
+        super().__init__()
+        self.nlat = nlat
+        self.nlon = nlon
+        self.in_channels = in_channels
+        self.levels = levels
+
+        # setup padding functions
+        self.pad_lon = torch.nn.CircularPad2d((1,1,0,0))
+        self.pad_lat = torch.nn.ReplicationPad2d((0,0,1,1))
+        self.relu = nn.ReLU()
+
+        if architecture is None:
+            architecture = {
+                            "name": "unet",
+                            "encoder_name": "resnet34",
+                            "encoder_weights": "imagenet",
+                        }
+        if architecture["name"] == "unet":
+            architecture["decoder_attention_type"] = "scse"
+        architecture["in_channels"] = in_channels
+        architecture["classes"] = levels
+
+        self.model = load_premade_encoder_model(architecture)
+
+
+    def pad(self, x):
+        x = self.pad_lat(x) #reflection padding
+        x[..., [0,-1], :] = torch.roll(x[..., [0,-1], :], self.nlon // 2, -1) # shift reflection by 180
+        x = self.pad_lon(x) #padding across lon
+        return x
+    
+    def unpad(self, x):
+        return x[..., 1:-1, 1:-1]
+    
+    def forward(self, x):
+        x = x.squeeze(2) # squeeze out time dim (see above)
+        
+        x = self.pad(x)
+        x = self.model(x)
+        x = self.relu(x)
+
+        x = x.unsqueeze(2)
+        return x
+
 class Backscatter_fixed_col(nn.Module):
+    def __init__(self,
+                 levels,):
+        super().__init__()
+        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 2.5))
+
+    def forward(self, x):
+        # self.backscatter_array.data = self.backscatter_array.data.clamp(0., 10.)
+        logger.debug(torch.flatten(self.backscatter_array))
+        return self.backscatter_array  # this will be inside sqrt
+    
+
+class Backscatter_prescribed(nn.Module):
+    """  min/max scaling
+        # forcing / forcing_max * perturb_frac * sigma_max * std
+        # perturb_max is the maximum perturbation fraction wrt to sigma_max*std
+        # where we have pre-calculated forcing_max"""
     def __init__(self,
                  levels,
                  std_path,
                  sigma_max,
                  perturb_frac):
         super().__init__()
-        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 0.01))
 
-        # std = xr.open_dataset(std_path)
-        # std_wind = np.sqrt(std.U.values ** 2 + std.V.values ** 2)[::-1]
-        # self.register_buffer("max_perturb",
-        #                      (torch.tensor(std_wind * sigma_max * perturb_frac)
-        #                     .view(1, levels, 1, 1, 1)),
-        #                     persistent=False)
-        # self.max_perturb = 1.0
+        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 2.5))
+
+        std = xr.open_dataset(std_path)
+        std_wind = np.sqrt(std.U.values ** 2 + std.V.values ** 2)
+        self.register_buffer("max_perturb",
+                             (torch.tensor(std_wind * sigma_max * perturb_frac)
+                            .view(1, levels, 1, 1, 1)),
+                            persistent=False)
 
     def forward(self, x):
-        self.backscatter_array.data = self.backscatter_array.data.clamp(0., 10.)
-        # return self.backscatter_array * self.max_perturb ** 2  # this will be inside sqrt
-        logger.info(torch.flatten(self.backscatter_array))
-        return self.backscatter_array  # this will be inside sqrt
-
+        return self.backscatter_array * (self.max_perturb / 2. ) ** 2  # this will be inside sqrt
+        #add_wind_mag with backscatter = 1.0 is under ~80 for most of the distribution. target: 7% perturb fraction, 2 sigma level
+    
 
 class SKEBS(nn.Module):
     """
@@ -1030,26 +1163,49 @@ class SKEBS(nn.Module):
         self.initialize_skebs_parameters()
         self.initialize_plev_calc()
         
-        # coeffs havent been spun up yet (need to cycle the coeffs)
+        # coeffs havent been spun up yet (indicates need to cycle the coeffs)
         self.spec_coef_is_initialized = False
 
         # freeze pattern weights before init backscatter
-        if post_conf["skebs"].get("freeze_pattern_weights", False):
+        self.freeze_pattern_weights = post_conf["skebs"].get("freeze_pattern_weights", False)
+        if self.freeze_pattern_weights:
             logger.warning("freezing all skebs pattern weights")
             for param in self.parameters():
                 param.requires_grad = False
 
         # initialize backscatter prediction
-        num_channels = self.levels * self.channels + self.surface_channels + self.output_only_channels
-        if post_conf["skebs"]["uniform_dissipation"]:
-            # self.backscatter_network = Backscatter_fixed(self.nlat, self.nlon)
-            self.backscatter_network = Backscatter_fixed_col(self.levels,
+        num_channels = (self.channels * self.levels 
+                        + post_conf["model"]["surface_channels"]
+                        + post_conf["model"]["output_only_channels"]
+        )
+        # num_channels = (self.channels * self.levels 
+        #                 + len(post_conf["data"]["surface_variables"])
+        #                 + len(post_conf["data"]["diagnostic_variables"])
+        # )
+        dissipation_type = post_conf["skebs"]["dissipation_type"]
+        if dissipation_type == "prescribed":
+            self.backscatter_network = Backscatter_prescribed(self.levels,
                                                              post_conf["data"]["std_path"],
                                                              post_conf["skebs"]["sigma_max"],
                                                              post_conf["skebs"]["perturb_frac"])
-        else:
+        elif dissipation_type == "uniform":
+            self.backscatter_network = Backscatter_fixed_col(self.levels)
+        elif dissipation_type == "FCNN":
             self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
+        elif dissipation_type == "CNN":
+            self.backscatter_network = Backscatter_CNN(num_channels, self.levels, self.nlat, self.nlon)
+        elif dissipation_type == "unet":
+            architecture = post_conf["skebs"].get("architecture", None)
+            self.backscatter_network = Backscatter_unet(num_channels,
+                                                        self.levels,
+                                                        self.nlat,
+                                                        self.nlon,
+                                                        architecture)
+        else:
+            raise RuntimeError(f"{dissipation_type} is a not a valid dissipation type, please modify config")
         
+        logger.info(f"using dissipation type: {dissipation_type}")
+
         # freeze backscatter weights if needed
         if post_conf["skebs"].get("freeze_dissipation_weights", False):
             logger.warning("freezing all dissipation predictor weights")
@@ -1061,12 +1217,27 @@ class SKEBS(nn.Module):
             for param in self.parameters():
                 param.requires_grad = False
 
+        logger.info(f"trainable params{[torch.flatten(param) for param in self.parameters() if param.requires_grad]}")
+
 
         ########### debugging and analysis features #############
         self.write_debug_files = False
-        self.debug_save_loc = join(post_conf['skebs']["save_loc"], "debug_skebs")
+        save_loc = post_conf['skebs']["save_loc"]
+        self.debug_save_loc = join(save_loc, "debug_skebs")
         os.makedirs(self.debug_save_loc, exist_ok=True)  
         self.iteration = 0
+        logger.info("writing SKEBS debugging files" if self.write_debug_files else "not debugging")
+
+        self.save_backscatter_prediction = post_conf["skebs"].get("save_backscatter", False)
+        if self.save_backscatter_prediction:
+            logger.info("writing backscatter files")
+            self.backscatter_save_loc = join(save_loc, "backscatter")
+            os.makedirs(self.backscatter_save_loc, exist_ok=True)
+
+        ############# stop iteration ###################
+        self.iteration_stop = post_conf['skebs'].get("iteration_stop", 0)
+        if self.iteration_stop:
+            logger.info(f"SKEBS is STOPPING at iteration {self.iteration_stop}")
 
     def initialize_sht(self):
         """
@@ -1116,7 +1287,7 @@ class SKEBS(nn.Module):
             self.alpha = Parameter(torch.tensor(0.125, requires_grad=True))
         else:
             logger.info("single-step skebs")
-            self.alpha = Parameter(torch.tensor(0.5, requires_grad=False)) #why doesnt this set to false?
+            self.alpha = Parameter(torch.tensor(0.5, requires_grad=False))
             self.alpha.requires_grad = False 
         self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
         self.p = Parameter(torch.tensor(-1.27, requires_grad=True))
@@ -1133,7 +1304,6 @@ class SKEBS(nn.Module):
         # self.spectral_filter = Parameter(torch.ones(self.lmax).view(1,1,1,self.lmax,1),
         #                                  requires_grad=True)
 
-        self.spectral_adjustment = 1.0 / (3.5 * 10 ** 7.5)
 
     def clip_parameters(self):
         self.alpha.data = self.alpha.data.clamp(self.eps, 1.)
@@ -1159,7 +1329,7 @@ class SKEBS(nn.Module):
         self.multivariateNormal = MultivariateNormal(torch.zeros(2, device=y_pred.device), 
                                                      torch.eye(2, device=y_pred.device))
         # initialize pattern todo: how many iters?
-        iters = 50
+        iters = 25
         logger.debug(f"initializing pattern with {iters} iterations")
         for i in range(iters):
             self.spec_coef = self.cycle_pattern(self.spec_coef)
@@ -1214,13 +1384,23 @@ class SKEBS(nn.Module):
 
     def forward(self, x):
         x = x["y_pred"]
+
+        # shutoff skebs if specified
+        if self.iteration > self.iteration_stop and self.iteration_stop > 0:
+            if self.iteration == self.iteration_stop + 1:
+                logger.info(f"skebs stopped at {self.iteration_stop} steps")
+                
+            return x
+
+        # todo feed in prev step
+        backscatter_pred = self.backscatter_network(x)
+        if self.save_backscatter_prediction and not torch.is_grad_enabled():
+            torch.save(backscatter_pred, join(self.backscatter_save_loc, f"backscatter_{self.iteration}"))
         # todo: get topography and other input vars
         x = self.state_trans.inverse_transform(x)
-        
+
         if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
             self.steps = 0
-            # self.write_debug_files = not self.training # check if we are in rollout mode. this attr is set by model.eval() or model.train()
-            logger.info("writing SKEBS debugging files" if self.write_debug_files else "not debugging")
             self.initialize_pattern(x)
             self.spec_coef_is_initialized = True
         else:
@@ -1229,41 +1409,22 @@ class SKEBS(nn.Module):
         self.spec_coef = self.cycle_pattern(self.spec_coef) # cycle from prev step
         # b, 1, 1, lmax, mmax
         # pattern_on_grid = self.isht(self.spec_coef) # b, 1, 1, lat, lon
-        # pattern_on_grid = (-1. / RAD_EARTH
-        #                     * torch.gradient(pattern_on_grid, 
-        #                                    spacing= PI / self.nlat,
-        #                                    axis=-2)[0]
-        #                     )
 
         spec_coef = self.spec_coef.squeeze()
         u_chi, v_chi = self.getgrad(spec_coef)
         u_chi, v_chi = u_chi.unsqueeze(1).unsqueeze(1), v_chi.unsqueeze(1).unsqueeze(1)
         # logger.info(f"pattern max/min: {pattern_on_grid.max():.2f}, {pattern_on_grid.min():.2f}")
-        backscatter_pred = self.backscatter_network(x)
 
-        # with fixed col, we adjust the perturbations to make sense using
-        # min/max scaling
-        # forcing / forcing_max * perturb_frac * sigma_max * std
-        # perturb_max is the maximum perturbation fraction wrt to sigma_max*std
-        # where we have pre-calculated forcing_max
-        # total_forcing = (torch.sqrt(self.r * backscatter_pred / self.dE) #taking out of sqrt so i can fix magnitude issue
-        #                  * pattern_on_grid * self.spectral_adjustment )
-        dissipation_term = torch.sqrt(self.r * backscatter_pred / self.dE)
-        # shape (b, levels, t, lat, lon)
+        dissipation_term = torch.sqrt(self.r * backscatter_pred * self.timestep / self.dE)
+        # shape (b, levels, 1, lat, lon)
 
         # sp = torch.ones_like(x[:, self.sp_index : self.sp_index + 1], device = x.device) * 1013.
-        sp = x[:, self.sp_index : self.sp_index + 1]  # slice to keep dims
-        t = x[:, self.T_inds]
-        q = x[:, self.Q_inds]
-        density = self.calculate_density(sp, t, q)
-        assert torch.min(density) >= 0., "ERROR: density is less than 0"
+        # sp = x[:, self.sp_index : self.sp_index + 1]  # slice to keep dims
+        # t = x[:, self.T_inds]
+        # q = x[:, self.Q_inds]
+        # density = self.calculate_density(sp, t, q)
+        # assert torch.min(density) >= 0., "ERROR: density is less than 0"
         # (b, levels, 1, lat, lon)
-
-        ## compute component magnitudes of wind
-        # u_squared, v_squared = x[:, self.U_inds] ** 2, x[:, self.V_inds] ** 2
-        # wind_squared = u_squared + v_squared
-        # u_frac = u_squared / wind_squared # (b, levels, 1, lat, lon)
-        # v_frac = v_squared / wind_squared
 
         # big forcing at top of atmosphere..
         # skebs gives us an instantaneous forcing term, need to multiply by timestep (euler step)
@@ -1273,16 +1434,16 @@ class SKEBS(nn.Module):
 
         # still debugging this part
         # add_wind_magnitude = (1. / density) * total_forcing * self.timestep  
-        add_wind_magnitude = torch.sqrt(dissipation_term ** 2 * (u_chi ** 2 + v_chi ** 2)) * self.timestep
-
+        add_wind_magnitude = torch.sqrt(dissipation_term ** 2 * (u_chi ** 2 + v_chi ** 2))
+        logger.debug(f"perturb max/min: {add_wind_magnitude.max():.2f}, {add_wind_magnitude.min():.2f}")
         ## debug skebs, write out physical values 
         if self.write_debug_files:
             torch.save(add_wind_magnitude, join(self.debug_save_loc, f"perturb_{self.iteration}"))
             # torch.save(pattern_on_grid, join(self.debug_save_loc, f"pattern_{self.iteration}"))
             # torch.save(x, join(self.debug_save_loc, f"x_{self.iteration}"))
 
-        x_u_wind = x[:, self.U_inds] + dissipation_term * u_chi * self.timestep
-        x_v_wind = x[:, self.V_inds] + dissipation_term * v_chi * self.timestep
+        x_u_wind = x[:, self.U_inds] + dissipation_term * u_chi
+        x_v_wind = x[:, self.V_inds] + dissipation_term * v_chi
         
         x = concat_for_inplace_ops(x, x_u_wind, min(self.U_inds), max(self.U_inds))
         x = concat_for_inplace_ops(x, x_v_wind, min(self.V_inds), max(self.V_inds))
@@ -1296,7 +1457,8 @@ class SKEBS(nn.Module):
 
         # TODO: make this more robust
         self.steps += 1  # this one for model state
-        if torch.is_grad_enabled(): # means we are in a training script (not always true, but good enough for now for rolling out)
+        # check if we are training and that pattern is trainable
+        if torch.is_grad_enabled() and not self.freeze_pattern_weights: # means we are in a training script (not always true, but good enough for now for rolling out)
             if self.training and self.steps >= self.forecast_len:
                 self.spec_coef_is_initialized = False
                 logger.info(f"pattern is reset after train step {self.steps} total iter {self.iteration}")
@@ -1304,11 +1466,13 @@ class SKEBS(nn.Module):
                 self.spec_coef_is_initialized = False
                 logger.info(f"pattern is reset after valid step {self.steps} total iter {self.iteration}")
         return x
+    
     def spec2grid(self, uspec):
         """
         spatial data from spectral coefficients
         """
         return self.isht(uspec)
+    
     def getuv(self, vrtdivspec):
         """
         compute wind vector from spectral coeffs of vorticity and divergence
