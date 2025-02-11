@@ -37,13 +37,22 @@ Content:
 '''
 
 import os
-from typing import List
+from typing import List, TypedDict
 from dataclasses import dataclass, field
 from glob import glob
 from warnings import warn
 import netCDF4 as nc
 import cftime as cf
 import numpy as np
+
+
+
+class VarDict(TypedDict, total=False):
+    '''a dictionary of the variables that could be in a dataset'''
+    boundary: List
+    prognostic: List
+    diagnostic: List
+    unused: List
 
 def rescale_minmax(x):
     '''rescale data to [0,1].  Don't use
@@ -198,16 +207,12 @@ class DataMap:
     component:    str = None
     dim:          str = "2D"
     normalize:    bool = False
-    unstack:      bool = False
-    boundary:     List[str] = field(default_factory=list)
-    prognostic:   List[str] = field(default_factory=list)
-    diagnostic:   List[str] = field(default_factory=list)
-    unused:       List[str] = field(default_factory=list)
+    # unstack:      bool = False
+    variables:    VarDict[str, List] = field(default_factory=list)
     history_len:  int = 2
     forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
-#    mode:         str = "train"
     
     def __post_init__(self):
         super().__init__()
@@ -224,21 +229,30 @@ class DataMap:
         if self.normalize and self.dim != "static":
             warn(f"credit.datamap: normalize does nothing if dim != 'static'; setting to False")
             self.normalize = False
+
+        # set any missing keys in VarDict
+        for use in ('boundary', 'prognostic', 'diagnostic'):
+            if use not in self.variables:
+                self.variables[use] = ()
+
             
         if self.dim == "static":
             if len(glob(self.glob, root_dir=self.rootpath)) != 1:
                 warn("credit.datamap: dim='static' requires a single file")
                 ## TODO (someday): support multiple static files
                 raise
-            if len(self.prognostic) > 0 or len(self.diagnostic) > 0:
-                warn("credit.datamap: static vars must be boundary")
-                raise
+
+            #if len(self.prognostic) > 0 or len(self.diagnostic) > 0:
+            if (len(self.variables['prognostic']) > 0 or
+                len(self.variables['diagnostic']) > 0):                   
+               warn("credit.datamap: static vars must be boundary")
+               raise
             
             ## if static, load data from netcdf
             staticfile = nc.Dataset(self.rootpath + '/' + self.glob)
             ## [:] forces data to load
-            staticdata = [staticfile[v][:] for v in self.boundary]
-            self.data = dict(zip(self.boundary, staticdata))
+            staticdata = [staticfile[v][:] for v in self.variables['boundary']]
+            self.data = dict(zip(self.variables['boundary'], staticdata))
             ## cleanup
             staticfile.close()
             del staticfile, staticdata
@@ -247,11 +261,7 @@ class DataMap:
                 for k in self.data.keys():
                     self.data[k] = rescale_minmax(self.data[k])
                     
-        else:
-            ## this gets repeatedly used in read(), so create & cache up-front
-            uses = ('boundary', 'prognostic', 'diagnostic')
-            self.vardict = {k: self.__dict__[k] for k in uses}
-            
+        else:            
             fileglob = sorted(glob(self.glob, root_dir=self.rootpath))
             self.filepaths = [os.path.join(self.rootpath, f) for f in fileglob]
 
@@ -266,15 +276,15 @@ class DataMap:
             self.t0 = float(time0[0])
             self.dt = float(time0[1]) - self.t0
 
-            if self.dim=='3D' and self.unstack:
-                ## get coord values to use as names when unstacking z-dim
-                ## note that some datasets may have more than one z coord
-                ## e.g., ERA5 has level, but CONUS404 has lev & ilev
-                self.znames = dict()
-                for use in uses:
-                    for v in self.vardict[use]:
-                        zdimname = nc0[v].dimensions[1]  ## standard dim ordering
-                        self.znames[zdimname] = [str(int(z)) for z in nc0[zdimname]]
+            # if self.dim=='3D' and self.unstack:
+            #     ## get coord values to use as names when unstacking z-dim
+            #     ## note that some datasets may have more than one z coord
+            #     ## e.g., ERA5 has level, but CONUS404 has lev & ilev
+            #     self.znames = dict()
+            #     for use in uses:
+            #         for v in self.vardict[use]:
+            #             zdimname = nc0[v].dimensions[1]  ## standard dim ordering
+            #             self.znames[zdimname] = [str(int(z)) for z in nc0[zdimname]]
             
             nc0.close()
 
@@ -408,16 +418,16 @@ class DataMap:
         data = dict()
         for use in uses:
             data[use] = dict()
-            for var in self.vardict[use]:
+            for var in self.variables[use]:
                 if self.dim == "3D":
-                    if self.unstack:
-                        zdn = ds[var].dimensions[1]
-                        for z in range(0, len(self.znames[zdn])-1):
-                            varz = var + self.znames[zdn][z]
-                            data[use][varz] = ds[var][start:finish,z,:,:]
-                    else:
+                    # if self.unstack:
+                    #     zdn = ds[var].dimensions[1]
+                    #     for z in range(0, len(self.znames[zdn])-1):
+                    #         varz = var + self.znames[zdn][z]
+                    #         data[use][varz] = ds[var][start:finish,z,:,:]
+                    # else:
                         ## 3D data not unstacked
-                        data[use][var] = ds[var][start:finish,:,:,:]
+                    data[use][var] = ds[var][start:finish,:,:,:]
                 else:
                     data[use][var] = ds[var][start:finish,:,:]
         ds.close()

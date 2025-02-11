@@ -14,18 +14,25 @@
 # them by hand.
 #---------------------
 
-# the location to save your workspace, it will have
-# (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
+# the location to save your workspace, it will have (1) pbs script,
+# (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
 
 save_loc: /glade/work/$USER/CREDIT_runs/c404/
 seed: 2222  # RNG seed
 
-history_len:  &histlen 2 
-forecast_len: &forelen 1
 
+## To avoid errors / incompatibilities, declare options that are used
+## repeatedly once, at the top level where they apply, and inherit
+## them at the levels where they are used using the <<: pattern.  We
+## could propagate configuration info downward in code, but inheriting
+## it here dramatically simplifies things.
 
-# file globs are defined relative to the top-level data rootpath
+sampling: &samples
+    history_len:  2 
+    forecast_len: 1
+
+  
 
 # A downscaling model has two encoders, one for the high-res
 # downscaled data (the output from the model being emulated) and one
@@ -58,141 +65,178 @@ forecast_len: &forelen 1
 # rewrite their outputs alphabetize variables.
 
 
-data:
-    # common values across datasets
-    
+# The 'data', 'dataset', and 'transforms' sections below are used to
+# initialize DownscalingDataset, DataMap, and DataTransform objects,
+# respectively.  You pass **conf['data'] (etc.) to the constructor, so
+# the options here correspond to constructor arguments.
+
+data_defaults: &ddefault
+    <<: *samples
+
+    # file globs are defined relative to the top-level data rootpath
+    rootpath: /glade/derecho/scratch/mcginnis/credit
+
+    first_date:   "1980-01-01"
+    last_date:    "2021-12-31"
+
     # note: first_date and last_date must be quoted so that they
     # remain strings; otherwise the yaml parser converts them to
     # datetime objects, which can't handle non-standard GCM calendars.
     
-    history_len:  *histlen
-    forecast_len: *forelen
-    first_date:   "1980-01-01"
-    last_date:    "2021-12-31"
+  
+  
+data:
+    <<: *ddefault
 
-    
-#    ## filenames should match dataset names above
-#    normalization: minmax
-#        normpath: *default/norms
-#        minglob: 'min.*.nc'
-#        maxglob: 'max.*.nc'
-
-    
-    rootpath: &default /glade/derecho/scratch/mcginnis/credit
-    datasets:
-
-      
+    ## CONUS404 data on native 4km grid; hourly, 1979-10 to 2022-09
+    hires:
+          
         ## static WRF fields extracted from 'wrfconstants_usgs404.nc'
-
         conus404_static:
-            rootpath: *default
+            <<: *ddefault
             glob: 'conus404/conus404.static.nc'
-            component: hires
             dim: static
             normalize: True   # scale min,max == [0,1] iff dim = static
-            boundary:
-              - COSALPHA  # local cosine of map rotation
-              - E         # coriolis cosine latitude term
-              - F         # coriolis sine latitude term
-              - HGT       # terrain height / orography
-              - LANDMASK  # land/sea mask (0=water, 1=land)
-              - SINALPHA  # local sine of map rotation
-              - VAR       # orographic variance
-              - VAR_SSO   # variance of subgrid-scale orography
-            unused:
-              - XLAT      # latitude
-              - XLONG     # longitude
+            variables:
+                boundary:
+                    - COSALPHA  # local cosine of map rotation
+                    - E         # coriolis cosine latitude term
+                    - F         # coriolis sine latitude term
+                    - HGT       # terrain height / orography
+                    - LANDMASK  # land/sea mask (0=water, 1=land)
+                    - SINALPHA  # local sine of map rotation
+                    - VAR       # orographic variance
+                    - VAR_SSO   # variance of subgrid-scale orography
+                unused:
+                    - XLAT      # latitude
+                    - XLONG     # longitude
+              
+              ## NOTE that U and V are on staggered grids that are 1
+              ## larger in the x- and y- dimensions (respectively)
+              ## than the other variables; they have been trimmed by 1
+              ## on the western and southern edges (respectively) to
+              ## match the dimensionality of the non-staggered grids.
+            
+        
+        conus404_3D:
+            <<: *ddefault
+            glob: 'conus404/3d/*/conus404.3d.*.nc'
+            dim: 3D
+            # unstack: False
+            variables:
+                prognostic:
+                    - P       # total pressure (dataset uses hybrid sigma coordinates)
+                    - QVAPOR  # water vapor mixing ratio
+                    - TK      # air temperature
+                    - U       # U-component of wind *with respect to model grid*
+                    - V       # V-component of wind *with respect to model grid*
+                diagnostic:
+                    - Z       # geopotential height
+            transforms:
+                default:
+                    minmax:
+                        min: 'norms/max.conus404_3d.nc'
+                        max: 'norms/max.conus404_2d.nc'
 
+      
+        conus404_2D:
+            <<: *ddefault
+            glob: 'conus404/2d/*/conus404.2d.*.nc'
+            dim: 2D
+            variables:
+                boundary:
+                    - COSZEN  # cosine of solar zenith angle
+                prognostic:
+                    - PSFC    # surface pressure
+                    - Q2      # water vapor mixing ratio at 2 meters
+                    - T2      # 2-meter air temperature
+                    - TD2     # 2-d dewpoint temperature
+                    - U10     # u-wind at 10 meters
+                    - V10     # v-wind at 10 meters
+                diagnostic:
+                    - PREC_ACC_NC # total precip (mm) over previous (1-hr) timestep
+                    - SWDNB       # shortwave downwelling at bottom (instantaneous)
+                    - totalVap    # column-integrated water vapor content 
+                unused:
+                    - SNOW       # snow water equivalent
+            transforms:
+                default:
+                    minmax:
+                        min: 'norms/min.conus404_2d.nc'
+                        max: 'norms/max.conus404_2d.nc'
+                PREC_ACC_NC:
+                    clip:
+                        amin: 0
+                    power:
+                        pow: 0.25
+                    minmax:
+                        min: 'norms/min.conus404_2d.nc'
+                        max: 'norms/max.conus404_2d.nc'
+
+              
+
+    lores:
+        ## driving ERA5 & TOA solar data on coarsened version of CONUS404 grid
 
         ## insolation data calculated using miles-credit applications
         ## script calc_global_solar.py, regridded to coarsened
         ## CONUS404 grid; hourly, 1979-2024
-        
+            
         solar:
-            rootpath: *default
+            <<: *ddefault
             glob: 'solar/tisr.20km.*.nc'
-            component: lores
             dim: 2D
-            boundary:
-              - tisr      # TOA incident solar radiation (J/m^2, integral dt)
+            variables:
+                boundary:
+                    - tisr      # TOA incident solar radiation (J/m^2, integral dt)
+            transforms:
+                default:
+                    minmax:
+                        min: 'norms/min.solar.nc'
+                        max: 'norms/max.solar.nc'
 
 
-        ## CONUS404 data on native grid; hourly, 1979-10 to 2022-09
-        
-        ## NOTE that U and V are on staggered grids that are 1 larger
-        ## in the x- and y- dimensions (respectively) than the other
-        ## variables; they have been trimmed by 1 on the western and
-        ## southern edges (respectively) to match the dimensionality
-        ## of the non-staggered grids.
+          ## ERA5 data regridded to coarsened CONUS404 grid.  Source
+          ## data is interpolated to pressure levels and global 0.25
+          ## degree grid.  (Variables are in alphabetical order except
+          ## for R, which is last.)  hourly, 1979-2023
     
-        conus404_3D:
-            rootpath: *default
-            glob: 'conus404/3d/*/conus404.3d.*.nc'
-            component: hires
-            dim: 3D
-            unstack: False
-            prognostic:
-              - P       # total pressure (dataset uses hybrid sigma coordinates)
-              - QVAPOR  # water vapor mixing ratio
-              - TK      # air temperature
-              - U       # U-component of wind *with respect to model grid*
-              - V       # V-component of wind *with respect to model grid*
-            diagnostic:
-              - Z       # geopotential height
-
-        conus404_2D:
-            rootpath: *default
-            glob: 'conus404/2d/*/conus404.2d.*.nc'
-            component: hires
-            dim: 2D
-            boundary:
-              - COSZEN  # cosine of solar zenith angle
-            prognostic:
-              - PSFC    # surface pressure
-              - Q2      # water vapor mixing ratio at 2 meters
-              - T2      # 2-meter air temperature
-              - TD2     # 2-d dewpoint temperature
-              - U10     # u-wind at 10 meters
-              - V10     # v-wind at 10 meters
-            diagnostic:
-              - PREC_ACC_NC # total precip (mm) over previous (1-hr) timestep
-              - SWDNB       # shortwave downwelling at bottom (instantaneous)
-              - totalVap    # column-integrated water vapor content 
-            unused:
-              - SNOW       # snow water equivalent
-
-
-        ## ERA5 data regridded to coarsened CONUS404 grid.  Source
-        ## data is interpolated to pressure levels and global 0.25
-        ## degree grid.  (Variables are in alphabetical order except
-        ## for R, which is last.)  hourly, 1979-2023
-
         era5_3D:
-            rootpath: *default
+            <<: *ddefault
             glob: 'era5/3d/*/era5.3d.*.nc'
-            component: lores
             dim: 3D
-            unstack: False
-            boundary:
-              - T   # temperature
-              - U   # u-winds
-              - V   # v-winds
-              - Z   # geopotential
-              - R   # humidity
-
+            # unstack: False
+            variables:
+                boundary:
+                    - T   # temperature
+                    - U   # u-winds
+                    - V   # v-winds
+                    - Z   # geopotential
+                    - R   # humidity
+            transforms:
+                default:
+                    minmax:
+                        min: 'norms/min.era5_3d.nc'
+                        max: 'norms/max.era5_3d.nc'
+    
         era5_2D:
-            rootpath: *default
+            <<: *ddefault
             glob: 'era5/2d/*/era5.2d.*.nc'
-            component: lores
             dim: 2D
-            boundary:
-              - SP       # surface pressure
-              - MSL      # mean sea-level pressure
-              - VAR_2T   # 2-meter temperature
-              - TCWV     # total column water vapor
-              - VAR_10U  # 10-meter u-wind
-              - VAR_10V  # 10-meter v-wind
-              
+            variables:
+                boundary:
+                    - SP       # surface pressure
+                    - MSL      # mean sea-level pressure
+                    - VAR_2T   # 2-meter temperature
+                    - TCWV     # total column water vapor
+                    - VAR_10U  # 10-meter u-wind
+                    - VAR_10V  # 10-meter v-wind
+            transforms:
+                default:
+                    minmax:
+                        min: 'norms/min.era5_2d.nc'
+                        max: 'norms/max.era5_2d.nc'
+
 
 model:
     type: "unet404"

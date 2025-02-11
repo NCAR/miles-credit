@@ -62,7 +62,7 @@ class Sample(TypedDict):
 #####################
 
 @dataclass
-class DownscalingDataset(torch.utils.data.Dataset):
+class DownscalingDataloader(torch.utils.data.Dataset):
     ''' pass **conf['data'] as arguments to constructor
     [insert more documentation here]
     '''
@@ -71,17 +71,25 @@ class DownscalingDataset(torch.utils.data.Dataset):
     forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
-    datasets: Dict = field(default_factory=dict)
+    components: Dict = field(default_factory=dict)
 
     def __post_init__(self):
         super().__init__()
 
-        ## replace the datasets dict (which holds configurations for
-        ## the various DataMaps in the dataset) with actual DataMap
-        ## objects intialized from those configurations.  Need to pop
-        ## datasets from __dict__ because we need to update each one
-        ## with the other class attributes (which are common to all
-        ## datasets) first.
+        ## replace the components dict (a nested dict of
+        ## configurations for the constituent datasets & their
+        ## transforms) with actual DataMap and DataTransform objects.
+
+        ## can we now do this without needing to update them with the
+        ## common attributs, since they've been inherited in the yaml
+        ## file?
+        
+        # ## replace the datasets dict (which holds configurations for
+        # ## the various DataMaps in the dataset) with actual DataMap
+        # ## objects intialized from those configurations.  Need to pop
+        # ## datasets from __dict__ because we need to update each one
+        # ## with the other class attributes (which are common to all
+        # ## datasets) first.
         
         dmap_configs = self.__dict__.pop("datasets")
         inherited = deepcopy(self.__dict__)
