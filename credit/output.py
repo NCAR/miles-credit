@@ -184,11 +184,9 @@ def save_netcdf_increment(
             else:
                 surface_geopotential_var = "Z_GDS4_SFC"
             with xr.open_dataset(conf["data"]["save_loc_static"]) as static_ds:
-                ds_merged[surface_geopotential_var] = static_ds[
-                    surface_geopotential_var
-                ]
+                surface_geopotential = static_ds[surface_geopotential_var].values
             pressure_interp = full_state_pressure_interpolation(
-                ds_merged, **conf["predict"]["interp_pressure"]
+                ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"]
             )
             ds_merged = xr.merge([ds_merged, pressure_interp])
 
