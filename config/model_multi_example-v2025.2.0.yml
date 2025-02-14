@@ -19,7 +19,7 @@
 # the location to save your workspace, it will have 
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
-save_loc: '/glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb'
+save_loc: '/glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/'
 seed: 1000
 
 data:
@@ -63,9 +63,9 @@ data:
     # static variables must be a single zarr or nc with (latitude, longitude) coords
     # static variables must be normalized BY USER 
     static_variables: ['z_norm','LANDM_COSLAT'] 
-    save_loc_static: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai.nc'
+    save_loc_static: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
 
-    save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai.nc'
+    save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
 
     # z-score files, they must be zarr or nc with (level,) coords
     # they MUST include all the 
@@ -92,7 +92,7 @@ data:
     # 1, 2, 3, ... for multi-step training
     forecast_len: 1
     # the "forecast_len" used for validation set, can be the same as or smaller than "forecast_len"
-    valid_forecast_len: 15
+    valid_forecast_len: 1
 
     # TRAINING ONLY
     # [Optional] backprop_on_timestep: use a list, for ex., [1, 2, 3, 5, 6, 7] to backprop on those timesteps when doing multi-step training
@@ -103,7 +103,7 @@ data:
     # this option speed-up multi-step training, it ONLY works with trainer type: standard
     # use one_shot --> True
     # do not use one_shot --> False or null
-    one_shot: False
+    one_shot: True
                             
     # number of hours for each forecast step
     # lead_time_periods = 6 for 6 hourly model and 6 hourly taining data
@@ -133,7 +133,7 @@ data:
     # dataset type. For now you may choose from 
     # ERA5_and_Forcing_MultiStep MultiprocessingBatcherPrefetch ERA5_MultiStep_Batcher MultiprocessingBatcher
     # All of these support single or multi-step training (e.g. forecast lengths >= 0)
-    dataset_type: MultiprocessingBatcherPrefetch
+    dataset_type: ERA5_MultiStep_Batcher
 
 
     data_clamp: null
@@ -175,6 +175,8 @@ trainer:
     # does not work if skip_validation: True
     save_best_weights: True
 
+    save_every_epoch: True
+
     # Optional for user to control which variable metrics get saved to training_log.csv
     # Set to True to save metrics for all predicted variables
     # Set to ["Z500", "Q500", "Q", "T"] for example to save these variables (with levels in the case of Q and T)
@@ -194,14 +196,14 @@ trainer:
 
     # define training and validation batch size
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 1
-    valid_batch_size: 1
+    train_batch_size: 2
+    valid_batch_size: 2
 
     # number of batches per epoch for training and validation
-    batches_per_epoch: 1000 # Set to 0 to use len(dataloader)
+    batches_per_epoch: 500 # Set to 0 to use len(dataloader)
     valid_batches_per_epoch: 20
     # early stopping
-    stopping_patience: 50 
+    stopping_patience: 5000 
     # True: do not validate, always save weights
     skip_validation: False
 
@@ -254,7 +256,7 @@ trainer:
 
     # Number of prefetch workers in the DataLoader
     # This only works with ERA5_MultiStep_Batcher or MultiprocessingBatcherPrefetch
-    prefetch_factor: 4
+    prefetch_factor: 2
   
 model:
     # NCAR WXFormer example
@@ -272,8 +274,8 @@ model:
     patch_height: 1                   # number of longitude grids in each 3D patch (default: 1)
     frame_patch_size: 1               # number of input states in each 3D patch (default: 1)
     
-    dim: [256, 512, 1024, 2048]           # Dimensionality of each layer
-    depth: [2, 2, 18, 2]               # Depth of each layer
+    dim: [256, 512, 1024, 2048]       # Dimensionality of each layer
+    depth: [2, 2, 18, 2]              # Depth of each layer
     global_window_size: [4, 4, 2, 1] # Global window size for each layer
     local_window_size: 3             # Local window size
     cross_embed_kernel_sizes:         # kernel sizes for cross-embedding
@@ -372,7 +374,7 @@ model:
 
         global_drymass_fixer:
             activate: True
-            activate_outside_model: False
+            activate_outside_model: True
             simple_demo: False
             denorm: True
             grid_type: 'sigma'
@@ -384,7 +386,7 @@ model:
 
         global_water_fixer:
             activate: True
-            activate_outside_model: False
+            activate_outside_model: True
             simple_demo: False
             denorm: True
             grid_type: 'sigma'
@@ -397,7 +399,7 @@ model:
             
         global_energy_fixer:
             activate: True
-            activate_outside_model: False
+            activate_outside_model: True
             simple_demo: False
             denorm: True
             grid_type: 'sigma'
@@ -432,7 +434,7 @@ loss:
     
     # this file is MANDATORY for the "predict" section below (inference stage)
     # the file must be nc and must contain 1D variables named "latitude" and "longitude"
-    latitude_weights: "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai.nc"
+    latitude_weights: "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
 
     # use latitude weighting
     # if True, the latitude_weights file MUST have a variable named "coslat"
@@ -468,21 +470,21 @@ predict:
     # fsdp: fully sharded data parallel
     # ddp: distributed data parallel
     # none: single-GPU training
-    mode: none
+    mode: ddp
 
     # Set the batch_size for the prediction inference mode (default is 1)
     batch_size: 1
 
     forecasts:
         type: "custom"       # keep it as "custom". See also credit.forecast
-        start_year: 1981     # year of the first initialization (where rollout will start)
+        start_year: 1980     # year of the first initialization (where rollout will start)
         start_month: 1       # month of the first initialization
-        start_day: 2         # day of the first initialization
+        start_day: 1         # day of the first initialization
         start_hours: [0]     # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
         duration: 1          # number of days to initialize, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
-        days: 365             # forecast lead time as days (1 means 24-hour forecast)
+        days:  5             # forecast lead time as days (1 means 24-hour forecast)
         
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables
@@ -492,7 +494,7 @@ predict:
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
     # each forecast lead time produces a file.nc
-    save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/cesm_wxformer_00191_nb/'
+    save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/cesm_wxformer_00191_nb/model_00240/monthly/'
     
     # this keyword will apply a low-pass filter to all fields and each forecast step
     # it will reduce high-freq noise, but may impact performance
@@ -503,13 +505,15 @@ predict:
     climatology: '/glade/campaign/cisl/aiml/ksha/CREDIT_arXiv/VERIF/verif_6h/ERA5_clim/ERA5_clim_1990_2019_6h_interp.nc'
 
     save_vars: ['PRECT','CLDTOT','CLDHGH','CLDLOW','CLDMED','TAUX','TAUY','U10','QFLX','FSNS','FLNS','FSNT','FLNT','SHFLX','LHFLX','TREFHT','PS','Qtot','U','V','T']
-    forcing_file: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.climaterun.sst.statics_1.0deg_F32.nc'
-    climate_timesteps: 43800
+    forcing_file: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.climaterun.sst.CLIM2000.statics_1.0deg_F32.nc'
+    climate_timesteps: 1460000
 
-    init_cond_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_physics/init_wxformer_1981_01_01_00Z_tensor.pth'
+    
+    run_fast_climate: False
+    init_cond_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_physics/init_wxformer_1979_01_01_00Z_tensor.pth'
     inds_rmse_fast_climate: ['rmse_PRECT','rmse_TREFHT']
-    seasonal_mean_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_physics/true_mean_01_wxformer_1981_01_01_00Z_tensor.pth'
-    timesteps_fast_climate: 1460
+    seasonal_mean_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_physics/true_mean_01_wxformer_10years_01_01_00Z_tensor.pth'
+    timesteps_fast_climate: 1460000
     
     # deprecated
     # save_format: "nc"
