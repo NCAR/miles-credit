@@ -3,9 +3,9 @@ channels:
   - pytorch
   - conda-forge
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
-  - numpy<2
+  - numpy
   - pandas
   - matplotlib
   - cartopy
@@ -15,9 +15,6 @@ dependencies:
   - pytest
   - xarray
   - netcdf4
-  - pytorch
-  - torchvision
-  - cpuonly
   - pyyaml
   - cartopy
   - dask
@@ -25,15 +22,15 @@ dependencies:
   - dask-jobqueue
   - zarr
   - jupyter
-  - geocat-comp
-  - xesmf
   - mpi4py
   - mpich
   - myst-parser
   - pip:
+    - torch
+    - torchvision
+    - pre-commit
     - einops
     - echo-opt
-    - optuna==3.6.0
     - bridgescaler
     - rotary-embedding-torch
     - segmentation-models-pytorch>=0.3.4
@@ -44,5 +41,4 @@ dependencies:
     - torch_geometric
     - sphinx-autoapi
     - timm
-    - wandb
     - .
