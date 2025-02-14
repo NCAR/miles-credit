@@ -427,8 +427,49 @@ def credit_main_parser(
         # --------------------------------------------------------------------- #
 
     # SKEBS
-    if conf["model"]["post_conf"]["skebs"]["activate"]:
-        pass
+    if conf['model']['post_conf']['skebs']['activate']:
+        assert "freeze_base_model_weights" in conf['model']['post_conf']['skebs'], (
+            'need to specify freeze_base_model_weights in skebs config'
+        )
+        assert "level_info_file" in conf['data'], (
+            'need to specify level_info_file for skebs')
+        assert conf['trainer']["train_batch_size"] == conf['trainer']["valid_batch_size"], (
+            'train and valid batch sizes need to be the same for skebs'
+        )
+
+
+        conf['model']['post_conf']['skebs'].setdefault('lmax', None)
+        conf['model']['post_conf']['skebs'].setdefault('mmax', None)
+        
+        if conf['model']['post_conf']['skebs']['lmax'] in ['none', 'None']:
+            conf['model']['post_conf']['skebs']['lmax'] = None
+        if conf['model']['post_conf']['skebs']['mmax'] in ['none', 'None']:
+            conf['model']['post_conf']['skebs']['mmax'] = None
+
+        U_inds = [
+            i_var for i_var, var in enumerate(varname_output) if var=="U"
+        ]
+        
+        V_inds = [
+            i_var for i_var, var in enumerate(varname_output) if var=="V"
+        ]
+        T_inds = [
+            i_var for i_var, var in enumerate(varname_output) if var=="T"
+        ]
+        Q_inds = [
+            i_var for i_var, var in enumerate(varname_output) if var in ["Q", "Qtot"]
+        ]
+        conf['model']['post_conf']['skebs']['U_inds'] = U_inds
+        conf['model']['post_conf']['skebs']['V_inds'] = V_inds
+        conf['model']['post_conf']['skebs']['Q_inds'] = Q_inds
+        conf['model']['post_conf']['skebs']['T_inds'] = T_inds
+        if "SP" in varname_output:
+            conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("SP")
+        else:
+            conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("PS")
+
+        ###### debug mode setup #######
+        conf['model']['post_conf']['skebs']['save_loc'] = conf['save_loc']
 
     # --------------------------------------------------------------------- #
     # tracer fixer

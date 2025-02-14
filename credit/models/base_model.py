@@ -82,7 +82,8 @@ class BaseModel(nn.Module):
         model_class = cls(**conf["model"])
 
         model_class.load_state_dict(
-            checkpoint if fsdp else checkpoint["model_state_dict"]
+            checkpoint if fsdp else checkpoint["model_state_dict"],
+            strict=False,
         )
 
         return model_class
@@ -114,7 +115,8 @@ class BaseModel(nn.Module):
         model_class = cls(**conf["model"])
 
         model_class.load_state_dict(
-            checkpoint if fsdp else checkpoint["model_state_dict"]
+            checkpoint if fsdp else checkpoint["model_state_dict"],
+            strict=False,
         )
 
         return model_class
