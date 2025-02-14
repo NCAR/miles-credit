@@ -1,6 +1,7 @@
 import os
 import gc
 import sys
+from sklearn import ensemble
 import yaml
 import time
 import logging
@@ -31,7 +32,6 @@ import matplotlib.pyplot as plt
 # ---------- #
 import torch
 from torch.utils.data import get_worker_info
-from torch.utils.data.distributed import DistributedSampler
 from torch.profiler import profile, record_function, ProfilerActivity
 
 
@@ -168,6 +168,15 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     x = torch.load(conf['predict']['init_cond_fast_climate'], map_location=torch.device(device)).to(device)
     DSforc = xr.open_dataset(conf["predict"]["forcing_file"])
 
+    ensemble_size = conf["predict"].get("ensemble_size", 1)
+    if ensemble_size > 1:
+        logger.info(f"rolling out with ensemble size {ensemble_size}")
+        x = torch.repeat_interleave(x, ensemble_size, 0)
+        input_shape[0] = ensemble_size
+        forcing_shape[0] = ensemble_size # dont do for forcing shape
+        output_shape[0] = ensemble_size
+
+
     # Set up metrics and transformations
     metrics = LatWeightedMetrics(conf)
     DSforc_norm = state_transformer.transform_dataset(DSforc)
@@ -248,16 +257,15 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     num_steps = 0
     
     # Trace the model for optimized execution
-    print('jit trace model start')
-    model = torch.jit.trace(model, x)
-    print('jit trace model done')
+    # print('jit trace model start')
+    # model = torch.jit.trace(model, x)
+    # print('jit trace model done')
 
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total parameters: {total_params}")
 
     model_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 ** 2)
     print(f"Model size: {model_size:.2f} MB")
-
 
     for k in range(num_ts):
         loop_start = time.time()
@@ -276,6 +284,7 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
                     x_forcing_batch[:, bb, :, :, :] = forcing_dict[dfv][k, :, :]
                 for bb, sfv in enumerate(sf_variables):
                     x_forcing_batch[:, len(df_variables) + bb, :, :, :] = forcing_dict[sfv]
+
             x = torch.cat((x, x_forcing_batch), dim=1)
 
         if k == 0:
@@ -293,7 +302,7 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
         start_model = time.time()
         x = x.contiguous()
         with torch.no_grad():
-            y_pred = model(x)
+            y_pred = model(x.float())
         # print('Model inference time:', time.time() - start_model)
 
         start_postprocess = time.time()
@@ -315,19 +324,38 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
             y_pred = input_dict["y_pred"]
         # print('Postprocess time:', time.time() - start_postprocess)
         test_tensor_rmse.add_(y_pred)
-        darray_upper_air, darray_single_level = make_xarray(
-            y_pred.cpu(),
-            utc_datetime,
-            latlons.latitude.values,
-            latlons.longitude.values,
-            conf,
-        )
+        upper_air_list, single_level_list = [], []
+        for i in range(ensemble_size):  # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
+            darray_upper_air, darray_single_level = make_xarray(
+                y_pred[i:i+1].cpu(),
+                utc_datetime,
+                latlons.latitude.values,
+                latlons.longitude.values,
+                conf,
+            )
+            upper_air_list.append(darray_upper_air)
+            single_level_list.append(darray_single_level)
+
+        if ensemble_size > 1:
+            ensemble_index = xr.DataArray(
+                np.arange(ensemble_size), dims="ensemble_member_label"
+            )
+            all_upper_air = xr.concat(
+                upper_air_list, ensemble_index
+            )  # .transpose("time", ...)
+            all_single_level = xr.concat(
+                single_level_list, ensemble_index
+            )  # .transpose("time", ...)
+        else:
+            all_upper_air = darray_upper_air
+            all_single_level = darray_single_level
+
 
         result = p.apply_async(
             save_netcdf_increment,
             (
-                darray_upper_air,
-                darray_single_level,
+                all_upper_air,
+                all_single_level,
                 init_datetime_str,
                 lead_time_periods * forecast_hour,
                 meta_data,
@@ -370,7 +398,8 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
         # print('Total loop time:', time.time() - loop_start)
         # ============================================================ #
         # print('Switch time:', time.time() - start_switch)
-        # print('Total loop time:', time.time() - loop_start)
+        loop_time = time.time() - loop_start
+        logger.info(f'Total loop time: {loop_time:.2f}')
         # print('add_it: ', add_it)
         # if add_it == 365:
         #     break
@@ -447,7 +476,7 @@ def main():
     #     model_name=args.model_name
     # )
     
-    num_cpus = 8
+    num_cpus = 12
     with mp.Pool(num_cpus) as p:
         run_year_rmse(p, config=args.config, input_shape=args.input_shape,
         forcing_shape=args.forcing_shape,
@@ -465,4 +494,16 @@ def main():
 
 
 if __name__ == "__main__":
+
+    # Set up logger to print stuff
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+
+    # Stream output to stdout
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(formatter)
+    root.addHandler(ch)
+
     main()
