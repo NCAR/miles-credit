@@ -142,13 +142,15 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     
     model.eval()
     post_conf = conf["model"]["post_conf"]
+
+    
     
     # Extract conservation flags from the configuration
     flag_mass_conserve, flag_water_conserve, flag_energy_conserve = False, False, False
     if post_conf["activate"]:
-        if post_conf["global_mass_fixer"]["activate"] and post_conf["global_mass_fixer"]["activate_outside_model"]:
+        if post_conf["global_drymass_fixer"]["activate"] and post_conf["global_drymass_fixer"]["activate_outside_model"]:
             flag_mass_conserve = True
-            opt_mass = GlobalMassFixer(post_conf)
+            opt_mass = GlobalDryMassFixer(post_conf)
         if post_conf["global_water_fixer"]["activate"] and post_conf["global_water_fixer"]["activate_outside_model"]:
             flag_water_conserve = True
             opt_water = GlobalWaterFixer(post_conf)
@@ -249,6 +251,13 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     print('jit trace model start')
     model = torch.jit.trace(model, x)
     print('jit trace model done')
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total parameters: {total_params}")
+
+    model_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 ** 2)
+    print(f"Model size: {model_size:.2f} MB")
+
 
     for k in range(num_ts):
         loop_start = time.time()

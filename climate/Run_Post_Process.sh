@@ -2,8 +2,8 @@
 #PBS -N Post_Process_XXX_Clim_Run
 #PBS -A NAML0001 
 #PBS -l walltime=12:00:00
-#PBS -o surf_pp_clim_00XXX.out
-#PBS -e surf_pp_clim_00XXX.out
+#PBS -o Tot_pp_clim_00XXX.out
+#PBS -e Tot_pp_clim_00XXX.out
 #PBS -q casper
 #PBS -l select=1:ncpus=8:mem=50GB
 #PBS -m a
@@ -11,8 +11,35 @@
 
 module load conda
 conda activate npl-2023b
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/JOHN_cam32_full/model_00007/model.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT --rescale_it True --n_processes 24
 
-python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/model_multi_example-v2025.2.0.yml 1D --variables PRECT CLDTOT CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSNS FLNS FSNT FLNT SHFLX LHFLX --reset_times False --dask_do False --name_string SingleLevel --rescale_it False
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel_infinite.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/model_multi_example-v2025.2.0.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT --rescale_it True --n_processes 24
+
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/JOHN_cam32_full/model_00007/model.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT --rescale_it True --n_processes 24
+
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000/model_multi_example-v2025.2.0.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT --rescale_it False --n_processes 24
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000_2K/model_multi_example-v2025.2.0.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT --rescale_it False --n_processes 48
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000_4K/model_multi_example-v2025.2.0.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT --rescale_it False --n_processes 48
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000/model_multi_example-v2025.2.0.yml 1D --variables PRECT CLDTOT CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSNS FLNS FSNT FLNT SHFLX LHFLX --reset_times False --dask_do False --name_string SingleLevel --rescale_it False --n_processes 24
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000_2K/model_multi_example-v2025.2.0.yml 1D --variables PRECT CLDTOT CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSNS FLNS FSNT FLNT SHFLX LHFLX --reset_times False --dask_do False --name_string SingleLevel --rescale_it False --n_processes 24
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000_4K/model_multi_example-v2025.2.0.yml 1D --variables PRECT CLDTOT CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSNS FLNS FSNT FLNT SHFLX LHFLX --reset_times False --dask_do False --name_string SingleLevel --rescale_it False --n_processes 24
+
+
+
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000/model_multi_example-v2025.2.0.yml 1D --variables PRECT CLDTOT CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSNS FLNS FSNT FLNT SHFLX LHFLX --reset_times False --dask_do False --name_string SingleLevel --rescale_it False --n_processes 24
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000_2K/model_multi_example-v2025.2.0.yml 1D --variables PRECT CLDTOT CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSNS FLNS FSNT FLNT SHFLX LHFLX --reset_times False --dask_do False --name_string SingleLevel --rescale_it False --n_processes 24
+
+python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process_Parallel.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00240/climo_2000_4K/model_multi_example-v2025.2.0.yml 1D --variables PRECT CLDTOT CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSNS FLNS FSNT FLNT SHFLX LHFLX --reset_times False --dask_do False --name_string SingleLevel --rescale_it False --n_processes 24
 
 # python /glade/work/wchapman/miles_branchs/CESM_physics_multigpu/climate/Post_Process.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191_nb/model_00223/model_multi_example_c-v2025.2.0.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT --rescale_it False
 
