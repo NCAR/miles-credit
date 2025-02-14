@@ -35,10 +35,10 @@ dependencies = [
     "vector-quantize-pytorch",
     "haversine",
     "pvlib",
-    "geocat-comp",
     "torch-harmonics",
     "torch_geometric",
-    "sphinx",
+    "pre-commit",
+    "ruff"
    ]
 
 [project.optional-dependencies]
@@ -54,6 +54,7 @@ version = {file = "credit/VERSION"}
 
 [tool.ruff]
 src = ["credit", "applications", "tests"]
+line-length = 120
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
