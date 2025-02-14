@@ -313,7 +313,10 @@ def main(rank, world_size, conf, backend, trial=False):
         m = torch.compile(m)
 
     # Wrap in DDP or FSDP module, or none
-    model = distributed_model_wrapper(conf, m, device)
+    if conf["trainer"]["mode"] in ["ddp", "fsdp"]:
+        model = distributed_model_wrapper(conf, m, device)
+    else:
+        model = m
 
     # Load model weights (if any), an optimizer, scheduler, and gradient scaler
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(
