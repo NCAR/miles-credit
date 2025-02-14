@@ -3,6 +3,7 @@ import logging
 import multiprocessing as mp
 import os
 import sys
+import time
 import warnings
 from argparse import ArgumentParser
 
@@ -205,6 +206,7 @@ def predict(rank, world_size, conf, p):
         )
 
     # Rollout
+    start_time = time.time()
     with torch.no_grad():
         # forecast count = a constant for each run
         forecast_count = 0
@@ -388,7 +390,7 @@ def predict(rank, world_size, conf, p):
 
         if distributed:
             torch.distributed.destroy_process_group()
-
+    logger.info(f"total time: {(time.time() - start_time) / 60:.2f} minutes")
     return 1
 
 

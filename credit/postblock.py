@@ -944,39 +944,44 @@ class Backscatter_FCNN(nn.Module):
 
         x = x.permute(0, -1, 1, 2, 3) # put channels back to 1st dim
         return x
-class Backscatter_fixed(nn.Module):
+
+class Backscatter_fixed_col(nn.Module):
     def __init__(self,
-                 nlat,
-                 nlon):
+                 levels,):
         super().__init__()
-        self.backscatter_array = Parameter(torch.full((1,1,1,nlat,nlon), 2.5)) 
+        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 2.5))
 
     def forward(self, x):
-        # self.backscatter_array = self.backscatter_array.clamp(0.)
-        return self.backscatter_array
-class Backscatter_fixed_col(nn.Module):
+        # self.backscatter_array.data = self.backscatter_array.data.clamp(0., 10.)
+        logger.info(torch.flatten(self.backscatter_array))
+        return self.backscatter_array  # this will be inside sqrt
+    
+
+class Backscatter_prescribed(nn.Module):
+    """  min/max scaling
+        # forcing / forcing_max * perturb_frac * sigma_max * std
+        # perturb_max is the maximum perturbation fraction wrt to sigma_max*std
+        # where we have pre-calculated forcing_max"""
     def __init__(self,
                  levels,
                  std_path,
                  sigma_max,
                  perturb_frac):
         super().__init__()
-        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 0.01))
 
-        # std = xr.open_dataset(std_path)
-        # std_wind = np.sqrt(std.U.values ** 2 + std.V.values ** 2)[::-1]
-        # self.register_buffer("max_perturb",
-        #                      (torch.tensor(std_wind * sigma_max * perturb_frac)
-        #                     .view(1, levels, 1, 1, 1)),
-        #                     persistent=False)
-        # self.max_perturb = 1.0
+        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 2.5))
+
+        std = xr.open_dataset(std_path)
+        std_wind = np.sqrt(std.U.values ** 2 + std.V.values ** 2)[::-1]
+        self.register_buffer("max_perturb",
+                             (torch.tensor(std_wind * sigma_max * perturb_frac)
+                            .view(1, levels, 1, 1, 1)),
+                            persistent=False)
 
     def forward(self, x):
-        self.backscatter_array.data = self.backscatter_array.data.clamp(0., 10.)
-        # return self.backscatter_array * self.max_perturb ** 2  # this will be inside sqrt
-        logger.info(torch.flatten(self.backscatter_array))
-        return self.backscatter_array  # this will be inside sqrt
-
+        return self.backscatter_array * (self.max_perturb / 2. ) ** 2  # this will be inside sqrt
+        #add_wind_mag with backscatter = 1.0 is under ~80 for most of the distribution. target: 7% perturb fraction, 2 sigma level
+    
 
 class SKEBS(nn.Module):
     """
@@ -1030,7 +1035,7 @@ class SKEBS(nn.Module):
         self.initialize_skebs_parameters()
         self.initialize_plev_calc()
         
-        # coeffs havent been spun up yet (need to cycle the coeffs)
+        # coeffs havent been spun up yet (indicates need to cycle the coeffs)
         self.spec_coef_is_initialized = False
 
         # freeze pattern weights before init backscatter
@@ -1048,15 +1053,21 @@ class SKEBS(nn.Module):
         #                 + len(post_conf["data"]["surface_variables"])
         #                 + len(post_conf["data"]["diagnostic_variables"])
         # )
-        if post_conf["skebs"]["uniform_dissipation"]:
-            # self.backscatter_network = Backscatter_fixed(self.nlat, self.nlon)
-            self.backscatter_network = Backscatter_fixed_col(self.levels,
+        dissipation_type = post_conf["skebs"]["dissipation_type"]
+        if dissipation_type == "prescribed":
+            self.backscatter_network = Backscatter_prescribed(self.levels,
                                                              post_conf["data"]["std_path"],
                                                              post_conf["skebs"]["sigma_max"],
                                                              post_conf["skebs"]["perturb_frac"])
-        else:
+        elif dissipation_type == "uniform":
+            self.backscatter_network = Backscatter_fixed_col(self.levels)
+        elif dissipation_type == "FCNN":
             self.backscatter_network = Backscatter_FCNN(num_channels, self.levels)
+        else:
+            raise RuntimeError(f"{dissipation_type} is a not a valid dissipation type, please modify config")
         
+        logger.info(f"using dissipation type: {dissipation_type}")
+
         # freeze backscatter weights if needed
         if post_conf["skebs"].get("freeze_dissipation_weights", False):
             logger.warning("freezing all dissipation predictor weights")
@@ -1068,7 +1079,7 @@ class SKEBS(nn.Module):
             for param in self.parameters():
                 param.requires_grad = False
 
-        logger.info(f"trainable params{[param for param in self.parameters() if param.requires_grad]}")
+        logger.info(f"trainable params{[torch.flatten(param) for param in self.parameters() if param.requires_grad]}")
 
 
         ########### debugging and analysis features #############
@@ -1076,6 +1087,11 @@ class SKEBS(nn.Module):
         self.debug_save_loc = join(post_conf['skebs']["save_loc"], "debug_skebs")
         os.makedirs(self.debug_save_loc, exist_ok=True)  
         self.iteration = 0
+        logger.info("writing SKEBS debugging files" if self.write_debug_files else "not debugging")
+
+        self.iteration_stop = post_conf['skebs'].get("iteration_stop", 0)
+        if self.iteration_stop:
+            logger.info(f"SKEBS is STOPPING at iteration {self.iteration_stop}")
 
     def initialize_sht(self):
         """
@@ -1125,7 +1141,7 @@ class SKEBS(nn.Module):
             self.alpha = Parameter(torch.tensor(0.125, requires_grad=True))
         else:
             logger.info("single-step skebs")
-            self.alpha = Parameter(torch.tensor(0.5, requires_grad=False)) #why doesnt this set to false?
+            self.alpha = Parameter(torch.tensor(0.5, requires_grad=False))
             self.alpha.requires_grad = False 
         self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
         self.p = Parameter(torch.tensor(-1.27, requires_grad=True))
@@ -1168,7 +1184,7 @@ class SKEBS(nn.Module):
         self.multivariateNormal = MultivariateNormal(torch.zeros(2, device=y_pred.device), 
                                                      torch.eye(2, device=y_pred.device))
         # initialize pattern todo: how many iters?
-        iters = 50
+        iters = 25
         logger.debug(f"initializing pattern with {iters} iterations")
         for i in range(iters):
             self.spec_coef = self.cycle_pattern(self.spec_coef)
@@ -1222,8 +1238,15 @@ class SKEBS(nn.Module):
         return compute_density(pressure, t, q)
 
     def forward(self, x):
-
         x = x["y_pred"]
+
+        # shutoff skebs if specified
+        if self.iteration > self.iteration_stop and self.iteration_stop > 0:
+            if self.iteration == self.iteration_stop + 1:
+                logger.info(f"skebs stopped at {self.iteration_stop} steps")
+                
+            return x
+
         backscatter_pred = self.backscatter_network(x)
 
         # todo: get topography and other input vars
@@ -1231,8 +1254,6 @@ class SKEBS(nn.Module):
 
         if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
             self.steps = 0
-            # self.write_debug_files = not self.training # check if we are in rollout mode. this attr is set by model.eval() or model.train()
-            logger.info("writing SKEBS debugging files" if self.write_debug_files else "not debugging")
             self.initialize_pattern(x)
             self.spec_coef_is_initialized = True
         else:
@@ -1241,25 +1262,13 @@ class SKEBS(nn.Module):
         self.spec_coef = self.cycle_pattern(self.spec_coef) # cycle from prev step
         # b, 1, 1, lmax, mmax
         # pattern_on_grid = self.isht(self.spec_coef) # b, 1, 1, lat, lon
-        # pattern_on_grid = (-1. / RAD_EARTH
-        #                     * torch.gradient(pattern_on_grid, 
-        #                                    spacing= PI / self.nlat,
-        #                                    axis=-2)[0]
-        #                     )
 
         spec_coef = self.spec_coef.squeeze()
         u_chi, v_chi = self.getgrad(spec_coef)
         u_chi, v_chi = u_chi.unsqueeze(1).unsqueeze(1), v_chi.unsqueeze(1).unsqueeze(1)
         # logger.info(f"pattern max/min: {pattern_on_grid.max():.2f}, {pattern_on_grid.min():.2f}")
 
-        # with fixed col, we adjust the perturbations to make sense using
-        # min/max scaling
-        # forcing / forcing_max * perturb_frac * sigma_max * std
-        # perturb_max is the maximum perturbation fraction wrt to sigma_max*std
-        # where we have pre-calculated forcing_max
-        # total_forcing = (torch.sqrt(self.r * backscatter_pred / self.dE) #taking out of sqrt so i can fix magnitude issue
-        #                  * pattern_on_grid * self.spectral_adjustment )
-        dissipation_term = torch.sqrt(self.r * backscatter_pred / self.dE)
+        dissipation_term = torch.sqrt(self.r * backscatter_pred * self.timestep / self.dE)
         # shape (b, levels, 1, lat, lon)
 
         # sp = torch.ones_like(x[:, self.sp_index : self.sp_index + 1], device = x.device) * 1013.
@@ -1270,12 +1279,6 @@ class SKEBS(nn.Module):
         # assert torch.min(density) >= 0., "ERROR: density is less than 0"
         # (b, levels, 1, lat, lon)
 
-        ## compute component magnitudes of wind
-        # u_squared, v_squared = x[:, self.U_inds] ** 2, x[:, self.V_inds] ** 2
-        # wind_squared = u_squared + v_squared
-        # u_frac = u_squared / wind_squared # (b, levels, 1, lat, lon)
-        # v_frac = v_squared / wind_squared
-
         # big forcing at top of atmosphere..
         # skebs gives us an instantaneous forcing term, need to multiply by timestep (euler step)
         # du/dt = 1 / rho * forcing
@@ -1284,16 +1287,16 @@ class SKEBS(nn.Module):
 
         # still debugging this part
         # add_wind_magnitude = (1. / density) * total_forcing * self.timestep  
-        add_wind_magnitude = torch.sqrt(dissipation_term ** 2 * (u_chi ** 2 + v_chi ** 2)) * self.timestep
-
+        add_wind_magnitude = torch.sqrt(dissipation_term ** 2 * (u_chi ** 2 + v_chi ** 2))
+        logger.debug(f"perturb max/min: {add_wind_magnitude.max():.2f}, {add_wind_magnitude.min():.2f}")
         ## debug skebs, write out physical values 
         if self.write_debug_files:
             torch.save(add_wind_magnitude, join(self.debug_save_loc, f"perturb_{self.iteration}"))
             # torch.save(pattern_on_grid, join(self.debug_save_loc, f"pattern_{self.iteration}"))
             # torch.save(x, join(self.debug_save_loc, f"x_{self.iteration}"))
 
-        x_u_wind = x[:, self.U_inds] + dissipation_term * u_chi * self.timestep
-        x_v_wind = x[:, self.V_inds] + dissipation_term * v_chi * self.timestep
+        x_u_wind = x[:, self.U_inds] + dissipation_term * u_chi
+        x_v_wind = x[:, self.V_inds] + dissipation_term * v_chi
         
         x = concat_for_inplace_ops(x, x_u_wind, min(self.U_inds), max(self.U_inds))
         x = concat_for_inplace_ops(x, x_v_wind, min(self.V_inds), max(self.V_inds))
@@ -1315,11 +1318,13 @@ class SKEBS(nn.Module):
                 self.spec_coef_is_initialized = False
                 logger.info(f"pattern is reset after valid step {self.steps} total iter {self.iteration}")
         return x
+    
     def spec2grid(self, uspec):
         """
         spatial data from spectral coefficients
         """
         return self.isht(uspec)
+    
     def getuv(self, vrtdivspec):
         """
         compute wind vector from spectral coeffs of vorticity and divergence

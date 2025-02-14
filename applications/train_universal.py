@@ -438,12 +438,18 @@ if __name__ == "__main__":
         default="nccl",
         choices=["nccl", "gloo", "mpi"],
     )
+    parser.add_argument(
+        "-d",
+        "--debug",
+        action='store_true'
+    )
     args = parser.parse_args()
     args_dict = vars(args)
     config = args_dict.pop("model_config")
     launch = int(args_dict.pop("launch"))
     backend = args_dict.pop("backend")
     use_wandb = int(args_dict.pop("wandb"))
+    debug = args_dict.pop("debug")
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -452,7 +458,10 @@ if __name__ == "__main__":
 
     # Stream output to stdout
     ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
+    if debug:
+        ch.setLevel(logging.DEBUG)
+    else:
+        ch.setLevel(logging.INFO)
     ch.setFormatter(formatter)
     root.addHandler(ch)
 

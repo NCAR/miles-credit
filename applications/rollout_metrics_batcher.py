@@ -285,7 +285,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             if flag_clamp:
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-            y_pred = model(x)
+            y_pred = model(x.float())
 
             # Post-processing blocks
             if flag_mass_conserve:
