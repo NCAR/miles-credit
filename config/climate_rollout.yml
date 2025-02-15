@@ -361,8 +361,8 @@ model:
             tracer_thres: [0, 0, 0, 0, 0, 0, 0]
             
         global_mass_fixer:
-            activate: False
-            activate_outside_model: False
+            activate: True
+            activate_outside_model: True
             simple_demo: False
             denorm: True
             grid_type: 'sigma'
@@ -494,7 +494,7 @@ predict:
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
     # each forecast lead time produces a file.nc
-    save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/cesm_wxformer_00191_nb/model_00240/monthly/'
+    save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/cesm_wxformer_00191_nb/model_00240/test_new_env/'
     
     # this keyword will apply a low-pass filter to all fields and each forecast step
     # it will reduce high-freq noise, but may impact performance
@@ -506,14 +506,14 @@ predict:
 
     save_vars: ['PRECT','CLDTOT','CLDHGH','CLDLOW','CLDMED','TAUX','TAUY','U10','QFLX','FSNS','FLNS','FSNT','FLNT','SHFLX','LHFLX','TREFHT','PS','Qtot','U','V','T']
     forcing_file: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.climaterun.sst.CLIM2000.statics_1.0deg_F32.nc'
-    climate_timesteps: 1460000
+    climate_timesteps: 100
 
     
     run_fast_climate: False
     init_cond_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_physics/init_wxformer_1979_01_01_00Z_tensor.pth'
     inds_rmse_fast_climate: ['rmse_PRECT','rmse_TREFHT']
     seasonal_mean_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_physics/true_mean_01_wxformer_10years_01_01_00Z_tensor.pth'
-    timesteps_fast_climate: 1460000
+    timesteps_fast_climate: 100
     
     # deprecated
     # save_format: "nc"

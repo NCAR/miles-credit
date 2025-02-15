@@ -83,7 +83,7 @@ def load_fsdp_or_checkpoint_policy(conf):
     return transformer_layers_cls
 
 
-def load_model(conf, load_weights=False):
+def load_model(conf, load_weights=False, model_name=False):
     conf = copy.deepcopy(conf)
 
     model_conf = conf["model"]
@@ -108,6 +108,7 @@ def load_model(conf, load_weights=False):
                 ckpt = os.path.join(save_loc, "model_checkpoint.pt")
             else:
                 ckpt = os.path.join(save_loc, "checkpoint.pt")
+            
             if not os.path.isfile(ckpt):
                 raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
 
@@ -126,7 +127,10 @@ def load_model(conf, load_weights=False):
         model, message = model_types[model_type]
         logger.info(message)
         if load_weights:
-            return model.load_model(conf)
+            if model_name:
+                return model.load_model_name(conf, model_name=model_name)
+            else:
+                return model.load_model(conf)
         return model(**model_conf)
 
     else:

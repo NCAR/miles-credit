@@ -37,7 +37,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 
 # ---------- #
 # credit
-from credit.models import load_model, load_model_name
+from credit.models import load_model
 from credit.seed import seed_everything
 from credit.loss import latitude_weights
 
@@ -62,7 +62,7 @@ from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state
 from credit.parser import credit_main_parser, predict_data_check
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer, GlobalDryMassFixer
+from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -126,11 +126,10 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     else:
         print("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
         raise
-
     # Load the model (optionally a custom model) and configure distributed mode
     if model_name is not None:
         print('loading custom: ', model_name)
-        model = load_model_name(conf, model_name, load_weights=True).to(device)
+        model = load_model(conf, model_name=model_name, load_weights=True).to(device)
     else:
         model = load_model(conf, load_weights=True).to(device)
     
@@ -148,9 +147,9 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     # Extract conservation flags from the configuration
     flag_mass_conserve, flag_water_conserve, flag_energy_conserve = False, False, False
     if post_conf["activate"]:
-        if post_conf["global_drymass_fixer"]["activate"] and post_conf["global_drymass_fixer"]["activate_outside_model"]:
+        if post_conf["global_mass_fixer"]["activate"] and post_conf["global_mass_fixer"]["activate_outside_model"]:
             flag_mass_conserve = True
-            opt_mass = GlobalDryMassFixer(post_conf)
+            opt_mass = GlobalMassFixer(post_conf)
         if post_conf["global_water_fixer"]["activate"] and post_conf["global_water_fixer"]["activate_outside_model"]:
             flag_water_conserve = True
             opt_water = GlobalWaterFixer(post_conf)

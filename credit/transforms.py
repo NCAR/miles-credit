@@ -132,6 +132,10 @@ class NormalizeState:
         else:
             return self.transform(sample)
 
+    def transform_dataset(self, DS: xr.Dataset) -> xr.Dataset:
+        DS = (DS - self.mean_ds)/self.std_ds
+        return DS
+
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
         """Transform from unscaled to scaled values.
 
@@ -346,6 +350,10 @@ class Normalize_ERA5_and_Forcing:
         else:
             # Transformation
             return self.transform(sample)
+
+    def transform_dataset(self, DS: xr.Dataset) -> xr.Dataset:
+        DS = (DS - self.mean_ds)/self.std_ds
+        return DS
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
         """Transform of y_pred.
