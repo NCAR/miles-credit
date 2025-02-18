@@ -1,7 +1,22 @@
+import numpy as np
+
 """
 transforms_downscaling.py
 -------------------------------------------------------
 """
+
+
+
+## Expand array by repeating x & y elements; equivalent to
+## nearest-neighbor interpolation of coarse data for simplified
+## single-funnel downscaling models
+
+def expand(x, by, inverse=False):
+        if inverse:
+            return x[...,::by,::by]
+        else:
+            n = len(x.shape)
+            return x.repeat(by, axis=n-1).repeat(by, axis=n-2)
 
 
 ## Note: we don't want sklearn functions becaue they calcluate params
@@ -26,29 +41,31 @@ def zscore(x, mean, stdev, inverse=False):
 
 def power(x, pow, inverse=False):
     if inverse:
-        return numpy.power(x, 1/pow)
+        return np.power(x, 1/pow)
     else:
-        return numpy.power(x, pow)
+        return np.power(x, pow)
+
+    
+## wrapped to handle inverse, which is the same as forward.  (If I
+## didn't want precip < 0 on input, I also don't want it on output.)
+
+def clip(x, min=None, max=None, inverse=False):
+    return np.clip(x, min, max)
+
 
 ## the 'do-nothing' op
-def identity(x, **kwargs):
+def identity(x, inverse=False, **kwargs):
     return x
-    
 
-fundict = { "rescale": rescale,
+## map names to functions in dict to avoid insecure exec()
+fundict = { "expand": expand,
+            "rescale": rescale,
             "minmax": minmax,
             "zscore": zscore,
             "power": power,
-            "clip": numpy.clip,
-            "none": identity,
+            "clip": clip,
+            None: identity,  # do nothing if no transform defined
            }
-
-# For the "clip" operation, the arguments are a_min and a_max.  You
-# can define either or both.  It takes **kwargs, so you can provide
-# extra arguments that it will ignore, like 'inverse'.  This is the
-# right thing to do: inverse clip is the same as forward clip, because
-# if I didn't want precip < 0 on input, I don't want precip < 0 on
-# output, either.
 
 
 @dataclass
