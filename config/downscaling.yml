@@ -133,12 +133,13 @@ data:
                 diagnostic:
                     - Z       # geopotential height
             transforms:
+                paramfiles:
+                    mmin: 'norms/max.conus404_3d.nc'
+                    mmax: 'norms/max.conus404_2d.nc'
                 default:
-                    minmax:
-                        min: 'norms/max.conus404_3d.nc'
-                        max: 'norms/max.conus404_2d.nc'
+                    minmax: paramfile
 
-      
+
         conus404_2D:
             <<: *ddefault
             glob: 'conus404/2d/*/conus404.2d.*.nc'
@@ -160,20 +161,19 @@ data:
                 unused:
                     - SNOW       # snow water equivalent
             transforms:
+                paramfiles: 
+                    mmin: 'norms/min.conus404_2d.nc'
+                    mmax: 'norms/max.conus404_2d.nc'
                 default:
-                    minmax:
-                        min: 'norms/min.conus404_2d.nc'
-                        max: 'norms/max.conus404_2d.nc'
+                    minmax: paramfile
                 PREC_ACC_NC:
                     clip:
-                        amin: 0
+                        cmin: 0
                     power:
                         pow: 0.25
-                    minmax:
-                        min: 'norms/min.conus404_2d.nc'
-                        max: 'norms/max.conus404_2d.nc'
+                    minmax: paramfile
 
-              
+
 
     lores:
         ## driving ERA5 & TOA solar data on coarsened version of CONUS404 grid
@@ -190,10 +190,11 @@ data:
                 boundary:
                     - tisr      # TOA incident solar radiation (J/m^2, integral dt)
             transforms:
-                default:
-                    minmax:
-                        min: 'norms/min.solar.nc'
-                        max: 'norms/max.solar.nc'
+                paramfiles: 
+                    mmin: 'norms/min.solar.nc'
+                    mmax: 'norms/max.solar.nc'
+                tisr:
+                    minmax: paramfile
 
 
           ## ERA5 data regridded to coarsened CONUS404 grid.  Source
@@ -214,11 +215,12 @@ data:
                     - Z   # geopotential
                     - R   # humidity
             transforms:
+                paramfiles:
+                    mmin: 'norms/min.era5_3d.nc'
+                    mmax: 'norms/max.era5_3d.nc'
                 default:
-                    minmax:
-                        min: 'norms/min.era5_3d.nc'
-                        max: 'norms/max.era5_3d.nc'
-    
+                    minmax: paramfile
+
         era5_2D:
             <<: *ddefault
             glob: 'era5/2d/*/era5.2d.*.nc'
@@ -232,10 +234,11 @@ data:
                     - VAR_10U  # 10-meter u-wind
                     - VAR_10V  # 10-meter v-wind
             transforms:
+                paramfiles:
+                    mmin: 'norms/min.era5_2d.nc'
+                    mmax: 'norms/max.era5_2d.nc'
                 default:
-                    minmax:
-                        min: 'norms/min.era5_2d.nc'
-                        max: 'norms/max.era5_2d.nc'
+                    minmax: paramfile
 
 
 model:
