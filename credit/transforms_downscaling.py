@@ -21,21 +21,38 @@ transforms_downscaling.py
 @dataclass
 class Expand:
     by: int
-    inverse: bool=False
-    def __call__(self, x):
-        if self.inverse:
+    def __call__(self, x, inverse=False):
+        if inverse:
             return x[..., ::self.by, ::self.by]
         else:
             n = len(x.shape)
-            return x.repeat(selfby, axis=n-1).repeat(self,by, axis=n-2)
+            return x.repeat(self.by, axis=n-1).repeat(self.by, axis=n-2)
         
-
+@dataclass
+class Pad:
+    left:   int=0
+    right:  int=0
+    top:    int=0
+    bottom: int=0
+    mode:   str="edge"
+    def __call__(self, x, inverse=False):
+        if inverse:
+            nx = x.shape[-1]
+            ny = x.shape[-2]
+            return x[..., self.bottom:ny-self.top, self.left:nx-self.right]
+        else:
+            pad = ((self.bottom, self.top), (self.left, self.right))
+            for i in range(2, len(x.shape)):
+                pad = ((0,0),) + pad
+            return np.pad(x, pad_width=pad, mode=self.mode)
+        
 ## Note: we don't want sklearn functions for normalization because
 ## they calcluate params from the data, and we want to use
 ## externally-specified param values.  We also need an inverse for
 ## each function.
 
 def rescale(x, offset=0, scale=1, inverse=False):
+    print(offset, scale, inverse)
     if inverse:
         return (x * scale) + offset
     else:
@@ -45,28 +62,22 @@ def rescale(x, offset=0, scale=1, inverse=False):
 class Minmax:
     mmin: float
     mmax: float
-    inverse: bool = False
-
-    def __call__(self, x):
-        return rescale(x, self.mmin, self.mmax-self.mmin, self.inverse)
+    def __call__(self, x, inverse=False):
+        return rescale(x, self.mmin, self.mmax-self.mmin, inverse)
 
 @dataclass
 class Zscore:
     mean: float = 0
     stdev: float = 1
-    inverse: bool = False
-
-    def __call(self, x):
-        return rescale(x, self.mean, self.stdev, self.inverse)
+    def __call__(self, x, inverse=False):
+        return rescale(x, self.mean, self.stdev, inverse)
 
 ## TODO: rename argument 'pow' - nameclash with function
 @dataclass
 class Power:
     pow: float
-    inverse: bool=False
-    
-    def __call__(self, x):
-        if self.inverse:
+    def __call__(self, x, inverse=False):
+        if inverse:
             return np.power(x, 1/self.pow)
         else:
             return np.power(x, self.pow)
@@ -79,37 +90,20 @@ class Power:
 class Clip:
     cmin: float=None
     cmax: float=None
-    inverse: bool=False
-    def __call__(self, x):
+    def __call__(self, x, inverse=False):
         return np.clip(x, a_min=self.cmin, a_max=self.cmax)
 
     
 ## the 'do-nothing' op
 @dataclass
 class Identity:
-    inverse: bool=False
-    def __call__(self, x):
+    def __call__(self, x, inverse=False):
         return x
 
-#..# @Dataclass
-#..# class Composition:
-#..#     transforms: #list of callables
-#..#     inverse: bool=False
-#..# 
-#..#     def __call__(self, x):
-#..#         if self.inverse:
-#..#             # call trasnforms in reverse order            
-#..#             pass
-#..#         else:
-#..#             # call trasnforms on x in order
-#..#             pass
-#..# 
 
-## inversion needs to be a switch that you flip
 
-## Works for 2D!
-## Need to make it work for 3D when pfile.variables[var][...].item() is a list
-
+## If inverse works better as a state switch, add inverse=False to
+## init args, drop from call and branch on self.inverse
 
 class DownscalingNormalizer:
     '''
@@ -120,15 +114,13 @@ class DownscalingNormalizer:
                   "zscore": Zscore,
                   "power": Power,
                   "clip": Clip,
+                  "pad": Pad,
                   None: Identity,  # do nothing if no transform defined
                   }
     
-    def __init__(self, vardict, transdict, rootpath, inverse=False):
+    def __init__(self, vardict, transdict, rootpath):
         ## TODO: make this take **kwargs instead so we can pass **conf?
         
-        ## TODO: make this a setter property so it can flip all the transforms
-        self.inverse = inverse
-
         ## flatten to get list of variables
         variables = [var for vlist in vardict.values() for var in vlist]
         
@@ -169,17 +161,16 @@ class DownscalingNormalizer:
                 self.transforms[var].append(self.xclassdict[None]())
             
     
-    def __call__(self, x):
+    def __call__(self, x, inverse=False):
         # x is a nested dict of [usage][var][time,(z),y,x]
         for usage in x:
             for var in x[usage]:
-                
-                pass
-        # iterate over sample structure
-        # call self.transforms[var] for each variable
-        # (it's a list; iterate over it)
-        # if self.inverse, iterate in reverse order
-        # if variable not in list of transforms, do nothing to it
+                if inverse:
+                    for xform in reversed(self.transforms[var]):
+                        x[usage][var] = xform(x[usage][var], inverse=True)
+                else:
+                    for xform in self.transforms[var]:
+                        x[usage][var] = xform(x[usage][var], inverse=False)
         return x
 
 

@@ -135,7 +135,7 @@ data:
             transforms:
                 paramfiles:
                     mmin: 'norms/max.conus404_3d.nc'
-                    mmax: 'norms/max.conus404_2d.nc'
+                    mmax: 'norms/max.conus404_3d.nc'
                 default:
                     minmax: paramfile
 
@@ -169,9 +169,9 @@ data:
                 PREC_ACC_NC:
                     clip:
                         cmin: 0
+                    minmax: paramfile
                     power:
                         pow: 0.25
-                    minmax: paramfile
 
 
 
@@ -195,6 +195,11 @@ data:
                     mmax: 'norms/max.solar.nc'
                 tisr:
                     minmax: paramfile
+                    expand:
+                        by: 5
+                    pad:
+                        left: 1
+                        right: 1
 
 
           ## ERA5 data regridded to coarsened CONUS404 grid.  Source
