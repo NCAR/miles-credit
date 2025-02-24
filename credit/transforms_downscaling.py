@@ -2,8 +2,6 @@ import os
 import inspect
 from collections import defaultdict
 from dataclasses import dataclass
-from glob import glob
-from typing import ClassVar
 import netCDF4 as nc
 import numpy as np
 
@@ -13,28 +11,30 @@ transforms_downscaling.py
 """
 
 
-
-## Expand array by repeating x & y elements; equivalent to
-## nearest-neighbor interpolation of coarse data for simplified
-## single-funnel downscaling models
+# Expand array by repeating x & y elements; equivalent to
+# nearest-neighbor interpolation of coarse data for simplified
+# single-funnel downscaling models
 
 @dataclass
 class Expand:
     by: int
+
     def __call__(self, x, inverse=False):
         if inverse:
             return x[..., ::self.by, ::self.by]
         else:
             n = len(x.shape)
             return x.repeat(self.by, axis=n-1).repeat(self.by, axis=n-2)
-        
+
+
 @dataclass
 class Pad:
-    left:   int=0
-    right:  int=0
-    top:    int=0
-    bottom: int=0
-    mode:   str="edge"
+    left:   int = 0
+    right:  int = 0
+    top:    int = 0
+    bottom: int = 0
+    mode:   str = "edge"
+
     def __call__(self, x, inverse=False):
         if inverse:
             nx = x.shape[-1]
@@ -43,13 +43,14 @@ class Pad:
         else:
             pad = ((self.bottom, self.top), (self.left, self.right))
             for i in range(2, len(x.shape)):
-                pad = ((0,0),) + pad
+                pad = ((0, 0), ) + pad
             return np.pad(x, pad_width=pad, mode=self.mode)
-        
-## Note: we don't want sklearn functions for normalization because
-## they calcluate params from the data, and we want to use
-## externally-specified param values.  We also need an inverse for
-## each function.
+
+
+# Note: we don't want sklearn functions for normalization because
+# they calcluate params from the data, and we want to use
+# externally-specified param values.  We also need an inverse for
+# each function.
 
 def rescale(x, offset=0, scale=1, inverse=False):
     print(offset, scale, inverse)
@@ -58,52 +59,57 @@ def rescale(x, offset=0, scale=1, inverse=False):
     else:
         return (x - offset) / scale
 
+
 @dataclass
 class Minmax:
     mmin: float
     mmax: float
+
     def __call__(self, x, inverse=False):
         return rescale(x, self.mmin, self.mmax-self.mmin, inverse)
+
 
 @dataclass
 class Zscore:
     mean: float = 0
     stdev: float = 1
+
     def __call__(self, x, inverse=False):
         return rescale(x, self.mean, self.stdev, inverse)
 
-## TODO: rename argument 'pow' - nameclash with function
+
 @dataclass
 class Power:
     exponent: float
+
     def __call__(self, x, inverse=False):
         if inverse:
             return np.power(x, 1/self.exponent)
         else:
             return np.power(x, self.exponent)
 
-    
-## Inverse for clipping is the same as forward.  (If I didn't want
-## precip < 0 on input, I also don't want it on output.)
+
+# Inverse for clipping is the same as forward.  (If I didn't want
+# precip < 0 on input, I also don't want it on output.)
 
 @dataclass
 class Clip:
-    cmin: float=None
-    cmax: float=None
+    cmin: float = None
+    cmax: float = None
+
     def __call__(self, x, inverse=False):
         return np.clip(x, a_min=self.cmin, a_max=self.cmax)
 
-    
-## the 'do-nothing' op
+
+# the 'do-nothing' op
 @dataclass
 class Identity:
     def __call__(self, x, inverse=False):
         return x
 
 
-
-## If inverse works better as a state switch, add inverse=False to
-## init args, drop from call and branch on self.inverse
+# If inverse works better as a state switch, add inverse=False to
+# init args, drop from call and branch on self.inverse
 
 class DownscalingNormalizer:
     '''
@@ -117,39 +123,36 @@ class DownscalingNormalizer:
                   "pad": Pad,
                   None: Identity,  # do nothing if no transform defined
                   }
-    
+
     def __init__(self, vardict, transdict, rootpath):
-        ## TODO: make this take **kwargs instead so we can pass **conf?
-        
-        ## get flat list of variables
+        # TODO: make this take **kwargs instead so we can pass **conf?
+
+        # get flat list of variables
         variables = []
         for usage in vardict:
             if usage != 'unused':
                 variables.extend(vardict[usage])
 
-
-        ## get parameters used by each transforms (for transforms used)
+        # get parameters used by each transforms (for transforms used)
         xformparams = {}
         for var in transdict:
             if var != "paramfiles":
                 for xform in transdict[var]:
                     x = self.xclassdict[xform]
-                    xformparams[xform] = list(inspect.signature(x).parameters.keys())        
-        
+                    xformparams[xform] = list(inspect.signature(x).parameters.keys())
 
-        ## read in any parameter values stored in netcdf files
+        # read in any parameter values stored in netcdf files
         if 'paramfiles' in transdict:
 
             fileparams = defaultdict(dict)
-            
+
             for par in transdict['paramfiles']:
-                pfile = nc.Dataset(rootpath + "/" + transdict['paramfiles'][par])
+                pfile = nc.Dataset(os.path.join(rootpath, transdict['paramfiles'][par]))
                 for var in variables:
                     if var in pfile.variables:
                         fileparams[var][par] = pfile.variables[var][...]
 
-        
-        ## instantiate list of transforms for each variable
+        # instantiate list of transforms for each variable
         self.transforms = {}
         for var in variables:
             self.transforms[var] = list()
@@ -162,12 +165,9 @@ class DownscalingNormalizer:
                         xargs = {par: fileparams[var][par] for par in xformparams[xform]}
                     self.transforms[var].append(x(**xargs))
             else:
-                ## no tranform defined & no default for this variable
+                # no tranform defined & no default for this variable
                 self.transforms[var].append(Identity())
 
-
-            
-    
     def __call__(self, x, inverse=False):
         # x is a nested dict of [usage][var][time,(z),y,x]
         for usage in x:
@@ -179,5 +179,3 @@ class DownscalingNormalizer:
                     for xform in self.transforms[var]:
                         x[usage][var] = xform(x[usage][var], inverse=False)
         return x
-
-

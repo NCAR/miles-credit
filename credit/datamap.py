@@ -46,13 +46,13 @@ import cftime as cf
 import numpy as np
 
 
-
 class VarDict(TypedDict, total=False):
     '''a dictionary of the variables that could be in a dataset'''
     boundary: List
     prognostic: List
     diagnostic: List
     unused: List
+
 
 def rescale_minmax(x):
     '''rescale data to [0,1].  Don't use
@@ -123,52 +123,52 @@ def rescale_minmax(x):
 # within files.  Sample index is the numbering that's exposed to the
 # outside world via __getitem__.
 
-#  i  | file | fidx | time | mon | day | split | sample | index
-#--------------------------------------------------------------
-#   0 |  0   |  0   |      | Dec |  1  |       |        |  -     
-#   1 |  0   |  1   |      | '00 |  2  |       |        |  -     
-#   2 |  0   |  2   |      |  "  |  3  |       |        |  -     
-# ... |  "   | ...  |      |  "  | ... |       |        |       
-#  20 |  0   |      |      |  "  |  21 |       | (1st)  |  -     
-#  21 |  0   |      |      |  "  |  22 | first | hist0  |  -     
-#  22 |  0   |      |      |  "  |  23 |       | hist1  |  -     
-#  23 |  0   |      |      |  "  |  24 |       | hist2  |  -     
-#  24 |  0   |      |      |  "  |  25 |       | fore0  |  0    
-#  25 |  0   |      |      |  "  |  26 |       | fore1  |  1    
-# ... |  "   | ...  | ...  |  "  | ... |       |        | ...      
-#  28 |  0   |  28  | -72  |  "  |  29 |       | ([8])  |  4     
-#  29 |  0   |  29  | -48  |  "  |  30 |       | hist0  |  5     
-#  30 |  0   |  30  | -24  |  "  |  31 |       | hist1  |  6     
-#--------------------------------------------------------------
-#  31 |  1   |  0   |  0   | Jan |  1  |       | hist2  |  7     
-#  32 |  1   |  1   |  24  | '01 |  2  |       | fore0  |  8     
-#  33 |  1   |  2   |  48  |  "  |  3  |       | fore1  |  9     
-# ... |  1   | ...  | ...  |  "  | ... |       |        | ...      
-#  60 |  1   |  29  | 719  | Jan |  30 |       |        |       
-#  61 |  1   |  30  | 720  | Jan |  31 |       |        |       
-#--------------------------------------------------------------
-#  62 |  2   |  0   | 744  | Feb |  1  |       |        |       
-#  63 |  2   |  1   | 768  |  "  |  2  |       |        |       
-# ... |  2   | ...  | ...  |  "  | ... |       |        | ...      
-#--------------------------------------------------------------
-# ...   ...    ...    ...    ...   ...                    ...      
-#--------------------------------------------------------------
-# ... |  11  | ...  | ...  | Nov | ... |       |        | ...   
-# 363 |  11  |  28  |      |  "  |  29 |       |        |       
-# 364 |  11  |  29  |      | Nov |  30 |       |        |       
-#--------------------------------------------------------------
-# 365 |  12  |  0   |      | Dec |  1  |       |        |       
-# ... |  12  | ...  |      | '01 | ... |       | (last) | ...   
-# 381 |  12  |  16  |      |  "  |  17 |       | hist0  | 357   
-# 382 |  12  |  17  |      |  "  |  18 |       | hist1  | 358   
-# 383 |  12  |  18  |      |  "  |  19 |       | hist2  | 359   
-# 384 |  12  |  19  |      |  "  |  20 |       | fore0  | 360   
-# 385 |  12  |  20  |      |  "  |  21 | last  | fore1  |  -    
-# 386 |  12  |  21  |      |  "  |  22 |       |        |  -    
-# ... |  "   | ...  | ...  |  "  | ... |       |        |       
-# 394 |  12  |  29  |      |  "  |  30 |       |        |  -    
-# 395 |  12  |  30  |      | Dec |  31 |       |        |  -    
-#--------------------------------------------------------------
+#  i  | file | fidx | time | mon | day | split | sample | index|
+# --------------------------------------------------------------
+#   0 |  0   |  0   |      | Dec |  1  |       |        |  -   |
+#   1 |  0   |  1   |      | '00 |  2  |       |        |  -   |
+#   2 |  0   |  2   |      |  "  |  3  |       |        |  -   |
+# ... |  "   | ...  |      |  "  | ... |       |        |      |
+#  20 |  0   |      |      |  "  |  21 |       | (1st)  |  -   |
+#  21 |  0   |      |      |  "  |  22 | first | hist0  |  -   |
+#  22 |  0   |      |      |  "  |  23 |       | hist1  |  -   |
+#  23 |  0   |      |      |  "  |  24 |       | hist2  |  -   |
+#  24 |  0   |      |      |  "  |  25 |       | fore0  |  0   |
+#  25 |  0   |      |      |  "  |  26 |       | fore1  |  1   |
+# ... |  "   | ...  | ...  |  "  | ... |       |        | ...  |
+#  28 |  0   |  28  | -72  |  "  |  29 |       | ([8])  |  4   |
+#  29 |  0   |  29  | -48  |  "  |  30 |       | hist0  |  5   |
+#  30 |  0   |  30  | -24  |  "  |  31 |       | hist1  |  6   |
+# -------------------------------------------------------------|
+#  31 |  1   |  0   |  0   | Jan |  1  |       | hist2  |  7   |
+#  32 |  1   |  1   |  24  | '01 |  2  |       | fore0  |  8   |
+#  33 |  1   |  2   |  48  |  "  |  3  |       | fore1  |  9   |
+# ... |  1   | ...  | ...  |  "  | ... |       |        | ...  |
+#  60 |  1   |  29  | 719  | Jan |  30 |       |        |      |
+#  61 |  1   |  30  | 720  | Jan |  31 |       |        |      |
+# -------------------------------------------------------------|
+#  62 |  2   |  0   | 744  | Feb |  1  |       |        |      |
+#  63 |  2   |  1   | 768  |  "  |  2  |       |        |      |
+# ... |  2   | ...  | ...  |  "  | ... |       |        | ...  |
+# -------------------------------------------------------------|
+# ...   ...    ...    ...    ...   ...                    ...  |
+# -------------------------------------------------------------|
+# ... |  11  | ...  | ...  | Nov | ... |       |        | ...  |
+# 363 |  11  |  28  |      |  "  |  29 |       |        |      |
+# 364 |  11  |  29  |      | Nov |  30 |       |        |      |
+# -------------------------------------------------------------|
+# 365 |  12  |  0   |      | Dec |  1  |       |        |      |
+# ... |  12  | ...  |      | '01 | ... |       | (last) | ...  |
+# 381 |  12  |  16  |      |  "  |  17 |       | hist0  | 357  |
+# 382 |  12  |  17  |      |  "  |  18 |       | hist1  | 358  |
+# 383 |  12  |  18  |      |  "  |  19 |       | hist2  | 359  |
+# 384 |  12  |  19  |      |  "  |  20 |       | fore0  | 360  |
+# 385 |  12  |  20  |      |  "  |  21 | last  | fore1  |  -   |
+# 386 |  12  |  21  |      |  "  |  22 |       |        |  -   |
+# ... |  "   | ...  | ...  |  "  | ... |       |        |      |
+# 394 |  12  |  29  |      |  "  |  30 |       |        |  -   |
+# 395 |  12  |  30  |      | Dec |  31 |       |        |  -   |
+# --------------------------------------------------------------
 
 
 # Written as a dataclass to avoid acres of boilerplate and for free repr(), etc.
@@ -188,7 +188,6 @@ class DataMap:
         3D: data has z-dimension; can unstack Z to pseudo-variables when reading
         2D: default: time-varying 2D data
     normalize: if dim=='static' & normalize == True, scale data to range [0,1]
-    unstack: if dim=='3d' & unstack == True, convert 3D layers to pseudo-vars
     boundary: list of variable names to use as (input-only) boundary conditions
     diagnostic: list of diagnostic (output-only) variable names
     prognostic: list of prognostic (state / input-output) variable names
@@ -207,25 +206,24 @@ class DataMap:
     component:    str = None
     dim:          str = "2D"
     normalize:    bool = False
-    # unstack:      bool = False
     variables:    VarDict[str, List] = field(default_factory=list)
     history_len:  int = 2
     forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
-    
+
     def __post_init__(self):
         super().__init__()
 
         self.sample_len = self.history_len + self.forecast_len
 
         self._mode = "train"
-        
-        ## todo: accept & canonicalize different capitalization
+
+        # todo: accept & canonicalize different capitalization
         if self.dim not in ['static', '2D', '3D']:
             warn(f"credit.datamap: unknown dimensionality: {self.dim}; assuming 2D")
             self.dim = "2D"
-            
+
         if self.normalize and self.dim != "static":
             warn(f"credit.datamap: normalize does nothing if dim != 'static'; setting to False")
             self.normalize = False
@@ -235,65 +233,62 @@ class DataMap:
             if use not in self.variables:
                 self.variables[use] = ()
 
-            
         if self.dim == "static":
             if len(glob(self.glob, root_dir=self.rootpath)) != 1:
                 warn("credit.datamap: dim='static' requires a single file")
-                ## TODO (someday): support multiple static files
                 raise
 
-            #if len(self.prognostic) > 0 or len(self.diagnostic) > 0:
             if (len(self.variables['prognostic']) > 0 or
-                len(self.variables['diagnostic']) > 0):                   
-               warn("credit.datamap: static vars must be boundary")
-               raise
-            
-            ## if static, load data from netcdf
+                len(self.variables['diagnostic']) > 0):
+                    warn("credit.datamap: static vars must be boundary")
+                    raise
+
+            # if static, load data from netcdf
             staticfile = nc.Dataset(self.rootpath + '/' + self.glob)
-            ## [:] forces data to load
+            # [:] forces data to load
             staticdata = [staticfile[v][:] for v in self.variables['boundary']]
             self.data = dict(zip(self.variables['boundary'], staticdata))
-            ## cleanup
+            # cleanup
             staticfile.close()
             del staticfile, staticdata
-            
+
             if self.normalize:
                 for k in self.data.keys():
                     self.data[k] = rescale_minmax(self.data[k])
-                    
-        else:            
+
+        else:
             fileglob = sorted(glob(self.glob, root_dir=self.rootpath))
             self.filepaths = [os.path.join(self.rootpath, f) for f in fileglob]
 
-            ## get time coordinate characteristics from first file
-            ## calendar & units used to convert date <=> time coordinate
-            ## t0 & dt used to convert time coordinates <=> timestep index
+            # get time coordinate characteristics from first file
+            # calendar & units used to convert date <=> time coordinate
+            # t0 & dt used to convert time coordinates <=> timestep index
             nc0 = nc.Dataset(self.filepaths[0])
             time0 = nc0.variables["time"]
-            
+
             self.calendar = time0.calendar
             self.units = time0.units
             self.t0 = float(time0[0])
             self.dt = float(time0[1]) - self.t0
 
             # if self.dim=='3D' and self.unstack:
-            #     ## get coord values to use as names when unstacking z-dim
-            #     ## note that some datasets may have more than one z coord
-            #     ## e.g., ERA5 has level, but CONUS404 has lev & ilev
+            #     # get coord values to use as names when unstacking z-dim
+            #     # note that some datasets may have more than one z coord
+            #     # e.g., ERA5 has level, but CONUS404 has lev & ilev
             #     self.znames = dict()
             #     for use in uses:
             #         for v in self.vardict[use]:
             #             zdimname = nc0[v].dimensions[1]  ## standard dim ordering
             #             self.znames[zdimname] = [str(int(z)) for z in nc0[zdimname]]
-            
+
             nc0.close()
 
-            if(self.first_date is None):
+            if self.first_date is None:
                 self.first = 0
             else:
                 self.first = self.date2tindex(self.first_date)
 
-            if(self.last_date is None):
+            if self.last_date is None:
                 self.last = self.ends[-1]
             else:
                 self.last = self.date2tindex(self.last_date)
@@ -301,8 +296,8 @@ class DataMap:
             self.length = self.last - self.first + 1 - (self.sample_len - 1)
 
 
-            ## get last timestep index in each file
-            ## do this in a loop to avoid many-many open filehandles at once
+            # get last timestep index in each file
+            # do this in a loop to avoid many-many open filehandles at once
 
             self.ends = list()
             cumlen = -1
@@ -314,16 +309,17 @@ class DataMap:
                 ## file opens are slow; stop early if possible
                 if cumlen > self.last:
                     break
-                
-    # end of __post_init__   
+
+    # end of __post_init__
 
     def date2tindex(self, datestring):
         '''Convert datestring (in ISO8601 YYYY-MM-DD format) to
         internal time index.  Datestring can optionally also have an
         HH:MM:SS component; if absent, it defaults to 00:00:00.'''
-        ## todo: check that sting matches expected format
+        # todo: check that string matches expected format
         bits = datestring.split()
-        if(len(bits) == 1): bits.append("00:00:00")
+        if len(bits) == 1:
+            bits.append("00:00:00")
         year, mon, day = [int(x) for x in bits[0].split("-")]
         hour, min, sec = [int(x) for x in bits[1].split(":")]
         cfdt = cf.datetime(year, mon, day, hour, min, sec, calendar=self.calendar)
@@ -337,21 +333,20 @@ class DataMap:
         timecoord = self.t0 + tindex * self.dt
         cfdate = cf.num2date(timecoord, self.units, self.calendar)
         return str(cfdate)
-    
-        
+
     def __len__(self):
-       if self.dim == "static":
-           return 1
-       else:
-           return self.length
+        if self.dim == "static":
+            return 1
+        else:
+            return self.length
 
     def __getitem__(self, index):
         if self.dim == "static":
-            return {"static":self.data}
+            return {"static": self.data}
 
         if index < 0 or index > self.length-1:
-            raise(IndexError())
-        
+            raise IndexError()
+
         start = index + self.first + 1
         if self.mode == "train":
             finish = start + self.sample_len - 1
@@ -360,7 +355,7 @@ class DataMap:
 
         # get segment (which file) and subindex (within file) for start & finish.
         # subindexes are all negative, but that works fine & makes math simpler
-        
+
         startseg = np.searchsorted(self.ends, start)
         finishseg = np.searchsorted(self.ends, finish)
         startsub = start - (self.ends[startseg] + 1)
@@ -377,7 +372,7 @@ class DataMap:
                 for var in data1[use].keys():
                     a1 = data1[use][var]
                     a2 = data2[use][var]
-                    result[use][var] = np.concatenate((a1,a2))
+                    result[use][var] = np.concatenate((a1, a2))
 
         # result["dates"] = {"start":self.sindex2date(start-self.first),
         #                    "finish":self.sindex2date(finish-self.first),
@@ -392,14 +387,13 @@ class DataMap:
     @property
     def mode(self) -> str:
         return self._mode
-    
+
     @mode.setter
     def mode(self, mode: str):
         if mode not in ('train', 'init', 'infer'):
             raise ValueError("invalid DataMap mode")
         self._mode = mode
 
-        
     def read(self, segment, start, finish):
         '''open file & read data from start to finish for needed variables'''
 
@@ -419,6 +413,7 @@ class DataMap:
         for use in uses:
             data[use] = dict()
             for var in self.variables[use]:
+                # can this if be replaced by using ...?
                 if self.dim == "3D":
                     # if self.unstack:
                     #     zdn = ds[var].dimensions[1]
@@ -426,13 +421,9 @@ class DataMap:
                     #         varz = var + self.znames[zdn][z]
                     #         data[use][varz] = ds[var][start:finish,z,:,:]
                     # else:
-                        ## 3D data not unstacked
+                    #   # 3D data not unstacked
                     data[use][var] = ds[var][start:finish,:,:,:]
                 else:
                     data[use][var] = ds[var][start:finish,:,:]
         ds.close()
         return data
-
-    ## todo: normalization
-    ## todo: splitting to input / target
-    ## concatenation to tensor happens in dataset class
