@@ -171,7 +171,7 @@ data:
                         cmin: 0
                     minmax: paramfile
                     power:
-                        pow: 0.25
+                        exponent: 0.25
 
 
 
@@ -225,6 +225,11 @@ data:
                     mmax: 'norms/max.era5_3d.nc'
                 default:
                     minmax: paramfile
+                    expand:
+                        by: 5
+                    pad:
+                        left: 1
+                        right: 1
 
         era5_2D:
             <<: *ddefault
@@ -244,6 +249,11 @@ data:
                     mmax: 'norms/max.era5_2d.nc'
                 default:
                     minmax: paramfile
+                    expand:
+                        by: 5
+                    pad:
+                        left: 1
+                        right: 1
 
 
 model:

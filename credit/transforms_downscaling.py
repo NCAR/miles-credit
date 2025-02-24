@@ -75,12 +75,12 @@ class Zscore:
 ## TODO: rename argument 'pow' - nameclash with function
 @dataclass
 class Power:
-    pow: float
+    exponent: float
     def __call__(self, x, inverse=False):
         if inverse:
-            return np.power(x, 1/self.pow)
+            return np.power(x, 1/self.exponent)
         else:
-            return np.power(x, self.pow)
+            return np.power(x, self.exponent)
 
     
 ## Inverse for clipping is the same as forward.  (If I didn't want
