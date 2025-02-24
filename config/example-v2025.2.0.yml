@@ -1,18 +1,16 @@
 # --------------------------------------------------------------------------------------------------------------------- #
-# This YAML file configures the training of a 1 or 6-hourly state-in-state-out Crossformer model
-# on NSF NCAR high-performance computing systems (casper.ucar.edu and derecho.hpc.ucar.edu).
-# 
-# The model is trained on 6-hourly ERA5 model-level data, incorporating key physical features:
-# - Input: Model-level variables [U, V, T, Q], static variables [Z_GDS4_SFC, LSM], and dynamic forcing [tsi].
-# - Output: 
-#     - Model level: [U, V, T, Q]
-#     - Single level: [SP, t2m]
-#     - 500 hPa level: [U, V, T, Z, Q]
-#
-# This configuration is designed for fine-tuning and prediction tasks using advanced components, 
-# such as spectral normalization, reflective padding, and tracer-specific postprocessing.
-#
-# Ensure compatibility with ERA5 data preprocessing workflows and metadata paths specified in this file.
+# This is an example YAML file. It explains the major keywords that are used in the training and 
+# inference of CREDIT models.
+
+# Contents
+#     - data
+#     - trainer
+#     - model
+#     - loss
+#     - predict
+#     - pbs
+
+# Note: this is NOT a runable YAML. The purposes is to explain how to use each keyword with examples.
 # --------------------------------------------------------------------------------------------------------------------- #
 
 
@@ -48,8 +46,8 @@ data:
     # files must have the listed variable names 
     # THESE ARE NOT LOADING CORRECTLY ON X
     # diagnostic variables will be normalized by the dataloader, users do not need to normalize them
-    # diagnostic_variables: ['Z500', 'T500', 'U500', 'V500', 'Q500'] 
-    # save_loc_diagnostic: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_y_TOTAL_*'
+    diagnostic_variables: ['Z500', 'T500', 'U500', 'V500', 'Q500'] 
+    save_loc_diagnostic: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_y_TOTAL_*'
     
     # periodic forcing variables, must be a single zarr or nc with (time, latitude, longitude) dims
     # the time dimension should cover an entire LEAP YEAR
@@ -59,21 +57,25 @@ data:
     #
     # THESE ARE REDUNDANT?
     # periodic forcing variables MUST be normalized BY USER 
-    # forcing_variables: ['TSI']   
-    # save_loc_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT/forcing_norm_6h.nc'
+    forcing_variables: ['TSI']   
+    save_loc_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT/forcing_norm_6h.nc'
     
     # static variables must be a single zarr or nc with (latitude, longitude) coords
     # static variables must be normalized BY USER 
     static_variables: ['Z_GDS4_SFC', 'LSM'] 
     save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
 
+    # physics file
+    # this file provides parameters for the conservation schemes in the post_block section
+    save_loc_physics: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    
     # z-score files, they must be zarr or nc with (level,) coords
     # they MUST include all the 
     #     'variables', 'surface_variables', 'dynamic_forcing_variables', 'diagnostic_variables' above
     mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_6h_1979_2018_16lev_0.25deg.nc'
     std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_6h_1979_2018_16lev_0.25deg.nc'
     
-    # years to form the training / validation set [first_year, last_yeat (not covered)]
+    # years to form the training / validation set [first_year, last_yeat (NOT covered)]
     train_years: [1979, 2014] # 1979 - 2013
     valid_years: [2014, 2018] # 2014 - 2017
     
@@ -95,7 +97,7 @@ data:
 
     # TRAINING ONLY
     # [Optional] backprop_on_timestep: use a list, for ex., [1, 2, 3, 5, 6, 7] to backprop on those timesteps when doing multi-step training
-    # backprop_on_timestep: [1, 2, 3, 5, 6, 7]
+    backprop_on_timestep: [1, 2, 3, 5, 6, 7]
 
     # when forecast_len = 0, it does nothing
     # when forecast_len > 0, it computes training loss on the last forecast state only
@@ -107,8 +109,11 @@ data:
     # number of hours for each forecast step
     # lead_time_periods = 6 for 6 hourly model and 6 hourly taining data
     # lead_time_periods = 1 for hourly model and hourly taining data
+    # ------------------------------------------------------------ #
+    # Note: This keyword is applied in both training and inference
     lead_time_periods: 6
-
+    # ------------------------------------------------------------ #
+    
     # *NOT A STABLE FEATURE
     # this is the keyword that resolves the mismatch between 6 hourly model and hourly data
     # skip_periods = 6 will train a 6 hourly model on hourly data, by skipping and picking every 6 hour
@@ -327,17 +332,59 @@ model:
         skebs:
             activate: False
 
+        # =================================================== #
+        # The section of conservation schemes
+        # Technical details: https://arxiv.org/abs/2501.05648
+        # =================================================== #
         tracer_fixer:
             activate: True
             denorm: True
-            tracer_name: ['Q', 'Q500']
-            tracer_thres: [1e-8, 1e-8]
+            tracer_name: ['specific_total_water', 'total_precipitation']
+            tracer_thres: [0, 0]
 
         global_mass_fixer:
-            activate: False
+            activate: True
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            fix_level_num: 7
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            specific_total_water_name: ['specific_total_water']
+
+        global_water_fixer:
+            activate: True
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            specific_total_water_name: ['specific_total_water']
+            precipitation_name: ['total_precipitation']
+            evaporation_name: ['evaporation']
 
         global_energy_fixer:
-            activate: False
+            activate: True
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            air_temperature_name: ['temperature']
+            specific_total_water_name: ['specific_total_water']
+            u_wind_name: ['u_component_of_wind']
+            v_wind_name: ['v_component_of_wind']
+            surface_geopotential_name: ['geopotential_at_surface']
+            TOA_net_radiation_flux_name: ['top_net_solar_radiation', 'top_net_thermal_radiation']
+            surface_net_radiation_flux_name: ['surface_net_solar_radiation', 'surface_net_thermal_radiation']
+            surface_energy_flux_name: ['surface_sensible_heat_flux', 'surface_latent_heat_flux',]
+
 
 loss: 
     # the main training loss
