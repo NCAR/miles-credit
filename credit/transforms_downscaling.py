@@ -121,44 +121,51 @@ class DownscalingNormalizer:
     def __init__(self, vardict, transdict, rootpath):
         ## TODO: make this take **kwargs instead so we can pass **conf?
         
-        ## flatten to get list of variables
-        variables = [var for vlist in vardict.values() for var in vlist]
+        ## get flat list of variables
+        variables = []
+        for usage in vardict:
+            if usage != 'unused':
+                variables.extend(vardict[usage])
+
+
+        ## get parameters used by each transforms (for transforms used)
+        xformparams = {}
+        for var in transdict:
+            if var != "paramfiles":
+                for xform in transdict[var]:
+                    x = self.xclassdict[xform]
+                    xformparams[xform] = list(inspect.signature(x).parameters.keys())        
         
-        ## get all parameter values stored in netcdf paramfiles
-        params = defaultdict(dict)
+
+        ## read in any parameter values stored in netcdf files
         if 'paramfiles' in transdict:
+
+            fileparams = defaultdict(dict)
+            
             for par in transdict['paramfiles']:
-                params[par] = {}
                 pfile = nc.Dataset(rootpath + "/" + transdict['paramfiles'][par])
                 for var in variables:
                     if var in pfile.variables:
-                        params[par][var] = pfile.variables[var][...]  #.item()
+                        fileparams[var][par] = pfile.variables[var][...]
 
-        ## add explicitly specified parameter values, possibly overriding netcdf
+        
+        ## instantiate list of transforms for each variable
+        self.transforms = {}
         for var in variables:
-            if var in transdict:
-                tvdict = transdict[var]
-                for xform in tvdict:
-                    if tvdict[xform] != "paramfile":
-                        for arg in tvdict[xform]:
-                            params[arg][var] = tvdict[xform][arg]
-                            
-        # instantiate transforms for each var
-        self.transforms = defaultdict(list)
-
-        for var in variables:
+            self.transforms[var] = list()
             if var in transdict or 'default' in transdict:
                 xkey = var if var in transdict else 'default'
                 for xform in transdict[xkey]:
                     x = self.xclassdict[xform]
-                    xparams = {}
-                    for arg in inspect.signature(x).parameters.keys():
-                        if var in params[arg]:
-                            xparams[arg] = params[arg][var]                    
-                    # instantiate new transform & append to list                    
-                    self.transforms[var].append(x(**xparams))
+                    xargs = transdict[xkey][xform]
+                    if xargs == 'paramfile':
+                        xargs = {par: fileparams[var][par] for par in xformparams[xform]}
+                    self.transforms[var].append(x(**xargs))
             else:
-                self.transforms[var].append(self.xclassdict[None]())
+                ## no tranform defined & no default for this variable
+                self.transforms[var].append(Identity())
+
+
             
     
     def __call__(self, x, inverse=False):
