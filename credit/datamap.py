@@ -185,9 +185,10 @@ class DataMap:
     # component: used by higher-level classes to decide how to use the datamap
     dim: dimensions of the data:
         static: no time dimension; data is loaded on initialization
-        3D: data has z-dimension; can unstack Z to pseudo-variables when reading
+        3D: data has z-dimension; can subset levels using zstride
         2D: default: time-varying 2D data
     normalize: if dim=='static' & normalize == True, scale data to range [0,1]
+    zstride: if dim=='3D', subset in Z dimension by ::zstride when reading
     boundary: list of variable names to use as (input-only) boundary conditions
     diagnostic: list of diagnostic (output-only) variable names
     prognostic: list of prognostic (state / input-output) variable names
@@ -206,6 +207,7 @@ class DataMap:
     # component:    str = None
     dim:          str = "2D"
     normalize:    bool = False
+    zstride:      int = 1
     variables:    VarDict[str, List] = field(default_factory=list)
     history_len:  int = 2
     forecast_len: int = 1
@@ -227,6 +229,9 @@ class DataMap:
         if self.normalize and self.dim != "static":
             warn(f"credit.datamap: normalize does nothing if dim != 'static'; setting to False")
             self.normalize = False
+
+        if self.zstride != 1 and self.dim != "3D":
+            warn(f"credit.datamap: zstride not applicable if dim != '3D'; ignoring")
 
         # set any missing keys in VarDict
         for use in ('boundary', 'prognostic', 'diagnostic'):
@@ -270,16 +275,6 @@ class DataMap:
             self.units = time0.units
             self.t0 = float(time0[0])
             self.dt = float(time0[1]) - self.t0
-
-            # if self.dim=='3D' and self.unstack:
-            #     # get coord values to use as names when unstacking z-dim
-            #     # note that some datasets may have more than one z coord
-            #     # e.g., ERA5 has level, but CONUS404 has lev & ilev
-            #     self.znames = dict()
-            #     for use in uses:
-            #         for v in self.vardict[use]:
-            #             zdimname = nc0[v].dimensions[1]  ## standard dim ordering
-            #             self.znames[zdimname] = [str(int(z)) for z in nc0[zdimname]]
 
             nc0.close()
 
@@ -413,7 +408,10 @@ class DataMap:
         for use in uses:
             data[use] = dict()
             for var in self.variables[use]:
-                data[use][var] = ds[var][start:finish,...]
+                if self.dim=='3D' and self.zstride != 1:
+                    data[use][var] = ds[var][start:finish, ::self.zstride, ...]
+                else:
+                    data[use][var] = ds[var][start:finish, ...]
 
         ds.close()
         return data
