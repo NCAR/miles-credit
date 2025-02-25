@@ -7,7 +7,14 @@ Harrop, B.E., Pritchard, M.S., Parishani, H., Gettelman, A., Hagos, S., Lauritze
 """
 
 # Earth's radius
+<<<<<<< HEAD
 RAD_EARTH = 6371000  # m
+=======
+RAD_EARTH = 6.37122e6 # m
+
+# Earth's rate of rotation 
+OMEGA = 7.292e-5 # radians/s
+>>>>>>> e4512dc (some changes)
 
 # ideal gas constant of water vapor
 RVGAS = 461.5  # J/kg/K

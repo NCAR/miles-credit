@@ -223,7 +223,7 @@ class Trainer(BaseTrainer):
 
                 # predict with the model
                 with autocast(enabled=amp):
-                    y_pred = self.model(x)
+                    y_pred = self.model(x.float())
 
                 # ============================================= #
                 # postblock opts outside of model
@@ -567,7 +567,7 @@ class Trainer(BaseTrainer):
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-                    y_pred = self.model(x)
+                    y_pred = self.model(x.float())
 
                     # ============================================= #
                     # postblock opts outside of model
