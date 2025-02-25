@@ -123,9 +123,13 @@ class DownscalingNormalizer:
                   "none": Identity,
                   }
 
-    def __init__(self, vardict, transdict, rootpath):
-        # TODO: make this take **kwargs instead so we can pass **conf?
+    def __init__(self, vardict, transdict, rootpath, dim, zstride=1):
 
+        # TODO: something if dim == 'static'
+
+        if zstride != 1 and dim != '3D':
+            raise ValueError("credit.transforms: zstride > 1 only allowed for dim=='3D'")
+        
         # get flat list of variables
         variables = []
         for usage in vardict:
@@ -149,7 +153,10 @@ class DownscalingNormalizer:
                 pfile = nc.Dataset(os.path.join(rootpath, transdict['paramfiles'][par]))
                 for var in variables:
                     if var in pfile.variables:
-                        fileparams[var][par] = pfile.variables[var][...]
+                        if dim == '3D' and zstride != 1:
+                            fileparams[var][par] = pfile.variables[var][:, ::zstride, ...]
+                        else:
+                            fileparams[var][par] = pfile.variables[var][...]
 
         # instantiate list of transforms for each variable
         self.transforms = {}

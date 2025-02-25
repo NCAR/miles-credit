@@ -63,7 +63,7 @@ class Sample(TypedDict):
 ###########
 
 @dataclass
-class DownscalingDataloader(torch.utils.data.Dataset):
+class DownscalingDataset(torch.utils.data.Dataset):
     ''' pass **conf['data'] as arguments to constructor
     [insert more documentation here]
     '''
@@ -74,7 +74,7 @@ class DownscalingDataloader(torch.utils.data.Dataset):
     last_date:    str = None
     #components: Dict = field(default_factory=dict)
     datasets: Dict = field(default_factory=dict)
-    normalize:    bool= True
+    transform:    bool= True
     _mode:        str = field(init=False, repr=False, default='train')
     # legal mode values: train, init, infer
     _output:      str = field(init=False, repr=False, default='by_io')
@@ -90,21 +90,24 @@ class DownscalingDataloader(torch.utils.data.Dataset):
         dmap_sig = signature(DataMap).parameters
         norm_sig = signature(DownscalingNormalizer).parameters
 
+        dsdict = {}
+        
         for dname, dconfig in self.datasets.items():
             print(dname)
 
             dm_args = {arg: val for arg,val in dconfig.items() if arg in dmap_sig}
             dm_args['variables'] = dconfig['variables']
 
-            dt_args = {'rootpath': self.rootpath,
-                       'vardict': dconfig['variables'],
-                       'transdict': dconfig['transforms']
-                       }
+            dt_args = {arg: val for arg,val in dconfig.items() if arg in norm_sig}
+            dt_args['vardict'] = dconfig['variables']
+            dt_args['transdict'] = dconfig['transforms']
 
-            self.datasets[dname] = {
+            dsdict[dname] = {
                 'datamap': DataMap(**dm_args),
                 'transforms': DownscalingNormalizer(**dt_args)
             }
+
+        self.datasets = dsdict
 
         self.sample_len = self.history_len + self.forecast_len
 
@@ -118,13 +121,14 @@ class DownscalingDataloader(torch.utils.data.Dataset):
         #     self.components.setdefault(comp, []).append(dset)
 
 
-    def getdata(self, dset, index): #, normalize=self.normalize):
+    def getdata(self, dset, index):
         raw = self.datasets[dset]['datamap'][index]
-        if self.normalize:
+        if self.transform:
             return self.datasets[dset]['transforms'](raw)
         else:
             return raw
 
+        
     def rearrange(self, items):
         # based on mode, rearrange items{ dataset{ usage{ var to
         # sample{ input/target{ dset.var
@@ -166,6 +170,13 @@ class DownscalingDataloader(torch.utils.data.Dataset):
         return result
 
 
+    def toTensor(self, sampledict):
+        for sd in sampledict:
+            
+            pass
+        return sampledict
+    
+
     def __getitem__(self, index):
 
         items = {dset: self.getdata(dset, index) for dset in self.datasets}
@@ -178,8 +189,8 @@ class DownscalingDataloader(torch.utils.data.Dataset):
         if self.output == 'by_io':
             return result
         
-        # if self.output = 'tensor':
-        #    result = self.toTensor(result)
+        if self.output == 'tensor':
+            result = self.toTensor(result)
 
         return result
 
@@ -190,9 +201,6 @@ class DownscalingDataloader(torch.utils.data.Dataset):
 
     @mode.setter
     def mode(self, mode: str):
-        print("_mode:", self._mode)
-        print("self.mode:", self.mode)
-        print("mode arg:", mode)
         if mode not in ('train', 'init', 'infer'):
             raise ValueError("invalid DataMap mode")
         self._mode = mode

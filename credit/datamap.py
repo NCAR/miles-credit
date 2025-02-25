@@ -40,7 +40,6 @@ import os
 from typing import List, TypedDict
 from dataclasses import dataclass, field
 from glob import glob
-from warnings import warn
 import netCDF4 as nc
 import cftime as cf
 import numpy as np
@@ -223,15 +222,13 @@ class DataMap:
 
         # todo: accept & canonicalize different capitalization
         if self.dim not in ['static', '2D', '3D']:
-            warn(f"credit.datamap: unknown dimensionality: {self.dim}; assuming 2D")
-            self.dim = "2D"
+            raise ValueError(f"credit.datamap: unknown dimensionality: {self.dim}")
 
         if self.normalize and self.dim != "static":
-            warn(f"credit.datamap: normalize does nothing if dim != 'static'; setting to False")
-            self.normalize = False
+            raise ValueError("credit.datamap: 'normalize' only applies to dim=='static'")
 
         if self.zstride != 1 and self.dim != "3D":
-            warn(f"credit.datamap: zstride not applicable if dim != '3D'; ignoring")
+            raise ValueError("credit.datamap: zstride not applicable if dim != '3D'")
 
         # set any missing keys in VarDict
         for use in ('boundary', 'prognostic', 'diagnostic'):
@@ -240,13 +237,11 @@ class DataMap:
 
         if self.dim == "static":
             if len(glob(self.glob, root_dir=self.rootpath)) != 1:
-                warn("credit.datamap: dim='static' requires a single file")
-                raise
+                raise ValueError("credit.datamap: dim='static' requires a single file")
 
             if (len(self.variables['prognostic']) > 0 or
                 len(self.variables['diagnostic']) > 0):
-                    warn("credit.datamap: static vars must be boundary")
-                    raise
+                    raise ValueError("credit.datamap: static vars must be boundary vars")
 
             # if static, load data from netcdf
             staticfile = nc.Dataset(self.rootpath + '/' + self.glob)
