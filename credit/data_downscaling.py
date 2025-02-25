@@ -2,6 +2,7 @@
 from copy import deepcopy
 from typing import Dict, TypedDict, Union
 from dataclasses import dataclass, field
+from inspect import signature
 
 # data utils
 import numpy as np
@@ -10,10 +11,10 @@ import xarray as xr
 # Pytorch utils
 import torch
 import torch.utils.data
-# from torch.utils.data import get_worker_info
-# from torch.utils.data.distributed import DistributedSampler
 
-from credit.datamap import DataMap
+from credit.datamap import *
+from credit.transforms_downscaling import *
+
 
 Array = Union[np.ndarray, xr.DataArray]
 
@@ -34,8 +35,8 @@ class Sample(TypedDict):
     transforms.
 
     """
-    x: Array
-    y: Array
+    input:  Array
+    target: Array
 
 
 # def testC4loader():
@@ -71,7 +72,8 @@ class DownscalingDataloader(torch.utils.data.Dataset):
     forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
-    components: Dict = field(default_factory=dict)
+    #components: Dict = field(default_factory=dict)
+    datasets: Dict = field(default_factory=dict)
 
     def __post_init__(self):
         super().__init__()
@@ -80,31 +82,24 @@ class DownscalingDataloader(torch.utils.data.Dataset):
         # configurations for the constituent datasets & their
         # transforms) with actual DataMap and DataTransform objects.
 
-        # can we now do this without needing to update them with the
-        # common attributs, since they've been inherited in the yaml
-        # file?
+        dmap_sig = signature(DataMap).parameters
+        norm_sig = signature(DownscalingNormalizer).parameters
 
-        # # replace the datasets dict (which holds configurations for
-        # # the various DataMaps in the dataset) with actual DataMap
-        # # objects intialized from those configurations.  Need to pop
-        # # datasets from __dict__ because we need to update each one
-        # # with the other class attributes (which are common to all
-        # # datasets) first.
+        for dname, dconfig in self.datasets.items():
+            print(dname)
 
-        dmap_configs = self.__dict__.pop("datasets")
-        inherited = deepcopy(self.__dict__)
+            dm_args = {arg: val for arg,val in dconfig.items() if arg in dmap_sig}
+            dm_args['variables'] = dconfig['variables']
 
-        # error if length not > 1
+            dt_args = {'rootpath': self.rootpath,
+                       'vardict': dconfig['variables'],
+                       'transdict': dconfig['transforms']
+                       }
 
-        self.datasets = dict()
-        for k in dmap_configs.keys():
-            dmap_configs[k].update(inherited)
-            # print(dmap_configs[k].keys())
-            self.datasets[k] = DataMap(**dmap_configs[k])
-
-        # don't add anything to self above here, since we use
-        # self.__dict__ as kwargs to DataMap(), and dataclasses don't
-        # like extra args to __init__
+            self.datasets[dname] = {
+                'datamap': DataMap(**dm_args),
+                'transforms': DownscalingNormalizer(**dt_args)
+            }
 
         self.sample_len = self.history_len + self.forecast_len
 
@@ -114,88 +109,67 @@ class DownscalingDataloader(torch.utils.data.Dataset):
         self.len = np.max(dlengths)
         # TODO: error if any dlengths != self.len or 1
 
-        self.components = dict()
-        for dset in self.datasets.keys():
-            comp = self.datasets[dset].component
-            self.components.setdefault(comp, []).append(dset)
+        # self.components = dict()
+        # for dset in self.datasets.keys():
+        #     comp = self.datasets[dset].component
+        #     self.components.setdefault(comp, []).append(dset)
 
-    def __getitem__(self, index):
+
+    def getdata(self, dset, index, normalize=True):
+        raw = self.datasets[dset]['datamap'][index]
+        if normalize:
+            return self.datasets[dset]['transforms'](raw)
+        else:
+            return raw
+
+    def rearrange(self, items):
+        # based on mode, rearrange items{ dataset{ usage{ var to
+        # sample{ input/target{ dset.var
+
+        include = {"train": {"input":  ['boundary', 'prognostic', 'diagnostic'],
+                             "target": [            'prognostic', 'diagnostic']},
+                   "init":  {"input":  ['boundary', 'prognostic'],
+                             "target": []},
+                   "infer": {"input":  ['boundary',],
+                             "target": []},
+                   }
+
+        result = {'input': {}, 'target': {}}
 
         hlen = self.history_len
         slen = self.sample_len
 
-        items = {k: self.datasets[k][index] for k in self.datasets.keys()}
+        for usage in ("boundary", "prognostic", "diagnostic"):
+            for dim in ("static", "2D", "3D"):
+                for dname, dset in self.datasets.items():
+                    if dset['datamap'].dim == dim:
+                        for part in ('input', 'target'):
+                            if usage in include[self.mode][part]:
+                                for var in dset['datamap'].variables[usage]:
+                                    outname = dname + '.' + var
+                                    data = items[dname][usage][var]
+                                    if self.mode == 'train':
+                                        if part == 'input':
+                                            result[part][outname] = data[0:hlen, ...]
+                                        if part == 'target':
+                                            result[part][outname] = data[hlen:slen, ...]
+                                    else:
+                                        result[part][outname] = data
 
-        # items is a nested dict of {dataset: {usage: {var: np.ndarray}}}.
-        # where usage is one of (static, boundary, prognostic, diagnostic)
+        # subsetting time dimension to hist / future is only needed
+        # for training data; in mode init or infer, the datamaps only
+        # return the historical part of the sample
 
-        # Note that self.mode determines which usages we want to
-        # return.  The DataMap object understands mode and reads &
-        # returns only the necessary bits, so we don't need to worry
-        # about it here.
-
-        # We pass each item in the dict (1 item = 1 dataset) to the
-        # corresponding Normalizer object for normalization
-
-        # then we pass it to to dict<-> tensor converter, which
-        # unstacks 3D variables, converts all the arrays to tensors,
-        # and concatenates them together in the correct arrangment
-        # The code below all will move there:
-        # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-
-        # need to rearrange that into a nested dict of
-        # {component: {input/target: {var: np.ndarray}}},
-        # where input is static & bound [hist_len] for 'infer', that
-        # plus prog [hist_len] for 'init' and 'train', and target is
-        # prog [fore_len] & diag[fore_len] for 'train'
-
-        result = dict()
-        for comp in self.components.keys():
-            result[comp] = dict()
-
-            if self.mode in ("train", "init", "infer"):
-                result[comp]["input"] = dict()
-                for dset in self.components[comp]:
-                    for u in items[dset].keys():
-                        if u in ("static", "boundary"):
-                            result[comp]["input"].update(items[dset][u])
-
-            if self.mode in ("train", "init"):
-                for dset in self.components[comp]:
-                    for u in items[dset].keys():
-                        if u in ("prognostic"):
-                            result[comp]["input"].update(items[dset][u])
-
-            if self.mode in ("train",):
-                result[comp]["target"] = dict()
-                for dset in self.components[comp]:
-                    for u in items[dset].keys():
-                        if u in ("prognostic", "diagnostic"):
-                            result[comp]["target"].update(items[dset][u])
-
-
-            # time subset: modes 'infer' and 'init' return only
-            # historical timesteps.  For mode 'train', we need to
-            # split the data into histlen timesteps for 'input' and
-            # forelen timesteps for 'target'
-
-            # In the main code, toTensor() returns a dict of tensors
-            # and Trainer combines them.  This goes better here,
-            # though.
-
-            if self.mode in ("train",):
-                for v in result[comp]["input"].keys():
-                    x = result[comp]["input"][v]
-                    if len(x.shape) == 3:
-                        result[comp]["input"][v] = x[0:hlen,:,:]
-
-                for v in result[comp]["target"].keys():
-                    x = result[comp]["target"][v]
-                    if len(x.shape) == 3:
-                        result[comp]["target"][v] = x[hlen:slen,:,:]
-
-        # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
         return result
+
+
+    def __getitem__(self, index):
+
+        items = {dset: self.getdata(dset, index) for dset in self.datasets}
+        result = self.rearrange(items)
+
+        return result
+
 
     @property
     def mode(self) -> str:

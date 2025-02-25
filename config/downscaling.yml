@@ -32,7 +32,7 @@ sampling: &samples
     history_len:  2 
     forecast_len: 1
 
-  
+
 
 # A downscaling model has two encoders, one for the high-res
 # downscaled data (the output from the model being emulated) and one
@@ -82,15 +82,16 @@ data_defaults: &ddefault
     # note: first_date and last_date must be quoted so that they
     # remain strings; otherwise the yaml parser converts them to
     # datetime objects, which can't handle non-standard GCM calendars.
-    
-  
-  
+
+
+
 data:
     <<: *ddefault
 
-    ## CONUS404 data on native 4km grid; hourly, 1979-10 to 2022-09
-    hires:
-          
+    datasets:
+        ## CONUS404 data on native 4km grid; hourly, 1979-10 to 2022-09
+        # hires:
+
         ## static WRF fields extracted from 'wrfconstants_usgs404.nc'
         conus404_static:
             <<: *ddefault
@@ -110,14 +111,16 @@ data:
                 unused:
                     - XLAT      # latitude
                     - XLONG     # longitude
-              
-              ## NOTE that U and V are on staggered grids that are 1
-              ## larger in the x- and y- dimensions (respectively)
-              ## than the other variables; they have been trimmed by 1
-              ## on the western and southern edges (respectively) to
-              ## match the dimensionality of the non-staggered grids.
-            
-        
+            transforms:
+                default: none
+
+
+        ## NOTE that U and V are on staggered grids that are 1 larger in
+        ## the x- and y- dimensions (respectively) than the other
+        ## variables; they have been trimmed by 1 on the western and
+        ## southern edges (respectively) to match the dimensionality of
+        ## the non-staggered grids.
+
         conus404_3D:
             <<: *ddefault
             glob: 'conus404/3d/*/conus404.3d.*.nc'
@@ -157,11 +160,11 @@ data:
                 diagnostic:
                     - PREC_ACC_NC # total precip (mm) over previous (1-hr) timestep
                     - SWDNB       # shortwave downwelling at bottom (instantaneous)
-                    - totalVap    # column-integrated water vapor content 
+                    - totalVap    # column-integrated water vapor content
                 unused:
                     - SNOW       # snow water equivalent
             transforms:
-                paramfiles: 
+                paramfiles:
                     mmin: 'norms/min.conus404_2d.nc'
                     mmax: 'norms/max.conus404_2d.nc'
                 default:
@@ -175,13 +178,13 @@ data:
 
 
 
-    lores:
+        # lores:
         ## driving ERA5 & TOA solar data on coarsened version of CONUS404 grid
 
         ## insolation data calculated using miles-credit applications
         ## script calc_global_solar.py, regridded to coarsened
         ## CONUS404 grid; hourly, 1979-2024
-            
+
         solar:
             <<: *ddefault
             glob: 'solar/tisr.20km.*.nc'
@@ -190,7 +193,7 @@ data:
                 boundary:
                     - tisr      # TOA incident solar radiation (J/m^2, integral dt)
             transforms:
-                paramfiles: 
+                paramfiles:
                     mmin: 'norms/min.solar.nc'
                     mmax: 'norms/max.solar.nc'
                 tisr:
@@ -206,7 +209,7 @@ data:
           ## data is interpolated to pressure levels and global 0.25
           ## degree grid.  (Variables are in alphabetical order except
           ## for R, which is last.)  hourly, 1979-2023
-    
+
         era5_3D:
             <<: *ddefault
             glob: 'era5/3d/*/era5.3d.*.nc'
@@ -265,7 +268,7 @@ model:
         name: "unet"
         encoder_name: "resnet34"
         encoder_weights: "imagenet"
-    
+
 trainer:
     type: "conus404"
     mode: none # none, ddp, fsdp
@@ -293,8 +296,8 @@ trainer:
     #scheduler: {'scheduler_type': 'cosine-annealing', first_cycle_steps: 500, cycle_mult: 6.0, max_lr: 5.0e-04, min_lr: 5.0e-07, warmup_steps: 499, gamma: 0.7}
     # scheduler: {scheduler_type: plateau, mode: min, factor: 0.1, patience: 5, cooldown: 2, min_lr: 1e-6, epsilon: 1e-8, verbose: true, threshold: 1e-4}
     scheduler: {'scheduler_type': 'lambda'}
-     
-loss: 
+
+loss:
    training_loss: "mse"
    use_vgg: False
    use_spectral_loss: False
@@ -315,7 +318,7 @@ predict:
 
 
 #visualization:
-#    surface_visualize: 
+#    surface_visualize:
 #        variable_keys: ['U10','U1000','U250','U500','U850','V10','V1000','V250','V500','V850']
 #        variable_names: ['U10','U1000','U250','U500','U850','V10','V1000','V250','V500','V850']
 #        file_name_prefix: "unet-03-wind"
@@ -323,7 +326,7 @@ predict:
 #                   'format':'png'}
 #    video_format: 'none'
 
-    
+
 pbs: # casper
     conda: "credit"
     job_name: 'unet-debug'

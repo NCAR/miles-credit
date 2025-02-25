@@ -182,7 +182,7 @@ class DataMap:
 
     rootpath: pathway to the files
     glob: filename glob of netcdf files
-    component: used by higher-level classes to decide how to use the datamap
+    # component: used by higher-level classes to decide how to use the datamap
     dim: dimensions of the data:
         static: no time dimension; data is loaded on initialization
         3D: data has z-dimension; can unstack Z to pseudo-variables when reading
@@ -203,7 +203,7 @@ class DataMap:
     '''
     rootpath:     str
     glob:         str
-    component:    str = None
+    # component:    str = None
     dim:          str = "2D"
     normalize:    bool = False
     variables:    VarDict[str, List] = field(default_factory=list)
@@ -342,7 +342,7 @@ class DataMap:
 
     def __getitem__(self, index):
         if self.dim == "static":
-            return {"static": self.data}
+            return {"boundary": self.data}
 
         if index < 0 or index > self.length-1:
             raise IndexError()
@@ -413,17 +413,7 @@ class DataMap:
         for use in uses:
             data[use] = dict()
             for var in self.variables[use]:
-                # can this if be replaced by using ...?
-                if self.dim == "3D":
-                    # if self.unstack:
-                    #     zdn = ds[var].dimensions[1]
-                    #     for z in range(0, len(self.znames[zdn])-1):
-                    #         varz = var + self.znames[zdn][z]
-                    #         data[use][varz] = ds[var][start:finish,z,:,:]
-                    # else:
-                    #   # 3D data not unstacked
-                    data[use][var] = ds[var][start:finish,:,:,:]
-                else:
-                    data[use][var] = ds[var][start:finish,:,:]
+                data[use][var] = ds[var][start:finish,...]
+
         ds.close()
         return data

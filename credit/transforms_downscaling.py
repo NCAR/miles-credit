@@ -53,7 +53,6 @@ class Pad:
 # each function.
 
 def rescale(x, offset=0, scale=1, inverse=False):
-    print(offset, scale, inverse)
     if inverse:
         return (x * scale) + offset
     else:
@@ -104,7 +103,7 @@ class Clip:
 # the 'do-nothing' op
 @dataclass
 class Identity:
-    def __call__(self, x, inverse=False):
+    def __call__(self, x, inverse=False, **kwargs):
         return x
 
 
@@ -121,7 +120,7 @@ class DownscalingNormalizer:
                   "power": Power,
                   "clip": Clip,
                   "pad": Pad,
-                  None: Identity,  # do nothing if no transform defined
+                  "none": Identity,
                   }
 
     def __init__(self, vardict, transdict, rootpath):
@@ -133,10 +132,10 @@ class DownscalingNormalizer:
             if usage != 'unused':
                 variables.extend(vardict[usage])
 
-        # get parameters used by each transforms (for transforms used)
+        # get parameters used by each transform (for transforms used)
         xformparams = {}
         for var in transdict:
-            if var != "paramfiles":
+            if var != "paramfiles" and transdict[var] != 'none':
                 for xform in transdict[var]:
                     x = self.xclassdict[xform]
                     xformparams[xform] = list(inspect.signature(x).parameters.keys())
@@ -158,12 +157,15 @@ class DownscalingNormalizer:
             self.transforms[var] = list()
             if var in transdict or 'default' in transdict:
                 xkey = var if var in transdict else 'default'
-                for xform in transdict[xkey]:
-                    x = self.xclassdict[xform]
-                    xargs = transdict[xkey][xform]
-                    if xargs == 'paramfile':
-                        xargs = {par: fileparams[var][par] for par in xformparams[xform]}
-                    self.transforms[var].append(x(**xargs))
+                if transdict[xkey] == "none":
+                    self.transforms[var].append(Identity())
+                else:
+                    for xform in transdict[xkey]:
+                        x = self.xclassdict[xform]
+                        xargs = transdict[xkey][xform]
+                        if xargs == 'paramfile':
+                            xargs = {par: fileparams[var][par] for par in xformparams[xform]}
+                            self.transforms[var].append(x(**xargs))
             else:
                 # no tranform defined & no default for this variable
                 self.transforms[var].append(Identity())
