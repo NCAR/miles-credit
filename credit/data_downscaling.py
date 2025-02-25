@@ -74,6 +74,11 @@ class DownscalingDataloader(torch.utils.data.Dataset):
     last_date:    str = None
     #components: Dict = field(default_factory=dict)
     datasets: Dict = field(default_factory=dict)
+    normalize:    bool= True
+    _mode:        str = field(init=False, repr=False, default='train')
+    # legal mode values: train, init, infer
+    _output:      str = field(init=False, repr=False, default='by_io')
+    # legal output values: by_dset, by_io, tensor
 
     def __post_init__(self):
         super().__init__()
@@ -103,8 +108,6 @@ class DownscalingDataloader(torch.utils.data.Dataset):
 
         self.sample_len = self.history_len + self.forecast_len
 
-        self._mode = "train"
-
         dlengths = [len(d) for d in self.datasets.values()]
         self.len = np.max(dlengths)
         # TODO: error if any dlengths != self.len or 1
@@ -115,9 +118,9 @@ class DownscalingDataloader(torch.utils.data.Dataset):
         #     self.components.setdefault(comp, []).append(dset)
 
 
-    def getdata(self, dset, index, normalize=True):
+    def getdata(self, dset, index): #, normalize=self.normalize):
         raw = self.datasets[dset]['datamap'][index]
-        if normalize:
+        if self.normalize:
             return self.datasets[dset]['transforms'](raw)
         else:
             return raw
@@ -166,7 +169,17 @@ class DownscalingDataloader(torch.utils.data.Dataset):
     def __getitem__(self, index):
 
         items = {dset: self.getdata(dset, index) for dset in self.datasets}
+
+        if self.output == 'by_dset':
+            return items
+
         result = self.rearrange(items)
+
+        if self.output == 'by_io':
+            return result
+        
+        # if self.output = 'tensor':
+        #    result = self.toTensor(result)
 
         return result
 
@@ -177,8 +190,22 @@ class DownscalingDataloader(torch.utils.data.Dataset):
 
     @mode.setter
     def mode(self, mode: str):
+        print("_mode:", self._mode)
+        print("self.mode:", self.mode)
+        print("mode arg:", mode)
         if mode not in ('train', 'init', 'infer'):
             raise ValueError("invalid DataMap mode")
         self._mode = mode
         for d in self.datasets.values():
-            d.mode = mode
+            d['datamap'].mode = mode
+
+            
+    @property
+    def output(self) -> str:
+        return self._output
+
+    @output.setter
+    def output(self, output: str):
+        if output not in ('by_dset', 'by_io', 'tensor'):
+            raise ValueError("invalid DataMap output")
+        self._output = output
