@@ -244,10 +244,12 @@ class DataMap:
                     raise ValueError("credit.datamap: static vars must be boundary vars")
 
             # if static, load data from netcdf
-            staticfile = nc.Dataset(self.rootpath + '/' + self.glob)
+            staticfile = nc.Dataset(self.rootpath + '/' + self.glob, mask_and_scale=False)
+            
             # [:] forces data to load
-            staticdata = [staticfile[v][:] for v in self.variables['boundary']]
+            staticdata = [np.array(staticfile[v][:]) for v in self.variables['boundary']]
             self.data = dict(zip(self.variables['boundary'], staticdata))
+            
             # cleanup
             staticfile.close()
             del staticfile, staticdata
@@ -263,7 +265,7 @@ class DataMap:
             # get time coordinate characteristics from first file
             # calendar & units used to convert date <=> time coordinate
             # t0 & dt used to convert time coordinates <=> timestep index
-            nc0 = nc.Dataset(self.filepaths[0])
+            nc0 = nc.Dataset(self.filepaths[0], mask_and_scale=False)
             time0 = nc0.variables["time"]
 
             self.calendar = time0.calendar
@@ -292,7 +294,7 @@ class DataMap:
             self.ends = list()
             cumlen = -1
             for f in self.filepaths:
-                ncf = nc.Dataset(f)
+                ncf = nc.Dataset(f, mask_and_scale=False)
                 cumlen = cumlen + len(ncf.variables["time"])
                 self.ends.append(cumlen)
                 ncf.close()
@@ -398,15 +400,15 @@ class DataMap:
             case _:
                 raise ValueError("invalid DataMap mode")
 
-        ds = nc.Dataset(self.filepaths[segment])
+        ds = nc.Dataset(self.filepaths[segment], mask_and_scale=False)
         data = dict()
         for use in uses:
             data[use] = dict()
             for var in self.variables[use]:
                 if self.dim=='3D' and self.zstride != 1:
-                    data[use][var] = ds[var][start:finish, ::self.zstride, ...]
+                    data[use][var] = np.array(ds[var][start:finish, ::self.zstride, ...])
                 else:
-                    data[use][var] = ds[var][start:finish, ...]
-
+                    data[use][var] = np.array(ds[var][start:finish, ...])
+                print(np.min(data[use][var]))
         ds.close()
         return data

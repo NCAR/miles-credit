@@ -135,7 +135,7 @@ data:
                     - Z       # geopotential height
             transforms:
                 paramfiles:
-                    mmin: 'norms/max.conus404_3d.nc'
+                    mmin: 'norms/min.conus404_3d.nc'
                     mmax: 'norms/max.conus404_3d.nc'
                 default:
                     minmax: paramfile

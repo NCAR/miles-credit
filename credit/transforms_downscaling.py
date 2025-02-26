@@ -150,13 +150,15 @@ class DownscalingNormalizer:
             fileparams = defaultdict(dict)
 
             for par in transdict['paramfiles']:
-                pfile = nc.Dataset(os.path.join(rootpath, transdict['paramfiles'][par]))
+                ppath = os.path.join(rootpath, transdict['paramfiles'][par])
+                pfile = nc.Dataset(ppath, mask_and_scale=False)
                 for var in variables:
                     if var in pfile.variables:
+                        v = pfile.variables[var]
                         if dim == '3D' and zstride != 1:
-                            fileparams[var][par] = pfile.variables[var][:, ::zstride, ...]
+                            fileparams[var][par] = np.array(v[:, ::zstride, ...])
                         else:
-                            fileparams[var][par] = pfile.variables[var][...]
+                            fileparams[var][par] = np.array(v[...])
 
         # instantiate list of transforms for each variable
         self.transforms = {}
