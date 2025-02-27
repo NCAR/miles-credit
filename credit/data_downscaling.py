@@ -167,22 +167,24 @@ class DownscalingDataset(torch.utils.data.Dataset):
         for usage in ("boundary", "prognostic", "diagnostic"):
             for dim in ("static", "2D", "3D"):
                 for dname, dset in self.datasets.items():
-                    if dset['datamap'].dim == dim:
-                        for part in ('input', 'target'):
-                            if usage in include[self.mode][part]:
-                                for var in dset['datamap'].variables[usage]:
-                                    outname = dname + '.' + var
-                                    data = items[dname][usage][var]
-                                    if self.mode == 'train':
-                                        if dim == 'static':
-                                            result[part][outname] = data
-                                        else:
-                                            if part == 'input':
-                                                result[part][outname] = data[0:hlen, ...]
-                                            if part == 'target':
-                                                result[part][outname] = data[hlen:slen, ...]
-                                    else:
-                                        result[part][outname] = data
+                    if dset['datamap'].dim != dim:
+                        continue
+                    for part in ('input', 'target'):
+                        if usage not in include[self.mode][part]:
+                            continue
+                        for var in dset['datamap'].variables[usage]:
+                            outname = f"{dname}.{var}"
+                            data = items[dname][usage][var]
+                            if self.mode == 'train':
+                                if dim == 'static':
+                                    result[part][outname] = data
+                                else:
+                                    if part == 'input':
+                                        result[part][outname] = data[0:hlen, ...]
+                                    if part == 'target':
+                                        result[part][outname] = data[hlen:slen, ...]
+                            else:
+                                result[part][outname] = data
 
         # subsetting time dimension to hist / future is only needed
         # for training data; in mode init or infer, the datamaps only
