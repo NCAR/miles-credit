@@ -75,7 +75,7 @@ data_defaults: &ddefault
     # file globs are defined relative to the top-level data rootpath
     rootpath: /glade/derecho/scratch/mcginnis/credit
 
-    first_date:   "1980-01-01"
+    first_date:   "1980-01-02"  ## first timestep of CONUS404 is bad
     last_date:    "2021-12-31"
 
     # note: first_date and last_date must be quoted so that they
@@ -258,9 +258,9 @@ data:
 
 
 model:
-    type: "unet404"
-    image_height: 512
-    image_width: 512
+    type: "unet_downscaling"
+    image_height: 1015
+    image_width: 1367
     frames: 3
     architecture:
         name: "unet"
@@ -269,7 +269,7 @@ model:
 
 trainer:
     type: "conus404"
-    mode: none # none, ddp, fsdp
+    mode: ddp # none, ddp, fsdp
     train_batch_size: 4
     valid_batch_size: 4
     batches_per_epoch: 10 # Set to 0 to use len(dataloader)
@@ -291,8 +291,6 @@ trainer:
     load_optimizer: False
     use_scheduler: False
     update_learning_rate: True
-    #scheduler: {'scheduler_type': 'cosine-annealing', first_cycle_steps: 500, cycle_mult: 6.0, max_lr: 5.0e-04, min_lr: 5.0e-07, warmup_steps: 499, gamma: 0.7}
-    # scheduler: {scheduler_type: plateau, mode: min, factor: 0.1, patience: 5, cooldown: 2, min_lr: 1e-6, epsilon: 1e-8, verbose: true, threshold: 1e-4}
     scheduler: {'scheduler_type': 'lambda'}
 
 loss:
