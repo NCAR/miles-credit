@@ -99,7 +99,9 @@ Model weights for the CREDIT 6-hour WXFormer and FuXi models and the 1-hour WXFo
 * [1-Hour WXFormer](https://huggingface.co/djgagne2/wxformer_1h)
 * [6-Hour FuXi](https://huggingface.co/djgagne2/fuxi_6h)
 
-Processed ERA5 Zarr Data are available for download through Globus (requires free account) through the [CREDIT ERA5 Zarr Files](https://app.globus.org/file-manager?origin_id=2fc90d8f-10b7-44e1-a6a5-cf844112822e&origin_path=%2F) collection.
+Processed ERA5 Zarr Data are available for download through Globus (requires free account) through the [CREDIT ERA5 Zarr Files](https://app.globus.org/file-manager/collections/2fc90d8f-10b7-44e1-a6a5-cf844112822e/overview) collection.
+
+Scaling/transform values for normalizing the data are available through Globus [here](https://app.globus.org/file-manager/collections/c5a23e21-1bee-4d1e-bb59-77c5dcee7c76). 
 
 # Support
 This software is based upon work supported by the NSF National Center for Atmospheric Research, a major facility sponsored by the 

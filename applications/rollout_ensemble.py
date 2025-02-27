@@ -36,10 +36,8 @@ from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.parser import credit_main_parser, predict_data_check
-from credit.datasets.era5_predict_batcher import (
-    BatchForecastLenDataLoader,
-    Predict_Dataset_Batcher,
-)
+from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
+from credit.datasets.load_dataset_and_dataloader import  BatchForecastLenDataLoader
 from credit.ensemble.bred_vector import generate_bred_vectors
 from credit.ensemble.crps import calculate_crps_per_channel
 
@@ -106,6 +104,8 @@ def predict(rank, world_size, conf, backend=None, p=None):
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
         torch.cuda.set_device(rank % torch.cuda.device_count())
+    elif torch.mps.is_available():
+        device = torch.device("mps")
     else:
         device = torch.device("cpu")
 
@@ -547,8 +547,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 y_pred = None
                 gc.collect()
 
-                if distributed:
-                    torch.distributed.barrier()
+
 
                 forecast_count += batch_size
 

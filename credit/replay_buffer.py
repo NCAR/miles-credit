@@ -14,7 +14,7 @@ from torch.utils.data import IterableDataset
 import optuna
 from glob import glob
 from credit.transforms import load_transforms
-from credit.data import ERA5Dataset
+from credit.data import ERA5_and_Forcing_Dataset
 from credit.trainers.base_trainer import BaseTrainer
 from overrides import overrides
 import random
@@ -121,7 +121,13 @@ class ReplayBuffer:
         transform = load_transforms(conf)
 
         # Initialize dataset
-        self.dataset = ERA5Dataset(
+        self.dataset = ERA5_and_Forcing_Dataset(
+            model_conf["data"]["variables"],
+            model_conf["data"]["surface_variables"],
+            model_conf["data"]["dynamic_forcing_variables"],
+            model_conf["data"]["forcing_variables"],
+            model_conf["data"]["static_variables"],
+            model_conf["data"]["diagnostic_variables"],
             filenames=filenames,
             history_len=history_len,
             forecast_len=forecast_len,

@@ -3,10 +3,10 @@ channels:
   - conda-forge
 
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
   - jupyter
-  - numpy<1.24
+  - numpy
   - pandas
   - pyarrow
   - pyyaml
@@ -15,7 +15,6 @@ dependencies:
 ## dev and ML ops
   - pytest
   - ruff
-  - wandb
   - pre_commit
   - myst-parser
 
@@ -24,7 +23,6 @@ dependencies:
   - netcdf4
   - zarr
   - xesmf
-  - geocat-comp
   - dask
   - dask-jobqueue
   - matplotlib
@@ -42,9 +40,7 @@ dependencies:
     - bridgescaler
     - torch 
     - torchvision 
-    - rotary-embedding-torch
     - segmentation-models-pytorch>=0.3.4
-    - vector_quantize_pytorch
     - torch-harmonics
     - torch_geometric
     - haversine

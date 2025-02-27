@@ -9,12 +9,10 @@ import warnings
 import multiprocessing as mp
 from pathlib import Path
 from argparse import ArgumentParser
-from collections import defaultdict
 
 # ---------- #
 # Numerics
 from datetime import datetime, timedelta
-import pandas as pd
 import xarray as xr
 import numpy as np
 
@@ -24,6 +22,7 @@ import torch
 # ---------- #
 # credit
 from credit.models import load_model
+from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.seed import seed_everything
 from credit.data import (
     concat_and_reshape,
@@ -33,17 +32,14 @@ from credit.datasets import setup_data_loading
 from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
-from credit.metrics import LatWeightedMetrics, LatWeightedMetricsClimatology
+from credit.metrics import LatWeightedMetricsEnsemble
 from credit.forecast import load_forecasts
 from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.parser import credit_main_parser, predict_data_check
-from credit.datasets.era5_predict_batcher import (
-    BatchForecastLenDataLoader,
-    Predict_Dataset_Batcher
-)
-
+from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
+from credit.datasets.load_dataset_and_dataloader import  BatchForecastLenDataLoader
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -52,18 +48,10 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 
-def compute_metrics(metrics, y_pred, y, date_time, forecast_step, utc_datetime):
-    """Compute metrics and update metrics_results."""
-    metrics_results = {}
-    metrics_dict = metrics(y_pred.float(), y.float(), forecast_datetime=date_time)
-    for k, m in metrics_dict.items():
-        metrics_results[k] = m.item()
-    metrics_results["forecast_step"] = forecast_step
-    metrics_results["datetime"] = utc_datetime
-    return metrics_results
-
-
 def predict(rank, world_size, conf, backend=None, p=None):
+    """
+    computes ensemble mean, rmse, std for each gridcell, saves each as separate xarrays
+    """
     # setup rank and world size for GPU-based rollout
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"], backend)
@@ -85,9 +73,12 @@ def predict(rank, world_size, conf, backend=None, p=None):
     # length of forecast steps
     lead_time_periods = conf["data"]["lead_time_periods"]
 
-    # batch size
+    # batch and ensemble size
     batch_size = conf["predict"].get("batch_size", 1)
-
+    ensemble_size = conf["predict"].get("ensemble_size", 1)
+    if ensemble_size > 1:
+        logger.info(f"Rolling out with ensemble size {ensemble_size}")
+    
     # transform and ToTensor class
     logger.info("Loading z-score transforms")
     if conf["data"]["scaler_type"] == "std_new":
@@ -195,15 +186,17 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
     model.eval()
 
+    if ensemble_size > 1: # setup for saving gridcell specific metrics
+        # get lat/lons from x-array
+        latlons = xr.open_dataset(conf["loss"]["latitude_weights"])
+        # grab ERA5 (etc) metadata
+        meta_data = load_metadata(conf)
+
+
     # Set up metrics and containers
-    if 'climatology' in conf['predict']:
-        metrics = LatWeightedMetricsClimatology(
-            conf,
-            climatology=xr.open_dataset(conf['predict']['climatology'])
-        )
-    else:
-        metrics = LatWeightedMetrics(conf)
-    metrics_results = defaultdict(list)
+    if ensemble_size > 1:
+        ensemble_metrics = LatWeightedMetricsEnsemble(conf, training_mode=False)
+
     dpf = None
 
     # Set up the diffusion and pole filters
@@ -224,22 +217,18 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
         # y_pred allocation and results tracking
         results = []
+        save_datetimes = [0] * batch_size
 
         # model inference loop
         for k, batch in enumerate(data_loader):
             batch_size = batch["datetime"].shape[0]
             forecast_step = batch["forecast_step"].item()
-            save_datetimes = [0] * batch_size
 
             # Initial input processing
             if forecast_step == 1:
-                # Set up dictionaries for metrics results
-                metrics_results = [defaultdict(list) for _ in range(batch_size)]
-
                 # Process the entire batch at once
                 init_datetimes = [datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime("%Y-%m-%dT%HZ") for i in range(batch_size)]
                 save_datetimes[forecast_count:forecast_count + batch_size] = init_datetimes
-
                 if "x_surf" in batch:
                     x = concat_and_reshape(
                         batch["x"],
@@ -247,10 +236,15 @@ def predict(rank, world_size, conf, backend=None, p=None):
                     ).to(device).float()
                 else:
                     x = reshape_only(batch["x"]).to(device).float()
+                # create ensemble:
+                if ensemble_size > 1:
+                    x = torch.repeat_interleave(x, ensemble_size, 0)
 
             # Add forcing and static variables
             if "x_forcing_static" in batch:
                 x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                if ensemble_size > 1: 
+                    x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
                 x = torch.cat((x, x_forcing_batch), dim=1)
 
             # Load y-truth
@@ -305,6 +299,43 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
             # Prepare for next iteration
             y_pred = state_transformer.transform_array(y_pred).to(device)
+            
+            if ensemble_size > 1:
+                _y_pred = _y_pred.view(batch_size, ensemble_size, *_y_pred.shape[1:])
+            # Process each item in the batch
+            for j in range(batch_size):
+                # save gridcell-wise metrics and ensemble mean for the ensemble
+                if ensemble_size > 1:
+                    ensemble_metrics_dict = ensemble_metrics(_y_pred[j].unsqueeze(0),
+                                                             y[j].unsqueeze(0))
+                    for metric_type, darray_metric in ensemble_metrics_dict.items():
+                        darray_upper_air, darray_single_level = make_xarray(
+                            darray_metric,  # Process each ensemble metric
+                            utc_datetime[j],
+                            latlons.latitude.values,
+                            latlons.longitude.values,
+                            conf,
+                        )
+
+                        # Save the current forecast hour data in parallel
+                        result = p.apply_async(
+                            save_netcdf_increment,
+                            (
+                                darray_upper_air,
+                                darray_single_level,
+                                f"{metric_type}_{save_datetimes[forecast_count + j]}",  # Use correct index for current batch item
+                                lead_time_periods * forecast_step,
+                                meta_data,
+                                conf,
+                            ),
+                        )
+                        results.append(result)
+
+                # Print to screen
+                print_str = f"Forecast: {forecast_count + 1 + j} "
+                print_str += f"Date: {utc_datetime[j].strftime('%Y-%m-%d %H:%M:%S')} "
+                print_str += f"Hour: {forecast_step * lead_time_periods} "
+                print(print_str)
 
             if history_len == 1:
                 if "y_diag" in batch:
@@ -322,57 +353,14 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
-            # Process each item in the batch
-            for j in range(batch_size):
-                # Compute the metrics in parallel
-                result = p.apply_async(
-                    compute_metrics,
-                    (
-                        metrics,
-                        _y_pred[j].unsqueeze(0),
-                        y[j].unsqueeze(0),
-                        batch["datetime"][j].item(),
-                        forecast_step,
-                        utc_datetime[j]
-                    )
-                )
-                results.append((j, result))  # Store the batch index with the result
-
-                # Print to screen
-                print_str = f"Forecast: {forecast_count + 1 + j} "
-                print_str += f"Date: {utc_datetime[j].strftime('%Y-%m-%d %H:%M:%S')} "
-                print_str += f"Hour: {forecast_step * lead_time_periods} "
-                print(print_str)
-
-                torch.cuda.empty_cache()
-                gc.collect()
+            torch.cuda.empty_cache()
+            gc.collect()
 
             if batch["stop_forecast"].item():
-                # Wait for processes to finish and collect metrics
-                for batch_idx, result in results:
-                    metric_dict = result.get()
-                    for h, v in metric_dict.items():
-                        metrics_results[batch_idx][h].append(v)
-
-                # Save metrics files
-                save_location = os.path.join(
-                    os.path.expandvars(conf["save_loc"]), "metrics"
-                )
-                os.makedirs(save_location, exist_ok=True)
-
-                for j in range(batch_size):
-                    df = pd.DataFrame(metrics_results[j])
-                    df.to_csv(
-                        os.path.join(save_location, f"{init_datetimes[j]}.csv")
-                    )
-
                 # Clear everything
                 results = []
                 y_pred = None
                 gc.collect()
-
-                if distributed:
-                    torch.distributed.barrier()
 
                 forecast_count += batch_size
 

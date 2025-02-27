@@ -27,10 +27,7 @@ from credit.loss import VariableTotalLoss2D
 from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
 from credit.parser import credit_main_parser, training_data_check
-from credit.datasets.load_dataset_and_dataloader import (
-    load_dataset,
-    load_dataloader
-)
+from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
 
 from credit.metrics import LatWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
@@ -278,8 +275,12 @@ def main(rank, world_size, conf, backend, trial=False):
     valid_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=False)
 
     # Load the dataloader
-    train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
-    valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
+    train_loader = load_dataloader(
+        conf, train_dataset, rank=rank, world_size=world_size, is_train=True
+    )
+    valid_loader = load_dataloader(
+        conf, valid_dataset, rank=rank, world_size=world_size, is_train=False
+    )
 
     # model
     m = load_model(conf)
@@ -308,7 +309,7 @@ def main(rank, world_size, conf, backend, trial=False):
 
     # Initialize a trainer object
     trainer_cls = load_trainer(conf)
-    trainer = trainer_cls(model, rank, module=(conf["trainer"]["mode"] == "ddp"))
+    trainer = trainer_cls(model, rank)
 
     # Fit the model
     result = trainer.fit(

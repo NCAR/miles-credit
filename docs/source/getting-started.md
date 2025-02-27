@@ -2,7 +2,9 @@
 
 ## NSF NCAR Derecho Installation
 
-Currently, the framework for running miles-credit in parallel is centered around NSF-NCAR's Derecho HPC. Derecho requires building several miles-credit dependent packages locally, including PyTorch, to enable correct MPI configuration. To begin, create a clone of the pre-built miles-credit environment, which contains compatiable versions of torch, torch-vision, numpy, and others. 
+Currently, the framework for running miles-credit in parallel is centered around NSF-NCAR's Derecho HPC. Derecho 
+requires building several miles-credit dependent packages locally, including PyTorch, to enable correct MPI 
+configuration. To begin, create a clone of the pre-built miles-credit environment, which contains compatiable versions of torch, torch-vision, numpy, and others. 
 
 ```bash
 module purge 
@@ -26,7 +28,7 @@ pip install --no-deps .
 
 Henceforth, when adding new packages aim to use the no dependenices option. 
 
-## Standard Installation 
+## Installation with Mamba/Conda
 
 Clone from miles-credit github page:
 ```bash
@@ -34,9 +36,9 @@ git clone git@github.com:NCAR/miles-credit.git
 cd miles-credit
 ```
 
-Install dependencies using environment_gpu.yml file (also compatible with CPU-only machines):
+Install dependencies using environment_gpu.yml file (also compatible with CPU-only Linux machines):
 
-Note: if you are on NCAR HPC, we recommend installing to your home directory. To do this, simply append `-p /glade/u/home/$USER/[your_install_dir]/` to the `conda/mamba env create` command below:
+Note: if you are on NCAR HPC, we recommend installing to your home or work directory. To do this, simply append `-p /glade/u/home/$USER/[your_install_dir]/` to the `conda/mamba env create` command below:
 
 ```bash
 mamba env create -f environment_gpu.yml
@@ -49,11 +51,8 @@ mamba env create -f environment_cpu.yml
 conda activate credit
 ```
 
+## Installation from Scratch
+See <project:installation.md> for detailed instructions on building CREDIT and its 
+dependencies from scratch.
 
-Some metrics use WeatherBench2 for computation. Install with:
-```bash
-git clone git@github.com:google-research/weatherbench2.git
-cd weatherbench2
-pip install .
-````
 

@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(BaseTrainer):
-    def __init__(self, model: torch.nn.Module, rank: int, module: bool = False):
-        super().__init__(model, rank, module)
+    def __init__(self, model: torch.nn.Module, rank: int):
+        super().__init__(model, rank)
         # Add any additional initialization if needed
         logger.info("Loading a batch trainer class")
 

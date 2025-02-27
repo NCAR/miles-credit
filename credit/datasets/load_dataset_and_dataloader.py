@@ -20,28 +20,20 @@ import re
 
 
 class BatchForecastLenSampler:
-    """
-    A PyTorch Sampler designed to preserve the forecast length from the dataset.
-
-    This sampler is tailored for datasets with a non-trivial forecast length,
-    ensuring compatibility with batch sampling by adjusting the total number
-    of iterations based on the dataset's forecast length and batches per epoch.
-
-    Attributes:
-        dataset: The dataset object, which must have `forecast_len` and
-                 `batches_per_epoch()` attributes.
-        forecast_len: The forecast length incremented by 1.
-        len: The total number of iterations determined by the forecast length
-             and the number of batches per epoch.
-    """
-
     def __init__(self, dataset):
         """
-        Initializes the BatchForecastLenSampler.
+        A PyTorch Sampler designed to preserve the forecast length from the dataset.
 
-        Args:
-            dataset: A dataset object with a `forecast_len` attribute and
-                     a `batches_per_epoch()` method.
+        This sampler is tailored for datasets with a non-trivial forecast length,
+        ensuring compatibility with batch sampling by adjusting the total number
+        of iterations based on the dataset's forecast length and batches per epoch.
+
+        Attributes:
+            dataset: The dataset object, which must have `forecast_len` and
+                     `batches_per_epoch()` attributes.
+            forecast_len: The forecast length incremented by 1.
+            len: The total number of iterations determined by the forecast length
+                 and the number of batches per epoch.
         """
         self.dataset = dataset
         self.forecast_len = dataset.forecast_len + 1
@@ -74,26 +66,18 @@ class BatchForecastLenSampler:
 
 
 class BatchForecastLenDataLoader:
-    """
-    A custom DataLoader that supports datasets with a non-trivial forecast length.
-
-    This DataLoader is designed to iterate over datasets that provide a
-     `forecast_len` attribute, optionally incorporating batch-specific
-     properties like `batches_per_epoch()` if available.
-
-    Attributes:
-        dataset: The dataset object, which must have a `forecast_len` attribute
-                  and may optionally have a `batches_per_epoch()` method.
-        forecast_len: The forecast length incremented by 1.
-    """
-
     def __init__(self, dataset):
         """
-        Initializes the BatchForecastLenDataLoader.
+        A custom DataLoader that supports datasets with a non-trivial forecast length.
 
-        Args:
-            dataset: A dataset object with a `forecast_len` attribute and
-                      optionally a `batches_per_epoch()` method.
+        This DataLoader is designed to iterate over datasets that provide a
+         `forecast_len` attribute, optionally incorporating batch-specific
+         properties like `batches_per_epoch()` if available.
+
+        Attributes:
+            dataset: The dataset object, which must have a `forecast_len` attribute
+                      and may optionally have a `batches_per_epoch()` method.
+            forecast_len: The forecast length incremented by 1.
         """
         self.dataset = dataset
         self.forecast_len = dataset.forecast_len + 1

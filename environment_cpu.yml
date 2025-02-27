@@ -1,49 +1,9 @@
 name: credit
 channels:
-  - pytorch
   - conda-forge
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
-  - numpy<2
-  - pandas
-  - matplotlib
-  - cartopy
-  - ffmpeg
-  - scikit-learn
-  - pyarrow
-  - pytest
-  - xarray
-  - netcdf4
-  - pytorch
-  - torchvision
-  - cpuonly
-  - pyyaml
-  - cartopy
-  - dask
-  - distributed
-  - dask-jobqueue
-  - zarr
-  - jupyter
-  - geocat-comp
-  - xesmf
-  - mpi4py
-  - mpich
-  - cftime
-  - myst-parser
   - pip:
-    - einops
-    - echo-opt
-    - optuna==3.6.0
-    - bridgescaler
-    - rotary-embedding-torch
-    - segmentation-models-pytorch>=0.3.4
-    - torchsummary
-    - vector_quantize_pytorch
-    - haversine
-    - torch-harmonics
-    - torch_geometric
-    - sphinx-autoapi
-    - timm
-    - wandb
+    - torch --index-url https://download.pytorch.org/whl/cpu
     - .

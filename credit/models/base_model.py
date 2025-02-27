@@ -4,6 +4,8 @@ import torch
 from torch import nn
 import logging
 
+from credit.models.checkpoint import load_state_dict_error_handler
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,15 +61,11 @@ class BaseModel(nn.Module):
 
         if os.path.isfile(os.path.join(save_loc, "model_checkpoint.pt")):
             ckpt = os.path.join(save_loc, "model_checkpoint.pt")
-            fsdp = True
         else:
             ckpt = os.path.join(save_loc, "checkpoint.pt")
-            fsdp = False
 
         if not os.path.isfile(ckpt):
-            raise ValueError(
-                "No saved checkpoint exists. You must train a model first. Exiting."
-            )
+            raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
 
         logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
@@ -80,10 +78,11 @@ class BaseModel(nn.Module):
             del conf["model"]["type"]
 
         model_class = cls(**conf["model"])
-
-        model_class.load_state_dict(
-            checkpoint if fsdp else checkpoint["model_state_dict"]
-        )
+        if "model_state_dict" in checkpoint.keys():
+            load_msg = model_class.load_state_dict(checkpoint, strict=False)
+        else:
+            load_msg = model_class.load_state_dict(checkpoint, strict=False)
+        load_state_dict_error_handler(load_msg)
 
         return model_class
 

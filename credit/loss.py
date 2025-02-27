@@ -63,7 +63,7 @@ class LogCoshLoss(torch.nn.Module):
     Squared Error (MSE) loss.
 
     Args:
-        reduction (str): Specifies the reduction to apply to the output:
+        reduction (str): Specifies the reduction to apply to the output.
             'mean' | 'none'. 'mean': the output is averaged; 'none': no reduction is applied.
     """
 
@@ -130,7 +130,7 @@ class XSigmoidLoss(torch.nn.Module):
     transformation. It is designed to handle large errors in a non-linear fashion.
 
     Args:
-        reduction (str): Specifies the reduction to apply to the output:
+        reduction (str): Specifies the reduction to apply to the output.
             'mean' | 'none'. 'mean': the output is averaged; 'none': no reduction is applied.
     """
 
@@ -164,7 +164,7 @@ class MSLELoss(nn.Module):
     several orders of magnitude.
 
     Args:
-        reduction (str): Specifies the reduction to apply to the output:
+        reduction (str): Specifies the reduction to apply to the output.
             'mean' | 'none'. 'mean': the output is averaged; 'none': no reduction is applied.
     """
 
@@ -191,8 +191,8 @@ class MSLELoss(nn.Module):
 
 
 class KCRPSLoss(nn.Module):
-    """Adapted from Nvidia Modulus 
-    
+    """Adapted from Nvidia Modulus
+
     Estimate the CRPS from a finite ensemble
 
     Computes the local Continuous Ranked Probability Score (CRPS) by using
@@ -200,41 +200,51 @@ class KCRPSLoss(nn.Module):
 
     Creates a map of CRPS and does not accumulate over lat/lon regions.
     Approximates:
+
     .. math::
         CRPS(X, y) = E[X - y] - 0.5 E[X-X']
 
     with
+
     .. math::
         sum_i=1^m |X_i - y| / m - 1/(2m^2) sum_i,j=1^m |x_i - x_j|
+
     """
 
     def __init__(self, reduction, biased: bool = False):
         super().__init__()
         self.biased = biased
         self.batched_forward = torch.vmap(self.single_sample_forward)
-    
+
     def forward(self, target, pred):
         # integer division but will error out next op if there is a remainder
-        ensemble_size = pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
-        pred = pred.view(target.shape[0], ensemble_size, *target.shape[1:]) #b, ensemble, c, t, lat, lon
+        ensemble_size = (
+            pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
+        )
+        pred = pred.view(
+            target.shape[0], ensemble_size, *target.shape[1:]
+        )  # b, ensemble, c, t, lat, lon
         # apply single_sample_forward to each dim
         target = target.unsqueeze(1)
         return self.batched_forward(target, pred).squeeze(1)
 
     def single_sample_forward(self, target, pred):
-        """Forward pass for KCRPS loss for a single sample 
+        """
+        Forward pass for KCRPS loss for a single sample.
 
         Args:
-            prediction (torch.Tensor): Predicted tensor.
             target (torch.Tensor): Target tensor.
+            pred (torch.Tensor): Predicted tensor.
 
         Returns:
             torch.Tensor: CRPS loss values at each lat/lon
         """
         pred = torch.movedim(pred, 0, -1)
         return self._kernel_crps_implementation(pred, target, self.biased)
-    
-    def _kernel_crps_implementation(self, pred: torch.Tensor, obs: torch.Tensor, biased: bool) -> torch.Tensor:
+
+    def _kernel_crps_implementation(
+        self, pred: torch.Tensor, obs: torch.Tensor, biased: bool
+    ) -> torch.Tensor:
         """An O(m log m) implementation of the kernel CRPS formulas"""
         skill = torch.abs(pred - obs[..., None]).mean(-1)
         pred, _ = torch.sort(pred)
@@ -252,6 +262,7 @@ class KCRPSLoss(nn.Module):
         factor = (2 * i - m - 1) / denom
         spread = torch.sum(factor * pred, dim=-1)
         return skill - spread
+
 
 class SpectralLoss2D(torch.nn.Module):
     """Spectral Loss in 2D.
@@ -557,13 +568,15 @@ class VariableTotalLoss2D(torch.nn.Module):
             )
 
         self.validation = validation
-        if conf["loss"]["training_loss"] == "KCRPS": # for ensembles, load same loss for train and valid
+        if (
+            conf["loss"]["training_loss"] == "KCRPS"
+        ):  # for ensembles, load same loss for train and valid
             self.loss_fn = load_loss(self.training_loss, reduction="none")
         elif self.validation:
             self.loss_fn = nn.L1Loss(reduction="none")
         else:
             self.loss_fn = load_loss(self.training_loss, reduction="none")
-    
+
     def forward(self, target, pred):
         """Calculate the total loss for the given target and prediction.
 

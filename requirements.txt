@@ -1,4 +1,4 @@
-numpy<2
+numpy
 pandas
 matplotlib
 cartopy
@@ -10,7 +10,6 @@ netcdf4
 torch
 torchvision
 pyyaml
-cartopy
 dask
 distributed
 dask-jobqueue
@@ -19,8 +18,10 @@ jupyter
 einops
 echo-opt
 bridgescaler
-rotary-embedding-torch
 segmentation-models-pytorch
-vector-quantize-pytorch
 haversine
 pvlib
+pre-commit
+torch-harmonics
+torch_geometric
+ruff

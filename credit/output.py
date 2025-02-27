@@ -76,19 +76,19 @@ def make_xarray(pred, forecast_datetime, lat, lon, conf):
     """
     Create two xarray.DataArray objects for upper air and surface variables.
 
-    Args
+    Args:
         pred (torch.Tensor or np.ndarray): Prediction tensor containing both upper air and surface variables.
-    forecast_datetime (datetime): The forecast initialization datetime.
-    lat (np.ndarray or list): Latitude values.
-    lon (np.ndarray or list): Longitude values.
-    conf (dict): Configuration dictionary containing details about the data structure
-        and variables.
+        forecast_datetime (datetime): The forecast initialization datetime.
+        lat (np.ndarray or list): Latitude values.
+        lon (np.ndarray or list): Longitude values.
+        conf (dict): Configuration dictionary containing details about the data structure
+            and variables.
 
     Returns:
         darray_upper_air (xarray.DataArray): DataArray containing upper air variables with dimensions
             [time, vars, level, latitude, longitude].
-    darray_single_level (xarray.DataArray): DataArray containing surface variables with dimensions
-        [time, vars, latitude, longitude].
+        darray_single_level (xarray.DataArray): DataArray containing surface variables with dimensions
+            [time, vars, latitude, longitude].
     """
 
     # subset upper air and surface variables
@@ -157,6 +157,7 @@ def save_netcdf_increment(
         forecast_hour (int):  how many hours since the initialization of the model.
         meta_data (dict): metadata dictionary for output variables
         conf (dict): configuration dictionary for training and/or rollout
+
     """
     try:
         """
@@ -183,11 +184,9 @@ def save_netcdf_increment(
             else:
                 surface_geopotential_var = "Z_GDS4_SFC"
             with xr.open_dataset(conf["data"]["save_loc_static"]) as static_ds:
-                ds_merged[surface_geopotential_var] = static_ds[
-                    surface_geopotential_var
-                ]
+                surface_geopotential = static_ds[surface_geopotential_var].values
             pressure_interp = full_state_pressure_interpolation(
-                ds_merged, **conf["predict"]["interp_pressure"]
+                ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"]
             )
             ds_merged = xr.merge([ds_merged, pressure_interp])
 

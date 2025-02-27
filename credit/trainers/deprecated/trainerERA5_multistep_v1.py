@@ -23,8 +23,8 @@ from credit.trainers.utils import cleanup
 
 
 class Trainer(BaseTrainer):
-    def __init__(self, model: torch.nn.Module, rank: int, module: bool = False):
-        super().__init__(model, rank, module)
+    def __init__(self, model: torch.nn.Module, rank: int):
+        super().__init__(model, rank)
         # Add any additional initialization if needed
         logging.info("Loading a multi-step trainer class")
 

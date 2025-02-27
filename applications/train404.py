@@ -348,7 +348,7 @@ def main(rank, world_size, conf, trial=False):
 
     # Initialize a trainer object
 
-    trainer = Trainer(model, rank, module=(conf["trainer"]["mode"] == "ddp"))
+    trainer = Trainer(model, rank)
 
     # Fit the model
 

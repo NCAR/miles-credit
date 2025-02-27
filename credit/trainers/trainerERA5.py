@@ -21,34 +21,33 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(BaseTrainer):
-    """
-    Trainer class for handling the training, validation, and checkpointing of models.
+    def __init__(self, model: torch.nn.Module, rank: int):
+        """
+        Trainer class for handling the training, validation, and checkpointing of models.
 
-    This class is responsible for executing the training loop, validating the model
-    on a separate dataset, and managing checkpoints during training. It supports
-    both single-GPU and distributed (FSDP, DDP) training.
+        This class is responsible for executing the training loop, validating the model
+        on a separate dataset, and managing checkpoints during training. It supports
+        both single-GPU and distributed (FSDP, DDP) training.
 
-    Attributes:
-        model (torch.nn.Module): The model to be trained.
-        rank (int): The rank of the process in distributed training.
-        module (bool): If True, use model with module parallelism (default: False).
+        Attributes:
+            model (torch.nn.Module): The model to be trained.
+            rank (int): The rank of the process in distributed training.
 
-    Methods:
-        train_one_epoch(epoch, conf, trainloader, optimizer, criterion, scaler,
-                        scheduler, metrics):
-            Perform training for one epoch and return training metrics.
 
-        validate(epoch, conf, valid_loader, criterion, metrics):
-            Validate the model on the validation dataset and return validation metrics.
+        Methods:
+            train_one_epoch(epoch, conf, trainloader, optimizer, criterion, scaler,
+                            scheduler, metrics):
+                Perform training for one epoch and return training metrics.
 
-        fit_deprecated(conf, train_loader, valid_loader, optimizer, train_criterion,
-                       valid_criterion, scaler, scheduler, metrics, trial=False):
-            Perform the full training loop across multiple epochs, including validation
-            and checkpointing.
-    """
+            validate(epoch, conf, valid_loader, criterion, metrics):
+                Validate the model on the validation dataset and return validation metrics.
 
-    def __init__(self, model: torch.nn.Module, rank: int, module: bool = False):
-        super().__init__(model, rank, module)
+            fit_deprecated(conf, train_loader, valid_loader, optimizer, train_criterion,
+                           valid_criterion, scaler, scheduler, metrics, trial=False):
+                Perform the full training loop across multiple epochs, including validation
+                and checkpointing.
+        """
+        super().__init__(model, rank)
         # Add any additional initialization if needed
         logger.info("Loading a multi-step trainer class")
 
@@ -74,13 +73,14 @@ class Trainer(BaseTrainer):
         """
 
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
-        grad_max_norm = conf["trainer"]["grad_max_norm"]
+        grad_max_norm = conf["trainer"].get("grad_max_norm", 0.0)
         amp = conf["trainer"]["amp"]
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
         forecast_length = conf["data"]["forecast_len"]
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
         if ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {ensemble_size}")
+        logger.info(f"Using grad-max-norm value: {grad_max_norm}")
 
         # number of diagnostic variables
         varnum_diag = len(conf["data"]["diagnostic_variables"])
@@ -190,10 +190,10 @@ class Trainer(BaseTrainer):
                     else:
                         # no x_surf
                         x = reshape_only(batch["x"]).to(self.device)  # .float()
-                    
+
                     # --------------------------------------------- #
                     # ensemble x and x_surf on initialization
-                    # copies each sample in the batch ensemble_size number of times. 
+                    # copies each sample in the batch ensemble_size number of times.
                     # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                     # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
                     if ensemble_size > 1:
@@ -207,8 +207,10 @@ class Trainer(BaseTrainer):
                     )  # .float()
                     # ---------------- ensemble ----------------- #
                     # ensemble x_forcing_batch for concat. see above for explanation of code
-                    if ensemble_size > 1: 
-                        x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                    if ensemble_size > 1:
+                        x_forcing_batch = torch.repeat_interleave(
+                            x_forcing_batch, ensemble_size, 0
+                        )
                     # --------------------------------------------- #
 
                     # concat on var dimension
@@ -320,10 +322,35 @@ class Trainer(BaseTrainer):
             if distributed:
                 torch.distributed.barrier()
 
+            # Grad norm clipping
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), max_norm=grad_max_norm
-            )
+            if grad_max_norm == "dynamic":
+                # Compute local L2 norm
+                local_norm = torch.norm(
+                    torch.stack(
+                        [
+                            p.grad.detach().norm(2)
+                            for p in self.model.parameters()
+                            if p.grad is not None
+                        ]
+                    )
+                )
+
+                # All-reduce to get global norm across ranks
+                if distributed:
+                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
+                global_norm = local_norm.sqrt()  # Compute total global norm
+
+                # Clip gradients using the global norm
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=global_norm
+                )
+            elif grad_max_norm > 0.0:
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=grad_max_norm
+                )
+
+            # Step optimizer
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
@@ -362,6 +389,9 @@ class Trainer(BaseTrainer):
                 np.mean(results_dict["train_mae"]),
                 forecast_length + 1,
             )
+            ensemble_size = conf["trainer"].get("ensemble_size", 0)
+            if ensemble_size > 1:
+                to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
             to_print += " lr: {:.12f}".format(optimizer.param_groups[0]["lr"])
             if self.rank == 0:
                 batch_group_generator.update(1)
@@ -507,7 +537,7 @@ class Trainer(BaseTrainer):
                             x = reshape_only(batch["x"]).to(self.device)  # .float()
                         # --------------------------------------------- #
                         # ensemble x and x_surf on initialization
-                        # copies each sample in the batch ensemble_size number of times. 
+                        # copies each sample in the batch ensemble_size number of times.
                         # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                         # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
                         if ensemble_size > 1:
@@ -523,8 +553,10 @@ class Trainer(BaseTrainer):
                         )  # .float()
                         # ---------------- ensemble ----------------- #
                         # ensemble x_forcing_batch for concat. see above for explanation of code
-                        if ensemble_size > 1: 
-                            x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                        if ensemble_size > 1:
+                            x_forcing_batch = torch.repeat_interleave(
+                                x_forcing_batch, ensemble_size, 0
+                            )
                         # --------------------------------------------- #
 
                         # concat on var dimension
@@ -657,6 +689,9 @@ class Trainer(BaseTrainer):
                     np.mean(results_dict["valid_acc"]),
                     np.mean(results_dict["valid_mae"]),
                 )
+                ensemble_size = conf["trainer"].get("ensemble_size", 0)
+                if ensemble_size > 1:
+                    to_print += f" std: {np.mean(results_dict['valid_std']):.6f}"
                 if self.rank == 0:
                     batch_group_generator.update(1)
                     batch_group_generator.set_description(to_print)

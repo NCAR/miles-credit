@@ -5,7 +5,7 @@ from credit.loss import latitude_weights
 
 
 class LatWeightedMetrics:
-    def __init__(self, conf):
+    def __init__(self, conf, training_mode=True):
         self.conf = conf
         atmos_vars = conf["data"]["variables"]
         surface_vars = conf["data"]["surface_variables"]
@@ -27,8 +27,10 @@ class LatWeightedMetrics:
 
         # DO NOT apply these weights during metrics computations, only on the loss during
         self.w_var = None
-
-        self.ensemble_size = conf["trainer"].get("ensemble_size", 1) # default value of 1 if not set
+        if training_mode:
+            self.ensemble_size = conf["trainer"].get("ensemble_size", 1) # default value of 1 if not set
+        else:
+            self.ensemble_size = conf["predict"].get("ensemble_size", 1)
 
     def __call__(self, pred, y, clim=None, transform=None, forecast_datetime=0):
         # forecast_datetime is passed for interface consistency but not used here
@@ -36,11 +38,6 @@ class LatWeightedMetrics:
         if transform is not None:
             pred = transform(pred)
             y = transform(y)
-
-        # calculate ensemble mean, if ensemble_size=1, does nothing
-        if self.ensemble_size > 1:
-            pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:]) #b, ensemble, c, t, lat, lon
-            pred = pred.mean(dim=1)
 
         # Get latitude and variable weights
         w_lat = (
@@ -61,6 +58,12 @@ class LatWeightedMetrics:
 
         loss_dict = {}
         with torch.no_grad():
+            # calculate ensemble mean, if ensemble_size=1, does nothing
+            if self.ensemble_size > 1:
+                pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:]) #b, ensemble, c, t, lat, lon
+                std_dev = torch.std(pred, dim=1) # std dev of ensemble
+                pred = pred.mean(dim=1)
+
             error = pred - y
             for i, var in enumerate(self.vars):
                 pred_prime = pred[:, i] - torch.mean(pred[:, i])
@@ -89,6 +92,13 @@ class LatWeightedMetrics:
                 loss_dict[f"mae_{var}"] = (
                     torch.abs(error[:, i]) * w_lat * w_var
                 ).mean()
+                # mean of std across all batches
+                if self.ensemble_size > 1:
+                    loss_dict[f"std_{var}"] = torch.mean(
+                        torch.sqrt(
+                            torch.mean(std_dev[:, i] ** 2 * w_lat * w_var, dim=(-2, -1))
+                        )
+                    )
 
         # Calculate metrics averages
         loss_dict["acc"] = np.mean(
@@ -107,6 +117,10 @@ class LatWeightedMetrics:
         loss_dict["mae"] = np.mean(
             [loss_dict[k].cpu() for k in loss_dict.keys() if "mae_" in k]
         )
+        if self.ensemble_size > 1:
+            loss_dict["std"] = np.mean(
+                [loss_dict[k].cpu() for k in loss_dict.keys() if "std_" in k]
+                )
 
         return loss_dict
 
@@ -272,6 +286,75 @@ class LatWeightedMetricsClimatology:
         return (torch.abs(error) * w_lat * w_var
                 ).mean()
 
+class LatWeightedMetricsEnsemble:
+    def __init__(self, conf, training_mode=True):
+        self.conf = conf
+        atmos_vars = conf["data"]["variables"]
+        surface_vars = conf["data"]["surface_variables"]
+        diag_vars = conf["data"]["diagnostic_variables"]
+        
+        levels = (
+            conf["model"]["levels"]
+            if "levels" in conf["model"]
+            else conf["model"]["frames"]
+        )
+
+        self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
+        self.vars += surface_vars
+        self.vars += diag_vars
+
+        self.w_lat = None
+        if conf["loss"]["use_latitude_weights"]:
+            self.w_lat = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
+
+        # DO NOT apply these weights during metrics computations, only on the loss during
+        self.w_var = None
+        if training_mode:
+            self.ensemble_size = conf["trainer"].get("ensemble_size", 1) # default value of 1 if not set
+        else:
+            self.ensemble_size = conf["predict"].get("ensemble_size", 1)
+
+    def __call__(self, pred, y, clim=None, transform=None, forecast_datetime=0):
+        # pred is of shape (1, ensemble_size, c, t, lat, lon)
+        # we are interested in gridcell-wise: ens mean, rmse, spread
+        # TODO: spectrum
+        # forecast_datetime is passed for interface consistency but not used here
+
+        if transform is not None:
+            pred = transform(pred)
+            y = transform(y)
+
+        # Get latitude and variable weights
+        w_lat = (
+            self.w_lat.to(dtype=pred.dtype, device=pred.device)
+            if self.w_lat is not None
+            else 1.0
+        )
+        w_var = (
+            self.w_var.to(dtype=pred.dtype, device=pred.device)
+            if self.w_var is not None
+            else 1.0
+        )
+
+        if clim is not None:
+            clim = clim.to(device=y.device).unsqueeze(0)
+            pred = pred - clim
+            y = y - clim
+
+        loss_dict = {}
+        with torch.no_grad():
+            pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:]) #b, ensemble, c, t, lat, lon
+            
+            loss_dict["ens_std"] = torch.std(pred, dim=1) # std dev of ensemble for each gridcell/variable
+            
+            # compute ensemble mean
+            pred = pred.mean(dim=1)
+            loss_dict["ens_mean"] = pred
+            loss_dict["ens_rmse"] = torch.sqrt((pred - y) ** 2 * w_lat * w_var)
+
+        return loss_dict
+
+
 if __name__ == "__main__":
     import yaml
     import logging
@@ -328,3 +411,5 @@ if __name__ == "__main__":
     # Display results
     for key, value in results.items():
         print(f"{key}: {value}")
+
+
