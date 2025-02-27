@@ -1,5 +1,4 @@
 # system tools
-from copy import deepcopy
 from typing import Dict, TypedDict, Union
 from dataclasses import dataclass, field
 from inspect import signature
@@ -67,17 +66,18 @@ class DownscalingDataset(torch.utils.data.Dataset):
     ''' pass **conf['data'] as arguments to constructor
     [insert more documentation here]
     '''
+
     rootpath:     str
     history_len:  int = 2
     forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
-    #components: Dict = field(default_factory=dict)
+    # components: Dict = field(default_factory=dict)
     datasets: Dict = field(default_factory=dict)
-    transform:    bool= True
+    transform:    bool = True
     _mode:        str = field(init=False, repr=False, default='train')
     # legal mode values: train, init, infer
-    _output:      str = field(init=False, repr=False, default='by_io')
+    _output:      str = field(init=False, repr=False, default='tensor')
     # legal output values: by_dset, by_io, tensor
 
     def __post_init__(self):
@@ -91,14 +91,14 @@ class DownscalingDataset(torch.utils.data.Dataset):
         norm_sig = signature(DownscalingNormalizer).parameters
 
         dsdict = {}
-        
+
         for dname, dconfig in self.datasets.items():
             print(dname)
 
-            dm_args = {arg: val for arg,val in dconfig.items() if arg in dmap_sig}
+            dm_args = {arg: val for arg, val in dconfig.items() if arg in dmap_sig}
             dm_args['variables'] = dconfig['variables']
 
-            dt_args = {arg: val for arg,val in dconfig.items() if arg in norm_sig}
+            dt_args = {arg: val for arg, val in dconfig.items() if arg in norm_sig}
             dt_args['vardict'] = dconfig['variables']
             dt_args['transdict'] = dconfig['transforms']
 
@@ -120,6 +120,25 @@ class DownscalingDataset(torch.utils.data.Dataset):
         #     comp = self.datasets[dset].component
         #     self.components.setdefault(comp, []).append(dset)
 
+        # end __post_init__
+
+    def __getitem__(self, index):
+
+        items = {dset: self.getdata(dset, index) for dset in self.datasets}
+
+        if self.output == 'by_dset':
+            return items
+
+        result = self.rearrange(items)
+
+        if self.output == 'by_io':
+            return result
+
+        if self.output == 'tensor':
+            result = self.toTensor(result)
+
+        return result
+        # yield result    # change return to yield to make this lazy
 
     def getdata(self, dset, index):
         raw = self.datasets[dset]['datamap'][index]
@@ -128,7 +147,6 @@ class DownscalingDataset(torch.utils.data.Dataset):
         else:
             return raw
 
-        
     def rearrange(self, items):
         # based on mode, rearrange items{ dataset{ usage{ var to
         # sample{ input/target{ dset.var
@@ -156,10 +174,13 @@ class DownscalingDataset(torch.utils.data.Dataset):
                                     outname = dname + '.' + var
                                     data = items[dname][usage][var]
                                     if self.mode == 'train':
-                                        if part == 'input':
-                                            result[part][outname] = data[0:hlen, ...]
-                                        if part == 'target':
-                                            result[part][outname] = data[hlen:slen, ...]
+                                        if dim == 'static':
+                                            result[part][outname] = data
+                                        else:
+                                            if part == 'input':
+                                                result[part][outname] = data[0:hlen, ...]
+                                            if part == 'target':
+                                                result[part][outname] = data[hlen:slen, ...]
                                     else:
                                         result[part][outname] = data
 
@@ -169,31 +190,33 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         return result
 
+    def toTensor(self, sample):
+        # sample is nested dict {input{vars}, target{vars}}
+        # arrays are dimensioned [T, Z, Y, X]
+        # stack vars along z-dim (i.e., z-levels ~= variables)
 
-    def toTensor(self, sampledict):
-        for sd in sampledict:
-            
-            pass
-        return sampledict
-    
+        nt = {'input': self.history_len, 'target': self.forecast_len}
 
-    def __getitem__(self, index):
+        for s in sample:
+            for var, data in sample[s].items():
+                if len(data.shape) == 2:
+                    # static data; add time dimension & repeat along it
+                    data = np.repeat(np.expand_dims(data, axis=0),
+                                     repeats=nt[s], axis=0)
 
-        items = {dset: self.getdata(dset, index) for dset in self.datasets}
+                if len(data.shape) == 3:
+                    # add singleton var/z dimension
+                    data = np.expand_dims(data, axis=1)
 
-        if self.output == 'by_dset':
-            return items
+                sample[s][var] = data
 
-        result = self.rearrange(items)
+            # concatenate along z/var dim
+            sample[s] = np.concatenate(list(sample[s].values()), axis=1)
 
-        if self.output == 'by_io':
-            return result
-        
-        if self.output == 'tensor':
-            result = self.toTensor(result)
+            # nparray to tensor
+            sample[s] = torch.as_tensor(sample[s])
 
-        return result
-
+        return sample
 
     @property
     def mode(self) -> str:
@@ -207,7 +230,6 @@ class DownscalingDataset(torch.utils.data.Dataset):
         for d in self.datasets.values():
             d['datamap'].mode = mode
 
-            
     @property
     def output(self) -> str:
         return self._output

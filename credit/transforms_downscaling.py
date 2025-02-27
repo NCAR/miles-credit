@@ -129,7 +129,7 @@ class DownscalingNormalizer:
 
         if zstride != 1 and dim != '3D':
             raise ValueError("credit.transforms: zstride > 1 only allowed for dim=='3D'")
-        
+
         # get flat list of variables
         variables = []
         for usage in vardict:
@@ -174,7 +174,7 @@ class DownscalingNormalizer:
                         xargs = transdict[xkey][xform]
                         if xargs == 'paramfile':
                             xargs = {par: fileparams[var][par] for par in xformparams[xform]}
-                            self.transforms[var].append(x(**xargs))
+                        self.transforms[var].append(x(**xargs))
             else:
                 # no tranform defined & no default for this variable
                 self.transforms[var].append(Identity())
