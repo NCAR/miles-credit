@@ -245,7 +245,7 @@ class DataMap:
 
             # if static, load data from netcdf
             staticfile = nc.Dataset(self.rootpath + '/' + self.glob, mask_and_scale=False)
-            
+
             # [:] forces data to load
             staticdata = [np.array(staticfile[v][:]) for v in self.variables['boundary']]
             self.data = dict(zip(self.variables['boundary'], staticdata))
@@ -287,7 +287,6 @@ class DataMap:
 
             self.length = self.last - self.first + 1 - (self.sample_len - 1)
 
-
             # get last timestep index in each file
             # do this in a loop to avoid many-many open filehandles at once
 
@@ -298,7 +297,7 @@ class DataMap:
                 cumlen = cumlen + len(ncf.variables["time"])
                 self.ends.append(cumlen)
                 ncf.close()
-                ## file opens are slow; stop early if possible
+                # file opens are slow; stop early if possible
                 if cumlen > self.last:
                     break
 
@@ -370,8 +369,6 @@ class DataMap:
         #                    "finish":self.sindex2date(finish-self.first),
         #                    }
         return result
-        pass
-
 
     # the mode property determines which variables to return by use type:
     # "train" = all; "init" = all but diagnostic; "infer" = static + boundary
@@ -392,9 +389,9 @@ class DataMap:
         # Note: static DataMaps never call read; they short-circuit in getitem
         match self.mode:
             case "train":
-                uses = ("boundary","prognostic","diagnostic")
+                uses = ("boundary", "prognostic", "diagnostic")
             case "init":
-                uses = ("boundary","prognostic")
+                uses = ("boundary", "prognostic")
             case "infer":
                 uses = ("boundary",)
             case _:
@@ -405,10 +402,9 @@ class DataMap:
         for use in uses:
             data[use] = dict()
             for var in self.variables[use]:
-                if self.dim=='3D' and self.zstride != 1:
+                if self.dim == '3D' and self.zstride != 1:
                     data[use][var] = np.array(ds[var][start:finish, ::self.zstride, ...])
                 else:
                     data[use][var] = np.array(ds[var][start:finish, ...])
-                print(np.min(data[use][var]))
         ds.close()
         return data
