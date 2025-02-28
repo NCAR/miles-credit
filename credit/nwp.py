@@ -5,17 +5,19 @@ import xarray as xr
 import fsspec
 import xesmf as xe
 
-var_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m'}
-level_map = {'T500': 'tmp', 'U500': 'ugrd', 'V500': 'vgrd', 'Q500': 'spfh', 'Z500': 'Z'}
+gfs_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m', 'delz': 'Z500'}
+level_map = {'T500': 'T', 'U500': 'U', 'V500': 'V', 'Q500': 'Q', 'Z500': 'Z'}
+upper_air = ['T', 'U', 'V', 'Q', 'Z']
+surface = ['SP', 't2m']
 
 def build_GFS_init(output_grid, gdas_base_path="https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/",
                    date="202502200600", variables=[], model_level_indices=[]):
 
-    variables = [k for k, v in var_map.items() if v in variables]
+    gfs_variables = [k for k, v in gfs_map.items() if v in variables]
     atm_full_path = build_file_path(date, gdas_base_path, file_type='atm')
     sfc_full_path = build_file_path(date, gdas_base_path, file_type='sfc')
-    gfs_atm_data = load_gfs_data(atm_full_path, variables)
-    gfs_sfc_data = load_gfs_data(sfc_full_path, variables)
+    gfs_atm_data = load_gfs_data(atm_full_path, gfs_variables)
+    gfs_sfc_data = load_gfs_data(sfc_full_path, gfs_variables)
     gfs_data = combine_data(gfs_atm_data, gfs_sfc_data)
     regridded_gfs = regrid(gfs_data, output_grid)
     interpolated_gfs = interpolate_to_model_level(regridded_gfs, output_grid, model_level_indices, variables)
@@ -39,8 +41,8 @@ def load_gfs_data(full_file_path, variables):
     available_vars = ds.data_vars
     vars = [v for v in variables if v in available_vars]
     ds = ds[vars].rename({'grid_xt': 'longitude', 'grid_yt': 'latitude'}).load()
-    if 'delz' in available_vars and 'Z500' in variables:
-        ds['delz'].values = np.abs(ds['delz'].cumsum(dim='pfull').values)
+    if 'delz' in available_vars and 'delz' in variables:
+        ds['delz'].values = np.abs(ds['delz'].cumsum(dim='pfull').values) * 9.81
         ds = ds.rename({'delz': 'Z'})
     return ds
 
@@ -49,6 +51,10 @@ def combine_data(atm_data, sfc_data):
 
     for var in sfc_data.data_vars:
         atm_data[var] = (sfc_data[var].dims, sfc_data[var].values)
+
+    for var in atm_data.data_vars:
+        if var in gfs_map.keys():
+            atm_data = atm_data.rename({var: gfs_map[var]})
 
     return atm_data
 
@@ -65,28 +71,28 @@ def regrid(nwp_data, output_grid, method="conservative"):
 
 def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indices, variables):
 
+    upper_vars = [var for var in variables if var in upper_air]
+    surface_vars = [var for var in variables if var in surface]
+    vars_500 = [var for var in variables if '500' in var]
+
     xp = regridded_nwp_data['pfull'].values
     fp = regridded_nwp_data
-    output_pressure = (output_grid['a_half'] + output_grid['b_half'] * regridded_nwp_data['pressfc']) / 100
+    output_pressure = (output_grid['a_half'] + output_grid['b_half'] * regridded_nwp_data['SP']) / 100
     sampled_output_pressure = output_pressure[model_level_indices].values
-    ny, nx = fp['tmp'].shape[1], fp['tmp'].shape[2]
+    ny, nx = fp['T'].shape[1], fp['T'].shape[2]
     interpolated_data = {}
-    for var in ['tmp', 'ugrd', 'vgrd']:
-        if var not in variables:
-            continue
+    for var in upper_vars:
         fp_data = fp[var].values
         interpolated_data[var] = {'dims': ['latitude', 'longitude', 'level'],
                                   'data': np.array([np.interp(sampled_output_pressure[:, j, i], xp, fp_data[:, j, i])
                                                     for j in range(ny) for i in range(nx)]).reshape(ny, nx,
                                                                                                     len(model_level_indices))}
-    # for var, var1 in zip(['T500', 'U500', 'V500', 'Z500'], ['tmp', 'ugrd', 'vgrd', 'Z']):
-    vars_500 = [var for var in variables if '500' in var]
-    for var, var1 in zip(vars_500, [level_map[k] for k in vars_500]):
-        fp_data = fp[var1].values
+    for var in vars_500:
+        fp_data = fp[level_map[var]].values
         interpolated_data[var] = {'dims': ['latitude', 'longitude'],
                                   'data': np.array([np.interp([500], xp, fp_data[:, j, i])
                                                     for j in range(ny) for i in range(nx)]).reshape(ny, nx)}
-    for var in ['pressfc', 'tmp2m']:
+    for var in surface_vars:
         interpolated_data[var] = {'dims': regridded_nwp_data[var].dims, 'data': regridded_nwp_data[var].values}
 
     return interpolated_data
@@ -95,10 +101,6 @@ def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indi
 def format_data(data_dict, regridded_data, model_levels):
 
     data = xr.Dataset.from_dict(data_dict).transpose('level', 'latitude', 'longitude', ...).expand_dims('time')
-    for v in data.data_vars:
-        if v in var_map.keys():
-            data = data.rename({v: var_map[v]})
-
     data = data.assign_coords(level=model_levels,
                               latitude=regridded_data['latitude'].values,
                               longitude=regridded_data['longitude'].values,

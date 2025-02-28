@@ -21,6 +21,4 @@ gfs_init = build_GFS_init(output_grid=credit_grid,
                           variables=variables,
                           model_level_indices=model_levels)
 
-print(gfs_init)
-# gfs_init.to_netcdf("/glade/derecho/scratch/cbecker/gfs_init.nc")
 gfs_init.to_zarr("/glade/derecho/scratch/cbecker/gfs_init.zarr")
