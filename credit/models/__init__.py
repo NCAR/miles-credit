@@ -25,7 +25,6 @@ model_types = {
         "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
     ),
     "unet": (SegmentationModel, "Loading a unet model"),
-    "unet404": (SegmentationModel404, "Loading unet404 model"),
     "fuxi": (Fuxi, "Loading Fuxi model"),
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
