@@ -31,6 +31,7 @@ jobs:
           ruff check  --select=D  --exit-zero --statistics 
       - name: Test with pytest
         run: |
+          pytest
           pytest --cov=credit tests/ | tee pytest-coverage.txt
       - name: Pytest coverage comment
         uses: MishaKav/pytest-coverage-comment@main

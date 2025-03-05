@@ -1,116 +1,119 @@
 # --------------------------------------------------------------------------------------------------------------------- #
-# This yaml file implements hourly state-in-state-out swin (see https://arxiv.org/pdf/2404.19630)
+# This yaml file implements 6 hourly state-in-state-out crossformer
 # on NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu) 
-# The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
+# The model is trained on 6 hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/$USER/CREDIT_runs/swin_1h/'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/swin_6hr'
 seed: 1000
 
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
+    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL*12-31_staged.zarr'
     
     # surface variables
-    surface_variables: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
+    surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL*12-31_staged.zarr'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_nc_6h_0.25deg/*.nc'
     
     # static variables
-    static_variables: ['Z_GDS4_SFC','LSM'] 
+    static_variables: ['Z_GDS4_SFC','LSM']
     save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
     
     # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
-    # regular z-score version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
-    # residual norm version
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
-    
-    # mean / std path
-    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/ERA5_mean_1h.nc'
-    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/ERA5_std_1h.nc'
+    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_6h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_6h_1979_2018_16lev_0.25deg.nc'
     
     # train / validation split
-    train_years: [1979, 2014]
-    valid_years: [2014, 2018]
-    
+    train_years: [1979, 2018]
+    valid_years: [2018, 2019]
+
     # data workflow
-    scaler_type: 'std_new'  
-    
+    scaler_type: 'std_new'
+
     # number of input states
-    # state-in-state-out
+    # FuXi has 2 input states
     history_len: 1
     valid_history_len: 1
-    
+
     # number of forecast steps to compute loss
     # 0 for single step training / validation
     # larger than 0 for multi-step training / validation
     forecast_len: 0
     valid_forecast_len: 0
-    
+
     # one_shot: True --> compute loss on the last forecast step only
     # one_shot: False --> compute loss on all forecast steps
     one_shot: True
-    
+
     # 1 for hourly model
-    lead_time_periods: 1
-    
+    lead_time_periods: 6
+
     # do not use skip_period
     skip_periods: null
-    
+
     # compatible with the old 'std'
     static_first: True
-    
+
+    dataset_type: ERA5_MultiStep_Batcher # ERA5_and_Forcing_MultiStep MultiprocessingBatcherPrefetch ERA5_MultiStep_Batcher MultiprocessingBatcher
+
 trainer:
-    # type: standard for single-step or one-shot multi-step training
-    # type: multi-step for the "real" multi-step training
-    
-    type: standard # <---------- change to your type
-    
-    # use fsdp
+    type: era5 # <---------- change to your type: single/multi-step training
+
     mode: fsdp
-    cpu_offload: False # <------ can cause CPU memory problem ("Expects storage to be allocated")
+    cpu_offload: False
     activation_checkpoint: True
     
-    load_weights: False # <----- change if load weights
-    load_optimizer: False # <--- change if load optimizer
+    load_weights: True
+    load_optimizer: True
+    load_scaler: True
+    load_scheduler: True
+
     skip_validation: False
+    update_learning_rate: False
+
+    save_backup_weights: True
+    save_best_weights: True
     
-    learning_rate: 1.0e-03 # <-- change to your lr
-    weight_decay: 0
+    learning_rate: 1.0e-05 # <-- change to your lr
+    weight_decay: 1.0e-06
     
     train_batch_size: 1
     valid_batch_size: 1
+    # ensemble_size: 1
     
-    batches_per_epoch: 1000
-    valid_batches_per_epoch: 50
-    stopping_patience: 5
+    batches_per_epoch: 0 # Total number of samples = 341,880  (1h) ~56,960 (6h)
+    valid_batches_per_epoch: 100
+    stopping_patience: 999
     
     start_epoch: 0
+    num_epoch: 5
     reload_epoch: True
     epochs: &epochs 70
-    
+     
     use_scheduler: True
     scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
-
+    
     # Automatic Mixed Precision: False
     amp: False
     
     # rescale loss as loss = loss / grad_accum_every
     grad_accum_every: 1 
     # gradient clipping
-    grad_max_norm: 1.0
+    grad_max_norm: 'dynamic'
     
     # number of workers
     thread_workers: 4
-    valid_thread_workers: 0
+    valid_thread_workers: 4
 
-
+    # compile 
+    # compile: True
+    prefetch_factor: 4
+  
 model:
     type: "swin"
     img_size: [640, 1280]
@@ -152,9 +155,10 @@ model:
             tracer_name: ['Q', 'Q500']
             tracer_thres: [1e-8, 1e-8]
 
+    
 loss: 
     # the main training loss
-    training_loss: "mse"
+    training_loss: "KCRPS"
     
     # power loss (x), spectral_loss (x)
     use_power_loss: False
@@ -168,18 +172,20 @@ loss:
     use_variable_weights: False
     
 predict:
+    batch_size: 1
+    ensemble_size: 1
     forecasts:
         type: "custom"       # keep it as "custom"
         start_year: 2020     # year of the first initialization (where rollout will start)
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 30         # number of days to initialize, starting from the (year, mon, day) above
+        duration: 384         # number of days to initialize, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
-        days: 2              # forecast lead time as days (1 means 24-hour forecast)
+        days: 10              # forecast lead time as days (1 means 24-hour forecast)
         
-    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/swin_1h/'
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/swin_6hr'
     save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
     
     # turn-off low-pass filter
@@ -191,7 +197,7 @@ predict:
 pbs: #derecho
     conda: "/glade/work/ksha/miniconda3/envs/credit"
     project: "NAML0001"
-    job_name: "swin_1h"
+    job_name: "wxformer_6h"
     walltime: "12:00:00"
     nodes: 8
     ncpus: 64

@@ -148,9 +148,7 @@ def load_premade_encoder_model(model_conf):
         logger.info(f"Loading model {name} with settings {model_conf}")
         return supported_models[name](**model_conf)
     else:
-        raise OSError(
-            f"Model name {name} not recognized. Please choose from {supported_models.keys()}"
-        )
+        raise OSError(f"Model name {name} not recognized. Please choose from {supported_models.keys()}")
 
 
 class SegmentationModel(BaseModel):
@@ -169,12 +167,6 @@ class SegmentationModel(BaseModel):
         post_conf=None,
         **kwargs,
     ):
-        if architecture is None:
-            architecture = {
-                "name": "unet",
-                "encoder_name": "resnet34",
-                "encoder_weights": "imagenet",
-            }
         if post_conf is None:
             post_conf = {"activate": False, "use_skebs": False}
         super(SegmentationModel, self).__init__()
@@ -204,17 +196,6 @@ class SegmentationModel(BaseModel):
         self.use_post_block = post_conf["activate"]
         if self.use_post_block:
             self.postblock = PostBlock(post_conf)
-
-    # def concat_and_reshape(self, x1, x2):
-    #     x1 = x1.view(x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5])
-    #     x_concat = torch.cat((x1, x2), dim=2)
-    #     return x_concat.permute(0, 2, 1, 3, 4)
-
-    # def split_and_reshape(self, tensor):
-    #     tensor1 = tensor[:, :int(self.channels * self.levels), :, :, :]
-    #     tensor2 = tensor[:, -int(self.surface_channels):, :, :, :]
-    #     tensor1 = tensor1.view(tensor1.shape[0], self.channels, self.levels, tensor1.shape[2], tensor1.shape[3], tensor1.shape[4])
-    #     return tensor1, tensor2
 
     def forward(self, x):
         x_copy = None

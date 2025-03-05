@@ -39,7 +39,7 @@ data:
     # files must have the listed variable names
     # surface variables will be normalized by the dataloader, users do not need to normalize them
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_6h_0.25deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_nc_6h_0.25deg/*.nc'
 
     # diagnostic variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
     # the time dimension MUST be the same as upper-air variables
@@ -464,10 +464,10 @@ loss:
     use_variable_weights: False
     # # an example
     # variable_weights:
-    #     U: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
-    #     V: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
-    #     T: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
-    #     Q: [0.132, 0.123, 0.113, 0.104, 0.095, 0.085, 0.076, 0.067, 0.057, 0.048, 0.039, 0.029, 0.02 , 0.011, 0.005]
+    #     U: [0.005, 0.011, 0.02, 0.029, 0.039, 0.048, 0.057, 0.067, 0.076, 0.085, 0.095, 0.104, 0.113, 0.123, 0.132, 0.141]
+    #     V: [0.005, 0.011, 0.02, 0.029, 0.039, 0.048, 0.057, 0.067, 0.076, 0.085, 0.095, 0.104, 0.113, 0.123, 0.132, 0.141]
+    #     T: [0.005, 0.011, 0.02, 0.029, 0.039, 0.048, 0.057, 0.067, 0.076, 0.085, 0.095, 0.104, 0.113, 0.123, 0.132, 0.141]
+    #     Q: [0.005, 0.011, 0.02, 0.029, 0.039, 0.048, 0.057, 0.067, 0.076, 0.085, 0.095, 0.104, 0.113, 0.123, 0.132, 0.141]
     #     SP: 0.1
     #     t2m: 1.0
     #     V500: 0.1

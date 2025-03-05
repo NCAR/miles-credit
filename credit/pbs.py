@@ -99,9 +99,7 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     destination_path = config_save_path
 
     # Only delete the original if the source and destination paths are different
-    if os.path.exists(destination_path) and os.path.realpath(
-        source_path
-    ) != os.path.realpath(destination_path):
+    if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
         os.remove(destination_path)
         logger.info(f"Removed the old model.yml at {destination_path}")
 
@@ -123,6 +121,8 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     # Load modules
     module purge
+    module load ncarenv/23.09
+    module reset
     module load gcc craype cray-mpich cuda cudnn/8.8.1.3-12 conda
     conda activate {pbs_options.get('conda', 'credit')}
 
@@ -192,9 +192,7 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
         destination_path = os.path.join(save_loc, "launch.sh")
 
         # Only delete the original if the source and destination paths are different
-        if os.path.exists(destination_path) and os.path.realpath(
-            source_path
-        ) != os.path.realpath(destination_path):
+        if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
             os.remove(destination_path)
             logger.info(f"Removed the old launch.sh at {destination_path}")
 

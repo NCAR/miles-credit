@@ -1,10 +1,17 @@
-"""
-transforms.py
+"""transforms.py provides transforms.
+
 -------------------------------------------------------
 Content:
     - load_transforms
+    - NormalizeState
     - Normalize_ERA5_and_Forcing
+    - BridgescalerScaleState
+    - NormalizeState_Quantile
+    - NormalizeTendency
+    - ToTensor
     - ToTensor_ERA5_and_Forcing
+    - NormalizeState_Quantile_Bridgescalar
+    - ToTensor_BridgeScaler
 """
 
 import logging
@@ -25,8 +32,16 @@ logger = logging.getLogger(__name__)
 
 
 def load_transforms(conf, scaler_only=False):
-    """
-    scaler_only: True --> retrun scaler; False --> return scaler and ToTensor
+    #TODO: check docstring
+    """Load transforms.
+    
+    Args:
+        conf (str): path to config
+        scaler_only (bool): True --> retrun scaler; False --> return scaler and ToTensor
+    
+    Returns:
+        tf.tensor: transform
+        
     """
     # ------------------------------------------------------------------- #
     # transform class
@@ -72,7 +87,26 @@ def load_transforms(conf, scaler_only=False):
 
 
 class NormalizeState:
+    #TODO: finish docstring
+    """Class to normalize state."""
+    
     def __init__(self, conf):
+        #TODO: finish docstring
+        """Normalize state.
+
+        Normalize the state via provided scaler file/s.
+
+        Args:
+            conf (str): path to config file.
+        
+        Attributes:
+            mean_ds (str): path to mean.
+            std_ds (str): path to std.
+            variables (list): list of upper air varibles.
+            surface_variables (list): list of surface varibles.
+            levels (int): number of upper-air variable levels.           
+        
+        """
         self.mean_ds = xr.open_dataset(conf["data"]["mean_path"])
         self.std_ds = xr.open_dataset(conf["data"]["std_path"])
         self.variables = conf["data"]["variables"]
@@ -82,12 +116,37 @@ class NormalizeState:
         logger.info("Loading preprocessing object for transform/inverse transform states into z-scores")
 
     def __call__(self, sample: Sample, inverse: bool = False) -> Sample:
+        #TODO: review docstring
+        """Normalize via quantile transform.
+
+        Normalize via provided scaler file/s.
+
+        Args:
+            sample: batch.
+            inverse: if true, will inverse the transform.
+        
+        Returns:
+            torch.tensor: transformed type.         
+        
+        """
         if inverse:
             return self.inverse_transform(sample)
         else:
             return self.transform(sample)
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
+        #TODO: review docstring
+        """Transform.
+
+        Transform.
+
+        Args:
+            x: batch.
+        
+        Returns:
+            transformed x.       
+        
+        """
         device = x.device
         tensor = x[:, : (len(self.variables) * self.levels), :, :]
         surface_tensor = x[:, (len(self.variables) * self.levels) :, :, :]
@@ -113,6 +172,18 @@ class NormalizeState:
         return transformed_x.to(device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        #TODO: review docstring
+        """Transform.
+
+        Transform.
+
+        Args:
+            sample: batch.
+        
+        Returns:
+            transformed sample.       
+        
+        """
         normalized_sample = {}
         for key, value in sample.items():
             if isinstance(value, xr.Dataset):
@@ -120,6 +191,18 @@ class NormalizeState:
         return normalized_sample
 
     def inverse_transform(self, x: torch.Tensor) -> torch.Tensor:
+        #TODO: review docstring
+        """Inverse transform.
+
+        Inverse transform.
+
+        Args:
+            x: batch.
+        
+        Returns:
+            inverse transformed x.       
+        
+        """
         device = x.device
         tensor = x[:, : (len(self.variables) * self.levels), :, :]
         surface_tensor = x[:, (len(self.variables) * self.levels) :, :, :]
@@ -146,7 +229,32 @@ class NormalizeState:
 
 
 class Normalize_ERA5_and_Forcing:
+    #TODO: review docstring
+    """Class to normalize ERA5 and Forcing."""
+
     def __init__(self, conf):
+        #TODO: review docstring
+        """Normalize ERA5 and Forcing.
+
+        Transform and normalize model inputs.
+
+        Args:
+            conf (str): path to config file.
+        
+        Attributes:
+            mean_ds (str): path to mean.
+            std_ds (str): path to std.
+            varnames_all (list of str): list of all variables.
+            levels (int): number of upper-air variable levels.           
+            varname_upper_air (list): list of upper air varibles.
+            varname_surface (list): list of surface varibles.
+            varname_dyn_forcing (list): list of dynamic forcing varibles.
+            varname_diagnostic (list): list of diagnostic varibles.
+            varname_forcing (list): list of forcing varibles.
+            varname_static (list): list of static varibles.
+            static_first (bool): if True, static listed before forcing variables.
+        
+        """
         self.mean_ds = xr.open_dataset(conf["data"]["mean_path"]).load()
         self.std_ds = xr.open_dataset(conf["data"]["std_path"]).load()
 
@@ -217,6 +325,16 @@ class Normalize_ERA5_and_Forcing:
         logger.info("Loading stored mean and std data for z-score-based transform and inverse transform")
 
     def __call__(self, sample: Sample, inverse: bool = False) -> Sample:
+        """Normalize ERA5 and Forcing.
+
+        Args:
+            sample: batch.
+            inverse: whether to transform or inverse transform the sample.
+        
+        Returns:
+            torch.tensor: transformed and normalized sample.         
+        
+        """
         if inverse:
             # Inverse transformation
             return self.inverse_transform(sample)
@@ -225,8 +343,17 @@ class Normalize_ERA5_and_Forcing:
             return self.transform(sample)
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        This function applies to y_pred, so there won't be dynamic forcing, forcing, and static variables.
+        """Transform of y_pred.
+        
+        Transform via provided scaler file/s of the prediction variable.
+        Dynamic forcing, forcing, and static vars not transformed.
+
+        Args:
+            x: batch.
+        
+        Returns:
+            transformed x.
+        
         """
         # Get the current device
         device = x.device
@@ -295,10 +422,18 @@ class Normalize_ERA5_and_Forcing:
         return transformed_x.to(device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
-        """
-        This function transforms training batches, it handles forcing & static as follows:
-            - forcing & static don't need to be transformed; users should transform them and save them to the file
-            - other variables (upper-air, surface, dynamic forcing, diagnostics) need to be transformed
+        """Transform training batches.
+        
+        Transform handles forcing & static as follows:
+        - forcing & static don't need to be transformed; users should transform them and save them to the file
+        - other variables (upper-air, surface, dynamic forcing, diagnostics) need to be transformed
+        
+        Args:
+            sample: batch.
+        
+        Returns:
+            transformed sample.
+
         """
         normalized_sample = {}
         if self.has_forcing_static:
@@ -333,8 +468,17 @@ class Normalize_ERA5_and_Forcing:
         return normalized_sample
 
     def inverse_transform(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        This function applies to y_pred, so there won't be dynamic forcing, forcing, and static vars
+        """Inverse transform of y_pred.
+        
+        Inverse transform of prediction variable. Dynamic forcing, forcing,
+        and static vars not transformed.
+
+        Args:
+            x: batch.
+        
+        Returns:
+            inverse transformed x.
+        
         """
         # Get the current device
         device = x.device
@@ -400,10 +544,17 @@ class Normalize_ERA5_and_Forcing:
         return transformed_x.to(device)
 
     def inverse_transform_input(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Inverse transform for input x.
+        """Inverse transform for input x.
+        
         Forcing and static variables are not transformed
         (they were not transformed in the transform function).
+        
+        Args:
+            x: batch.
+        
+        Returns:
+            transformed x.
+
         """
         # Get the current device
         device = x.device
@@ -502,7 +653,26 @@ class Normalize_ERA5_and_Forcing:
 
 
 class BridgescalerScaleState(object):
+    #TODO: review docstring
+    """Convert to reshaped tensor."""
+    
     def __init__(self, conf):
+        #TODO: review docstring
+        """Convert to reshaped tensor.
+
+        Reshape and convert to torch tensor.
+
+        Args:
+            conf (str): path to config file.
+        
+        Attributes:
+            scaler_file (str): path to scaler file.
+            variables (list): list of upper air varibles.
+            surface_variables (list): list of surface varibles.         
+            level_ids (list of ints): level ids.           
+            n_levels (int): number of upper-air variable levels.           
+                    
+        """
         self.scaler_file = conf["data"]["quant_path"]
         self.variables = conf["data"]["variables"]
         self.surface_variables = conf["data"]["surface_variables"]
@@ -525,6 +695,18 @@ class BridgescalerScaleState(object):
         self.scaler_surf = np.sum(self.scaler_df["scaler_surface"].apply(read_scaler))
 
     def inverse_transform(self, x: torch.Tensor) -> torch.Tensor:
+        #TODO: review docstring
+        """Inverse transform.
+
+        Inverse transform.
+
+        Args:
+            x: batch.
+        
+        Returns:
+            inverse transformed batch.       
+        
+        """
         device = x.device
         x_3d = x[:, : self.n_3dvar_levels].cpu()
         x_surface = x[:, self.n_3dvar_levels :].cpu()
@@ -546,6 +728,18 @@ class BridgescalerScaleState(object):
         return x_transformed.to(device)
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
+        #TODO: review docstring
+        """Transform.
+
+        Transform.
+
+        Args:
+            x: batch.
+        
+        Returns:
+            transformed batch.       
+        
+        """
         device = x.device
         x_3d = x[:, : self.n_3dvar_levels].cpu()
         x_surface = x[:, self.n_3dvar_levels :].cpu()
@@ -567,6 +761,18 @@ class BridgescalerScaleState(object):
         return x_transformed.to(device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        #TODO: review docstring
+        """Transform.
+
+        Transform.
+
+        Args:
+            sample: batch.
+        
+        Returns:
+            transformed batch.       
+        
+        """
         normalized_sample = {}
         for data_id, ds in sample.items():
             if isinstance(ds, xr.Dataset):
@@ -588,12 +794,28 @@ class BridgescalerScaleState(object):
 
 
 class NormalizeState_Quantile:
-    """Class to use the bridgescaler Quantile functionality.
-    Some hoops have to be jumped thorugh, and the efficiency could be
-    improved if we were to retrain the bridgescaler.
-    """
+    #TODO: review docstring
+    """Class to use the Quantile functionality."""
 
     def __init__(self, conf):
+        #TODO: review docstring
+        """Normalize via quantile transform.
+
+        Normalize via provided scaler file/s.
+
+        Args:
+            conf (str): path to config file.
+        
+        Attributes:
+            scaler_file (str): path to scaler file.
+            variables (list): list of upper air varibles.
+            surface_variables (list): list of surface varibles.
+            levels (int): number of upper-air variable levels.           
+            scaler_df (pd.df): scaler df.
+            scaler_3ds (xr.ds): 3d scaler dataset.
+            scaler_surfs (xr.ds): surface scaler dataset.
+        
+        """
         self.scaler_file = conf["data"]["quant_path"]
         self.variables = conf["data"]["variables"]
         self.surface_variables = conf["data"]["surface_variables"]
@@ -608,12 +830,37 @@ class NormalizeState_Quantile:
         self.scaler_3d.channels_last = False
 
     def __call__(self, sample: Sample, inverse: bool = False) -> Sample:
+        #TODO: review docstring
+        """Normalize via quantile transform.
+
+        Normalize via provided scaler file/s.
+
+        Args:
+            sample: batch.
+            inverse: if true, will inverse the transform.
+        
+        Returns:
+            torch.tensor: transformed type.         
+        
+        """
         if inverse:
             return self.inverse_transform(sample)
         else:
             return self.transform(sample)
 
     def inverse_transform(self, x: torch.Tensor) -> torch.Tensor:
+        #TODO: review docstring
+        """Inverse transform.
+
+        Inverse transform.
+
+        Args:
+            x: batch.
+        
+        Returns:
+            inverse transformed x.       
+        
+        """
         device = x.device
         tensor = x[:, : (len(self.variables) * self.levels), :, :]  # B, Var, H, W
         surface_tensor = x[:, (len(self.variables) * self.levels) :, :, :]  # B, Var, H, W
@@ -635,6 +882,17 @@ class NormalizeState_Quantile:
         return transformed_x.to(device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        """Transform.
+
+        Transform.
+
+        Args:
+            sample: batch.
+        
+        Returns:
+            transformed batch.       
+        
+        """
         normalized_sample = {}
         for key, value in sample.items():
             if isinstance(value, xr.Dataset):
@@ -676,7 +934,21 @@ class NormalizeState_Quantile:
 
 
 class NormalizeTendency:
+    #TODO: review docstring
+    """Normalize tendency."""
+    
     def __init__(self, variables, surface_variables, base_path):
+        #TODO: review docstring
+        """Normalize tendency.
+
+        Normalize tendency.
+
+        Args:
+            variables (list of strings): list of upper air varibles.
+            surface_variables (list): list of surface varibles.
+            base_path (str): base_path.      
+        
+        """
         self.variables = variables
         self.surface_variables = surface_variables
         self.base_path = base_path
@@ -693,6 +965,18 @@ class NormalizeTendency:
         logger.info("Loading preprocessing object for transform/inverse transform tendencies into z-scores")
 
     def transform(self, tensor, surface_tensor):
+        """Transform.
+
+        Transform input tensor/s.
+
+        Args:
+            tensor (torch tensor): batch.
+            surface_tensor (torch tensor): surface batch.
+        
+        Returns:
+            torch.Tensor: transformed torch tensors.       
+        
+        """
         device = tensor.device
 
         # Apply z-score normalization using the pre-loaded mean and std
@@ -709,6 +993,18 @@ class NormalizeTendency:
         return transformed_tensor, transformed_surface_tensor
 
     def inverse_transform(self, tensor, surface_tensor):
+        """Inverse transform.
+
+        Inverse transform input tensor/s.
+
+        Args:
+            tensor (torch tensor): batch.
+            surface_tensor (torch tensor): surface batch.
+        
+        Returns:
+            torch.Tensor: inverse transformed torch tensors.       
+        
+        """
         device = tensor.device
 
         # Reverse z-score normalization using the pre-loaded mean and std
@@ -726,7 +1022,26 @@ class NormalizeTendency:
 
 
 class ToTensor:
+    #TODO: review docstring
+    """Convert variables to reshaped tensor."""
+    
     def __init__(self, conf):
+        #TODO: review docstring
+        """Convert variables to reshaped tensor.
+
+        Reshape and convert to torch tensor.
+
+        Args:
+            conf (str): path to config file.
+        
+        Attributes:
+            hist_len (bool): state-in-state-out.
+            for_len (bool): state-in-state-out.
+            variables (list): list of upper air varibles.
+            surface_variables (list): list of surface varibles.
+            static_variables (list): list of static varibles.          
+        
+        """
         self.conf = conf
         self.hist_len = int(conf["data"]["history_len"])
         self.for_len = int(conf["data"]["forecast_len"])
@@ -736,6 +1051,18 @@ class ToTensor:
         self.static_variables = conf["data"]["static_variables"]
 
     def __call__(self, sample: Sample) -> Sample:
+        #TODO: review docstring
+        """Convert to reshaped tensor.
+
+        Reshape and convert to torch tensor.
+
+        Args:
+            sample (interator): batch.
+        
+        Returns:
+            torch.tensor: reshaped torch tensor.         
+        
+        """
         return_dict = {}
 
         for key, value in sample.items():
@@ -809,7 +1136,30 @@ class ToTensor:
 
 
 class ToTensor_ERA5_and_Forcing:
+    #TODO: review docstring
+    """Class to convert ERA5 and Forcing to torch tensor."""
+    
     def __init__(self, conf):
+        #TODO: review docstring
+        """Convert variables to input/output torch tensors.
+
+        Convert variables from config file to proper model inputs.
+
+        Args:
+            conf (str): path to config file.
+        
+        Attributes:
+            hist_len (bool): state-in-state-out.
+            for_len (bool): state-in-state-out.
+            varname_upper_air (str): list of upper air varibles.
+            varname_surface (list): list of surface varibles.
+            varname_dyn_forcing (list): list of dynamic forcing varibles.
+            varname_diagnostic (list): list of diagnostic varibles.
+            varname_forcing (list): list of forcing varibles.
+            varname_static (list): list of static varibles.
+            flag_static_first (bool): if True, static listed before forcing variables.
+        
+        """
         self.conf = conf
 
         # =============================================== #
@@ -875,6 +1225,16 @@ class ToTensor_ERA5_and_Forcing:
             self.has_forcing_static = False
 
     def __call__(self, sample: Sample) -> Sample:
+        #TODO: review docstring
+        """Convert variables to input/output torch tensors.
+
+        Args:
+            sample (interator): batch.
+        
+        Returns:
+            torch.tensor: converted torch tensor.         
+        
+        """
         return_dict = {}
 
         for key, value in sample.items():
@@ -1081,12 +1441,32 @@ class ToTensor_ERA5_and_Forcing:
 
 
 class NormalizeState_Quantile_Bridgescalar:
+    #TODO: review docstring
     """Class to use the bridgescaler Quantile functionality.
+    
     Some hoops have to be jumped thorugh, and the efficiency could be
     improved if we were to retrain the bridgescaler.
     """
 
     def __init__(self, conf):
+        #TODO: review docstring
+        """Normalize via quantile bridgescaler.
+
+        Normalize via provided scaler file/s.
+
+        Args:
+            conf (str): path to config file.
+        
+        Attributes:
+            scaler_file (str): path to scaler file.
+            variables (list): list of upper air varibles.
+            surface_variables (list): list of surface varibles.
+            levels (int): number of upper-air variable levels.           
+            scaler_df (pd.df): scaler df.
+            scaler_3ds (xr.ds): 3d scaler dataset.
+            scaler_surfs (xr.ds): surface scaler dataset.
+        
+        """
         self.scaler_file = conf["data"]["quant_path"]
         self.variables = conf["data"]["variables"]
         self.surface_variables = conf["data"]["surface_variables"]
@@ -1101,12 +1481,36 @@ class NormalizeState_Quantile_Bridgescalar:
         self.scaler_3d.channels_last = False
 
     def __call__(self, sample: Sample, inverse: bool = False) -> Sample:
+        #TODO: review docstring
+        """Normalize via quantile bridgescaler.
+
+        Normalize via provided scaler file/s.
+
+        Args:
+            sample (iterator): batch.
+        
+        Returns:
+            torch.tensor: transformed torch tensor.         
+        
+        """
         if inverse:
             return self.inverse_transform(sample)
         else:
             return self.transform(sample)
 
     def inverse_transform(self, x: torch.Tensor) -> torch.Tensor:
+        #TODO: review docstring
+        """Inverse transform.
+
+        Inverse transform via provided scaler file/s.
+
+        Args:
+            x: batch.
+        
+        Returns:
+            inverse transformed torch tensor.       
+        
+        """
         device = x.device
         tensor = x[:, : (len(self.variables) * self.levels), :, :]  # B, Var, H, W
         surface_tensor = x[:, (len(self.variables) * self.levels) :, :, :]  # B, Var, H, W
@@ -1128,6 +1532,17 @@ class NormalizeState_Quantile_Bridgescalar:
         return transformed_x.to(device)
 
     def transform(self, sample):
+        """Transform.
+
+        Transform via provided scaler file/s.
+
+        Args:
+            sample (iterator): batch.
+        
+        Returns:
+            torch.Tensor: transformed torch tensor.       
+        
+        """
         normalized_sample = {}
         for key, value in sample.items():
             normalized_sample[key] = value
@@ -1135,7 +1550,30 @@ class NormalizeState_Quantile_Bridgescalar:
 
 
 class ToTensor_BridgeScaler:
+    #TODO: review docstring
+    """Convert to reshaped tensor."""
+    
     def __init__(self, conf):
+        #TODO: review docstring
+        """Convert to reshaped tensor.
+
+        Reshape and convert to torch tensor.
+
+        Args:
+            conf (str): path to config file.
+        
+        Attributes:
+            hist_len (bool): state-in-state-out.
+            for_len (bool): state-in-state-out.
+            variables (list): list of upper air varibles.
+            surface_variables (list): list of surface varibles.
+            static_variables (list): list of static varibles.
+            latN (int): number of latitude grids (default: 640).           
+            lonN (int): number of longitude grids (default: 1280).           
+            levels (int): number of upper-air variable levels.           
+            one_shot (bool): one shot.           
+        
+        """
         self.conf = conf
         self.hist_len = int(conf["data"]["history_len"])
         self.for_len = int(conf["data"]["forecast_len"])
@@ -1143,12 +1581,24 @@ class ToTensor_BridgeScaler:
         self.surface_variables = conf["data"]["surface_variables"]
         self.allvars = self.variables + self.surface_variables
         self.static_variables = conf["data"]["static_variables"]
-        self.lonN = int(conf["model"]["image_width"])
         self.latN = int(conf["model"]["image_height"])
+        self.lonN = int(conf["model"]["image_width"])
         self.levels = int(conf["model"]["levels"])
         self.one_shot = conf["data"]["one_shot"]
 
     def __call__(self, sample: Sample) -> Sample:
+        #TODO: review docstring
+        """Convert to reshaped tensor.
+
+        Reshape and convert to torch tensor.
+
+        Args:
+            sample (interator): batch.
+        
+        Returns:
+            torch.tensor: reshaped torch tensor.         
+        
+        """
         return_dict = {}
 
         for key, value in sample.items():

@@ -1,0 +1,27 @@
+Docstring errors:
+  
+  All files:
+    ignore = ["D417"]
+      Found 1908 errors.
+  
+  Exclude notebooks:
+    ignore = ["D417"]
+      Found 1590 errors.
+
+  Exclude notebooks:
+    ignore = ["D417"]
+    manually edited test/test_postblock.py
+      Found 1562 errors.
+
+  Exclude notebooks:
+    ignore = ["D417"]
+    manually edited test/test_postblock.py
+    manually edited credit/transforms.py
+      Found 1437 errors.
+
+  Exclude notebooks:
+    ignore = ["D417"]
+    manually edited test/test_postblock.py
+    manually edited credit/transforms.py
+    manually editing credit/data.py
+      Found 1431 errors.

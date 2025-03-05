@@ -1,5 +1,4 @@
 import os
-import gc
 import sys
 import yaml
 import logging
@@ -360,17 +359,12 @@ def predict(rank, world_size, conf, p):
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
-            # Memory cleanup
-            torch.cuda.empty_cache()
-            gc.collect()
-
             if batch["stop_forecast"][0]:
                 # Wait for processes to finish
                 for result in results:
                     result.get()
 
                 y_pred = None
-                gc.collect()
 
                 if distributed:
                     torch.distributed.barrier()

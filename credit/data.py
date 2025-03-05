@@ -1,5 +1,5 @@
-"""
-data.py
+"""data.py
+
 -------------------------------------------------------
 Content:
     - generate_datetime(start_time, end_time, interval_hr)
@@ -16,7 +16,7 @@ Content:
 """
 
 # system tools
-from typing import TypedDict, Union
+from typing import TypedDict, Union, List
 
 # data utils
 import datetime
@@ -107,7 +107,7 @@ def reshape_only(x1):
     return x1.permute(0, 2, 1, 3, 4)
 
 
-def get_forward_data(filename) -> xr.DataArray:
+def get_forward_data(filename) -> xr.Dataset:
     """
     Check nc vs. zarr files
     open file as xr.Dataset
@@ -207,6 +207,20 @@ def drop_var_from_dataset(xarray_dataset, varname_keep):
     assert len(varname_diff) == 0, "Variable name: {} missing".format(varname_diff)
 
     return xarray_dataset
+
+
+def keep_dataset_vars(xarray_dataset: xr.Dataset, varnames_keep: List[str]):
+    """
+    Return a version of an xarray dataset with only a selected subset of variables.
+
+    Args:
+        xarray_dataset (xr.Dataset): The xarray dataset.
+        varnames_keep (List[str]): a list of variable names to be kept.
+
+    Returns:
+
+    """
+    return xarray_dataset[varnames_keep]
 
 
 class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
@@ -1079,9 +1093,8 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
 
 
 class Predict_Dataset(torch.utils.data.IterableDataset):
-    """
-    Same as ERA5_and_Forcing_Dataset() but work with rollout_to_netcdf_new.py
-    """
+    #TODO: review docstring
+    """Same as ERA5_and_Forcing_Dataset() but work with rollout_to_netcdf_new.py"""
 
     def __init__(
         self,
@@ -1106,8 +1119,39 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         rollout_p=0.0,
         which_forecast=None,
     ):
-        # ------------------------------------------------------------------------------ #
+        #TODO: review docstring
+        """Normalize via quantile bridgescaler.
 
+        Normalize via provided scaler file/s.
+
+        Args:
+            conf (str): path to config file.
+            varname_upper_air (list): list of upper air varibles.
+            varname_surface (list): list of surface varibles.
+            varname_dyn_forcing (list): list of dynamic forcing varibles.
+            varname_forcing (list): list of forcing varibles.
+            varname_static (list): list of static varibles.
+            varname_diagnostic (list): list of diagnostic varibles.
+            filenames (str): path to upper air variables file.
+            filename_surface (str): path surface variables file.
+            filename_dyn_forcing (str): path to dynamic forcing variables file.
+            filename_forcing (str): path to forcing variables file.
+            filename_static (str): path to static variables file.
+            filename_diagnostic (str): path to diagnostic variables file.
+            fcst_datetime (): .
+            hist_len (bool): state-in-state-out.
+            rank (): .
+            world_size (): .
+            transform (): .
+            rollout_p (): .
+            which_forecast ():
+
+        Attributes:
+            current_epoch (int): current epoch.
+            lead_time_periods (): .
+            skip_periods (): .
+        
+        """
         ## no diagnostics because they are output only
         # varname_diagnostic = None
 
@@ -1158,6 +1202,16 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         self.skip_periods = conf["data"]["skip_periods"]
 
     def ds_read_and_subset(self, filename, time_start, time_end, varnames):
+        #TODO: review docstring
+        """Read and subset specified dataset.
+
+        Args:
+            filename (str): path to specified dataset file.
+            time_start (): start time.
+            time_end (): end time.
+            varnames (): .
+            
+        """
         sliced_x = get_forward_data(filename)
         sliced_x = sliced_x.isel(time=slice(time_start, time_end))
         sliced_x = drop_var_from_dataset(sliced_x, varnames)

@@ -18,6 +18,7 @@ allows users to train, run, and evaluate AI numerical weather prediction models.
 
    Getting Started <getting-started.md>
    Installing CREDIT from source <installation.md>
+   Config Settings <config.md>
    Contributing <contrib.rst>
 
 
