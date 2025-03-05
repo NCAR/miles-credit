@@ -5,7 +5,6 @@ import logging
 # Import model classes
 from credit.models.crossformer import CrossFormer
 from credit.models.unet import SegmentationModel
-from credit.models.unet404 import SegmentationModel404
 from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
 from credit.models.graph import GraphResTransfGRU
