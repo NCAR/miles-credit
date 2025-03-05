@@ -258,10 +258,10 @@ data:
 
 
 model:
-    type: "unet_downscaling"
+    type: "crossformer_downscaling"
     image_height: 1015
     image_width: 1367
-    frames: 3
+    frames: 2
     architecture:
         name: "unet"
         encoder_name: "resnet34"
