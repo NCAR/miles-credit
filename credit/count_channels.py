@@ -4,16 +4,33 @@ from glob import glob
 import os
 
 
+def find_key(nested, key):
+    '''Recursive breadth-first search to find the value associated
+    with the first instance of a key in a nested dict'''
+    if isinstance(nested, dict):
+        if key in nested.keys():
+            return(nested[key])
+        else:
+            for k in nested.keys():
+                found = find_key(nested[k], key)
+                if found is not None:
+                    return found
+            return None
+    return None
+
+
 def count_channels(conf):
-    dconf = conf['data']['datasets']
+    dconf = find_key(conf, 'datasets') or conf
     total = {'boundary': 0, 'prognostic': 0, 'diagnostic': 0}
     for dset in dconf:
         dim = dconf[dset]['dim']
         dim = dim.upper() if len(dim) < 3 else dim.lower()
 
         if dim == '3D':
-            # need to count levels, but only for 1st var/file; everything is uniform
-            ncpath = glob(os.path.join(dconf[dset]['rootpath'],dconf[dset]['glob']))[0]
+            # need to count levels, but only for 1st var/file;
+            # everything is (assumed to be) uniform
+            ncpath = glob(os.path.join(dconf[dset]['rootpath'],
+                                       dconf[dset]['glob']))[0]
             with nc.Dataset(ncpath, 'r') as ncfile:
                 var = list(dconf[dset]['variables'].values())[0][0]
                 # data should be dimensioned [T, Z, Y, X]
