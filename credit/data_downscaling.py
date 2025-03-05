@@ -196,6 +196,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
         # sample is nested dict {input{vars}, target{vars}}
         # arrays are dimensioned [T, Z, Y, X]
         # stack vars along z-dim (i.e., z-levels ~= variables)
+        # combine to tensor [V, T, Y, X]
 
         nt = {'input': self.history_len, 'target': self.forecast_len}
 
@@ -215,8 +216,12 @@ class DownscalingDataset(torch.utils.data.Dataset):
             # concatenate along z/var dim
             sample[s] = np.concatenate(list(sample[s].values()), axis=1)
 
-            # nparray to tensor
-            sample[s] = torch.as_tensor(sample[s])
+            # nparray[T,Z,Y,X] to tensor[V,T,Y,X]
+            sample[s] = torch.as_tensor(sample[s]).permute(1, 0, 2, 3)
+
+        # other code wants tensors named 'x' and 'y'
+        sample['x'] = sample.pop('input')
+        sample['y'] = sample.pop('target')
 
         return sample
 

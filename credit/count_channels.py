@@ -1,5 +1,5 @@
 import yaml
-import netCDF as nc
+import netCDF4 as nc
 from glob import glob
 import os
 

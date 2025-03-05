@@ -29,10 +29,10 @@ seed: 2222  # RNG seed
 ## it here dramatically simplifies things.
 
 sampling: &samples
-    history_len:  2 
+    history_len:  1   # for now, downscaling trainer only handles 1/1
     forecast_len: 1
 
-
+    
 # A downscaling model is trained on two datasets, one for the
 # high-resolution output from the model being emulated, and one for
 # the low-resolution driving data (boundary conditions coming from a
@@ -268,6 +268,7 @@ model:
         encoder_weights: "imagenet"
 
 trainer:
+    <<: *samples  # history_len, forecast_len
     type: "conus404"
     mode: ddp # none, ddp, fsdp
     train_batch_size: 4
@@ -293,6 +294,7 @@ trainer:
     update_learning_rate: True
     scheduler: {'scheduler_type': 'lambda'}
 
+
 loss:
    training_loss: "mse"
    use_vgg: False
@@ -306,7 +308,7 @@ loss:
 
 predict:
     start: "2017-11-01"
-    finish: "2017-11-03"
+    finish: "2017-11-10"
 #    finish: "2022-09-30"
     autoregressive: False
     use_laplace_filter: False
@@ -325,7 +327,7 @@ predict:
 
 pbs: # casper
     conda: "credit"
-    job_name: 'unet-debug'
+    job_name: 'downscale-test'
     nodes: 1
     ncpus: 8
     ngpus: 1
