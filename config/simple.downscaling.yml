@@ -261,14 +261,12 @@ data:
 
 
 model:
-    type: "unet404"
-    image_height: 512
-    image_width: 512
-    frames: 3
-    architecture:
-        name: "unet"
-        encoder_name: "resnet34"
-        encoder_weights: "imagenet"
+    type: "crossformer_downscaling"
+    image_height: 1015
+    image_width: 1367
+    frames: 2
+#    architecture:  # none, just use defaults
+
 
 trainer:
     type: "conus404"
@@ -311,7 +309,7 @@ loss:
 
 predict:
     start: "2017-11-01"
-    finish: "2017-11-03"
+    finish: "2017-11-10"
 #    finish: "2022-09-30"
     autoregressive: False
     use_laplace_filter: False
@@ -330,13 +328,13 @@ predict:
 
 pbs: # casper
     conda: "credit"
-    job_name: 'unet-debug'
+    job_name: 'down-simple-test'
     nodes: 1
     ncpus: 8
     ngpus: 1
     mem: '128GB'
     walltime: '4:00:00'
 #    walltime: '24:00:00'
-    gpu_type: 'v100'
+    gpu_type: 'a100'
     project: 'NRIS0001'
     queue: 'casper'

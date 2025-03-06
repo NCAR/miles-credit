@@ -417,9 +417,9 @@ class Trainer(BaseTrainer):
 
         assert (
             self.forecast_length <= self.backprop_on_timestep[-1]
-        ), f"forecast_length ({self.forecast_length + 1})" +
-        " must not exceed the max value in " +
-        f"backprop_on_timestep {self.backprop_on_timestep}"
+        ), (f"forecast_length ({self.forecast_length + 1})" +
+            " must not exceed the max value in " +
+            f"backprop_on_timestep {self.backprop_on_timestep}")
         # ================================================ #
 
         return
@@ -726,16 +726,16 @@ class Trainer(BaseTrainer):
             # aggregate the results
             to_print = (
                 f"Epoch: {epoch}".format(epoch) +
-                f" train_loss: {np.mean(results_dict["train_loss"]):.6f}" +
-                f" train_acc: {np.mean(results_dict["train_acc"]):.6f}" +
-                f" train_mae: {np.mean(results_dict["train_mae"]):.6f}" +
+                f" train_loss: {np.mean(results_dict['train_loss']):.6f}" +
+                f" train_acc: {np.mean(results_dict['train_acc']):.6f}" +
+                f" train_mae: {np.mean(results_dict['train_mae']):.6f}" +
                 f" forecast_len: {forecast_length+1:.6f}"
             )
 
             ensemble_size = conf["trainer"].get("ensemble_size", 0)
             if ensemble_size > 1:
                 to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
-            to_print += f" lr: {optimizer.param_groups[0]["lr"]:.12f}"
+            to_print += f" lr: {optimizer.param_groups[0]['lr']:.12f}"
             if self.rank == 0:
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
