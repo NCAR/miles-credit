@@ -478,14 +478,21 @@ def credit_main_parser(
         Q_inds = [
             i_var for i_var, var in enumerate(varname_output) if var in ["Q", "Qtot"]
         ]
+
         conf['model']['post_conf']['skebs']['U_inds'] = U_inds
         conf['model']['post_conf']['skebs']['V_inds'] = V_inds
         conf['model']['post_conf']['skebs']['Q_inds'] = Q_inds
         conf['model']['post_conf']['skebs']['T_inds'] = T_inds
+
         if "SP" in varname_output:
             conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("SP")
         else:
             conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("PS")
+
+        static_inds = [
+            i_var for i_var, var in enumerate(varname_input) if var in conf["data"]["static_variables"]
+        ]
+        conf['model']['post_conf']['skebs']['static_inds'] = static_inds
 
         ###### debug mode setup #######
         conf['model']['post_conf']['skebs']['save_loc'] = conf['save_loc']

@@ -92,6 +92,9 @@ class Trainer(BaseTrainer):
             + len(conf["data"]["static_variables"])
         )
 
+        # [Optional] retain graph for multiple backward passes
+        retain_graph = conf["data"].get("retain_graph", False)
+
         # [Optional] Use the config option to set when to backprop
         if "backprop_on_timestep" in conf["data"]:
             backprop_on_timestep = conf["data"]["backprop_on_timestep"]
@@ -253,7 +256,7 @@ class Trainer(BaseTrainer):
                 # ============================================= #
 
                 # only load y-truth data if we intend to backprop (default is every step gets grads computed
-                if forecast_step in backprop_on_timestep:
+                if forecast_step in backprop_on_timestep: #steps go from 1 to n
                     # calculate rolling loss
                     if "y_surf" in batch:
                         y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
@@ -283,7 +286,7 @@ class Trainer(BaseTrainer):
                     accum_log(logs, {"loss": loss.item()})
 
                     # compute gradients
-                    scaler.scale(loss).backward()
+                    scaler.scale(loss).backward(retain_graph=retain_graph)
 
                 if distributed:
                     torch.distributed.barrier()

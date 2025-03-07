@@ -124,7 +124,7 @@ def load_model_states_and_optimizer(conf, model, device):
         # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
             logging.info(
-                f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                f"Loading FSDP model state only from {save_loc}"
             )
             optimizer = torch.optim.AdamW(
                 filter(lambda p: p.requires_grad, model.parameters()),
@@ -143,7 +143,7 @@ def load_model_states_and_optimizer(conf, model, device):
             checkpoint = torch.load(ckpt, map_location=device)
             if conf["trainer"]["mode"] == "ddp":
                 logging.info(
-                    f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                    f"Loading DDP model state only from {save_loc}"
                 )
                 load_msg = model.module.load_state_dict(
                     checkpoint["model_state_dict"], strict=False
@@ -151,7 +151,7 @@ def load_model_states_and_optimizer(conf, model, device):
                 load_state_dict_error_handler(load_msg)
             else:
                 logging.info(
-                    f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
+                    f"Loading model state only from {save_loc}"
                 )
                 load_msg = model.load_state_dict(
                     checkpoint["model_state_dict"], strict=False
@@ -166,7 +166,10 @@ def load_model_states_and_optimizer(conf, model, device):
             else GradScaler(enabled=amp)
         )
         # Update the config file to the current epoch
-        if "reload_epoch" in conf["trainer"] and conf["trainer"]["reload_epoch"]:
+        if ("reload_epoch" in conf["trainer"] 
+            and conf["trainer"]["reload_epoch"]
+            and os.path.exists(os.path.join(save_loc, "training_log.csv"))):
+            
             conf["trainer"]["start_epoch"] = checkpoint["epoch"] + 1
 
     # load optimizer and grad scaler states

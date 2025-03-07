@@ -54,7 +54,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
     """
     # setup rank and world size for GPU-based rollout
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
-        setup(rank, world_size, conf["trainer"]["mode"], backend)
+        setup(rank, world_size, conf["predict"]["mode"], backend)
 
     # infer device id from rank
     if torch.cuda.is_available():
@@ -265,7 +265,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             if flag_clamp:
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-            y_pred = model(x)
+            y_pred = model(x.float())
 
             # Post-processing blocks
             if flag_mass_conserve:
@@ -308,9 +308,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 if ensemble_size > 1:
                     ensemble_metrics_dict = ensemble_metrics(_y_pred[j].unsqueeze(0),
                                                              y[j].unsqueeze(0))
-                    for metric_type, darray_metric in ensemble_metrics_dict.items():
+                    for metric_type, tensor_metric in ensemble_metrics_dict.items():
                         darray_upper_air, darray_single_level = make_xarray(
-                            darray_metric,  # Process each ensemble metric
+                            tensor_metric.cpu(),  # Process each ensemble metric and also save out the ensemble
                             utc_datetime[j],
                             latlons.latitude.values,
                             latlons.longitude.values,
@@ -330,6 +330,49 @@ def predict(rank, world_size, conf, backend=None, p=None):
                             ),
                         )
                         results.append(result)
+
+
+                ### save out pred
+                upper_air_list, single_level_list = [], []
+                for i in range(ensemble_size):  
+                    # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
+                    darray_upper_air, darray_single_level = make_xarray(
+                        _y_pred[j, i:i+1].cpu(),  # Process each ensemble member
+                        utc_datetime[j],
+                        latlons.latitude.values,
+                        latlons.longitude.values,
+                        conf,
+                    )
+                    upper_air_list.append(darray_upper_air)
+                    single_level_list.append(darray_single_level)
+
+                if ensemble_size > 1:
+                    ensemble_index = xr.DataArray(
+                        np.arange(ensemble_size), dims="ensemble_member_label"
+                    )
+                    all_upper_air = xr.concat(
+                        upper_air_list, ensemble_index
+                    )  # .transpose("time", ...)
+                    all_single_level = xr.concat(
+                        single_level_list, ensemble_index
+                    )  # .transpose("time", ...)
+                else:
+                    all_upper_air = darray_upper_air
+                    all_single_level = darray_single_level
+
+                # Save the current forecast hour data in parallel
+                result = p.apply_async(
+                    save_netcdf_increment,
+                    (
+                        all_upper_air,
+                        all_single_level,
+                        f"out_{save_datetimes[forecast_count + j]}",
+                        lead_time_periods * forecast_step,
+                        meta_data,
+                        conf,
+                    ),
+                )
+                results.append(result)
 
                 # Print to screen
                 print_str = f"Forecast: {forecast_count + 1 + j} "
@@ -363,7 +406,8 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 gc.collect()
 
                 forecast_count += batch_size
-
+        for result in results:
+            result.get()
         if distributed:
             torch.distributed.barrier()
 
@@ -523,7 +567,7 @@ if __name__ == "__main__":
 
     with mp.Pool(num_cpus) as p:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
-            local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+            local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
             _ = predict(world_rank, world_size, conf, p=p)
         else:  # single device inference
             _ = predict(0, 1, conf, p=p)
