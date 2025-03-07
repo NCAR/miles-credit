@@ -4,16 +4,19 @@ from os.path import join
 import xarray as xr
 import fsspec
 import xesmf as xe
+from credit.interp import geopotential_from_model_vars, create_pressure_grid
 
-gfs_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m', 'delz': 'Z500'}
+gfs_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m'}
 level_map = {'T500': 'T', 'U500': 'U', 'V500': 'V', 'Q500': 'Q', 'Z500': 'Z'}
 upper_air = ['T', 'U', 'V', 'Q', 'Z']
 surface = ['SP', 't2m']
+STANDARD_GRAVITY = 9.80665
 
 def build_GFS_init(output_grid, gdas_base_path="https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/",
-                   date="202502200600", variables=[], model_level_indices=[]):
+                   date="202503030600", variables=[], model_level_indices=[]):
 
-    gfs_variables = [k for k, v in gfs_map.items() if v in variables]
+    required_variables = ['pressfc', 'tmp', 'spfh', 'hgtsfc'] # required for calculating pressure and geopotential
+    gfs_variables = list(set([k for k, v in gfs_map.items() if v in variables]).union(required_variables))
     atm_full_path = build_file_path(date, gdas_base_path, file_type='atm')
     sfc_full_path = build_file_path(date, gdas_base_path, file_type='sfc')
     gfs_atm_data = load_gfs_data(atm_full_path, gfs_variables)
@@ -24,6 +27,23 @@ def build_GFS_init(output_grid, gdas_base_path="https://nomads.ncep.noaa.gov/pub
     final_data = format_data(interpolated_gfs, regridded_gfs, model_level_indices)
 
     return final_data
+
+
+def add_pressure_and_geopotntial(data):
+
+    sfc_pressure = data['SP'].values.squeeze()
+    sfc_gpt = data['hgtsfc'].values.squeeze() * STANDARD_GRAVITY
+    level_T = data['T'].values.squeeze()
+    level_Q = data['Q'].values.squeeze()
+    a_coeff = data.attrs['ak']
+    b_coeff = data.attrs['bk']
+
+    full_prs_grid, half_prs_grid = create_pressure_grid(sfc_pressure, a_coeff, b_coeff)
+    geopotential = geopotential_from_model_vars(sfc_gpt, sfc_pressure, level_T, level_Q, half_prs_grid)
+    data['Z'] = (data['T'].dims, np.expand_dims(geopotential, axis=0))
+    data['P'] = (data['T'].dims, np.expand_dims(full_prs_grid, axis=0))
+
+    return data
 
 
 def build_file_path(date, base_path, file_type='atm'):
@@ -41,9 +61,7 @@ def load_gfs_data(full_file_path, variables):
     available_vars = ds.data_vars
     vars = [v for v in variables if v in available_vars]
     ds = ds[vars].rename({'grid_xt': 'longitude', 'grid_yt': 'latitude'}).load()
-    if 'delz' in available_vars and 'delz' in variables:
-        ds['delz'].values = np.abs(ds['delz'].cumsum(dim='pfull').values) * 9.81
-        ds = ds.rename({'delz': 'Z'})
+
     return ds
 
 
@@ -56,7 +74,9 @@ def combine_data(atm_data, sfc_data):
         if var in gfs_map.keys():
             atm_data = atm_data.rename({var: gfs_map[var]})
 
-    return atm_data
+    data = add_pressure_and_geopotntial(atm_data)
+
+    return data
 
 
 def regrid(nwp_data, output_grid, method="conservative"):
@@ -75,22 +95,23 @@ def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indi
     surface_vars = [var for var in variables if var in surface]
     vars_500 = [var for var in variables if '500' in var]
 
-    xp = regridded_nwp_data['pfull'].values
+    xp = regridded_nwp_data['P'].values
     fp = regridded_nwp_data
-    output_pressure = (output_grid['a_half'] + output_grid['b_half'] * regridded_nwp_data['SP']) / 100
+    output_pressure = (output_grid['a_half'] + output_grid['b_half'] * regridded_nwp_data['SP'])
     sampled_output_pressure = output_pressure[model_level_indices].values
-    ny, nx = fp['T'].shape[1], fp['T'].shape[2]
+    ny, nx = regridded_nwp_data.sizes['latitude'], regridded_nwp_data.sizes['longitude']
     interpolated_data = {}
     for var in upper_vars:
         fp_data = fp[var].values
         interpolated_data[var] = {'dims': ['latitude', 'longitude', 'level'],
-                                  'data': np.array([np.interp(sampled_output_pressure[:, j, i], xp, fp_data[:, j, i])
+                                  'data': np.array([np.interp(sampled_output_pressure[:, j, i], xp[:, j, i], fp_data[:, j, i])
                                                     for j in range(ny) for i in range(nx)]).reshape(ny, nx,
                                                                                                     len(model_level_indices))}
     for var in vars_500:
+        prs = 50000 # 500mb
         fp_data = fp[level_map[var]].values
         interpolated_data[var] = {'dims': ['latitude', 'longitude'],
-                                  'data': np.array([np.interp([500], xp, fp_data[:, j, i])
+                                  'data': np.array([np.interp([prs], xp[:, j, i], fp_data[:, j, i])
                                                     for j in range(ny) for i in range(nx)]).reshape(ny, nx)}
     for var in surface_vars:
         interpolated_data[var] = {'dims': regridded_nwp_data[var].dims, 'data': regridded_nwp_data[var].values}
