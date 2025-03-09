@@ -940,7 +940,7 @@ class Backscatter_FCNN(nn.Module):
         self.relu2 = nn.ReLU()
 
 
-        self.scale = torch.tensor(100.)
+        self.scale = torch.tensor(40.)
 
 
     def forward(self, x):
@@ -1496,10 +1496,10 @@ class SKEBS(nn.Module):
 
         if self.filter_backscatter:
             backscatter_unfiltered = backscatter_pred.clone().detach()
-
-            backscatter_spec = self.sht(backscatter_pred) # b, levels, t, lmax, mmax
-            backscatter_spec = self.spectral_backscatter_filter * backscatter_spec
-            backscatter_pred = self.isht(backscatter_spec)
+            with torch.autocast(device_type="cuda", enabled=False): #isht cannot use amp
+                backscatter_spec = self.sht(backscatter_pred) # b, levels, t, lmax, mmax
+                backscatter_spec = self.spectral_backscatter_filter * backscatter_spec
+                backscatter_pred = self.isht(backscatter_spec)
 
             backscatter_pred = self.relu(backscatter_pred) 
 
