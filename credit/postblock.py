@@ -1170,6 +1170,11 @@ class SKEBS(nn.Module):
         # self.surface_area = xr.open_dataset(post_conf["data"]["save_loc_static"])["surface_area"].to_numpy()
 
         self.tropics_only_dissipation = post_conf["skebs"].get("tropics_only_dissipation", False)
+        self.filter_backscatter = post_conf["skebs"].get("filter_backscatter", True) # backscatter filter by default, trainable is set below using train_spectral_filter
+        if self.filter_backscatter:
+            logger.info("Filtering backscatter")
+        else:
+            logger.info("Filtering the pattern")
 
         self.initialize_sht()
         self.initialize_skebs_parameters()
@@ -1240,14 +1245,17 @@ class SKEBS(nn.Module):
         
         self.train_spectral_filter = post_conf["skebs"].get("train_spectral_filter", False)
         if self.train_spectral_filter:
-            self.spectral_filter.requires_grad = True
+            if self.filter_backscatter:
+                self.spectral_backscatter_filter.requires_grad = True
+            else: 
+                self.spectral_filter.requires_grad = True
 
 
-        logger.info(f"trainable params{[torch.flatten(param) for param in self.parameters() if param.requires_grad]}")
+        logger.info(f"trainable params{[name for name, param in self.named_parameters() if param.requires_grad]}")
 
 
         ########### debugging and analysis features #############
-        self.write_debug_files = post_conf['skebs']['write_debug_files']
+        self.write_debug_files = post_conf['skebs'].get('write_debug_files', False)
         self.write_every = 100
         save_loc = post_conf['skebs']["save_loc"]
         self.debug_save_loc = join(save_loc, "debug_skebs")
@@ -1277,7 +1285,7 @@ class SKEBS(nn.Module):
         for both scalar and vector fields.
         """
         # Initialize spherical harmonics transformation objects
-        # self.sht = harmonics.RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        self.sht = harmonics.RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
         self.isht = harmonics.InverseRealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
         # self.vsht = harmonics.RealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
         self.ivsht = harmonics.InverseRealVectorSHT(
@@ -1309,7 +1317,7 @@ class SKEBS(nn.Module):
         logging.info(f"lmax: {self.lmax}, mmax: {self.mmax}")
 
     def initialize_skebs_parameters(self):
-        self.register_buffer('backscatter_filter', 
+        self.register_buffer('backscatter_filter', # filter to zero out backscatter at top of model
                              torch.cat([
                                  torch.zeros(self.zero_out_levels_top_of_model),
                                  torch.ones(self.levels - self.zero_out_levels_top_of_model)
@@ -1346,8 +1354,20 @@ class SKEBS(nn.Module):
         self.dE = Parameter(torch.tensor(10e-4, requires_grad=True))
         self.r = Parameter(torch.tensor(0.01, requires_grad=False)) # see berner 2009, section 4a
         self.r.requires_grad = False
-        # filter
-        self.spectral_filter = Parameter(torch.cat([
+        # either filter the backscatter or the pattern
+        if self.filter_backscatter:
+            self.spectral_filter = Parameter(torch.ones(self.lmax) # all ones so no filtering of the pattern
+                                                    .view(1,1,1,self.lmax, 1),
+                                                    requires_grad=False)
+            self.spectral_backscatter_filter = Parameter(torch.cat([
+                                                    torch.ones(10),
+                                                    torch.linspace(1., 0.2, 20),
+                                                    torch.zeros(self.lmax - 30)
+                                                    ])
+                                                    .view(1,1,1,self.lmax, 1),
+                                                    requires_grad=True)
+        else:
+            self.spectral_filter = Parameter(torch.cat([
                                                     torch.ones(30),
                                                     torch.logspace(0., -3, 30),
                                                     torch.zeros(self.lmax - 60)
@@ -1474,6 +1494,17 @@ class SKEBS(nn.Module):
         backscatter_pred = self.backscatter_filter * self.tropics_backscatter_filter * self.backscatter_network(x)
         backscatter_pred = self.relu(backscatter_pred) # make sure filter doesnt turn it negative
 
+        if self.filter_backscatter:
+            backscatter_unfiltered = backscatter_pred.clone().detach()
+
+            backscatter_spec = self.sht(backscatter_pred) # b, levels, t, lmax, mmax
+            backscatter_spec = self.spectral_backscatter_filter * backscatter_spec
+            backscatter_pred = self.isht(backscatter_spec)
+
+            backscatter_pred = self.relu(backscatter_pred) 
+
+        logger.debug(f"max backscatter: {torch.max(torch.abs(backscatter_pred))}")
+
         if not self.is_training and torch.is_grad_enabled():
             self.is_training = True # set and forget to detect if we are in a training script
 
@@ -1481,6 +1512,9 @@ class SKEBS(nn.Module):
             or (self.write_debug_files and self.iteration % self.write_every == 0)):
             logger.info(f"writing backscatter file for iter {self.iteration}")
             torch.save(backscatter_pred, join(self.backscatter_save_loc, f"backscatter_{self.iteration}"))
+            if self.filter_backscatter: # save the raw backscatter prediction
+                torch.save(backscatter_unfiltered, join(self.backscatter_save_loc, f"backscatter_raw_{self.iteration}"))
+
         
         ################### SKEBS pattern ####################
 
@@ -1503,7 +1537,7 @@ class SKEBS(nn.Module):
         spec_coef = self.spec_coef.squeeze()
         u_chi, v_chi = self.getgrad(spec_coef)
         u_chi, v_chi = u_chi.unsqueeze(1).unsqueeze(1), v_chi.unsqueeze(1).unsqueeze(1)
-
+        logger.debug(f"max pattern: {torch.max(torch.abs(u_chi))}")
         # compute the dissipation term
         dissipation_term = torch.sqrt(self.r * backscatter_pred * self.timestep / self.dE) # shape (b, levels, 1, lat, lon)
 
