@@ -333,7 +333,6 @@ pbs: # casper
     ngpus: 1
     mem: '128GB'
     walltime: '4:00:00'
-#    walltime: '24:00:00'
-    gpu_type: 'v100'
+    gpu_type: 'a100'
     project: 'NRIS0001'
     queue: 'casper'

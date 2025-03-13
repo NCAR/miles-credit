@@ -10,6 +10,7 @@ from credit.models.swin import SwinTransformerV2Cr
 from credit.models.graph import GraphResTransfGRU
 from credit.models.debugger_model import DebuggerModel
 from credit.models.crossformer_ensemble import CrossFormerWithNoise
+from credit.models.crossformer_downscaling import DownscalingCrossFormer
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ model_types = {
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
+    "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
 }
 
 

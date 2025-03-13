@@ -68,8 +68,10 @@ class DownscalingDataset(torch.utils.data.Dataset):
     '''
 
     rootpath:     str
-    history_len:  int = 2
+    history_len:  int = 1
     forecast_len: int = 1
+    valid_history_len:  int = 1
+    valid_forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
     # components: Dict = field(default_factory=dict)
@@ -121,6 +123,9 @@ class DownscalingDataset(torch.utils.data.Dataset):
         #     self.components.setdefault(comp, []).append(dset)
 
         # end __post_init__
+
+    def __len__(self):
+        return self.len
 
     def __getitem__(self, index):
 

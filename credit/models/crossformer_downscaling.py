@@ -9,7 +9,6 @@ from einops.layers.torch import Rearrange
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
 from credit.boundary_padding import TensorPadding
-from credit.count_channels import count_channels
 
 logger = logging.getLogger(__name__)
 
@@ -335,220 +334,236 @@ class Transformer(nn.Module):
 
 # classes
 
-@dataclass
 class DownscalingCrossFormer(BaseModel):
-        """CrossFormer is the base architecture for the WXFormer
-        model. It uses convolutions and long and short distance
-        attention layers in the encoder layer and then uses strided
-        transpose convolution blocks for the decoder layer.
-
-        Args:
-            datasets (dict): nested dict describing datasets
-            image_height (int): number of grid cells in the south-north direction.
-            patch_height (int): number of grid cells within each patch in the south-north direction.
-            image_width (int): number of grid cells in the west-east direction.
-            patch_width (int): number of grid cells within each patch in the west-east direction.
-            frames (int): number of time steps being used as input
-            dim (tuple): output dimensions of hidden state of each conv/transformer block in the encoder
-            depth (tuple): number of attention blocks per encoder layer
-            dim_head (int): dimension of each attention head.
-            global_window_size (tuple): number of grid cells between cells in long range attention
-            local_window_size (tuple): number of grid cells between cells in short range attention
-            cross_embed_kernel_sizes (tuple): width of the cross embed kernels in each layer
-            cross_embed_strides (tuple): stride of convolutions in each block
-            attn_dropout (float): dropout rate for attention layout
-            ff_dropout (float): dropout rate for feedforward layers.
-            use_spectral_norm (bool): whether to use spectral normalization
-            interp (bool): whether to use interpolation
-            padding_conf (dict): padding configuration
-            post_conf (dict): configuration for postblock processing
-
-        """
-        datasets: dict
-        image_height: int = 640
-        patch_height: int = 1
-        image_width: int = 1280
-        patch_width: int = 1
-        frames: int = 2
-        dim: tuple = (64, 128, 256, 512)
-        depth: tuple = (2, 2, 8, 2)
-        dim_head: int = 32
-        global_window_size: tuple = (5, 5, 2, 1)
-        local_window_size: int = 10
-        cross_embed_kernel_sizes: tuple = ((4, 8, 16, 32), (2, 4), (2, 4), (2, 4))
-        cross_embed_strides: tuple = (4, 2, 2, 2)
-        attn_dropout: float = 0.0
-        ff_dropout: float = 0.0
-        use_spectral_norm: bool = True
-        interp: bool = True
-        padding_conf: dict = None
-        post_conf: dict = None
-
-        def __post_init__(self):
-        super().__init__()
-
-        # enforce types for tuple args
-        for arg in ('dim', 'depth', 'global_window_size', 'cross_embed_strides'):
-            self.set(arg, tuple(self.getattr(arg)))
-         self.cross_embed_kernel_sizes = tuple([tuple(_) for _ in self.cross_embed_kernel_sizes])
- 
-       
-        if self.padding_conf is None:
-            self.padding_conf = {"activate": False}
-        self.use_padding = padding_conf["activate"]
-
-        if self.post_conf is None:
-            self.post_conf = {"activate": False}
-        self.use_post_block = post_conf["activate"]
-
-        channels = count_channels(self.datasets)
-        input_channels = channels['boundary'] + channels['prognostic']
-        output_channels = channels['prognostic'] + channels['diagnostic']
-        
-        # ensure params have correct dimensions
-        params = ('dim', 'depth', 'global_window_size',
-                  'local_window_size', 'cross_embed_kernel_sizes',
-                  'cross_embed_strides')
-
-        for p in params:
-            self.setattr(p, cast_tuple(self.getattr(p), 4))
-            assert len(self.getattr(p)) == 4
-
-        # dimensions
-        last_dim = dim[-1]
-        first_dim = input_channels if (patch_height == 1 and patch_width == 1) else dim[0]
-        dims = [first_dim, *dim]
-        dim_in_and_out = tuple(zip(dims[:-1], dims[1:]))
-
-        # allocate cross embed layers
-        self.layers = nn.ModuleList([])
-
-        # loop through hyperparameters
-        for (
-            dim_in,
-            dim_out,
-        ), num_layers, global_wsize, local_wsize, kernel_sizes, stride in zip(
-            dim_in_and_out,
-            depth,
-            global_window_size,
-            local_window_size,
-            cross_embed_kernel_sizes,
-            cross_embed_strides,
+        def __init__(
+                self,
+                channels: dict,
+                image_height: int = 640,
+                image_width: int = 1280,
+                patch_height: int = 1,
+                patch_width: int = 1,
+                frames: int = 2,
+                dim: tuple = (64, 128, 256, 512),
+                depth: tuple = (2, 2, 8, 2),
+                dim_head: int = 32,
+                global_window_size: tuple = (5, 5, 2, 1),
+                local_window_size: int = 10,
+                cross_embed_kernel_sizes: tuple = ((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
+                cross_embed_strides: tuple = (4, 2, 2, 2),
+                attn_dropout: float = 0.0,
+                ff_dropout: float = 0.0,
+                use_spectral_norm: bool = True,
+                interp: bool = True,
+                padding_conf: dict = None,
+                post_conf: dict = None,
+                **kwargs,
         ):
-            # create CrossEmbedLayer
-            cross_embed_layer = CrossEmbedLayer(
-                dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride
+            """CrossFormer is the base architecture for the WXFormer
+            model. It uses convolutions and long and short distance
+            attention layers in the encoder layer and then uses strided
+            transpose convolution blocks for the decoder layer.
+
+            Args:
+                channels (dict): dict with count of channels by type (boundary, prognostic, diagnostic)
+                image_height (int): number of grid cells in the south-north direction.
+                image_width (int): number of grid cells in the west-east direction.
+                patch_height (int): number of grid cells within each patch in the south-north direction.
+                patch_width (int): number of grid cells within each patch in the west-east direction.
+                frames (int): number of time steps being used as input
+                dim (tuple): output dimensions of hidden state of each conv/transformer block in the encoder
+                depth (tuple): number of attention blocks per encoder layer
+                dim_head (int): dimension of each attention head.
+                global_window_size (tuple): number of grid cells between cells in long range attention
+                local_window_size (tuple): number of grid cells between cells in short range attention
+                cross_embed_kernel_sizes (tuple): width of the cross embed kernels in each layer
+                cross_embed_strides (tuple): stride of convolutions in each block
+                attn_dropout (float): dropout rate for attention layout
+                ff_dropout (float): dropout rate for feedforward layers.
+                use_spectral_norm (bool): whether to use spectral normalization
+                interp (bool): whether to use interpolation
+                padding_conf (dict): padding configuration
+                post_conf (dict): configuration for postblock processing
+            """
+            super().__init__()
+
+
+
+            self.input_channels  = channels['boundary']   + channels['prognostic']
+            self.output_channels = channels['prognostic'] + channels['diagnostic']
+
+            self.image_height = image_height
+            self.image_width  = image_width
+            self.patch_height = patch_height
+            self.patch_width  = patch_width
+            self.frames = frames
+
+            dim   = cast_tuple(tuple(dim), 4)
+            depth = cast_tuple(tuple(depth), 4)
+            global_window_size = cast_tuple(tuple(global_window_size), 4)
+            local_window_size = cast_tuple(local_window_size, 4)
+            cross_embed_kernel_sizes = tuple([tuple(_) for _ in cross_embed_kernel_sizes])
+            cross_embed_kernel_sizes = cast_tuple(cross_embed_kernel_sizes)
+            cross_embed_strides = cast_tuple(tuple(cross_embed_strides), 4)
+
+            assert len(dim) == 4
+            assert len(depth) == 4
+            assert len(global_window_size) == 4
+            assert len(local_window_size) == 4
+            assert len(cross_embed_kernel_sizes) == 4
+            assert len(cross_embed_strides) == 4
+
+            # self.* ?
+
+            self.dim_head          = dim_head
+            self.attn_dropout      = attn_dropout
+            self.ff_dropout        = ff_dropout
+            self.use_spectral_norm = use_spectral_norm
+            self.interp            = interp
+
+            if padding_conf is None:
+                padding_conf = {"activate": False}
+            self.use_padding = padding_conf["activate"]
+
+            if post_conf is None:
+                post_conf = {"activate": False}
+            self.use_post_block = post_conf["activate"]
+
+
+            # dimensions
+            last_dim = dim[-1]
+            first_dim = self.input_channels if (patch_height == 1 and patch_width == 1) else dim[0]
+            dims = [first_dim, *dim]
+            dim_in_and_out = tuple(zip(dims[:-1], dims[1:]))
+
+            # allocate cross embed layers
+            self.layers = nn.ModuleList([])
+
+            # loop through hyperparameters
+            for (
+                dim_in,
+                dim_out,
+            ), num_layers, global_wsize, local_wsize, kernel_sizes, stride in zip(
+                dim_in_and_out,
+                depth,
+                global_window_size,
+                local_window_size,
+                cross_embed_kernel_sizes,
+                cross_embed_strides,
+            ):
+                # create CrossEmbedLayer
+                cross_embed_layer = CrossEmbedLayer(
+                    dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride
+                )
+
+                # create Transformer
+                transformer_layer = Transformer(
+                    dim=dim_out,
+                    local_window_size=local_wsize,
+                    global_window_size=global_wsize,
+                    depth=num_layers,
+                    dim_head=dim_head,
+                    attn_dropout=attn_dropout,
+                    ff_dropout=ff_dropout,
+                )
+
+                # append everything
+                self.layers.append(nn.ModuleList([cross_embed_layer, transformer_layer]))
+
+            if self.use_padding:
+                self.padding_opt = TensorPadding(**padding_conf)
+
+            # define embedding layer using adjusted sizes
+            # if the original sizes were good, adjusted sizes should == original sizes
+            self.cube_embedding = CubeEmbedding(
+                (frames, image_height, image_width),
+                (frames, patch_height, patch_width),
+                self.input_channels,
+                dim[0],
             )
 
-            # create Transformer
-            transformer_layer = Transformer(
-                dim=dim_out,
-                local_window_size=local_wsize,
-                global_window_size=global_wsize,
-                depth=num_layers,
-                dim_head=dim_head,
-                attn_dropout=attn_dropout,
-                ff_dropout=ff_dropout,
-            )
+            # =================================================================================== #
 
-            # append everything
-            self.layers.append(nn.ModuleList([cross_embed_layer, transformer_layer]))
+            self.up_block1 = UpBlock(1 * last_dim, last_dim // 2, dim[0])
+            self.up_block2 = UpBlock(2 * (last_dim // 2), last_dim // 4, dim[0])
+            self.up_block3 = UpBlock(2 * (last_dim // 4), last_dim // 8, dim[0])
+            self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), self.output_channels, kernel_size=4, stride=2, padding=1)
 
-        if self.use_padding:
-            self.padding_opt = TensorPadding(**padding_conf)
+            if self.use_spectral_norm:
+                logger.info("Adding spectral norm to all conv and linear layers")
+                apply_spectral_norm(self)
 
-        # define embedding layer using adjusted sizes
-        # if the original sizes were good, adjusted sizes should == original sizes
-        self.cube_embedding = CubeEmbedding(
-            (frames, image_height, image_width),
-            (frames, patch_height, patch_width),
-            input_channels,
-            dim[0],
-        )
+            if self.use_post_block:
+                # freeze base model weights before postblock init
+                if "skebs" in post_conf.keys():
+                    if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
+                        "freeze_base_model_weights", False
+                    ):
+                        logger.warning("freezing all base model weights due to skebs config")
+                        for param in self.parameters():
+                            param.requires_grad = False
 
-        # =================================================================================== #
+                logger.info("using postblock")
+                self.postblock = PostBlock(post_conf)
 
-        self.up_block1 = UpBlock(1 * last_dim, last_dim // 2, dim[0])
-        self.up_block2 = UpBlock(2 * (last_dim // 2), last_dim // 4, dim[0])
-        self.up_block3 = UpBlock(2 * (last_dim // 4), last_dim // 8, dim[0])
-        self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1)
+        def forward(self, x):
+            x_copy = None
+            if self.use_post_block:  # copy tensor to feed into postBlock later
+                x_copy = x.clone().detach()
 
-        if self.use_spectral_norm:
-            logger.info("Adding spectral norm to all conv and linear layers")
-            apply_spectral_norm(self)
+            if self.use_padding:
+                x = self.padding_opt.pad(x)
 
-        if self.use_post_block:
-            # freeze base model weights before postblock init
-            if "skebs" in post_conf.keys():
-                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
-                    "freeze_base_model_weights", False
-                ):
-                    logger.warning("freezing all base model weights due to skebs config")
-                    for param in self.parameters():
-                        param.requires_grad = False
+            if self.patch_width > 1 and self.patch_height > 1:
+                x = self.cube_embedding(x)
+            elif self.frames > 1:
+                x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
+            else:  # case where only using one time-step as input
+                x = x.squeeze(2)
 
-            logger.info("using postblock")
-            self.postblock = PostBlock(post_conf)
+            encodings = []
+            for cel, transformer in self.layers:
+                x = cel(x)
+                x = transformer(x)
+                encodings.append(x)
 
-    def forward(self, x):
-        x_copy = None
-        if self.use_post_block:  # copy tensor to feed into postBlock later
-            x_copy = x.clone().detach()
+            x = self.up_block1(x)
+            x = torch.cat([x, encodings[2]], dim=1)
+            x = self.up_block2(x)
+            x = torch.cat([x, encodings[1]], dim=1)
+            x = self.up_block3(x)
+            x = torch.cat([x, encodings[0]], dim=1)
+            x = self.up_block4(x)
 
-        if self.use_padding:
-            x = self.padding_opt.pad(x)
+            if self.use_padding:
+                x = self.padding_opt.unpad(x)
 
-        if self.patch_width > 1 and self.patch_height > 1:
-            x = self.cube_embedding(x)
-        elif self.frames > 1:
-            x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
-        else:  # case where only using one time-step as input
-            x = x.squeeze(2)
+            if self.interp:
+                x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
-        encodings = []
-        for cel, transformer in self.layers:
-            x = cel(x)
-            x = transformer(x)
-            encodings.append(x)
+            x = x.unsqueeze(2)
 
-        x = self.up_block1(x)
-        x = torch.cat([x, encodings[2]], dim=1)
-        x = self.up_block2(x)
-        x = torch.cat([x, encodings[1]], dim=1)
-        x = self.up_block3(x)
-        x = torch.cat([x, encodings[0]], dim=1)
-        x = self.up_block4(x)
+            if self.use_post_block:
+                x = {
+                    "y_pred": x,
+                    "x": x_copy,
+                }
+                x = self.postblock(x)
 
-        if self.use_padding:
-            x = self.padding_opt.unpad(x)
+            return x
 
-        if self.use_interp:
-            x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
+        def rk4(self, x):
+            def integrate_step(x, k, factor):
+                return self.forward(x + k * factor)
 
-        x = x.unsqueeze(2)
+            k1 = self.forward(x)  # State at i
+            k1 = torch.cat([x[:, :, -2:-1], k1], dim=2)
+            k2 = integrate_step(x, k1, 0.5)  # State at i + 0.5
+            k2 = torch.cat([x[:, :, -2:-1], k2], dim=2)
+            k3 = integrate_step(x, k2, 0.5)  # State at i + 0.5
+            k3 = torch.cat([x[:, :, -2:-1], k3], dim=2)
+            k4 = integrate_step(x, k3, 1.0)  # State at i + 1
 
-        if self.use_post_block:
-            x = {
-                "y_pred": x,
-                "x": x_copy,
-            }
-            x = self.postblock(x)
-
-        return x
-
-    def rk4(self, x):
-        def integrate_step(x, k, factor):
-            return self.forward(x + k * factor)
-
-        k1 = self.forward(x)  # State at i
-        k1 = torch.cat([x[:, :, -2:-1], k1], dim=2)
-        k2 = integrate_step(x, k1, 0.5)  # State at i + 0.5
-        k2 = torch.cat([x[:, :, -2:-1], k2], dim=2)
-        k3 = integrate_step(x, k2, 0.5)  # State at i + 0.5
-        k3 = torch.cat([x[:, :, -2:-1], k3], dim=2)
-        k4 = integrate_step(x, k3, 1.0)  # State at i + 1
-
-        return (k1 + 2 * k2 + 2 * k3 + k4) / 6
+            return (k1 + 2 * k2 + 2 * k3 + k4) / 6
 
 
 if __name__ == "__main__":

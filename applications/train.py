@@ -6,7 +6,7 @@ train.py
 import os
 import sys
 import yaml
-import wandb
+#import wandb
 import optuna
 import shutil
 import logging
@@ -468,7 +468,8 @@ if __name__ == "__main__":
     conf = credit_main_parser(
         conf, parse_training=True, parse_predict=False, print_summary=False
     )
-    training_data_check(conf, print_summary=False)
+    if not conf['data']['datasets']:
+        training_data_check(conf, print_summary=False)
     # ======================================================== #
 
     # Create directories if they do not exist and copy yml file

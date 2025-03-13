@@ -21,7 +21,6 @@
 save_loc: /glade/work/$USER/CREDIT_runs/c404/
 seed: 2222  # RNG seed
 
-
 ## To avoid errors / incompatibilities, declare options that are used
 ## repeatedly once, at the top level where they apply, and inherit
 ## them at the levels where they are used using the <<: pattern.  We
@@ -29,9 +28,8 @@ seed: 2222  # RNG seed
 ## it here dramatically simplifies things.
 
 sampling: &samples
-    history_len:  2 
+    history_len:  1 
     forecast_len: 1
-
 
 # A downscaling model is trained on two datasets, one for the
 # high-resolution output from the model being emulated, and one for
@@ -75,7 +73,7 @@ data_defaults: &ddefault
     # file globs are defined relative to the top-level data rootpath
     rootpath: /glade/derecho/scratch/mcginnis/credit
 
-    first_date:   "1980-01-01"
+    first_date:   "1980-01-02"
     last_date:    "1984-12-31"
 
     # note: first_date and last_date must be quoted so that they
@@ -86,7 +84,7 @@ data_defaults: &ddefault
 
 data:
     <<: *ddefault
-
+    
     datasets:
         ## hires component:
         ## CONUS404 data on native 4km grid; hourly, 1979-10 to 2022-09
@@ -270,7 +268,7 @@ model:
 
 trainer:
     type: "conus404"
-    mode: none # none, ddp, fsdp
+    mode: ddp # none, ddp, fsdp
     train_batch_size: 4
     valid_batch_size: 4
     batches_per_epoch: 10 # Set to 0 to use len(dataloader)
@@ -333,8 +331,7 @@ pbs: # casper
     ncpus: 8
     ngpus: 1
     mem: '128GB'
-    walltime: '4:00:00'
-#    walltime: '24:00:00'
+    walltime: '00:20:00'
     gpu_type: 'a100'
     project: 'NRIS0001'
     queue: 'casper'
