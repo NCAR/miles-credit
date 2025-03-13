@@ -455,7 +455,8 @@ def credit_main_parser(
         assert conf['trainer']["train_batch_size"] == conf['trainer']["valid_batch_size"], (
             'train and valid batch sizes need to be the same for skebs'
         )
-
+        #setup backscatter writing
+        conf['model']['post_conf']['predict'] = {k: v for k,v in conf['predict'].items()}
 
         conf['model']['post_conf']['skebs'].setdefault('lmax', None)
         conf['model']['post_conf']['skebs'].setdefault('mmax', None)
