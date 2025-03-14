@@ -569,7 +569,8 @@ class CrossFormer(BaseModel):
                 "y_pred": x,
                 "x": x_copy,
             }
-            x = self.postblock(x)
+            with torch.autocast(device_type="cuda", enabled=False): #isht cannot use amp
+                x = self.postblock(x)
 
         return x
 
