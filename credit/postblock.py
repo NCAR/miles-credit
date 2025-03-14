@@ -21,6 +21,7 @@ import torch_harmonics as harmonics
 import numpy as np
 import xarray as xr
 
+from credit.boundary_padding import TensorPadding
 from credit.data import get_forward_data
 from torch.nn.parameter import Parameter
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -1075,17 +1076,22 @@ class Backscatter_unet(nn.Module):
                  levels,
                  nlat,
                  nlon,
-                 architecture):
+                 architecture,
+                 padding):
         # could also predict with x_prev and y
         super().__init__()
         self.nlat = nlat
         self.nlon = nlon
         self.in_channels = in_channels
         self.levels = levels
-
+        
         # setup padding functions
-        self.pad_lon = torch.nn.CircularPad2d((1,1,0,0))
-        self.pad_lat = torch.nn.ReplicationPad2d((0,0,1,1))
+        self.pad = padding
+        if self.pad:
+            logger.info(f"padding size {self.pad} inside unet")
+            self.boundary_padding = TensorPadding(pad_lat=(self.pad, self.pad),
+                                                pad_lon=(self.pad, self.pad))
+
         self.relu = nn.ReLU()
 
         if architecture is None:
@@ -1097,29 +1103,24 @@ class Backscatter_unet(nn.Module):
         if architecture["name"] == "unet":
             architecture["decoder_attention_type"] = "scse"
 
-            # height and width need to be divisble by 32
-            self.lon_pad = self.nlon % 32
-            self.lat_pad = self.nlat % 32
-
         architecture["in_channels"] = in_channels
         architecture["classes"] = levels
 
         self.model = load_premade_encoder_model(architecture)
-
-    def pad(self, x):
-        x = self.pad_lat(x) #reflection padding
-        x[..., [0,-1], :] = torch.roll(x[..., [0,-1], :], self.nlon // 2, -1) # shift reflection by 180
-        x = self.pad_lon(x) #padding across lon
-        return x
-    
-    def unpad(self, x):
-        return x[..., 1:-1, 1:-1]
     
     def forward(self, x):
         x = x.squeeze(2) # squeeze out time dim (see above)
+
+        if self.pad:
+            x = self.boundary_padding.pad(x)
         
         x = self.model(x)
+
+        if self.pad:
+            x = self.boundary_padding.unpad(x)
+
         x = self.relu(x)
+
 
         x = x.unsqueeze(2)
         return x
@@ -1269,11 +1270,13 @@ class SKEBS(nn.Module):
             self.backscatter_network = Backscatter_CNN(num_channels, self.levels, self.nlat, self.nlon)
         elif dissipation_type == "unet":
             architecture = post_conf["skebs"].get("architecture", None)
+            padding = post_conf["skebs"].get("padding", 0)
             self.backscatter_network = Backscatter_unet(num_channels,
                                                         self.levels,
                                                         self.nlat,
                                                         self.nlon,
-                                                        architecture)
+                                                        architecture,
+                                                        padding)
         else:
             raise RuntimeError(f"{dissipation_type} is a not a valid dissipation type, please modify config")
         
@@ -1308,7 +1311,7 @@ class SKEBS(nn.Module):
 
         ########### debugging and analysis features #############
         self.write_debug_files = post_conf['skebs'].get('write_debug_files', False)
-        self.write_every = 100
+        self.write_every = 1000
         save_loc = post_conf['skebs']["save_loc"]
         self.debug_save_loc = join(save_loc, "debug_skebs")
         self.write_rollout_debug_files = post_conf["skebs"].get("write_rollout_debug_files", True)
