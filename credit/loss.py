@@ -508,22 +508,33 @@ class VariableTotalLoss2D(torch.nn.Module):
     def __init__(self, conf, validation=False):
         super(VariableTotalLoss2D, self).__init__()
 
+        self.is_downscaling = 'datasets' in conf['data']
+
+
         self.conf = conf
         self.training_loss = conf["loss"]["training_loss"]
 
-        atmos_vars = conf["data"]["variables"]
-        surface_vars = conf["data"]["surface_variables"]
-        diag_vars = conf["data"]["diagnostic_variables"]
+        # associate indexes of tensor channel dimension with variable names / levels.
+        # Not yet implemented for downscaling
 
-        levels = (
-            conf["model"]["levels"]
-            if "levels" in conf["model"]
-            else conf["model"]["frames"]
-        )
+        if self.is_downscaling:
+            pass
 
-        self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
-        self.vars += surface_vars
-        self.vars += diag_vars
+        else:
+
+            atmos_vars = conf["data"]["variables"]
+            surface_vars = conf["data"]["surface_variables"]
+            diag_vars = conf["data"]["diagnostic_variables"]
+
+            levels = (
+                conf["model"]["levels"]
+                if "levels" in conf["model"]
+                else conf["model"]["frames"]
+            )
+
+            self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
+            self.vars += surface_vars
+            self.vars += diag_vars
 
         self.lat_weights = None
         if conf["loss"]["use_latitude_weights"]:
@@ -594,20 +605,24 @@ class VariableTotalLoss2D(torch.nn.Module):
         # User defined loss
         loss = self.loss_fn(target, pred)
 
-        # Latitutde and variable weights
-        loss_dict = {}
-        for i, var in enumerate(self.vars):
-            var_loss = loss[:, i]
+        if self.is_downscaling:
+            loss = torch.mean(loss)
 
-            if self.lat_weights is not None:
-                var_loss = torch.mul(var_loss, self.lat_weights.to(target.device))
+        else:
+            # Latitutde and variable weights
+            loss_dict = {}
+            for i, var in enumerate(self.vars):
+                var_loss = loss[:, i]
 
-            if self.var_weights is not None:
-                var_loss *= self.var_weights[i].to(target.device)
+                if self.lat_weights is not None:
+                    var_loss = torch.mul(var_loss, self.lat_weights.to(target.device))
 
-            loss_dict[f"loss_{var}"] = var_loss.mean()
+                if self.var_weights is not None:
+                    var_loss *= self.var_weights[i].to(target.device)
 
-        loss = torch.mean(torch.stack(list(loss_dict.values())))
+                loss_dict[f"loss_{var}"] = var_loss.mean()
+
+            loss = torch.mean(torch.stack(list(loss_dict.values())))
 
         # Add the spectral loss
         if not self.validation and self.use_power_loss:
