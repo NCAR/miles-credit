@@ -6,7 +6,7 @@
 # variables of the appropriate dimensionality.  Data has been
 # compressed with lossy compression, and is chunked so that each file
 # is a single chunk (i.e., 1 chunk = all space, 24 timesteps).
-# 
+#
 # Naming convention: $path/YYYY/conus404.Nd.YYYY-MM-DD.nc
 #
 # data is normalized (using functions in transforms.py) in the
@@ -28,7 +28,7 @@ seed: 2222  # RNG seed
 ## it here dramatically simplifies things.
 
 sampling: &samples
-    history_len:  1 
+    history_len:  1
     forecast_len: 1
 
 # A downscaling model is trained on two datasets, one for the
@@ -84,7 +84,7 @@ data_defaults: &ddefault
 
 data:
     <<: *ddefault
-    
+
     datasets:
         ## hires component:
         ## CONUS404 data on native 4km grid; hourly, 1979-10 to 2022-09
@@ -131,7 +131,7 @@ data:
                     - Z       # geopotential height
                 unused:
                     - P       # total pressure (dataset uses hybrid sigma coordinates)
-                    - QVAPOR  # water vapor mixing ratio                    
+                    - QVAPOR  # water vapor mixing ratio
             transforms:
                 paramfiles:
                     mmin: 'norms/min.conus404_3d.nc'
@@ -263,46 +263,73 @@ model:
     image_height: 1015
     image_width: 1367
     frames: 2
-#    architecture:  # none, just use defaults
+    # architecture:  # none, just use defaults
 
 
 trainer:
     type: "conus404"
-    mode: ddp # none, ddp, fsdp
-    train_batch_size: 4
-    valid_batch_size: 4
-    batches_per_epoch: 10 # Set to 0 to use len(dataloader)
-    valid_batches_per_epoch: 100
-    learning_rate: 1.0e-04
-    weight_decay: 1.0e-05
-    start_epoch: 0
-    epochs: 4  # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
-    amp: False
-    grad_accum_every: 1
-    grad_max_norm: 1.0
-    thread_workers: 4
-    valid_thread_workers: 0
-    stopping_patience: 50
-    teacher_forcing_ratio: 0.5 #0.9886539666794065
-    stop_rollout: 0.9
-    skip_validation: True
+    mode: none #ddp # none, ddp, fsdp
+
+    # fsdp-specific optimization options go here
+
+    # compile: False
+
     load_weights: False
     load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    save_backup_weights: True
+    save_best_weights: False # True only works if skip_validation = False
+    save_metric_vars: True # True = save for each predictand separately
+
+    update_learning_rate: False  # false if using scheduler
+    learning_rate: 1.0e-04
+    weight_decay: 1.0e-05
+
+    train_batch_size: 4
+    valid_batch_size: 4
+    emsemble_size: 1
+
+    batches_per_epoch: 10 # Set to 0 to use len(dataloader)
+    valid_batches_per_epoch: 100
+    stopping_patience: 50
+    skip_validation: True  # don't validate, always save weights
+    # (also validation not implemented yet)
+
+    start_epoch: 0
+    num_epoch: 10 # ?
+    reload_epoch: True
+    epochs: 4  # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
+
     use_scheduler: False
-    update_learning_rate: True
-    #scheduler: {'scheduler_type': 'cosine-annealing', first_cycle_steps: 500, cycle_mult: 6.0, max_lr: 5.0e-04, min_lr: 5.0e-07, warmup_steps: 499, gamma: 0.7}
-    # scheduler: {scheduler_type: plateau, mode: min, factor: 0.1, patience: 5, cooldown: 2, min_lr: 1e-6, epsilon: 1e-8, verbose: true, threshold: 1e-4}
     scheduler: {'scheduler_type': 'lambda'}
+
+    # Pytorch automatic mixed precision
+    amp: False
+
+    grad_accum_every: 1
+    grad_max_norm: 'dynamic' #1.0
+
+    thread_workers: 4
+    valid_thread_workers: 0
+
+    # prefetch_factor: 4
+
+    # teacher_forcing_ratio: 0.5 #0.9886539666794065
+    # stop_rollout: 0.9
+    # update_learning_rate: True
 
 loss:
    training_loss: "mse"
-   use_vgg: False
+   # use_vgg: False
    use_spectral_loss: False
-   spectral_wavenum_init: 15
-   spectral_lambda_reg: 0.025791372491084097
-   use_latitude_weights: False
-   use_variable_weights: False
-   latitude_weights: False
+   spectral_lambda_reg: 0.1
+   spectral_wavenum_init: 20
+
+   use_latitude_weights: False  # not applicable for downscaling
+   use_variable_weights: False  # not yet implemented for downscaling
+   # latitude_weights: False
 
 
 predict:
