@@ -442,12 +442,20 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
         dataloader = BatchForecastLenDataLoader(dataset)
     elif type(dataset) is DownscalingDataset:
         print("we made it here!")
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=world_size,
+            rank=rank,
+            seed=seed,
+            shuffle=shuffle,
+            drop_last=True,
+        )
         dataloader = DataLoader(
             dataset,
             num_workers=1,
             collate_fn=collate_fn,
             prefetch_factor=prefetch_factor,
-            sampler=DistributedSampler(dataset),
+            sampler=sampler,
         )
     else:
         raise ValueError(f"Unsupported dataset type: {type(dataset)}")
