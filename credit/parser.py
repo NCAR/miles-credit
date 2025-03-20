@@ -90,10 +90,15 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     """
 
+    # many config options don't apply when downscaling to regional
+    is_downscaling = 'datasets' in conf['data']
+
+
     assert "save_loc" in conf, "save location of the CREDIT project ('save_loc') is missing from conf"
     assert "data" in conf, "data section ('data') is missing from conf"
     assert "model" in conf, "model section ('model') is missing from conf"
-    assert "latitude_weights" in conf["loss"], "lat / lon file ('latitude_weights') is missing from conf['loss']"
+    if not is_downscaling:
+        assert "latitude_weights" in conf["loss"], "lat / lon file ('latitude_weights') is missing from conf['loss']"
 
     if parse_training:
         assert "trainer" in conf, "trainer section ('trainer') is missing from conf"
@@ -106,8 +111,6 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # --------------------------------------------------------- #
     # conf['data'] section
-
-    is_downscaling = 'datasets' in conf['data']
 
     if is_downscaling:
         # new-style data configuration
