@@ -72,6 +72,7 @@ class PostBlock(nn.Module):
             self.operations.append(SKEBS(post_conf))
 
         # global mass fixer
+        print('bingo bongo:', post_conf["global_mass_fixer"]["activate"])
         if post_conf["global_mass_fixer"]["activate"]:
             if post_conf["global_mass_fixer"]["activate_outside_model"] is False:
                 logger.info("GlobalMassFixer registered")
@@ -517,7 +518,7 @@ class GlobalWaterFixer(nn.Module):
         self.precip_ind = int(post_conf["global_water_fixer"]["precip_ind"])
         self.evapor_ind = int(post_conf["global_water_fixer"]["evapor_ind"])
         if self.flag_sigma_level:
-            self.sp_ind = int(post_conf["global_mass_fixer"]["sp_inds"])
+            self.sp_ind = int(post_conf["global_water_fixer"]["sp_inds"])
         # ------------------------------------------------------------------------------------ #
         # setup a scaler
         if post_conf["global_water_fixer"]["denorm"]:
@@ -742,7 +743,7 @@ class GlobalEnergyFixer(nn.Module):
         self.surf_LH_ind = int(post_conf["global_energy_fixer"]["surf_flux_inds"][1])
 
         if self.flag_sigma_level:
-            self.sp_ind = int(post_conf["global_mass_fixer"]["sp_inds"])
+            self.sp_ind = int(post_conf["global_energy_fixer"]["sp_inds"])
         # ------------------------------------------------------------------------------------ #
         # setup a scaler
         if post_conf["global_energy_fixer"]["denorm"]:

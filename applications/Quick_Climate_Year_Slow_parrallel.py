@@ -17,6 +17,8 @@ import json
 import pickle
 import argparse
 
+
+
 # ---------- #
 # Numerics
 from datetime import datetime, timedelta
@@ -35,7 +37,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 
 # ---------- #
 # credit
-from credit.models import load_model
+from credit.models import load_model, load_model_name
 from credit.seed import seed_everything
 from credit.loss import latitude_weights
 
@@ -124,14 +126,17 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     else:
         print("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
         raise
+
     # Load the model (optionally a custom model) and configure distributed mode
     if model_name is not None:
         print('loading custom: ', model_name)
-        model = load_model(conf, model_name=model_name, load_weights=True).to(device)
+        model = load_model_name(conf, model_name, load_weights=True).to(device)
     else:
         model = load_model(conf, load_weights=True).to(device)
+
     
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
+    print(distributed)
     if distributed:
         model = distributed_model_wrapper(conf, model, device)
         if conf["predict"]["mode"] == "fsdp":

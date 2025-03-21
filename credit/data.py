@@ -21,6 +21,8 @@ from typing import TypedDict, Union, List
 import datetime
 import numpy as np
 import xarray as xr
+import pandas as pd
+import cftime
 
 # Pytorch utils
 import torch
@@ -31,6 +33,38 @@ from torch.utils.data.distributed import DistributedSampler
 #
 Array = Union[np.ndarray, xr.DataArray]
 IMAGE_ATTR_NAMES = ("historical_ERA5_images", "target_ERA5_images")
+
+
+def ensure_numpy_datetime(value):
+    """
+    Converts an input value (or array) to numpy.datetime64.
+    Handles numpy arrays, pandas timestamps, cftime objects, and strings.
+    """
+    # If the value is an array, extract the first element
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            value = value.item()  # Extract scalar value
+        else:
+            raise TypeError(f"Cannot convert array with multiple elements: {value}")
+
+    if isinstance(value, np.datetime64):
+        return value  # Already correct
+    elif isinstance(value, pd.Timestamp):
+        return np.datetime64(value)  # Convert from pandas Timestamp
+    elif isinstance(value, str):
+        try:
+            return np.datetime64(value)  # Convert from string
+        except ValueError:
+            pass  # If it fails, let it fall through
+    elif isinstance(value, cftime.datetime):
+        return np.datetime64(value.strftime('%Y-%m-%dT%H:%M:%S'))  # Convert from cftime
+    elif isinstance(value, object):  # Catch-all for potential unexpected object types
+        try:
+            return np.datetime64(pd.to_datetime(value))
+        except Exception:
+            raise TypeError(f"Cannot convert type {type(value)} to numpy.datetime64")
+    else:
+        raise TypeError(f"Unsupported type {type(value)} for datetime conversion")
 
 
 def generate_datetime(start_time, end_time, interval_hr):
@@ -1419,7 +1453,12 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         for init_time in self.init_time_list_np:
             for i_file, ds in enumerate(self.all_files):
                 # get the year of the current file
-                ds_year = int(np.datetime_as_string(ds["time"][0].values, unit="Y"))
+                #print('Check time values, data.py:' ,ds["time"][0].values)
+                #print('Check time values, data.py:' ,ds["time"][0].values.dtype)
+
+                time_value = ensure_numpy_datetime(ds["time"][0].values)
+                
+                ds_year = int(np.datetime_as_string(time_value, unit="Y"))
 
                 # get the first and last years of init times
                 init_year0 = nanoseconds_to_year(init_time)
@@ -1427,9 +1466,9 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                 # found the right yearly file
                 if init_year0 == ds_year:
                     N_times = len(ds["time"])
-                    # convert ds['time'] to a list of nanosecondes
+                    # convert ds['time'] to a list of nanoseconds
                     ds_time_list = [
-                        np.datetime64(ds_time.values).astype(datetime.datetime)
+                        np.datetime64(ensure_numpy_datetime(ds_time.values)).astype('datetime64[ns]').astype(int)
                         for ds_time in ds["time"]
                     ]
                     ds_start_time = ds_time_list[0]
@@ -1437,6 +1476,10 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
 
                     init_time_start = init_time
                     # if initalization time is within this (yearly) xr.Dataset
+                    #print('Check time values, data.py: start time',ds_start_time)
+                    #print('Check time values, data.py: end time' ,ds_end_time)
+                    #print('Check time values, data.py: init time' , init_time_start)
+                    
                     if ds_start_time <= init_time_start <= ds_end_time:
                         # try getting the index of the first initalization time
                         i_init_start = ds_time_list.index(init_time_start)
