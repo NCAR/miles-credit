@@ -227,23 +227,27 @@ class DownscalingDataset(torch.utils.data.Dataset):
         nt = {'input': self.history_len, 'target': self.forecast_len}
 
         for s in sample:
-            for var, data in sample[s].items():
-                if len(data.shape) == 2:
-                    # static data; add time dimension & repeat along it
-                    data = np.repeat(np.expand_dims(data, axis=0),
-                                     repeats=nt[s], axis=0)
-
-                if len(data.shape) == 3:
-                    # add singleton var/z dimension
-                    data = np.expand_dims(data, axis=1)
-
-                sample[s][var] = data
-
-            # concatenate along z/var dim
-            sample[s] = np.concatenate(list(sample[s].values()), axis=1)
-
-            # nparray[T,Z,Y,X] to tensor[V,T,Y,X]
-            sample[s] = torch.as_tensor(sample[s]).permute(1, 0, 2, 3)
+            if len(sample[s]) == 0:
+                sample[s] = None
+            else:
+                for var, data in sample[s].items():
+                    print(var, data.shape)
+                    if len(data.shape) == 2:
+                        # static data; add time dimension & repeat along it
+                        data = np.repeat(np.expand_dims(data, axis=0),
+                                         repeats=nt[s], axis=0)
+    
+                    if len(data.shape) == 3:
+                        # add singleton var/z dimension
+                        data = np.expand_dims(data, axis=1)
+    
+                    sample[s][var] = data
+    
+                # concatenate along z/var dim
+                sample[s] = np.concatenate(list(sample[s].values()), axis=1)
+    
+                # nparray[T,Z,Y,X] to tensor[V,T,Y,X]
+                sample[s] = torch.as_tensor(sample[s]).permute(1, 0, 2, 3)
 
         # other code wants tensors named 'x' and 'y'
         sample['x'] = sample.pop('input')
