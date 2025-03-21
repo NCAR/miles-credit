@@ -6,6 +6,7 @@ from inspect import signature
 # data utils
 import numpy as np
 import xarray as xr
+import pandas as pd
 
 # Pytorch utils
 import torch
@@ -117,11 +118,37 @@ class DownscalingDataset(torch.utils.data.Dataset):
         self.len = np.max(dlengths)
         # TODO: error if any dlengths != self.len or 1
 
-        # self.components = dict()
-        # for dset in self.datasets.keys():
-        #     comp = self.datasets[dset].component
-        #     self.components.setdefault(comp, []).append(dset)
+        # construct dataframe that defines the ordering used by
+        # .rearrange() to go from nested dict [dataset][variable] to
+        # nested dict [input/target][dataset.variable]
 
+        dlist = list()
+        for ds in self.datasets:
+            dmap = self.datasets[ds]['datamap']
+            dvar = dmap.variables
+            varuse = [(var, use) for use, vlist in dvar.items() for var in vlist]
+            df = pd.DataFrame(varuse, columns=['var','usage'])
+
+            df.insert(0, 'dim', dmap.dim)
+            df.insert(0, 'dataset', ds)
+
+            df = df[df['usage'] != 'unused']
+
+            dlist.append(df)
+
+        rdf = pd.concat(dlist).reset_index(drop=True)
+
+        rdf.insert(rdf.shape[1], "name",
+                   [f"{d}.{v}" for d, v in zip(rdf['dataset'], rdf['var'])])
+
+        # sorting order:
+        rdf['usage'] = pd.Categorical(rdf['usage'], ['boundary', 'prognostic', 'diagnostic'])
+        rdf['dim']   = pd.Categorical(rdf['dim'],   ['static', '2D', '3D'])
+        rdf['dataset'] = pd.Categorical(rdf['dataset'], self.datasets)
+        rdf = rdf.sort_values(by=['usage', 'dim', 'dataset', 'var']).reset_index(drop=True)
+
+        self.arrangement = rdf
+        
         # end __post_init__
 
     def __len__(self):
@@ -169,31 +196,25 @@ class DownscalingDataset(torch.utils.data.Dataset):
         hlen = self.history_len
         slen = self.sample_len
 
-        for usage in ("boundary", "prognostic", "diagnostic"):
-            for dim in ("static", "2D", "3D"):
-                for dname, dset in self.datasets.items():
-                    if dset['datamap'].dim != dim:
-                        continue
-                    for part in ('input', 'target'):
-                        if usage not in include[self.mode][part]:
-                            continue
-                        for var in dset['datamap'].variables[usage]:
-                            outname = f"{dname}.{var}"
-                            data = items[dname][usage][var]
-                            if self.mode == 'train':
-                                if dim == 'static':
-                                    result[part][outname] = data
-                                else:
-                                    if part == 'input':
-                                        result[part][outname] = data[0:hlen, ...]
-                                    if part == 'target':
-                                        result[part][outname] = data[hlen:slen, ...]
-                            else:
-                                result[part][outname] = data
+        for part in result:
+            for row in self.arrangement.itertuples():
+                
+                if row.usage in include[self.mode][part]:
+                    data = items[row.dataset][row.usage][row.var]
+                    if self.mode == 'train':
+                        if row.dim == 'static':
+                            result[part][row.name] = data
+                        else:
+                            if part == 'input':
+                                result[part][row.name] = data[0:hlen, ...]
+                            if part == 'target':
+                                result[part][row.name] = data[hlen:slen, ...]
+                    else:
+                        result[part][row.name] = data
 
         # subsetting time dimension to hist / future is only needed
         # for training data; in mode init or infer, the datamaps only
-        # return the historical part of the sample
+        # return the hist part of the sample
 
         return result
 
