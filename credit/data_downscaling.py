@@ -148,6 +148,22 @@ class DownscalingDataset(torch.utils.data.Dataset):
         rdf = rdf.sort_values(by=['usage', 'dim', 'dataset', 'var']).reset_index(drop=True)
 
         self.arrangement = rdf
+
+        # construct list of variable names corresponding to tensor channels
+        # (Only done for mode=train, tensor=target at the moment)
+
+        tarr = rdf[rdf['usage'].isin(['prognostic','diagnostic'])]
+        self.tnames = list()
+        for row in tarr.itertuples():
+            if row.dim != "3D":
+                self.tnames.append(row.name)
+            else:
+                dmap = self.datasets[row.dataset]['datamap']
+                nlev = dmap.shape[0]
+                zlevels = range(0, nlev, dmap.zstride)
+                ## todo: record z-coord values in datamap, use those
+                znames = [f"{row.name}.z{z}" for z in zlevels]
+                self.tnames.extend(znames)
         
         # end __post_init__
 
