@@ -231,7 +231,6 @@ class DownscalingDataset(torch.utils.data.Dataset):
                 sample[s] = None
             else:
                 for var, data in sample[s].items():
-                    print(var, data.shape)
                     if len(data.shape) == 2:
                         # static data; add time dimension & repeat along it
                         data = np.repeat(np.expand_dims(data, axis=0),
