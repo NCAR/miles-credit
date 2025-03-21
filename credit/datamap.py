@@ -249,6 +249,7 @@ class DataMap:
 
             # [:] forces data to load
             staticdata = [np.array(staticfile[v][:]) for v in self.variables['boundary']]
+            self.shape = staticdata[0].shape
             self.data = dict(zip(self.variables['boundary'], staticdata))
             
             # cleanup
@@ -273,6 +274,10 @@ class DataMap:
             self.units = time0.units
             self.t0 = float(time0[0])
             self.dt = float(time0[1]) - self.t0
+
+            # take shape from first variable we're using, minus time dimension.
+            v0 = list(self.variables.values())[0][0]
+            self.shape = nc0[v0].shape[1:]
 
             nc0.close()
 
