@@ -4,7 +4,7 @@ from os.path import join
 import xarray as xr
 import fsspec
 import xesmf as xe
-from credit.interp import geopotential_from_model_vars, create_pressure_grid
+from credit.interp import geopotential_from_model_vars, create_pressure_grid, interp_hybrid_to_pressure_levels
 from credit.physics_constants import GRAVITY
 
 gfs_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m'}
@@ -158,28 +158,24 @@ def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indi
     surface_vars = [var for var in variables if var in surface]
     vars_500 = [var for var in variables if '500' in var]
 
-    xp = regridded_nwp_data['P'].values
-    fp = regridded_nwp_data
+    p = regridded_nwp_data['P'].values
     output_pressure = (output_grid['a_half'] + output_grid['b_half'] * regridded_nwp_data['SP'])
     sampled_output_pressure = output_pressure[model_level_indices].values
-    ny, nx = regridded_nwp_data.sizes['latitude'], regridded_nwp_data.sizes['longitude']
     interpolated_data = {}
     for var in upper_vars:
-        fp_data = fp[var].values
-        interpolated_data[var] = {'dims': ['latitude', 'longitude', 'level'],
-                                  'data': np.array([np.interp(sampled_output_pressure[:, j, i], xp[:, j, i], fp_data[:, j, i])
-                                                    for j in range(ny) for i in range(nx)]).reshape(ny, nx,
-                                                                                                    len(model_level_indices))}
+        model_var_data = regridded_nwp_data[var].values
+        interpolated_data[var] ={'dims': ['latitude', 'longitude', 'level'],
+                                 'data': interp_hybrid_to_pressure_levels(model_var_data, p, sampled_output_pressure)}
     for var in vars_500:
         prs = 50000 # 500mb
-        fp_data = fp[level_map[var]].values
+        model_var_data = regridded_nwp_data[level_map[var]].values
         interpolated_data[var] = {'dims': ['latitude', 'longitude'],
-                                  'data': np.array([np.interp([prs], xp[:, j, i], fp_data[:, j, i])
-                                                    for j in range(ny) for i in range(nx)]).reshape(ny, nx)}
+                                  'data': interp_hybrid_to_pressure_levels(model_var_data, p, prs)}
     for var in surface_vars:
         interpolated_data[var] = {'dims': regridded_nwp_data[var].dims, 'data': regridded_nwp_data[var].values}
 
     return interpolated_data
+
 
 
 def format_data(data_dict, regridded_data, model_levels):
