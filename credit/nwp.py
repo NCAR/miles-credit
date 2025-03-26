@@ -5,15 +5,27 @@ import xarray as xr
 import fsspec
 import xesmf as xe
 from credit.interp import geopotential_from_model_vars, create_pressure_grid
+from credit.physics_constants import GRAVITY
 
 gfs_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m'}
 level_map = {'T500': 'T', 'U500': 'U', 'V500': 'V', 'Q500': 'Q', 'Z500': 'Z'}
 upper_air = ['T', 'U', 'V', 'Q', 'Z']
 surface = ['SP', 't2m']
-STANDARD_GRAVITY = 9.80665
 
-def build_GFS_init(output_grid, gdas_base_path="https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/",
-                   date="202503030600", variables=[], model_level_indices=[]):
+def build_GFS_init(output_grid, date, variables, model_level_indices,
+                   gdas_base_path="https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/"):
+    """
+    Create GFS initial conditions on model levels that are interpolated from ECMWF L137 model levels.
+    Args:
+        output_grid: (xr.DataArray) grid of ERA5 model levels
+        date: (pd.Timestamp) date of GFS initialization
+        variables: (list) list of variable names
+        model_level_indices: (list) list of model level indices to extract from L137 model levels
+        gdas_base_path: (str) NOMADS path to GFS base directory (archives last 10 days)
+
+    Returns:
+        (xr.Dataset) Interpolated GFS initial conditions
+    """
 
     required_variables = ['pressfc', 'tmp', 'spfh', 'hgtsfc'] # required for calculating pressure and geopotential
     gfs_variables = list(set([k for k, v in gfs_map.items() if v in variables]).union(required_variables))
@@ -30,9 +42,16 @@ def build_GFS_init(output_grid, gdas_base_path="https://nomads.ncep.noaa.gov/pub
 
 
 def add_pressure_and_geopotntial(data):
+    """
+    Derive pressure and geopotential fields from model level data and to dataset
+    Args:
+        data: (xr.Dataset) GFS model level data
 
+    Returns:
+        xr.Dataset
+    """
     sfc_pressure = data['SP'].values.squeeze()
-    sfc_gpt = data['hgtsfc'].values.squeeze() * STANDARD_GRAVITY
+    sfc_gpt = data['hgtsfc'].values.squeeze() * GRAVITY
     level_T = data['T'].values.squeeze()
     level_Q = data['Q'].values.squeeze()
     a_coeff = data.attrs['ak']
@@ -47,16 +66,32 @@ def add_pressure_and_geopotntial(data):
 
 
 def build_file_path(date, base_path, file_type='atm'):
+    """
+    Create NOMADS filepaths for etiher upper air or surface data
+    Args:
+        date: (pd.Timestamp) date of GFS initialization
+        base_path: (str) NOMADS base directory (archives last 10 days)
+        file_type: (str) Type of analysis data (supports 'atm' or 'sfc')
 
-    date_obj = pd.Timestamp(date)
-    dir_path = date_obj.strftime("gdas.%Y%m%d/%H/atmos/")
-    file_name = date_obj.strftime(f"gdas.t%Hz.{file_type}anl.nc")
+    Returns:
+        (str) NOMADS filepaths
+    """
+    dir_path = date.strftime("gdas.%Y%m%d/%H/atmos/")
+    file_name = date.strftime(f"gdas.t%Hz.{file_type}anl.nc")
 
     return join(base_path, dir_path, file_name)
 
 
 def load_gfs_data(full_file_path, variables):
+    """
+    Load GFS data directly from Nomads server
+    Args:
+        full_file_path: (str) NOMADS filepath
+        variables: (list) list of variable names
 
+    Returns:
+        xr.Dataset
+    """
     ds = xr.open_dataset(fsspec.open(full_file_path).open())
     available_vars = ds.data_vars
     vars = [v for v in variables if v in available_vars]
@@ -66,7 +101,15 @@ def load_gfs_data(full_file_path, variables):
 
 
 def combine_data(atm_data, sfc_data):
+    """
+    Merge upper air and surface data
+    Args:
+        atm_data: (xr.Dataset) GFS upper air data
+        sfc_data: (xr.Dataset) GFS surface data
 
+    Returns:
+        xr.Dataset
+    """
     for var in sfc_data.data_vars:
         atm_data[var] = (sfc_data[var].dims, sfc_data[var].values)
 
@@ -80,6 +123,16 @@ def combine_data(atm_data, sfc_data):
 
 
 def regrid(nwp_data, output_grid, method="conservative"):
+    """
+    Spatially regrid (interpolate) from GFS grid to CREDIT grid
+    Args:
+        nwp_data: (xr.Dataset) GFS initial conditions
+        output_grid: (xr.Dataset) CREDIT grid
+        method: (str)
+
+    Returns:
+        (xr.Dataset) Regridded GFS initial conditions
+    """
 
     ds_out = output_grid[['longitude', 'latitude']].drop_vars(['time']).load()
     in_grid = nwp_data[['longitude', 'latitude']].load()
@@ -90,7 +143,17 @@ def regrid(nwp_data, output_grid, method="conservative"):
 
 
 def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indices, variables):
+    """
+    Verticallly interpolate GFS model level data to CREDIT model levels
+    Args:
+        regridded_nwp_data: (xr.Dataset) GFS initial conditions on CREDIT grid
+        output_grid: (xr.Dataset) CREDIT Grid
+        model_level_indices: (list) list of model level indices to extract from L137 model levels
+        variables: (list) list of variable names
 
+    Returns:
+        (dict): Dictionary of xr.DataArrays of interpolated GFS model level data
+    """
     upper_vars = [var for var in variables if var in upper_air]
     surface_vars = [var for var in variables if var in surface]
     vars_500 = [var for var in variables if '500' in var]
@@ -120,7 +183,16 @@ def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indi
 
 
 def format_data(data_dict, regridded_data, model_levels):
+    """
+    Format data for CREDIT model ingestion
+    Args:
+        data_dict: (dict) Dictionary of xr.DataArrays of interpolated GFS model level data
+        regridded_data: (xr.Dataset) GFS initial conditions on CREDIT grid
+        model_levels: (list) list of model level indices to extract from L137 model levels
 
+    Returns:
+        xr.Dataset of GFS initial conditions interpolated to CREDIT grid and model levels
+    """
     data = xr.Dataset.from_dict(data_dict).transpose('level', 'latitude', 'longitude', ...).expand_dims('time')
     data = data.assign_coords(level=model_levels,
                               latitude=regridded_data['latitude'].values,
@@ -130,5 +202,20 @@ def format_data(data_dict, regridded_data, model_levels):
     return data
 
 
+def format_datetime(init_time):
+    """
+    Format datetime string from CREDIT configuration file
+    Args:
+        init_time: (dict) Dictionary of Forecast times from configuration file
+
+    Returns:
+        pd.Timestamp of initialization time
+    """
+    dt = datetime.datetime(init_time["start_year"],
+                           init_time["start_month"],
+                           init_time["start_day"],
+                           init_time["start_hours"][0])
+
+    return pd.Timestamp(dt)
 
 
