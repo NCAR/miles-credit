@@ -4,8 +4,9 @@ from os.path import join
 import xarray as xr
 import fsspec
 import xesmf as xe
-from credit.interp import geopotential_from_model_vars, create_pressure_grid, interp_hybrid_to_pressure_levels
+from credit.interp import geopotential_from_model_vars, create_pressure_grid
 from credit.physics_constants import GRAVITY
+import datetime
 
 gfs_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m'}
 level_map = {'T500': 'T', 'U500': 'U', 'V500': 'V', 'Q500': 'Q', 'Z500': 'Z'}
@@ -181,8 +182,6 @@ def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indi
 
     return interpolated_data
 
-
-interp_hybrid_to_pressure_levels(model_var, model_pressure, interp_pressures)
 
 def format_data(data_dict, regridded_data, model_levels):
     """
