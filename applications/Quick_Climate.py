@@ -69,7 +69,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 def save_task(data, meta_data, conf):
-    """Wrapper function for saving data in parallel."""
+    """Wrapper function for saving data in parallel."""  # noqa: D401
     darray_upper_air, darray_single_level, init_datetime_str, lead_time, forecast_hour = data
     save_netcdf_increment(
         darray_upper_air,
@@ -81,10 +81,10 @@ def save_task(data, meta_data, conf):
     )
 
 def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, model_name=None, init_noise=None):
-    """
-    Function to compute RMSE for a year-long climate model prediction. 
+    """Function to compute RMSE for a year-long climate model prediction.
     
-    Parameters:
+    Parameters
+    ----------
     - config: str
         Path to the YAML configuration file.
     - input_shape: tuple
@@ -105,6 +105,7 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     - Preparing input/output tensors for prediction and RMSE computation
     - Tracing the model for optimized execution
     - running for a specified amount of time and saving mean 
+
     """
     # Load configuration from the YAML file
     with open(config) as cf:
@@ -132,7 +133,6 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     else:
         model = load_model(conf, load_weights=True).to(device)
 
-    
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
     print(distributed)
     if distributed:
@@ -143,7 +143,12 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     model.eval()
     post_conf = conf["model"]["post_conf"]
 
-    
+    # number of dynamic forcing + forcing + static
+    static_dim_size = (
+        len(conf["data"]["dynamic_forcing_variables"])
+        + len(conf["data"]["forcing_variables"])
+        + len(conf["data"]["static_variables"])
+    )
     
     # Extract conservation flags from the configuration
     flag_mass_conserve, flag_water_conserve, flag_energy_conserve = False, False, False
@@ -417,7 +422,6 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     plt.tight_layout()
     plt.savefig(f'{conf["save_loc"]}/{fsout}_quick_climate_plot_slow.png', bbox_inches='tight')
     plt.show()
-
     
     return test_tensor_rmse, truth_field, inds_to_rmse, metrics, conf, METS
 
@@ -437,16 +441,6 @@ def main():
 
     start_time = time.time()
 
-    # # Call the run_year_rmse function with parsed arguments
-    # test_tensor_rmse, truth_field, inds_to_rmse, metrics, conf, METS = run_year_rmse(
-    #     config=args.config,
-    #     input_shape=args.input_shape,
-    #     forcing_shape=args.forcing_shape,
-    #     output_shape=args.output_shape,
-    #     device=args.device,
-    #     model_name=args.model_name
-    # )
-    
     num_cpus = 8
     with mp.Pool(num_cpus) as p:
         run_year_rmse(p, config=args.config, input_shape=args.input_shape,

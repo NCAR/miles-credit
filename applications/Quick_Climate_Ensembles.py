@@ -143,7 +143,12 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     model.eval()
     post_conf = conf["model"]["post_conf"]
 
-    
+    # number of dynamic forcing + forcing + static
+    static_dim_size = (
+        len(conf["data"]["dynamic_forcing_variables"])
+        + len(conf["data"]["forcing_variables"])
+        + len(conf["data"]["static_variables"])
+    )
     
     # Extract conservation flags from the configuration
     flag_mass_conserve, flag_water_conserve, flag_energy_conserve = False, False, False
