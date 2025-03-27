@@ -450,13 +450,6 @@ if __name__ == "__main__":
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    #     wandb.init(
-    #         # set the wandb project where this run will be logged
-    #         project="Derecho parallelism",
-    #         name=f"Worker {os.environ["RANK"]} {os.environ["WORLD_SIZE"]}"
-    #         # track hyperparameters and run metadata
-    #         config=conf
-    #     )
 
     if number_of_subsets > 0:
         forecasts = load_forecasts(conf)
