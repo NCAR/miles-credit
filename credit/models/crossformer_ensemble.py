@@ -6,7 +6,14 @@ import torch
 
 
 class CrossFormerWithNoise(CrossFormer):
-    def __init__(self, noise_latent_dim=128, noise_factor=0.1, freeze=True, **kwargs):
+    def __init__(
+        self,
+        noise_latent_dim=128,
+        noise_factor=0.275,
+        encoder_noise=True,
+        freeze=True,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.noise_latent_dim = noise_latent_dim
 
@@ -15,10 +22,62 @@ class CrossFormerWithNoise(CrossFormer):
             for param in self.parameters():
                 param.requires_grad = False
 
-        # Noise injection layers
-        self.noise_inject1 = PixelNoiseInjection(self.noise_latent_dim, self.up_block1.output_channels, noise_factor)
-        self.noise_inject2 = PixelNoiseInjection(self.noise_latent_dim, self.up_block2.output_channels, noise_factor)
-        self.noise_inject3 = PixelNoiseInjection(self.noise_latent_dim, self.up_block3.output_channels, noise_factor)
+        self.encoder_noise = encoder_noise
+        if encoder_noise:
+            # Define separate learnable noise factors for encoder noise layers
+            encoder_noise_factors = nn.ParameterList(
+                [
+                    nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
+                    nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
+                    nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
+                ]
+            )
+            # Encoder noise injection layers
+            self.encoder_noise_layers = nn.ModuleList(
+                [
+                    PixelNoiseInjection(
+                        self.noise_latent_dim,
+                        self.up_block3.output_channels,
+                        encoder_noise_factors[0],
+                    ),
+                    PixelNoiseInjection(
+                        self.noise_latent_dim,
+                        self.up_block2.output_channels,
+                        encoder_noise_factors[1],
+                    ),
+                    PixelNoiseInjection(
+                        self.noise_latent_dim,
+                        self.up_block1.output_channels,
+                        encoder_noise_factors[2],
+                    ),
+                ]
+            )
+
+        # Define separate learnable noise factors for decoder noise layers
+        decoder_noise_factors = nn.ParameterList(
+            [
+                nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
+                nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
+                nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
+            ]
+        )
+
+        # Decoder noise injection layers
+        self.noise_inject1 = PixelNoiseInjection(
+            self.noise_latent_dim,
+            self.up_block1.output_channels,
+            decoder_noise_factors[0],
+        )
+        self.noise_inject2 = PixelNoiseInjection(
+            self.noise_latent_dim,
+            self.up_block2.output_channels,
+            decoder_noise_factors[1],
+        )
+        self.noise_inject3 = PixelNoiseInjection(
+            self.noise_latent_dim,
+            self.up_block3.output_channels,
+            decoder_noise_factors[2],
+        )
 
     def forward(self, x, noise=None):
         x_copy = None
@@ -39,9 +98,11 @@ class CrossFormerWithNoise(CrossFormer):
             noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
 
         encodings = []
-        for cel, transformer in self.layers:
+        for k, (cel, transformer) in enumerate(self.layers):
             x = cel(x)
             x = transformer(x)
+            if self.encoder_noise and k < len(self.layers) - 1:
+                self.encoder_noise_layers[k](x, noise)
             encodings.append(x)
 
         x = self.up_block1(x)
@@ -62,7 +123,9 @@ class CrossFormerWithNoise(CrossFormer):
             x = self.padding_opt.unpad(x)
 
         if self.use_interp:
-            x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
+            x = F.interpolate(
+                x, size=(self.image_height, self.image_width), mode="bilinear"
+            )
 
         x = x.unsqueeze(2)
 
@@ -87,7 +150,9 @@ class PixelNoiseInjection(nn.Module):
         batch, channels, height, width = feature_map.shape
 
         # Generate per-pixel, per-channel noise
-        pixel_noise = self.noise_factor * torch.randn(batch, channels, height, width, device=feature_map.device)
+        pixel_noise = self.noise_factor * torch.randn(
+            batch, channels, height, width, device=feature_map.device
+        )
 
         # Transform latent noise and reshape
         style = self.noise_transform(noise).view(batch, channels, 1, 1)
@@ -103,9 +168,15 @@ class CrossFormerWithNoiseChannel(CrossFormer):
         self.initial_coeff = initial_coeff
 
         # Noise injection layers
-        self.noise_inject1 = NoiseInjection(self.noise_latent_dim, self.up_block1.output_channels)
-        self.noise_inject2 = NoiseInjection(self.noise_latent_dim, self.up_block2.output_channels)
-        self.noise_inject3 = NoiseInjection(self.noise_latent_dim, self.up_block3.output_channels)
+        self.noise_inject1 = NoiseInjection(
+            self.noise_latent_dim, self.up_block1.output_channels
+        )
+        self.noise_inject2 = NoiseInjection(
+            self.noise_latent_dim, self.up_block2.output_channels
+        )
+        self.noise_inject3 = NoiseInjection(
+            self.noise_latent_dim, self.up_block3.output_channels
+        )
 
     def forward(self, x, noise=None):
         x_copy = None
@@ -151,7 +222,9 @@ class CrossFormerWithNoiseChannel(CrossFormer):
             x = self.padding_opt.unpad(x)
 
         if self.use_interp:
-            x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
+            x = F.interpolate(
+                x, size=(self.image_height, self.image_width), mode="bilinear"
+            )
 
         x = x.unsqueeze(2)
 
@@ -169,7 +242,9 @@ class NoiseInjection(nn.Module):
     def __init__(self, noise_dim, feature_channels):
         super().__init__()
         self.noise_transform = nn.Linear(noise_dim, feature_channels)
-        self.weight = nn.Parameter(torch.ones(feature_channels))  # Scale parameter for noise
+        self.weight = nn.Parameter(
+            torch.ones(feature_channels)
+        )  # Scale parameter for noise
 
     def forward(self, feature_map, noise):
         # Transform noise to match feature dimensions
@@ -232,7 +307,9 @@ if __name__ == "__main__":
 
     ensemble_model = CrossFormerWithNoise(**crossformer_config).to("cuda")
 
-    x = torch.randn(5, 74, 1, 192, 288).to("cuda")  # (batch size * ensemble size, channels, time, height, width)
+    x = torch.randn(5, 74, 1, 192, 288).to(
+        "cuda"
+    )  # (batch size * ensemble size, channels, time, height, width)
 
     output = ensemble_model(x)
 
