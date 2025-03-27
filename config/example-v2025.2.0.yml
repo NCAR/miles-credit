@@ -202,7 +202,9 @@ trainer:
     ensemble_size: 1  # default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
-    batches_per_epoch: 1000 # Set to 0 to use len(dataloader)
+    # set to 0 to use all available training samples e.g. `len(dataloader)`
+    # if the number is larger than all training samples, all available training samples will be used
+    batches_per_epoch: 1000 
     valid_batches_per_epoch: 20
     # early stopping
     stopping_patience: 50 
