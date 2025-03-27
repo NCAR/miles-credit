@@ -349,7 +349,7 @@ class Objective(BaseObjective):
 
 
 if __name__ == "__main__":
-    description = "Train a segmengation model on a hologram data set"
+    description = "Train an AI model for Numerical Weather Prediction (NWP) using a specified dataset and configuration."
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "-c",
