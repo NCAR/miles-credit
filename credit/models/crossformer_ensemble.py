@@ -6,14 +6,38 @@ import torch
 
 
 class CrossFormerWithNoise(CrossFormer):
+    """
+    CrossFormer variant with pixel-wise noise injection in both encoder and decoder stages.
+
+    Attributes:
+        noise_latent_dim (int): Dimensionality of the noise vector.
+        encoder_noise_factor (float): Initial scaling factor for encoder noise injection.
+        decoder_noise_factor (float): Initial scaling factor for decoder noise injection.
+        encoder_noise (bool): Whether to apply noise injection in the encoder.
+        freeze (bool): Whether to freeze pre-trained model weights.
+    """
+
     def __init__(
         self,
         noise_latent_dim=128,
-        noise_factor=0.275,
+        encoder_noise_factor=0.05,
+        decoder_noise_factor=0.275,
         encoder_noise=True,
         freeze=True,
         **kwargs,
     ):
+        """
+        Initializes the CrossFormerWithNoise model.
+
+        Args:
+            noise_latent_dim (int, optional): Dimensionality of the noise latent space. Defaults to 128.
+            encoder_noise_factor (float, optional): Scaling factor for encoder noise injection. Defaults to 0.05.
+            decoder_noise_factor (float, optional): Scaling factor for decoder noise injection. Defaults to 0.275.
+            encoder_noise (bool, optional): Whether to inject noise into encoder layers. Defaults to True.
+            freeze (bool, optional): Whether to freeze pre-trained model weights. Defaults to True.
+            **kwargs: Additional arguments passed to the CrossFormer base class.
+        """
+
         super().__init__(**kwargs)
         self.noise_latent_dim = noise_latent_dim
 
@@ -27,9 +51,15 @@ class CrossFormerWithNoise(CrossFormer):
             # Define separate learnable noise factors for encoder noise layers
             encoder_noise_factors = nn.ParameterList(
                 [
-                    nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
-                    nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
-                    nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
+                    nn.Parameter(
+                        torch.tensor(encoder_noise_factor, dtype=torch.float32)
+                    ),
+                    nn.Parameter(
+                        torch.tensor(encoder_noise_factor, dtype=torch.float32)
+                    ),
+                    nn.Parameter(
+                        torch.tensor(encoder_noise_factor, dtype=torch.float32)
+                    ),
                 ]
             )
             # Encoder noise injection layers
@@ -56,9 +86,9 @@ class CrossFormerWithNoise(CrossFormer):
         # Define separate learnable noise factors for decoder noise layers
         decoder_noise_factors = nn.ParameterList(
             [
-                nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
-                nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
-                nn.Parameter(torch.tensor(noise_factor, dtype=torch.float32)),
+                nn.Parameter(torch.tensor(decoder_noise_factor, dtype=torch.float32)),
+                nn.Parameter(torch.tensor(decoder_noise_factor, dtype=torch.float32)),
+                nn.Parameter(torch.tensor(decoder_noise_factor, dtype=torch.float32)),
             ]
         )
 
@@ -80,6 +110,17 @@ class CrossFormerWithNoise(CrossFormer):
         )
 
     def forward(self, x, noise=None):
+        """
+        Forward pass through the CrossFormer with noise injection.
+
+        Args:
+            x (Tensor): Input tensor of shape (batch_size, channels, height, width).
+            noise (Tensor, optional): External noise tensor. If None, noise is sampled internally. Defaults to None.
+
+        Returns:
+            Tensor: Output tensor after passing through the model.
+        """
+
         x_copy = None
         if self.use_post_block:
             x_copy = x.clone().detach()
@@ -94,26 +135,27 @@ class CrossFormerWithNoise(CrossFormer):
         else:
             x = x.squeeze(2)
 
-        if noise is None:
-            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
-
         encodings = []
         for k, (cel, transformer) in enumerate(self.layers):
             x = cel(x)
             x = transformer(x)
             if self.encoder_noise and k < len(self.layers) - 1:
-                self.encoder_noise_layers[k](x, noise)
+                noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+                x = self.encoder_noise_layers[k](x, noise)
             encodings.append(x)
 
         x = self.up_block1(x)
+        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
         x = self.noise_inject1(x, noise)
         x = torch.cat([x, encodings[2]], dim=1)
 
         x = self.up_block2(x)
+        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
         x = self.noise_inject2(x, noise)
         x = torch.cat([x, encodings[1]], dim=1)
 
         x = self.up_block3(x)
+        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
         x = self.noise_inject3(x, noise)
         x = torch.cat([x, encodings[0]], dim=1)
 
@@ -140,6 +182,18 @@ class CrossFormerWithNoise(CrossFormer):
 
 
 class PixelNoiseInjection(nn.Module):
+    """
+    A module that injects noise into feature maps, with a per-pixel and per-channel style modulation.
+
+    Attributes:
+        noise_transform (nn.Linear): A linear transformation to map latent noise to the feature map's channels.
+        modulation (nn.Parameter): A learnable scaling factor applied to the noise.
+        noise_factor (float): A scaling factor for controlling the intensity of the injected noise.
+
+    Methods:
+        forward(feature_map, noise): Adds noise to the feature map, modulated by style and the modulation parameter.
+    """
+
     def __init__(self, noise_dim, feature_channels, noise_factor=0.1):
         super().__init__()
         self.noise_transform = nn.Linear(noise_dim, feature_channels)
@@ -147,6 +201,17 @@ class PixelNoiseInjection(nn.Module):
         self.noise_factor = noise_factor
 
     def forward(self, feature_map, noise):
+        """
+        Injects noise into the feature map.
+
+        Args:
+            feature_map (torch.Tensor): The input feature map (batch, channels, height, width).
+            noise (torch.Tensor): The latent noise tensor (batch, noise_dim), used for modulating the injected noise.
+
+        Returns:
+            torch.Tensor: The feature map with injected noise.
+        """
+
         batch, channels, height, width = feature_map.shape
 
         # Generate per-pixel, per-channel noise
@@ -159,98 +224,6 @@ class PixelNoiseInjection(nn.Module):
 
         # Combine style-modulated per-pixel noise with features
         return feature_map + pixel_noise * style * self.modulation
-
-
-class CrossFormerWithNoiseChannel(CrossFormer):
-    def __init__(self, noise_latent_dim=128, initial_coeff=0.1, **kwargs):
-        super().__init__(**kwargs)
-        self.noise_latent_dim = noise_latent_dim
-        self.initial_coeff = initial_coeff
-
-        # Noise injection layers
-        self.noise_inject1 = NoiseInjection(
-            self.noise_latent_dim, self.up_block1.output_channels
-        )
-        self.noise_inject2 = NoiseInjection(
-            self.noise_latent_dim, self.up_block2.output_channels
-        )
-        self.noise_inject3 = NoiseInjection(
-            self.noise_latent_dim, self.up_block3.output_channels
-        )
-
-    def forward(self, x, noise=None):
-        x_copy = None
-        if self.use_post_block:  # copy tensor to feed into postBlock later
-            x_copy = x.clone().detach()
-
-        if self.use_padding:
-            x = self.padding_opt.pad(x)
-
-        if self.patch_width > 1 and self.patch_height > 1:
-            x = self.cube_embedding(x)
-        elif self.frames > 1:
-            x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
-        else:  # case where only using one time-step as input
-            x = x.squeeze(2)
-
-        # Generate random noise if none is provided
-        if noise is None:
-            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
-
-        encodings = []
-        for cel, transformer in self.layers:
-            x = cel(x)
-            x = transformer(x)
-            encodings.append(x)
-
-        # Upsampling with noise injection
-        x = self.up_block1(x)
-        x = self.noise_inject1(x, noise)
-        x = torch.cat([x, encodings[2]], dim=1)
-
-        x = self.up_block2(x)
-        x = self.noise_inject2(x, noise)
-        x = torch.cat([x, encodings[1]], dim=1)
-
-        x = self.up_block3(x)
-        x = self.noise_inject3(x, noise)
-        x = torch.cat([x, encodings[0]], dim=1)
-
-        x = self.up_block4(x)
-
-        if self.use_padding:
-            x = self.padding_opt.unpad(x)
-
-        if self.use_interp:
-            x = F.interpolate(
-                x, size=(self.image_height, self.image_width), mode="bilinear"
-            )
-
-        x = x.unsqueeze(2)
-
-        if self.use_post_block:
-            x = {
-                "y_pred": x,
-                "x": x_copy,
-            }
-            x = self.postblock(x)
-
-        return x
-
-
-class NoiseInjection(nn.Module):
-    def __init__(self, noise_dim, feature_channels):
-        super().__init__()
-        self.noise_transform = nn.Linear(noise_dim, feature_channels)
-        self.weight = nn.Parameter(
-            torch.ones(feature_channels)
-        )  # Scale parameter for noise
-
-    def forward(self, feature_map, noise):
-        # Transform noise to match feature dimensions
-        transformed_noise = self.noise_transform(noise)
-        transformed_noise = transformed_noise.unsqueeze(-1).unsqueeze(-1)  # Broadcast
-        return feature_map + transformed_noise * torch.exp(self.weight)
 
 
 if __name__ == "__main__":
