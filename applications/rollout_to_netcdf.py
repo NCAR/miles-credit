@@ -337,11 +337,11 @@ def predict(rank, world_size, conf, p):
             )
             results.append(result)
 
-            # y_diag is not drawn in predict batcher, if diag is specified in config, it will not be in the input to the model
+            # use `varnum_diag > 0` to check if diagnostic vars exists
             # use previous step y_pred as the next step input
             if history_len == 1:
                 # cut diagnostic vars from y_pred, they are not inputs
-                if "y_diag" in batch:
+                if varnum_diag > 0:
                     x = y_pred[:, :-varnum_diag, ...].detach()
                 else:
                     x = y_pred.detach()
@@ -354,7 +354,7 @@ def predict(rank, world_size, conf, p):
                     x_detach = x[:, :-static_dim_size, 1:, ...].detach()
 
                 # cut diagnostic vars from y_pred, they are not inputs
-                if "y_diag" in batch:
+                if varnum_diag > 0:
                     x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
