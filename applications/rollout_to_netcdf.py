@@ -35,6 +35,11 @@ from credit.parser import credit_main_parser, predict_data_check
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
+#-------- added -----##
+
+from interp import *
+
+#####################
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -110,6 +115,18 @@ class ForecastProcessor:
                 all_upper_air = darray_upper_air
                 all_single_level = darray_single_level
 
+            #changes 29-03-2025
+            #print(all_upper_air.dims, all_single_level.dims)  
+        
+            # print("Coordinates:", all_single_level.coords)
+            # print("Variables:", all_single_level.data_vars)
+        
+            processed_ds = process_credit_output(
+                 all_upper_air=all_upper_air, 
+                all_single_level=all_single_level  # Pass surface data directly
+            )
+            
+            print(processed_ds.dims)
             # Save the current forecast hour data in parallel
             save_netcdf_increment(
                 all_upper_air,
