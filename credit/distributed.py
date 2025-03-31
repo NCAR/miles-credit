@@ -255,8 +255,7 @@ def distributed_model_wrapper(conf, neural_network, device):
         apply_activation_checkpointing(
             model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn
         )
-    if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
-    # attempting to get around the launch issue we are having
-        torch.distributed.barrier()
+
+    torch.distributed.barrier()
 
     return model

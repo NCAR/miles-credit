@@ -17,7 +17,7 @@ CONFIG_FILE_DIR = os.path.join(
 
 def test_unet():
     # load config
-    config = os.path.join(CONFIG_FILE_DIR, "unet_test.yml")
+    config = os.path.join(CONFIG_FILE_DIR, "unet_1dg_test.yml")
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 

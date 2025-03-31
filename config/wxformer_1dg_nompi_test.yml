@@ -169,12 +169,12 @@ predict:
     # save_format: "nc"
 
 pbs: #derecho
-    conda: "/glade/work/ggantos/conda-envs/credit-derecho"
+    conda: "/glade/work/ggantos/conda-envs/credit"
     project: "NAML0001"
     job_name: "wxformer_1h"
     walltime: "00:30:00"
-    nodes: 2
+    nodes: 1
     ncpus: 8
-    ngpus: 2
+    ngpus: 1
     mem: '120GB'
     queue: 'main'

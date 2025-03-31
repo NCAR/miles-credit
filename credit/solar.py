@@ -137,20 +137,49 @@ def get_tsi(timestamps: Sequence, tsi_data: xr.DataArray) -> np.array:
     return np.interp(fractional_year, tsi_data.coords["time"].data, tsi_data.data)
 
 
+def get_toa_radiation(start_date: str, end_date: str, step_freq: str = "1h", sub_freq: str = "10Min"):
+    """
+    Calculate top of atmosphere solar irradiance
+
+    Args:
+        start_date (str): Start date of time series
+        end_date (str): End date of time series (inclusive).
+        step_freq (str): How much time between steps in pandas time string format (e.g., 1h, 10Min)
+        sub_freq (str): How much time between substeps that are integrated forward (e.g., 10Min)
+
+    Returns:
+        top of atmosphere radiation in W m**-2.
+    """
+    start_date_ts = pd.Timestamp(start_date)
+    end_date_ts = pd.Timestamp(end_date)
+    dates = pd.date_range(
+        start=start_date_ts - pd.Timedelta(step_freq) + pd.Timedelta(sub_freq),
+        end=end_date_ts,
+        freq=sub_freq,
+        tz="utc",
+    )
+    total_rad = get_tsi(dates, tsi_data)
+    solar_distance = pvlib.solarposition.nrel_earthsun_distance(dates, how="numba")
+    solar_factor = (1.0 / solar_distance) ** 2
+    return total_rad * solar_factor
+
+
 def get_solar_radiation_loc(
+    toa_radiation: pd.Series,
     lon: float,
     lat: float,
     altitude: float,
     start_date: str,
     end_date: str,
     step_freq: str = "1h",
-    sub_freq: str = "1Min",
-):
+    sub_freq: str = "10Min",
+) -> xr.Dataset:
     """
     Calculate total solar irradiance at a single location over a range of times. Solar irradiance is integrated
     over the step frequency at specified substeps.
 
     Args:
+        toa_radiation (pd.Series): Top of atmosphere solar radiation in W m**-2.
         lon (float): longitude.
         lat (float): latitude.
         altitude (float): altitude in meters.
@@ -173,22 +202,16 @@ def get_solar_radiation_loc(
         freq=sub_freq,
         tz="utc",
     )
-    # total_rad = get_extra_radiation(dates)
-    total_rad = get_tsi(dates, tsi_data)
-    solar_distance = pvlib.solarposition.nrel_earthsun_distance(dates, how="numba")
-    solar_factor = (1.0 / solar_distance) ** 2
     solar_pos = get_solarposition(dates, lat, lon, altitude, method="nrel_numba")
     cos_zenith = np.maximum(0, np.cos(np.radians(solar_pos["zenith"].values)))
-    solar_rad = total_rad * solar_factor * cos_zenith
+    solar_rad = toa_radiation * cos_zenith
 
     step_rad = trapezoid(
         np.reshape(solar_rad, (int(solar_rad.size // step_len), step_len)),
         dx=sub_sec,
         axis=1,
     )
-    step_dates = pd.date_range(
-        start=start_date_ts, end=end_date_ts, freq=step_freq, tz="utc"
-    )
+    step_dates = pd.date_range(start=start_date_ts, end=end_date_ts, freq=step_freq, tz="utc")
     step_cos_zenith = pd.Series(cos_zenith, index=dates)[step_dates]
 
     out_rad_da = xr.DataArray(
@@ -230,10 +253,9 @@ if __name__ == "__main__":
     lats = np.arange(30.0, 35.0, 0.5)
     lon_grid, lat_grid = np.meshgrid(lons, lats)
     solar_ts = []
+    toa_radiation = get_toa_radiation("2016-01-01", "2016-12-31 23:00")
     for lon_val, lat_val in tqdm(zip(lon_grid.ravel(), lat_grid.ravel())):
-        out = get_solar_radiation_loc(
-            lon_val, lat_val, 0.0, "2016-01-01", "2016-12-31 23:00"
-        )
+        out = get_solar_radiation_loc(toa_radiation, lon_val, lat_val, 0.0, "2016-01-01", "2016-12-31 23:00")
         solar_ts.append(out)
     combined = xr.combine_by_coords(solar_ts)
     print(combined)

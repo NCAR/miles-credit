@@ -1,0 +1,20 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) ncarenv/24.12
+Lmod has detected the following error: These module(s) or extension(s) exist
+but cannot be loaded as requested: "cudnn/8.8.1.3-12"
+   Try: "module spider cudnn/8.8.1.3-12" to see how to load the module(s).
+
+
+
+
+CondaError: Run 'conda init' before 'conda activate'
+
+Number of nodes: 2
+Number of GPUs per node: 2
+Total number of GPUs: 4
+nodes: deg0038.hsn.de.hpc.ucar.edu
+Warning: Permanently added the ECDSA host key for IP address '10.14.20.5' to the list of known hosts.
+pbs_attach: process 36174 attached to job: 7895186.desched1
+/var/spool/pbs/mom_priv/jobs/7895186.desched1.SC: line 44: mpiexec: command not found

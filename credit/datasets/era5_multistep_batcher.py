@@ -10,12 +10,13 @@ from queue import Queue
 from threading import Thread
 
 import numpy as np
-import xarray as xr 
+import xarray as xr
 import torch
 from torch.utils.data import DistributedSampler
 
 from credit.data import (
     drop_var_from_dataset,
+    keep_dataset_vars,
     extract_month_day_hour,
     find_common_indices,
     generate_datetime,
@@ -133,6 +134,7 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         # ------------------------------------------------------------------ #
         # blocks that can handle no-sharing (each group has it own file)
         # surface
+        surface_files = None
         if filename_surface is not None:
             surface_files = []
             filename_surface = sorted(filename_surface)
@@ -143,14 +145,15 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
                 for fn in filename_surface:
                     # drop variables if they are not in the config
                     ds = get_forward_data(filename=fn)
-                    ds_surf = drop_var_from_dataset(ds, varname_surface)
+                    ds_surf = keep_dataset_vars(ds, varname_surface)
                     surface_files.append(ds_surf)
 
                 self.surface_files = surface_files
         else:
-            self.surface_files = False
+            self.surface_files = None
 
         # dynamic forcing
+        dyn_forcing_files = None
         if filename_dyn_forcing is not None:
             dyn_forcing_files = []
             filename_dyn_forcing = sorted(filename_dyn_forcing)
@@ -161,14 +164,15 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
                 for fn in filename_dyn_forcing:
                     # drop variables if they are not in the config
                     ds = get_forward_data(filename=fn)
-                    ds_dyn = drop_var_from_dataset(ds, varname_dyn_forcing)
+                    ds_dyn = keep_dataset_vars(ds, varname_dyn_forcing)
                     dyn_forcing_files.append(ds_dyn)
 
                 self.dyn_forcing_files = dyn_forcing_files
         else:
-            self.dyn_forcing_files = False
+            self.dyn_forcing_files = None
 
         # diagnostics
+        diagnostic_files = None
         if filename_diagnostic is not None:
             diagnostic_files = []
             filename_diagnostic = sorted(filename_diagnostic)
@@ -179,30 +183,30 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
                 for fn in filename_diagnostic:
                     # drop variables if they are not in the config
                     ds = get_forward_data(filename=fn)
-                    ds_diag = drop_var_from_dataset(ds, varname_diagnostic)
+                    ds_diag = keep_dataset_vars(ds, varname_diagnostic)
                     diagnostic_files.append(ds_diag)
 
                 self.diagnostic_files = diagnostic_files
         else:
-            self.diagnostic_files = False
+            self.diagnostic_files = None
 
         # ------------------------------------------------------------------ #
         # blocks that can handle file sharing (share with upper air file)
         for fn in filenames:
             # drop variables if they are not in the config
             ds = get_forward_data(filename=fn)
-            ds_upper = drop_var_from_dataset(ds, varname_upper_air)
+            ds_upper = keep_dataset_vars(ds, varname_upper_air)
 
             if flag_share_surf:
-                ds_surf = drop_var_from_dataset(ds, varname_surface)
+                ds_surf = keep_dataset_vars(ds, varname_surface)
                 surface_files.append(ds_surf)
 
             if flag_share_dyn:
-                ds_dyn = drop_var_from_dataset(ds, varname_dyn_forcing)
+                ds_dyn = keep_dataset_vars(ds, varname_dyn_forcing)
                 dyn_forcing_files.append(ds_dyn)
 
             if flag_share_diag:
-                ds_diag = drop_var_from_dataset(ds, varname_diagnostic)
+                ds_diag = keep_dataset_vars(ds, varname_diagnostic)
                 diagnostic_files.append(ds_diag)
 
             all_files.append(ds_upper)
@@ -223,11 +227,11 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         for ind_file, ERA5_xarray in enumerate(self.all_files):
             # [number of samples, ind_start, ind_end]
             self.ERA5_indices[str(ind_file)] = [
-                len(ERA5_xarray["time"]),
+                ERA5_xarray["time"].shape[0],
                 ind_start,
-                ind_start + len(ERA5_xarray["time"]),
+                ind_start + ERA5_xarray["time"].shape[0],
             ]
-            ind_start += len(ERA5_xarray["time"]) + 1
+            ind_start += ERA5_xarray["time"].shape[0] + 1
 
         # ======================================================== #
         # forcing file
@@ -236,11 +240,11 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         if self.filename_forcing is not None:
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_forcing)
-            xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_forcing)
+            xarray_dataset = keep_dataset_vars(xarray_dataset, varname_forcing)
 
             self.xarray_forcing = xarray_dataset
         else:
-            self.xarray_forcing = False
+            self.xarray_forcing = None
 
         # ======================================================== #
         # static file
@@ -249,11 +253,11 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         if self.filename_static is not None:
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_static)
-            xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_static)
+            xarray_dataset = keep_dataset_vars(xarray_dataset, varname_static)
 
             self.xarray_static = xarray_dataset
         else:
-            self.xarray_static = False
+            self.xarray_static = None
 
         self.worker = partial(
             worker,
@@ -288,9 +292,7 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         self.batch_size = batch_size
         self.batch_indices = None  # To track initial indices for each batch item
         self.time_steps = None  # Tracks time steps for each batch index
-        self.forecast_step_counts = (
-            None  # Track forecast step counts for each batch item
-        )
+        self.forecast_step_counts = None  # Track forecast step counts for each batch item
 
         # initialze the batch indices by faking the epoch number here and resetting to None
         # this is mainly a feature for working with smaller datasets / testing purposes
@@ -314,9 +316,7 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
 
         # Set epoch for DistributedSampler to ensure consistent shuffling across devices
         if self.current_epoch is None:
-            logging.warning(
-                "You must first set the epoch number using set_epoch method."
-            )
+            logging.warning("You must first set the epoch number using set_epoch method.")
 
         # Retrieve indices for this GPU
         total_indices = len(self.batch_indices)
@@ -334,10 +334,7 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         else:
             if end > total_indices:
                 # Wrap-around to ensure no index is skipped
-                indices = (
-                    self.batch_indices[start:]
-                    + self.batch_indices[: (end % total_indices)]
-                )
+                indices = self.batch_indices[start:] + self.batch_indices[: (end % total_indices)]
             else:
                 indices = self.batch_indices[start:end]
 
@@ -347,9 +344,7 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
             self.batch_call_count = 0  # Reset for next cycle
 
         # Assign batch indices
-        self.current_batch_indices = list(
-            indices
-        )  # this will be the local indices used in getitem
+        self.current_batch_indices = list(indices)  # this will be the local indices used in getitem
         self.time_steps = [0 for _ in self.batch_indices]
         self.forecast_step_counts = [0 for _ in self.batch_indices]
 
@@ -361,7 +356,7 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         # compute the total number of length
         total_len = 0
         for ERA5_xarray in self.all_files:
-            total_len += len(ERA5_xarray["time"]) - self.total_seq_len + 1
+            total_len += ERA5_xarray["time"].shape[0] - self.total_seq_len + 1
         return total_len
 
     def set_epoch(self, epoch):
@@ -404,15 +399,9 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
                     value = torch.tensor(value)
                 elif isinstance(value, np.int64):  # If it's a numpy scalar (int64)
                     value = torch.tensor(value, dtype=torch.int64)
-                elif isinstance(
-                    value, (int, float)
-                ):  # If it's a native Python scalar (int/float)
-                    value = torch.tensor(
-                        value, dtype=torch.float32
-                    )  # Ensure tensor is float for scalar
-                elif not isinstance(
-                    value, torch.Tensor
-                ):  # If it's not already a tensor
+                elif isinstance(value, (int, float)):  # If it's a native Python scalar (int/float)
+                    value = torch.tensor(value, dtype=torch.float32)  # Ensure tensor is float for scalar
+                elif not isinstance(value, torch.Tensor):  # If it's not already a tensor
                     value = torch.tensor(value)  # Ensure conversion to tensor
 
                 # Convert zero-dimensional tensor (scalar) to 1D tensor
@@ -428,9 +417,7 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
                 if key not in batch:
                     batch[key] = value  # Initialize the key in the batch dictionary
                 else:
-                    batch[key] = torch.cat(
-                        (batch[key], value), dim=0
-                    )  # Concatenate values along the batch dimension
+                    batch[key] = torch.cat((batch[key], value), dim=0)  # Concatenate values along the batch dimension
 
             # Increment time steps and forecast step counts for this batch item
             self.time_steps[k] += 1
@@ -493,9 +480,7 @@ class MultiprocessingBatcher(ERA5_MultiStep_Batcher):
         splits = np.array_split(range(len(args)), self.num_workers)
         start_ends = [(split[0], split[-1] + 1) for split in splits if len(split)]
         for start_idx, end_idx in start_ends:
-            p = multiprocessing.Process(
-                target=worker_process, args=(start_idx, end_idx)
-            )
+            p = multiprocessing.Process(target=worker_process, args=(start_idx, end_idx))
             processes.append(p)
             p.start()
 
@@ -590,9 +575,7 @@ class MultiprocessingBatcherPrefetch(ERA5_MultiStep_Batcher):
         """
         try:
             while not self.stop_signal.is_set():
-                if (
-                    not self.prefetch_queue.full()
-                ):  # Only prefetch if the queue has space
+                if not self.prefetch_queue.full():  # Only prefetch if the queue has space
                     try:
                         batch = self._fetch_batch()
                         self.prefetch_queue.put(batch)  # Add batch to the queue
@@ -630,8 +613,6 @@ class MultiprocessingBatcherPrefetch(ERA5_MultiStep_Batcher):
                 logger.info("Initiating shutdown sequence.")
                 self.shutdown()
             return
-        except:  # This is here to catch the workers that may not have died
-            raise RuntimeError(f"Error in worker process for index {k}")
 
     def _fetch_batch(self):
         """
@@ -640,10 +621,7 @@ class MultiprocessingBatcherPrefetch(ERA5_MultiStep_Batcher):
         batch = {}
 
         # Reset items if forecast step count exceeds forecast length
-        if (
-            self.forecast_step_counts[0] == self.forecast_len + 1
-            or self.batch_indices is None
-        ):
+        if self.forecast_step_counts[0] == self.forecast_len + 1 or self.batch_indices is None:
             self.initialize_batch()
 
         # Prepare arguments for processing
@@ -655,18 +633,14 @@ class MultiprocessingBatcherPrefetch(ERA5_MultiStep_Batcher):
 
         # Split tasks among workers (efficient chunking)
         chunk_size = max(1, len(tasks) // self.num_workers)
-        task_chunks = [
-            tasks[i : i + chunk_size] for i in range(0, len(tasks), chunk_size)
-        ]
+        task_chunks = [tasks[i : i + chunk_size] for i in range(0, len(tasks), chunk_size)]
 
         # Shared dictionary to collect results from workers
         results = self.results
 
         processes = []
         for chunk in task_chunks:
-            p = multiprocessing.Process(
-                target=self._process_chunk, args=(chunk, results)
-            )
+            p = multiprocessing.Process(target=self._process_chunk, args=(chunk, results))
             processes.append(p)
             p.start()
 
@@ -865,6 +839,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
 
         # blocks that can handle no-sharing (each group has it own file)
         # surface
+        surface_files = None
         if filename_surface is not None:
             surface_files = []
             filename_surface = sorted(filename_surface)
@@ -875,14 +850,15 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 for fn in filename_surface:
                     # drop variables if they are not in the config
                     ds = get_forward_data(filename=fn)
-                    ds_surf = drop_var_from_dataset(ds, varname_surface)
+                    ds_surf = keep_dataset_vars(ds, varname_surface)
                     surface_files.append(ds_surf)
 
                 self.surface_files = surface_files
         else:
-            self.surface_files = False
+            self.surface_files = None
 
         # dynamic forcing
+        dyn_forcing_files = None
         if filename_dyn_forcing is not None:
             dyn_forcing_files = []
             filename_dyn_forcing = sorted(filename_dyn_forcing)
@@ -893,14 +869,15 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 for fn in filename_dyn_forcing:
                     # drop variables if they are not in the config
                     ds = get_forward_data(filename=fn)
-                    ds_dyn = drop_var_from_dataset(ds, varname_dyn_forcing)
+                    ds_dyn = keep_dataset_vars(ds, varname_dyn_forcing)
                     dyn_forcing_files.append(ds_dyn)
 
                 self.dyn_forcing_files = dyn_forcing_files
         else:
-            self.dyn_forcing_files = False
+            self.dyn_forcing_files = None
 
         # diagnostics
+        diagnostic_files = None
         if filename_diagnostic is not None:
             diagnostic_files = []
             filename_diagnostic = sorted(filename_diagnostic)
@@ -911,7 +888,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 for fn in filename_diagnostic:
                     # drop variables if they are not in the config
                     ds = get_forward_data(filename=fn)
-                    ds_diag = drop_var_from_dataset(ds, varname_diagnostic)
+                    ds_diag = keep_dataset_vars(ds, varname_diagnostic)
                     diagnostic_files.append(ds_diag)
 
                 self.diagnostic_files = diagnostic_files
@@ -922,18 +899,18 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         for fn in filenames:
             # drop variables if they are not in the config
             ds = get_forward_data(filename=fn)
-            ds_upper = drop_var_from_dataset(ds, varname_upper_air)
+            ds_upper = keep_dataset_vars(ds, varname_upper_air)
 
             if flag_share_surf:
-                ds_surf = drop_var_from_dataset(ds, varname_surface)
+                ds_surf = keep_dataset_vars(ds, varname_surface)
                 surface_files.append(ds_surf)
 
             if flag_share_dyn:
-                ds_dyn = drop_var_from_dataset(ds, varname_dyn_forcing)
+                ds_dyn = keep_dataset_vars(ds, varname_dyn_forcing)
                 dyn_forcing_files.append(ds_dyn)
 
             if flag_share_diag:
-                ds_diag = drop_var_from_dataset(ds, varname_diagnostic)
+                ds_diag = keep_dataset_vars(ds, varname_diagnostic)
                 diagnostic_files.append(ds_diag)
 
             all_files.append(ds_upper)
@@ -968,11 +945,11 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         for ind_file, ERA5_xarray in enumerate(self.all_files):
             # [number of samples, ind_start, ind_end]
             self.ERA5_indices[str(ind_file)] = [
-                len(ERA5_xarray["time"]),
+                ERA5_xarray["time"].shape[0],
                 ind_start,
-                ind_start + len(ERA5_xarray["time"]),
+                ind_start + ERA5_xarray["time"].shape[0],
             ]
-            ind_start += len(ERA5_xarray["time"]) + 1
+            ind_start += ERA5_xarray["time"].shape[0] + 1
 
         # forcing file
         self.filename_forcing = filename_forcing
@@ -980,11 +957,11 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         if self.filename_forcing is not None:
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_forcing)
-            xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_forcing)
+            xarray_dataset = keep_dataset_vars(xarray_dataset, varname_forcing)
 
             self.xarray_forcing = xarray_dataset
         else:
-            self.xarray_forcing = False
+            self.xarray_forcing = None
 
         # static file
         self.filename_static = filename_static
@@ -992,21 +969,17 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         if self.filename_static is not None:
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_static)
-            xarray_dataset = drop_var_from_dataset(xarray_dataset, varname_static)
+            xarray_dataset = keep_dataset_vars(xarray_dataset, varname_static)
 
-            self.xarray_static = xarray_dataset
+            self.xarray_static = xarray_dataset.load()
         else:
-            self.xarray_static = False
+            self.xarray_static = None
 
         # Initialize the first forecast so we can get the forecast_len
         # which up to here is not defined. Needed in __len__ so DataLoader knows when to stop
         # convert to datetime object
-        fcst_datetime_0 = datetime.strptime(
-            self.init_datetime[0][0], "%Y-%m-%d %H:%M:%S"
-        )
-        fcst_datetime_1 = datetime.strptime(
-            self.init_datetime[0][1], "%Y-%m-%d %H:%M:%S"
-        )
+        fcst_datetime_0 = datetime.strptime(self.init_datetime[0][0], "%Y-%m-%d %H:%M:%S")
+        fcst_datetime_1 = datetime.strptime(self.init_datetime[0][1], "%Y-%m-%d %H:%M:%S")
         # convert the 1st & last init times to a list of init times
         self.forecast_period = len(
             generate_datetime(
@@ -1015,14 +988,10 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 self.lead_time_periods,
             )
         )
-        self.forecast_len = (
-            self.forecast_period - 1
-        )  # For consistency with other datasets that use  forecast_len
+        self.forecast_len = self.forecast_period - 1  # For consistency with other datasets that use  forecast_len
         # logger.info(f'rank={self.rank} {self.forecast_period=:} {self.forecast_len=:}')
 
-        all_indices_splits = torch.tensor_split(
-            torch.arange(len(self.init_datetime)), world_size
-        )
+        all_indices_splits = torch.tensor_split(torch.arange(len(self.init_datetime)), world_size)
         self.batch_indices = all_indices_splits[rank].long()
         self.batch_indices_splits = []
         total_indices = len(self.batch_indices)
@@ -1047,73 +1016,87 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         sliced_x = drop_var_from_dataset(sliced_x, varnames)
         return sliced_x
 
+    def get_time_variable(self, filename, time_start, time_end) -> xr.Dataset:
+        """
+        Open NetCDF or Zarr file and return only the time variable.
+        """
+        if filename.endswith((".nc", ".nc4")):
+            dataset = xr.open_dataset(filename, decode_times=False, engine="h5netcdf")
+        else:
+            dataset = xr.open_zarr(filename, consolidated=True)
+        
+        dataset = dataset.drop_vars(list(dataset.data_vars))
+        dataset = dataset.isel(time=slice(time_start, time_end))
+        
+        return dataset
+
     def load_zarr_as_input(self, i_file, i_init_start, i_init_end, mode="input"):
         # get the needed file from a list of zarr files
         # open the zarr file as xr.dataset and subset based on the needed time
+        # if mode == "forcing":
+        #     sliced_x = self.get_time_variable(self.filenames[i_file], i_init_start, i_init_end + 1)
+        sliced_x = self.all_files[i_file]["time"][i_init_start : i_init_end + 1]
+        if mode in ["input", "target"]:
+            # sliced_x: the final output, starts with an upper air xr.dataset
+            # sliced_x = self.ds_read_and_subset(
+            #     self.filenames[i_file], i_init_start, i_init_end + 1, self.varname_upper_air
+            # )
+            sliced_x = self.all_files[i_file].isel(time=slice(i_init_start, i_init_end + 1)).load()
+            # surface variables
+            if self.filename_surface is not None:
+                # sliced_surface = self.ds_read_and_subset(
+                #    self.filename_surface[i_file],
+                #    i_init_start,
+                #    i_init_end + 1,
+                #    self.varname_surface,
+                # )
+                # merge surface to sliced_x
+                sliced_surface = self.surface_files[i_file].isel(time=slice(i_init_start, i_init_end + 1)).load()
+                # sliced_surface["time"] = sliced_x["time"]
+                sliced_x = sliced_x.merge(sliced_surface)
 
-        # sliced_x: the final output, starts with an upper air xr.dataset
-        sliced_x = self.ds_read_and_subset(
-            self.filenames[i_file], i_init_start, i_init_end + 1, self.varname_upper_air
-        )
-        # surface variables
-        if self.filename_surface is not None:
-            sliced_surface = self.ds_read_and_subset(
-                self.filename_surface[i_file],
-                i_init_start,
-                i_init_end + 1,
-                self.varname_surface,
-            )
-            # merge surface to sliced_x
-            sliced_surface["time"] = sliced_x["time"]
-            sliced_x = sliced_x.merge(sliced_surface)
-
-        if mode == "input":
+        if mode in ["input", "forcing"]:
             # dynamic forcing variables
             if self.filename_dyn_forcing is not None:
-                sliced_dyn_forcing = self.ds_read_and_subset(
-                    self.filename_dyn_forcing[i_file],
-                    i_init_start,
-                    i_init_end + 1,
-                    self.varname_dyn_forcing,
+                sliced_dyn_forcing = (
+                    self.dyn_forcing_files[i_file].isel(time=slice(i_init_start, i_init_end + 1)).load()
                 )
+                # sliced_dyn_forcing = self.ds_read_and_subset(
+                #    self.filename_dyn_forcing[i_file],
+                #    i_init_start,
+                #    i_init_end + 1,
+                #    self.varname_dyn_forcing,
+                # )
                 # merge surface to sliced_x
                 sliced_dyn_forcing["time"] = sliced_x["time"]
-                sliced_x = sliced_x.merge(sliced_dyn_forcing)
+                if mode == "forcing":
+                    sliced_x = sliced_dyn_forcing
+                else:
+                    sliced_x = sliced_x.merge(sliced_dyn_forcing)
 
-            # forcing / static
+            # forcing / periodic static
             if self.filename_forcing is not None:
-                sliced_forcing = get_forward_data(self.filename_forcing)
-                sliced_forcing = drop_var_from_dataset(
-                    sliced_forcing, self.varname_forcing
-                )
-
+                sliced_forcing = self.xarray_forcing
                 # See also `ERA5_and_Forcing_Dataset`
                 # matching month, day, hour between forcing and upper air [time]
                 # this approach handles leap year forcing file and non-leap-year upper air file
-                month_day_forcing = extract_month_day_hour(
-                    np.array(sliced_forcing["time"])
-                )
+                month_day_forcing = extract_month_day_hour(np.array(sliced_forcing["time"]))
                 month_day_inputs = extract_month_day_hour(np.array(sliced_x["time"]))
                 # indices to subset
-                ind_forcing, _ = find_common_indices(
-                    month_day_forcing, month_day_inputs
-                )
-                sliced_forcing = sliced_forcing.isel(time=ind_forcing)
+                ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
+                sliced_forcing = sliced_forcing.isel(time=ind_forcing).load()
                 # forcing and upper air have different years but the same mon/day/hour
                 # safely replace forcing time with upper air time
                 sliced_forcing["time"] = sliced_x["time"]
-
+                
                 # merge forcing to sliced_x
                 sliced_x = sliced_x.merge(sliced_forcing)
-
+                
             if self.filename_static is not None:
-                sliced_static = get_forward_data(self.filename_static)
-                sliced_static = drop_var_from_dataset(
-                    sliced_static, self.varname_static
-                )
-                sliced_static = sliced_static.expand_dims(
-                    dim={"time": len(sliced_x["time"])}
-                )
+                # sliced_static = get_forward_data(self.filename_static)
+                # sliced_static = drop_var_from_dataset(sliced_static, self.varname_static)
+                sliced_static = self.xarray_static
+                sliced_static = sliced_static.expand_dims(dim={"time": sliced_x["time"].shape[0]})
                 sliced_static["time"] = sliced_x["time"]
                 # merge static to sliced_x
                 sliced_x = sliced_x.merge(sliced_static)
@@ -1134,20 +1117,18 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         return sliced_x
 
     def find_start_stop_indices(self, index):
-        # shift hours for history_len > 1, becuase more than one init times are needed
+        # shift hours for history_len > 1, because more than one init times are needed
         # <--- !! it MAY NOT work when self.skip_period != 1
-        shifted_hours = (
-            self.lead_time_periods * self.skip_periods * (self.history_len - 1)
-        )
+        shifted_hours = self.lead_time_periods * self.skip_periods * (self.history_len - 1)
 
         # subtrack shifted_hour form the 1st & last init times
         # convert to datetime object
-        self.init_datetime[index][0] = datetime.strptime(
-            self.init_datetime[index][0], "%Y-%m-%d %H:%M:%S"
-        ) - timedelta(hours=shifted_hours)
-        self.init_datetime[index][1] = datetime.strptime(
-            self.init_datetime[index][1], "%Y-%m-%d %H:%M:%S"
-        ) - timedelta(hours=shifted_hours)
+        self.init_datetime[index][0] = datetime.strptime(self.init_datetime[index][0], "%Y-%m-%d %H:%M:%S") - timedelta(
+            hours=shifted_hours
+        )
+        self.init_datetime[index][1] = datetime.strptime(self.init_datetime[index][1], "%Y-%m-%d %H:%M:%S") - timedelta(
+            hours=shifted_hours
+        )
 
         # convert the 1st & last init times to a list of init times
         self.init_datetime[index] = generate_datetime(
@@ -1156,17 +1137,13 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             self.lead_time_periods,
         )
         # convert datetime obj to nanosecondes
-        init_time_list_dt = [
-            np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S"))
-            for date in self.init_datetime[index]
-        ]
+        init_time_list_dt = [np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S")) for date in self.init_datetime[index]]
 
         # init_time_list_np: a list of python datetime objects, each is a forecast step
         # init_time_list_np[0]: the first initialization time
         # init_time_list_np[t]: the forcasted time of the (t-1)th step; the initialization time of the t-th step
         self.init_time_list_np = [
-            np.datetime64(str(dt_obj) + ".000000000").astype(datetime)
-            for dt_obj in init_time_list_dt
+            np.datetime64(str(dt_obj) + ".000000000").astype(datetime) for dt_obj in init_time_list_dt
         ]
 
         info = []
@@ -1174,13 +1151,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             for i_file, ds in enumerate(self.all_files):
                 # get the year of the current file
                 # looks messy because extra code needed to handle cftime
-                ds_year = int(
-                    (
-                        np.datetime_as_string(
-                            ds["time"][0].astype("datetime64[ns]").values, unit="Y"
-                        )
-                    )
-                )
+                ds_year = int((np.datetime_as_string(ds["time"][0].astype("datetime64[ns]").values, unit="Y")))
 
                 # get the first and last years of init times
                 init_year0 = nanoseconds_to_year(init_time)
@@ -1189,10 +1160,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 if init_year0 == ds_year:
                     N_times = len(ds["time"])
                     # convert ds['time'] to a list of nanosecondes
-                    ds_time_list = [
-                        ds_time.astype("datetime64[ns]").values.astype(datetime)
-                        for ds_time in ds["time"]
-                    ]
+                    ds_time_list = [ds_time.astype("datetime64[ns]").values.astype(datetime) for ds_time in ds["time"]]
                     ds_start_time = ds_time_list[0]
                     ds_end_time = ds_time_list[-1]
 
@@ -1203,9 +1171,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                         i_init_start = ds_time_list.index(init_time_start)
 
                         # for multiple init time inputs (history_len > 1), init_end is different for init_start
-                        init_time_end = init_time_start + hour_to_nanoseconds(
-                            shifted_hours
-                        )
+                        init_time_end = init_time_start + hour_to_nanoseconds(shifted_hours)
 
                         # see if init_time_end is alos in this file
                         if ds_start_time <= init_time_end <= ds_end_time:
@@ -1231,9 +1197,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
 
         indices = self.batch_indices_splits[self.batch_call_count]
         # Assign batch indices
-        self.current_batch_indices = list(
-            indices
-        )  # this will be the local indices used in getitem
+        self.current_batch_indices = list(indices)  # this will be the local indices used in getitem
         self.time_steps = [0] * len(self.current_batch_indices)
         self.forecast_step_counts = [0] * len(self.current_batch_indices)
 
@@ -1247,14 +1211,15 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
     def __getitem__(self, _):
         batch = {}
 
-        # logger.info(f'rank={self.rank} current_idx={self.current_batch_indices} all_indices={self.batch_indices}')
+        # logger.info(f"rank={self.rank} current_idx={self.current_batch_indices} all_indices={self.batch_indices}")
         if self.forecast_step_counts[0] == self.forecast_period:
             self.initialize_batch()
 
         if self.forecast_step_counts[0] == 0:
-            self.data_lookup = [
-                self.find_start_stop_indices(idx) for idx in self.current_batch_indices
-            ]
+            self.data_lookup = [self.find_start_stop_indices(idx) for idx in self.current_batch_indices]
+            mode = "input"
+        else:
+            mode = "forcing"
 
         for k, idx in enumerate(self.current_batch_indices):
             # Get data for current timestep
@@ -1262,39 +1227,24 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             i_file, i_init_start, i_init_end, N_times = self.data_lookup[k][current_t]
 
             # Load input data
-            sliced_x = self.load_zarr_as_input(
-                i_file, i_init_start, i_init_end, mode="input"
-            )
-
+            sliced_x = self.load_zarr_as_input(i_file, i_init_start, i_init_end, mode=mode)
             # Handle cross-file data if needed
-            if (len(sliced_x["time"]) < self.history_len) or (
-                i_init_end + 1 >= N_times
-            ):
+            if (len(sliced_x["time"]) < self.history_len) or (i_init_end + 1 >= N_times):
                 next_file_idx = self.filenames.index(self.filenames[i_file]) + 1
                 if next_file_idx >= len(self.filenames):
                     raise OSError("End of available data reached.")
                 # Input data
-                sliced_x_next = self.load_zarr_as_input(
-                    next_file_idx, 0, self.history_len, mode="input"
-                )
-                sliced_x = xr.concat([sliced_x, sliced_x_next], dim="time").isel(
-                    time=slice(0, self.history_len)
-                )
+                sliced_x_next = self.load_zarr_as_input(next_file_idx, 0, self.history_len, mode=mode)
+                sliced_x = xr.concat([sliced_x, sliced_x_next], dim="time").isel(time=slice(0, self.history_len))
                 # Truth data
                 if not self.skip_target:
-                    sliced_y = self.load_zarr_as_input(
-                        i_file, i_init_end, i_init_end, mode="target"
-                    )
-                    sliced_y_next = self.load_zarr_as_input(
-                        next_file_idx, 0, 1, mode="target"
-                    )
+                    sliced_y = self.load_zarr_as_input(i_file, i_init_end, i_init_end, mode="target")
+                    sliced_y_next = self.load_zarr_as_input(next_file_idx, 0, 1, mode="target")
                     sliced_y = xr.concat([sliced_y, sliced_y_next], dim="time").isel(
                         time=slice(self.history_len, self.history_len + 1)
                     )
             elif not self.skip_target:
-                sliced_y = self.load_zarr_as_input(
-                    i_file, i_init_end + 1, i_init_end + 1, mode="target"
-                )
+                sliced_y = self.load_zarr_as_input(i_file, i_init_end + 1, i_init_end + 1, mode="target")
 
             # Transform data
             sample = {"historical_ERA5_images": sliced_x}
@@ -1305,9 +1255,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
 
             # Add metadata
             sample["index"] = idx + current_t
-            sample["datetime"] = sliced_x.time.values.astype("datetime64[s]").astype(
-                int
-            )[-1]
+            sample["datetime"] = sliced_x.time.values.astype("datetime64[s]").astype(int)[-1]
 
             # Convert and add to batch
             for key, value in sample.items():
@@ -1366,14 +1314,10 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger(__name__)  # Create a logger with the module name
 
-    with open(
-        "/glade/derecho/scratch/schreck/repos/miles-credit/production/multistep/wxformer_6h/model.yml"
-    ) as cf:
+    with open("/glade/derecho/scratch/schreck/repos/miles-credit/production/multistep/wxformer_6h/model.yml") as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = credit_main_parser(
-        conf, parse_training=True, parse_predict=False, print_summary=False
-    )
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
     training_data_check(conf, print_summary=False)
     data_config = setup_data_loading(conf)
 

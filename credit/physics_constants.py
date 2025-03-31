@@ -11,7 +11,7 @@ from math import pi
 PI = pi
 
 # Earth's radius
-RAD_EARTH = 6.37122e6 # m
+RAD_EARTH = 6371000 # m
 
 # Earth's rate of rotation 
 OMEGA = 7.292e-5 # radians/s

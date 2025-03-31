@@ -10,16 +10,17 @@ If you are interested in using or contributing to CREDIT, please reach out to Da
 Currently, the framework for running miles-credit in parallel is centered around NSF NCAR's Derecho HPC. Derecho requires building several miles-credit dependent packages locally, including PyTorch, to enable correct MPI configuration. To begin, create a clone of the pre-built miles-credit environment, which contains compatiable versions of torch, torch-vision, numpy, and others. 
 
 ```bash
-module purge 
+module --force purge 
 module load ncarenv/23.09 gcc/12.2.0 ncarcompilers cray-mpich/8.1.27 cuda/12.2.1 cudnn/8.8.1.3-12 conda/latest
-conda create --name credit-derecho --clone /glade/derecho/scratch/benkirk/derecho-pytorch-mpi/envs/credit-pytorch-v2.3.1-derecho-gcc-12.2.0-cray-mpich-8.1.27
+mamba create --name credit-derecho --clone /glade/derecho/scratch/benkirk/derecho-pytorch-mpi/envs/credit-pytorch-v2.3.1-derecho-gcc-12.2.0-cray-mpich-8.1.27
 ```
 
 Going forward, care must be taken when installing new packages so that PyTorch and the other relevant miles-credit dependencies are not overridden. Next, grab the most updated version of miles-credit from github (assuming no changes to the local-build dependencies):
 
 ```bash
 conda activate credit-derecho
-git clone git@github.com:NCAR/miles-credit.git
+# needed an sshkey to use this command: git clone git@github.com:NCAR/miles-credit.git
+git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 ```
 
@@ -31,10 +32,13 @@ pip install --no-deps .
 
 Henceforth, when adding new packages aim to use the no dependenices option. 
 
+To test your Derecho installation, skip to [Launch with PBS on Casper or Derecho](#launch-with-pbs-on-casper-or-derecho).
+
 ## Standard Installation 
 Clone from miles-credit github page:
 ```bash
-git clone git@github.com:NCAR/miles-credit.git
+# needed an sshkey to use this command: git clone git@github.com:NCAR/miles-credit.git
+git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 ```
 

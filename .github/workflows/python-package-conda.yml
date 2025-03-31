@@ -10,20 +10,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: mamba-org/setup-micromamba@v1
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          environment-file: environment_cpu.yml
-      - shell: bash -l {0}
-        run: |
-          conda info
-          conda list
-          conda config --show-sources
-          conda config --show
-          printenv | sort
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        run: | 
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install . 
+          pip install flake8 pytest pytest-cov
       - name: Lint with ruff
-        shell: bash -l {0}
         run: |
-          micromamba install ruff
           # stop the build if there are Python syntax errors or undefined names
           ruff check --select=E9,F63,F7,F82 --exit-zero
           # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
@@ -31,7 +30,11 @@ jobs:
           # Checking documentation errors
           ruff check  --select=D  --exit-zero --statistics 
       - name: Test with pytest
-        shell: bash -l {0}
         run: |
-          pip install pytest pytest-cov
-          pytest tests/ --junitxml=junit/test-results.xml --cov=com --cov-report=xml --cov-report=html
+          pytest
+          pytest --cov=credit tests/ | tee pytest-coverage.txt
+      - name: Pytest coverage comment
+        uses: MishaKav/pytest-coverage-comment@main
+        with:
+          pytest-coverage-path: ./pytest-coverage.txt
+

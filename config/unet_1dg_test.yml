@@ -4,32 +4,32 @@
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/$USER/CREDIT_runs/prod_1dg_cesm_unet/'
+save_loc: '/glade/work/$USER/CREDIT_runs/unet_1dg/'
 seed: 1000
 
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/coarse_climate/f.e21.CREDIT_climate_*_coarse.zarr'
+    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
     
     # surface variables
-    surface_variables: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/coarse_climate/f.e21.CREDIT_climate_*_coarse.zarr'
+    surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/coarse_climate/f.e21.CREDIT_climate_*_coarse.zarr'
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
     
     # static variables
     static_variables: ['Z_GDS4_SFC','LSM'] 
-    save_loc_static: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_onedeg.nc'
+    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/static/ERA5_mlevel_cesm_static.zarr'
     
     # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
+    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/mean_6h_1979_2018_cesm.nc'
     # regular z-score version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
+    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/std_6h_1979_2018_cesm.nc'
     # residual norm version
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/std_residual_6h_1979_2018_cesm.nc'
     
     # train / validation split
     train_years: [1979, 2018]
@@ -39,8 +39,8 @@ data:
     scaler_type: 'std_new'
     
     # state-in-state-out
-    history_len: 2
-    valid_history_len: 2
+    history_len: 1
+    valid_history_len: 1
     
     forecast_len: 0
     valid_forecast_len: 0
@@ -48,7 +48,7 @@ data:
     one_shot: True
     
     # 1 for hourly model
-    lead_time_periods: 1
+    lead_time_periods: 6
     
     # do not use skip_period
     skip_periods: null
@@ -56,20 +56,20 @@ data:
     # compatible with the old 'std'
     static_first: True
 
-    sst_forcing:
-        activate: False
+    dataset_type: ERA5_MultiStep_Batcher # ERA5_and_Forcing_MultiStep MultiprocessingBatcherPrefetch ERA5_MultiStep_Batcher MultiprocessingBatcher
+    
     
 trainer:
-    type: standard # <---------- change to your type
+    type: era5
 
-    mode: none
+    mode: ddp
     cpu_offload: False
     activation_checkpoint: True
     
     load_weights: False
     load_optimizer: False
     load_scaler: False
-    load_sheduler: False
+    load_scheduler: False
 
     skip_validation: False
     update_learning_rate: False
@@ -80,16 +80,16 @@ trainer:
     learning_rate: 1.0e-03 # <-- change to your lr
     weight_decay: 0
     
-    train_batch_size: 1
-    valid_batch_size: 1
+    train_batch_size: 8
+    valid_batch_size: 8
     
-    batches_per_epoch: 1 # Total number of samples = 341,880  
-    valid_batches_per_epoch: 1
+    batches_per_epoch: 0 # Total number of samples = 341,880  (1h) ~56,960 (6h)
+    valid_batches_per_epoch: 100
     stopping_patience: 999
     
     start_epoch: 0
-    num_epoch: 1
-    reload_epoch: True
+    num_epoch: 5
+    reload_epoch: False
     epochs: &epochs 70
      
     use_scheduler: True
@@ -101,14 +101,15 @@ trainer:
     # rescale loss as loss = loss / grad_accum_every
     grad_accum_every: 1 
     # gradient clipping
-    grad_max_norm: 1.0
+    grad_max_norm: 'dynamic'
     
     # number of workers
     thread_workers: 4
-    valid_thread_workers: 0
+    valid_thread_workers: 4
 
     # compile 
     # compile: True
+    prefetch_factor: 4
   
 model:
     type: "unet"
@@ -155,6 +156,9 @@ loss:
     use_variable_weights: False
     
 predict:
+    mode: ddp
+    batch_size: 8
+    ensemble_size: 1
     forecasts:
         type: "custom"       # keep it as "custom"
         start_year: 2020     # year of the first initialization (where rollout will start)
@@ -166,7 +170,7 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
         
-    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/wxformer_1h/'
+    save_forecast: '/glade/work/$USER/CREDIT_runs/unet_1dg/'
     save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
     
     # turn-off low-pass filter

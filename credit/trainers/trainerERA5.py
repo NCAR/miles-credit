@@ -296,6 +296,11 @@ class Trainer(BaseTrainer):
                 if stop_forecast:
                     break
 
+                # Discard current computational graph, which still 
+                # exists (through y_pred reference) if `forecast_step` not in `backprop_on_timestep`
+                if not retain_graph:
+                    y_pred = y_pred.detach()
+                
                 # step-in-step-out
                 if x.shape[2] == 1:
                     # cut diagnostic vars from y_pred, they are not inputs
@@ -340,7 +345,8 @@ class Trainer(BaseTrainer):
                 )
 
                 # All-reduce to get global norm across ranks
-                dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
+                if distributed:
+                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
                 global_norm = local_norm.sqrt()  # Compute total global norm
 
                 # Clip gradients using the global norm

@@ -10,7 +10,11 @@ def test_full_state_pressure_interpolation():
     ds = xr.open_dataset(input_file)
     pressure_levels = np.array([200.0, 500.0, 700.0, 850.0, 1000.0])
     interp_ds = full_state_pressure_interpolation(
-        ds, pressure_levels=pressure_levels, lat_var="lat", lon_var="lon"
+        ds,
+        ds["Z_GDS4_SFC"].values,
+        pressure_levels=pressure_levels,
+        lat_var="lat",
+        lon_var="lon",
     )
     for var in ["U", "V", "T", "Q"]:
         assert (

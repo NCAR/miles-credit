@@ -3,7 +3,7 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "credit"
+name = "miles-credit"
 authors = [{name = "NCAR Machine Integration and Learning for Earth Systems (MILES)", email = "miles@ucar.edu"}]
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -30,21 +30,20 @@ dependencies = [
     "einops",
     "echo-opt",
     "bridgescaler",
-    "rotary-embedding-torch",
     "segmentation-models-pytorch",
-    "vector-quantize-pytorch",
     "haversine",
     "pvlib",
-    "geocat-comp",
     "torch-harmonics",
     "torch_geometric",
-    "sphinx",
+    "pre-commit",
+    "ruff"
    ]
 
 [project.optional-dependencies]
 docs = ["sphinx",
         "sphinx-autoapi",
-        "myst_parser"]
+        "myst_parser",
+        "sphinx-book-theme"]
 
 [tool.setuptools]
 packages = ["credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
@@ -54,6 +53,10 @@ version = {file = "credit/VERSION"}
 
 [tool.ruff]
 src = ["credit", "applications", "tests"]
+line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
+"*.ipynb" = ["E402"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
