@@ -23,6 +23,7 @@ from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 
 from credit.seed import seed_everything
 from credit.loss import VariableTotalLoss2D
+from credit.loss_downscaling import DownscalingLoss
 
 from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
@@ -272,6 +273,8 @@ def main(rank, world_size, conf, backend, trial=False):
         Any: The result of the training process.
     """
 
+    is_downscaling = 'datasets' in conf['data']
+    
     # convert $USER to the actual user name
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
@@ -324,8 +327,12 @@ def main(rank, world_size, conf, backend, trial=False):
     )
 
     # Train and validation losses
-    train_criterion = VariableTotalLoss2D(conf)
-    valid_criterion = VariableTotalLoss2D(conf, validation=True)
+    if is_downscaling:
+        train_criterion = DownscalingLoss(conf, train_dataset.tnames)
+        valid_criterion = DownscalingLoss(conf, valid_dataset.tnames, validation=True)
+    else:
+        train_criterion = VariableTotalLoss2D(conf)
+        valid_criterion = VariableTotalLoss2D(conf, validation=True)
 
     # Set up some metrics
     metrics = LatWeightedMetrics(conf)
