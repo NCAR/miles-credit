@@ -4,17 +4,17 @@
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask inputs
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/ksha/CREDIT_runs/fuxi_6h/'
+save_loc: '/glade/work/sakor/credit_arxiv_models/fuxi_6h/'
 seed: 1000
 
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/derecho/scratch/wchapman/SixHourly_y_TOTAL*'
+    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL*'
     
     # surface variables
     surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/derecho/scratch/wchapman/SixHourly_y_TOTAL*'
+    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL*'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
@@ -170,13 +170,14 @@ predict:
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 30         # number of days to initialize, starting from the (year, mon, day) above
+        duration: 3         # number of days to initialize, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
-        
-    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/fuxi_6h/'
-    save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    
+    metadata: '/glade/work/sakor/miles-credit/credit/metadata/era5.yaml'
+    save_forecast: '/glade/work/sakor/CREDIT/fuxi_6h/'
+    #save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
     
     # turn-off low-pass filter
     use_laplace_filter: False
