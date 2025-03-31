@@ -520,7 +520,7 @@ if __name__ == "__main__":
     seed = conf["seed"]
     seed_everything(seed)
 
-    local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
 
     with mp.Pool(num_cpus) as p:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference

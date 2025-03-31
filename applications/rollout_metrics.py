@@ -61,7 +61,7 @@ def compute_metrics(metrics, y_pred, y, date_time, forecast_step, utc_datetime):
 def predict(rank, world_size, conf, backend=None, p=None):
     # setup rank and world size for GPU-based rollout
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
-        setup(rank, world_size, conf["trainer"]["mode"], backend)
+        setup(rank, world_size, conf["predict"]["mode"], backend)
 
     # infer device id from rank
     if torch.cuda.is_available():
@@ -266,7 +266,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             if flag_clamp:
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-            y_pred = model(x)
+            y_pred = model(x.float())
 
             # Post-processing blocks
             if flag_mass_conserve:
@@ -518,7 +518,7 @@ if __name__ == "__main__":
 
     with mp.Pool(num_cpus) as p:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
-            local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+            local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
             _ = predict(world_rank, world_size, conf, p=p)
         else:  # single device inference
             _ = predict(0, 1, conf, p=p)
