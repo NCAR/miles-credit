@@ -94,7 +94,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
         logger.info("Loading Normalize_ERA5_and_Forcing transforms")
         state_transformer = Normalize_ERA5_and_Forcing(conf)
     else:
-        logger.warning("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
+        logger.warning(
+            "Scaler type {} not supported".format(conf["data"]["scaler_type"])
+        )
         raise
 
     # number of diagnostic variables
@@ -188,7 +190,14 @@ def predict(rank, world_size, conf, backend=None, p=None):
         model = distributed_model_wrapper(conf, model, device)
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-        load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+        if conf["predict"]["mode"] not in ["ddp", "fsdp"]:
+            load_msg = model.module.load_state_dict(
+                checkpoint["model_state_dict"], strict=False
+            )
+        else:
+            load_msg = model.load_state_dict(
+                checkpoint["model_state_dict"], strict=False
+            )
         load_state_dict_error_handler(load_msg)
 
     elif conf["predict"]["mode"] == "fsdp":
@@ -201,14 +210,19 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
     # Set up metrics and containers
     if "climatology" in conf["predict"]:
-        metrics = LatWeightedMetricsClimatology(conf, climatology=xr.open_dataset(conf["predict"]["climatology"]))
+        metrics = LatWeightedMetricsClimatology(
+            conf, climatology=xr.open_dataset(conf["predict"]["climatology"])
+        )
     else:
         metrics = LatWeightedMetrics(conf, training_mode=False)
     metrics_results = defaultdict(list)
     dpf = None
 
     # Set up the diffusion and pole filters
-    if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
+    if (
+        "use_laplace_filter" in conf["predict"]
+        and conf["predict"]["use_laplace_filter"]
+    ):
         dpf = Diffusion_and_Pole_Filter(
             nlat=conf["model"]["image_height"],
             nlon=conf["model"]["image_width"],
@@ -234,11 +248,17 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
                 # Process the entire batch at once
                 init_datetimes = [
-                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime("%Y-%m-%dT%HZ")
+                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime(
+                        "%Y-%m-%dT%HZ"
+                    )
                     for i in range(batch_size)
                 ]
                 if "x_surf" in batch:
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(device).float()
+                    x = (
+                        concat_and_reshape(batch["x"], batch["x_surf"])
+                        .to(device)
+                        .float()
+                    )
                 else:
                     x = reshape_only(batch["x"]).to(device).float()
                 # create ensemble:
@@ -247,9 +267,13 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
             # Add forcing and static variables
             if "x_forcing_static" in batch:
-                x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                x_forcing_batch = (
+                    batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                )
                 if ensemble_size > 1:
-                    x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                    x_forcing_batch = torch.repeat_interleave(
+                        x_forcing_batch, ensemble_size, 0
+                    )
                 x = torch.cat((x, x_forcing_batch), dim=1)
 
             # Load y-truth
@@ -290,12 +314,22 @@ def predict(rank, world_size, conf, backend=None, p=None):
             y_pred = state_transformer.inverse_transform(y_pred.cpu())
             y = state_transformer.inverse_transform(y.cpu())
 
-            if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
-                y_pred = dpf.diff_lap2d_filt(y_pred.to(device).squeeze()).unsqueeze(0).unsqueeze(2).cpu()
+            if (
+                "use_laplace_filter" in conf["predict"]
+                and conf["predict"]["use_laplace_filter"]
+            ):
+                y_pred = (
+                    dpf.diff_lap2d_filt(y_pred.to(device).squeeze())
+                    .unsqueeze(0)
+                    .unsqueeze(2)
+                    .cpu()
+                )
 
             # Calculate correct datetime for current forecast
             init_datetime = [datetime.utcfromtimestamp(t) for t in batch["datetime"]]
-            utc_datetime = [t + timedelta(hours=lead_time_periods) for t in init_datetime]
+            utc_datetime = [
+                t + timedelta(hours=lead_time_periods) for t in init_datetime
+            ]
             _y_pred = y_pred.clone()
 
             # Prepare for next iteration
@@ -338,7 +372,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                     x_detach = x[:, :-static_dim_size, 1:, ...].detach()
 
                 if "y_diag" in batch:
-                    x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
+                    x = torch.cat(
+                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
+                    )
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
@@ -350,7 +386,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                         metrics_results[batch_idx][h].append(v)
 
                 # Save metrics files
-                save_location = os.path.join(os.path.expandvars(conf["save_loc"]), "metrics")
+                save_location = os.path.join(
+                    os.path.expandvars(conf["save_loc"]), "metrics"
+                )
                 os.makedirs(save_location, exist_ok=True)
 
                 for j in range(batch_size):
@@ -467,12 +505,16 @@ if __name__ == "__main__":
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
+    conf = credit_main_parser(
+        conf, parse_training=False, parse_predict=True, print_summary=False
+    )
     predict_data_check(conf, print_summary=False)
     data_config = setup_data_loading(conf)
 
     # create a save location for rollout
-    assert "save_forecast" in conf["predict"], "Please specify the output dir through conf['predict']['save_forecast']"
+    assert (
+        "save_forecast" in conf["predict"]
+    ), "Please specify the output dir through conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
