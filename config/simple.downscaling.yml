@@ -321,35 +321,56 @@ trainer:
     # update_learning_rate: True
 
 loss:
-   training_loss: "mse"
-   # use_vgg: False
-   use_spectral_loss: False
-   spectral_lambda_reg: 0.1
-   spectral_wavenum_init: 20
+    # primary training loss
+    # options: mse, msle, mae, huber, logcosh, xtanh, xsigmoid
+    training_loss: "mse"
 
-   use_latitude_weights: False  # not applicable for downscaling
-   use_variable_weights: False  # not yet implemented for downscaling
-   # latitude_weights: False
+    # not yet implemented for downscaling:
+    use_power_loss: False
+    use_spectral_loss: False
+    spectral_lambda_reg: 0.1
+    spectral_wavenum_init: 20
 
+    # not appliable for downscaling:
+    # latitude_weights: <path>
+
+    # not yet implemented for downscaling
+    use_variable_weights: False
+    # variable_weights:
+    #     dataset:
+    #         2dvar: 1.0
+    #         3dvar: [0.1, 0.2, 0.3, 0.4, 0.5]
 
 predict:
-    start: "2017-11-01"
-    finish: "2017-11-10"
-#    finish: "2022-09-30"
-    autoregressive: False
+
+    # todo: change "forecast" to something more generic
+    
+    # GPU usage
+    mode: none  # options: none, ddp, fsdp
+
+    batch_size: 1
+    ensemble_size: 1
+
+    forecasts:
+        type: "downscaling"  # todo: downscaling rollout
+        start: "2017-11-01 00:00"
+        finish: "2017-11-10 23:00"
+
+    # save_vars: []  # empty list & undefined both mean "all vars"
+    
+    # path to dir containing template netcdf files & yaml files with
+    # variable attributes (units, standard_name, etc.) for output
+    metadata: "placeholder"
+
+    # location to save output
+    save_forecast: "placeholder"
+
     use_laplace_filter: False
-    save_format: "nc"
 
-
-#visualization:
-#    surface_visualize:
-#        variable_keys: ['U10','U1000','U250','U500','U850','V10','V1000','V250','V500','V850']
-#        variable_names: ['U10','U1000','U250','U500','U850','V10','V1000','V250','V500','V850']
-#        file_name_prefix: "unet-03-wind"
-#    save_options: {'dpi': 250,
-#                   'format':'png'}
-#    video_format: 'none'
-
+    # # optional; uses anomaly in metrics if provided
+    # climatology:
+    #     - "path/to/climatology/file.2d.nc"
+    #     - "path/to/climatology/file.3d.nc"
 
 pbs: # casper
     conda: "credit"

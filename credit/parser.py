@@ -843,56 +843,62 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # conf['loss'] section
 
     if parse_training:
+
         assert "training_loss" in conf["loss"], "Training loss ('training_loss') is missing from conf['loss']"
-        assert "use_latitude_weights" in conf["loss"], "must specify 'use_latitude_weights' in conf['loss']"
-        assert "use_variable_weights" in conf["loss"], "must specify 'use_variable_weights' in conf['loss']"
 
-        if conf["loss"]["use_variable_weights"]:
-            assert (
-                "variable_weights" in conf["loss"]
-            ), "must specify 'variable_weights' in conf['loss'] if 'use_variable_weights': True"
+        if is_downscaling:
+            pass
+        else:
 
-            # ----------------------------------------------------------------------------------------- #
-            # check and reorganize variable weights
-            varname_upper_air = conf["data"]["variables"]
-            varname_surface = conf["data"]["surface_variables"]
-            varname_diagnostics = conf["data"]["diagnostic_variables"]
-            N_levels = conf["data"]["levels"]
+            assert "use_latitude_weights" in conf["loss"], "must specify 'use_latitude_weights' in conf['loss']"
+            assert "use_variable_weights" in conf["loss"], "must specify 'use_variable_weights' in conf['loss']"
 
-            weights_dict_ordered = {}
+            if conf["loss"]["use_variable_weights"]:
+                assert (
+                    "variable_weights" in conf["loss"]
+                ), "must specify 'variable_weights' in conf['loss'] if 'use_variable_weights': True"
 
-            varname_covered = list(conf["loss"]["variable_weights"].keys())
+                # ----------------------------------------------------------------------------------------- #
+                # check and reorganize variable weights
+                varname_upper_air = conf["data"]["variables"]
+                varname_surface = conf["data"]["surface_variables"]
+                varname_diagnostics = conf["data"]["diagnostic_variables"]
+                N_levels = conf["data"]["levels"]
 
-            for varname in varname_upper_air:
-                assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
-                N_weights = len(conf["loss"]["variable_weights"][varname])
-                assert N_weights == N_levels, "{} levels were defined, but weights only have {} levels".format(
-                    N_levels, N_weights
-                )
-                weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
+                weights_dict_ordered = {}
 
-            for varname in varname_surface + varname_diagnostics:
-                assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
-                weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
+                varname_covered = list(conf["loss"]["variable_weights"].keys())
 
-            conf["loss"]["variable_weights"] = weights_dict_ordered
-            # ----------------------------------------------------------------------------------------- #
+                for varname in varname_upper_air:
+                    assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
+                    N_weights = len(conf["loss"]["variable_weights"][varname])
+                    assert N_weights == N_levels, "{} levels were defined, but weights only have {} levels".format(
+                        N_levels, N_weights
+                    )
+                    weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
 
-        if "use_power_loss" not in conf["loss"]:
-            conf["loss"]["use_power_loss"] = False
+                for varname in varname_surface + varname_diagnostics:
+                    assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
+                    weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
 
-        if "use_spectral_loss" not in conf["loss"]:
-            conf["loss"]["use_spectral_loss"] = False
+                conf["loss"]["variable_weights"] = weights_dict_ordered
+                # ----------------------------------------------------------------------------------------- #
 
-        if conf["loss"]["use_power_loss"] and conf["loss"]["use_spectral_loss"]:
-            warnings.warn("'use_power_loss: True' and 'use_spectral_loss: True' are both applied")
+            if "use_power_loss" not in conf["loss"]:
+                conf["loss"]["use_power_loss"] = False
 
-        if conf["loss"]["use_power_loss"] or conf["loss"]["use_spectral_loss"]:
-            if "spectral_lambda_reg" not in conf["loss"]:
-                conf["loss"]["spectral_lambda_reg"] = 0.1
+            if "use_spectral_loss" not in conf["loss"]:
+                conf["loss"]["use_spectral_loss"] = False
 
-            if "spectral_wavenum_init" not in conf["loss"]:
-                conf["loss"]["spectral_wavenum_init"] = 20
+            if conf["loss"]["use_power_loss"] and conf["loss"]["use_spectral_loss"]:
+                warnings.warn("'use_power_loss: True' and 'use_spectral_loss: True' are both applied")
+
+            if conf["loss"]["use_power_loss"] or conf["loss"]["use_spectral_loss"]:
+                if "spectral_lambda_reg" not in conf["loss"]:
+                    conf["loss"]["spectral_lambda_reg"] = 0.1
+
+                if "spectral_wavenum_init" not in conf["loss"]:
+                    conf["loss"]["spectral_wavenum_init"] = 20
 
     # --------------------------------------------------------- #
     # conf['parse_predict'] section

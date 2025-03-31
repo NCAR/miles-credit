@@ -152,9 +152,12 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     Returns:
         Dataset: The loaded dataset.
     """
-    if 'datasets' in conf['data']:
+    if 'datasets' in conf['data']:  # if true, this is a downscaling dataset
         ## todo: check with parser here
+        ## todo: set different first_date and last_date for training vs validation
         dataset = DownscalingDataset(**conf['data'])
+        if not is_train:
+            dataset.mode = "infer"
 
     else:
         try:
