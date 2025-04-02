@@ -190,7 +190,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
         model = distributed_model_wrapper(conf, model, device)
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-        if conf["predict"]["mode"] not in ["ddp", "fsdp"]:
+        if conf["predict"]["mode"] in ["ddp", "fsdp"]:
             load_msg = model.module.load_state_dict(
                 checkpoint["model_state_dict"], strict=False
             )
@@ -512,9 +512,9 @@ if __name__ == "__main__":
     data_config = setup_data_loading(conf)
 
     # create a save location for rollout
-    assert (
-        "save_forecast" in conf["predict"]
-    ), "Please specify the output dir through conf['predict']['save_forecast']"
+    assert "save_forecast" in conf["predict"], (
+        "Please specify the output dir through conf['predict']['save_forecast']"
+    )
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
