@@ -61,7 +61,7 @@ class LatWeightedMetrics:
             # calculate ensemble mean, if ensemble_size=1, does nothing
             if self.ensemble_size > 1:
                 pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:]) #b, ensemble, c, t, lat, lon
-                std_dev = torch.std(pred, dim=1) # std dev of ensemble
+                std_dev = torch.std(pred, dim=1) * (self.ensemble_size + 1) / (self.ensemble_size - 1)# std dev of ensemble
                 pred = pred.mean(dim=1)
 
             error = pred - y
@@ -287,6 +287,9 @@ class LatWeightedMetricsClimatology:
                 ).mean()
 
 class LatWeightedMetricsEnsemble:
+    """
+    metrics for rollout_ens_batcher. will output full xarrays of rmse, std etc
+    """
     def __init__(self, conf, training_mode=True):
         self.conf = conf
         atmos_vars = conf["data"]["variables"]
@@ -345,12 +348,12 @@ class LatWeightedMetricsEnsemble:
         with torch.no_grad():
             pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:]) #b, ensemble, c, t, lat, lon
             
-            loss_dict["ens_std"] = torch.std(pred, dim=1) # std dev of ensemble for each gridcell/variable
+            loss_dict["ens_std"] = torch.std(pred, dim=1) * (self.ensemble_size + 1) / (self.ensemble_size - 1) # std dev of ensemble for each gridcell/variable
             
             # compute ensemble mean
-            pred = pred.mean(dim=1)
+            pred = pred.mean(dim=1) #b, c, t, lat, lon
             loss_dict["ens_mean"] = pred
-            loss_dict["ens_rmse"] = torch.sqrt((pred - y) ** 2 * w_lat * w_var)
+            loss_dict["ens_rmse"] = torch.sqrt((pred - y) ** 2)
 
         return loss_dict
 

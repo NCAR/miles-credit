@@ -27,7 +27,7 @@ from torch.optim import Optimizer
 from torch.cuda.amp import GradScaler
 from torch.optim.lr_scheduler import LRScheduler
 
-from credit.models.checkpoint import TorchFSDPCheckpointIO
+from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
 from credit.trainers.utils import cleanup
 
@@ -442,6 +442,9 @@ class BaseTrainer(ABC):
                         }
                         torch.save(state_dict, f"{save_loc}/checkpoint.pt")
 
+                        if conf.get("trainer", {}).get("save_every_epoch", False):
+                            copy_checkpoint(os.path.join(save_loc, "checkpoint.pt"), epoch)
+
                 else:
                     logger.info(
                         f"Saving FSDP model, optimizer, grad scaler, and learning rate scheduler states to {save_loc}"
@@ -475,6 +478,9 @@ class BaseTrainer(ABC):
                     }
 
                     torch.save(state_dict, os.path.join(save_loc, "checkpoint.pt"))
+
+                    if conf.get("trainer", {}).get("save_every_epoch", False):
+                            copy_checkpoint(os.path.join(save_loc, "model_checkpoint.pt"), epoch)
 
             # clear the cached memory from the gpu
             torch.cuda.empty_cache()

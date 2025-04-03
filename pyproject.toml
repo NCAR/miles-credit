@@ -36,14 +36,12 @@ dependencies = [
     "torch-harmonics",
     "torch_geometric",
     "pre-commit",
-    "ruff"
+    "ruff",
+    "sphinx",
+    "sphinx-autoapi",
+    "myst_parser",
+    "sphinx-book-theme",
    ]
-
-[project.optional-dependencies]
-docs = ["sphinx",
-        "sphinx-autoapi",
-        "myst_parser",
-        "sphinx-book-theme"]
 
 [tool.setuptools]
 packages = ["credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]

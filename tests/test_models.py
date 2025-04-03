@@ -1,3 +1,5 @@
+"""Tests for models.py."""
+
 import os
 import yaml
 
@@ -16,6 +18,7 @@ CONFIG_FILE_DIR = os.path.join(
 
 
 def test_unet():
+    """Test the unet model."""
     # load config
     config = os.path.join(CONFIG_FILE_DIR, "unet_1dg_test.yml")
     with open(config) as cf:
@@ -51,6 +54,7 @@ def test_unet():
 
 
 def test_crossformer():
+    """Test the crossformer model."""
     # load config
     config = os.path.join(CONFIG_FILE_DIR, "wxformer_1dg_test.yml")
     with open(config) as cf:
@@ -80,8 +84,7 @@ def test_crossformer():
 
 
 def test_fuxi():
-    """
-    Test the I/O size of the Fuxi torch model to ensure that the input/output dimensions match the expected configuration.
+    """Test the I/O size of the Fuxi torch model to ensure that the input/output dimensions match the expected configuration.
 
     This test verifies the following:
     1. Correct loading and parsing of the model configuration file.
@@ -105,9 +108,10 @@ def test_fuxi():
     - The output tensor has the correct shape: [batch_size, out_channels, 1, image_height, image_width].
     - The output tensor contains no NaN values.
 
-    Raises:
-    -------
+    Raises
+    ------
     AssertionError if any of the checks fail.
+
     """
     config = os.path.join(CONFIG_FILE_DIR, "fuxi_1deg_test.yml")
     with open(config) as cf:

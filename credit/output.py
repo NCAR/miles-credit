@@ -14,6 +14,7 @@ import traceback
 import xarray as xr
 from credit.data import drop_var_from_dataset
 from credit.interp import full_state_pressure_interpolation
+from inspect import signature
 
 logger = logging.getLogger(__name__)
 
@@ -228,8 +229,25 @@ def save_netcdf_increment(
             for surface_var in conf["data"]["variables"]:
                 encoding_dict[surface_var] = conf["predict"]["surface_var_encoding"]
         if "pressure_var_encoding" in conf["predict"].keys():
+            if "pres_var" not in conf["predict"]["interp_pressure"]:
+                sig = signature(full_state_pressure_interpolation)
+                pres_end = sig.parameters["pres_var"].default
+            else:
+                pres_end = conf["predict"]["interp_pressure"]["pres_var"]
             for pres_var in conf["data"]["variables"]:
-                encoding_dict[pres_var] = conf["predict"]["pressure_var_encoding"]
+                encoding_dict[pres_var + pres_end] = conf["predict"][
+                    "pressure_var_encoding"
+                ]
+        if "height_var_encoding" in conf["predict"].keys():
+            if "height_var" not in conf["predict"]["interp_pressure"]:
+                sig = signature(full_state_pressure_interpolation)
+                height_end = sig.parameters["height_var"].default
+            else:
+                height_end = conf["predict"]["interp_pressure"]["height_var"]
+            for pres_var in conf["data"]["variables"]:
+                encoding_dict[pres_var + height_end] = conf["predict"][
+                    "height_var_encoding"
+                ]
         # Use Dask to write the dataset in parallel
         ds_merged.to_netcdf(unique_filename, mode="w", encoding=encoding_dict)
 

@@ -17,7 +17,7 @@
 # the location to save your workspace, it will have 
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
-save_loc: '/glade/u/home/schreck/scratch/finetune/wx12/'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/test'
 seed: 1000
 
 data:
@@ -46,10 +46,11 @@ data:
     # files must have the listed variable names 
     # THESE ARE NOT LOADING CORRECTLY ON X
     # diagnostic variables will be normalized by the dataloader, users do not need to normalize them
-    diagnostic_variables: ['Z500', 'T500', 'U500', 'V500', 'Q500'] 
+    # diagnostic_variables: ['Z500', 'T500', 'U500', 'V500', 'Q500'] 
     save_loc_diagnostic: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_y_TOTAL_*'
     
-    # periodic forcing variables, must be a single zarr or nc with (time, latitude, longitude) dims
+    # periodic forcing variables, forcing variables that are the same year-to-year
+    # must be a single zarr or nc with (time, latitude, longitude) dims
     # the time dimension should cover an entire LEAP YEAR
     #
     # e.g., periodic forcing variables can be provided on the year 2000, 
@@ -57,7 +58,7 @@ data:
     #
     # THESE ARE REDUNDANT?
     # periodic forcing variables MUST be normalized BY USER 
-    forcing_variables: ['TSI']   
+    # forcing_variables: ['TSI']   
     save_loc_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT/forcing_norm_6h.nc'
     
     # static variables must be a single zarr or nc with (latitude, longitude) coords
@@ -98,6 +99,8 @@ data:
     # TRAINING ONLY
     # [Optional] backprop_on_timestep: use a list, for ex., [1, 2, 3, 5, 6, 7] to backprop on those timesteps when doing multi-step training
     backprop_on_timestep: [1, 2, 3, 5, 6, 7]
+    # [Optional] retain_graph to backprop on multiple timesteps on multi-step training
+    retain_graph: False
 
     # when forecast_len = 0, it does nothing
     # when forecast_len > 0, it computes training loss on the last forecast state only
@@ -157,7 +160,7 @@ trainer:
     # This can cause CPU out-of-memory if for some large models, do your diligence
     cpu_offload: False
     # save forward pass activation to checkpoints and free GPU memory
-    activation_checkpoint: True
+    activation_checkpoint: False
     # Set to True for all layers with activations otherwise use custom (see credit/distributed.py)
     checkpoint_all_layers: False
 
@@ -165,11 +168,11 @@ trainer:
     compile: False
 
     # load existing weights / optimizer / mixed-precision grad scaler / learning rate scheduler state(s)
-    # when starting multi-step training, only use reload weights initially, then set all to true
-    load_weights: True
-    load_optimizer: True
-    load_scaler: True 
-    load_scheduler: True
+    # when starting multi-step training, only use load weights initially, then set all to true
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False 
+    load_scheduler: False
 
     # CREDIT save checkpoints at the end of every epoch
     # save_backup_weights will also save checkpoints in the beginning of every epoch
@@ -199,10 +202,12 @@ trainer:
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
     train_batch_size: 1
     valid_batch_size: 1
-    ensemble_size: 1  # default 1 means deterministic training behavior
+    ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
-    batches_per_epoch: 1000 # Set to 0 to use len(dataloader)
+    # set to 0 to use all available training samples e.g. `len(dataloader)`
+    # if the number is larger than all training samples, all available training samples will be used
+    batches_per_epoch: 1000 
     valid_batches_per_epoch: 20
     # early stopping
     stopping_patience: 50 
@@ -262,7 +267,7 @@ trainer:
   
 model:
     # NCAR WXFormer example
-    type: "crossformer"               # use "debugger" with any config to use debugger model type. compatible with basic model args
+    type: "debugger"               # use "debugger" with any config to use debugger model type. compatible with basic model args
     frames: 1                         # number of input states (default: 1)
     image_height: 640                 # number of latitude grids (default: 640)
     image_width: 1280                 # number of longitude grids (default: 1280)
@@ -327,7 +332,7 @@ model:
 
     # configuration for postblock processing
     post_conf: 
-        activate: True
+        activate: False
 
         skebs:
             activate: False
@@ -381,7 +386,7 @@ model:
             specific_total_water_name: ['specific_total_water']
 
         global_water_fixer:
-            activate: True
+            activate: False
             activate_outside_model: False
             simple_demo: False
             denorm: True
@@ -398,7 +403,7 @@ model:
             evaporation_name: ['evaporation']
 
         global_energy_fixer:
-            activate: True
+            activate: False
             activate_outside_model: False
             simple_demo: False
             denorm: True
@@ -436,6 +441,7 @@ model:
 loss: 
     # the main training loss
     # available options are "mse", "msle", "mae", "huber", "logcosh", "xtanh", "xsigmoid"
+    # ensemble training losses: "KCRPS"
     training_loss: "mse"
 
     # use power or spectral loss
@@ -503,11 +509,13 @@ predict:
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 1152       # number of days to initialize, starting from the (year, mon, day) above
+        duration: 1152       # number of days to initialize from, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
+        # [Optional] defaults to 1
+        ic_interval_days: 1   # spacing between init days. defaults to 1 total number of ICs will be duration // ic_interval_days
         days: 10             # forecast lead time as days (1 means 24-hour forecast)
-        
+
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables
     # remove save_vars from config will save ALL variables
