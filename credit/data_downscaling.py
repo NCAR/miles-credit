@@ -118,9 +118,9 @@ class DownscalingDataset(torch.utils.data.Dataset):
         self.len = np.max(dlengths)
         # TODO: error if any dlengths != self.len or 1
 
-        # construct dataframe that defines the ordering used by
-        # .rearrange() to go from nested dict [dataset][variable] to
-        # nested dict [input/target][dataset.variable]
+        # construct a pandas dataframe that defines the ordering used
+        # by .rearrange() to go from nested dict [dataset][variable]
+        # to nested dict [input/target][dataset.variable]
 
         dlist = list()
         for ds in self.datasets:
@@ -136,20 +136,26 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
             dlist.append(df)
 
-        rdf = pd.concat(dlist).reset_index(drop=True)
+        rdf = pd.concat(dlist).reset_index(drop=True) # rdf = Rearrangement DataFrame
 
         rdf.insert(rdf.shape[1], "name",
                    [f"{d}.{v}" for d, v in zip(rdf['dataset'], rdf['var'])])
 
-        # sorting order:
+        # columns have to be Categorical to define a custom (non-alphabetical) sort order
         rdf['usage'] = pd.Categorical(rdf['usage'], ['boundary', 'prognostic', 'diagnostic'])
         rdf['dim']   = pd.Categorical(rdf['dim'],   ['static', '2D', '3D'])
         rdf['dataset'] = pd.Categorical(rdf['dataset'], self.datasets)
+
+        # Sort order for variables:
+        # first: input-only > input + output > output-only
+        # then:  static > 2D > 3D
+        # then:  order that datasets are defined in config
+        # then:  alphabetical by variable name
         rdf = rdf.sort_values(by=['usage', 'dim', 'dataset', 'var']).reset_index(drop=True)
 
         self.arrangement = rdf
 
-        # construct list of variable names corresponding to tensor channels
+        # construct list of variable names corresponding to channels in (output) tensor
         # (Only done for mode=train, tensor=target at the moment)
 
         tarr = rdf[rdf['usage'].isin(['prognostic','diagnostic'])]

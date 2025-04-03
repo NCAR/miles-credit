@@ -289,7 +289,7 @@ trainer:
 
     train_batch_size: 4
     valid_batch_size: 4
-    emsemble_size: 1
+    ensemble_size: 1
 
     batches_per_epoch: 10 # Set to 0 to use len(dataloader)
     valid_batches_per_epoch: 100

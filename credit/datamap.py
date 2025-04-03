@@ -220,6 +220,8 @@ class DataMap:
 
         self._mode = "train"
 
+        # todo: auto-detect dataset dimensionality
+
         # canonicalize capitalization
         self.dim = self.dim.upper() if len(self.dim) < 3 else self.dim.lower()
         if self.dim not in ['static', '2D', '3D']:
