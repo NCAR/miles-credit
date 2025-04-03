@@ -1,0 +1,199 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# This yaml file configures an hourly state-in-state-out CrossFormer
+# on NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
+# The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
+# Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
+# --------------------------------------------------------------------------------------------------------------------- #
+save_loc: '/glade/work/$USER/CREDIT_runs/test_1dg_unet/'
+seed: 1000
+
+data:
+    # upper-air variables
+    variables: ['U','V','T','Q']
+    save_loc: '/glade/derecho/scratch/dkimpara/y_ONEdeg*.zarr'
+
+    # surface variables
+    surface_variables: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
+    save_loc_surface: '/glade/derecho/scratch/dkimpara/y_ONEdeg*.zarr'
+
+    # dynamic forcing variables
+    dynamic_forcing_variables: ['tsi']
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/dkimpara/credit_solar_1h_1deg/*.nc'
+
+    # static variables
+    static_variables: ['Z_GDS4_SFC','LSM']
+    save_loc_static: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_onedeg.nc'
+
+    # mean / std path
+    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
+    # regular z-score version
+    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
+    # residual norm version
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
+
+    # train / validation split
+    train_years: [1979, 2018]
+    valid_years: [2018, 2019]
+
+    # data workflow
+    scaler_type: 'std_new'
+
+    # state-in-state-out
+    history_len: 2
+    valid_history_len: 2
+
+    forecast_len: 0
+    valid_forecast_len: 0
+
+    one_shot: True
+
+    # 1 for hourly model
+    lead_time_periods: 1
+
+    # do not use skip_period
+    skip_periods: null
+
+    # compatible with the old 'std'
+    static_first: True
+
+    sst_forcing:
+        activate: False
+
+trainer:
+    type: standard # <---------- change to your type
+
+    mode: none
+    cpu_offload: False
+    activation_checkpoint: True
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_sheduler: False
+
+    skip_validation: False
+    update_learning_rate: False
+
+    save_backup_weights: True
+    save_best_weights: True
+
+    learning_rate: 1.0e-03 # <-- change to your lr
+    weight_decay: 0
+
+    train_batch_size: 1
+    valid_batch_size: 1
+
+    batches_per_epoch: 1 # Total number of samples = 341,880
+    valid_batches_per_epoch: 1
+    stopping_patience: 999
+
+    start_epoch: 0
+    num_epoch: 1
+    reload_epoch: True
+    epochs: &epochs 70
+
+    use_scheduler: True
+    scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
+
+    # Automatic Mixed Precision: False
+    amp: False
+
+    # rescale loss as loss = loss / grad_accum_every
+    grad_accum_every: 1
+    # gradient clipping
+    grad_max_norm: 1.0
+
+    # number of workers
+    thread_workers: 4
+    valid_thread_workers: 0
+
+    # compile
+    # compile: True
+
+model:
+    type: "unet"
+    image_height: 192 #640
+    image_width: 288 #1280
+    frames: 2
+    channels: 4
+    surface_channels: 7
+    input_only_channels: 3
+    output_only_channels: 0
+    levels: 16
+    rk4_integration: False
+    architecture:
+        name: "unet"
+        encoder_name: "resnet34"
+        encoder_weights: "imagenet"
+    post_conf:
+        activate: False
+        skebs:
+            activate: False
+
+        tracer_fixer:
+            activate: False
+
+        global_mass_fixer:
+            activate: False
+
+        global_energy_fixer:
+            activate: False
+
+loss:
+    # the main training loss
+    training_loss: "mse"
+
+    # power loss (x), spectral_loss (x)
+    use_power_loss: False
+    use_spectral_loss: False
+
+    # use latitude weighting
+    use_latitude_weights: True
+    latitude_weights: "/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_onedeg.nc"
+
+    # turn-off variable weighting
+    use_variable_weights: False
+
+predict:
+    forecasts:
+        type: "custom"       # keep it as "custom"
+        start_year: 2020     # year of the first initialization (where rollout will start)
+        start_month: 1       # month of the first initialization
+        start_day: 1         # day of the first initialization
+        start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
+        duration: 30         # number of days to initialize, starting from the (year, mon, day) above
+                             # duration should be divisible by the number of GPUs
+                             # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
+        days: 2              # forecast lead time as days (1 means 24-hour forecast)
+
+    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/wxformer_1h/'
+    save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
+
+    # turn-off low-pass filter
+    use_laplace_filter: False
+
+    # deprecated
+    # save_format: "nc"
+
+pbs: # casper
+    conda: "$HOME/credit"
+    job_name: 'test_1dg_unet'
+    project: 'NAML0001'
+    nodes: 1
+    ncpus: 8
+    ngpus: 1
+    mem: '64GB'
+    walltime: '00:10:00'
+    gpu_type: 'a100'
+    queue: 'casper'
+
+# pbs: #derecho
+#     conda: "credit-derecho"
+#     project: "NAML0001"
+#     job_name: "unet_data"
+#     walltime: "12:00:00"
+#     nodes: 1
+#     ncpus: 64
+#     ngpus: 4
+#     mem: '480GB'
+#     queue: 'main'

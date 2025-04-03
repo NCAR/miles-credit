@@ -1,100 +1,26 @@
 # NSF NCAR MILES Community Research Earth Digital Intelligence Twin (CREDIT)
 
+[![DOI](https://zenodo.org/badge/710968229.svg)](https://doi.org/10.5281/zenodo.14361005)
+![PyPI - Version](https://img.shields.io/pypi/v/miles-credit)
+[![arXiv](https://img.shields.io/badge/arXiv-2411.07814-b31b1b.svg)](https://arxiv.org/abs/2411.07814)
+
 ## About
-CREDIT is a research platform to train and run neural networks that can emulate full NWP models by predicting
-the next state of the atmosphere given the current state. The platform is still under very active development. 
-If you are interested in using or contributing to CREDIT, please reach out to David John Gagne (dgagne@ucar.edu). 
+CREDIT is an open software platform to train and deploy AI atmospheric prediction models. CREDIT offers fast models 
+that can be flexibly configured both in terms of input data and neural network architecture. The interface is designed
+to be user-friendly and enable fast spin-up and iteration. CREDIT is backed by the AI and atmospheric science expertise
+of the MILES group and the NSF National Center for Atmospheric Research, leading to design choices that balance advanced
+AI/ML with our physical knowledge of the atmosphere.
 
+CREDIT has reached its first stable release with a full set of models, training, and deployment options. It continues
+to be under active development. Please contact [the MILES group](mailto:milescore@ucar.edu) if you have any questions about CREDIT.
 
-## NSF-NCAR Derecho Installation
-Currently, the framework for running miles-credit in parallel is centered around NSF NCAR's Derecho HPC. Derecho requires building several miles-credit dependent packages locally, including PyTorch, to enable correct MPI configuration. To begin, create a clone of the pre-built miles-credit environment, which contains compatiable versions of torch, torch-vision, numpy, and others. 
+MILES CREDIT also provides more detailed [documentation](https://miles-credit.readthedocs.io/en/latest/) with installation
+instructions, how to get started training and deploying models, how to interpret the config files, and full API docs. 
 
-```bash
-module --force purge 
-module load ncarenv/23.09 gcc/12.2.0 ncarcompilers cray-mpich/8.1.27 cuda/12.2.1 cudnn/8.8.1.3-12 conda/latest
-mamba create --name credit-derecho --clone /glade/derecho/scratch/benkirk/derecho-pytorch-mpi/envs/credit-pytorch-v2.3.1-derecho-gcc-12.2.0-cray-mpich-8.1.27
-```
-
-Going forward, care must be taken when installing new packages so that PyTorch and the other relevant miles-credit dependencies are not overridden. Next, grab the most updated version of miles-credit from github (assuming no changes to the local-build dependencies):
-
-```bash
-conda activate credit-derecho
-# needed an sshkey to use this command: git clone git@github.com:NCAR/miles-credit.git
-git clone https://github.com/NCAR/miles-credit.git
-cd miles-credit
-```
-
-and then install without dependencies by
-
-```bash
-pip install --no-deps .
-```
-
-Henceforth, when adding new packages aim to use the no dependenices option. 
-
-To test your Derecho installation, skip to [Launch with PBS on Casper or Derecho](#launch-with-pbs-on-casper-or-derecho).
-
-## Standard Installation 
-Clone from miles-credit github page:
-```bash
-# needed an sshkey to use this command: git clone git@github.com:NCAR/miles-credit.git
-git clone https://github.com/NCAR/miles-credit.git
-cd miles-credit
-```
-
-Install dependencies using environment_gpu.yml file (also compatible with CPU-only machines):
-
-Note: if you are on NCAR HPC, we recommend installing to your home directory. To do this, simply append `-p /glade/u/home/$USER/[your_install_dir]/` to the `conda/mamba env create` command below:
-
-```bash
-mamba env create -f environment_gpu.yml
-conda activate credit
-```
-
-CPU-only install:
-```bash
-mamba env create -f environment_cpu.yml
-conda activate credit
-```
-
-
-Some metrics use WeatherBench2 for computation. Install with:
-```bash
-git clone git@github.com:google-research/weatherbench2.git
-cd weatherbench2
-pip install .
-````
-
-## Train a Segmentation Model (like a U-Net)
-```bash
-python applications/train.py -c config/unet.yml
-```
- ## Train a Vision Transformer
-```bash
-python applications/train.py -c config/vit.yml
-```
-
-Or use a fancier [variation](https://github.com/lucidrains/vit-pytorch/blob/main/vit_pytorch/rvt.py)
-
-```bash
-python applications/train.py -c config/wxformer_1dg_test.yml
-```
-
-## Launch with PBS on Casper or Derecho
- 
-Adjust the PBS settings in a configuration file for either casper or derecho. Then, submit the job via
-```bash
-python applications/train.py -c config/wxformer_1dg_test.yml -l 1
-```
-The launch script may be found in the save location that you set in the configation file. The automatic launch script generation will take care of MPI calls and other complexities if you are using more than 1 GPU.
-
-## Inference Forecast
-
-The predict field in the config file allows one to speficy start and end dates to roll-out a trained model. To generate a forecast,
-
-```bash
-python applications/rollout_to_netcdf.py -c config/wxformer_1dg_test.yml
-```
+## Citing CREDIT
+If you are interested in using CREDIT as part of your research, please cite the following paper:
+Schreck, J., Sha, Y., Chapman, W., Kimpara, D., Berner, J., McGinnis, S., Kazadi, A., Sobhani, N., Kirk, B., Gagne, D.J. (2024, November 9). 
+Community Research Earth Digital Intelligence Twin (CREDIT). arXiv [cs.AI]. http://arxiv.org/abs/2411.07814
 
 # Model Weights and Data
 Model weights for the CREDIT 6-hour WXFormer and FuXi models and the 1-hour WXFormer are available on huggingface.

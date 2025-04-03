@@ -38,6 +38,14 @@ they are installed:
 to interface between libfabric and NCCL. If you do not compile PyTorch with Libfabric and aws-ofi-nccl, 
 we have found that inter-node communication speeds on Derecho and other HPE/Cray HPC systems are much slower.
 
+## NSF NCAR Derecho
+The NSF NCAR Derecho system has some special requirements in place to support Cray MPI and the Slingshot
+interconnect. Ben Kirk has created a special [makefile](https://github.com/benkirk/derecho-pytorch-mpi) to
+build PyTorch and Torchvision from source on Derecho with all appropriate environment variables and dependencies.
+Please follow instructions there if you wish to build your own version of PyTorch from source. Otherwise,
+built wheels of PyTorch 2.5.1 and Torchvision 0.20.1 are available on Derecho 
+at `/glade/work/dgagne/credit-pytorch-envs/derecho-pytorch-mpi/wheels/`. 
+
 ## PyTorch Python Dependencies
 1. Install a Python virtual environment manager. My preferred one for now is
 [miniforge](https://github.com/conda-forge/miniforge), which has both conda and mamba included and does not have the 

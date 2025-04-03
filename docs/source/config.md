@@ -70,7 +70,7 @@ diagnostic_variables: ['Z500', 'T500', 'U500', 'V500', 'Q500']
 save_loc_diagnostic: '/path/to/diagnostic_data/'
 ```
 
-- **Dynamic forcing variables** provide additional time-dependent factors (e.g., solar forcing or SST forcing), these are dynamic (changing in time) varibles provided during run time. 
+- **Dynamic forcing variables** provide additional time-dependent factors (e.g., solar forcing or SST forcing), these are dynamic (changing in time) variables provided during run time. 
 
 - **Diagnostic variables** are used for evaluation but **not directly predicted** by the model.  
 

@@ -86,6 +86,44 @@ class BaseModel(nn.Module):
 
         return model_class
 
+    @classmethod
+    def load_model_name(cls, conf, model_name):
+        conf = copy.deepcopy(conf)
+        save_loc = os.path.expandvars(conf["save_loc"])
+
+
+        if conf['trainer']['mode'] == 'fsdp':
+            fsdp = True 
+        else: 
+            fsdp = False
+
+        ckpt = os.path.join(save_loc, model_name)
+        
+        if not os.path.isfile(ckpt):
+            raise ValueError(
+                f"No saved checkpoint {ckpt} exists. You must train a model first. Exiting."
+            )
+
+        logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
+
+        checkpoint = torch.load(
+            ckpt,
+            map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
+        )
+
+        if "type" in conf["model"]:
+            del conf["model"]["type"]
+
+        model_class = cls(**conf["model"])
+
+        load_msg = model_class.load_state_dict(
+            checkpoint if fsdp else checkpoint["model_state_dict"],
+            strict=False
+        )
+        load_state_dict_error_handler(load_msg)
+
+        return model_class
+
     def save_model(self, conf):
         save_loc = os.path.expandvars(conf["save_loc"])
         state_dict = {

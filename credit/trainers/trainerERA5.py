@@ -14,6 +14,7 @@ from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
 from credit.data import concat_and_reshape, reshape_only
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+
 import optuna
 import torch
 
@@ -91,6 +92,9 @@ class Trainer(BaseTrainer):
             + len(conf["data"]["forcing_variables"])
             + len(conf["data"]["static_variables"])
         )
+
+        # [Optional] retain graph for multiple backward passes
+        retain_graph = conf["data"].get("retain_graph", False)
 
         # [Optional] Use the config option to set when to backprop
         if "backprop_on_timestep" in conf["data"]:
@@ -223,7 +227,7 @@ class Trainer(BaseTrainer):
 
                 # predict with the model
                 with autocast(enabled=amp):
-                    y_pred = self.model(x)
+                    y_pred = self.model(x.float())
 
                 # ============================================= #
                 # postblock opts outside of model
@@ -253,7 +257,7 @@ class Trainer(BaseTrainer):
                 # ============================================= #
 
                 # only load y-truth data if we intend to backprop (default is every step gets grads computed
-                if forecast_step in backprop_on_timestep:
+                if forecast_step in backprop_on_timestep: #steps go from 1 to n
                     # calculate rolling loss
                     if "y_surf" in batch:
                         y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
@@ -283,7 +287,7 @@ class Trainer(BaseTrainer):
                     accum_log(logs, {"loss": loss.item()})
 
                     # compute gradients
-                    scaler.scale(loss).backward()
+                    scaler.scale(loss).backward(retain_graph=retain_graph)
 
                 if distributed:
                     torch.distributed.barrier()
@@ -292,10 +296,11 @@ class Trainer(BaseTrainer):
                 stop_forecast = batch["stop_forecast"].item()
                 if stop_forecast:
                     break
-                
+
                 # Discard current computational graph, which still 
                 # exists (through y_pred reference) if `forecast_step` not in `backprop_on_timestep`
-                y_pred = y_pred.detach()
+                if not retain_graph:
+                    y_pred = y_pred.detach()
                 
                 # step-in-step-out
                 if x.shape[2] == 1:
@@ -571,7 +576,7 @@ class Trainer(BaseTrainer):
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-                    y_pred = self.model(x)
+                    y_pred = self.model(x.float())
 
                     # ============================================= #
                     # postblock opts outside of model

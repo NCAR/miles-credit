@@ -2,8 +2,8 @@
 
 -------------------------------------------------------
 Content:
-    - TODO: finish this docstring
 """
+
 import torch
 from credit.postblock import PostBlock
 from credit.postblock import (
@@ -16,7 +16,6 @@ from credit.postblock import (
 
 
 def test_SKEBS_rand():
-    # TODO: Finish this Docstring
     """Provides an I/O size test on SKEBS at credit.postblock."""
     image_width = 100
     conf = {
@@ -44,7 +43,6 @@ def test_SKEBS_rand():
 
 
 def test_TracerFixer_rand():
-    # TODO: Finish this Docstring
     """Provides an I/O size test on TracerFixer at credit.postblock."""
     # initialize post_conf, turn-off other blocks
     conf = {"post_conf": {"skebs": {"activate": False}}}
@@ -78,7 +76,6 @@ def test_TracerFixer_rand():
 
 
 def test_GlobalMassFixer_rand():
-    # TODO: Finish this Docstring
     """Provides an I/O size test on GlobalMassFixer at credit.postblock."""
     # initialize post_conf, turn-off other blocks
     conf = {"post_conf": {"skebs": {"activate": False}}}
@@ -122,7 +119,6 @@ def test_GlobalMassFixer_rand():
 
 
 def test_GlobalWaterFixer_rand():
-    # TODO: Finish this Docstring
     """Provides an I/O size test on GlobalWaterFixer at credit.postblock."""
     # initialize post_conf, turn-off other blocks
     conf = {"post_conf": {"skebs": {"activate": False}}}
@@ -168,7 +164,6 @@ def test_GlobalWaterFixer_rand():
 
 
 def test_GlobalEnergyFixer_rand():
-    # TODO: Finish this Docstring
     """Provides an I/O size test on GlobalEnergyFixer at credit.postblock."""
     # turn-off other blocks
     conf = {"post_conf": {"skebs": {"activate": False}}}
@@ -216,6 +211,5 @@ def test_GlobalEnergyFixer_rand():
 
 
 def test_SKEBS_era5():
-    # TODO: add docstring
     """test_SKEBS_era5."""
     pass

@@ -192,6 +192,20 @@ class MSLELoss(nn.Module):
 
 class KCRPSLoss(nn.Module):
     """Adapted from Nvidia Modulus
+    pred : Tensor
+        Tensor containing the ensemble predictions. The ensemble dimension
+        is assumed to be the leading dimension
+    obs : Union[Tensor, np.ndarray]
+        Tensor or array containing an observation over which the CRPS is computed
+        with respect to.
+    biased :
+        When False, uses the unbiased estimators described in (Zamo and Naveau, 2018)::
+
+            E|X-y|/m - 1/(2m(m-1)) sum_(i,j=1)|x_i - x_j|
+
+        Unlike ``crps`` this is fair for finite ensembles. Non-fair ``crps`` favors less
+        dispersive ensembles since it is biased high by E|X- X'|/ m where m is the
+        ensemble size.
 
     Estimate the CRPS from a finite ensemble
 
