@@ -31,6 +31,7 @@ from credit.parser import credit_main_parser, training_data_check
 from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
 
 from credit.metrics import LatWeightedMetrics
+from credit.metrics_downscaling import UnWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
 from credit.models.checkpoint import (
@@ -335,7 +336,10 @@ def main(rank, world_size, conf, backend, trial=False):
         valid_criterion = VariableTotalLoss2D(conf, validation=True)
 
     # Set up some metrics
-    metrics = LatWeightedMetrics(conf)
+    if is_downscaling:
+        metrics = UnWeightedMetrics(conf, train_dataset.tnames)
+    else:
+        metrics = LatWeightedMetrics(conf)
 
     # Initialize a trainer object
     trainer_cls = load_trainer(conf)
