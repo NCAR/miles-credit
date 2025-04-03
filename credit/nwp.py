@@ -3,10 +3,13 @@ import pandas as pd
 from os.path import join
 import xarray as xr
 import fsspec
-import xesmf as xe
 from credit.interp import geopotential_from_model_vars, create_pressure_grid
 from credit.physics_constants import GRAVITY
 import datetime
+try:
+    import xesmf as xe
+except (ImportError, ModuleNotFoundError) as e:
+    print(e, "-- xesmf must be installed to regrid.")
 
 gfs_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m'}
 level_map = {'T500': 'T', 'U500': 'U', 'V500': 'V', 'Q500': 'Q', 'Z500': 'Z'}
