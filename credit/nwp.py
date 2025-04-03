@@ -9,7 +9,7 @@ import datetime
 try:
     import xesmf as xe
 except (ImportError, ModuleNotFoundError) as e:
-    print(e, "-- xesmf must be installed to regrid.")
+    raise e
 
 gfs_map = {'tmp': 'T', 'ugrd': 'U', 'vgrd': 'V', 'spfh': 'Q', 'pressfc': 'SP', 'tmp2m': 't2m'}
 level_map = {'T500': 'T', 'U500': 'U', 'V500': 'V', 'Q500': 'Q', 'Z500': 'Z'}
