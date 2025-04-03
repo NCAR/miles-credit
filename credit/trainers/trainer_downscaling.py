@@ -363,8 +363,8 @@ class Trainer(BaseTrainer):
 
         self.ensemble_size = tconf.get("ensemble_size", 1)
         if self.ensemble_size > 1:
-            self.logger.info(f"ensemble training with ensemble_size {ensemble_size}")
-        self.logger.info(f"Using grad-max-norm value: {grad_max_norm}")
+            logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
+        logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
 
 
         self.forecast_length = dconf["forecast_len"]
@@ -413,7 +413,7 @@ class Trainer(BaseTrainer):
         if "backprop_on_timestep" in dconf:
             self.backprop_on_timestep = dconf["backprop_on_timestep"]
         else:
-            self.backprop_on_timestep = list(range(0, self.forecast_len + 1 + 1))
+            self.backprop_on_timestep = list(range(0, self.forecast_length + 1 + 1))
 
         assert (
             self.forecast_length <= self.backprop_on_timestep[-1]
@@ -469,7 +469,7 @@ class Trainer(BaseTrainer):
 
         dl= cycle(trainloader)
         results_dict = defaultdict(list)
-        for steps in range(batches_per_epoch):
+        for steps in range(self.batches_per_epoch):
             logs = {}
             loss = 0
             stop_forecast = False
