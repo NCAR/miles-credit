@@ -35,11 +35,9 @@ from credit.parser import credit_main_parser, predict_data_check
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
-#-------- added -----##
-
-from interp import *
-
-#####################
+#--------> credit ptype postprocess <---------------------
+from credit.credit_for_ptype import CreditPostProcessor
+#---------------------------------------------------------
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -115,28 +113,52 @@ class ForecastProcessor:
                 all_upper_air = darray_upper_air
                 all_single_level = darray_single_level
 
-            #changes 29-03-2025
-            #print(all_upper_air.dims, all_single_level.dims)  
-        
-            # print("Coordinates:", all_single_level.coords)
-            # print("Variables:", all_single_level.data_vars)
-        
-            processed_ds = process_credit_output(
-                 all_upper_air=all_upper_air, 
-                all_single_level=all_single_level  # Pass surface data directly
-            )
+            #---------> credit ptype p: Wqostprocess <------------------------------
+            if self.conf['use_ptype']:
+                
+                credit_processor = CreditPostProcessor()
             
-            print(processed_ds.dims)
-            # Save the current forecast hour data in parallel
-            save_netcdf_increment(
-                all_upper_air,
-                all_single_level,
-                save_datetimes[forecast_count + j],  # Use correct index for current batch item
-                self.lead_time_periods * forecast_step,
-                self.meta_data,
-                conf,
-            )
-
+                ds_output = credit_processor.process_credit_output(all_upper_air.to_dataset(dim="vars"),
+                                                                   all_single_level.to_dataset(dim="vars"))
+                subset = credit_processor.subset_extent(ds_output, self.conf['ptype']['extent'], data_proj=None)
+                subset_array = credit_processor.extract_variable_levels(subset)
+                scaler,input_features = credit_processor.load_scalar(self.conf['ptype']["input_scaler_file"])
+                transformed_data = credit_processor.transform_data(subset_array, scaler, input_features)
+                print(transformed_data.shape, type(transformed_data))     
+    
+                ptype_model = credit_processor.load_model(self.conf['ptype']['ML_model_path'])
+    
+                predictions = ptype_model.predict(transformed_data, 
+                                                  self.conf['ptype']['output_uncertainties'],
+                                                batch_size=self.conf['ptype']["predict_batch_size"])
+    
+                
+                gridded_preds = credit_processor.grid_predictions(
+                                        data=subset,
+                                        predictions=predictions,
+                                        output_uncertainties=self.conf['ptype']["output_uncertainties"]
+                                    )
+                
+                credit_processor.write_to_netcdf(
+                    gridded_preds,
+                    save_datetimes[forecast_count + j],
+                    self.lead_time_periods * forecast_step,
+                    self.conf,
+                    
+                )
+            #----------------------------------------------------------------------------
+            if not self.conf['use_ptype']:
+            
+                # Save the current forecast hour data in parallel
+                save_netcdf_increment(
+                    all_upper_air,
+                    all_single_level,
+                    save_datetimes[forecast_count + j],  # Use correct index for current batch item
+                    self.lead_time_periods * forecast_step,
+                    self.meta_data,
+                    conf,
+                )
+    
             print_str = f"Forecast: {forecast_count + 1 + j} "
             print_str += f"Date: {utc_datetimes[j].strftime('%Y-%m-%d %H:%M:%S')} "
             print_str += f"Hour: {forecast_step * self.lead_time_periods} "

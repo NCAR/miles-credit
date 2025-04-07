@@ -9,6 +9,12 @@ from tqdm import tqdm
 import os
 from bridgescaler import load_scaler
 import pandas as pd
+from keras.models import load_model
+from mlguess.keras.models import CategoricalDNN
+from mlguess.keras.losses import evidential_cat_loss
+import logging
+logger = logging.getLogger(__name__)
+
 
 class CreditPostProcessor:
     def __init__(self, levels=None, interp_var=None, interp_heights_m=None):
@@ -178,7 +184,9 @@ class CreditPostProcessor:
         input_features = [x for y in groups for x in y]
     
         return  scaler,input_features
-
+        
+    def load_model(self, model_path):
+        return load_model(model_path, custom_objects={'loss': evidential_cat_loss})
     
     def transform_data(self,input_data, transformer, input_features):
         """
@@ -195,7 +203,7 @@ class CreditPostProcessor:
         return transformed_data
 
 
-    def grid_predictions(data, predictions,output_uncertainties=False):
+    def grid_predictions(self, data, predictions,output_uncertainties=False):
         """
         Populate gridded xarray dataset with ML probabilities and categorical predictions as separate variables.
         Args:
@@ -243,26 +251,16 @@ class CreditPostProcessor:
     
         return data
 
-    def make_predictions(self):
-        """Runs the ML model to generate predictions."""
-        self.predictions = self.model.predict(
-            self.x_data,
-            return_uncertainties=self.config["output_uncertainties"],
-            batch_size=self.config["predict_batch_size"]
-        )
-
-    def save_results(self, save_path):
+    def write_to_netcdf(self,dataset,nc_filename, forecast_hour,conf):
         """Saves the processed data to a NetCDF file."""
-        save_data(self.gridded_preds, save_path)
 
-    def run_pipeline(self, all_upper_air, all_single_level, save_path):
-        """Runs the full postprocessing pipeline."""
-        self.data = self.process_credit_output(all_upper_air, all_single_level)
-        self.load_model()
-        self.subset_data()
-        self.extract_variables()
-        self.transform_inputs()
-        self.make_predictions()
-        self.grid_predictions()
-        self.save_results(save_path)
-        print("Postprocessing complete. Data saved to:", save_path)
+        logger.info(f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
+
+        save_location = os.path.join(conf["predict"]["save_forecast"], nc_filename)
+        os.makedirs(save_location, exist_ok=True)
+
+        unique_filename = os.path.join(
+            save_location, f"pred_{nc_filename}_{forecast_hour:03d}.nc"
+        )
+        
+        dataset.to_netcdf(unique_filename)
