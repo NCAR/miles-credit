@@ -23,7 +23,8 @@ class LatWeightedMetrics:
 
         self.w_lat = None
         if conf["loss"]["use_latitude_weights"]:
-            self.w_lat = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
+            self.lat_weights = latitude_weights(conf)
+            self.lat_weights = self.lat_weights.view(1, 1, 1, len(self.lat_weights), 1)
 
         # DO NOT apply these weights during metrics computations, only on the loss during
         self.w_var = None

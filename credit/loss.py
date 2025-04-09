@@ -447,16 +447,12 @@ def latitude_weights(conf):
     # Open the dataset and extract latitude and longitude information
     ds = xr.open_dataset(conf["loss"]["latitude_weights"])
     lat = torch.from_numpy(ds["latitude"].values).float()
-    lon_dim = ds["longitude"].shape[0]
 
     # Calculate weights using PyTorch operations
     weights = torch.cos(torch.deg2rad(lat))
     weights = weights / weights.mean()
 
-    # Create a 2D tensor of weights
-    L = weights.unsqueeze(1).expand(-1, lon_dim)
-
-    return L
+    return weights
 
 
 def variable_weights(conf, channels, frames):
@@ -576,28 +572,37 @@ class VariableTotalLoss2D(torch.nn.Module):
         self.vars += surface_vars
         self.vars += diag_vars
 
-        self.lat_weights = None
+        self.lat_weights = torch.tensor(1.0)
         if conf["loss"]["use_latitude_weights"]:
             logger.info("Using latitude weights in loss calculations")
-            self.lat_weights = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
+            self.lat_weights = latitude_weights(conf)
+            self.lat_weights = self.lat_weights.view(1, 1, 1, len(self.lat_weights), 1)
 
         # ------------------------------------------------------------- #
         # variable weights
         # order: upper air --> surface --> diagnostics
-        self.var_weights = None
+        self.var_weights = torch.tensor(1.0)
         if conf["loss"]["use_variable_weights"]:
             logger.info("Using variable weights in loss calculations")
+            
+            var_weights = []
+            for key, value in conf["loss"]["variable_weights"].items():
+                if key in ["U", "V", "T", "Q", "Qtot"] and not isinstance(value, list):
+                    weights = [value] * levels
+                else:
+                    weights = value if isinstance(value, list) else [value] 
+                var_weights += weights
 
-            var_weights = [
-                value if isinstance(value, list) else [value]
-                for value in conf["loss"]["variable_weights"].values()
-            ]
+            self.var_weights = torch.tensor(var_weights)
+            
+            num_missing_weights = len(self.vars) - len(self.var_weights)
+            if num_missing_weights > 0:
+                self.var_weights = torch.cat([self.var_weights, 
+                                              torch.full((num_missing_weights, ), conf["loss"]["default_var_weight"])])
 
-            var_weights = np.array(
-                [item for sublist in var_weights for item in sublist]
-            )
+            assert len(self.var_weights) == len(self.vars)
 
-            self.var_weights = torch.from_numpy(var_weights)
+            self.var_weights = self.var_weights.view(1, len(self.var_weights), 1, 1, 1)
         # ------------------------------------------------------------- #
 
         self.use_spectral_loss = conf["loss"]["use_spectral_loss"]
@@ -619,12 +624,12 @@ class VariableTotalLoss2D(torch.nn.Module):
             )
 
         self.validation = validation
-        if (
-            conf["loss"]["training_loss"] == "KCRPS"
-        ):  # for ensembles, load same loss for train and valid
+        if conf["loss"]["training_loss"] == "KCRPS":  # for ensembles, load same loss for train and valid
             self.loss_fn = load_loss(self.training_loss, reduction="none")
+
         elif self.validation:
             self.loss_fn = nn.L1Loss(reduction="none")
+
         else:
             self.loss_fn = load_loss(self.training_loss, reduction="none")
 
@@ -647,19 +652,11 @@ class VariableTotalLoss2D(torch.nn.Module):
         loss = self.loss_fn(target, pred)
 
         # Latitutde and variable weights
-        loss_dict = {}
-        for i, var in enumerate(self.vars):
-            var_loss = loss[:, i]
+        loss = (loss 
+                * self.lat_weights.to(target.device)
+                * self.var_weights.to(target.device))
 
-            if self.lat_weights is not None:
-                var_loss = torch.mul(var_loss, self.lat_weights.to(target.device))
-
-            if self.var_weights is not None:
-                var_loss *= self.var_weights[i].to(target.device)
-
-            loss_dict[f"loss_{var}"] = var_loss.mean()
-
-        loss = torch.mean(torch.stack(list(loss_dict.values())))
+        loss = loss.mean()
 
         # Add the spectral loss
         if not self.validation and self.use_power_loss:
