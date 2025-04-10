@@ -65,7 +65,10 @@ class ForecastProcessor:
         self.meta_data = load_metadata(conf)
 
         # Set up the diffusion and pole filters
-        if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
+        if (
+            "use_laplace_filter" in conf["predict"]
+            and conf["predict"]["use_laplace_filter"]
+        ):
             self.dpf = Diffusion_and_Pole_Filter(
                 nlat=conf["model"]["image_height"],
                 nlon=conf["model"]["image_width"],
@@ -77,12 +80,21 @@ class ForecastProcessor:
         y_pred = self.state_transformer.inverse_transform(y_pred)
 
         # This will fail if not using torch multiprocessing AND using a GPU
-        if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
-            y_pred = self.dpf.diff_lap2d_filt(y_pred.to(self.device).squeeze()).unsqueeze(0).unsqueeze(2).cpu()
+        if (
+            "use_laplace_filter" in conf["predict"]
+            and conf["predict"]["use_laplace_filter"]
+        ):
+            y_pred = (
+                self.dpf.diff_lap2d_filt(y_pred.to(self.device).squeeze())
+                .unsqueeze(0)
+                .unsqueeze(2)
+                .cpu()
+            )
 
         # Calculate correct datetime for current forecast
         utc_datetimes = [
-            datetime.utcfromtimestamp(datetimes[i].item()) + timedelta(hours=self.lead_time_periods)
+            datetime.utcfromtimestamp(datetimes[i].item())
+            + timedelta(hours=self.lead_time_periods)
             for i in range(self.batch_size)
         ]
 
@@ -103,9 +115,15 @@ class ForecastProcessor:
                 single_level_list.append(darray_single_level)
 
             if self.ensemble_size > 1:
-                ensemble_index = xr.DataArray(np.arange(self.ensemble_size), dims="ensemble_member_label")
-                all_upper_air = xr.concat(upper_air_list, ensemble_index)  # .transpose("time", ...)
-                all_single_level = xr.concat(single_level_list, ensemble_index)  # .transpose("time", ...)
+                ensemble_index = xr.DataArray(
+                    np.arange(self.ensemble_size), dims="ensemble_member_label"
+                )
+                all_upper_air = xr.concat(
+                    upper_air_list, ensemble_index
+                )  # .transpose("time", ...)
+                all_single_level = xr.concat(
+                    single_level_list, ensemble_index
+                )  # .transpose("time", ...)
             else:
                 all_upper_air = darray_upper_air
                 all_single_level = darray_single_level
@@ -114,7 +132,9 @@ class ForecastProcessor:
             save_netcdf_increment(
                 all_upper_air,
                 all_single_level,
-                save_datetimes[forecast_count + j],  # Use correct index for current batch item
+                save_datetimes[
+                    forecast_count + j
+                ],  # Use correct index for current batch item
                 self.lead_time_periods * forecast_step,
                 self.meta_data,
                 conf,
@@ -138,6 +158,8 @@ def predict(rank, world_size, conf, p):
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
         torch.cuda.set_device(rank % torch.cuda.device_count())
+    elif torch.mps.is_available():
+        device = torch.device("mps")
     else:
         device = torch.device("cpu")
 
@@ -248,7 +270,9 @@ def predict(rank, world_size, conf, p):
         model = distributed_model_wrapper(conf, model, device)
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-        load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+        load_msg = model.module.load_state_dict(
+            checkpoint["model_state_dict"], strict=False
+        )
         load_state_dict_error_handler(load_msg)
     elif conf["predict"]["mode"] == "fsdp":
         model = load_model(conf, load_weights=True).to(device)
@@ -279,13 +303,21 @@ def predict(rank, world_size, conf, p):
             if forecast_step == 1:
                 # Process the entire batch at once
                 init_datetimes = [
-                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime("%Y-%m-%dT%HZ")
+                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime(
+                        "%Y-%m-%dT%HZ"
+                    )
                     for i in range(batch_size)
                 ]
-                save_datetimes[forecast_count : forecast_count + batch_size] = init_datetimes
+                save_datetimes[forecast_count : forecast_count + batch_size] = (
+                    init_datetimes
+                )
 
                 if "x_surf" in batch:
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(device).float()
+                    x = (
+                        concat_and_reshape(batch["x"], batch["x_surf"])
+                        .to(device)
+                        .float()
+                    )
                 else:
                     x = reshape_only(batch["x"]).to(device).float()
 
@@ -295,9 +327,13 @@ def predict(rank, world_size, conf, p):
 
             # Add forcing and static variables for the entire batch
             if "x_forcing_static" in batch:
-                x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                x_forcing_batch = (
+                    batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                )
                 if ensemble_size > 1:
-                    x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                    x_forcing_batch = torch.repeat_interleave(
+                        x_forcing_batch, ensemble_size, 0
+                    )
                 x = torch.cat((x, x_forcing_batch), dim=1)
 
             # Clamp if needed
@@ -355,7 +391,9 @@ def predict(rank, world_size, conf, p):
 
                 # cut diagnostic vars from y_pred, they are not inputs
                 if varnum_diag > 0:
-                    x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
+                    x = torch.cat(
+                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
+                    )
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
@@ -470,11 +508,15 @@ if __name__ == "__main__":
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     # handling config args
-    conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
+    conf = credit_main_parser(
+        conf, parse_training=False, parse_predict=True, print_summary=False
+    )
     predict_data_check(conf, print_summary=False)
 
     # create a save location for rollout
-    assert "save_forecast" in conf["predict"], "Please specify the output dir through conf['predict']['save_forecast']"
+    assert (
+        "save_forecast" in conf["predict"]
+    ), "Please specify the output dir through conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)

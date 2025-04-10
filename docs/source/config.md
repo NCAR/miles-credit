@@ -4,7 +4,7 @@ Your configuration file drives everything from the model training to inference, 
 
 # CREDIT Configuration Guide  
 
-## Overview  
+## Overview
 
 This document provides detailed instructions on configuring `configuration.yml` for running CREDIT.
 
@@ -161,7 +161,7 @@ valid_years: [2014, 2018]  # 2014 - 2017
 
 ---
 
-You're absolutely right—this section contains **critical configuration parameters** related to **data preprocessing, input structure, and training behavior**, and it should be explained clearly in the README. Below is an expanded, structured section covering these settings in depth.  
+This section contains **critical configuration parameters** related to **data preprocessing, input structure, and training behavior**. Below is an expanded, structured section covering these settings in depth.  
 
 ---
 
@@ -214,16 +214,26 @@ valid_forecast_len: 0
 
 ### Multi-Step Training Options  
 
-If `forecast_len > 0`, CREDIT supports **customized backpropagation strategies** to improve training efficiency.  
+If `forecast_len > 0`, CREDIT supports **customized backpropagation strategies** to improve training efficiency.
+
 
 ```yaml
 backprop_on_timestep: [1, 2, 3, 5, 6, 7]
 ```
 
-- Specifies which time steps contribute to the loss during backpropagation.  
+- Specifies which time steps contribute to the loss during 
+backpropagation.  
+- If unspecified, the trainer will backpropagate on *all* timesteps
 - Helps **control memory usage** by skipping certain time steps.  
 
 💡 *For example, `[1, 2, 3, 5, 6, 7]` means the model backpropagates on these timesteps but skips others.*  
+
+```yaml
+retain_graph: False
+```
+- Specifies whether the trainer keeps the computation graph through the autoregressive prediction during training
+- If so, the backpropagation will go from each `backprop_on_timestep` to the start of the autoregressive rollout
+- Will use **a lot** more memory
 
 #### One-Shot Loss Computation  
 
@@ -248,14 +258,14 @@ lead_time_periods: 6  # Example: 6-hourly training data
   - `6` → 6-hourly model (common for ERA5).  
   - `1` → Hourly model.  
 
-#### Handling Hourly Data with a 6-Hourly Model  
+<!-- #### Handling Hourly Data with a 6-Hourly Model  
 
 ```yaml
 skip_periods: null
 ```
 
 - If `skip_periods: 6`, CREDIT will **subsample hourly data** to train a 6-hourly model.  
-- If `skip_periods: 1` or `null`, it uses all time steps (assumes no subsampling needed).  
+- If `skip_periods: 1` or `null`, it uses all time steps (assumes no subsampling needed).   -->
 
 ---
 
@@ -278,15 +288,16 @@ static_first: False
 CREDIT supports multiple data loading strategies:  
 
 ```yaml
-dataset_type: MultiprocessingBatcherPrefetch
+dataset_type: ERA5_MultiStep_Batcher
 ```
 
 - **Options**:  
-  - `ERA5_and_Forcing_MultiStep`  
-  - `MultiprocessingBatcherPrefetch`  
   - `ERA5_MultiStep_Batcher`  
+  - `ERA5_and_Forcing_MultiStep` 
+  - `MultiprocessingBatcherPrefetch` (*experimental*)
   - `MultiprocessingBatcher`  
-- The **default (`MultiprocessingBatcherPrefetch`) is recommended** for efficient parallel data loading.  
+- The **default (`ERA5_MultiStep_Batcher`) is recommended** for efficient parallel data loading.  
+- `MultiprocessingBatcherPrefetch` is *experimental* and you may run into weird issues.
 
 ---
 
@@ -306,42 +317,22 @@ dataset_type: MultiprocessingBatcherPrefetch
 
 
 ## Training Configuration  
-
-### Training Mode  
-
-```yaml
-trainer:
-    mode: none  # Options: "none" (single GPU), "fsdp" (fully sharded), "ddp" (distributed)
-```
-
-- **Use `fsdp` or `ddp` for multi-GPU training.**  
-
-
-Here's an **expanded section** for the **trainer configuration**, including explanations for **FSDP optimizations, checkpointing, and logging settings**.  
-
----
-
-## Trainer Configuration  
-
 The `trainer` section controls how CREDIT handles **GPU parallelism, gradient updates, checkpointing, and logging**.  
 
----
-
-### GPU Optimization & Distributed Training  
-
-CREDIT supports **single-GPU, multi-GPU, and distributed training**.  
+### Training type and mode  
 
 ```yaml
 trainer:
+    type: era5 # era5 or conus404 (in development)
     mode: none  # Options: "none" (single GPU), "fsdp" (fully sharded), "ddp" (distributed)
 ```
 
-- **`none`** → Single-GPU training.  
-- **`fsdp`** → Fully Sharded Data Parallel (FSDP).  
-- **`ddp`** → Distributed Data Parallel (DDP).  
+- Use `era5` for global data
+- **Use `fsdp` or `ddp` for multi-GPU training.**  
 
 💡 *For large models, `fsdp` helps distribute computation across multiple GPUs, reducing memory usage.*  
 
+CREDIT supports **single-GPU, multi-GPU, and distributed training**.  
 ---
 
 ### FSDP-Specific GPU Optimization  
@@ -366,7 +357,7 @@ checkpoint_all_layers: False
 
 ### Torch Compilation  
 
-Torch 2.0 introduces **graph-based optimizations** to speed up training.  
+Torch 2.0 introduces **compiling to torchscript** to speed up training.  
 
 ```yaml
 compile: False
@@ -547,6 +538,7 @@ epochs: &epochs 70
 - **`reload_epoch`**:  
   - `True` → Reads the **last saved epoch** and resumes training.  
   - `False` → Starts fresh.  
+- **`epochs`**: total number of epochs that the scheduler sees
 
 💡 *If using **epoch-based schedulers**, `reload_epoch: True` ensures proper continuation.*  
 
@@ -649,18 +641,6 @@ prefetch_factor: 4
 | `grad_max_norm` | `'dynamic'` | Prevents gradient explosion. |
 | `thread_workers` | `4` | Tune based on available CPUs. |
 
-
-### Loss Function  
-
-```yaml
-loss:
-    training_loss: "mse"
-    use_power_loss: False
-    use_spectral_loss: False
-```
-
-- Options: `"mse"`, `"mae"`, `"huber"`, `"logcosh"`, `"xtanh"`, `"xsigmoid"`.  
-- Use **power loss or spectral loss** to penalize high-frequency errors.  
 
 ---
 
@@ -909,15 +889,76 @@ post_conf:
 
 SKEBS introduces **stochastic perturbations** to correct **underdispersed forecasts** in weather models.  
 
-```yaml
-skebs:
-    activate: False
-```
+Based on [Berner, J., Shutts, G. J., Leutbecher, M., & Palmer, T. N. (2009). A spectral stochastic kinetic energy backscatter scheme and its impact on flow-dependent predictability in the ECMWF ensemble prediction system. Journal of the Atmospheric Sciences, 66(3), 603-626. ](https://journals.ametsoc.org/view/journals/atsc/66/3/2008jas2677.1.xml)
 
 - **`True`** → Enables **kinetic energy backscatter corrections** (experimental).  
 - **`False`** → Disables SKEBS.  
 
 💡 *Enable if testing **ensemble perturbations** for uncertainty quantification.*  
+
+```yaml
+skebs:
+    activate: True
+    freeze_base_model_weights: True  # turn off training of the basemodel
+
+    # skebs module training options
+    trainable: True # is skebs trainable at all
+    freeze_dissipation_weights: False  # turn off training for dissipation
+    freeze_pattern_weights: True  # turn off training for the spectral pattern
+    lmax: None # lmax, mmax for spectral transforms
+    mmax: None
+
+    # custom initialization of alpha
+    alpha_init: 0.95 
+    train_alpha: False #trains alpha no matter what
+
+    # dissipation config:
+    zero_out_levels_top_of_model: 3 # zero out backscatter at top k levels of the model
+
+    dissipation_scaling_coefficient: 10.
+    dissipation_type: FCNN 
+    # available types:
+    #    - prescribed: fixed dissipation rate spatially, varies by level starts at sigma_max level (see below)
+    #    - uniform: fixed dissipation rate spatially, varies by level starts at 2.5
+    #    - FCNN: two layer small MLP
+    #    - FCNN_wide: four layer wide MLP
+    #    - unet: user specified arch, default: unet++
+    #    - CNN: single 3x3 convolution with padding for each column
+
+    # unet - see models/unet.py for examples
+    # architecture:
+    padding: 48
+
+    # prescribed dissipation:
+    sigma_max: 2.0 # what sigma level to set as the max wind. perturbation will be roughly sigma_max * std for wind at each level
+
+    # spectral filters, will anneal to 0 from anneal_start (linspace)
+    max_pattern_wavenum: 60
+    pattern_filter_anneal_start: 40
+
+    max_backscatter_wavenum: 100
+    backscatter_filter_anneal_start: 90
+
+    # [Optional] default is off
+    train_backscatter_filter: False
+    train_pattern_filter: False
+
+    # data config - does the backscatter model get statics variables?
+    use_statics: False 
+
+    # [Optional] early skebs shutoff on iteration number:
+    iteration_stop: 0 # if 0, skebs is always run
+
+    #### debugging ####
+    # write files during training:
+    write_train_debug_files: False #writing out files while training, if this is False          
+    write_train_every: 999
+
+    # write files during inference
+    write_rollout_debug_files: False # saves only when no_grad 
+```
+
+
 
 ---
 
@@ -1109,6 +1150,7 @@ training_loss: "mse"
   - `"logcosh"` → **Log-Cosh Loss** (similar to Huber, smooths large errors).  
   - `"xtanh"` → Custom loss using hyperbolic tangent.  
   - `"xsigmoid"` → Custom loss using sigmoid transformation.  
+  - `"KCRPS"` → bias corrected CRPS for ensemble training
 
 💡 *`mse` is recommended for smooth loss surfaces, while `huber` or `logcosh` are better for handling outliers.*  
 

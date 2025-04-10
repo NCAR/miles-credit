@@ -166,6 +166,7 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
                 )
                 x_list.extend([upper_x, surface_x])
                 if self.filename_dyn_forcing is not None:
+                    print(self.dyn_forcing_files.keys())
                     dyn_forcing_x = (
                         self.dyn_forcing_files[valid_year]
                         .sel(time=valid_date)

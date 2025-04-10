@@ -140,12 +140,12 @@ data:
     # dataset type. For now you may choose from 
     # ERA5_and_Forcing_MultiStep MultiprocessingBatcherPrefetch ERA5_MultiStep_Batcher MultiprocessingBatcher
     # All of these support single or multi-step training (e.g. forecast lengths >= 0)
-    dataset_type: MultiprocessingBatcherPrefetch
+    dataset_type: ERA5_MultiStep_Batcher
 
 trainer:
     # Choose the training routine
     # This is deprecated as of credit-2.0
-    # Options: era5, cam, or conus404
+    # Options: era5, or conus404
     type: era5
 
     # the keyword that controls GPU usage
