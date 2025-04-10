@@ -69,6 +69,19 @@ def do_eval(forecast_save_loc, conf, model_conf, fh):
             #compute and merge dicts
             result_dict = result_dict | _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level)
             result_dict = result_dict | _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, level) # returns dict of None if not computed
+
+    if "U" in conf["variables"] and "V" in conf["variables"]:
+        variable = "wind_norm"
+        for level in conf["levels"]:
+            #get ensemble and truth
+            da_pred_u, da_true_u = get_data(sampler, rollout_files, "U", level)
+            da_pred_v, da_true_v = get_data(sampler, rollout_files, "V", level)
+            da_pred = np.sqrt(da_pred_u ** 2 + da_pred_v ** 2)
+            da_true = np.sqrt(da_true_u ** 2 + da_true_v ** 2)
+            #compute and merge dicts
+            result_dict = result_dict | _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level)
+            result_dict = result_dict | _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, level) # returns dict of None if not computed
+
     for variable in conf["single_level_variables"]:
         da_pred, da_true = get_data(sampler, rollout_files, variable, None)
         #compute and merge dicts

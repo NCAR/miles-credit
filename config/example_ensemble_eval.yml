@@ -10,7 +10,7 @@ save_filename: "ensemble_eval.parquet"
 # analysis 
 # spread-error and ens RMSE computed for every forecast hour
 
-variables: ["U"]
+variables: ["U", "V"]
 levels: [20, 24] # uses isel
 single_level_variables: ["U10"]
 
