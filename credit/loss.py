@@ -587,6 +587,8 @@ class VariableTotalLoss2D(torch.nn.Module):
             
             var_weights = []
             for key, value in conf["loss"]["variable_weights"].items():
+                logger.info(f"extracting {key} weights")
+                
                 if key in ["U", "V", "T", "Q", "Qtot"] and not isinstance(value, list):
                     weights = [value] * levels
                 else:
@@ -594,6 +596,7 @@ class VariableTotalLoss2D(torch.nn.Module):
                 var_weights += weights
 
             self.var_weights = torch.tensor(var_weights)
+            logger.info(self.var_weights)
             
             num_missing_weights = len(self.vars) - len(self.var_weights)
             if num_missing_weights > 0:

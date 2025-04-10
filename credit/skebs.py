@@ -612,6 +612,11 @@ class SKEBS(nn.Module):
     @custom_fwd(device_type='cuda', cast_inputs=torch.float32)
     def forward(self, x):
         """ the inverse sht operation requires float32 or greater """
+
+        # manual override of r
+        if self.iteration == 0 and "r" in self.post_conf["skebs"]:
+            self.r.data = torch.tensor(self.post_conf["skebs"]["r"])
+            logger.warning(f"manually setting r to {self.r}")
  
         if self.is_training: # this checks if we are in a training script
             # self.training is a torch level thing that checks if we are in train/validation mode of training
@@ -635,7 +640,7 @@ class SKEBS(nn.Module):
                 
             return x
         
-
+        input_dict = x
         ################### SKEBS ################### 
         #############################################
         #############################################
@@ -643,12 +648,13 @@ class SKEBS(nn.Module):
 
         ################### BACKSCATTER ################### 
         ######## setup input data for backscatter #########
-
+        
         x_input_statics = x["x"][:, self.static_inds]
         x = x["y_pred"]
 
         if not self.retain_graph:
             x = x.detach()
+            x_input_statics = x_input_statics.detach()
 
         if self.iteration == 0:
             self.cos_lat = self.cos_lat.to(x.device).expand(x.shape[0], *self.cos_lat.shape[1:])
@@ -665,7 +671,7 @@ class SKEBS(nn.Module):
 
         if ((self.write_rollout_debug_files and not self.is_training) # save out raw all backscatter prediction when not training
             or (self.write_train_debug_files and self.iteration % self.write_every == 0)):
-            logger.info(f"writing backscatter file for iter {self.iteration}")
+            logger.info(f"writing raw backscatter file for iter {self.iteration}")
             torch.save(backscatter_pred, join(self.debug_save_loc, f"backscatter_raw_{self.iteration}"))
             
         if self.dissipation_type not in ["prescribed", "uniform"]:
@@ -680,7 +686,7 @@ class SKEBS(nn.Module):
 
         if ((self.write_rollout_debug_files and not self.is_training) # save out filtered backscatter
             or (self.write_train_debug_files and self.iteration % self.write_every == 0)):
-            logger.info(f"writing backscatter file for iter {self.iteration}")
+            logger.info(f"writing filtered backscatter file for iter {self.iteration}")
             torch.save(backscatter_pred, join(self.debug_save_loc, f"backscatter_{self.iteration}"))
         
         ################### SKEBS pattern ####################
@@ -756,8 +762,9 @@ class SKEBS(nn.Module):
         ################### setup next iteration #####################
         self.iteration += 1 # this one for total iterations
         self.steps += 1  # this one for skebs/model state
-        
-        return x
+
+        input_dict["y_pred"] = x
+        return input_dict
     
     def spec2grid(self, uspec):
         """
