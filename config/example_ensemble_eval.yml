@@ -2,29 +2,30 @@ config: "/glade/derecho/scratch/dkimpara/CREDIT_runs/skebs_fcnn_scaled_train/mod
 grid: "equiangular" #move this to data config in model conf?
 
 
-# [Optional] will default to above config's save_forecast location
+# [Optional] location of forecast data. default: above config's save_forecast location
 save_forecast: "/glade/derecho/scratch/dkimpara/CREDIT_runs/skebs_fcnn_scaled_train/analysis_test"
-# [Optional] filename to save eval results in
+# [Optional] filename to save eval results filename default: ensemble_eval.parquet
+# will save to save_forecast
 save_filename: "ensemble_eval.parquet"
 
 # analysis 
 # spread-error and ens RMSE computed for every forecast hour
 
-variables: ["U"]
-levels: [20, 24] # uses isel
+variables: ["U", "V", "T"]
+levels: [14, 20, 24] # uses isel
 single_level_variables: ["U10"]
 
 # use the following to specify leadtimes for other 
 # metrics: zonal spectrum, spread-reliability, rank histograms
-detailed_eval_hours: [24]
+detailed_eval_hours: [6]
 
 # num bins for binned spread-skill reliability
-num_bins: 20
+num_bins: 25
 
 
 ###### provisioning setup ######
-# [Override] overrides -cpus CLI argument
-num_process: 1 
+# [Override] overrides -cpus CLI argument and default num_cpus - 1
+# num_process: 31
 # memory reqs:
 # num_cpus or num_process * num_ICs * ensemble_size * size of 1 variable,level dataarray
 # 1 deg equiangular 1 variable, ensemble_size 16: roughly 10mb
@@ -33,7 +34,7 @@ pbs:
     conda: "~/credit"
     job_name: 'ensemble_eval'
     nodes: 1
-    ncpus: 16
+    ncpus: 32
     ngpus: 0
     mem: '128GB'
     walltime: '01:00:00'

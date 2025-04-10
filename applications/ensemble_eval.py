@@ -14,10 +14,9 @@ import xarray as xr
 
 import yaml
 
-from credit import ensemble, forecast
-from credit.pbs import launch_script, launch_script_mpi
+from credit.pbs import launch_script, launch_script_mpi, get_num_cpus
 from credit.verification.ensemble import binned_spread_skill, rank_histogram_apply, spread_error
-from credit.verification.standard import average_zonal_spectrum
+from credit.verification.standard import average_div_rot_spectrum, average_zonal_spectrum
 from credit.xr_sampler import XRSamplerByYear
 
 def evaluate(num_files, forecast_save_loc, conf, model_conf, p):
@@ -38,7 +37,7 @@ def evaluate(num_files, forecast_save_loc, conf, model_conf, p):
 
     # result will be list of dicts eg. {"spread_U10": num, "spectrum_U_24": num, "ranks_": vec, "freq_": vec}
     # pack result into dataframe and save
-    result.sort(key= lambda x: x["forecast_hour"]) # sort of forechast hours are in order
+    result.sort(key= lambda x: x["forecast_hour"]) # sort of forecast hours are in order
     
     # future: use multi-indexing
     df = pd.DataFrame(result)
@@ -69,6 +68,32 @@ def do_eval(forecast_save_loc, conf, model_conf, fh):
             #compute and merge dicts
             result_dict = result_dict | _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level)
             result_dict = result_dict | _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, level) # returns dict of None if not computed
+
+     
+    # eval of U and V combined
+    if "U" in conf["variables"] and "V" in conf["variables"]:
+        variable = "wind_norm"
+        for level in conf["levels"]:
+            #get ensemble and truth
+            da_pred_u, da_true_u = get_data(sampler, rollout_files, "U", level)
+            da_pred_v, da_true_v = get_data(sampler, rollout_files, "V", level)
+
+            # do wind norm
+            da_pred = np.sqrt(da_pred_u ** 2 + da_pred_v ** 2)
+            da_true = np.sqrt(da_true_u ** 2 + da_true_v ** 2)
+            result_dict = result_dict | _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level)
+            result_dict = result_dict | _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, level) # returns dict of None if not computed
+
+            # do vrt, div
+            ds_pred = xr.Dataset({"U": da_pred_u, "V": da_pred_v})
+            ds_true = xr.Dataset({"U": da_true_u, "V": da_true_v})
+
+            vrt_pred, div_pred = average_div_rot_spectrum(ds_pred, conf["grid"], wave_spec="n")
+            vrt_true, div_true = average_div_rot_spectrum(ds_true, conf["grid"], wave_spec="n")
+
+            result_dict = result_dict | {f"vrt_spectrum_{level}": vrt_pred, f"div_spectrum_{level}": div_pred}
+            result_dict = result_dict | {f"vrt_spectrum_{level}_truth": vrt_true, f"div_spectrum_{level}_truth": div_true}
+
     for variable in conf["single_level_variables"]:
         da_pred, da_true = get_data(sampler, rollout_files, variable, None)
         #compute and merge dicts
@@ -77,6 +102,7 @@ def do_eval(forecast_save_loc, conf, model_conf, fh):
 
 
     return result_dict
+
 
 def _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level):
     # ensemble spread, ensemble RMSE
@@ -215,11 +241,13 @@ if __name__ == "__main__":
     with open(conf["config"]) as cf:
         model_conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    # create a save location for rollout
+    # get save location for rollout
     if "save_forecast" not in conf or conf["save_forecast"] is None:
         forecast_save_loc = model_conf["predict"]["save_forecast"]
     else:
         forecast_save_loc = conf["save_forecast"]
+
+    logging.info(f"evaluating forecast at {forecast_save_loc}")
 
     conf["save_filename"] = conf.get("save_filename", "ensemble_eval.parquet")
     if conf["save_filename"] is None:
@@ -254,10 +282,11 @@ if __name__ == "__main__":
 
     #local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
 
+    num_process = get_num_cpus() - 1 # count the num_cpus
     if "num_process" in conf:
-        num_cpus = conf["num_process"]
+        num_process = conf["num_process"]
 
-    with mp.Pool(num_cpus) as p:
+    with mp.Pool(num_process) as p:
         evaluate(num_files, forecast_save_loc, conf, model_conf, p)
     # Ensure all processes are finished
     p.close()
