@@ -33,6 +33,24 @@ class CreditPostProcessor:
         self.surface_geopotential = self.surface_geopotential_ds.Z_GDS4_SFC.values
         self.data = None
 
+        self.save_vars = ['ML_u',
+                         'ML_rain_ale',
+                         'ML_rain_epi',
+                         'ML_snow_ale',
+                         'ML_snow_epi',
+                         'ML_icep_ale',
+                         'ML_icep_epi',
+                         'ML_frzr_ale',
+                         'ML_frzr_epi',
+                         'ML_rain',
+                         'ML_crain',
+                         'ML_snow',
+                         'ML_csnow',
+                         'ML_icep',
+                         'ML_cicep',
+                         'ML_frzr',
+                         'ML_cfrzr']
+
     def process_credit_output(self, all_upper_air, all_single_level):
         
 
@@ -73,8 +91,12 @@ class CreditPostProcessor:
             for var in self.interp_var:
                 var_name_3d = var.lower()
                 data_source = dew_point_3d if var == 'DPT' else all_upper_air[var].isel(time=t_idx).values
+                
                 d_interp = interp_hybrid_to_height_agl(
-                    data_source, self.interp_heights_m, model_geopotential, self.surface_geopotential
+                    data_source,
+                    np.flip(self.interp_heights_m),  # flip to go from  top of the atmosphere to surface
+                    model_geopotential,
+                    self.surface_geopotential
                 )
 
                 if var_name_3d == 't':  # Convert to Celsius
@@ -86,7 +108,7 @@ class CreditPostProcessor:
                         np.empty((len(time_values), len(self.interp_heights_m), len(lat), len(lon)))
                     )
 
-                hgl_data[var_name_3d][1][t_idx, ...] = d_interp
+                hgl_data[var_name_3d][1][t_idx, ...] = np.flip(d_interp, axis=0)
 
         
         var_attributes = {
@@ -95,19 +117,15 @@ class CreditPostProcessor:
             'u': {'units': 'm/s', 'long_name': 'Zonal wind'},
             'v': {'units': 'm/s', 'long_name': 'Meridional wind'},
         }
-
-        
         ds = xr.Dataset(
             hgl_data,
             coords={
                 'time': (['time'], time_values),
-                'height': (['height'], np.flip(self.interp_heights_m)),
+                'height': (['height'], self.interp_heights_m),
                 'latitude': (['latitude'], lat),
                 'longitude': (['longitude'], lon)
             }
         )
-
-        
         for var in var_attributes:
             if var in ds:
                 ds[var].attrs = var_attributes[var]
@@ -251,6 +269,9 @@ class CreditPostProcessor:
     
         return data
 
+    def ptype_classification(self, dataset):
+        return dataset[self.save_vars].expand_dims({'time': dataset.time.values})
+    
     def write_to_netcdf(self,dataset,nc_filename, forecast_hour,conf):
         """Saves the processed data to a NetCDF file."""
 

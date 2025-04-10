@@ -113,6 +113,7 @@ class ForecastProcessor:
                 all_upper_air = darray_upper_air
                 all_single_level = darray_single_level
 
+           
             #---------> credit ptype p: Wqostprocess <------------------------------
             if self.conf['use_ptype']:
                 
@@ -120,12 +121,11 @@ class ForecastProcessor:
             
                 ds_output = credit_processor.process_credit_output(all_upper_air.to_dataset(dim="vars"),
                                                                    all_single_level.to_dataset(dim="vars"))
-                subset = credit_processor.subset_extent(ds_output, self.conf['ptype']['extent'], data_proj=None)
-                subset_array = credit_processor.extract_variable_levels(subset)
+                # subset = credit_processor.subset_extent(ds_output, self.conf['ptype']['extent'], data_proj=None)
+                subset_array = credit_processor.extract_variable_levels(ds_output)
                 scaler,input_features = credit_processor.load_scalar(self.conf['ptype']["input_scaler_file"])
                 transformed_data = credit_processor.transform_data(subset_array, scaler, input_features)
-                print(transformed_data.shape, type(transformed_data))     
-    
+                
                 ptype_model = credit_processor.load_model(self.conf['ptype']['ML_model_path'])
     
                 predictions = ptype_model.predict(transformed_data, 
@@ -134,25 +134,31 @@ class ForecastProcessor:
     
                 
                 gridded_preds = credit_processor.grid_predictions(
-                                        data=subset,
+                                        data=ds_output,
                                         predictions=predictions,
                                         output_uncertainties=self.conf['ptype']["output_uncertainties"]
                                     )
                 
-                credit_processor.write_to_netcdf(
-                    gridded_preds,
-                    save_datetimes[forecast_count + j],
+                ptype_classification  = credit_processor.ptype_classification(gridded_preds)
+
+            
+                save_netcdf_increment(
+                    all_upper_air,
+                    all_single_level,
+                    ptype_classification,
+                    save_datetimes[forecast_count + j],  
                     self.lead_time_periods * forecast_step,
-                    self.conf,
-                    
+                    self.meta_data,
+                    conf,
                 )
-            #----------------------------------------------------------------------------
+
             if not self.conf['use_ptype']:
             
                 # Save the current forecast hour data in parallel
                 save_netcdf_increment(
                     all_upper_air,
                     all_single_level,
+                    None, # No ptype data
                     save_datetimes[forecast_count + j],  # Use correct index for current batch item
                     self.lead_time_periods * forecast_step,
                     self.meta_data,
