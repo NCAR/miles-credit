@@ -36,7 +36,7 @@ from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
 #--------> credit ptype postprocess <---------------------
-from credit.credit_for_ptype import CreditPostProcessor
+from credit.credit_ptype import CreditPostProcessor
 #---------------------------------------------------------
 
 logger = logging.getLogger(__name__)
@@ -121,9 +121,11 @@ class ForecastProcessor:
             
                 ds_output = credit_processor.process_credit_output(all_upper_air.to_dataset(dim="vars"),
                                                                    all_single_level.to_dataset(dim="vars"))
-                # subset = credit_processor.subset_extent(ds_output, self.conf['ptype']['extent'], data_proj=None)
+                
                 subset_array = credit_processor.extract_variable_levels(ds_output)
+                
                 scaler,input_features = credit_processor.load_scalar(self.conf['ptype']["input_scaler_file"])
+                
                 transformed_data = credit_processor.transform_data(subset_array, scaler, input_features)
                 
                 ptype_model = credit_processor.load_model(self.conf['ptype']['ML_model_path'])
@@ -140,12 +142,10 @@ class ForecastProcessor:
                                     )
                 
                 ptype_classification  = credit_processor.ptype_classification(gridded_preds)
-
             
                 save_netcdf_increment(
                     all_upper_air,
-                    all_single_level,
-                    ptype_classification,
+                    xr.merge([all_single_level.to_dataset(dim="vars"),ptype_classification]),
                     save_datetimes[forecast_count + j],  
                     self.lead_time_periods * forecast_step,
                     self.meta_data,
@@ -153,12 +153,10 @@ class ForecastProcessor:
                 )
 
             if not self.conf['use_ptype']:
-            
                 # Save the current forecast hour data in parallel
                 save_netcdf_increment(
                     all_upper_air,
-                    all_single_level,
-                    None, # No ptype data
+                    all_single_level.to_dataset(dim="vars"),
                     save_datetimes[forecast_count + j],  # Use correct index for current batch item
                     self.lead_time_periods * forecast_step,
                     self.meta_data,
