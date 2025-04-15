@@ -169,8 +169,8 @@ predict:
         start_year: 2020     # year of the first initialization (where rollout will start)
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
-        start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 3         # number of days to initialize, starting from the (year, mon, day) above
+        start_hours: [0] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
+        duration: 1         # number of days to initialize, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
@@ -195,3 +195,14 @@ pbs: #derecho
     ngpus: 4
     mem: '480GB'
     queue: 'main'
+
+use_ptype: True
+
+ptype:
+    output_uncertainties: True # set to False if not using an Evidential Model
+    
+    ML_model_path: "/glade/derecho/scratch/cbecker/ptype_model_20240909.keras"
+    input_scaler_file: "/glade/derecho/scratch/cbecker/ptype_scaler_20240909.json"
+    drop_input_data: False
+    save_format: "netcdf"  
+    predict_batch_size: 2048
