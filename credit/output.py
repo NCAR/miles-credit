@@ -138,12 +138,9 @@ def make_xarray(pred, forecast_datetime, lat, lon, conf):
     return darray_upper_air, darray_single_level
 
 
-# add routine to save ptype forecast and preds similar to what is below:
-
 def save_netcdf_increment(
     darray_upper_air: xr.DataArray,
     darray_single_level: xr.DataArray,
-    ptype_data,
     nc_filename: str,
     forecast_hour: int,
     meta_data: dict,
@@ -168,11 +165,11 @@ def save_netcdf_increment(
         """
         # Convert DataArrays to Datasets
         ds_upper = darray_upper_air.to_dataset(dim="vars")
-        ds_single = darray_single_level.to_dataset(dim="vars")
-        # print(ds_upper.coords, ds_single.coords)
+        
         # Merge datasets
-        ds_merged = xr.merge([ds_upper, ds_single])
+        ds_merged = xr.merge([ds_upper,darray_single_level])
 
+        
         # Add forecast_hour coordinate
         ds_merged["forecast_hour"] = forecast_hour
 
@@ -233,23 +230,6 @@ def save_netcdf_increment(
         if "pressure_var_encoding" in conf["predict"].keys():
             for pres_var in conf["data"]["variables"]:
                 encoding_dict[pres_var] = conf["predict"]["pressure_var_encoding"]
-
-        if ptype_data:
-            
-            ptype_data = ptype_data.assign_coords({ # Convert ptype_data coordinates to float64 to match main dataset
-                'latitude': ptype_data.latitude.astype('float64'),
-                'longitude': ptype_data.longitude.astype('float64')
-            })
-            
-            # Explicitly align using reindex_like (nearest neighbor for safety)
-            ptype_data = ptype_data.reindex_like(
-                ds_merged.isel(level=0),  
-                method='nearest',
-                tolerance=1e-4 
-            )
-            
-            
-            ds_merged = xr.merge([ds_merged, ptype_data])
         
         # Use Dask to write the dataset in parallel
         ds_merged.to_netcdf(unique_filename, mode="w", encoding=encoding_dict)
