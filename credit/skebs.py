@@ -249,7 +249,7 @@ class BackscatterFixedCol(nn.Module):
         the array weights are trainable
         """
         super().__init__()
-        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 2.5))
+        self.backscatter_array = Parameter(torch.full((1,levels,1,1,1), 10.))
 
     def forward(self, x):
         logger.debug(torch.flatten(self.backscatter_array))
@@ -274,8 +274,8 @@ class BackscatterPrescribed(nn.Module):
 
         std = xr.open_dataset(std_path)
         std_wind_avg = (std.U.values + std.V.values) / 2.
-        self.backscatter_array = Parameter(torch.tensor(1e-2 * (std_wind_avg * sigma_max) ** 2).reshape(1,levels,1,1,1), requires_grad=True)
-        # formula to convert to 1% of sigma * std_wind_avg
+        self.backscatter_array = Parameter(torch.tensor(0.01 * (std_wind_avg * sigma_max) ** 2).reshape(1,levels,1,1,1), requires_grad=True)
+        # total perturb will be 10% of the sqrt of the backscatter rate
 
     def forward(self, x):
         return self.backscatter_array
@@ -614,9 +614,13 @@ class SKEBS(nn.Module):
         """ the inverse sht operation requires float32 or greater """
 
         # manual override of r
-        if self.iteration == 0 and "r" in self.post_conf["skebs"]:
-            self.r.data = torch.tensor(self.post_conf["skebs"]["r"])
-            logger.warning(f"manually setting r to {self.r}")
+        if self.iteration == 0:
+            if "r" in self.post_conf["skebs"]:
+                self.r.data = torch.tensor(self.post_conf["skebs"]["r"])
+                logger.warning(f"manually setting r to {self.r}")
+            if "dE"  in self.post_conf["skebs"]:
+                self.dE.data = torch.tensor(float(self.post_conf["skebs"]["dE"]))
+                logger.warning(f"manually setting dE to {self.dE}")
  
         if self.is_training: # this checks if we are in a training script
             # self.training is a torch level thing that checks if we are in train/validation mode of training
@@ -714,9 +718,7 @@ class SKEBS(nn.Module):
         logger.debug(f"max v_chi: {torch.max(torch.abs(v_chi))}")
         # compute the dissipation term
         dissipation_term = torch.sqrt(self.r * backscatter_pred / self.dE) # shape (b, levels, 1, lat, lon)
-        # sqrt(2e-2 * 1e1 * 1e4) * 0.5e-3 (pattern)
-        # 1.4e1.5 * 0.5e-3 = 0.7e-1.5 = 0.2
-        # pattern: 1e-3
+
 
         #############################################################
         ################### DEBUG perturbations #####################
@@ -737,6 +739,16 @@ class SKEBS(nn.Module):
 
         u_perturb = dissipation_term * u_chi
         v_perturb = dissipation_term * v_chi
+
+        # total perturb
+        # sqrt(r * D * 1e4) * 1e-2 (pattern)
+        # sqrt(r D) * 1e0
+        # for reasonable values sqrt(rD) ~ [0.1, 0.3]
+        # with r = 1e-2:
+        # sqrt(D) * 1e-1
+
+        # in berner 2009: 
+        # ~ sqrt(10) * 1e-1 ~ 0.3
 
         if ((self.write_rollout_debug_files and not self.is_training) # save out raw all backscatter prediction when not training
             or (self.write_train_debug_files and self.iteration % self.write_every == 0)):
@@ -762,9 +774,8 @@ class SKEBS(nn.Module):
         ################### setup next iteration #####################
         self.iteration += 1 # this one for total iterations
         self.steps += 1  # this one for skebs/model state
-
-        input_dict["y_pred"] = x
-        return input_dict
+        
+        return x
     
     def spec2grid(self, uspec):
         """
