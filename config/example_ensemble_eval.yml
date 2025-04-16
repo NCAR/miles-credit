@@ -16,7 +16,7 @@ levels: [14, 20, 24] # uses isel
 single_level_variables: ["U10"]
 
 # use the following to specify leadtimes for other 
-# metrics: zonal spectrum, spread-reliability, rank histograms
+# metrics: zonal spectrum, spread-reliability, rank histograms, div/vrt spectrum
 detailed_eval_hours: [6]
 
 # num bins for binned spread-skill reliability
@@ -24,11 +24,14 @@ num_bins: 25
 
 
 ###### provisioning setup ######
-# [Override] overrides -cpus CLI argument and default num_cpus - 1
+# [Override] default: num_cpus - 1 (will detect num_cpus). also overrides -cpus CLI argument and 
 # num_process: 31
+
+
 # memory reqs:
 # num_cpus or num_process * num_ICs * ensemble_size * size of 1 variable,level dataarray
 # 1 deg equiangular 1 variable, ensemble_size 16: roughly 10mb
+
 pbs: 
     # example for casper
     conda: "~/credit"

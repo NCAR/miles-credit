@@ -1,3 +1,11 @@
+# ensemble evaluation suite for rollouts generated with rollout_to_netcdf.py
+# parallelizes across CPUs
+# WARNING: DOES NOT USE model config file
+# see config/example_ensemble_eval.yml for an example config for this rollout
+#
+# WARNING: currently only works for CAM data, since the XRSamplerByYear can only handle one data file for all variables
+# 
+
 from argparse import ArgumentParser
 from functools import partial
 from glob import glob
@@ -21,8 +29,8 @@ from credit.xr_sampler import XRSamplerByYear
 
 def evaluate(num_files, forecast_save_loc, conf, model_conf, p):
     # break up computations by forecast hour6
-    # computations: spread-error, spectrum, binned hist, rank hist
-    # other: CRPS
+    # computations: spread-error, zonal spectrum, binned hist, rank hist, div/vorticity spectrum
+    # TODO: CRPS
 
     model_timestep = model_conf["data"]["lead_time_periods"]
     forecast_hours = model_timestep * (np.arange(num_files) + 1)
@@ -153,6 +161,7 @@ def _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, le
 
 
 def get_data(sampler, rollout_files, variable, level):
+    """ uses a XRSamplerByYear object to sample the true data"""
     def select_darray(ds_given):
         ds_sel = ds_given[variable]
         if variable in "UVTQtot":

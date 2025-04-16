@@ -14,7 +14,12 @@ latitude_slices = {
 }
 
 def spread_error(da_pred, da_true, w_lat=None):
-    # doing all slices in one function reduces computation a bit
+    """
+        computes the latitude weighted ensemble standard deviation of da_pred and ensemble rmse with respect to da_true
+
+        input: da_pred, da_true with matching time, lat, lon dimensions
+        output: result_dict with std and rmse for regions defined by latitude partition (see above)
+    """
     if w_lat is None:
         w_lat = np.cos(np.deg2rad(da_pred.latitude))
 
@@ -39,7 +44,12 @@ def spread_error(da_pred, da_true, w_lat=None):
     return result_dict
 
 def binned_spread_skill(da_pred, da_true, num_bins, w_lat=None):
-    # todo: split by slices
+    """
+        computes the binned spread-skill 
+
+        input: da_pred, da_true with matching time, lat, lon dimensions
+        output: result_dict
+    """
     spread = da_pred.std(dim="ensemble_member_label").values.flatten()
     rmse = np.sqrt((da_pred.mean(dim="ensemble_member_label") - da_true) ** 2).values.flatten()
 
@@ -59,6 +69,12 @@ def binned_spread_skill(da_pred, da_true, num_bins, w_lat=None):
     }
 
 def rank_histogram_apply(da_pred, da_true, w_lat=None):
+    """
+        computes the rank histogram
+
+        input: da_pred, da_true with matching time, lat, lon dimensions
+        output: result_dict
+    """
 
     ensemble_size = len(da_pred.ensemble_member_label)
     rank_hist = np.zeros(ensemble_size + 1)
