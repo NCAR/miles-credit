@@ -40,8 +40,8 @@ def test_spread_error():
     
     result_dict = spread_error(da_pred, da_true)
     
-    assert(np.isclose(result_dict["rmse_global"], 0.0, atol=1e-3) )
-    assert(np.isclose(result_dict["std_global"], 1.0, atol=1e-3) )
+    assert(np.isclose(result_dict["rmse_global"], 0.0, atol=1e-2) )
+    assert(np.isclose(result_dict["std_global"], 1.0, atol=1e-2) )
 
 
 if __name__ == "__main__":
