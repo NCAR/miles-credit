@@ -11,7 +11,7 @@ from credit.models.graph import GraphResTransfGRU
 from credit.models.debugger_model import DebuggerModel
 from credit.models.crossformer_ensemble import CrossFormerWithNoise
 from credit.models.crossformer_downscaling import DownscalingCrossFormer
-
+from credit.models.unet_downscaling import DownscalingSegmentationModel
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ model_types = {
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
     "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
+    "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
 }
 
 

@@ -28,21 +28,23 @@ seed: 2222  # RNG seed
 ## it here dramatically simplifies things.
 
 sampling: &samples
-    history_len:  1
+    history_len:  2
     forecast_len: 1
+
+image_size: &imsize  # round up to multiples of 128
+    image_width:  1408  # orginally 1367 
+    image_height: 1024  # originally 1015
 
 # A downscaling model is trained on two datasets, one for the
 # high-resolution output from the model being emulated, and one for
 # the low-resolution driving data (boundary conditions coming from a
 # reanalysis or GCM).  All data needs to have the same dimensions in X
-# & Y, so we interpolate the low-res data onto a coarsened version of
-# the high-res grid, then apply the 'expand' and 'pad' transforms to
-# stretch it out to match the actual high-res grid.  This saves us
-# from needing to store a high-res of the driver data that would be
-# 25x bigger and blow up our scratch quota.  (We don't need to worry
-# about the Z dimension because it gets concatenated along the
-# 'variable' dimension; i.e., different levels of a 3D variable are
-# treated as different variables.)
+# & Y, and some model architectures have constraints that the image
+# size must be an integer multiple of certain model parameters.
+# Specify the appropriate dimensions here, and the DownscalingDataset
+# class can resize things on the fly to match.  (The Z-dimension of 3D
+# data doesn't need to be resized because different levels of a 3D
+# variable are treated as different variables / channels.)
 
 # 'boundary' variables are input-only, used in both training and
 #  inference
@@ -83,6 +85,7 @@ data_defaults: &ddefault
 
 
 data:
+    <<: *imsize
     <<: *ddefault
 
     datasets:
@@ -195,11 +198,6 @@ data:
                     mmax: 'norms/max.solar.nc'
                 tisr:
                     minmax: paramfile
-                    expand:
-                        by: 5
-                    pad:
-                        left: 1
-                        right: 1
 
 
           ## ERA5 data regridded to coarsened CONUS404 grid.  Source
@@ -226,11 +224,6 @@ data:
                     mmax: 'norms/max.era5_3d.nc'
                 default:
                     minmax: paramfile
-                    expand:
-                        by: 5
-                    pad:
-                        left: 1
-                        right: 1
 
         era5_2D:
             <<: *ddefault
@@ -251,19 +244,18 @@ data:
                     mmax: 'norms/max.era5_2d.nc'
                 default:
                     minmax: paramfile
-                    expand:
-                        by: 5
-                    pad:
-                        left: 1
-                        right: 1
 
 
 model:
-    type: "crossformer_downscaling"
-    image_height: 1015
-    image_width: 1367
-    frames: 2
-    # architecture:  # none, just use defaults
+    type: "unet_downscaling"
+    <<: *imsize
+    frames: 2            # same as history_len
+    architecture:
+        name: unet
+    #type: "crossformer_downscaling"
+    #architecture:
+    #    patch_height: 1
+    #    patch_width:  1
 
 
 trainer:

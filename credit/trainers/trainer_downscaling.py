@@ -52,7 +52,418 @@ class Trainer(BaseTrainer):
         # Add any additional initialization if needed
         logger.info("Loading a multi-step trainer class")
 
-    #################
+    ###################################
+
+    # this stuff should all move into init()...
+    def setup(self, conf):
+        dconf = conf["data"]
+        tconf = conf["trainer"]
+
+        self.batches_per_epoch = tconf["batches_per_epoch"]
+        self.grad_max_norm = tconf.get("grad_max_norm", 0.0)
+        self.amp = tconf["amp"]
+        self.distributed = True if tconf["mode"] in ["fsdp", "ddp"] else False
+
+        self.ensemble_size = tconf.get("ensemble_size", 1)
+        if self.ensemble_size > 1:
+            logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
+        logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
+
+
+        self.forecast_length = dconf["forecast_len"]
+
+        self.ccount = count_channels(conf)
+
+        # # ----- clamping options for outlier removal ----- #
+        # if dconf["data_clamp"] is None:
+        #     self.flag_clamp = False
+        # else:
+        #     self.flag_clamp = True
+        #     self.clamp_min = float(dconf["data_clamp"][0])
+        #     self.clamp_max = float(dconf["data_clamp"][1])
+        # # ================================================ #
+
+        # # ------- options for data postprocessing  ------- #
+        #
+        # self.flag_mass_conserve = False
+        # self.flag_water_conserve = False
+        # self.flag_energy_conserve = False
+        #
+        # self.post_conf = conf["model"]["post_conf"]
+        #
+        # if post_conf["activate"]:
+        #     if post_conf["global_mass_fixer"]["activate"]:
+        #         if post_conf["global_mass_fixer"]["activate_outside_model"]:
+        #             logger.info("Activate GlobalMassFixer outside of model")
+        #             self.flag_mass_conserve = True
+        #             self.opt_mass = GlobalMassFixer(post_conf)
+        #
+        #     if post_conf["global_water_fixer"]["activate"]:
+        #         if post_conf["global_water_fixer"]["activate_outside_model"]:
+        #             logger.info("Activate GlobalWaterFixer outside of model")
+        #             self.flag_water_conserve = True
+        #             self.opt_water = GlobalWaterFixer(post_conf)
+        #
+        #     if post_conf["global_energy_fixer"]["activate"]:
+        #         if post_conf["global_energy_fixer"]["activate_outside_model"]:
+        #             logger.info("Activate GlobalEnergyFixer outside of model")
+        #             self.flag_energy_conserve = True
+        #             self.opt_energy = GlobalEnergyFixer(post_conf)
+        # # ================================================ #
+
+        # -------- options for multistep backprop  ------- #
+
+        if "backprop_on_timestep" in dconf:
+            self.backprop_on_timestep = dconf["backprop_on_timestep"]
+        else:
+            self.backprop_on_timestep = list(range(0, self.forecast_length + 1 + 1))
+
+        assert (
+            self.forecast_length <= self.backprop_on_timestep[-1]
+        ), (f"forecast_length ({self.forecast_length + 1})" +
+            " must not exceed the max value in " +
+            f"backprop_on_timestep {self.backprop_on_timestep}")
+        # ================================================ #
+
+        return
+
+    ###################################
+
+    # Training function
+    def train_one_epoch(self,
+                        epoch,
+                        conf,
+                        trainloader,
+                        optimizer,
+                        criterion,
+                        scaler,
+                        scheduler,
+                        metrics,
+                        ):
+
+        self.setup(conf)
+
+        # update the learning rate if epoch-by-epoch updates don't depend on a metric
+        if(conf["trainer"]["use_scheduler"] and
+           conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"):
+            scheduler.step()
+
+        # setup custom tqdm progress meter
+
+        if not isinstance(trainloader.dataset, IterableDataset):
+            # Check if the dataset has its own batches_per_epoch method
+            if hasattr(trainloader.dataset, "batches_per_epoch"):
+                dataset_batches_per_epoch = trainloader.dataset.batches_per_epoch()
+            elif hasattr(trainloader.sampler, "batches_per_epoch"):
+                dataset_batches_per_epoch = trainloader.sampler.batches_per_epoch()
+            else:
+                dataset_batches_per_epoch = len(trainloader)
+            # Use the user-given number if not larger than the dataset
+            batches_per_epoch = (
+                self.batches_per_epoch
+                if 0 < self.batches_per_epoch < dataset_batches_per_epoch
+                else dataset_batches_per_epoch
+            )
+
+        batch_group_generator = tqdm.tqdm(range(self.batches_per_epoch),
+                                          total=self.batches_per_epoch,
+                                          leave=True)
+
+        self.model.train()
+
+        dl= cycle(trainloader)
+        results_dict = defaultdict(list)
+        for steps in range(self.batches_per_epoch):
+            logs = {}
+            loss = 0
+            stop_forecast = False
+            y_pred = None     # placeholder for predicted values
+            while not stop_forecast:
+                batch = next(dl)
+                print(f"batch keys: {batch.keys()}")
+                for k,v in batch.items():
+                    print(f"batch {k}: {v.shape}")
+                # forecast_step = batch["forecast_step"].item()
+
+                x = batch['x'].to(self.device)
+
+                # this section is for initializing prognostic vars
+                # when doing multistep training
+
+                # I believe the section below is taken care of by
+                # DownscalingDataset's toTensor() function for
+                # single-step training.
+
+                # if we were doing multi-step training, we'd need to
+                # replace all but the last timestep of the prognostic
+                # variables in x with the x_new values created below.
+
+                # if forecast_step == 1:
+                #     # Initialize x and x_surf with the first time step
+                #     if "x_surf" in batch:
+                #         # combine x and x_surf
+                #         x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)
+                #     else:
+                #         x = reshape_only(batch["x"]).to(self.device)
+                #
+                # # add forcing and static variables (regardless of fcst hours)
+                # if "x_forcing_static" in batch:
+                #     x_forcing_batch = (batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4))
+                #
+                #     # concat on var dimension
+                #     x = torch.cat((x, x_forcing_batch), dim=1)
+
+                # If ensemble_size > 1, there's a section that uses
+                # torch.repeat_interleave(x, ensemble_size, 0) to
+                # replicate each sample in the batch.  It happens
+                # before static vars are concatenated onto the tensor;
+                # if we need to replicate that behavior, count up the
+                # number of static boundary variables in dconf & drop
+                # those from the front of the tensor, do the
+                # replication, then concatenate them back on.
+
+
+                # clamping should be unnecessary for minmax normalization
+
+                # # --------------------------------------------- #
+                # # clamp
+                # if flag_clamp:
+                #     x = torch.clamp(x, min=clamp_min, max=clamp_max)
+
+                # predict with the model
+                with autocast(enabled=self.amp):
+                    y_pred = self.model(x)
+
+                # # ============================================= #
+                # # postblock opts outside of model
+                #
+                # # backup init state
+                # if flag_mass_conserve:
+                #     if forecast_step == 1:
+                #         x_init = x.clone()
+                #
+                # # mass conserve using initialization as reference
+                # if flag_mass_conserve:
+                #     input_dict = {"y_pred": y_pred, "x": x_init}
+                #     input_dict = opt_mass(input_dict)
+                #     y_pred = input_dict["y_pred"]
+                #
+                # # water conserve use previous step output as reference
+                # if flag_water_conserve:
+                #     input_dict = {"y_pred": y_pred, "x": x}
+                #     input_dict = opt_water(input_dict)
+                #     y_pred = input_dict["y_pred"]
+                #
+                # # energy conserve use previous step output as reference
+                # if flag_energy_conserve:
+                #     input_dict = {"y_pred": y_pred, "x": x}
+                #     input_dict = opt_energy(input_dict)
+                #     y_pred = input_dict["y_pred"]
+                # # ============================================= #
+
+
+                # in multistep training, we only calculate loss &
+                # compute backprop gradients after N autoregressive
+                # rollout steps.  So don't load batch['y'] onto GPU
+                # until/unless we are doing backprop
+
+                y = batch['y'].to(self.device)
+
+                # I believe the section below is taken care of by
+                # DownscalingDataset's toTensor() function
+
+                # if forecast_step in backprop_on_timestep:
+                #     # calculate rolling loss
+                #     if "y_surf" in batch:
+                #         y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
+                #             self.device
+                #         )
+                #     else:
+                #         y = reshape_only(batch["y"]).to(self.device)
+                #
+                #     if "y_diag" in batch:
+                #         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
+                #         y_diag_batch = (
+                #             batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
+                #         )  # .float()
+                #
+                #         # concat on var dimension
+                #         y = torch.cat((y, y_diag_batch), dim=1)
+
+                # clamping should be unnecessary for minmax normalization
+
+                # # --------------------------------------------- #
+                # # clamp
+                # if flag_clamp:
+                #     y = torch.clamp(y, min=clamp_min, max=clamp_max)
+
+                with autocast(enabled=amp):
+                    loss = criterion(y.to(y_pred.dtype), y_pred).mean()
+
+                # track the loss
+                accum_log(logs, {"loss": loss.item()})
+
+                # compute gradients
+                scaler.scale(loss).backward()
+
+
+                if distributed:
+                    torch.distributed.barrier()
+
+                # stop after X steps
+                stop_forecast = batch["stop_forecast"].item()
+                if stop_forecast:
+                    break
+
+
+                # The section below recycles prognostic variables when
+                # doing multistep training.  If there are diagnostic
+                # variables in y, we need to discard them:
+
+                # x_new = y_pred[:, :self.ccount['prognostic'], ...].detach()
+
+                # if history_len == 1, concatenate the boundary
+                # variables onto the front of x_new and that becomes
+                # x[t+1]
+
+                # if history_len > 1, then we drop the first timestep
+                # of x[t] and concatenate x_new onto it to get x[t+1]
+
+                # The detach() stuff is to remove the tensor from the
+                # autograd computation graph.
+
+
+                # if self.history_len == 1:
+                #     # discard any diagnostic variables
+                #     x_new = y_pred[:, :self.ccount['prognostic'], ...].detach()
+                #
+                # else:
+                #     x_new = x[:, self.ccount['prognostic'], 1:, ...].detach()
+                #     # (I think)
+
+                # # step-in-step-out
+                # if x.shape[2] == 1:
+                #     # cut diagnostic vars from y_pred, they are not inputs
+                #     if "y_diag" in batch:
+                #         x = y_pred[:, :-varnum_diag, ...].detach()
+                #     else:
+                #         x = y_pred.detach()
+                #
+                # # multi-step in
+                # else:
+                #     # static channels will get updated on next pass
+                #
+                #     if static_dim_size == 0:
+                #         x_detach = x[:, :, 1:, ...].detach()
+                #     else:
+                #         x_detach = x[:, :-static_dim_size, 1:, ...].detach()
+                #
+                #     # cut diagnostic vars from y_pred, they are not inputs
+                #     if "y_diag" in batch:
+                #         x = torch.cat(
+                #             [x_detach, y_pred[:, :-varnum_diag, ...].detach()],
+                #             dim=2,
+                #         )
+                #     else:
+                #         x = torch.cat([x_detach, y_pred.detach()], dim=2)
+
+            if distributed:
+                torch.distributed.barrier()
+
+            # Grad norm clipping
+            scaler.unscale_(optimizer)
+            if grad_max_norm == "dynamic":
+                # Compute local L2 norm
+                local_norm = torch.norm(
+                    torch.stack(
+                        [
+                            p.grad.detach().norm(2)
+                            for p in self.model.parameters()
+                            if p.grad is not None
+                        ]
+                    )
+                )
+
+                # All-reduce to get global norm across ranks
+                if distributed:
+                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
+                global_norm = local_norm.sqrt()  # Compute total global norm
+
+                # Clip gradients using the global norm
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=global_norm
+                )
+            elif grad_max_norm > 0.0:
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=grad_max_norm
+                )
+
+            # Step optimizer
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+
+            # Metrics
+            metrics_dict = metrics(y_pred, y)
+            for name, value in metrics_dict.items():
+                value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
+                if distributed:
+                    dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                results_dict[f"train_{name}"].append(value[0].item())
+
+            batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
+            if distributed:
+                dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+            results_dict["train_loss"].append(batch_loss[0].item())
+            results_dict["train_forecast_len"].append(forecast_length + 1)
+
+            if not np.isfinite(np.mean(results_dict["train_loss"])):
+                print(
+                    results_dict["train_loss"],
+                    batch["x"].shape,
+                    batch["y"].shape,
+                    batch["index"],
+                )
+                try:
+                    raise optuna.TrialPruned()
+                except Exception as E:
+                    raise E
+
+
+            # aggregate the results
+            to_print = (
+                f"Epoch: {epoch}".format(epoch) +
+                f" train_loss: {np.mean(results_dict['train_loss']):.6f}" +
+                f" train_acc: {np.mean(results_dict['train_acc']):.6f}" +
+                f" train_mae: {np.mean(results_dict['train_mae']):.6f}" +
+                f" forecast_len: {forecast_length+1:.6f}"
+            )
+
+            ensemble_size = conf["trainer"].get("ensemble_size", 0)
+            if ensemble_size > 1:
+                to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
+            to_print += f" lr: {optimizer.param_groups[0]['lr']:.12f}"
+            if self.rank == 0:
+                batch_group_generator.update(1)
+                batch_group_generator.set_description(to_print)
+
+            if (
+                conf["trainer"]["use_scheduler"]
+                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
+                scheduler.step()
+
+        #  Shutdown the progbar
+        batch_group_generator.close()
+
+        # clear the cached memory from the gpu
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        return results_dict
+
+    ###################################
+
     def validate(self, epoch, conf, valid_loader, criterion, metrics):
         """
         Validates the model on the validation dataset.
@@ -343,411 +754,6 @@ class Trainer(BaseTrainer):
         # Wait for rank-0 process to save the checkpoint above
         if distributed:
             torch.distributed.barrier()
-
-        # clear the cached memory from the gpu
-        torch.cuda.empty_cache()
-        gc.collect()
-
-        return results_dict
-        ###################################
-
-    # this stuff should all move into init()...
-    def setup(self, conf):
-        dconf = conf["data"]
-        tconf = conf["trainer"]
-
-        self.batches_per_epoch = tconf["batches_per_epoch"]
-        self.grad_max_norm = tconf.get("grad_max_norm", 0.0)
-        self.amp = tconf["amp"]
-        self.distributed = True if tconf["mode"] in ["fsdp", "ddp"] else False
-
-        self.ensemble_size = tconf.get("ensemble_size", 1)
-        if self.ensemble_size > 1:
-            logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
-        logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
-
-
-        self.forecast_length = dconf["forecast_len"]
-
-        self.ccount = count_channels(conf)
-
-        # # ----- clamping options for outlier removal ----- #
-        # if dconf["data_clamp"] is None:
-        #     self.flag_clamp = False
-        # else:
-        #     self.flag_clamp = True
-        #     self.clamp_min = float(dconf["data_clamp"][0])
-        #     self.clamp_max = float(dconf["data_clamp"][1])
-        # # ================================================ #
-
-        # # ------- options for data postprocessing  ------- #
-        #
-        # self.flag_mass_conserve = False
-        # self.flag_water_conserve = False
-        # self.flag_energy_conserve = False
-        #
-        # self.post_conf = conf["model"]["post_conf"]
-        #
-        # if post_conf["activate"]:
-        #     if post_conf["global_mass_fixer"]["activate"]:
-        #         if post_conf["global_mass_fixer"]["activate_outside_model"]:
-        #             logger.info("Activate GlobalMassFixer outside of model")
-        #             self.flag_mass_conserve = True
-        #             self.opt_mass = GlobalMassFixer(post_conf)
-        #
-        #     if post_conf["global_water_fixer"]["activate"]:
-        #         if post_conf["global_water_fixer"]["activate_outside_model"]:
-        #             logger.info("Activate GlobalWaterFixer outside of model")
-        #             self.flag_water_conserve = True
-        #             self.opt_water = GlobalWaterFixer(post_conf)
-        #
-        #     if post_conf["global_energy_fixer"]["activate"]:
-        #         if post_conf["global_energy_fixer"]["activate_outside_model"]:
-        #             logger.info("Activate GlobalEnergyFixer outside of model")
-        #             self.flag_energy_conserve = True
-        #             self.opt_energy = GlobalEnergyFixer(post_conf)
-        # # ================================================ #
-
-        # -------- options for multistep backprop  ------- #
-
-        if "backprop_on_timestep" in dconf:
-            self.backprop_on_timestep = dconf["backprop_on_timestep"]
-        else:
-            self.backprop_on_timestep = list(range(0, self.forecast_length + 1 + 1))
-
-        assert (
-            self.forecast_length <= self.backprop_on_timestep[-1]
-        ), (f"forecast_length ({self.forecast_length + 1})" +
-            " must not exceed the max value in " +
-            f"backprop_on_timestep {self.backprop_on_timestep}")
-        # ================================================ #
-
-        return
-
-    
-    # Training function
-    def train_one_epoch(self,
-                        epoch,
-                        conf,
-                        trainloader,
-                        optimizer,
-                        criterion,
-                        scaler,
-                        scheduler,
-                        metrics,
-                        ):
-
-        self.setup(conf)
-
-        # update the learning rate if epoch-by-epoch updates don't depend on a metric
-        if(conf["trainer"]["use_scheduler"] and
-           conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"):
-            scheduler.step()
-
-        # setup custom tqdm progress meter
-
-        if not isinstance(trainloader.dataset, IterableDataset):
-            # Check if the dataset has its own batches_per_epoch method
-            if hasattr(trainloader.dataset, "batches_per_epoch"):
-                dataset_batches_per_epoch = trainloader.dataset.batches_per_epoch()
-            elif hasattr(trainloader.sampler, "batches_per_epoch"):
-                dataset_batches_per_epoch = trainloader.sampler.batches_per_epoch()
-            else:
-                dataset_batches_per_epoch = len(trainloader)
-            # Use the user-given number if not larger than the dataset
-            batches_per_epoch = (
-                batches_per_epoch
-                if 0 < batches_per_epoch < dataset_batches_per_epoch
-                else dataset_batches_per_epoch
-            )
-
-        batch_group_generator = tqdm.tqdm(range(self.batches_per_epoch),
-                                          total=self.batches_per_epoch,
-                                          leave=True)
-
-        self.model.train()
-
-        dl= cycle(trainloader)
-        results_dict = defaultdict(list)
-        for steps in range(self.batches_per_epoch):
-            logs = {}
-            loss = 0
-            stop_forecast = False
-            y_pred = None     # placeholder for predicted values
-            while not stop_forecast:
-                batch = next(dl)
-                forecast_step = batch["forecast_step"].item()
-
-                x = batch['x'].to(self.device)
-
-                # this section is for initializing prognostic vars
-                # when doing multistep training
-
-                # I believe the section below is taken care of by
-                # DownscalingDataset's toTensor() function for
-                # single-step training.
-
-                # if we were doing multi-step training, we'd need to
-                # replace all but the last timestep of the prognostic
-                # variables in x with the x_new values created below.
-
-                # if forecast_step == 1:
-                #     # Initialize x and x_surf with the first time step
-                #     if "x_surf" in batch:
-                #         # combine x and x_surf
-                #         x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)
-                #     else:
-                #         x = reshape_only(batch["x"]).to(self.device)
-                #
-                # # add forcing and static variables (regardless of fcst hours)
-                # if "x_forcing_static" in batch:
-                #     x_forcing_batch = (batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4))
-                #
-                #     # concat on var dimension
-                #     x = torch.cat((x, x_forcing_batch), dim=1)
-
-                # If ensemble_size > 1, there's a section that uses
-                # torch.repeat_interleave(x, ensemble_size, 0) to
-                # replicate each sample in the batch.  It happens
-                # before static vars are concatenated onto the tensor;
-                # if we need to replicate that behavior, count up the
-                # number of static boundary variables in dconf & drop
-                # those from the front of the tensor, do the
-                # replication, then concatenate them back on.
-
-
-                # clamping should be unnecessary for minmax normalization
-
-                # # --------------------------------------------- #
-                # # clamp
-                # if flag_clamp:
-                #     x = torch.clamp(x, min=clamp_min, max=clamp_max)
-
-                # predict with the model
-                with autocast(enabled=amp):
-                    y_pred = self.model(x)
-
-                # # ============================================= #
-                # # postblock opts outside of model
-                #
-                # # backup init state
-                # if flag_mass_conserve:
-                #     if forecast_step == 1:
-                #         x_init = x.clone()
-                #
-                # # mass conserve using initialization as reference
-                # if flag_mass_conserve:
-                #     input_dict = {"y_pred": y_pred, "x": x_init}
-                #     input_dict = opt_mass(input_dict)
-                #     y_pred = input_dict["y_pred"]
-                #
-                # # water conserve use previous step output as reference
-                # if flag_water_conserve:
-                #     input_dict = {"y_pred": y_pred, "x": x}
-                #     input_dict = opt_water(input_dict)
-                #     y_pred = input_dict["y_pred"]
-                #
-                # # energy conserve use previous step output as reference
-                # if flag_energy_conserve:
-                #     input_dict = {"y_pred": y_pred, "x": x}
-                #     input_dict = opt_energy(input_dict)
-                #     y_pred = input_dict["y_pred"]
-                # # ============================================= #
-
-
-                # in multistep training, we only calculate loss &
-                # compute backprop gradients after N autoregressive
-                # rollout steps.  So don't load batch['y'] onto GPU
-                # until/unless we are doing backprop
-
-                y = batch['y'].to(self.device)
-
-                # I believe the section below is taken care of by
-                # DownscalingDataset's toTensor() function
-
-                # if forecast_step in backprop_on_timestep:
-                #     # calculate rolling loss
-                #     if "y_surf" in batch:
-                #         y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
-                #             self.device
-                #         )
-                #     else:
-                #         y = reshape_only(batch["y"]).to(self.device)
-                #
-                #     if "y_diag" in batch:
-                #         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                #         y_diag_batch = (
-                #             batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                #         )  # .float()
-                #
-                #         # concat on var dimension
-                #         y = torch.cat((y, y_diag_batch), dim=1)
-
-                # clamping should be unnecessary for minmax normalization
-
-                # # --------------------------------------------- #
-                # # clamp
-                # if flag_clamp:
-                #     y = torch.clamp(y, min=clamp_min, max=clamp_max)
-
-                with autocast(enabled=amp):
-                    loss = criterion(y.to(y_pred.dtype), y_pred).mean()
-
-                # track the loss
-                accum_log(logs, {"loss": loss.item()})
-
-                # compute gradients
-                scaler.scale(loss).backward()
-
-
-                if distributed:
-                    torch.distributed.barrier()
-
-                # stop after X steps
-                stop_forecast = batch["stop_forecast"].item()
-                if stop_forecast:
-                    break
-
-
-                # The section below recycles prognostic variables when
-                # doing multistep training.  If there are diagnostic
-                # variables in y, we need to discard them:
-
-                # x_new = y_pred[:, :self.ccount['prognostic'], ...].detach()
-
-                # if history_len == 1, concatenate the boundary
-                # variables onto the front of x_new and that becomes
-                # x[t+1]
-
-                # if history_len > 1, then we drop the first timestep
-                # of x[t] and concatenate x_new onto it to get x[t+1]
-                
-                # The detach() stuff is to remove the tensor from the
-                # autograd computation graph.
-                
-
-                # if self.history_len == 1:
-                #     # discard any diagnostic variables
-                #     x_new = y_pred[:, :self.ccount['prognostic'], ...].detach()
-                #     
-                # else:
-                #     x_new = x[:, self.ccount['prognostic'], 1:, ...].detach()
-                #     # (I think)    
-                
-                # # step-in-step-out
-                # if x.shape[2] == 1:
-                #     # cut diagnostic vars from y_pred, they are not inputs
-                #     if "y_diag" in batch:
-                #         x = y_pred[:, :-varnum_diag, ...].detach()
-                #     else:
-                #         x = y_pred.detach()
-                # 
-                # # multi-step in
-                # else:
-                #     # static channels will get updated on next pass
-                # 
-                #     if static_dim_size == 0:
-                #         x_detach = x[:, :, 1:, ...].detach()
-                #     else:
-                #         x_detach = x[:, :-static_dim_size, 1:, ...].detach()
-                # 
-                #     # cut diagnostic vars from y_pred, they are not inputs
-                #     if "y_diag" in batch:
-                #         x = torch.cat(
-                #             [x_detach, y_pred[:, :-varnum_diag, ...].detach()],
-                #             dim=2,
-                #         )
-                #     else:
-                #         x = torch.cat([x_detach, y_pred.detach()], dim=2)
-
-            if distributed:
-                torch.distributed.barrier()
-
-            # Grad norm clipping
-            scaler.unscale_(optimizer)
-            if grad_max_norm == "dynamic":
-                # Compute local L2 norm
-                local_norm = torch.norm(
-                    torch.stack(
-                        [
-                            p.grad.detach().norm(2)
-                            for p in self.model.parameters()
-                            if p.grad is not None
-                        ]
-                    )
-                )
-
-                # All-reduce to get global norm across ranks
-                if distributed:
-                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
-                global_norm = local_norm.sqrt()  # Compute total global norm
-
-                # Clip gradients using the global norm
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=global_norm
-                )
-            elif grad_max_norm > 0.0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=grad_max_norm
-                )
-
-            # Step optimizer
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
-
-            # Metrics
-            metrics_dict = metrics(y_pred, y)
-            for name, value in metrics_dict.items():
-                value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
-                if distributed:
-                    dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
-                results_dict[f"train_{name}"].append(value[0].item())
-
-            batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
-            if distributed:
-                dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
-            results_dict["train_loss"].append(batch_loss[0].item())
-            results_dict["train_forecast_len"].append(forecast_length + 1)
-
-            if not np.isfinite(np.mean(results_dict["train_loss"])):
-                print(
-                    results_dict["train_loss"],
-                    batch["x"].shape,
-                    batch["y"].shape,
-                    batch["index"],
-                )
-                try:
-                    raise optuna.TrialPruned()
-                except Exception as E:
-                    raise E
-
-
-            # aggregate the results
-            to_print = (
-                f"Epoch: {epoch}".format(epoch) +
-                f" train_loss: {np.mean(results_dict['train_loss']):.6f}" +
-                f" train_acc: {np.mean(results_dict['train_acc']):.6f}" +
-                f" train_mae: {np.mean(results_dict['train_mae']):.6f}" +
-                f" forecast_len: {forecast_length+1:.6f}"
-            )
-
-            ensemble_size = conf["trainer"].get("ensemble_size", 0)
-            if ensemble_size > 1:
-                to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
-            to_print += f" lr: {optimizer.param_groups[0]['lr']:.12f}"
-            if self.rank == 0:
-                batch_group_generator.update(1)
-                batch_group_generator.set_description(to_print)
-
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
-            ):
-                scheduler.step()
-
-        #  Shutdown the progbar
-        batch_group_generator.close()
 
         # clear the cached memory from the gpu
         torch.cuda.empty_cache()

@@ -30,7 +30,6 @@ class Expand:
             n = len(x.shape)
             return x.repeat(self.by, axis=n-1).repeat(self.by, axis=n-2)
 
-
 @dataclass
 class Pad:
     left:   int = 0
@@ -47,14 +46,13 @@ class Pad:
         else:
             pad = ((self.bottom, self.top), (self.left, self.right))
             for i in range(2, len(x.shape)):
-                pad = ((0, 0), ) + pad
+                pad = ((0, 0), ) + pad   # no padding on other dimensions
             return np.pad(x, pad_width=pad, mode=self.mode)
 
 
-# Note: we don't want sklearn functions for normalization because
-# they calcluate params from the data, and we want to use
-# externally-specified param values.  We also need an inverse for
-# each function.
+# Note: we don't want sklearn functions for normalization because they
+# calcluate params from the data, and we want to use externally-
+# specified param values.  We also need an inverse for each function.
 
 def rescale(x, offset=0, scale=1, inverse=False):
     if inverse:
@@ -92,8 +90,9 @@ class Power:
             return np.power(x, self.exponent)
 
 
-# Inverse for clipping is the same as forward.  (If I didn't want
-# precip < 0 on input, I also don't want it on output.)
+# Clipping limits data values to the range [cmin, cmax].  Inverse for
+# clipping is the same as forward.  (If I didn't want precip < 0 on
+# input, I also don't want it on output.)
 
 @dataclass
 class Clip:
@@ -111,10 +110,11 @@ class Identity:
         return x
 
 
-# If inverse works better as a state switch, add inverse=False to
-# init args, drop from call and branch on self.inverse
+# Note: if inverse proves to be more convenient as a state switch
+# rather than an argument, add inverse=False to init args, drop from
+# call and branch on self.inverse
 
-class DownscalingNormalizer:
+class DataTransforms:
     '''
     [insert more documentation here]
     '''

@@ -2,6 +2,7 @@
 from typing import Dict, TypedDict, Union
 from dataclasses import dataclass, field
 from inspect import signature
+import warnings
 
 # data utils
 import numpy as np
@@ -39,27 +40,6 @@ class Sample(TypedDict):
     target: Array
 
 
-# def testC4loader():
-#     """Test load speed of different number of vars & storage locs.
-#     Full load for C404 takes about 4 sec on campaign, 5 sec on scratch
-#
-#     """
-#     zdirs = {
-#         "worktest": "/glade/work/mcginnis/ML/GWC/testdata/zarr",
-#         "scratch": "/glade/derecho/scratch/mcginnis/conus404/zarr",
-#         "campaign": "/glade/campaign/ral/risc/DATA/conus404/zarr"
-#         }
-#     for zk in zdirs.keys():
-#         src = zdirs[zk]
-#         print("#### "+zk+" ####")
-#         svars = os.listdir(src)
-#         for i in range(1, len(svars)+1):
-#             testvars = svars[slice(0, i)]
-#             print(testvars)
-#             cmd = 'c4 = CONUS404Dataset("'+src+'",varnames='+str(testvars)+')'
-#             print(cmd+"\t"+str(timeit(cmd, globals=globals(), number=1)))
-
-
 ###########
 
 @dataclass
@@ -75,8 +55,9 @@ class DownscalingDataset(torch.utils.data.Dataset):
     valid_forecast_len: int = 1
     first_date:   str = None
     last_date:    str = None
-    # components: Dict = field(default_factory=dict)
-    datasets: Dict = field(default_factory=dict)
+    datasets:     Dict = field(default_factory=dict)
+    image_width:  int = None
+    image_height: int = None
     transform:    bool = True
     _mode:        str = field(init=False, repr=False, default='train')
     # legal mode values: train, init, infer
@@ -86,31 +67,119 @@ class DownscalingDataset(torch.utils.data.Dataset):
     def __post_init__(self):
         super().__init__()
 
-        # replace the components dict (a nested dict of
+        #####
+        # Replace the `datasets` argument dict (a nested dict of
         # configurations for the constituent datasets & their
-        # transforms) with actual DataMap and DataTransform objects.
+        # associated transforms) with DataMap and DataTransform
+        # objects.
+
+        # Datasets are allowed to b different sizes.  When sampling,
+        # we automatically resize them to image_width x image_height
+        # by adding Expand and/or Pad transforms to the sequence
+        # defined for each dataset.  To do this, we need to construct
+        # the self.datasets dict in two passes, because we need the
+        # shape of each dataset in order to figure out those resizing
+        # transforms.
 
         dmap_sig = signature(DataMap).parameters
-        norm_sig = signature(DownscalingNormalizer).parameters
+        norm_sig = signature(DataTransforms).parameters
 
         dsdict = {}
 
+        # create DataMaps
         for dname, dconfig in self.datasets.items():
-            print(dname)
-
+            # collect config arguments needed by DataMap
             dm_args = {arg: val for arg, val in dconfig.items() if arg in dmap_sig}
             dm_args['variables'] = dconfig['variables']
 
+            dsdict[dname] = {'datamap': DataMap(**dm_args)}
+
+        # data_width (determined by the datasets) is the width of the
+        # widest dataset; image_width (declared as an argument) is the
+        # width of our output tensor (and likewise for height).
+        # If not defined, image_width defaults to data_width.
+
+        # to keep differently-sized datasets co-registered, we need to
+        # Expand the smaller ones up to roughly data_width before
+        # resizing them using Pad transforms.
+
+        self.data_width  = max([dsdict[d]['datamap'].shape[-1] for d in dsdict])
+        self.data_height = max([dsdict[d]['datamap'].shape[-2] for d in dsdict])
+
+        if self.image_width is None:
+            self.image_width = self.data_width
+        if self.image_height is None:
+            self.image_height = self.data_height
+
+        if self.data_width > self.image_width or self.data_height > self.image_height:
+            warnings.warn("model size is smaller than data size; "
+                          "auto-shrinking not yet implemented, code may break.")
+        # TODO: extend code below to handle this case, using subsampling
+        # (inverse of Expand) and cropping (inverse of Pad)
+
+        if (self.image_width  // self.data_width  > 1 or
+            self.image_height // self.data_height > 1):
+            warnings.warn("data size is much smaller than model size; "
+                          "data will be mostly padding")
+
+        # create DataTransforms
+        for dname, dconfig in self.datasets.items():
             dt_args = {arg: val for arg, val in dconfig.items() if arg in norm_sig}
             dt_args['vardict'] = dconfig['variables']
-            dt_args['transdict'] = dconfig['transforms']
+            transdict = dconfig['transforms']
 
-            dsdict[dname] = {
-                'datamap': DataMap(**dm_args),
-                'transforms': DownscalingNormalizer(**dt_args)
-            }
+            if 'default' not in transdict or transdict['default'] == 'none':
+                transdict['default'] = {}
+
+            # add transforms for auto-resizing
+            # first scale smaller datasets up
+            dshape = dsdict[dname]['datamap'].shape
+            if dshape[-1] != self.image_width or dshape[-2] != self.image_height:
+                xscale = self.data_width // dshape[-1]
+                yscale = self.data_height // dshape[-2]
+                scale = min(xscale, yscale)
+                if xscale != yscale:
+                    warnings.warn(f"dataset {dname}: expansion ratio mismatch with data size "
+                                  f"(x{xscale} x vs x{yscale} y); using x{scale}")
+                if scale != 1:
+                    for v in transdict:
+                        if v != 'paramfiles':
+                            transdict[v]['expand'] = {"by": scale}
+                    dshape = (dshape[-2]*scale, dshape[-1]*scale)
+
+            # then pad datasets to match image size
+            # currently only padding along left/top of array
+            # TODO: add options for centered or right/bottom padding
+            xdelta = self.image_width - dshape[-1]
+            ydelta = self.image_height - dshape[-2]
+
+            if xdelta != 0 or ydelta != 0:
+                for v in transdict:
+                    if v != 'paramfiles':
+                        transdict[v]['pad'] = {'top': ydelta, 'right': xdelta}
+
+            if transdict['default'] == {}:
+                transdict['default'] = 'none'
+            dt_args['transdict'] = transdict
+
+            dsdict[dname]['transforms'] = DataTransforms(**dt_args)
+
+            # for static data, we need to run the transforms once and
+            # then discard them to prevent the cached data from
+            # repeatedly mutating in place, because python is too
+            # object-oriented and stateful to be a functional language
+            # (pun intended)
+
+            dmap = dsdict[dname]['datamap']
+            if dmap.dim == 'static':
+                xforms = dsdict[dname]['transforms'].transforms
+                for var in dmap.data:
+                    for x in xforms[var]:
+                        dmap.data[var] = x(dmap.data[var])
+                    xforms[var] = [Identity()]
 
         self.datasets = dsdict
+        ##### end datasets replacement
 
         self.sample_len = self.history_len + self.forecast_len
 
@@ -170,8 +239,11 @@ class DownscalingDataset(torch.utils.data.Dataset):
                 ## todo: record z-coord values in datamap, use those
                 znames = [f"{row.name}.z{z}" for z in zlevels]
                 self.tnames.extend(znames)
-        
+
         # end __post_init__
+
+    #def _setup_arrangement(self):
+
 
     def __len__(self):
         return self.len
@@ -194,18 +266,21 @@ class DownscalingDataset(torch.utils.data.Dataset):
         return result
         # yield result    # change return to yield to make this lazy
 
+
     def getdata(self, dset, index):
+        # returns nested dict: items{ dataset{ usage { var
         raw = self.datasets[dset]['datamap'][index]
         if self.transform:
             return self.datasets[dset]['transforms'](raw)
         else:
             return raw
 
+
     def rearrange(self, items):
         # based on mode, rearrange items{ dataset{ usage{ var to
         # sample{ input/target{ dset.var
 
-        include = {"train": {"input":  ['boundary', 'prognostic', 'diagnostic'],
+        include = {"train": {"input":  ['boundary', 'prognostic'],
                              "target": [            'prognostic', 'diagnostic']},
                    "init":  {"input":  ['boundary', 'prognostic'],
                              "target": []},
@@ -220,7 +295,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         for part in result:
             for row in self.arrangement.itertuples():
-                
+
                 if row.usage in include[self.mode][part]:
                     data = items[row.dataset][row.usage][row.var]
                     if self.mode == 'train':
@@ -257,16 +332,16 @@ class DownscalingDataset(torch.utils.data.Dataset):
                         # static data; add time dimension & repeat along it
                         data = np.repeat(np.expand_dims(data, axis=0),
                                          repeats=nt[s], axis=0)
-    
+
                     if len(data.shape) == 3:
                         # add singleton var/z dimension
                         data = np.expand_dims(data, axis=1)
-    
+
                     sample[s][var] = data
-    
+
                 # concatenate along z/var dim
                 sample[s] = np.concatenate(list(sample[s].values()), axis=1)
-    
+
                 # nparray[T,Z,Y,X] to tensor[V,T,Y,X]
                 sample[s] = torch.as_tensor(sample[s]).permute(1, 0, 2, 3)
 

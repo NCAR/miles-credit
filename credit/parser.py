@@ -15,11 +15,10 @@ import warnings
 from glob import glob
 from collections import Counter
 
-
 from credit.data import get_forward_data
 from credit.data_downscaling import DownscalingDataset
 from credit.datamap import DataMap
-from credit.transforms_downscaling import DownscalingNormalizer
+from credit.transforms_downscaling import DataTransforms
 from credit.count_channels import count_channels
 
 def validate_args(function, argdict, context, ignore=[]):
@@ -128,13 +127,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         dconf = conf['data']['datasets']
 
         for dset in dconf:
-            # skipping for now
-            # todo: change names of DownscalingNormalizer arguments to match,
-            # update DownscalingDataset postinit accordingly
-
-            # validate_args(DataMap, dconf[dset], f"dataset {dset}", ignore=('transforms'))
-            # validate_args(DownscalingNormalizer, dconf[dset], f"dataset {dset}",
-            #              ignore=('normalize', 'history_len', 'forecast_len', 'first_date', 'last_date'))
+            # todo: more comprehensive validation using schema library; skipping for now
 
             if not dconf[dset]['variables']:
                 raise ValueError(f"variables must not be empty for dataset {dset} configuration")
