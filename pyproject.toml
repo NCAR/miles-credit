@@ -17,6 +17,7 @@ dependencies = [
     "scikit-learn",
     "pyarrow",
     "pytest",
+    "pysteps",
     "xarray",
     "netcdf4",
     "torch",
