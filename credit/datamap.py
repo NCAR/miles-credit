@@ -244,7 +244,7 @@ class DataMap:
 
             if (len(self.variables['prognostic']) > 0 or
                 len(self.variables['diagnostic']) > 0):
-                    raise ValueError("credit.datamap: static vars must be boundary vars")
+                raise ValueError("credit.datamap: static vars must be boundary vars")
 
             # if static, load data from netcdf
             staticfile = nc.Dataset(self.rootpath + '/' + self.glob, mask_and_scale=False)
@@ -253,7 +253,7 @@ class DataMap:
             staticdata = [np.array(staticfile[v][:]) for v in self.variables['boundary']]
             self.shape = staticdata[0].shape
             self.data = dict(zip(self.variables['boundary'], staticdata))
-            
+
             # cleanup
             staticfile.close()
             del staticfile, staticdata
@@ -288,9 +288,7 @@ class DataMap:
             else:
                 self.first = self.date2tindex(self.first_date)
 
-            if self.last_date is None:
-                self.last = self.ends[-1]
-            else:
+            if self.last_date is not None:
                 self.last = self.date2tindex(self.last_date)
 
             self.length = self.last - self.first + 1 - (self.sample_len - 1)
@@ -298,7 +296,7 @@ class DataMap:
             # get last timestep index in each file
             # do this in a loop to avoid many-many open filehandles at once
 
-            self.ends = list()
+            self.ends = []
             cumlen = -1
             for f in self.filepaths:
                 ncf = nc.Dataset(f, mask_and_scale=False)
@@ -306,8 +304,11 @@ class DataMap:
                 self.ends.append(cumlen)
                 ncf.close()
                 # file opens are slow; stop early if possible
-                if cumlen > self.last:
+                if self.last_date is not None and cumlen > self.last:
                     break
+
+            if self.last_date is None:
+                self.last = self.ends[-1]
 
     # end of __post_init__
 
@@ -336,8 +337,7 @@ class DataMap:
     def __len__(self):
         if self.dim == "static":
             return 1
-        else:
-            return self.length
+        return self.length
 
     def __getitem__(self, index):
         if self.dim == "static":
@@ -365,10 +365,10 @@ class DataMap:
         else:
             data1 = self.read(startseg, startsub, None)
             data2 = self.read(finishseg, None, finishsub)
-            result = dict()
-            for use in data1.keys():
-                result[use] = dict()
-                for var in data1[use].keys():
+            result = {}
+            for use in data1:
+                result[use] = {}
+                for var in data1[use]:
                     a1 = data1[use][var]
                     a2 = data2[use][var]
                     result[use][var] = np.concatenate((a1, a2))
@@ -406,9 +406,9 @@ class DataMap:
                 raise ValueError("invalid DataMap mode")
 
         ds = nc.Dataset(self.filepaths[segment], mask_and_scale=False)
-        data = dict()
+        data = {}
         for use in uses:
-            data[use] = dict()
+            data[use] = {}
             for var in self.variables[use]:
                 if self.dim == '3D' and self.zstride != 1:
                     data[use][var] = np.array(ds[var][start:finish, ::self.zstride, ...])

@@ -3,20 +3,20 @@ import logging
 from collections import defaultdict
 
 import numpy as np
-import torch
-import torch.distributed as dist
-import torch.fft
+import optuna
 import tqdm
+import torch
+import torch.fft
+import torch.distributed as dist
 from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
+
 from credit.scheduler import update_on_batch
 from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
 from credit.data import concat_and_reshape, reshape_only
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+# from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.count_channels import count_channels
-import optuna
-import torch
 
 logger = logging.getLogger(__name__)
 

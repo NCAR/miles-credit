@@ -9,6 +9,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# pylint: disable=no-else-return
+
 """
 transforms_downscaling.py
 -------------------------------------------------------
@@ -45,14 +47,15 @@ class Pad:
             return x[..., self.bottom:ny-self.top, self.left:nx-self.right]
         else:
             pad = ((self.bottom, self.top), (self.left, self.right))
-            for i in range(2, len(x.shape)):
+            for _ in range(2, len(x.shape)):
                 pad = ((0, 0), ) + pad   # no padding on other dimensions
             return np.pad(x, pad_width=pad, mode=self.mode)
 
 
-# Note: we don't want sklearn functions for normalization because they
-# calcluate params from the data, and we want to use externally-
-# specified param values.  We also need an inverse for each function.
+# Note: we don't want to use sklearn functions for normalization
+# because they calcluate params from the data, and we want to use
+# externally- specified param values.  We also need an inverse for
+# each function.
 
 def rescale(x, offset=0, scale=1, inverse=False):
     if inverse:
@@ -167,7 +170,7 @@ class DataTransforms:
         # instantiate list of transforms for each variable
         self.transforms = {}
         for var in variables:
-            self.transforms[var] = list()
+            self.transforms[var] = []
             if var in transdict or 'default' in transdict:
                 xkey = var if var in transdict else 'default'
                 if transdict[xkey] == "none":

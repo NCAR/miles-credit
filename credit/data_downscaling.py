@@ -13,8 +13,8 @@ import pandas as pd
 import torch
 import torch.utils.data
 
-from credit.datamap import *
-from credit.transforms_downscaling import *
+from credit.datamap import DataMap
+from credit.transforms_downscaling import DataTransforms, Identity
 
 
 Array = Union[np.ndarray, xr.DataArray]
@@ -67,19 +67,34 @@ class DownscalingDataset(torch.utils.data.Dataset):
     def __post_init__(self):
         super().__init__()
 
-        #####
-        # Replace the `datasets` argument dict (a nested dict of
-        # configurations for the constituent datasets & their
-        # associated transforms) with DataMap and DataTransform
-        # objects.
+        self._setup_datasets()
+        # Set up self.datasets[dataset]['datamap'|'transforms']
+        # Also sets self.data_width and self.data_height
 
-        # Datasets are allowed to b different sizes.  When sampling,
-        # we automatically resize them to image_width x image_height
-        # by adding Expand and/or Pad transforms to the sequence
-        # defined for each dataset.  To do this, we need to construct
-        # the self.datasets dict in two passes, because we need the
-        # shape of each dataset in order to figure out those resizing
-        # transforms.
+        self.sample_len = self.history_len + self.forecast_len
+
+        dlengths = [len(d) for d in self.datasets.values()]
+        self.len = np.max(dlengths)
+        # TODO: error if any dlengths != self.len or 1
+
+        # create self.arrangement dataframe used by .rearrange()
+        # and self.tnames list of names for tensor channels
+        self._setup_arrangement()
+
+    def _setup_datasets(self):
+        '''Replace the `datasets` argument dict (a nested dict of
+        configurations for the constituent datasets & their
+        associated transforms) with DataMap and DataTransform
+        objects created from those configurations.
+
+        Datasets are allowed to be different sizes.  When sampling, we
+        automatically resize them to (image_width x image_height) by
+        adding Expand and/or Pad transforms to the sequence defined
+        for each dataset.  To do this, we need to construct the
+        self.datasets dict in two passes, because we need the shape of
+        each dataset in order to figure out those resizing transforms.
+
+        '''
 
         dmap_sig = signature(DataMap).parameters
         norm_sig = signature(DataTransforms).parameters
@@ -96,10 +111,10 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         # data_width (determined by the datasets) is the width of the
         # widest dataset; image_width (declared as an argument) is the
-        # width of our output tensor (and likewise for height).
-        # If not defined, image_width defaults to data_width.
+        # width of our output tensor (likewise for height).  If not
+        # defined, image_width defaults to data_width.
 
-        # to keep differently-sized datasets co-registered, we need to
+        # To keep differently-sized datasets co-registered, we need to
         # Expand the smaller ones up to roughly data_width before
         # resizing them using Pad transforms.
 
@@ -124,6 +139,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         # create DataTransforms
         for dname, dconfig in self.datasets.items():
+            # collect config arguments needed by DataTransforms
             dt_args = {arg: val for arg, val in dconfig.items() if arg in norm_sig}
             dt_args['vardict'] = dconfig['variables']
             transdict = dconfig['transforms']
@@ -179,19 +195,23 @@ class DownscalingDataset(torch.utils.data.Dataset):
                     xforms[var] = [Identity()]
 
         self.datasets = dsdict
-        ##### end datasets replacement
 
-        self.sample_len = self.history_len + self.forecast_len
+    def _setup_arrangement(self):
+        '''construct a pandas dataframe that defines the ordering used
+        by .rearrange() to go from a nested dict structured
+        [dataset][variable] (the arrangement of output from
+        .getdata()) to one structured [input/target][dataset.variable]
+        (the arrangement needed by .to_tensor())
 
-        dlengths = [len(d) for d in self.datasets.values()]
-        self.len = np.max(dlengths)
-        # TODO: error if any dlengths != self.len or 1
+        Also creates self.tnames, a list of names for the channels in
+        the output tensor formatted "<dataset>.<variable>[.z<level>"
 
-        # construct a pandas dataframe that defines the ordering used
-        # by .rearrange() to go from nested dict [dataset][variable]
-        # to nested dict [input/target][dataset.variable]
+        '''
 
-        dlist = list()
+        dlist = []
+
+        # make a dataframe for each dataset with columns for
+        # variable, usage, dataset, and dimensionality
         for ds in self.datasets:
             dmap = self.datasets[ds]['datamap']
             dvar = dmap.variables
@@ -205,8 +225,10 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
             dlist.append(df)
 
+        # concatenate all the dataframes together
         rdf = pd.concat(dlist).reset_index(drop=True) # rdf = Rearrangement DataFrame
 
+        # add a 'name' column = "dataset.variable"
         rdf.insert(rdf.shape[1], "name",
                    [f"{d}.{v}" for d, v in zip(rdf['dataset'], rdf['var'])])
 
@@ -216,7 +238,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
         rdf['dataset'] = pd.Categorical(rdf['dataset'], self.datasets)
 
         # Sort order for variables:
-        # first: input-only > input + output > output-only
+        # first: input-only > input + output > output-only  (bound > prog > diag)
         # then:  static > 2D > 3D
         # then:  order that datasets are defined in config
         # then:  alphabetical by variable name
@@ -228,7 +250,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
         # (Only done for mode=train, tensor=target at the moment)
 
         tarr = rdf[rdf['usage'].isin(['prognostic','diagnostic'])]
-        self.tnames = list()
+        self.tnames = []
         for row in tarr.itertuples():
             if row.dim != "3D":
                 self.tnames.append(row.name)
@@ -236,14 +258,9 @@ class DownscalingDataset(torch.utils.data.Dataset):
                 dmap = self.datasets[row.dataset]['datamap']
                 nlev = dmap.shape[0]
                 zlevels = range(0, nlev, dmap.zstride)
-                ## todo: record z-coord values in datamap, use those
+                ## TODO: record z-coord values in datamap, use those
                 znames = [f"{row.name}.z{z}" for z in zlevels]
                 self.tnames.extend(znames)
-
-        # end __post_init__
-
-    #def _setup_arrangement(self):
-
 
     def __len__(self):
         return self.len
@@ -261,7 +278,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
             return result
 
         if self.output == 'tensor':
-            result = self.toTensor(result)
+            result = self.to_tensor(result)
 
         return result
         # yield result    # change return to yield to make this lazy
@@ -272,8 +289,8 @@ class DownscalingDataset(torch.utils.data.Dataset):
         raw = self.datasets[dset]['datamap'][index]
         if self.transform:
             return self.datasets[dset]['transforms'](raw)
-        else:
-            return raw
+
+        return raw
 
 
     def rearrange(self, items):
@@ -315,7 +332,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         return result
 
-    def toTensor(self, sample):
+    def to_tensor(self, sample):
         # sample is nested dict {input{vars}, target{vars}}
         # arrays are dimensioned [T, Z, Y, X]
         # stack vars along z-dim (i.e., z-levels ~= variables)

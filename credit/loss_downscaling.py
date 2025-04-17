@@ -1,12 +1,11 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import xarray as xr
-import numpy as np
 import logging
 import warnings
-from credit.loss import *
-del latitude_weights, variable_weights, VariableTotalLoss2D
+import torch
+from torch import nn
+#import torch.nn.functional as F
+# import xarray as xr
+# import numpy as np
+from credit.loss import load_loss
 
 logger = logging.getLogger(__name__)
 
