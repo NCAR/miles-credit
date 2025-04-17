@@ -567,40 +567,31 @@ class DownscalingCrossFormer(BaseModel):
 
 
 if __name__ == "__main__":
-    image_height = 640  # 640, 192
-    image_width = 1280  # 1280, 288
-    levels = 15
+    image_width =  1408
+    image_height = 1024
+    patch_height = 1
+    patch_width = 1
     frames = 2
-    channels = 4
-    surface_channels = 7
-    input_only_channels = 3
-    frame_patch_size = 2
+    channels = {"boundary": 20, "prognostic": 21, "diagnostic":7}  # input = 41, output = 28
+
+    global_window_size = (4, 4, 2, 1)
+    local_window_size = 4
 
     input_tensor = torch.randn(
         1,
-        channels * levels + surface_channels + input_only_channels,
+        channels["boundary"] + channels["prognostic"],
         frames,
         image_height,
         image_width,
     ).to("cuda")
 
-    model = CrossFormer(
+    model = DownscalingCrossFormer(
+        channels=channels,
         image_height=image_height,
         image_width=image_width,
         frames=frames,
-        frame_patch_size=frame_patch_size,
-        channels=channels,
-        surface_channels=surface_channels,
-        input_only_channels=input_only_channels,
-        levels=levels,
-        dim=(128, 256, 512, 1024),
-        depth=(2, 2, 18, 2),
-        global_window_size=(8, 4, 2, 1),
-        local_window_size=5,
-        cross_embed_kernel_sizes=((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
-        cross_embed_strides=(4, 2, 2, 2),
-        attn_dropout=0.0,
-        ff_dropout=0.0,
+        global_window_size=global_window_size,
+        local_window_size=local_window_size,
     ).to("cuda")
 
     num_params = sum(p.numel() for p in model.parameters())
