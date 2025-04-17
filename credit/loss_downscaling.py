@@ -15,18 +15,18 @@ logger = logging.getLogger(__name__)
 # def variable_weights(conf, channels, frames):
 #     """Create variable-specific weights for different atmospheric
 #     and surface channels.
-# 
+#
 #     This function loads weights for different atmospheric variables
 #     (e.g., U, V, T, Q) and surface variables (e.g., SP, t2m) from
 #     the configuration file. It then combines them into a single
 #     weight tensor for use in loss calculations.
-# 
+#
 #     Args:
 #         conf (dict): Configuration dictionary containing the
 #             variable weights.
 #         channels (int): Number of channels for atmospheric variables.
 #         frames (int): Number of time frames.
-# 
+#
 #     Returns:
 #         torch.Tensor: A tensor containing the combined weights for
 #             all variables.
@@ -35,24 +35,24 @@ logger = logging.getLogger(__name__)
 #     varname_upper_air = conf["data"]["variables"]
 #     varname_surface = conf["data"]["surface_variables"]
 #     varname_diagnostics = conf["data"]["diagnostic_variables"]
-# 
+#
 #     # surface + diag channels
 #     N_channels_single = len(varname_surface) + len(varname_diagnostics)
-# 
+#
 #     weights_upper_air = torch.tensor(
 #         [conf["loss"]["variable_weights"][var] for var in varname_upper_air]
 #     ).view(1, channels * frames, 1, 1)
-# 
+#
 #     weights_single = torch.tensor(
 #         [
 #             conf["loss"]["variable_weights"][var]
 #             for var in (varname_surface + varname_diagnostics)
 #         ]
 #     ).view(1, N_channels_single, 1, 1)
-# 
+#
 #     # Combine all weights along the color channel
 #     var_weights = torch.cat([weights_upper_air, weights_single], dim=1)
-# 
+#
 #     return var_weights
 
 
@@ -80,12 +80,12 @@ class DownscalingLoss(torch.nn.Module):
         # todo: move this to parser
         if 'use_latitude_weights' in conf['loss']:
             warnings.warn("latitude weights not applicable to downscaling")
-        
+
         for stub in ['use_variable_weights', 'use_power_loss',
                      'use_spectral_loss',]:
             if stub in conf['loss']:
                 warnings.warn(f"{stub} not yet implemented for downscaling")
-        
+
         self.training_loss = conf['loss']['training_loss']
 
         # change to fft_loss = None / 'psd' / '2d'] (radiobutton not checkbox)
@@ -97,7 +97,7 @@ class DownscalingLoss(torch.nn.Module):
         # # setup frequency-domain loss functions here:
         # self.power_loss = PSDLoss(wavenum_init)
         # self.spectral_loss = SpectralLoss2D(wavenum_init, reduction="none")
-        
+
         self.use_variable_weights = conf['loss']['use_variable_weights']
         if self.use_variable_weights:
             pass
@@ -107,18 +107,18 @@ class DownscalingLoss(torch.nn.Module):
             # create np.array from list of weights (tindex order)
             # convert to tensor using torch.from_numpy
             # self.var_weights = weights tensor
-        
+
         # see docstring for description
         self.tindex = tindex
-                
+
         self.validation = validation
 
         if self.validation and not self.training_loss == "KCRPS":
             self.loss_fn = nn.L1Loss(reduction="none")
         else:
             self.loss_fn = load_loss(self.training_loss, reduction="none")
-        
-    
+
+
 
     def forward(self, target, pred):
         """Calculate the total loss for the given target and prediction.
@@ -139,7 +139,7 @@ class DownscalingLoss(torch.nn.Module):
 
         # if var weights:
         #   loop on vars / channels
-        
+
         loss = torch.mean(loss)
 
         if self.validation:
