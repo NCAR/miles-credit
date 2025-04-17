@@ -6,10 +6,11 @@ import warnings
 from pathlib import Path
 from argparse import ArgumentParser
 import multiprocessing as mp
+from tqdm import tqdm
 
 # ---------- #
 # Numerics
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import xarray as xr
 import numpy as np
 
@@ -27,13 +28,13 @@ from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoad
 from credit.data import concat_and_reshape, reshape_only
 from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
 from credit.pbs import launch_script, launch_script_mpi
-from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
 from credit.forecast import load_forecasts
 from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.parser import credit_main_parser
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+import traceback
 
 
 logger = logging.getLogger(__name__)
@@ -43,80 +44,43 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 
-class ForecastProcessor:
-    def __init__(self, conf, device):
-        self.conf = conf
-        self.device = device
-
-        self.batch_size = conf["predict"].get("batch_size", 1)
-        self.ensemble_size = conf["predict"].get("ensemble_size", 1)
-        self.lead_time_periods = conf["data"]["lead_time_periods"]
-
-        # transform and ToTensor class
-        if conf["data"]["scaler_type"] == "std_new":
-            self.state_transformer = Normalize_ERA5_and_Forcing(conf)
-        else:
-            print("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
-            raise
-
-        # get lat/lons from x-array
-        self.latlons = xr.open_dataset(conf["loss"]["latitude_weights"]).load()
-        # grab ERA5 (etc) metadata
-        self.meta_data = load_metadata(conf)
-
-        # Set up the diffusion and pole filters
-        if (
-            "use_laplace_filter" in conf["predict"]
-            and conf["predict"]["use_laplace_filter"]
-        ):
-            self.dpf = Diffusion_and_Pole_Filter(
-                nlat=conf["model"]["image_height"],
-                nlon=conf["model"]["image_width"],
-                device=device,
-            )
-
-    def process(self, y_pred, forecast_step, forecast_count, datetimes, save_datetimes):
-        # Transform predictions
-        y_pred = self.state_transformer.inverse_transform(y_pred)
-
-        # This will fail if not using torch multiprocessing AND using a GPU
-        if (
-            "use_laplace_filter" in conf["predict"]
-            and conf["predict"]["use_laplace_filter"]
-        ):
-            y_pred = (
-                self.dpf.diff_lap2d_filt(y_pred.to(self.device).squeeze())
-                .unsqueeze(0)
-                .unsqueeze(2)
-                .cpu()
-            )
-
+def process_forecast(
+    conf, y_pred, forecast_step, forecast_count, datetimes, save_datetimes
+):
+    # Transform predictions
+    try:
+        batch_size = conf["predict"].get("batch_size", 1)
+        ensemble_size = conf["predict"].get("ensemble_size", 1)
+        lead_time_periods = conf["data"]["lead_time_periods"]
+        with xr.open_dataset(conf["predict"]["static_fields"]) as statics:
+            lats = statics["latitude"].values
+            lons = statics["longitude"].values
+        meta_data = load_metadata(conf)
         # Calculate correct datetime for current forecast
         utc_datetimes = [
             datetime.utcfromtimestamp(datetimes[i].item())
-            + timedelta(hours=self.lead_time_periods)
-            for i in range(self.batch_size)
+            + timedelta(hours=lead_time_periods)
+            for i in range(batch_size)
         ]
 
         # Convert to xarray and handle results
-        for j in range(self.batch_size):
+        for j in range(batch_size):
             upper_air_list, single_level_list = [], []
-            for i in range(
-                self.ensemble_size
-            ):  # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
+            for i in range(ensemble_size):
+                # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
                 darray_upper_air, darray_single_level = make_xarray(
                     y_pred[j + i : j + i + 1],  # Process each ensemble member
                     utc_datetimes[j],
-                    self.latlons.latitude.values,
-                    self.latlons.longitude.values,
+                    lats,
+                    lons,
                     conf,
                 )
                 upper_air_list.append(darray_upper_air)
                 single_level_list.append(darray_single_level)
 
-            if self.ensemble_size > 1:
+            if ensemble_size > 1:
                 ensemble_index = xr.DataArray(
-                    np.arange(self.ensemble_size), dims="ensemble_member_label"
+                    np.arange(ensemble_size), dims="ensemble_member_label"
                 )
                 all_upper_air = xr.concat(
                     upper_air_list, ensemble_index
@@ -135,15 +99,18 @@ class ForecastProcessor:
                 save_datetimes[
                     forecast_count + j
                 ],  # Use correct index for current batch item
-                self.lead_time_periods * forecast_step,
-                self.meta_data,
+                lead_time_periods * forecast_step,
+                meta_data,
                 conf,
             )
 
             print_str = f"Forecast: {forecast_count + 1 + j} "
             print_str += f"Date: {utc_datetimes[j].strftime('%Y-%m-%d %H:%M:%S')} "
-            print_str += f"Hour: {forecast_step * self.lead_time_periods} "
+            print_str += f"Hour: {forecast_step * lead_time_periods} "
             print(print_str)
+    except Exception as e:
+        print(traceback.format_exc())
+        raise e
 
 
 def predict(rank, world_size, conf, p):
@@ -158,6 +125,8 @@ def predict(rank, world_size, conf, p):
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
         torch.cuda.set_device(rank % torch.cuda.device_count())
+    elif torch.mps.is_available():
+        device = torch.device("mps")
     else:
         device = torch.device("cpu")
 
@@ -174,9 +143,9 @@ def predict(rank, world_size, conf, p):
         logger.info(f"Rolling out with ensemble size {ensemble_size}")
     print(conf["predict"])
     # Set forecast window and time step
-    forecast_start_time = conf["predict"]["forecasts"]["forecast_start_time"]
-    forecast_end_time = conf["predict"]["forecasts"]["forecast_end_time"]
-    forecast_timestep = conf["predict"]["forecasts"]["forecast_timestep"]
+    forecast_start_time = conf["predict"]["realtime"]["forecast_start_time"]
+    forecast_end_time = conf["predict"]["realtime"]["forecast_end_time"]
+    forecast_timestep = conf["predict"]["realtime"]["forecast_timestep"]
 
     # number of diagnostic variables
     varnum_diag = len(conf["data"]["diagnostic_variables"])
@@ -187,6 +156,11 @@ def predict(rank, world_size, conf, p):
         + len(conf["data"]["forcing_variables"])
         + len(conf["data"]["static_variables"])
     )
+    if conf["data"]["scaler_type"] == "std_new":
+        state_transformer = Normalize_ERA5_and_Forcing(conf)
+    else:
+        print("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
+        raise
 
     # postblock opts outside of model
     post_conf = conf["model"]["post_conf"]
@@ -251,9 +225,6 @@ def predict(rank, world_size, conf, p):
     # Use a custom DataLoader so we get the len correct
     data_loader = BatchForecastLenDataLoader(dataset)
 
-    # Class for saving in parallel
-    result_processor = ForecastProcessor(conf, device)
-
     # Warning -- see next line
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
 
@@ -290,17 +261,16 @@ def predict(rank, world_size, conf, p):
         save_datetimes = [0] * len(forecasts)
 
         # model inference loop
-        for batch in data_loader:
+        for batch in tqdm(data_loader):
             batch_size = batch["datetime"].shape[0]
             forecast_step = batch["forecast_step"].item()
-
             # Initial input processing
-            if forecast_step == 0:
+            if forecast_step == 1:
                 # Process the entire batch at once
                 init_datetimes = [
-                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime(
-                        "%Y-%m-%dT%HZ"
-                    )
+                    datetime.fromtimestamp(
+                        batch["datetime"][i].item(), tz=timezone.utc
+                    ).strftime("%Y-%m-%dT%HZ")
                     for i in range(batch_size)
                 ]
                 save_datetimes[forecast_count : forecast_count + batch_size] = (
@@ -329,8 +299,6 @@ def predict(rank, world_size, conf, p):
                     x_forcing_batch = torch.repeat_interleave(
                         x_forcing_batch, ensemble_size, 0
                     )
-                print("x shape", x.shape)
-                print("x_forcing_batch", x_forcing_batch.shape)
                 x = torch.cat((x, x_forcing_batch), dim=1)
 
             # Clamp if needed
@@ -357,11 +325,13 @@ def predict(rank, world_size, conf, p):
                 input_dict = {"y_pred": y_pred, "x": x}
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
+            y_pred_trans = state_transformer.inverse_transform(y_pred.cpu())
 
             result = p.apply_async(
-                result_processor.process,
+                process_forecast,
                 (
-                    y_pred.cpu(),
+                    conf,
+                    y_pred_trans.numpy(),
                     forecast_step,
                     forecast_count,
                     batch["datetime"],
@@ -413,12 +383,13 @@ def predict(rank, world_size, conf, p):
 
 
 if __name__ == "__main__":
-    description = "Rollout AI-NWP forecasts"
+    description = "Rollout Realtime AI-NWP forecasts"
     parser = ArgumentParser(description=description)
     # -------------------- #
     # parser args: -c, -l, -w
     parser.add_argument(
         "-c",
+        "--config",
         dest="model_config",
         type=str,
         default=False,
@@ -427,9 +398,9 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-l",
+        "--launch",
         dest="launch",
-        type=int,
-        default=0,
+        action="store_true",
         help="Submit workers to PBS.",
     )
 
@@ -437,7 +408,7 @@ if __name__ == "__main__":
         "-w",
         "--world-size",
         type=int,
-        default=4,
+        default=1,
         help="Number of processes (world size) for multiprocessing",
     )
 
@@ -445,36 +416,15 @@ if __name__ == "__main__":
         "-m",
         "--mode",
         type=str,
-        default=0,
+        default="none",
         help="Update the config to use none, DDP, or FSDP",
     )
-
     parser.add_argument(
-        "-nd",
-        "--no-data",
-        type=str,
-        default=0,
-        help="If set to True, only pandas CSV files will we saved for each forecast",
-    )
-    parser.add_argument(
-        "-s",
-        "--subset",
+        "-p",
+        "--procs",
+        dest="num_cpus",
         type=int,
-        default=False,
-        help="Predict on subset X of forecasts",
-    )
-    parser.add_argument(
-        "-ns",
-        "--no_subset",
-        type=int,
-        default=False,
-        help="Break the forecasts list into X subsets to be processed by X GPUs",
-    )
-    parser.add_argument(
-        "-cpus",
-        "--num_cpus",
-        type=int,
-        default=8,
+        default=1,
         help="Number of CPU workers to use per GPU",
     )
 
@@ -482,11 +432,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args_dict = vars(args)
     config = args_dict.pop("model_config")
-    launch = int(args_dict.pop("launch"))
-    mode = str(args_dict.pop("mode"))
-    no_data = 0 if "no-data" not in args_dict else int(args_dict.pop("no-data"))
-    subset = int(args_dict.pop("subset"))
-    number_of_subsets = int(args_dict.pop("no_subset"))
+    launch = args_dict.pop("launch")
+    mode = args_dict.pop("mode")
     num_cpus = int(args_dict.pop("num_cpus"))
 
     # Set up logger to print stuff
@@ -508,13 +455,12 @@ if __name__ == "__main__":
     conf = credit_main_parser(
         conf, parse_training=False, parse_predict=True, print_summary=False
     )
-    print(conf)
     # predict_data_check(conf, print_summary=False)
 
     # create a save location for rollout
     assert (
         "save_forecast" in conf["predict"]
-    ), "Please specify the output dir through conf['predict']['save_forecast']"
+    ), "Please specify the output dir for the predictions through conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
@@ -542,24 +488,17 @@ if __name__ == "__main__":
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    if number_of_subsets > 0:
-        forecasts = load_forecasts(conf)
-        if number_of_subsets > 0 and subset >= 0:
-            subsets = np.array_split(forecasts, number_of_subsets)
-            forecasts = subsets[subset - 1]  # Select the subset based on subset_size
-            conf["predict"]["forecasts"] = forecasts
-
     seed = conf["seed"]
     seed_everything(seed)
 
-    local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
 
-    with mp.Pool(num_cpus) as p:
+    with mp.Pool(num_cpus) as pool:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
-            _ = predict(world_rank, world_size, conf, p=p)
+            _ = predict(world_rank, world_size, conf, p=pool)
         else:  # single device inference
-            _ = predict(0, 1, conf, p=p)
+            _ = predict(0, 1, conf, p=pool)
 
-    # Ensure all processes are finished
-    p.close()
-    p.join()
+        # Ensure all processes are finished
+        pool.close()
+        pool.join()

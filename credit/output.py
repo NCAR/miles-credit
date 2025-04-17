@@ -62,7 +62,7 @@ def split_and_reshape(tensor, conf):
     tensor_upper_air = tensor[:, : int(channels * levels), :, :]
 
     shape_upper_air = tensor_upper_air.shape
-    tensor_upper_air = tensor_upper_air.view(
+    tensor_upper_air = tensor_upper_air.reshape(
         shape_upper_air[0], channels, levels, shape_upper_air[-2], shape_upper_air[-1]
     )
 
@@ -184,7 +184,7 @@ def save_netcdf_increment(
                 ]
             else:
                 surface_geopotential_var = "Z_GDS4_SFC"
-            with xr.open_dataset(conf["data"]["save_loc_static"]) as static_ds:
+            with xr.open_dataset(conf["predict"]["static_fields"]) as static_ds:
                 surface_geopotential = static_ds[surface_geopotential_var].values
             pressure_interp = full_state_pressure_interpolation(
                 ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"]
@@ -206,11 +206,20 @@ def save_netcdf_increment(
                 ds_merged = drop_var_from_dataset(
                     ds_merged, conf["predict"]["save_vars"]
                 )
-
+        if "pres_ending" not in conf["predict"]["interp_pressure"]:
+            sig = signature(full_state_pressure_interpolation)
+            pres_end = sig.parameters["pres_ending"].default
+        else:
+            pres_end = conf["predict"]["interp_pressure"]["pres_ending"]
+        if "height_ending" not in conf["predict"]["interp_pressure"]:
+            sig = signature(full_state_pressure_interpolation)
+            height_end = sig.parameters["height_ending"].default
+        else:
+            height_end = conf["predict"]["interp_pressure"]["height_ending"]
         # when there's no metafile --> meta_data = False
         if meta_data is not False:
             # Add metadata attributes to every model variable if available
-            for var in ds_merged.variables:
+            for var in ds_merged.variables.keys():
                 if var in meta_data.keys():
                     if var != "time":
                         # use attrs.update for non-datetime variables
@@ -221,31 +230,35 @@ def save_netcdf_increment(
                             ds_merged.time.encoding[metadata_time] = meta_data["time"][
                                 metadata_time
                             ]
+                elif pres_end in var:
+                    var_short = var.strip(pres_end)
+                    if var_short in meta_data.keys():
+                        ds_merged[var].attrs.update(meta_data[var_short])
+                        ds_merged[var].attrs["long_name"] += (
+                            " (interpolated to isobaric levels)"
+                        )
+                elif height_end in var:
+                    var_short = var.strip(height_end)
+                    if var_short in meta_data.keys():
+                        ds_merged[var].attrs.update(meta_data[var_short])
+                        ds_merged[var].attrs["long_name"] += (
+                            " (interpolated to constant height AGL levels)"
+                        )
         encoding_dict = {}
         if "ua_var_encoding" in conf["predict"].keys():
             for ua_var in conf["data"]["variables"]:
                 encoding_dict[ua_var] = conf["predict"]["ua_var_encoding"]
         if "surface_var_encoding" in conf["predict"].keys():
-            for surface_var in conf["data"]["variables"]:
+            for surface_var in conf["data"]["surface_variables"]:
                 encoding_dict[surface_var] = conf["predict"]["surface_var_encoding"]
         if "pressure_var_encoding" in conf["predict"].keys():
-            if "pres_var" not in conf["predict"]["interp_pressure"]:
-                sig = signature(full_state_pressure_interpolation)
-                pres_end = sig.parameters["pres_var"].default
-            else:
-                pres_end = conf["predict"]["interp_pressure"]["pres_var"]
             for pres_var in conf["data"]["variables"]:
                 encoding_dict[pres_var + pres_end] = conf["predict"][
                     "pressure_var_encoding"
                 ]
         if "height_var_encoding" in conf["predict"].keys():
-            if "height_var" not in conf["predict"]["interp_pressure"]:
-                sig = signature(full_state_pressure_interpolation)
-                height_end = sig.parameters["height_var"].default
-            else:
-                height_end = conf["predict"]["interp_pressure"]["height_var"]
-            for pres_var in conf["data"]["variables"]:
-                encoding_dict[pres_var + height_end] = conf["predict"][
+            for height_var in conf["data"]["variables"]:
+                encoding_dict[height_var + height_end] = conf["predict"][
                     "height_var_encoding"
                 ]
         # Use Dask to write the dataset in parallel

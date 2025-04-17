@@ -142,13 +142,12 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
         return
 
     def __len__(self):
-        return self.forecast_times.size
+        return self.forecast_times.size - 1
 
     def __getitem__(self, idx):
         valid_date = self.forecast_times[idx]
         valid_year = valid_date.year
         batch = {}
-        sliced_x = None
         if idx == 0:
             if self.history_len == 1:
                 x_list = []
@@ -216,7 +215,6 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
                 value = torch.tensor(value.timestamp(), dtype=torch.float64)
             elif not isinstance(value, torch.Tensor):
                 value = torch.tensor(value)
-
             if value.ndimension() == 0:
                 value = value.unsqueeze(0)
 
@@ -227,6 +225,6 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
                 batch[key] = value
             else:
                 batch[key] = torch.cat((batch[key], value), dim=0)
-        batch["forecast_step"] = torch.tensor(idx)
+        batch["forecast_step"] = torch.tensor(idx + 1)
         batch["stop_forecast"] = idx == (self.forecast_times.size - 1)
         return batch

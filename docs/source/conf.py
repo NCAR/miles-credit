@@ -9,7 +9,7 @@
 project = "miles-credit"
 copyright = "2024, University Corporation for Atmospheric Research"
 author = "University Corporation for Atmospheric Research"
-release = "2025.1.0"
+release = "2025.2.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

@@ -416,6 +416,13 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         "global_water_fixer",
         "global_energy_fixer",
     ]
+
+    # if activate is false, set all post modules to false
+    if not conf['model']['post_conf']['activate']:
+        for post_module in post_list:
+            conf['model']['post_conf'][post_module] = {'activate': False}
+
+    # set defaults for post modules
     for post_module in post_list:
         conf["model"]["post_conf"].setdefault(post_module, {"activate": False})
 
@@ -430,6 +437,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         conf["model"]["post_conf"]["model"] = {k: v for k, v in conf["model"].items() if k != "post_conf"}
         # copy data configs to post_conf (for de-normalize variables)
         conf["model"]["post_conf"]["data"] = {k: v for k, v in conf["data"].items()}
+        conf["model"]["post_conf"].setdefault("grid", "legendre-gauss")
 
         # --------------------------------------------------------------------- #
         # get the full list of input / output variables for post_conf
@@ -472,12 +480,13 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         assert "freeze_base_model_weights" in conf['model']['post_conf']['skebs'], (
             'need to specify freeze_base_model_weights in skebs config'
         )
-        assert "level_info_file" in conf['data'], (
-            'need to specify level_info_file for skebs')
+
         assert conf['trainer']["train_batch_size"] == conf['trainer']["valid_batch_size"], (
             'train and valid batch sizes need to be the same for skebs'
         )
 
+        #setup backscatter writing
+        conf['model']['post_conf']['predict'] = {k: v for k,v in conf['predict'].items()}
 
         conf['model']['post_conf']['skebs'].setdefault('lmax', None)
         conf['model']['post_conf']['skebs'].setdefault('mmax', None)
@@ -500,14 +509,21 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         Q_inds = [
             i_var for i_var, var in enumerate(varname_output) if var in ["Q", "Qtot"]
         ]
+
         conf['model']['post_conf']['skebs']['U_inds'] = U_inds
         conf['model']['post_conf']['skebs']['V_inds'] = V_inds
         conf['model']['post_conf']['skebs']['Q_inds'] = Q_inds
         conf['model']['post_conf']['skebs']['T_inds'] = T_inds
+
         if "SP" in varname_output:
             conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("SP")
         else:
             conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("PS")
+
+        static_inds = [
+            i_var for i_var, var in enumerate(varname_input) if var in conf["data"]["static_variables"]
+        ]
+        conf['model']['post_conf']['skebs']['static_inds'] = static_inds
 
         ###### debug mode setup #######
         conf['model']['post_conf']['skebs']['save_loc'] = conf['save_loc']

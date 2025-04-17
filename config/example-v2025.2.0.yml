@@ -26,7 +26,7 @@ data:
     # upper-air variables will be normalized by the dataloader, users do not need to normalize them
     variables: ['U','V','T','Q']
     save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL_*'
-    
+    level_ids: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
     # surface variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
     # the time dimension MUST be the same as upper-air variables
     # files must have the listed variable names
@@ -140,12 +140,12 @@ data:
     # dataset type. For now you may choose from 
     # ERA5_and_Forcing_MultiStep MultiprocessingBatcherPrefetch ERA5_MultiStep_Batcher MultiprocessingBatcher
     # All of these support single or multi-step training (e.g. forecast lengths >= 0)
-    dataset_type: MultiprocessingBatcherPrefetch
+    dataset_type: ERA5_MultiStep_Batcher
 
 trainer:
     # Choose the training routine
     # This is deprecated as of credit-2.0
-    # Options: era5, cam, or conus404
+    # Options: era5, or conus404
     type: era5
 
     # the keyword that controls GPU usage
@@ -332,10 +332,68 @@ model:
 
     # configuration for postblock processing
     post_conf: 
-        activate: False
+        activate: True
+        grid: 'equiangular'
 
         skebs:
-            activate: False
+            activate: True
+            freeze_base_model_weights: True  # turn off training of the basemodel
+
+            # skebs module training options
+            trainable: True # is skebs trainable at all
+            freeze_dissipation_weights: False  # turn off training for dissipation
+            freeze_pattern_weights: True  # turn off training for the spectral pattern
+            lmax: None # lmax, mmax for spectral transforms
+            mmax: None
+
+            # custom initialization of alpha
+            alpha_init: 0.95 
+            train_alpha: False #trains alpha no matter what
+            
+            # dissipation config:
+            zero_out_levels_top_of_model: 3 # zero out backscatter at top k levels of the model
+
+            dissipation_scaling_coefficient: 10.
+            dissipation_type: FCNN 
+            # available types:
+            #    - prescribed: fixed dissipation rate spatially, varies by level starts at sigma_max level (see below)
+            #    - uniform: fixed dissipation rate spatially, varies by level starts at 2.5
+            #    - FCNN: two layer small MLP
+            #    - FCNN_wide: four layer wide MLP
+            #    - unet: user specified arch, default: unet++
+            #    - CNN: single 3x3 convolution with padding for each column
+            
+            # unet - see models/unet.py for examples
+            # architecture:
+            padding: 48
+
+            # prescribed dissipation:
+            sigma_max: 2.0 # what sigma level to set as the max wind. perturbation will be roughly sigma_max * std for wind at each level
+
+            # spectral filters, will anneal to 0 from anneal_start (linspace)
+            max_pattern_wavenum: 60
+            pattern_filter_anneal_start: 40
+
+            max_backscatter_wavenum: 100
+            backscatter_filter_anneal_start: 90
+            
+            # [Optional] default is off
+            train_backscatter_filter: False
+            train_pattern_filter: False
+
+            # data config - does the backscatter model get statics variables?
+            use_statics: False 
+
+            # [Optional] early skebs shutoff on iteration number:
+            iteration_stop: 0 # if 0, skebs is always run
+
+            #### debugging ####
+            # write files during training:
+            write_train_debug_files: False #writing out files while training, if this is False          
+            write_train_every: 999
+
+            # write files during inference
+            write_rollout_debug_files: False # saves only when no_grad 
 
         # =================================================== #
         # The section of conservation schemes
@@ -531,7 +589,7 @@ predict:
     use_laplace_filter: False
     
     # climatology file to be used with rollout_metrics.py. 
-    # Supplying this will compute ananomly ACC, otherwise its Pearson coeffcient (acc in metrics).
+    # Supplying this will compute anomaly ACC, otherwise its Pearson coefficient (acc in metrics).
     climatology: '/glade/campaign/cisl/aiml/ksha/CREDIT_arXiv/VERIF/verif_6h/ERA5_clim/ERA5_clim_1990_2019_6h_interp.nc'
 
     # Optional: Interpolate data field from hybrid sigma-pressure vertical coordinates to pressure levels.

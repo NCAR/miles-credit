@@ -79,7 +79,7 @@ class BaseModel(nn.Module):
 
         model_class = cls(**conf["model"])
         if "model_state_dict" in checkpoint.keys():
-            load_msg = model_class.load_state_dict(checkpoint, strict=False)
+            load_msg = model_class.load_state_dict(checkpoint["model_state_dict"], strict=False)
         else:
             load_msg = model_class.load_state_dict(checkpoint, strict=False)
         load_state_dict_error_handler(load_msg)

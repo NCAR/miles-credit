@@ -158,7 +158,6 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
         dataset = DownscalingDataset(**conf['data'])
         if not is_train:
             dataset.mode = "infer"
-
     else:
         try:
             data_config = setup_data_loading(conf)
@@ -372,6 +371,18 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
             "Please specify prefetch_factor in the 'trainer' section of your config."
         )
         prefetch_factor = 4
+
+    # If loss is CRPS, we need all samplers-dataloaders to return the same (x, y)
+    # pair as the CDF is computed across GPUs. Randomness is handled by adding noise
+    # to the input x to create different samples. There are many other ways to do this
+    # but using the same rank and world_size is the fastest as far as communication.
+    if conf["loss"]["training_loss"] == "KCRPS":
+        rank = 0
+        world_size = 1
+        logging.info(
+            "For CRPS loss, we maintain identical rank and world size across all "
+            "GPUs to ensure proper CDF calculation during synchronous distributed processing."
+        )
 
     if type(dataset) is ERA5_and_Forcing_SingleStep:
         # This is the single-step dataset, original version

@@ -16,7 +16,7 @@ from argparse import ArgumentParser
 from echo.src.base_objective import BaseObjective
 
 import torch
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 

@@ -7,30 +7,24 @@ Content:
     - GlobalMassFixer
     - GlobalWaterFixer
     - GlobalEnergyFixer
-    - SKEBS
 
 """
-import os
-from os.path import join
 import torch
 from torch import nn
-import torch_harmonics as harmonics
+
 import numpy as np
-import xarray as xr
 
 from credit.data import get_forward_data
-from torch.nn.parameter import Parameter
-from torch.distributions.multivariate_normal import MultivariateNormal
 from credit.transforms import load_transforms
 from credit.physics_core import physics_pressure_level, physics_hybrid_sigma_level
 from credit.physics_constants import (
     GRAVITY,
-    RAD_EARTH,
     RHO_WATER,
     LH_WATER,
     CP_DRY,
     CP_VAPOR,
 )
+from credit.skebs import SKEBS
 
 import logging
 from math import pi
@@ -916,36 +910,3 @@ def concat_fix(y_pred, q_pred_correct, q_ind_start, q_ind_end, N_vars):
 
     return torch.cat(var_list, dim=1)
 
-
-class SKEBS(nn.Module):
-    """
-    post_conf: dictionary with config options for PostBlock.
-                if post_conf is not specified in config,
-                defaults are set in the parser
-
-    This class is currently a placeholder for SKEBS
-    """
-
-    def __init__(self, post_conf):
-        super().__init__()
-        self.image_width = post_conf["model"]["image_width"]
-        final_layer_size = self.image_width
-        self.additional_layer = nn.Linear(
-            final_layer_size, final_layer_size
-        )  # .to(self.device) # Example: another layer
-
-    def forward(self, x):
-        x = x["y_pred"]
-        return self.additional_layer(x)
-
-
-if __name__ == "__main__":
-    image_width = 100
-    conf = {"post_conf": {"use_skebs": True, "image_width": image_width}}
-
-    input_tensor = torch.randn(image_width)
-    postblock = PostBlock(**conf)
-    assert any([isinstance(module, SKEBS) for module in postblock.modules()])
-
-    y_pred = postblock(input_tensor)
-    print("Predicted shape:", y_pred.shape)

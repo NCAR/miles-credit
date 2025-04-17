@@ -25,3 +25,5 @@ pre-commit
 torch-harmonics
 torch_geometric
 ruff
+fsspec
+gcsfs

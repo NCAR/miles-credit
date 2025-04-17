@@ -520,6 +520,43 @@ class VariableTotalLoss2D(torch.nn.Module):
     """
 
     def __init__(self, conf, validation=False):
+        """Initialize the VariableTotalLoss2D.
+
+        Args:
+            conf (str): path to config file.
+            training_loss (str): Loss equation to use during training.
+            vars (list): Atmospheric, surface, and diagnostic variable names.
+            lat_weights (str): Path to upper latitude weights file.
+            var_weights (bool): Whether to use variable weights during training.
+            use_spectral_loss (bool): Whether to use spectral loss during training.
+            
+            varname_surface (list): List of surface variable names.
+            varname_dyn_forcing (list): List of dynamic forcing variable names.
+            varname_forcing (list): List of forcing variable names.
+            varname_static (list): List of static variable names.
+            varname_diagnostic (list): List of diagnostic variable names.
+            filenames (list): List of filenames for upper air data.
+            filename_surface (list, optional): List of filenames for surface data.
+            filename_dyn_forcing (list, optional): List of filenames for dynamic forcing data.
+            filename_forcing (str, optional): Filename for forcing data.
+            filename_static (str, optional): Filename for static data.
+            filename_diagnostic (list, optional): List of filenames for diagnostic data.
+            history_len (int, optional): Length of the history sequence. Default is 2.
+            forecast_len (int, optional): Length of the forecast sequence. Default is 0.
+            transform (callable, optional): Transformation function to apply to the data.
+            seed (int, optional): Random seed for reproducibility. Default is 42.
+            skip_periods (int, optional): Number of periods to skip between samples.
+            one_shot(bool, optional): Whether to return all states or just
+                                    the final state of the training target. Default is None
+            max_forecast_len (int, optional): Maximum length of the forecast sequence.
+            shuffle (bool, optional): Whether to shuffle the data. Default is True.
+
+        Returns:
+            sample (dict): A dictionary containing historical_ERA5_images,
+                                                 target_ERA5_images,
+                                                 datetime index, and additional information.
+
+        """
         super(VariableTotalLoss2D, self).__init__()
 
         self.is_downscaling = 'datasets' in conf['data']
@@ -615,6 +652,7 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         Returns:
             torch.Tensor: The computed loss value.
+        
         """
         # User defined loss
         loss = self.loss_fn(target, pred)

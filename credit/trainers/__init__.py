@@ -3,8 +3,8 @@ import logging
 
 # Import trainer classes
 from credit.trainers.trainerERA5 import Trainer as TrainerERA5
+from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
 from credit.trainers.trainer_downscaling import Trainer as Trainer404
-#from credit.trainers.trainer404 import Trainer as Trainer404
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,10 @@ trainer_types = {
     "era5": (
         TrainerERA5,
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
+    ),
+    "era5-ensemble": (
+        TrainerEnsemble,
+        "Loading a single or multi-step trainer for the ERA5 dataset for parallel computation of the CRPS loss.",
     ),
     "cam": (
         TrainerERA5,

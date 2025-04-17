@@ -121,9 +121,9 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     # Load modules
     module purge
-    module load ncarenv/23.09
+    module load ncarenv/24.12
     module reset
-    module load gcc craype cray-mpich cuda cudnn/8.8.1.3-12 conda
+    module load gcc craype cray-mpich cuda cudnn/8.9.7.29-12 conda
     conda activate {pbs_options.get('conda', 'credit')}
 
     # Export environment variables

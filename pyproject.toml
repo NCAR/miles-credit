@@ -41,6 +41,8 @@ dependencies = [
     "sphinx-autoapi",
     "myst_parser",
     "sphinx-book-theme",
+    "fsspec",
+    "gcsfs"
    ]
 
 [tool.setuptools]

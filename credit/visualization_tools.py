@@ -410,9 +410,6 @@ def draw_variables(pred, level, step, visualization_key, conf=None, save_locatio
     save_options = conf["visualization"]["save_options"]
     save_name_head = conf["visualization"][visualization_key]["file_name_prefix"]
 
-    ## collect figure names
-    filenames = []
-
     # ------------------------------ #
     # Figure
     fig, AX = figure_panel_planner(
