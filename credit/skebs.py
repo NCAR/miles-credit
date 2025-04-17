@@ -379,6 +379,10 @@ class SKEBS(nn.Module):
 
         self.dissipation_scaling_coefficient = torch.tensor(post_conf["skebs"].get("dissipation_scaling_coefficient", 1.0))
         self.dissipation_type = post_conf["skebs"]["dissipation_type"]
+
+        self.filter_backscatter = post_conf["skebs"].get("filter_backscatter", True) and self.dissipation_type not in ["prescribed", "uniform"]
+        logger.info(f"backscatter filter: {self.filter_backscatter}")
+
         if self.dissipation_type == "prescribed":
             self.backscatter_network = BackscatterPrescribed(self.nlat, self.nlon, self.levels,
                                                              post_conf["data"]["std_path"],
@@ -534,8 +538,7 @@ class SKEBS(nn.Module):
         self.dE = Parameter(torch.tensor(1e-4, requires_grad=True))
         self.r = Parameter(torch.tensor(0.02, requires_grad=False)) # see berner 2009, section 4a
         self.r.requires_grad = False
-        # initialize spectral filters
-
+        
     def initialize_filters(self):
         """ initialize the spectral filters for the backscatter prediction, and the spectral pattern """
         def filter_init(max_wavenum, anneal_start):
@@ -588,9 +591,9 @@ class SKEBS(nn.Module):
         self.multivariateNormal = MultivariateNormal(torch.zeros(2, device=y_pred.device), 
                                                      torch.eye(2, device=y_pred.device))
         # initialize pattern todo: how many iters?
-        iters = 5
+        iters = 10
         logger.debug(f"initializing pattern with {iters} iterations")
-        for i in range(iters):
+        for _ in range(iters):
             self.spec_coef = self.cycle_pattern(self.spec_coef)
 
     def cycle_pattern(self, spec_coef):
@@ -621,18 +624,6 @@ class SKEBS(nn.Module):
             if "dE"  in self.post_conf["skebs"]:
                 self.dE.data = torch.tensor(float(self.post_conf["skebs"]["dE"]))
                 logger.warning(f"manually setting dE to {self.dE}")
- 
-        if self.is_training: # this checks if we are in a training script
-            # self.training is a torch level thing that checks if we are in train/validation mode of training
-            # for inference, we don't need to reset the pattern
-            if self.training and self.steps >= self.forecast_len:
-                self.spec_coef_is_initialized = False
-                self.spec_coef = self.spec_coef.detach()
-                logger.debug(f"pattern is reset after train step {self.steps} total iter {self.iteration}")
-            elif not self.training and self.steps >= self.valid_forecast_len:
-                self.spec_coef_is_initialized = False
-                self.spec_coef = self.spec_coef.detach()
-                logger.debug(f"pattern is reset after valid step {self.steps} total iter {self.iteration}")
         
         if not self.is_training and torch.is_grad_enabled():
             self.is_training = True # set and forget to detect if we are in a training script
@@ -663,7 +654,7 @@ class SKEBS(nn.Module):
         if self.iteration == 0:
             self.cos_lat = self.cos_lat.to(x.device).expand(x.shape[0], *self.cos_lat.shape[1:])
 
-        if self.use_statics: # compatibility with old fcnn
+        if self.use_statics: # for compatibility with old fcnn
             x = torch.cat([x, x_input_statics, self.cos_lat], dim=1) # add in static vars and coslat
 
         # takes in raw (transformed) model output
@@ -678,7 +669,7 @@ class SKEBS(nn.Module):
             logger.info(f"writing raw backscatter file for iter {self.iteration}")
             torch.save(backscatter_pred, join(self.debug_save_loc, f"backscatter_raw_{self.iteration}"))
             
-        if self.dissipation_type not in ["prescribed", "uniform"]:
+        if self.filter_backscatter:
             # spatially filter the backscatter 
             backscatter_spec = self.sht(backscatter_pred) # b, levels, t, lmax, mmax
             backscatter_spec = self.spectral_backscatter_filter * backscatter_spec
@@ -694,18 +685,22 @@ class SKEBS(nn.Module):
             torch.save(backscatter_pred, join(self.debug_save_loc, f"backscatter_{self.iteration}"))
         
         ################### SKEBS pattern ####################
-
-        # inverse transform to get real output
-        x = self.state_trans.inverse_transform(x)
-
-        # (re)-initialize the pattern or clip the updated parameters
-        if not self.spec_coef_is_initialized: #hacky way of doing lazymodulemixin
-            self.steps = 0
+        if self.iteration == 0: #lazy module mixin hack
             self.initialize_pattern(x)
+
+        # (re)-initialize the pattern or clip the updated parameters. but don't want the same noise for every train step
+        if not self.spec_coef_is_initialized:
+            logger.debug("pattern is reset")
+            self.spec_coef = self.spec_coef.detach() 
+            self.steps = 0
+            # self.initialize_pattern(x) want different noise for each batch, don't re-initialize
             self.spec_coef_is_initialized = True
 
         else:
             self.clip_parameters()
+
+        if not self.retain_graph:
+            self.spec_coef = self.spec_coef.detach()
 
         # cycle the pattern
         self.spec_coef = self.cycle_pattern(self.spec_coef) # b, 1, 1, lmax, mmax
@@ -736,6 +731,9 @@ class SKEBS(nn.Module):
 
         #############################################################
         ##################### perturb fields ########################
+
+        # inverse transform to get real output
+        x = self.state_trans.inverse_transform(x)
 
         u_perturb = dissipation_term * u_chi
         v_perturb = dissipation_term * v_chi
@@ -772,10 +770,23 @@ class SKEBS(nn.Module):
 
         #############################################################
         ################### setup next iteration #####################
+
         self.iteration += 1 # this one for total iterations
         self.steps += 1  # this one for skebs/model state
+
+        if self.is_training: # custom check if we are in a training script
+            # self.training is a torch level thing that checks if we are in train/validation mode of training
+            # for inference, we don't need to reset the pattern
+            if self.training and self.steps >= self.forecast_len:
+                self.spec_coef_is_initialized = False
+            elif not self.training and self.steps >= self.valid_forecast_len:
+                self.spec_coef_is_initialized = False
+
+
+
+        input_dict["y_pred"] = x
         
-        return x
+        return input_dict
     
     def spec2grid(self, uspec):
         """
