@@ -65,13 +65,11 @@ def average_div_rot_spectrum(ds, grid, wave_spec="n", norm="ortho"):
 
     vrt_spectrum = ((torch.abs(vrt ** 2) * times_two).sum(dim=reduce_dim))
     div_spectrum = ((torch.abs(div ** 2) * times_two).sum(dim=reduce_dim))
-    logger.info(f"vrt:{vrt_spectrum.shape}")
 
     # average over all batch dimensions
     dims_for_avg = list(range(len(vrt_spectrum.shape) - 1))
     avg_vrt_spectrum = vrt_spectrum.mean(dim=dims_for_avg)
     avg_div_spectrum = div_spectrum.mean(dim=dims_for_avg)
-    logger.info(avg_vrt_spectrum.shape)
 
     return avg_vrt_spectrum.detach().numpy().flatten(), avg_div_spectrum.detach().numpy().flatten()
 
