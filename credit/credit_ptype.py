@@ -21,7 +21,7 @@ class CreditPostProcessor:
         Initialize the CreditPostProcessor with required paths and configurations.
         """
         self.model_params_path = "/glade/work/sakor/miles-credit/credit/metadata/ERA5_Lev_Info.nc"
-        self.surface_geopotential_path = "/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc"
+        self.surface_geopotential_path = "/glade/campaign/cisl/aiml/credit/static_scalers/static_whole_20250416.nc"
         
         self.levels = levels or np.array([10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]) - 1
         self.interp_var = interp_var or ['T', 'DPT', 'U', 'V']
@@ -71,25 +71,23 @@ class CreditPostProcessor:
                 all_single_level.SP.isel(time=t_idx).values,
                 all_upper_air.T.isel(time=t_idx).values,
                 all_upper_air.Q.isel(time=t_idx).values,
-                pressure_3d_half
+                pressure_3d_half[0]
             )
 
             # Compute dew point temperature
             temp_3d = all_upper_air.T.isel(time=t_idx).values
             q_3d = all_upper_air.Q.isel(time=t_idx).values
-            dew_point_3d = np.empty_like(temp_3d)
-            for i in range(temp_3d.shape[0]):
-                dew_point_3d[i, ...] = dewpoint_from_specific_humidity(
-                    pressure_3d[i, ...] * units.Pa, q_3d[i, ...] * units.kg / units.kg
-                )
+            dew_point_3d = dewpoint_from_specific_humidity(
+                pressure_3d * units.Pa, q_3d * units.kg / units.kg
+            )
            
             for var in self.interp_var:
                 var_name_3d = var.lower()
-                data_source = dew_point_3d if var == 'DPT' else all_upper_air[var].isel(time=t_idx).values
+                data_source = dew_point_3d[0] if var == 'DPT' else all_upper_air[var].isel(time=t_idx).values
                 
                 d_interp = interp_hybrid_to_height_agl(
                     data_source,
-                    np.flip(self.interp_heights_m),  # flip to go from  top of the atmosphere to surface
+                    self.interp_heights_m,  
                     model_geopotential,
                     self.surface_geopotential
                 )
@@ -103,7 +101,7 @@ class CreditPostProcessor:
                         np.empty((len(time_values), len(self.interp_heights_m), len(lat), len(lon)))
                     )
 
-                hgl_data[var_name_3d][1][t_idx, ...] = np.flip(d_interp, axis=0)
+                hgl_data[var_name_3d][1][t_idx, ...] = d_interp
 
         var_attributes = {
             't': {'units': 'C', 'long_name': 'Temperature'},
