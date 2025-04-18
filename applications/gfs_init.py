@@ -34,6 +34,7 @@ gfs_init = build_GFS_init(
     date=date,
     variables=variables,
     model_level_indices=model_level_indices,
+    gdas_base_path=gdas_base_path
 )
 
 gfs_init.to_zarr(
