@@ -544,7 +544,7 @@ class SKEBS(nn.Module):
         def filter_init(max_wavenum, anneal_start):
             filter = torch.cat([
                                 torch.ones(anneal_start),
-                                torch.linspace(1., 0.2, max_wavenum - anneal_start),
+                                torch.linspace(1., 0.1, max_wavenum - anneal_start),
                                 torch.zeros(self.lmax - max_wavenum)
                                 ])
             return filter.view(1,1,1,self.lmax, 1)
@@ -799,8 +799,27 @@ class SKEBS(nn.Module):
         compute wind vector from spectral coeffs of vorticity and divergence
         """
         return self.ivsht(self.invlap * vrtdivspec / RAD_EARTH)
-
+    
     def getgrad(self, chispec):
+            """ 
+            input dims: (batch, lmax, mmax)
+            """
+            vrtspec = self.lap * chispec
+
+            uv = self.getuv(
+                torch.stack(
+                    (
+                        vrtspec,
+                        torch.zeros_like(vrtspec).to(vrtspec.device),
+                    ), dim = -3
+                )
+            )
+
+            u_chi = uv[..., 0, :, :]
+            v_chi = uv[..., 1, :, :]
+            return u_chi, v_chi
+
+    def _getgrad(self, chispec):
         """
         compute vector gradient on grid given complex spectral coefficients.
 
