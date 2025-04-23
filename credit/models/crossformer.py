@@ -6,6 +6,7 @@ from torch import nn, einsum
 from einops import rearrange
 from einops.layers.torch import Rearrange
 
+from credit.ic_perturb import ICPerturb
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
 from credit.boundary_padding import TensorPadding
@@ -416,10 +417,6 @@ class CrossFormer(BaseModel):
             padding_conf = {"activate": False}
         self.use_padding = padding_conf["activate"]
 
-        if post_conf is None:
-            post_conf = {"activate": False}
-        self.use_post_block = post_conf["activate"]
-
         # input channels
         self.input_only_channels = input_only_channels
         input_channels = channels * levels + surface_channels + input_only_channels
@@ -506,20 +503,49 @@ class CrossFormer(BaseModel):
             logger.info("Adding spectral norm to all conv and linear layers")
             apply_spectral_norm(self)
 
-        if self.use_post_block:
-            # freeze base model weights before postblock init
-            if "skebs" in post_conf.keys():
-                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
-                    "freeze_base_model_weights", False
-                ):
-                    logger.warning("freezing all base model weights due to skebs config")
-                    for param in self.parameters():
-                        param.requires_grad = False
+        #### IC perturbation
+        ic_conf = kwargs.get("ic_conf", {"activate": False})
 
+        self.use_ic_perturb = ic_conf["activate"]
+
+        #### postblock
+        if post_conf is None:
+            post_conf = {"activate": False}
+
+        self.use_post_block = post_conf['activate']
+
+        # freeze base model weights before postblock and IC init
+        if ((post_conf["skebs"].get("activate", False) 
+            and post_conf["skebs"].get("freeze_base_model_weights", False)) or 
+            self.use_ic_perturb 
+            and ic_conf.get("freeze_base_model_weights", False)
+            ):
+            logger.warning("freezing all base model weights")
+            for param in self.parameters():
+                param.requires_grad = False
+
+        
+        if self.use_ic_perturb:
+            logger.info("perturbing ICs")
+            self.ic_perturb = ICPerturb(ic_conf)
+        
+        if self.use_post_block:
             logger.info("using postblock")
             self.postblock = PostBlock(post_conf)
 
-    def forward(self, x):
+        # print trainable params for debugging
+        logger.debug(f"trainable params{[name for name, param in self.named_parameters() if param.requires_grad]}")
+      
+
+    def forward(self, x, forecast_step):
+
+        if self.use_ic_perturb:
+            x_dict = {
+                "x": x,
+                "forecast_step": forecast_step,
+            }
+            x = self.ic_perturb(x_dict) # returns a tensor
+
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
@@ -560,6 +586,7 @@ class CrossFormer(BaseModel):
             x = {
                 "y_pred": x,
                 "x": x_copy,
+                "forecast_step": forecast_step,
             }
             x = self.postblock(x)
 

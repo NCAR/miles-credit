@@ -3,6 +3,7 @@
 -------------------------------------------------------
 Content:
 """
+import pytest
 import yaml
 import os
 import logging
@@ -72,14 +73,15 @@ def test_SKEBS_rand():
     input_dict = {"x": x,
                 "y_pred": y_pred}
     
-    for _ in range(10):
+    for i in range(10):
         with torch.no_grad():
+            input_dict["forecast_step"] = i + 1
             skebs_pred = postblock(input_dict)
 
     assert skebs_pred.shape == y_pred.shape
     assert not torch.isnan(skebs_pred).any()
 
-
+@pytest.mark.skip("for local testing purposes only")
 def test_SKEBS_local():
     """ unit test for CPU. testing that values make sense
     """

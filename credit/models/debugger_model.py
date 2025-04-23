@@ -87,7 +87,7 @@ class DebuggerModel(BaseModel):
 
     def forward(self, x, forecast_step=None):
         """
-            forward that multiplies self.coef to the input
+            forward with a single linear layer
             used to test postblock and other model parts
         """
 

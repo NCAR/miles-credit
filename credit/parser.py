@@ -337,6 +337,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # postblock opts
     # turn-off post if post_conf does not exist
     conf["model"].setdefault("post_conf", {"activate": False})
+    conf["model"].setdefault("ic_conf", {"activate": False})
 
     # set defaults for post modules
     post_list = [
@@ -462,6 +463,23 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     if conf['model']['post_conf']['skebs']['activate']:
         conf["model"]["post_conf"] = parse_skebs(conf["model"]["post_conf"])
     # --------------------------------------------------------------------- #
+    # ic perturb config
+
+
+    # set defaults for post modules
+    ic_perturb = [
+        "skebs",
+        "white_noise"
+    ]
+
+    # if activate is false, set all post modules to false
+    if not conf['model']['ic_conf']['activate']:
+        for module in ic_perturb:
+            conf['model']['ic_conf'][module] = {'activate': False}
+
+    # set defaults for post modules
+    for module in ic_perturb:
+        conf["model"]["ic_conf"].setdefault(module, {"activate": False})
 
     if conf["model"]["ic_conf"]["activate"]:
         if conf["data"]["forecast_len"] > 0 and conf["data"]["retain_graph"]:
