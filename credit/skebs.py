@@ -633,27 +633,18 @@ class SKEBS(nn.Module):
         return new_coef * self.spectral_pattern_filter 
     
     @custom_fwd(device_type='cuda', cast_inputs=torch.float32)
-    def forward(self, x, forecast_step=None):
-        """ the inverse sht operation requires float32 or greater """
-
-        if self.ic_mode and self.spec_coef_is_initialized:
-            # if the coef is initialized, then we are past the first iter
-            logger.debug(f"{self.iteration} skipping skebs IC perturbation")
-
-            self.iteration += 1 # this one for total iterations
-            self.steps += 1  # this one for skebs/model state
-
-            if self.is_training: # custom check if we are in a training script
-                # self.training is a torch level thing that checks if we are in train/validation mode of training
-                # for inference, we don't need to reset the pattern
-                if self.training and self.steps >= self.forecast_len:
-                    self.spec_coef_is_initialized = False
-                elif not self.training and self.steps >= self.valid_forecast_len:
-                    self.spec_coef_is_initialized = False
-            return x
-        
-        if self.ic_mode: 
-            logger.debug(f"{self.iteration} perturbing IC with skebs")
+    def forward(self, x):
+        """ 
+        x needs to be dict with keys "x", "y_pred", "forecast_step"
+        skebs perturbs y_pred and assumes "x" is the previous timestep
+        the inverse sht operation requires float32 or greater 
+        """
+        forecast_step = x["forecast_step"]
+        if forecast_step == 1:
+            if self.is_training:
+                self.spec_coef_is_initialized = False # dont need to re-init for rollouts
+            if self.ic_mode:
+                logger.debug(f"{self.iteration} perturbing IC with skebs")
 
         # manual override of r
         if self.iteration == 0:
@@ -813,15 +804,6 @@ class SKEBS(nn.Module):
 
         self.iteration += 1 # this one for total iterations
         self.steps += 1  # this one for skebs/model state
-
-        if self.is_training: # custom check if we are in a training script
-            # self.training is a torch level thing that checks if we are in train/validation mode of training
-            # for inference, we don't need to reset the pattern
-            if self.training and self.steps >= self.forecast_len:
-                self.spec_coef_is_initialized = False
-            elif not self.training and self.steps >= self.valid_forecast_len:
-                self.spec_coef_is_initialized = False
-
 
 
         input_dict["y_pred"] = x.float()

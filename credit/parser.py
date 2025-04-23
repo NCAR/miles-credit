@@ -8,6 +8,7 @@ Content:
     - remove_string_by_pattern
 """
 
+import logging
 import os
 import copy
 import warnings
@@ -361,7 +362,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     if post_conf["activate"] and not activate_any:
         raise ("post_conf is set activate, but no post modules specified")
 
-    if conf["model"]["post_conf"]["activate"]:
+    if conf["model"]["post_conf"]["activate"] or conf["model"]["ic_conf"]["activate"]:
         # copy only model configs to post_conf subdictionary
         conf["model"]["post_conf"]["model"] = {k: v for k, v in conf["model"].items() if k != "post_conf"}
         # copy data configs to post_conf (for de-normalize variables)
@@ -405,25 +406,22 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         # --------------------------------------------------------------------- #
 
     # SKEBS
-    if conf['model']['post_conf']['skebs']['activate']:
-        assert "freeze_base_model_weights" in conf['model']['post_conf']['skebs'], (
-            'need to specify freeze_base_model_weights in skebs config'
-        )
+    def parse_skebs(block_conf):
 
         assert conf['trainer']["train_batch_size"] == conf['trainer']["valid_batch_size"], (
             'train and valid batch sizes need to be the same for skebs'
         )
 
         #setup backscatter writing
-        conf['model']['post_conf']['predict'] = {k: v for k,v in conf['predict'].items()}
+        block_conf['predict'] = {k: v for k,v in conf['predict'].items()}
 
-        conf['model']['post_conf']['skebs'].setdefault('lmax', None)
-        conf['model']['post_conf']['skebs'].setdefault('mmax', None)
+        block_conf['skebs'].setdefault('lmax', None)
+        block_conf['skebs'].setdefault('mmax', None)
         
-        if conf['model']['post_conf']['skebs']['lmax'] in ['none', 'None']:
-            conf['model']['post_conf']['skebs']['lmax'] = None
-        if conf['model']['post_conf']['skebs']['mmax'] in ['none', 'None']:
-            conf['model']['post_conf']['skebs']['mmax'] = None
+        if block_conf['skebs']['lmax'] in ['none', 'None']:
+            block_conf['skebs']['lmax'] = None
+        if block_conf['skebs']['mmax'] in ['none', 'None']:
+            block_conf['skebs']['mmax'] = None
 
         U_inds = [
             i_var for i_var, var in enumerate(varname_output) if var=="U"
@@ -439,23 +437,44 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             i_var for i_var, var in enumerate(varname_output) if var in ["Q", "Qtot"]
         ]
 
-        conf['model']['post_conf']['skebs']['U_inds'] = U_inds
-        conf['model']['post_conf']['skebs']['V_inds'] = V_inds
-        conf['model']['post_conf']['skebs']['Q_inds'] = Q_inds
-        conf['model']['post_conf']['skebs']['T_inds'] = T_inds
+        block_conf['skebs']['U_inds'] = U_inds
+        block_conf['skebs']['V_inds'] = V_inds
+        block_conf['skebs']['Q_inds'] = Q_inds
+        block_conf['skebs']['T_inds'] = T_inds
 
         if "SP" in varname_output:
-            conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("SP")
+            block_conf['skebs']['SP_ind'] = varname_output.index("SP")
         else:
-            conf['model']['post_conf']['skebs']['SP_ind'] = varname_output.index("PS")
+            block_conf['skebs']['SP_ind'] = varname_output.index("PS")
 
         static_inds = [
             i_var for i_var, var in enumerate(varname_input) if var in conf["data"]["static_variables"]
         ]
-        conf['model']['post_conf']['skebs']['static_inds'] = static_inds
+        block_conf['skebs']['static_inds'] = static_inds
 
         ###### debug mode setup #######
-        conf['model']['post_conf']['skebs']['save_loc'] = conf['save_loc']
+        block_conf['skebs']['save_loc'] = conf['save_loc']  
+        
+        return block_conf
+    
+
+    
+    if conf['model']['post_conf']['skebs']['activate']:
+        conf["model"]["post_conf"] = parse_skebs(conf["model"]["post_conf"])
+    # --------------------------------------------------------------------- #
+
+    if conf["model"]["ic_conf"]["activate"]:
+        if conf["data"]["forecast_len"] > 0 and conf["data"]["retain_graph"]:
+            logging.warning( "if doing multistep training, need to make sure there is a trainable graph after first timestep")
+
+        # copy only model configs to post_conf subdictionary
+        conf["model"]["ic_conf"]["model"] = {k: v for k, v in conf["model"].items() if k != "ic_conf"}
+        # copy data configs to post_conf (for de-normalize variables)
+        conf["model"]["ic_conf"]["data"] = {k: v for k, v in conf["data"].items()}
+        conf["model"]["ic_conf"].setdefault("grid", "legendre-gauss")
+
+    if conf['model']['ic_conf']['skebs']['activate']:
+        conf["model"]["ic_conf"] = parse_skebs(conf["model"]["ic_conf"])
 
     # --------------------------------------------------------------------- #
     # tracer fixer

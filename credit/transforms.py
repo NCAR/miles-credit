@@ -663,18 +663,128 @@ class Normalize_ERA5_and_Forcing:
             if self.static_first:
                 tensors.append(tensor_static)
                 tensors.append(transformed_dyn_forcing)
-                tensors.append(tensor_forcing)
+                if self.flag_forcing: tensors.append(tensor_forcing)
             else:
                 tensors.append(transformed_dyn_forcing)
-                tensors.append(tensor_forcing)
+                if self.flag_forcing: tensors.append(tensor_forcing)
                 tensors.append(tensor_static)
 
         elif self.has_forcing_static:
             if self.static_first:
                 tensors.append(tensor_static)
-                tensors.append(tensor_forcing)
+                if self.flag_forcing: tensors.append(tensor_forcing)
             else:
-                tensors.append(tensor_forcing)
+                if self.flag_forcing: tensors.append(tensor_forcing)
+                tensors.append(tensor_static)
+
+        elif self.flag_dyn_forcing:
+            tensors.append(transformed_dyn_forcing)
+
+        transformed_x = torch.cat(tensors, dim=1)
+
+        return transformed_x.to(device)
+    
+    def transform_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Inverse transform for input x.
+
+        Forcing and static variables are not transformed
+        (they were not transformed in the transform function).
+
+        Args:
+            x: batch.
+
+        Returns:
+            transformed x.
+
+        """
+        # Get the current device
+        device = x.device
+
+        # Subset upper air variables
+        tensor_upper_air = x[:, : self.num_upper_air, :, :]
+        transformed_upper_air = tensor_upper_air.clone()
+
+        idx = self.num_upper_air
+
+        # Surface variables
+        if self.flag_surface:
+            tensor_surface = x[:, idx : idx + self.num_surface, :, :]
+            transformed_surface = tensor_surface.clone()
+            idx += self.num_surface
+
+        # Dynamic forcing variables
+        if self.flag_dyn_forcing:
+            if self.static_first:
+                tensor_dyn_forcing = x[
+                    :,
+                    idx + self.num_static : idx
+                    + self.num_static
+                    + self.num_dyn_forcing,
+                    :,
+                    :,
+                ]
+            else:
+                tensor_dyn_forcing = x[:, idx : idx + self.num_dyn_forcing, :, :]
+                idx += self.num_dyn_forcing
+
+            transformed_dyn_forcing = tensor_dyn_forcing.clone()
+
+        # Forcing and static variables (not transformed)
+        if self.has_forcing_static:
+            if self.static_first:
+                tensor_static = x[:, idx : idx + self.num_static, :, :]
+                tensor_forcing = x[:, -self.num_forcing :, :, :]
+            else:
+                tensor_forcing = x[:, idx : idx + self.num_forcing, :, :]
+                tensor_static = x[:, idx : idx + self.num_static, :, :]
+
+        # Inverse transform upper air variables
+        k = 0
+        for name in self.varname_upper_air:
+            mean_tensor = self.mean_tensors[name].to(device)
+            std_tensor = self.std_tensors[name].to(device)
+            for level in range(self.levels):
+                mean = mean_tensor[level]
+                std = std_tensor[level]
+                transformed_upper_air[:, k] = (tensor_upper_air[:, k] - mean ) / std
+                k += 1
+
+        # Inverse transform surface variables
+        if self.flag_surface:
+            for k, name in enumerate(self.varname_surface):
+                mean = self.mean_tensors[name].to(device)
+                std = self.std_tensors[name].to(device)
+                transformed_surface[:, k] = (tensor_surface[:, k] - mean ) / std
+
+        # Inverse transform dynamic forcing variables
+        if self.flag_dyn_forcing:
+            for k, name in enumerate(self.varname_dyn_forcing):
+                mean = self.mean_tensors[name].to(device)
+                std = self.std_tensors[name].to(device)
+                transformed_dyn_forcing[:, k] = (tensor_dyn_forcing[:, k] - mean ) / std
+
+        # Reconstruct input tensor
+        tensors = [transformed_upper_air]
+
+        if self.flag_surface:
+            tensors.append(transformed_surface)
+
+        if self.flag_dyn_forcing and self.has_forcing_static:
+            if self.static_first:
+                tensors.append(tensor_static)
+                tensors.append(transformed_dyn_forcing)
+                if self.flag_forcing: tensors.append(tensor_forcing)
+            else:
+                tensors.append(transformed_dyn_forcing)
+                if self.flag_forcing: tensors.append(tensor_forcing)
+                tensors.append(tensor_static)
+
+        elif self.has_forcing_static:
+            if self.static_first:
+                tensors.append(tensor_static)
+                if self.flag_forcing: tensors.append(tensor_forcing)
+            else:
+                if self.flag_forcing: tensors.append(tensor_forcing)
                 tensors.append(tensor_static)
 
         elif self.flag_dyn_forcing:

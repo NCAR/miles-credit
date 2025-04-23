@@ -305,7 +305,7 @@ def predict(rank, world_size, conf, p):
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
             # Model inference on the entire batch
-            y_pred = model(x.float())
+            y_pred = model(x.float(), forecast_step)
 
             # Post-processing blocks
             if flag_mass_conserve:

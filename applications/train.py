@@ -241,8 +241,6 @@ def main(rank, world_size, conf, backend=None, trial=False):
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
     # Config settings
-    seed = conf["seed"]
-    seed_everything(seed)
 
     # Load the dataset using the provided dataset_type
     train_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=True)
@@ -251,6 +249,9 @@ def main(rank, world_size, conf, backend=None, trial=False):
     # Load the dataloader
     train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
     valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
+
+    seed = conf["seed"] + rank
+    seed_everything(seed) 
 
     # model
     m = load_model(conf)
