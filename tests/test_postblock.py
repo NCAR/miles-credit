@@ -20,7 +20,7 @@ CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2
                       "config")
 
 def test_SKEBS_rand():
-    """ unit test for CPU. testing that values make sense
+    """ unit test for CPU
     """
     config = os.path.join(CONFIG_FILE_DIR, "example-v2025.2.0.yml")
 
@@ -83,7 +83,7 @@ def test_SKEBS_rand():
 
 @pytest.mark.skip("for local testing purposes only")
 def test_SKEBS_local():
-    """ unit test for CPU. testing that values make sense
+    """ unit test for CPU
     """
     config = "/glade/derecho/scratch/dkimpara/CREDIT_runs/debug_cesm/model.yml"
     

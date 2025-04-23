@@ -426,6 +426,8 @@ class CrossFormer(BaseModel):
         output_channels = channels * levels + surface_channels + output_only_channels
         self.output_channels = output_channels
 
+        self.output_channels_override = kwargs.get("output_channels_override", output_channels)
+
         dim = cast_tuple(dim, 4)
         depth = cast_tuple(depth, 4)
         global_window_size = cast_tuple(global_window_size, 4)
@@ -580,7 +582,7 @@ class CrossFormer(BaseModel):
         if self.use_interp:
             x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
-        x = x.unsqueeze(2)
+        x = x.unsqueeze(2)[:, : self.output_channels_override]
 
         if self.use_post_block:
             x = {

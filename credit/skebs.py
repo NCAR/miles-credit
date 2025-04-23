@@ -470,7 +470,10 @@ class SKEBS(nn.Module):
         self.write_every = post_conf['skebs'].get('write_train_every', 999)
 
         save_loc = post_conf['skebs']["save_loc"]
-        self.debug_save_loc = join(save_loc, "debug_skebs")
+        if self.ic_mode:
+            self.debug_save_loc = join(save_loc, "debug_ic_skebs")
+        else:
+            self.debug_save_loc = join(save_loc, "debug_skebs")
 
         if self.write_train_debug_files or self.write_rollout_debug_files:
             os.makedirs(self.debug_save_loc, exist_ok=True)
