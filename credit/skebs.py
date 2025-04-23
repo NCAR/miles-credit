@@ -1,6 +1,7 @@
 import copy
 import os
 from os.path import join
+from re import I
 
 import torch
 from torch import nn
@@ -289,8 +290,13 @@ class SKEBS(nn.Module):
 
     """
 
-    def __init__(self, post_conf):
+    def __init__(self, post_conf, ic_mode=False):
         """
+        input: 
+           - post_conf (see config examples)
+           - ic_mode: bool
+
+
         A model error correction scheme inspired by [1]. The scheme perturbs the streamfunction of horizontal wind (U,V) and is a nondivergent perturbation.
         Randomness is drawn from a red-noise spectral pattern. The amplitude of the perturbations are predicted by a neural net (calling it backscatter to
         align with [1]). 
@@ -307,6 +313,7 @@ class SKEBS(nn.Module):
         super().__init__()
 
         self.post_conf = post_conf
+        self.ic_mode = ic_mode
         self.retain_graph = post_conf["data"].get("retain_graph", False)
 
         self.nlon = post_conf["model"]["image_width"]
@@ -336,6 +343,13 @@ class SKEBS(nn.Module):
         self.cos_lat = torch.tensor(cos_lat).reshape(1, 1, 1, cos_lat.shape[0], 1).expand(1,1,1,cos_lat.shape[0], 288)
         
         self.state_trans = load_transforms(post_conf, scaler_only=True)
+        if self.ic_mode:
+            self.inverse_transform = self.state_trans.inverse_transform_input
+            self.transform = self.state_trans.transform_input
+        else:
+            self.inverse_transform = self.state_trans.inverse_transform
+            self.transform = self.state_trans.transform_array
+
         self.eps = 1e-12
 
         # check for contiguous indices, need this for concat operation
@@ -369,11 +383,17 @@ class SKEBS(nn.Module):
         ############### initialize backscatter prediction ###############
         #################################################################
         self.use_statics = post_conf["skebs"].get("use_statics", True)
-        num_channels = (self.channels * self.levels 
+        
+        if self.ic_mode:
+            num_channels = (self.channels * self.levels
                             + post_conf["model"]["surface_channels"]
-                            + post_conf["model"]["output_only_channels"])
-        if self.use_statics:
-            num_channels += len(self.static_inds) + 1 # this one for static vars and coslat
+                            + post_conf["model"]["input_only_channels"])
+        else:
+            num_channels = (self.channels * self.levels 
+                                + post_conf["model"]["surface_channels"]
+                                + post_conf["model"]["output_only_channels"])
+            if self.use_statics:
+                num_channels += len(self.static_inds) + 1 # this one for static vars and coslat
         
         self.relu1 = nn.ReLU() # use this to gaurantee positive backscatter
 
@@ -613,8 +633,27 @@ class SKEBS(nn.Module):
         return new_coef * self.spectral_pattern_filter 
     
     @custom_fwd(device_type='cuda', cast_inputs=torch.float32)
-    def forward(self, x):
+    def forward(self, x, forecast_step=None):
         """ the inverse sht operation requires float32 or greater """
+
+        if self.ic_mode and self.spec_coef_is_initialized:
+            # if the coef is initialized, then we are past the first iter
+            logger.debug(f"{self.iteration} skipping skebs IC perturbation")
+
+            self.iteration += 1 # this one for total iterations
+            self.steps += 1  # this one for skebs/model state
+
+            if self.is_training: # custom check if we are in a training script
+                # self.training is a torch level thing that checks if we are in train/validation mode of training
+                # for inference, we don't need to reset the pattern
+                if self.training and self.steps >= self.forecast_len:
+                    self.spec_coef_is_initialized = False
+                elif not self.training and self.steps >= self.valid_forecast_len:
+                    self.spec_coef_is_initialized = False
+            return x
+        
+        if self.ic_mode: 
+            logger.debug(f"{self.iteration} perturbing IC with skebs")
 
         # manual override of r
         if self.iteration == 0:
@@ -644,17 +683,18 @@ class SKEBS(nn.Module):
         ################### BACKSCATTER ################### 
         ######## setup input data for backscatter #########
         
-        x_input_statics = x["x"][:, self.static_inds]
+        x_input = x["x"]
         x = x["y_pred"]
 
         if not self.retain_graph:
             x = x.detach()
-            x_input_statics = x_input_statics.detach()
+            x_input = x_input.detach()
 
         if self.iteration == 0:
             self.cos_lat = self.cos_lat.to(x.device).expand(x.shape[0], *self.cos_lat.shape[1:])
 
         if self.use_statics: # for compatibility with old fcnn
+            x_input_statics = x_input[:, self.static_inds]
             x = torch.cat([x, x_input_statics, self.cos_lat], dim=1) # add in static vars and coslat
 
         # takes in raw (transformed) model output
@@ -690,7 +730,7 @@ class SKEBS(nn.Module):
 
         # (re)-initialize the pattern or clip the updated parameters. but don't want the same noise for every train step
         if not self.spec_coef_is_initialized:
-            logger.debug("pattern is reset")
+            logger.debug(f"{self.iteration} pattern is reset")
             self.spec_coef = self.spec_coef.detach() 
             self.steps = 0
             # self.initialize_pattern(x) want different noise for each batch, don't re-initialize
@@ -733,7 +773,7 @@ class SKEBS(nn.Module):
         ##################### perturb fields ########################
 
         # inverse transform to get real output
-        x = self.state_trans.inverse_transform(x)
+        x = self.inverse_transform(x)
 
         u_perturb = dissipation_term * u_chi
         v_perturb = dissipation_term * v_chi
@@ -763,7 +803,7 @@ class SKEBS(nn.Module):
         x = concat_for_inplace_ops(x, x_v_wind, min(self.V_inds), max(self.V_inds))
         
         # transform back to model (transformed) output space
-        x = self.state_trans.transform_array(x)
+        x = self.transform(x)
 
         # check for nans
         assert not torch.isnan(x).any()
@@ -784,7 +824,7 @@ class SKEBS(nn.Module):
 
 
 
-        input_dict["y_pred"] = x
+        input_dict["y_pred"] = x.float()
         
         return input_dict
     
