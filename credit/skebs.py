@@ -263,7 +263,8 @@ class BackscatterPrescribed(nn.Module):
                  nlon,
                  levels,
                  std_path,
-                 sigma_max):
+                 sigma_max,
+                 vary_by_latitude=False):
         """
         An prescribed array for each column for a uniform (across space) backscatter rate.
         the array weights are trainable. 
@@ -275,7 +276,11 @@ class BackscatterPrescribed(nn.Module):
 
         std = xr.open_dataset(std_path)
         std_wind_avg = (std.U.values + std.V.values) / 2.
-        self.backscatter_array = Parameter(torch.tensor(0.01 * (std_wind_avg * sigma_max) ** 2).reshape(1,levels,1,1,1), requires_grad=True)
+        backscatter = torch.tensor(0.01 * (std_wind_avg * sigma_max) ** 2).reshape(1,levels,1,1,1)
+        if vary_by_latitude:
+            self.backscatter_array = Parameter(backscatter.repeat_interleave(self.nlat, dim=-2), requires_grad=True)
+        else:
+            self.backscatter_array = Parameter(backscatter, requires_grad=True)
         # total perturb will be 10% of the sqrt of the backscatter rate
 
     def forward(self, x):
@@ -369,6 +374,9 @@ class SKEBS(nn.Module):
         self.initialize_skebs_parameters()   
         self.initialize_filters()
    
+        # use ansatz perturbation? default False -> normal skebs
+        ansatz_perturb = post_conf["skebs"].get("ansatz_perturb", False)
+        self.get_uv_chi = self.getuv_dk_ansatz if ansatz_perturb else self.getuv
 
         # coeffs havent been spun up yet (indicates need to init the coeffs)
         self.spec_coef_is_initialized = False
@@ -407,6 +415,11 @@ class SKEBS(nn.Module):
             self.backscatter_network = BackscatterPrescribed(self.nlat, self.nlon, self.levels,
                                                              post_conf["data"]["std_path"],
                                                              post_conf["skebs"]["sigma_max"])
+        elif self.dissipation_type == "uniform_by_latitude":
+            self.backscatter_network = BackscatterPrescribed(self.nlat, self.nlon, self.levels,
+                                                    post_conf["data"]["std_path"],
+                                                    post_conf["skebs"]["sigma_max"],
+                                                    vary_by_latitude=True)
         elif self.dissipation_type == "uniform":
             self.backscatter_network = BackscatterFixedCol(self.levels)
         elif self.dissipation_type == "FCNN":
@@ -642,8 +655,8 @@ class SKEBS(nn.Module):
         skebs perturbs y_pred and assumes "x" is the previous timestep
         the inverse sht operation requires float32 or greater 
         """
-        forecast_step = x["forecast_step"]
-        if forecast_step == 1:
+        self.forecast_step = x["forecast_step"]
+        if self.forecast_step == 1:
             if self.is_training:
                 self.spec_coef_is_initialized = False # dont need to re-init for rollouts
             if self.ic_mode:
@@ -741,8 +754,8 @@ class SKEBS(nn.Module):
 
         # transform pattern to grid space
         spec_coef = self.spec_coef.squeeze()
-        u_chi, v_chi = self.getgrad(spec_coef) # spec_coef represent vrt (non-divergent) coeffs so the perturbation will be non-divergent
-        u_chi, v_chi = u_chi.unsqueeze(1).unsqueeze(1), v_chi.unsqueeze(1).unsqueeze(1)
+        u_chi, v_chi = self.get_uv_chi(spec_coef, x) # spec_coef represent vrt (non-divergent) coeffs so the perturbation will be non-divergent. returns (b, lat, lon) tensors
+        
         logger.debug(f"max u_chi: {torch.max(torch.abs(u_chi))}")
         logger.debug(f"max v_chi: {torch.max(torch.abs(v_chi))}")
         # compute the dissipation term
@@ -813,17 +826,41 @@ class SKEBS(nn.Module):
         
         return input_dict
     
+    def getuv_dk_ansatz(self, chispec, x):
+        # the wrong skebs perturbation
+
+        noise = self.isht(chispec).unsqueeze(1).unsqueeze(1) # (b, 1, 1, lat, lon)
+        
+        # get normalizer to be similar to other u_chi
+        if self.forecast_step == 1:
+            self.noise_max = noise.max()
+
+        noise = noise / self.noise_max * 0.01
+
+        # compute component magnitudes of wind
+        U = x[:, self.U_inds] 
+        V = x[:, self.V_inds] 
+
+        u_squared = U ** 2
+        v_squared = V ** 2 
+        wind_magnitude = torch.sqrt(u_squared + v_squared)
+
+        u_chi = U / wind_magnitude * noise
+        v_chi = V / wind_magnitude * noise
+        
+        return u_chi, v_chi
+    
     def spec2grid(self, uspec):
         """
         spatial data from spectral coefficients
         """
         return self.isht(uspec)
     
-    def getuv(self, vrtdivspec):
+    def getuv(self, vrtdivspec, x):
         """
         compute wind vector from spectral coeffs of vorticity and divergence
         """
-        return self.ivsht(self.invlap * vrtdivspec / RAD_EARTH)
+        return self.ivsht(self.invlap * vrtdivspec / RAD_EARTH).unsqueeze(1).unsqueeze(1)
     
     def getgrad(self, chispec):
             """ 
