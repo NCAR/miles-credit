@@ -32,8 +32,8 @@ sampling: &samples
     forecast_len: 1
 
 image_size: &imsize  # round up to multiples of 128
-    image_width:  1408  # orginally 1367 
-    image_height: 1024  # originally 1015
+    image_width:  256 # sgp subset # was 1408  # originally 1367 
+    image_height: 256 # sgp subset # was 1024  # originally 1015
 
 # A downscaling model is trained on two datasets, one for the
 # high-resolution output from the model being emulated, and one for
@@ -73,7 +73,7 @@ data_defaults: &ddefault
     <<: *samples
 
     # file globs are defined relative to the top-level data rootpath
-    rootpath: /glade/derecho/scratch/mcginnis/credit
+    rootpath: /glade/derecho/scratch/mcginnis/credit/sgp256
 
     first_date:   "1980-01-02"
     last_date:    "1984-12-31"
