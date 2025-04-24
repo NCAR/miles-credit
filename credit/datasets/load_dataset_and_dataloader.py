@@ -455,7 +455,6 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
     elif type(dataset) is MultiprocessingBatcherPrefetch:
         dataloader = BatchForecastLenDataLoader(dataset)
     elif type(dataset) is DownscalingDataset:
-        print("we made it here!")
         sampler = DistributedSampler(
             dataset,
             num_replicas=world_size,

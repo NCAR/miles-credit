@@ -176,16 +176,16 @@ class Trainer(BaseTrainer):
         for steps in range(self.batches_per_epoch):
             logs = {}
             loss = 0
-            stop_forecast = False
+            # stop_forecast = False
             y_pred = None     # placeholder for predicted values
-            while not stop_forecast:
-                batch = next(dl)
-                print(f"batch keys: {batch.keys()}")
-                for k,v in batch.items():
-                    print(f"batch {k}: {v.shape}")
+            # while not stop_forecast:
+            batch = next(dl)
+                # print(f"batch keys: {batch.keys()}")
+                # for k,v in batch.items():
+                #     print(f"batch {k}: {v.shape}")
                 # forecast_step = batch["forecast_step"].item()
 
-                x = batch['x'].to(self.device)
+            x = batch['x'].to(self.device)
 
                 # this section is for initializing prognostic vars
                 # when doing multistep training
@@ -231,8 +231,8 @@ class Trainer(BaseTrainer):
                 #     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
                 # predict with the model
-                with autocast(enabled=self.amp):
-                    y_pred = self.model(x)
+            with autocast(enabled=self.amp):
+                y_pred = self.model(x)
 
                 # # ============================================= #
                 # # postblock opts outside of model
@@ -267,7 +267,7 @@ class Trainer(BaseTrainer):
                 # rollout steps.  So don't load batch['y'] onto GPU
                 # until/unless we are doing backprop
 
-                y = batch['y'].to(self.device)
+            y = batch['y'].to(self.device)
 
                 # I believe the section below is taken care of by
                 # DownscalingDataset's toTensor() function
@@ -297,23 +297,23 @@ class Trainer(BaseTrainer):
                 # if flag_clamp:
                 #     y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                with autocast(enabled=amp):
-                    loss = criterion(y.to(y_pred.dtype), y_pred).mean()
+            with autocast(enabled=self.amp):
+                loss = criterion(y.to(y_pred.dtype), y_pred).mean()
 
                 # track the loss
-                accum_log(logs, {"loss": loss.item()})
+            accum_log(logs, {"loss": loss.item()})
 
                 # compute gradients
-                scaler.scale(loss).backward()
+            scaler.scale(loss).backward()
 
 
-                if distributed:
-                    torch.distributed.barrier()
+            if self.distributed:
+                torch.distributed.barrier()
 
-                # stop after X steps
-                stop_forecast = batch["stop_forecast"].item()
-                if stop_forecast:
-                    break
+                ## stop after X steps
+                #stop_forecast = batch["stop_forecast"].item()
+                #if stop_forecast:
+                #    break
 
 
                 # The section below recycles prognostic variables when
@@ -367,12 +367,12 @@ class Trainer(BaseTrainer):
                 #     else:
                 #         x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
-            if distributed:
-                torch.distributed.barrier()
+            # if self.distributed:
+            #    torch.distributed.barrier()
 
             # Grad norm clipping
             scaler.unscale_(optimizer)
-            if grad_max_norm == "dynamic":
+            if self.grad_max_norm == "dynamic":
                 # Compute local L2 norm
                 local_norm = torch.norm(
                     torch.stack(
@@ -385,7 +385,7 @@ class Trainer(BaseTrainer):
                 )
 
                 # All-reduce to get global norm across ranks
-                if distributed:
+                if self.distributed:
                     dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
                 global_norm = local_norm.sqrt()  # Compute total global norm
 
@@ -393,9 +393,9 @@ class Trainer(BaseTrainer):
                 torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), max_norm=global_norm
                 )
-            elif grad_max_norm > 0.0:
+            elif self.grad_max_norm > 0.0:
                 torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=grad_max_norm
+                    self.model.parameters(), max_norm=self.grad_max_norm
                 )
 
             # Step optimizer
@@ -407,15 +407,15 @@ class Trainer(BaseTrainer):
             metrics_dict = metrics(y_pred, y)
             for name, value in metrics_dict.items():
                 value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
-                if distributed:
+                if self.distributed:
                     dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
                 results_dict[f"train_{name}"].append(value[0].item())
 
             batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
-            if distributed:
+            if self.distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
-            results_dict["train_forecast_len"].append(forecast_length + 1)
+            results_dict["train_forecast_len"].append(self.forecast_length + 1)
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(
@@ -436,7 +436,7 @@ class Trainer(BaseTrainer):
                 f" train_loss: {np.mean(results_dict['train_loss']):.6f}" +
                 f" train_acc: {np.mean(results_dict['train_acc']):.6f}" +
                 f" train_mae: {np.mean(results_dict['train_mae']):.6f}" +
-                f" forecast_len: {forecast_length+1:.6f}"
+                f" forecast_len: {self.forecast_length+1:.6f}"
             )
 
             ensemble_size = conf["trainer"].get("ensemble_size", 0)
@@ -499,7 +499,7 @@ class Trainer(BaseTrainer):
 
         # ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        #distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         results_dict = defaultdict(list)
 
@@ -687,7 +687,7 @@ class Trainer(BaseTrainer):
                                 self.device, non_blocking=True
                             )
 
-                            if distributed:
+                            if self.distributed:
                                 dist.all_reduce(
                                     value, dist.ReduceOp.AVG, async_op=False
                                 )
@@ -726,7 +726,7 @@ class Trainer(BaseTrainer):
 
                 batch_loss = torch.Tensor([loss.item()]).cuda(self.device)
 
-                if distributed:
+                if self.distributed:
                     torch.distributed.barrier()
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
@@ -752,7 +752,7 @@ class Trainer(BaseTrainer):
         batch_group_generator.close()
 
         # Wait for rank-0 process to save the checkpoint above
-        if distributed:
+        if self.distributed:
             torch.distributed.barrier()
 
         # clear the cached memory from the gpu
