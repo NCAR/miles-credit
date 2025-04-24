@@ -315,7 +315,10 @@ class DataMap:
     def date2tindex(self, datestring):
         '''Convert datestring (in ISO8601 YYYY-MM-DD format) to
         internal time index.  Datestring can optionally also have an
-        HH:MM:SS component; if absent, it defaults to 00:00:00.'''
+        HH:MM:SS component; if absent, it defaults to 00:00:00.
+        Returns 0 if dataset is static.'''
+        if self.dim == "static":
+            return 0
         # todo: check that string matches expected format
         bits = datestring.split()
         if len(bits) == 1:
@@ -328,7 +331,10 @@ class DataMap:
         return tindex
 
     def sindex2date(self, sindex):
-        '''Convert sample index to ISO8601 datetime string using cftime library.'''
+        '''Convert sample index to ISO8601 datetime string using cftime library.
+        Returns None if dataset is static.'''
+        if self.dim == "static":
+            return None
         tindex = sindex + self.first
         timecoord = self.t0 + tindex * self.dt
         cfdate = cf.num2date(timecoord, self.units, self.calendar)
@@ -355,10 +361,13 @@ class DataMap:
         # get segment (which file) and subindex (within file) for start & finish.
         # subindexes are all negative, but that works fine & makes math simpler
 
-        startseg = np.searchsorted(self.ends, start)
+        startseg =  np.searchsorted(self.ends, start)
         finishseg = np.searchsorted(self.ends, finish)
-        startsub = start - (self.ends[startseg] + 1)
+        startsub =  start  - (self.ends[startseg] + 1)
         finishsub = finish - (self.ends[finishseg])
+        if finishsub == 0:
+            finishsub = None  ## needed to get the last element in the array
+                              ## x[-1:0] gives you an empty list
 
         if startseg == finishseg:
             result = self.read(startseg, startsub, finishsub)
@@ -373,9 +382,6 @@ class DataMap:
                     a2 = data2[use][var]
                     result[use][var] = np.concatenate((a1, a2))
 
-        # result["dates"] = {"start":self.sindex2date(start-self.first),
-        #                    "finish":self.sindex2date(finish-self.first),
-        #                    }
         return result
 
     # the mode property determines which variables to return by use type:

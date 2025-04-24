@@ -280,6 +280,13 @@ class DownscalingDataset(torch.utils.data.Dataset):
         if self.output == 'tensor':
             result = self.to_tensor(result)
 
+        # add date to sample for tracking purposes.  Could be None for
+        # static datasets, so iterate until we get an actual value
+        for dset in self.datasets.values():
+            result['date'] = dset['datamap'].sindex2date(index)
+            if result['date'] is not None:
+                break
+
         return result
         # yield result    # change return to yield to make this lazy
 
@@ -360,7 +367,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
                 sample[s] = np.concatenate(list(sample[s].values()), axis=1)
 
                 # nparray[T,Z,Y,X] to tensor[V,T,Y,X]
-                sample[s] = torch.as_tensor(sample[s]).permute(1, 0, 2, 3)
+                sample[s] = torch.as_tensor(sample[s]).permute(1, 0, 2, 3).unsqueeze(0)
 
         # other code wants tensors named 'x' and 'y'
         sample['x'] = sample.pop('input')
