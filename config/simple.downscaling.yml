@@ -283,7 +283,7 @@ trainer:
     valid_batch_size: 4
     ensemble_size: 1
 
-    batches_per_epoch: 10 # Set to 0 to use len(dataloader)
+    batches_per_epoch: 100 # Set to 0 to use len(dataloader)
     valid_batches_per_epoch: 100
     stopping_patience: 50
     skip_validation: True  # don't validate, always save weights
@@ -292,7 +292,7 @@ trainer:
     start_epoch: 0
     num_epoch: 10 # ?
     reload_epoch: True
-    epochs: 4  # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
+    epochs: 20  # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
 
     use_scheduler: False
     scheduler: {'scheduler_type': 'lambda'}
