@@ -1,6 +1,7 @@
 import gc
 import logging
 from collections import defaultdict
+from datetime import datetime
 
 import numpy as np
 import optuna
@@ -221,7 +222,8 @@ class Trainer(BaseTrainer):
                 f" train_loss: {np.mean(results_dict['train_loss']):.6f}" +
                 f" train_acc: {np.mean(results_dict['train_acc']):.6f}" +
                 f" train_mae: {np.mean(results_dict['train_mae']):.6f}" +
-                f" forecast_len: {self.forecast_length+1:.6f}"
+                f" finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                # f" forecast_len: {self.forecast_length+1:.6f}"
             )
 
             ensemble_size = conf["trainer"].get("ensemble_size", 0)
@@ -245,9 +247,12 @@ class Trainer(BaseTrainer):
         torch.cuda.empty_cache()
         gc.collect()
 
-        # can we write the last training sample & prediction to file here?
-        # y.cpu().detach().numpy().tofile(filename)
-        # y_pred.cpu().detach().numpy(),tofile(filename)
+        # write last training sample & prediction to file every so often
+        if epoch % conf['trainer']['output_after'] == 0:
+            np.savez(f"{conf['save_loc']}/{conf['pbs']['job_name']}.ep{epoch}",
+                     target = y.cpu().detach().numpy(),
+                     predicted = y_pred.cpu().detach().numpy(),
+                     allow_pickle=False)
         
         return results_dict
 

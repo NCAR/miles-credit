@@ -76,7 +76,7 @@ data_defaults: &ddefault
     rootpath: /glade/derecho/scratch/mcginnis/credit/sgp256
 
     first_date:   "1980-01-02"
-    last_date:    "1984-12-31"
+    last_date:    "2010-12-31"
 
     # note: first_date and last_date must be quoted so that they
     # remain strings; otherwise the yaml parser converts them to
@@ -279,20 +279,38 @@ trainer:
     learning_rate: 1.0e-04
     weight_decay: 1.0e-05
 
-    train_batch_size: 4
-    valid_batch_size: 4
+    # batch_size = number of samples per batch; loss is accumulated
+    # and weights updated after each batch.  For ddp & fsdp, actual
+    # number of samples = batch_size * number of GPUs
+    
+    train_batch_size: 1
+    valid_batch_size: 1
     ensemble_size: 1
 
+    # After each epoch, the trainer saves and checkpoints the model.
+    # If validation is on, it will rollout on v_b_p_e samples and
+    # calculate error metrics, and will only checkpoint if the results
+    # are better than the previous checkpoint (I believe)
+    
     batches_per_epoch: 100 # Set to 0 to use len(dataloader)
-    valid_batches_per_epoch: 100
+    valid_batches_per_epoch: 30
     stopping_patience: 50
     skip_validation: True  # don't validate, always save weights
     # (also validation not implemented yet)
 
+    # To avoid hitting wallclock limits, trainer can stop every
+    # so often and launch a new job that reloads from the last
+    # checkpoint.  So num_epochs is the number of epochs per job,
+    # while epochs is the total number to train for.
+
+    # if running interactively, set both to the same value
+    
     start_epoch: 0
-    num_epoch: 10 # ?
+    num_epoch: 201
     reload_epoch: True
-    epochs: 20  # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
+    epochs: 201
+    # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
+    output_after: 10  # write last sample & prediction to file every N epochs
 
     use_scheduler: False
     scheduler: {'scheduler_type': 'lambda'}
