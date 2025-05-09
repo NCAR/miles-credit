@@ -352,9 +352,7 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
         if is_downscaling:
             logging.info(f"Loaded downscaling dataset")
         else:
-            logging.info(
-                f"Loaded a {train_flag} {dataset_type} dataset (forecast length = {data_config['forecast_len'] + 1})"
-            )
+            logging.info(f"Loaded a {train_flag} {dataset_type} dataset (forecast length = {data_config['forecast_len'] + 1})")
 
     return dataset
 
@@ -384,9 +382,10 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
         if is_train
         else conf["trainer"]["valid_thread_workers"]
     )
-    forecast_len = (
-        conf["data"]["forecast_len"] #if is_train else conf["data"]["valid_forecast_len"]
-    )
+    if type(dataset) is DownscalingDataset:
+        forecast_len = conf["data"]["forecast_len"]
+    else:
+        forecast_len = conf["data"]["forecast_len"] if is_train else conf["data"]["valid_forecast_len"]
     prefetch_factor = conf["trainer"].get("prefetch_factor")
     if prefetch_factor is None:
         logging.warning(
