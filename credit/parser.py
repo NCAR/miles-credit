@@ -45,6 +45,19 @@ def validate_args(function, argdict, context, ignore=[]):
     return argdict
 
 
+def replace_nested_key(data, key, value):
+    """Recursively searches a nested dictionary and sets each instance
+    of `key` to `value`.  Behavior may be unpredictable if the
+    original value is also a dict.
+    """
+    if isinstance(data, dict):
+        return {k: value if k == key else replace_nested_key(v, key, value)
+                    for k, v in data.items()
+                }
+    else:
+        return data
+
+
 def remove_string_by_pattern(list_string, pattern):
     """
     Given a list of strings, remove some of them based on a given pattern.
@@ -136,6 +149,13 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 if usage not in vartypes:
                     raise ValueError(f"unknown variable usage '{usage}' for dataset {dset};"+
                                      f" must be one of {vartypes}")
+
+        if parse_predict:
+            # update start and finish for rollout
+            # note: this is an in-place modification of conf['data']
+            downconf = conf['predict']['downscaling']
+            conf = replace_nested_key(conf, 'first_date', downconf['start'])
+            conf = replace_nested_key(conf, 'last_date', downconf['finish'])
 
         # end new-style conf['data'] check
         # ===========================================#
@@ -955,38 +975,59 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # conf['parse_predict'] section
 
     if parse_predict:
-        assert "forecasts" in conf["predict"], "Rollout settings ('forecasts') is missing from conf['predict']"
-        assert (
-            "save_forecast" in conf["predict"]
-        ), "Rollout save location ('save_forecast') is missing from conf['predict']"
+        if "downscaling" in conf["predict"]:
+            if "forecasts" in conf["predict"]:
+                raise ValueError("conf['predict'] should contain 'downscaling' or 'forecasts', not both")
 
-        conf["predict"]["save_forecast"] = os.path.expandvars(conf["predict"]["save_forecast"])
+            # check conf['predict'] using schemas
+            # required:
+            #    output_dir exists & is a valid directory
+            #    downscaling:start & :finish exist and are datetimes
+            #    start & finish
+            #    if 'metadata' not in conf['predict'] or is None, warn no metadata
+            # todo: check the rest of the settings
+            # warn if overlap between training, validation, & prediction periods
 
-        if "use_laplace_filter" not in conf["predict"]:
-            conf["predict"]["use_laplace_filter"] = False
+        else:
+            assert "forecasts" in conf["predict"], "Rollout settings ('forecasts') is missing from conf['predict']"
+            assert (
+                "save_forecast" in conf["predict"]
+            ), "Rollout save location ('save_forecast') is missing from conf['predict']"
 
-        if "metadata" not in conf["predict"]:
-            conf["predict"]["metadata"] = False
+            conf["predict"]["save_forecast"] = os.path.expandvars(conf["predict"]["save_forecast"])
 
-        if "save_vars" not in conf["predict"]:
-            conf["predict"]["save_vars"] = []
+            if "use_laplace_filter" not in conf["predict"]:
+                conf["predict"]["use_laplace_filter"] = False
 
-        if "mode" not in conf["predict"]:
-            if "mode" in conf["trainer"]:
-                conf["predict"]["mode"] = conf["trainer"]["mode"]
-            else:
-                print("Resource type ('mode') is missing from both conf['trainer'] and conf['predict']")
-                raise
+            if "metadata" not in conf["predict"]:
+                conf["predict"]["metadata"] = False
+
+            if "save_vars" not in conf["predict"]:
+                conf["predict"]["save_vars"] = []
+
+            if "mode" not in conf["predict"]:
+                if "mode" in conf["trainer"]:
+                    conf["predict"]["mode"] = conf["trainer"]["mode"]
+                else:
+                    print("Resource type ('mode') is missing from both conf['trainer'] and conf['predict']")
+                    raise
 
     # ==================================================== #
     # print summary
     if print_summary:
-        print("Upper-air variables: {}".format(conf["data"]["variables"]))
-        print("Surface variables: {}".format(conf["data"]["surface_variables"]))
-        print("Dynamic forcing variables: {}".format(conf["data"]["dynamic_forcing_variables"]))
-        print("Diagnostic variables: {}".format(conf["data"]["diagnostic_variables"]))
-        print("Forcing variables: {}".format(conf["data"]["forcing_variables"]))
-        print("Static variables: {}".format(conf["data"]["static_variables"]))
+        if is_downscaling:
+            cdata = conf['data']
+            channels = conf['model']['channels']
+            print("Datasets: "+", ".join([k for k in cdata['datasets'].keys()]))
+            print("Channels: "+", ".join([f"{k}: {v}" for k,v in channels.items()]))
+            print(f"First: {cdata['first_date']}; last: {cdata['last_date']}")
+        else:
+            print("Upper-air variables: {}".format(conf["data"]["variables"]))
+            print("Surface variables: {}".format(conf["data"]["surface_variables"]))
+            print("Dynamic forcing variables: {}".format(conf["data"]["dynamic_forcing_variables"]))
+            print("Diagnostic variables: {}".format(conf["data"]["diagnostic_variables"]))
+            print("Forcing variables: {}".format(conf["data"]["forcing_variables"]))
+            print("Static variables: {}".format(conf["data"]["static_variables"]))
 
     return conf
 

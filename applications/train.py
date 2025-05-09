@@ -431,6 +431,7 @@ if __name__ == "__main__":
     )
     if not conf['data']['datasets']:
         training_data_check(conf, print_summary=False)
+        # todo: data check for downscaling mode
         
     # ======================================================== #
 

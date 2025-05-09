@@ -64,7 +64,7 @@ image_size: &imsize  # round up to multiples of 128
 
 # 'unused' variables don't actually need to be listed in the yaml
 # file, they're just here for reference and convenience when changing
-#  around the model configuration
+# around the model configuration
 
 # listing variables in the order they appear in the netcdf file should
 # result in faster reads from disk.  By default, NCO commands that
@@ -89,8 +89,15 @@ data_defaults: &ddefault
     # remain strings; otherwise the yaml parser converts them to
     # datetime objects, which can't handle non-standard GCM calendars.
 
-
-
+    # TODO: currently we're using <<: to make sure each dataset has
+    # the same first_date and last_date, which necessitates a
+    # recursive update of the configuration by the parser when running
+    # in prediction or validation mode.  Instead, we should only
+    # declare first_date and last_date at the conf['data'] level and
+    # have DownscalingDataset pass it on to its constituent Datamaps
+    # when it creates them; that way we can update it once at the top
+    # and be done with it.
+    
 data:
     <<: *imsize
     <<: *ddefault
@@ -355,30 +362,31 @@ loss:
 
 predict:
 
-    # todo: change "forecast" to something more generic
-    
     # GPU usage
     mode: none  # options: none, ddp, fsdp
 
+    # batching = running multiple predictions in parallel to fully use
+    # GPU.  Only makes sense for downscaling if you're doing timeslices
     batch_size: 1
+    # ensembles not yet implemented
     ensemble_size: 1
 
-    forecasts:
-        type: "downscaling"  # todo: downscaling rollout
-        start: "2017-11-01 00:00"
-        finish: "2017-11-10 23:00"
+    downscaling:
+        start: "2017-01-01 00:00:00"
+        finish: "2017-01-31 23:00:00"
 
     # save_vars: []  # empty list & undefined both mean "all vars"
     
     # path to dir containing template netcdf files & yaml files with
     # variable attributes (units, standard_name, etc.) for output
-    metadata: "placeholder"
+    metadata: None #"placeholder"
 
     # location to save output
-    save_forecast: "placeholder"
+    output_dir: "/glade/derecho/scratch/$USER/emulation-output"
 
-    use_laplace_filter: False
-
+    # filename prefix for saved output
+    output_prefix: "c404-ML"
+    
     # # optional; uses anomaly in metrics if provided
     # climatology:
     #     - "path/to/climatology/file.2d.nc"
