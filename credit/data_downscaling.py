@@ -73,7 +73,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         self.sample_len = self.history_len + self.forecast_len
 
-        dlengths = [len(d) for d in self.datasets.values()]
+        dlengths = [len(d['datamap']) for d in self.datasets.values()]
         self.len = np.max(dlengths)
         # TODO: error if any dlengths != self.len or 1
 
@@ -374,6 +374,14 @@ class DownscalingDataset(torch.utils.data.Dataset):
         sample['y'] = sample.pop('target')
 
         return sample
+
+    def revert(self, prediction):
+        pass
+        # invert the steps of __getitem__:
+        # convert tensor to dict of xarray ndarrays,
+        # organize them by dataset,
+        # invert any transformations,
+        # return the results
 
     @property
     def mode(self) -> str:
