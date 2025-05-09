@@ -202,6 +202,18 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
         except shutil.SameFileError:
             pass
 
+def get_num_cpus():
+    if "glade" in os.getcwd():
+        num_cpus = subprocess.run(
+            "qstat -f $PBS_JOBID | grep Resource_List.ncpus",
+            shell=True,
+            capture_output=True,
+            encoding="utf-8",
+        ).stdout.split()[-1]
+    else:
+        num_cpus = os.cpu_count()
+    return int(num_cpus)
+
 
 if __name__ == "__main__":
     config_file = "../config/vit2d.yml"

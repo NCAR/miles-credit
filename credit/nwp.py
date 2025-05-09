@@ -11,9 +11,9 @@ try:
     import xesmf as xe
 except (ImportError, ModuleNotFoundError) as e:
     raise e("""xesmf not installed.\n
-            Install esmf with conda first to prevent conda from overwriting numpy.
-            `conda install -c conda-forge esmf`
-            Then install xesmf with pip.
+            Install esmf with conda first to prevent conda from overwriting numpy.\n
+            `conda install -c conda-forge esmf esmpy`
+            Then install xesmf with pip.\n
             `pip install xesmf`
             """)
 
@@ -24,6 +24,8 @@ gfs_map = {
     "spfh": "Q",
     "pressfc": "SP",
     "tmp2m": "t2m",
+    "hgtsfc": "Z_GDS4_SFC",
+    "land": "LSM",
 }
 level_map = {"T500": "T", "U500": "U", "V500": "V", "Q500": "Q", "Z500": "Z"}
 upper_air = ["T", "U", "V", "Q", "Z"]
@@ -77,7 +79,7 @@ def build_GFS_init(
     return final_data
 
 
-def add_pressure_and_geopotntial(data):
+def add_pressure_and_geopotential(data):
     """
     Derive pressure and geopotential fields from model level data and to dataset
     Args:
@@ -162,7 +164,7 @@ def combine_data(atm_data, sfc_data):
         if var in gfs_map.keys():
             atm_data = atm_data.rename({var: gfs_map[var]})
 
-    data = add_pressure_and_geopotntial(atm_data)
+    data = add_pressure_and_geopotential(atm_data)
 
     return data
 
@@ -178,8 +180,10 @@ def regrid(nwp_data, output_grid, method="conservative"):
     Returns:
         (xr.Dataset) Regridded GFS initial conditions
     """
-
-    ds_out = output_grid[["longitude", "latitude"]].drop_vars(["time"]).load()
+    if "time" in output_grid.variables.keys():
+        ds_out = output_grid[["longitude", "latitude"]].drop_vars(["time"]).load()
+    else:
+        ds_out = output_grid[["longitude", "latitude"]].load()
     in_grid = nwp_data[["longitude", "latitude"]].load()
     regridder = xe.Regridder(in_grid, ds_out, method=method)
     ds_regridded = regridder(nwp_data)

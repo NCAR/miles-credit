@@ -120,9 +120,7 @@ class Trainer(BaseTrainer):
         logger.info("Loading a multi-step trainer class")
 
     # Training function.
-    def train_one_epoch(
-        self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics
-    ):
+    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         """
         Trains the model for one epoch.
 
@@ -139,7 +137,6 @@ class Trainer(BaseTrainer):
         Returns:
             dict: Dictionary containing training metrics and loss for the epoch.
         """
-
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_max_norm = conf["trainer"].get("grad_max_norm", 0.0)
         amp = conf["trainer"]["amp"]
@@ -175,10 +172,7 @@ class Trainer(BaseTrainer):
         ), f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if (
-            conf["trainer"]["use_scheduler"]
-            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
-        ):
+        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # ------------------------------------------------------- #
@@ -228,14 +222,10 @@ class Trainer(BaseTrainer):
                 dataset_batches_per_epoch = len(trainloader)
             # Use the user-given number if not larger than the dataset
             batches_per_epoch = (
-                batches_per_epoch
-                if 0 < batches_per_epoch < dataset_batches_per_epoch
-                else dataset_batches_per_epoch
+                batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
             )
 
-        batch_group_generator = tqdm.tqdm(
-            range(batches_per_epoch), total=batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
 
         self.model.train()
 
@@ -255,9 +245,7 @@ class Trainer(BaseTrainer):
                         # combine x and x_surf
                         # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
                         # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                        x = concat_and_reshape(batch["x"], batch["x_surf"]).to(
-                            self.device
-                        )  # .float()
+                        x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)  # .float()
                     else:
                         # no x_surf
                         x = reshape_only(batch["x"]).to(self.device)  # .float()
@@ -273,15 +261,11 @@ class Trainer(BaseTrainer):
                 # add forcing and static variables (regardless of fcst hours)
                 if "x_forcing_static" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = (
-                        batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )  # .float()
+                    x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
                     # ---------------- ensemble ----------------- #
                     # ensemble x_forcing_batch for concat. see above for explanation of code
                     if ensemble_size > 1:
-                        x_forcing_batch = torch.repeat_interleave(
-                            x_forcing_batch, ensemble_size, 0
-                        )
+                        x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
                     # --------------------------------------------- #
 
                     # concat on var dimension
@@ -327,17 +311,13 @@ class Trainer(BaseTrainer):
                 if forecast_step in backprop_on_timestep:  # steps go from 1 to n
                     # calculate rolling loss
                     if "y_surf" in batch:
-                        y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
-                            self.device
-                        )
+                        y = concat_and_reshape(batch["y"], batch["y_surf"]).to(self.device)
                     else:
                         y = reshape_only(batch["y"]).to(self.device)
 
                     if "y_diag" in batch:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        y_diag_batch = (
-                            batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                        )  # .float()
+                        y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                         # concat on var dimension
                         y = torch.cat((y, y_diag_batch), dim=1)
@@ -349,6 +329,7 @@ class Trainer(BaseTrainer):
 
                     lat_size = y.shape[3]
                     total_loss = 0
+                    total_std = 0
                     for i in range(lat_size):
                         # Slice the tensors
                         y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
@@ -359,16 +340,16 @@ class Trainer(BaseTrainer):
                         # y_slice = gather_tensor(y_slice)
 
                         # Compute loss for this slice
-                        loss = (
-                            criterion(
-                                y_slice.to(y_pred_slice.dtype), y_pred_slice
-                            ).mean()
-                            / lat_size
-                        )
+                        loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
                         total_loss += loss
+
+                        # Compute the std
+                        std = ((y_pred_slice - y_slice.to(y_pred_slice.dtype)).detach().std()) / lat_size
+                        total_std += std
 
                         # Track per-channel loss
                         accum_log(logs, {"loss": loss.item()})
+                        accum_log(logs, {"std": std.item()})
 
                     # Single backward call for the accumulated loss
                     scaler.scale(total_loss).backward()
@@ -420,13 +401,7 @@ class Trainer(BaseTrainer):
             if grad_max_norm == "dynamic":
                 # Compute local L2 norm
                 local_norm = torch.norm(
-                    torch.stack(
-                        [
-                            p.grad.detach().norm(2)
-                            for p in self.model.parameters()
-                            if p.grad is not None
-                        ]
-                    )
+                    torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
                 )
 
                 # All-reduce to get global norm across ranks
@@ -435,13 +410,9 @@ class Trainer(BaseTrainer):
                 global_norm = local_norm.sqrt()  # Compute total global norm
 
                 # Clip gradients using the global norm
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=global_norm
-                )
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
             elif grad_max_norm > 0.0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=grad_max_norm
-                )
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=grad_max_norm)
 
             # Step optimizer
             scaler.step(optimizer)
@@ -457,9 +428,12 @@ class Trainer(BaseTrainer):
                 results_dict[f"train_{name}"].append(value[0].item())
 
             batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
+            batch_std = torch.Tensor([logs["std"]]).cuda(self.device)
             if distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+                dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
+            results_dict["train_std"].append(batch_std[0].item())
             results_dict["train_forecast_len"].append(forecast_length + 1)
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
@@ -482,18 +456,13 @@ class Trainer(BaseTrainer):
                 np.mean(results_dict["train_mae"]),
                 forecast_length + 1,
             )
-            ensemble_size = conf["trainer"].get("ensemble_size", 0)
-            if ensemble_size > 1:
-                to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
+            to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
             to_print += " lr: {:.12f}".format(optimizer.param_groups[0]["lr"])
             if self.rank == 0:
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -533,15 +502,9 @@ class Trainer(BaseTrainer):
         )
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
-        history_len = (
-            conf["data"]["valid_history_len"]
-            if "valid_history_len" in conf["data"]
-            else conf["history_len"]
-        )
+        history_len = conf["data"]["valid_history_len"] if "valid_history_len" in conf["data"] else conf["history_len"]
         forecast_len = (
-            conf["data"]["valid_forecast_len"]
-            if "valid_forecast_len" in conf["data"]
-            else conf["forecast_len"]
+            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
         )
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
@@ -601,9 +564,7 @@ class Trainer(BaseTrainer):
                     opt_energy = GlobalEnergyFixer(post_conf)
         # ====================================================== #
 
-        batch_group_generator = tqdm.tqdm(
-            range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
 
         stop_forecast = False
         dl = cycle(valid_loader)
@@ -623,9 +584,7 @@ class Trainer(BaseTrainer):
                             # combine x and x_surf
                             # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
                             # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                            x = concat_and_reshape(batch["x"], batch["x_surf"]).to(
-                                self.device
-                            )  # .float()
+                            x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)  # .float()
                         else:
                             # no x_surf
                             x = reshape_only(batch["x"]).to(self.device)  # .float()
@@ -640,17 +599,11 @@ class Trainer(BaseTrainer):
                     # add forcing and static variables (regardless of fcst hours)
                     if "x_forcing_static" in batch:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        x_forcing_batch = (
-                            batch["x_forcing_static"]
-                            .to(self.device)
-                            .permute(0, 2, 1, 3, 4)
-                        )  # .float()
+                        x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
                         # ---------------- ensemble ----------------- #
                         # ensemble x_forcing_batch for concat. see above for explanation of code
                         if ensemble_size > 1:
-                            x_forcing_batch = torch.repeat_interleave(
-                                x_forcing_batch, ensemble_size, 0
-                            )
+                            x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
                         # --------------------------------------------- #
 
                         # concat on var dimension
@@ -692,17 +645,13 @@ class Trainer(BaseTrainer):
 
                     # creating `y` tensor for loss compute
                     if "y_surf" in batch:
-                        y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
-                            self.device
-                        )
+                        y = concat_and_reshape(batch["y"], batch["y_surf"]).to(self.device)
                     else:
                         y = reshape_only(batch["y"]).to(self.device)
 
                     if "y_diag" in batch:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        y_diag_batch = (
-                            batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                        )  # .float()
+                        y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                         # concat on var dimension
                         y = torch.cat((y, y_diag_batch), dim=1)
@@ -723,16 +672,15 @@ class Trainer(BaseTrainer):
                         y_pred_slice = gather_tensor(y_pred_slice)
 
                         # Compute loss for this slice
-                        loss = (
-                            criterion(
-                                y_slice.to(y_pred_slice.dtype), y_pred_slice
-                            ).mean()
-                            / lat_size
-                        )
+                        loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
                         total_loss += loss
 
-                        # Track per-channel loss
+                        # Compute the std
+                        std = ((y_pred_slice - y_slice.to(y_pred_slice.dtype)).detach().std()) / lat_size
+
+                        # Track per-channel loss, std
                         accum_log(logs, {"loss": loss.item()})
+                        accum_log(logs, {"std": std.item()})
 
                     # ----------------------------------------------------------------------- #
 
@@ -740,9 +688,7 @@ class Trainer(BaseTrainer):
                     metrics_dict = metrics(y_pred.float(), y.float())
 
                     for name, value in metrics_dict.items():
-                        value = torch.Tensor([value]).cuda(
-                            self.device, non_blocking=True
-                        )
+                        value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
 
                         if distributed:
                             dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
@@ -785,13 +731,13 @@ class Trainer(BaseTrainer):
                 if distributed:
                     torch.distributed.barrier()
 
-                # results_dict["valid_loss"].append(batch_loss[0].item())
-                # results_dict["valid_forecast_len"].append(forecast_len + 1)
-                # batch_loss = torch.Tensor([loss.item()]).cuda(self.device)
                 batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
+                batch_std = torch.Tensor([logs["std"]]).cuda(self.device)
                 if distributed:
                     dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
-                results_dict["valid_lossn_loss"].append(batch_loss[0].item())
+                    dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
+                results_dict["valid_loss"].append(batch_loss[0].item())
+                results_dict["valid_std"].append(batch_std[0].item())
                 results_dict["valid_forecast_len"].append(forecast_len + 1)
 
                 stop_forecast = False
@@ -803,9 +749,7 @@ class Trainer(BaseTrainer):
                     np.mean(results_dict["valid_acc"]),
                     np.mean(results_dict["valid_mae"]),
                 )
-                ensemble_size = conf["trainer"].get("ensemble_size", 0)
-                if ensemble_size > 1:
-                    to_print += f" std: {np.mean(results_dict['valid_std']):.6f}"
+                to_print += f" std: {np.mean(results_dict['valid_std']):.6f}"
                 if self.rank == 0:
                     batch_group_generator.update(1)
                     batch_group_generator.set_description(to_print)

@@ -177,6 +177,9 @@ def save_netcdf_increment(
         # Add CF convention version
         ds_merged.attrs["Conventions"] = "CF-1.11"
 
+        sig = signature(full_state_pressure_interpolation)
+        pres_end = sig.parameters["pres_ending"].default
+        height_end = sig.parameters["height_ending"].default
         if "interp_pressure" in conf["predict"].keys():
             if "surface_geopotential_var" in conf["predict"]["interp_pressure"].keys():
                 surface_geopotential_var = conf["predict"]["interp_pressure"][
@@ -184,6 +187,11 @@ def save_netcdf_increment(
                 ]
             else:
                 surface_geopotential_var = "Z_GDS4_SFC"
+            if "pres_ending" in conf["predict"]["interp_pressure"]:
+                pres_end = conf["predict"]["interp_pressure"]["pres_ending"]
+            if "height_ending" in conf["predict"]["interp_pressure"]:
+                height_end = conf["predict"]["interp_pressure"]["height_ending"]
+
             with xr.open_dataset(conf["predict"]["static_fields"]) as static_ds:
                 surface_geopotential = static_ds[surface_geopotential_var].values
             pressure_interp = full_state_pressure_interpolation(
@@ -206,16 +214,7 @@ def save_netcdf_increment(
                 ds_merged = drop_var_from_dataset(
                     ds_merged, conf["predict"]["save_vars"]
                 )
-        if "pres_ending" not in conf["predict"]["interp_pressure"]:
-            sig = signature(full_state_pressure_interpolation)
-            pres_end = sig.parameters["pres_ending"].default
-        else:
-            pres_end = conf["predict"]["interp_pressure"]["pres_ending"]
-        if "height_ending" not in conf["predict"]["interp_pressure"]:
-            sig = signature(full_state_pressure_interpolation)
-            height_end = sig.parameters["height_ending"].default
-        else:
-            height_end = conf["predict"]["interp_pressure"]["height_ending"]
+
         # when there's no metafile --> meta_data = False
         if meta_data is not False:
             # Add metadata attributes to every model variable if available
@@ -230,20 +229,21 @@ def save_netcdf_increment(
                             ds_merged.time.encoding[metadata_time] = meta_data["time"][
                                 metadata_time
                             ]
-                elif pres_end in var:
-                    var_short = var.strip(pres_end)
-                    if var_short in meta_data.keys():
-                        ds_merged[var].attrs.update(meta_data[var_short])
-                        ds_merged[var].attrs["long_name"] += (
-                            " (interpolated to isobaric levels)"
-                        )
-                elif height_end in var:
-                    var_short = var.strip(height_end)
-                    if var_short in meta_data.keys():
-                        ds_merged[var].attrs.update(meta_data[var_short])
-                        ds_merged[var].attrs["long_name"] += (
-                            " (interpolated to constant height AGL levels)"
-                        )
+                if "interp_pressure" in conf["predict"].keys():
+                    if pres_end in var:
+                        var_short = var.strip(pres_end)
+                        if var_short in meta_data.keys():
+                            ds_merged[var].attrs.update(meta_data[var_short])
+                            ds_merged[var].attrs["long_name"] += (
+                                " (interpolated to isobaric levels)"
+                            )
+                    elif height_end in var:
+                        var_short = var.strip(height_end)
+                        if var_short in meta_data.keys():
+                            ds_merged[var].attrs.update(meta_data[var_short])
+                            ds_merged[var].attrs["long_name"] += (
+                                " (interpolated to constant height AGL levels)"
+                            )
         encoding_dict = {}
         if "ua_var_encoding" in conf["predict"].keys():
             for ua_var in conf["data"]["variables"]:
