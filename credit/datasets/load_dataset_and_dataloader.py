@@ -152,13 +152,33 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     Returns:
         Dataset: The loaded dataset.
     """
-    if 'datasets' in conf['data']:  # if true, this is a downscaling dataset
-        ## todo: check with parser here
-        ## todo: set different first_date and last_date for training vs validation
+    if 'datasets' in conf['data']:
+        is_downscaling = True
+
+        # note: credit_main_parser will have been called by the
+        # top-level application script before load_dataset is called.
+        # This is important for DownscalingDataset because the parser
+        # updates first_date and last_date in the configuration
+        # depending on whether we're training, validating, or
+        # predicting.
+
+        # todo: change is_train to mode = train | validate | predict
+
+        # todo: first_date and last_date currently are set in config &
+        # inherited by each dataset via yaml "<< *" construct.  To
+        # change to a different set of dates for validation or
+        # inference, we need to overwrite that parameter for both the
+        # DownscalingDataset class and for all the Datamaps.
+        # Currently that's done in the rollout script; it would be
+        # better to do it here or in the parser.  Even better would be
+        # for DownscalingDataset to set it on the Datamaps as it
+        # creates them, so that it only needs to be set once.
+
         dataset = DownscalingDataset(**conf['data'])
         if not is_train:
             dataset.mode = "infer"
     else:
+        is_downscaling = False
         try:
             data_config = setup_data_loading(conf)
         except KeyError:
@@ -329,9 +349,12 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
 
         train_flag = "training" if is_train else "validation"
 
-        logging.info(
-            f"Loaded a {train_flag} {dataset_type} dataset (forecast length = {data_config['forecast_len'] + 1})"
-        )
+        if is_downscaling:
+            logging.info(f"Loaded downscaling dataset")
+        else:
+            logging.info(
+                f"Loaded a {train_flag} {dataset_type} dataset (forecast length = {data_config['forecast_len'] + 1})"
+            )
 
     return dataset
 
