@@ -4,7 +4,7 @@ import logging
 # Import trainer classes
 from credit.trainers.trainerERA5 import Trainer as TrainerERA5
 from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
-from credit.trainers.trainer404 import Trainer as Trainer404
+from credit.trainers.trainer_downscaling import Trainer as Trainer404
 
 logger = logging.getLogger(__name__)
 

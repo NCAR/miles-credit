@@ -22,6 +22,7 @@ from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 
 from credit.seed import seed_everything
 from credit.loss import VariableTotalLoss2D
+from credit.loss_downscaling import DownscalingLoss
 
 from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
@@ -29,6 +30,7 @@ from credit.parser import credit_main_parser, training_data_check
 from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
 
 from credit.metrics import LatWeightedMetrics
+from credit.metrics_downscaling import UnWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
 from credit.models.checkpoint import (
@@ -218,6 +220,8 @@ def main(rank, world_size, conf, backend=None, trial=False):
         Any: The result of the training process.
     """
 
+    is_downscaling = 'datasets' in conf['data']
+    
     # convert $USER to the actual user name
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
@@ -261,11 +265,18 @@ def main(rank, world_size, conf, backend=None, trial=False):
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
     # Train and validation losses
-    train_criterion = VariableTotalLoss2D(conf)
-    valid_criterion = VariableTotalLoss2D(conf, validation=True)
+    if is_downscaling:
+        train_criterion = DownscalingLoss(conf, train_dataset.tnames)
+        valid_criterion = DownscalingLoss(conf, valid_dataset.tnames, validation=True)
+    else:
+        train_criterion = VariableTotalLoss2D(conf)
+        valid_criterion = VariableTotalLoss2D(conf, validation=True)
 
     # Set up some metrics
-    metrics = LatWeightedMetrics(conf)
+    if is_downscaling:
+        metrics = UnWeightedMetrics(conf, train_dataset.tnames)
+    else:
+        metrics = LatWeightedMetrics(conf)
 
     # Initialize a trainer object
     trainer_cls = load_trainer(conf)
@@ -404,8 +415,14 @@ if __name__ == "__main__":
 
     # ======================================================== #
     # handling config args
-    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
-    training_data_check(conf, print_summary=False)
+
+    conf = credit_main_parser(
+        conf, parse_training=True, parse_predict=False, print_summary=False
+    )
+    if not conf['data']['datasets']:
+        training_data_check(conf, print_summary=False)
+        # todo: data check for downscaling mode
+        
     # ======================================================== #
 
     # Create directories if they do not exist and copy yml file

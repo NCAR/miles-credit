@@ -1,0 +1,41 @@
+P:
+    units = "Pa"
+    stagger = ""
+    standard_name = "air_pressure"
+    long_name = "Total pressure (P0+PB)"
+    coordinates = "lon lat"
+
+QVAPOR:
+    units = "kg kg-1"
+    stagger = ""
+    standard_name = "humidity_mixing_ratio"
+    long_name = "Water vapor mixing ratio"
+    coordinates = "lon lat"
+
+TK:
+    units = "K"
+    stagger = ""
+    standard_name = "air_temperature"
+    long_name = "Air temperature"
+    coordinates = "lon lat"
+
+U:
+    units = "m s-1"
+    stagger = "X"
+    standard_name = "eastward_wind"
+    long_name = "U-component of wind with respect to model grid"
+    coordinates = "ulon ulat"
+
+V:
+    units = "m s-1"
+    stagger = "Y"
+    standard_name = "northward_wind"
+    long_name = "V-component of wind with respect to model grid"
+    coordinates = "vlon vlat"
+
+Z:
+    units = "meters"
+    stagger = "Z"
+    standard_name = "geopotential_height"
+    long_name = "Geopotential height (PH + PHB)/9.81"
+    coordinates = "lon lat"
