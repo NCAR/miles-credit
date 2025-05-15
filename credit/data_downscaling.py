@@ -376,12 +376,43 @@ class DownscalingDataset(torch.utils.data.Dataset):
         return sample
 
     def revert(self, prediction):
-        pass
-        # invert the steps of __getitem__:
-        # convert tensor to dict of xarray ndarrays,
-        # organize them by dataset,
-        # invert any transformations,
-        # return the results
+        '''converts results tensor back into nested dict of numpy arrays'''
+
+        # get rid of batch dimension
+        prediction.squeeze(0)
+
+        result = {dset: {} for dset in self.datasets}
+
+        for i in range(len(self.tnames)):
+            ndim = self.tnames[i].count('.') + 1
+            if ndim == 2:
+                dset, varname = self.tnames[i].split('.')
+                # squeeze to get rid of degenerate variable dim
+                result[dset][varname] = prediction[i, ...].squeeze().numpy()
+            elif ndim == 3:
+                dset, varname, zlev = self.tnames[i].split('.')
+                if varname not in result[dset]:
+                    result[dset][varname] = [prediction[i, ...]]
+                else:
+                    result[dset][varname].append(prediction[i, ...])
+            else:
+                raise ValueError(f"Tensor index name '{self.tnames[i]}' has no/too many '.' in it")
+
+        result2 = {}
+        for dset, vardict in result.items():
+            if vardict: # false for empty directories
+                for var, data in vardict.items():
+                    if isinstance(data, list):
+                        vardict[var] = np.concatenate(data)
+                result2[dset] = vardict
+
+        if(self.trasnform):
+            for dset in result2:
+                xform = self.datasets[dset]['transforms']
+                result2[dset] = xform(result2[dset], inverse=True)
+
+        return result2
+
 
     @property
     def mode(self) -> str:

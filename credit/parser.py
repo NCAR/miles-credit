@@ -141,6 +141,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
         for dset in dconf:
             # todo: more comprehensive validation using schema library; skipping for now
+            # todo: dset name cannot have a '.' in it
 
             if not dconf[dset]['variables']:
                 raise ValueError(f"variables must not be empty for dataset {dset} configuration")

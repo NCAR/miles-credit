@@ -76,6 +76,9 @@ image_size: &imsize  # round up to multiples of 128
 # respectively.  You pass **config['data'] (etc.) to the constructor,
 # so the options here correspond to constructor arguments.
 
+# N.B.: variable and dataset names must not have a '.' in them!
+# (TODO: update parser to check)
+
 data_defaults: &ddefault
     <<: *samples
 
