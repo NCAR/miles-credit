@@ -55,7 +55,7 @@ class VarDict(TypedDict, total=False):
 
 def rescale_minmax(x):
     '''rescale data to [0,1].  Don't use
-    sklearn.preprocessing.minmax_scale() because it requires reshaping
+    `sklearn.preprocessing.minmax_scale` because it requires reshaping
     the data, which is silly for a use case this simple.
 
     '''
@@ -177,11 +177,10 @@ def rescale_minmax(x):
 
 @dataclass
 class DataMap:
-    '''Class for reading in data from multiple files.
+    '''Class for reading in netCDF data from multiple files.
 
     rootpath: pathway to the files
     glob: filename glob of netcdf files
-    # component: used by higher-level classes to decide how to use the datamap
     dim: dimensions of the data:
         static: no time dimension; data is loaded on initialization
         3D: data has z-dimension; can subset levels using zstride
@@ -203,7 +202,6 @@ class DataMap:
     '''
     rootpath:     str
     glob:         str
-    # component:    str = None
     dim:          str = "2D"
     normalize:    bool = False
     zstride:      int = 1
@@ -366,8 +364,8 @@ class DataMap:
         startsub =  start  - (self.ends[startseg] + 1)
         finishsub = finish - (self.ends[finishseg])
         if finishsub == 0:
-            finishsub = None  ## needed to get the last element in the array
-                              ## x[-1:0] gives you an empty list
+            finishsub = None    # needed to get the last element in the array
+                                # x[-1:0] gives you an empty list
 
         if startseg == finishseg:
             result = self.read(startseg, startsub, finishsub)

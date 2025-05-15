@@ -44,8 +44,75 @@ class Sample(TypedDict):
 
 @dataclass
 class DownscalingDataset(torch.utils.data.Dataset):
-    ''' pass **conf['data'] as arguments to constructor
-    [insert more documentation here]
+    '''Class that wrangles a collection of DataMaps and their
+    associated DataTransforms for use in ML.  Intended to be
+    initialized with `**conf['data']`; see `config/downscaling.yml`
+    for an example.
+
+    Constructor Arguments:
+
+        rootpath (str): pathway to the files
+
+        history_len (int): number of input timesteps for training
+        forecast_len (int): number of output timesteps for training
+        valid_history_len (int): number of input timesteps for validation
+        valid_forecast_len (int): number of output timesteps for validation
+            all _history_len and _forecast_len arguments default to 1
+
+        first_date (YYYY-MM-DD string): starting point of dataset
+        last_date: (YYYY-MM-DD string): ending point of dataset
+            Use first_date and last_date to define a subset of the dataset,
+            e.g., to use 1980-2000 for training and 2001-2010 for testing.
+            Default to first and last timesteps in the files, respectively.
+
+        datasets (nested dict): dicts of parameters for initializing
+            DataMaps and their corresponding DataTransforms via
+            **kwargs.  These dicts are replaced with actual objects
+            during initialization.
+
+        image_width (int): width of dataset in gridcells
+        image_height (int): height of dataset in gridcells
+            image_width and _height are used to automatically resize
+            different constituent datasets to the same size via
+            expansion & padding.  E.g., if declared image size is
+            120x120, a 55x55 dataset would be expanded by a factor of
+            2 and padded by 10 to match.  Defaults to the width
+            (height) of the widest (tallest) dataset.
+
+        transform (bool): apply normalizing transforms to samples?
+            Defaults to True
+
+    Additional Attributes:
+
+        sample_len: number of timesteps in a sample
+            (sample_len = history_len + forecast_len)
+
+        len: number of samples in the dataset, which will be less than
+            the number of timesteps in the netcdf files, due to
+            first_date/last_date subsetting and sample_len > 1.
+
+        mode: determines which variables are returned when sampling.
+            Valid values are 'train', 'test', and 'predict'.
+            Defaults to 'train'.
+
+            train: boundary & prognostic variables for input timesteps,
+                prognostic and diagnostic for target timesteps
+            test: boundary variables for input timesteps,
+                prognostic and diagnostic for target timesteps
+            predict: boundary variables for input timesteps,
+                nothing for target timesteps
+
+        output: determines the format of samples; see __getitem__ for
+            details.  Valid values: 'by_dset', 'by_io', 'tensor'.
+            Defaults to 'tensor'.
+
+        arrangement: a pandas dataframe that defines how variables are
+            ordered in the tensor.  Columns: dataset, dim, var, usage, name
+
+        tnames: a list of names (structured `dataset.var[.z-level]`)
+            corresponding to the channels in an output tensor (i.e.,
+            prognostic and diagnostic variables only).
+
     '''
 
     rootpath:     str
@@ -198,13 +265,13 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
     def _setup_arrangement(self):
         '''construct a pandas dataframe that defines the ordering used
-        by .rearrange() to go from a nested dict structured
-        [dataset][variable] (the arrangement of output from
-        .getdata()) to one structured [input/target][dataset.variable]
-        (the arrangement needed by .to_tensor())
+        by :meth:`~.rearrange` to go from the nested dict arrangement
+        returned by :meth:`~.getdata` to the arrangement used as input
+        by :meth:`~.to_tensor`.  See :meth:`~.__getitem__` for more
+        details.
 
         Also creates self.tnames, a list of names for the channels in
-        the output tensor formatted "<dataset>.<variable>[.z<level>"
+        the output tensor formatted "<dataset>.<variable>[.z<level>]"
 
         '''
 
@@ -216,7 +283,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
             dmap = self.datasets[ds]['datamap']
             dvar = dmap.variables
             varuse = [(var, use) for use, vlist in dvar.items() for var in vlist]
-            df = pd.DataFrame(varuse, columns=['var','usage'])
+            df = pd.DataFrame(varuse, columns=['var', 'usage'])
 
             df.insert(0, 'dim', dmap.dim)
             df.insert(0, 'dataset', ds)
@@ -226,7 +293,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
             dlist.append(df)
 
         # concatenate all the dataframes together
-        rdf = pd.concat(dlist).reset_index(drop=True) # rdf = Rearrangement DataFrame
+        rdf = pd.concat(dlist).reset_index(drop=True)  # rdf = Rearrangement DataFrame
 
         # add a 'name' column = "dataset.variable"
         rdf.insert(rdf.shape[1], "name",
@@ -249,7 +316,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
         # construct list of variable names corresponding to channels in (output) tensor
         # (Only done for mode=train, tensor=target at the moment)
 
-        tarr = rdf[rdf['usage'].isin(['prognostic','diagnostic'])]
+        tarr = rdf[rdf['usage'].isin(['prognostic', 'diagnostic'])]
         self.tnames = []
         for row in tarr.itertuples():
             if row.dim != "3D":
@@ -258,14 +325,46 @@ class DownscalingDataset(torch.utils.data.Dataset):
                 dmap = self.datasets[row.dataset]['datamap']
                 nlev = dmap.shape[0]
                 zlevels = range(0, nlev, dmap.zstride)
-                ## TODO: record z-coord values in datamap, use those
+                # TODO: record z-coord values in datamap, use those
                 znames = [f"{row.name}.z{z}" for z in zlevels]
                 self.tnames.extend(znames)
 
     def __len__(self):
+        '''Number of samples in the dataset.  Note that this is
+        smaller than the number of timesteps in the files, both
+        because `first_date` and `last_date` may not cover the full
+        range, and because sample length = `history_len` +
+        `forecast_len` and `~.__getitem__` only returns complete
+        samples.
+
+        '''
         return self.len
 
     def __getitem__(self, index):
+        '''Gets the index'th sample from the dataset.  The value of the
+        'output' attribute controls the format of the returned object.
+
+        `~.output == 'by_dset'` returns a nested dict structured
+        [dataset][usage][variable] (the format returned by
+        :meth:`~.getdata`); the leaf elements are numpy ndarrays
+        covering the full time period (history_len+forecast_len).
+
+        `~.output == 'by_io'` splits the ndarrays into history and
+        forecast periods and reorganizes the nested dict to
+        [input/target][dataset.variable] (the format returned by
+        :meth:`~.rearrange` and taken as input by
+        :meth:`~.to_tensor`).  The variables are ordered:
+
+            - first: boundary > prognostic > diagnostic (in-only > in-out > out-only)
+            - then: static > 2D > 3D
+            - then: order that datasets are defined in config
+            - then: alphabetical by variable name
+
+        `~.output == 'tensor'` stacks the ndarrays in the z-dimension
+        and converts them to a pair of pyTorch tensors (input and
+        target), returning them as a Sample.
+
+        '''
 
         items = {dset: self.getdata(dset, index) for dset in self.datasets}
 
@@ -290,8 +389,11 @@ class DownscalingDataset(torch.utils.data.Dataset):
         return result
         # yield result    # change return to yield to make this lazy
 
-
     def getdata(self, dset, index):
+        '''gets data for the index'th sample from dataset `dset`.
+        Returns a nested dict organized [dataset][usage][variable].
+
+        '''
         # returns nested dict: items{ dataset{ usage { var
         raw = self.datasets[dset]['datamap'][index]
         if self.transform:
@@ -299,10 +401,35 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         return raw
 
-
     def rearrange(self, items):
-        # based on mode, rearrange items{ dataset{ usage{ var to
-        # sample{ input/target{ dset.var
+        '''Rearranges a nested dict of data from [dataset][usage][var]
+        to [input/target][dataset.var]. Elements returned depend on
+        `~.mode`:
+
+            - `train`: input contains boundary and prognostic
+              variables, target contains prognostic and diagnostic
+              variables.
+
+            - `init`: input contains boundary and prognostic
+              variables, target is empty.
+
+            - `infer`: input contains boundary variables, `target` is
+              empty.
+
+        '''
+        # TODO: change mode from train/init/infer to
+        # train/test/predict.  test should contain only boundary vars
+        # on input, prog and diag on target.  Initialize testing with
+        # mode=train, then switch to test.  For predict, we have to
+        # initialize the prognostic variables using some other data
+        # source (since we have no high-res data for downscaling an
+        # arbitrary GCM.  An interpolated version of the corresponding
+        # coarse GCM data would be ideal, but requires wrangling and
+        # entire extra dataset and not all varaibles may be available.
+        # Could also init with climatology or [0,1] uniform noise
+        # (post-transform) for those vars.
+
+        # where: here, rollout_downscaling, datamap, datasets/load_dataset_and_dataloader
 
         include = {"train": {"input":  ['boundary', 'prognostic'],
                              "target": [            'prognostic', 'diagnostic']},
@@ -340,6 +467,17 @@ class DownscalingDataset(torch.utils.data.Dataset):
         return result
 
     def to_tensor(self, sample):
+        '''Takes a nested dict organized [input/target][vars], with
+        data arrays (numpy ndarrays) dimensioned [T, Z, Y, X].
+
+        Stacks variables along the z-dimension (i.e., so different
+        z-levels of a 3D variable are treated as different variables).
+
+        Combines variable stacks into tensors ordered [V, T, Y, X] and
+        returns a Sample where x is historical / input data and y is
+        forecast / target data.
+
+        '''
         # sample is nested dict {input{vars}, target{vars}}
         # arrays are dimensioned [T, Z, Y, X]
         # stack vars along z-dim (i.e., z-levels ~= variables)
@@ -376,7 +514,11 @@ class DownscalingDataset(torch.utils.data.Dataset):
         return sample
 
     def revert(self, prediction):
-        '''converts results tensor back into nested dict of numpy arrays'''
+        '''Converts a tensor (ML model output) back into nested dict
+        of numpy arrays (i.e, reverses the `getdata -> rearrange ->
+        to_tensor` pipeline).
+
+        '''
 
         # get rid of batch dimension
         prediction.squeeze(0)
@@ -400,19 +542,18 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         result2 = {}
         for dset, vardict in result.items():
-            if vardict: # false for empty directories
+            if vardict:  # evaluates to False for empty directories
                 for var, data in vardict.items():
                     if isinstance(data, list):
                         vardict[var] = np.concatenate(data)
                 result2[dset] = vardict
 
-        if(self.trasnform):
+        if self.transform:
             for dset in result2:
                 xform = self.datasets[dset]['transforms']
                 result2[dset] = xform(result2[dset], inverse=True)
 
         return result2
-
 
     @property
     def mode(self) -> str:

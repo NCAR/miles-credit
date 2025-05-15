@@ -202,8 +202,6 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
             )
             prefetch_factor = 4
 
-
-
         # Instantiate the dataset based on the provided class name
         if dataset_type == "ERA5_and_Forcing_SingleStep":  # forecast-len = 0 dataset
             logging.warning(
@@ -339,7 +337,7 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
         train_flag = "training" if is_train else "validation"
 
         if is_downscaling:
-            logging.info(f"Loaded downscaling dataset")
+            logging.info("Loaded downscaling dataset")
         else:
             logging.info(f"Loaded a {train_flag} {dataset_type} dataset (forecast length = {data_config['forecast_len'] + 1})")
 
@@ -518,7 +516,6 @@ if __name__ == "__main__":
     conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
     training_data_check(conf, print_summary=False)
 
-
     # options
     dataset_type = [
         "ERA5_and_Forcing_SingleStep",
@@ -527,7 +524,6 @@ if __name__ == "__main__":
         "MultiprocessingBatcher",
         "MultiprocessingBatcherPrefetch",
     ][dataset_id]
-
 
     epoch = 0
     rank = 0

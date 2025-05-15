@@ -34,17 +34,17 @@ from credit.models import load_model
 
 from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
 
-#from credit.distributed import get_rank_info
-#from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
-#from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoader
-#from credit.datasets import setup_data_loading
-#from credit.data import concat_and_reshape, reshape_only
-#from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
-#from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
-#from credit.forecast import load_forecasts
-#from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
-#from credit.output import load_metadata, make_xarray, save_netcdf_increment
-#from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+# from credit.distributed import get_rank_info
+# from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
+# from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoader
+# from credit.datasets import setup_data_loading
+# from credit.data import concat_and_reshape, reshape_only
+# from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
+# from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
+# from credit.forecast import load_forecasts
+# from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
+# from credit.output import load_metadata, make_xarray, save_netcdf_increment
+# from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ def replace_nested_key(data, key, value):
     else:
         return data
 
-    
+
 class ForecastProcessor:
     def __init__(self, conf, device):
         self.conf = conf
@@ -195,54 +195,54 @@ def predict(rank, world_size, conf, p):
     conf = credit_main_parser(
         conf, parse_training=False, parse_predict=True, print_summary=True
     )
-    
+
     # # number of input time frames
     # history_len = conf["data"]["history_len"]
-    # 
+    #
     # # length of forecast steps
     # lead_time_periods = conf["data"]["lead_time_periods"]
-    # 
+    #
     # # batch size
     # batch_size = conf["predict"].get("batch_size", 1)
     # ensemble_size = conf["predict"].get("ensemble_size", 1)
     # if ensemble_size > 1:
     #     logger.info(f"Rolling out with ensemble size {ensemble_size}")
-    # 
+    #
     # # number of diagnostic variables
     # varnum_diag = len(conf["data"]["diagnostic_variables"])
-    # 
+    #
     # # number of dynamic forcing + forcing + static
     # static_dim_size = (
     #     len(conf["data"]["dynamic_forcing_variables"])
     #     + len(conf["data"]["forcing_variables"])
     #     + len(conf["data"]["static_variables"])
     # )
-    # 
+    #
     # # postblock opts outside of model
     # post_conf = conf["model"]["post_conf"]
     # flag_mass_conserve = False
     # flag_water_conserve = False
     # flag_energy_conserve = False
-    # 
+    #
     # if post_conf["activate"]:
     #     if post_conf["global_mass_fixer"]["activate"]:
     #         if post_conf["global_mass_fixer"]["activate_outside_model"]:
     #             logger.info("Activate GlobalMassFixer outside of model")
     #             flag_mass_conserve = True
     #             opt_mass = GlobalMassFixer(post_conf)
-    # 
+    #
     #     if post_conf["global_water_fixer"]["activate"]:
     #         if post_conf["global_water_fixer"]["activate_outside_model"]:
     #             logger.info("Activate GlobalWaterFixer outside of model")
     #             flag_water_conserve = True
     #             opt_water = GlobalWaterFixer(post_conf)
-    # 
+    #
     #     if post_conf["global_energy_fixer"]["activate"]:
     #         if post_conf["global_energy_fixer"]["activate_outside_model"]:
     #             logger.info("Activate GlobalEnergyFixer outside of model")
     #             flag_energy_conserve = True
     #             opt_energy = GlobalEnergyFixer(post_conf)
-    # 
+    #
     # # clamp to remove outliers
     # if conf["data"]["data_clamp"] is None:
     #     flag_clamp = False
@@ -250,14 +250,14 @@ def predict(rank, world_size, conf, p):
     #     flag_clamp = True
     #     clamp_min = float(conf["data"]["data_clamp"][0])
     #     clamp_max = float(conf["data"]["data_clamp"][1])
-    # 
+    #
     # # Load the forecasts we wish to compute
     # forecasts = load_forecasts(conf)
     # if len(forecasts) < batch_size:
     #     logger.warning(
     #         f"number of forecast init times {len(forecasts)} is less than batch_size {batch_size}, will result in under-utilization"
-    #     )    
-    # 
+    #     )
+    #
     # dataset = Predict_Dataset_Batcher(
     #     varname_upper_air=data_config["varname_upper_air"],
     #     varname_surface=data_config["varname_surface"],
@@ -282,7 +282,7 @@ def predict(rank, world_size, conf, p):
     #     world_size=world_size,
     #     skip_target=True,
     # )
-    # 
+    #
     # # Use a custom DataLoader so we get the len correct
     # data_loader = BatchForecastLenDataLoader(dataset)
 
@@ -290,8 +290,8 @@ def predict(rank, world_size, conf, p):
     dataset.mode = "infer"
     data_loader = load_dataloader(conf, dataset, is_train=False)
     # todo: fix incorrect INFO message
-    
-    # HERE -- update processer vvv    
+
+    # HERE -- update processer vvv
     # # Class for saving in parallel
     # result_processor = ForecastProcessor(conf, device)
 
@@ -348,7 +348,7 @@ def predict(rank, world_size, conf, p):
             #     save_datetimes[forecast_count : forecast_count + batch_size] = (
             #         init_datetimes
             #     )
-            # 
+            #
             #     if "x_surf" in batch:
             #         x = (
             #             concat_and_reshape(batch["x"], batch["x_surf"])
@@ -387,12 +387,12 @@ def predict(rank, world_size, conf, p):
            #     input_dict = {"y_pred": y_pred, "x": x_init}
            #     input_dict = opt_mass(input_dict)
            #     y_pred = input_dict["y_pred"]
-           # 
+           #
            # if flag_water_conserve:
            #     input_dict = {"y_pred": y_pred, "x": x}
            #     input_dict = opt_water(input_dict)
            #     y_pred = input_dict["y_pred"]
-           # 
+           #
            # if flag_energy_conserve:
            #     input_dict = {"y_pred": y_pred, "x": x}
            #     input_dict = opt_energy(input_dict)
@@ -465,7 +465,7 @@ if __name__ == "__main__":
         default=False,
         help="Path to the model configuration (yml) containing your inputs.",
     )
-    
+
     parser.add_argument(
         "-l",
         dest="launch",
@@ -473,7 +473,7 @@ if __name__ == "__main__":
         default=0,
         help="Submit workers to PBS.",
     )
-    
+
     parser.add_argument(
         "-w",
         "--world-size",
@@ -481,7 +481,7 @@ if __name__ == "__main__":
         default=4,
         help="Number of processes (world size) for multiprocessing",
     )
-    
+
     parser.add_argument(
         "-m",
         "--mode",
@@ -489,7 +489,7 @@ if __name__ == "__main__":
         default=0,
         help="Update the config to use none, DDP, or FSDP",
     )
-    
+
     # parser.add_argument(
     #     "-nd",
     #     "--no-data",
@@ -552,34 +552,34 @@ if __name__ == "__main__":
     ## todo: data check for downscaling mode
     # predict_data_check(conf, print_summary=False)
 
-    ## for downscaling rollout, we need to write data incrementally.
-    ## Default patter is to write 2d & 3d data to separate files, one
-    ## file per timestep.  This can later be extended to collect
-    ## multiple timesteps into a file and write larger chunks.
+    # for downscaling rollout, we need to write data incrementally.
+    # Default pattern is to write 2d & 3d data to separate files, one
+    # file per timestep.  This can later be extended to collect
+    # multiple timesteps into a file and write larger chunks.
 
-    ## ancillary data & metadata will come from a template file.  Time
-    ## coordinate needs to come from the driving model.
+    # ancillary data & metadata will come from a template file.  Time
+    # coordinate needs to come from the driving model.
 
-    ## for now, we just write write everything into one directory
-    ## todo: come up with a good way to specify organization of output
+    # for now, we just write write everything into one directory
+    # todo: come up with a good way to specify organization of output
 
-    ## default filename: prefix.[2d|3d].datetime.nc, where 'prefix' is
-    ## specified in the config.
+    # default filename: prefix.[2d|3d].datetime.nc, where 'prefix' is
+    # specified in the config.
 
     outdir = os.path.expandvars(conf['predict']['output_dir'])
     os.makedirs(outdir, exist_ok=True)
     logging.info("Saving downscaled data to {}".format(outdir))
-    
+
     # create a save location for rollout
     # assert (
     #     "save_forecast" in conf["predict"]
     # ), "Please specify the output dir through conf['predict']['save_forecast']"
-    # 
+    #
     # forecast_save_loc = conf["predict"]["save_forecast"]
     # os.makedirs(forecast_save_loc, exist_ok=True)
     #
     # logging.info("Save roll-outs to {}".format(forecast_save_loc))
-    
+
 
     # Create a project directory (to save launch.sh and model.yml) if they do not exist
     save_loc = os.path.expandvars(conf["save_loc"])

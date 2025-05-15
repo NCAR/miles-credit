@@ -221,7 +221,7 @@ def main(rank, world_size, conf, backend=None, trial=False):
     """
 
     is_downscaling = 'datasets' in conf['data']
-    
+
     # convert $USER to the actual user name
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
@@ -422,7 +422,7 @@ if __name__ == "__main__":
     if not conf['data']['datasets']:
         training_data_check(conf, print_summary=False)
         # todo: data check for downscaling mode
-        
+
     # ======================================================== #
 
     # Create directories if they do not exist and copy yml file

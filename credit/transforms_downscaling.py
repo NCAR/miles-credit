@@ -32,6 +32,7 @@ class Expand:
             n = len(x.shape)
             return x.repeat(self.by, axis=n-1).repeat(self.by, axis=n-2)
 
+
 @dataclass
 class Pad:
     left:   int = 0
