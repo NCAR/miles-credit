@@ -287,9 +287,36 @@ def predict(rank, world_size, conf, p):
     # data_loader = BatchForecastLenDataLoader(dataset)
 
     dataset = load_dataset(conf)
+
+    # prognostic data initialization
+    if conf['predict'][] == 'test':
+        x0 = dataset[0]
+    else:
+        raise(ValueError("non-testing prog data init not implemented yet"))
+        # when downscaling other datasets, we don't have high-res
+        # truth to initialize with.  Options:
+        #
+        # * intialize prog vars from climatology
+        #       pro: easy to generate
+        #       con: overly smooth, non-seasonal
+        #            (could use seasclim -> extra steps)
+        # * initialize w/ interpolated GCM data
+        #       pro: results consistant w/ boundaries
+        #       con: require wrangling an extra dataset
+        #            GCM may not have all needed vars
+        #            blocky / overly smooth data
+        # * initialize w/ noise
+        #       pro: very easy & very fast
+        #       con: need to know normalization range
+        #            very noisy -> spinup period needed
+        #
+        # in any case, we could add a small perturbation
+        # afterward to get an initial-condition ensemble
+
+        pass
+
     dataset.mode = "infer"
     data_loader = load_dataloader(conf, dataset, is_train=False)
-    # todo: fix incorrect INFO message
 
     # HERE -- update processer vvv
     # # Class for saving in parallel
@@ -322,12 +349,15 @@ def predict(rank, world_size, conf, p):
     model.eval()
 
     # Rollout
+    first_loop = True
     with torch.no_grad():
         # # forecast count = a constant for each run
         # forecast_count = 0
 
-        # y_pred allocation and results tracking
+        # need to collect all the asynchronous output writing promises
+        # so we can make sure they all complete before we exit.
         results = []
+
         # save_datetimes = [0] * len(forecasts)
 
         # model inference loop
@@ -357,11 +387,11 @@ def predict(rank, world_size, conf, p):
             #         )
             #     else:
             #         x = reshape_only(batch["x"]).to(device).float()
-
-                # # create ensemble:
-                # if ensemble_size > 1:
-                #     x = torch.repeat_interleave(x, ensemble_size, 0)
-
+            #
+            #     # create ensemble:
+            #     if ensemble_size > 1:
+            #         x = torch.repeat_interleave(x, ensemble_size, 0)
+            #
             # # Add forcing and static variables for the entire batch
             # if "x_forcing_static" in batch:
             #     x_forcing_batch = (
@@ -372,10 +402,20 @@ def predict(rank, world_size, conf, p):
             #             x_forcing_batch, ensemble_size, 0
             #         )
             #     x = torch.cat((x, x_forcing_batch), dim=1)
-
+            #
             # # Clamp if needed
             # if flag_clamp:
             #     x = torch.clamp(x, min=clamp_min, max=clamp_max)
+
+            if first_loop:
+                x = x0
+                first_loop = False
+                del x0
+            else:
+                # recycle prognostic outputs from last step as inputs for this step
+                y_prog = y_pred[:, :-conf['model']['channels']['diagnostic'].detach()
+                x = torch.cat([batch['x'], y_prog], dim=2)
+                
 
             # Model inference on the entire batch
             y_pred = model(x.float())
@@ -399,52 +439,64 @@ def predict(rank, world_size, conf, p):
            #     y_pred = input_dict["y_pred"]
 
             result = p.apply_async(
-                result_processor.process,
-                (
-                    y_pred.cpu(),
-                    forecast_step,
-                    forecast_count,
-                    batch["datetime"],
-                    save_datetimes,
-                ),
+                write_output_to_netcdf_function,
+                (y_pred.cpu(),
+                 batch['datetime'],
+                 dataset)
             )
+                 
+            #     result_processor.process,
+            #     (
+            #         y_pred.cpu(),
+            #         forecast_step,
+            #         forecast_count,
+            #         batch["datetime"],
+            #         save_datetimes,
+            #     ),
+            # )
             results.append(result)
 
-            # use `varnum_diag > 0` to check if diagnostic vars exists
-            # use previous step y_pred as the next step input
-            if history_len == 1:
-                # cut diagnostic vars from y_pred, they are not inputs
-                if varnum_diag > 0:
-                    x = y_pred[:, :-varnum_diag, ...].detach()
-                else:
-                    x = y_pred.detach()
+            # # use `varnum_diag > 0` to check if diagnostic vars exists
+            # # use previous step y_pred as the next step input
+            # if history_len == 1:
+            #     # cut diagnostic vars from y_pred, they are not inputs
+            #     if varnum_diag > 0:
+            #         x = y_pred[:, :-varnum_diag, ...].detach()
+            #     else:
+            #         x = y_pred.detach()
+            # 
+            # # multi-step in
+            # else:
+            #     if static_dim_size == 0:
+            #         x_detach = x[:, :, 1:, ...].detach()
+            #     else:
+            #         x_detach = x[:, :-static_dim_size, 1:, ...].detach()
+            # 
+            #     # cut diagnostic vars from y_pred, they are not inputs
+            #     if varnum_diag > 0:
+            #         x = torch.cat(
+            #             [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
+            #         )
+            #     else:
+            #         x = torch.cat([x_detach, y_pred.detach()], dim=2)
+            # 
+            # if batch["stop_forecast"][0]:
+            #                     # Wait for processes to finish
+            #     for result in results:
+            #                     result.get()
+            # 
+            #     y_pred = None
+            # 
+            #     if distributed:
+            #                     torch.distributed.barrier()
+            # 
+            #     forecast_count += batch_size
 
-            # multi-step in
-            else:
-                if static_dim_size == 0:
-                    x_detach = x[:, :, 1:, ...].detach()
-                else:
-                    x_detach = x[:, :-static_dim_size, 1:, ...].detach()
+            # end of inference loop
 
-                # cut diagnostic vars from y_pred, they are not inputs
-                if varnum_diag > 0:
-                    x = torch.cat(
-                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
-                    )
-                else:
-                    x = torch.cat([x_detach, y_pred.detach()], dim=2)
-
-            if batch["stop_forecast"][0]:
-                # Wait for processes to finish
-                for result in results:
-                    result.get()
-
-                y_pred = None
-
-                if distributed:
-                    torch.distributed.barrier()
-
-                forecast_count += batch_size
+        # wait for asynchronous write processes to finish
+        for result in results:
+            result.get()
 
         if distributed:
             torch.distributed.barrier()
