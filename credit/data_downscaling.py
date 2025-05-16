@@ -520,8 +520,9 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         '''
 
-        # get rid of batch dimension
-        prediction.squeeze(0)
+        # get rid of degenerate batch dimension
+        assert(len(prediction.shape)==5 and prediction.shape[0]==1)
+        prediction = prediction.squeeze(0)
 
         result = {dset: {} for dset in self.datasets}
 
@@ -551,7 +552,8 @@ class DownscalingDataset(torch.utils.data.Dataset):
         if self.transform:
             for dset in result2:
                 xform = self.datasets[dset]['transforms']
-                result2[dset] = xform(result2[dset], inverse=True)
+                # dummy outer dict; xform wants a dict structured [usage][var]
+                result2[dset] = xform({"_": result2[dset]}, inverse=True)["_"]
 
         return result2
 
