@@ -141,6 +141,7 @@ data:
         conus404_3D:
             <<: *ddefault
             glob: 'conus404/3d/*/conus404.3d.*.nc'
+            template_file: 'templates/conus404.3d.template.nc'
             dim: 3D
             variables:
                 prognostic:
@@ -162,6 +163,7 @@ data:
         conus404_2D:
             <<: *ddefault
             glob: 'conus404/2d/*/conus404.2d.*.nc'
+            template_file: 'templates/conus404.2d.template.nc'
             dim: 2D
             variables:
                 boundary:
@@ -377,6 +379,10 @@ predict:
     downscaling:
         start: "2017-01-01 00:00:00"
         finish: "2017-01-31 23:00:00"
+
+        # name of dataset to pull time coordinates from
+        # defaults to first non-static dataset with only boundary variables
+        get_time_from: "era5_2D"
 
     # save_vars: []  # empty list & undefined both mean "all vars"
     

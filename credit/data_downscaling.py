@@ -79,6 +79,11 @@ class DownscalingDataset(torch.utils.data.Dataset):
             2 and padded by 10 to match.  Defaults to the width
             (height) of the widest (tallest) dataset.
 
+        get_time_from (str): name of the dataset to pull time
+            coordinates from when creating a sample; used when writing
+            output to netcdf.  Defaults to first non-static dataset
+            that has boundary variables.
+
         transform (bool): apply normalizing transforms to samples?
             Defaults to True
 
@@ -126,6 +131,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
     image_width:  int = None
     image_height: int = None
     transform:    bool = True
+    get_time_from: str = None
     _mode:        str = field(init=False, repr=False, default='train')
     # legal mode values: train, init, infer
     _output:      str = field(init=False, repr=False, default='tensor')
@@ -134,6 +140,15 @@ class DownscalingDataset(torch.utils.data.Dataset):
     def __post_init__(self):
         super().__init__()
 
+        # this needs to go before _setup_datasets
+        if self.get_time_from is None:
+            for d in self.datasets:
+                if (self.datasets[d]['dim'] != 'static' and
+                    len(self.datasets[d]['variables']['boundary']) > 0):
+                    self.get_time_from = d
+                    break
+            raise(ValueError("No non-static datasets with boundary vars (needed for output time coords)"))
+        
         self._setup_datasets()
         # Set up self.datasets[dataset]['datamap'|'transforms']
         # Also sets self.data_width and self.data_height
@@ -147,6 +162,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
         # create self.arrangement dataframe used by .rearrange()
         # and self.tnames list of names for tensor channels
         self._setup_arrangement()
+
 
     def _setup_datasets(self):
         '''Replace the `datasets` argument dict (a nested dict of
@@ -362,7 +378,8 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         `~.output == 'tensor'` stacks the ndarrays in the z-dimension
         and converts them to a pair of pyTorch tensors (input and
-        target), returning them as a Sample.
+        target), returning them as a Sample.  It also includes the
+        associated time coordinates in the sample
 
         '''
 
@@ -379,12 +396,8 @@ class DownscalingDataset(torch.utils.data.Dataset):
         if self.output == 'tensor':
             result = self.to_tensor(result)
 
-        # add date to sample for tracking purposes.  Could be None for
-        # static datasets, so iterate until we get an actual value
-        for dset in self.datasets.values():
-            result['date'] = dset['datamap'].sindex2date(index)
-            if result['date'] is not None:
-                break
+        # add date to sample for tracking purposes.
+        result['dates'] = self.datasets[self.get_time_from]['datamap'].sindex2dates(index)
 
         return result
         # yield result    # change return to yield to make this lazy

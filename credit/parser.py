@@ -158,6 +158,10 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             conf = replace_nested_key(conf, 'first_date', downconf['start'])
             conf = replace_nested_key(conf, 'last_date', downconf['finish'])
 
+            if 'get_time_from' in downconf:
+                assert(downconf['get_time_from'] in conf['data']['datasets'])
+                conf['data']['get_time_from'] = downconf['get_time_from']
+
         # end new-style conf['data'] check
         # ===========================================#
 

@@ -289,7 +289,7 @@ def predict(rank, world_size, conf, p):
     dataset = load_dataset(conf)
 
     # prognostic data initialization
-    if conf['predict'][] == 'test':
+    if conf['predict'][fixme] == 'test':
         x0 = dataset[0]
     else:
         raise(ValueError("non-testing prog data init not implemented yet"))
@@ -439,7 +439,7 @@ def predict(rank, world_size, conf, p):
            #     y_pred = input_dict["y_pred"]
 
             result = p.apply_async(
-                write_output_to_netcdf_function,
+                write_output_to_netcdf_wrapper_function,
                 (y_pred.cpu(),
                  batch['datetime'],
                  dataset)

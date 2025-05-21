@@ -181,6 +181,7 @@ class DataMap:
 
     rootpath: pathway to the files
     glob: filename glob of netcdf files
+    template: path to file to pattern output after; defaults to 1st file
     dim: dimensions of the data:
         static: no time dimension; data is loaded on initialization
         3D: data has z-dimension; can subset levels using zstride
@@ -200,16 +201,17 @@ class DataMap:
     first/last timestep in the dataset.  Note that they must be
     YYYY-MM-DD strings (with optional HH:MM:SS), not datetime objects.
     '''
-    rootpath:     str
-    glob:         str
-    dim:          str = "2D"
-    normalize:    bool = False
-    zstride:      int = 1
-    variables:    VarDict[str, List] = field(default_factory=list)
-    history_len:  int = 2
-    forecast_len: int = 1
-    first_date:   str = None
-    last_date:    str = None
+    rootpath:      str
+    glob:          str
+    template_file: str = None
+    dim:           str = "2D"
+    normalize:     bool = False
+    zstride:       int = 1
+    variables:     VarDict[str, List] = field(default_factory=list)
+    history_len:   int = 2
+    forecast_len:  int = 1
+    first_date:    str = None
+    last_date:     str = None
 
     def __post_init__(self):
         super().__init__()
@@ -328,15 +330,23 @@ class DataMap:
         tindex = int((time - self.t0) / self.dt)
         return tindex
 
-    def sindex2date(self, sindex):
-        '''Convert sample index to ISO8601 datetime string using cftime library.
-        Returns None if dataset is static.'''
+    def sindex2dates(self, sindex):
+        '''Returns dates associated with sample index as a dict
+        containing time coordinates, units, calendar, and ISO8601
+        dates from the cftime library.  Returns None if dataset is
+        static.
+
+        '''
         if self.dim == "static":
             return None
-        tindex = sindex + self.first
-        timecoord = self.t0 + tindex * self.dt
-        cfdate = cf.num2date(timecoord, self.units, self.calendar)
-        return str(cfdate)
+        dates = {"calendar": self.calendar,
+                 "units": self.units}
+        tindexes = [sindex + self.first + i for i in range(self.sample_len)]
+        timecoords = [self.t0 + t * self.dt for t in tindexes]
+        dates["time"] = timecoords
+        cfdates = [str(cf.num2date(t, self.units, self.calendar)) for t in timecoords]
+        dates["cf_datetimes"] = cfdates
+        return(dates)
 
     def __len__(self):
         if self.dim == "static":
