@@ -983,15 +983,36 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         if "downscaling" in conf["predict"]:
             if "forecasts" in conf["predict"]:
                 raise ValueError("conf['predict'] should contain 'downscaling' or 'forecasts', not both")
+            # todo: use schema library to validate (untested):
 
-            # check conf['predict'] using schemas
-            # required:
-            #    output_dir exists & is a valid directory
-            #    downscaling:start & :finish exist and are datetimes
-            #    start & finish
-            #    if 'metadata' not in conf['predict'] or is None, warn no metadata
-            # todo: check the rest of the settings
-            # warn if overlap between training, validation, & prediction periods
+            # from schema import And, Optional, Regex, Schema, Use, SchemaError
+            # isodate = Regex(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$')
+            # is_dataset = lambda s: s in conf["data"]["datasets"].keys()
+            # 
+            # downscaling_schema = Schema(
+            #     {"start": isodate,
+            #      "finish": isodate,
+            #      Optional("get_time_from"): is_dataset
+            #      })
+            #
+            # template_schema = Schema(
+            #     {"dir": And(str, os.path.exists),
+            #      "files": Schema({is_dataset: str})
+            #      })
+            #
+            # predict_schema = Schema({
+            #     "mode": lambda s: s in ("none", "ddp", "fsdp"),
+            #     Optional("batch_size"): int,
+            #     Optional("ensemble_size"): int,
+            #     "downscaling": downscaling_schema,
+            #     "templates": template_schema
+            # })
+
+            # check that all dirs & files exist
+            # check that start < finish (just convert to numbers)
+
+            # ? warn if overlap between training, validation, & prediction periods
+
 
         else:
             assert "forecasts" in conf["predict"], "Rollout settings ('forecasts') is missing from conf['predict']"

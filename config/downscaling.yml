@@ -83,7 +83,7 @@ data_defaults: &ddefault
     <<: *samples
 
     # file globs are defined relative to the top-level data rootpath
-    rootpath: /glade/derecho/scratch/mcginnis/credit/sgp256
+    rootpath: "/glade/derecho/scratch/mcginnis/credit/sgp256"
 
     first_date:   "1980-01-02"  ## first timestep of CONUS404 is bad
     last_date:    "2010-12-31"
@@ -141,7 +141,6 @@ data:
         conus404_3D:
             <<: *ddefault
             glob: 'conus404/3d/*/conus404.3d.*.nc'
-            template_file: 'templates/conus404.3d.template.nc'
             dim: 3D
             variables:
                 prognostic:
@@ -163,7 +162,6 @@ data:
         conus404_2D:
             <<: *ddefault
             glob: 'conus404/2d/*/conus404.2d.*.nc'
-            template_file: 'templates/conus404.2d.template.nc'
             dim: 2D
             variables:
                 boundary:
@@ -384,17 +382,33 @@ predict:
         # defaults to first non-static dataset with only boundary variables
         get_time_from: "era5_2D"
 
-    # save_vars: []  # empty list & undefined both mean "all vars"
-    
-    # path to dir containing template netcdf files & yaml files with
-    # variable attributes (units, standard_name, etc.) for output
-    metadata: None #"placeholder"
+    output:
+        # location to save output
+        output_dir: "/glade/derecho/scratch/$USER/emulation-output"
 
-    # location to save output
-    output_dir: "/glade/derecho/scratch/$USER/emulation-output"
+        # save files are named dataset_YYYY-MM-DD_HH:MM:SS.nc
+        # options for specifying filenames would go here
 
-    # filename prefix for saved output
-    output_prefix: "c404-ML"
+
+        # instead of using yaml metadata, the downscaling data
+        # pipeline uses template netcdf files.  It reads in the file
+        # via xarray, replaces the data in the template with the model
+        # results, and writes it to a new file.  This makes it easy to
+        # get ancillary data and metadata correct.
+
+        # You need one template file for each dataset that has output
+        # variables (prognostic or diagnostic) in it.  TODO: use the
+        # first file of the corresponding dataset as a default if
+        # templates are not provided.
+
+        templates:
+            dir: "/glade/derecho/scratch/mcginnis/credit/sgp256/templates"
+            files:
+                conus404_3D: "conus404.3d.template.nc"
+                conus404_2D: "conus404.2d.template.nc"
+
+        # save_vars: []  # empty list & undefined both mean "all vars"
+        # todo: subsetting output variables not yet implemented
     
     # # optional; uses anomaly in metrics if provided
     # climatology:

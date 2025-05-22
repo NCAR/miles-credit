@@ -441,7 +441,7 @@ def predict(rank, world_size, conf, p):
             result = p.apply_async(
                 write_output_to_netcdf_wrapper_function,
                 (y_pred.cpu(),
-                 batch['datetime'],
+                 batch['dates'],
                  dataset)
             )
                  

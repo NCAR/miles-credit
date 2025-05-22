@@ -43,6 +43,7 @@ from glob import glob
 import netCDF4 as nc
 import cftime as cf
 import numpy as np
+import xarray as xr
 
 
 class VarDict(TypedDict, total=False):
@@ -180,8 +181,7 @@ class DataMap:
     '''Class for reading in netCDF data from multiple files.
 
     rootpath: pathway to the files
-    glob: filename glob of netcdf files
-    template: path to file to pattern output after; defaults to 1st file
+    glob: filename glob of netcdf files (relative to rootpath)
     dim: dimensions of the data:
         static: no time dimension; data is loaded on initialization
         3D: data has z-dimension; can subset levels using zstride
@@ -201,17 +201,16 @@ class DataMap:
     first/last timestep in the dataset.  Note that they must be
     YYYY-MM-DD strings (with optional HH:MM:SS), not datetime objects.
     '''
-    rootpath:      str
-    glob:          str
-    template_file: str = None
-    dim:           str = "2D"
-    normalize:     bool = False
-    zstride:       int = 1
-    variables:     VarDict[str, List] = field(default_factory=list)
-    history_len:   int = 2
-    forecast_len:  int = 1
-    first_date:    str = None
-    last_date:     str = None
+    rootpath:     str
+    glob:         str
+    dim:          str = "2D"
+    normalize:    bool = False
+    zstride:      int = 1
+    variables:    VarDict[str, List] = field(default_factory=list)
+    history_len:  int = 2
+    forecast_len: int = 1
+    first_date:   str = None
+    last_date:    str = None
 
     def __post_init__(self):
         super().__init__()
