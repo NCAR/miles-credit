@@ -375,6 +375,9 @@ predict:
     ensemble_size: 1
 
     downscaling:
+        driver: "test"  # test = use same dataset as for training
+        # otherwise, we'd need to define a new driver dataset here
+        
         start: "2017-01-01 00:00:00"
         finish: "2017-01-31 23:00:00"
 
