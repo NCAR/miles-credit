@@ -249,7 +249,7 @@ def predict(rank, world_size, conf, p):
 
             if first_loop:
                 x = x0
-                prognostic = x[:,nbound:-ndiag, ...]
+                prognostic = x[:,nbound:, ...]
                 first_loop = False
                 del x0
             else:

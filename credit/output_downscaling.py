@@ -30,7 +30,8 @@ class OutputWrangler:
     # save_vars: List[str] = None  # todo: allow yaml to subset output vars
 
     def __post_init__(self):
-        # templates has been validated by parser; we can assume its structure is good
+        # templates dict has been validated by parser; we can assume its structure is good
+        self.output_dir = os.path.expandvars(self.output_dir)
 
         self.writers = {}
         for dset in self.templates['files']:
