@@ -151,6 +151,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                     raise ValueError(f"unknown variable usage '{usage}' for dataset {dset};"+
                                      f" must be one of {vartypes}")
 
+        # todo: should this move down to the predict section below?
         if parse_predict:
             # update start and finish for rollout
             # note: this is an in-place modification of conf['data']

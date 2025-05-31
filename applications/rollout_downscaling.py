@@ -7,9 +7,7 @@ import warnings
 
 from pathlib import Path
 from argparse import ArgumentParser
-
-# import multiprocessing as mp
-# import traceback
+import multiprocessing as mp
 
 # ---------- #
 # Numerics
@@ -32,112 +30,12 @@ from credit.pbs import launch_script, launch_script_mpi
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info
 
-# from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
-# from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoader
-# from credit.datasets import setup_data_loading
-# from credit.data import concat_and_reshape, reshape_only
-# from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
-# from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
-# from credit.forecast import load_forecasts
-# from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
-# from credit.output import load_metadata, make_xarray, save_netcdf_increment
-# from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-
-
-# class ForecastProcessor:
-#     def __init__(self, conf, device):
-#         self.conf = conf
-#         self.device = device
-# 
-#         self.batch_size = conf["predict"].get("batch_size", 1)
-#         self.ensemble_size = conf["predict"].get("ensemble_size", 1)
-#         self.lead_time_periods = conf["data"]["lead_time_periods"]
-# 
-#         # transform and ToTensor class
-#         if conf["data"]["scaler_type"] == "std_new":
-#             self.state_transformer = Normalize_ERA5_and_Forcing(conf)
-#         else:
-#             print("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
-#             raise
-# 
-# 
-#     def process(self, y_pred, forecast_step, forecast_count, datetimes, save_datetimes):
-#         try:
-#             # Transform predictions
-#             conf = self.conf
-#             y_pred = self.state_transformer.inverse_transform(y_pred)
-# 
-#             # # This will fail if not using torch multiprocessing AND using a GPU
-#             # if (
-#             #     "use_laplace_filter" in conf["predict"]
-#             #     and conf["predict"]["use_laplace_filter"]
-#             # ):
-#             #     y_pred = (
-#             #         self.dpf.diff_lap2d_filt(y_pred.to(self.device).squeeze())
-#             #         .unsqueeze(0)
-#             #         .unsqueeze(2)
-#             #         .cpu()
-#             #     )
-# 
-#             # Calculate correct datetime for current forecast
-#             utc_datetimes = [
-#                 datetime.utcfromtimestamp(datetimes[i].item())
-#                 + timedelta(hours=self.lead_time_periods)
-#                 for i in range(self.batch_size)
-#             ]
-# 
-#             # Convert to xarray and handle results
-#             for j in range(self.batch_size):
-#                 upper_air_list, single_level_list = [], []
-#                 for i in range(
-#                     self.ensemble_size
-#                 ):  # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
-#                     darray_upper_air, darray_single_level = make_xarray(
-#                         y_pred[j + i : j + i + 1],  # Process each ensemble member
-#                         utc_datetimes[j],
-#                         self.latlons.latitude.values,
-#                         self.latlons.longitude.values,
-#                         conf,
-#                     )
-#                     upper_air_list.append(darray_upper_air)
-#                     single_level_list.append(darray_single_level)
-# 
-#                 if self.ensemble_size > 1:
-#                     ensemble_index = xr.DataArray(
-#                         np.arange(self.ensemble_size), dims="ensemble_member_label"
-#                     )
-#                     all_upper_air = xr.concat(
-#                         upper_air_list, ensemble_index
-#                     )  # .transpose("time", ...)
-#                     all_single_level = xr.concat(
-#                         single_level_list, ensemble_index
-#                     )  # .transpose("time", ...)
-#                 else:
-#                     all_upper_air = darray_upper_air
-#                     all_single_level = darray_single_level
-# 
-#                 # Save the current forecast hour data in parallel
-#                 save_netcdf_increment(
-#                     all_upper_air,
-#                     all_single_level,
-#                     save_datetimes[
-#                         forecast_count + j
-#                     ],  # Use correct index for current batch item
-#                     self.lead_time_periods * forecast_step,
-#                     self.meta_data,
-#                     conf,
-#                 )
-# 
-#         except Exception as e:
-#             print(traceback.format_exc())
-#             raise e
 
 
 def predict(rank, world_size, conf, p):
@@ -264,12 +162,9 @@ def predict(rank, world_size, conf, p):
                 
             y_pred = model(x.float())
 
-           # (post-processing blocks go here)
+            # (post-processing blocks go here)
            
-           result = p.apply_async(
-               output_wrangler.process,
-               (y_pred.cpu(), timestep['dates'])
-           )
+            result = p.apply_async(output_wrangler.process, (y_pred.cpu(), timestep['dates']))
                  
             results.append(result)
 

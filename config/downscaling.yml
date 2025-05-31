@@ -316,13 +316,29 @@ trainer:
     # while epochs is the total number to train for.
 
     # if running interactively, set both to the same value
-    
+
     start_epoch: 0
     num_epoch: 201
     reload_epoch: True
     epochs: 201
     # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
-    output_after: 10  # write last sample & prediction to file every N epochs
+
+    
+    # the trainer can save the last target and prediction to netcdf
+    # every so often for progress evaluation.  Set save_data to None
+    # or False to disable
+
+    save_data:
+        frequency: 1  # save every N epochs
+        output:
+            # see predict section for details; same structure
+            output_dir: "/glade/derecho/scratch/$USER/emulation-output/training-progress"
+            templates:
+                dir: "/glade/derecho/scratch/mcginnis/credit/sgp256/templates"
+                files:
+                    conus404_3D: "conus404.3d.template.nc"
+                    conus404_2D: "conus404.2d.template.nc"
+
 
     use_scheduler: False
     scheduler: {'scheduler_type': 'lambda'}

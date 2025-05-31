@@ -12,6 +12,7 @@ import torch.distributed as dist
 from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
 
+from credit.output_downscaling import OutputWrangler
 from credit.scheduler import update_on_batch
 from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
@@ -43,11 +44,8 @@ class Trainer(BaseTrainer):
 
             validate(epoch, conf, valid_loader, criterion, metrics):
                 Validate the model on the validation dataset and return validation metrics.
+                (not yet updated for downscaling)
 
-            fit_deprecated(conf, train_loader, valid_loader, optimizer, train_criterion,
-                           valid_criterion, scaler, scheduler, metrics, trial=False):
-                Perform the full training loop across multiple epochs, including validation
-                and checkpointing.
         """
         super().__init__(model, rank)
         # Add any additional initialization if needed
@@ -248,12 +246,13 @@ class Trainer(BaseTrainer):
         gc.collect()
 
         # write last training sample & prediction to file every so often
-        if epoch % conf['trainer']['output_after'] == 0:
-            np.savez(f"{conf['save_loc']}/{conf['pbs']['job_name']}.ep{epoch}",
-                     target = y.cpu().detach().numpy(),
-                     predicted = y_pred.cpu().detach().numpy(),
-                     allow_pickle=False)
-        
+        if conf['trainer']['save_data']:
+            saveconf = conf['trainer']['save_data']
+            if epoch % saveconf['frequency'] == 0:
+                wrangler = OutputWrangler(train_loader.dataset, **saveconf['output'])
+                wrangler.process(batch['y'], batch['dates'], prefix=f"ep{epoch}.target")
+                wrangler.process(y_pred.cpu().detach(), batch['dates'], prefix=f"ep{epoch}.predicted")
+
         return results_dict
 
     ###################################
