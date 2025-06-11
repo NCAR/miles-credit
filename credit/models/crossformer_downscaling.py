@@ -567,12 +567,12 @@ class DownscalingCrossFormer(BaseModel):
 
 
 if __name__ == "__main__":
-    image_width =  1408
-    image_height = 1024
+    image_width =  256
+    image_height = 256
     patch_height = 1
     patch_width = 1
-    frames = 2
-    channels = {"boundary": 20, "prognostic": 21, "diagnostic":7}  # input = 41, output = 28
+    frames = 1
+    channels = {"boundary": 81, "prognostic": 36, "diagnostic":9}  # config/downscaling.yml
 
     global_window_size = (4, 4, 2, 1)
     local_window_size = 4
