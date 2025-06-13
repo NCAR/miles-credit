@@ -249,7 +249,7 @@ class Trainer(BaseTrainer):
         if conf['trainer']['save_data']:
             saveconf = conf['trainer']['save_data']
             if epoch % saveconf['frequency'] == 0:
-                wrangler = OutputWrangler(train_loader.dataset, **saveconf['output'])
+                wrangler = OutputWrangler(trainloader.dataset, **saveconf['output'])
                 wrangler.process(batch['y'], batch['dates'], prefix=f"ep{epoch}.target")
                 wrangler.process(y_pred.cpu().detach(), batch['dates'], prefix=f"ep{epoch}.predicted")
 
