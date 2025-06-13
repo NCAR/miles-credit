@@ -18,7 +18,7 @@
 # (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
 
-save_loc: /glade/work/$USER/CREDIT_runs/c404/
+save_loc: /glade/work/$USER/CREDIT_runs/wxf_c404/
 seed: 2222  # RNG seed
 
 
@@ -29,7 +29,7 @@ seed: 2222  # RNG seed
 ## it here dramatically simplifies things.
 
 sampling: &samples
-    history_len:  2
+    history_len:  1
     forecast_len: 1
 
 image_size: &imsize  # round up to multiples of 128
@@ -261,18 +261,23 @@ data:
 
 
 model:
-    type: "unet_downscaling" #"crossformer_downscaling"
+    type: "crossformer_downscaling"
     <<: *imsize
-    frames: 2
-    architecture:
-        name: "unet"
-        encoder_name: "resnet34"
-        encoder_weights: "imagenet"
+    frames: 1     # todo: if crossformer, history_len == frames == 1
+    global_window_size: [4, 4, 2, 1]
+    local_window_size: 4
+    # channels parameter gets set by calling count_channels() in parser.py
+    # all other parameters use default values
+
+    # type: "unet_downscaling" # useful for code development
+    #architecture:
+    #    name: "unet"
+    #    encoder_name: "resnet34"
+    #    encoder_weights: "imagenet"
 
 trainer:
     type: "conus404"
     mode: none # ddp # none, ddp, fsdp
-
     
     # fsdp-specific optimization options go here
 
@@ -329,10 +334,10 @@ trainer:
     # or False to disable
 
     save_data:
-        frequency: 1  # save every N epochs
+        frequency: 10  # save every N epochs
         output:
             # see predict section for details; same structure
-            output_dir: "/glade/derecho/scratch/$USER/emulation-output/training-progress"
+            output_dir: "/glade/derecho/scratch/$USER/emulation-output/wxf-training-progress"
             templates:
                 dir: "/glade/derecho/scratch/mcginnis/credit/sgp256/templates"
                 files:
@@ -403,7 +408,7 @@ predict:
 
     output:
         # location to save output
-        output_dir: "/glade/derecho/scratch/$USER/emulation-output"
+        output_dir: "/glade/derecho/scratch/$USER/wxf-emulation-output"
 
         # save files are named dataset_YYYY-MM-DD_HH:MM:SS.nc
         # options for specifying filenames would go here
@@ -436,7 +441,7 @@ predict:
 
 pbs: # casper
     conda: "credit"
-    job_name: 'downscaling'
+    job_name: 'downscaling-wxf'
     nodes: 1
     ncpus: 8
     ngpus: 1
