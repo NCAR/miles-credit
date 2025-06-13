@@ -144,10 +144,13 @@ class DownscalingDataset(torch.utils.data.Dataset):
         if self.get_time_from is None:
             for d in self.datasets:
                 if (self.datasets[d]['dim'] != 'static' and
+                    'boundary' in self.datasets[d]['variables'] and
                     len(self.datasets[d]['variables']['boundary']) > 0):
                     self.get_time_from = d
                     break
-            raise(ValueError("No non-static datasets with boundary vars (needed for output time coords)"))
+            else:
+                # Python for...else executes if loop exits w/o break
+                raise(ValueError("No non-static datasets with boundary vars (needed for output time coords)"))
         
         self._setup_datasets()
         # Set up self.datasets[dataset]['datamap'|'transforms']
