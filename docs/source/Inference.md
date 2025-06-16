@@ -16,12 +16,12 @@ can calculate top of atmosphere solar irradiance for any grid and integration ti
 pre-computing solar irradiance values for a given year of inference rather than calculating on the fly.
 3. ⛰️ Static forcing files with and without normalization. These forcing files include elements like
 terrain height, land-sea mask, and land-use type. Static forcing files for the initial CREDIT models
-are currently archived at `/glade/campaign/cisl/static_scalers/`. `static_norm_old.nc` has normalized
+are currently archived at `/glade/campaign/cisl/aiml/credit/static_scalers/`. `static_norm_old.nc` has normalized
 terrain height and land sea mask, while unnormalized values are in `LSM_static_variables_ERA5_zhght.nc`.
 The unnormalized values are needed for interpolation to pressure and height levels.
 4. Files containing the mean and standard deviation scaling values for each variable. Currently,
 CREDIT uses values stored in netCDF files. These are currently stored on Derecho in
-`/glade/campaign/cisl/static_scalers/`. The appropriate files to use are `mean_6h_1979_2018_16lev_0.25deg.nc`
+`/glade/campaign/cisl/aiml/credit/static_scalers/`. The appropriate files to use are `mean_6h_1979_2018_16lev_0.25deg.nc`
 for the mean and `std_residual_6h_1979_2018_16lev_0.25deg.nc` for the combined standard deviation of
 each variable and the standard deviation of the temporal residual.
 
