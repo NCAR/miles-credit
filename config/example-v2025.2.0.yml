@@ -319,6 +319,10 @@ model:
     # for BOTH fuxi and crossformer 
     # use spectral norm
     use_spectral_norm: True
+    # upsample before applying convtranspose layers in decoder -- eliminates grid artefacts!
+    upsample_v_conv: True
+    # decoder attention type
+    decoder_attention_type: "scse"
     
     # use interpolation to match the output size
     interp: True
@@ -499,8 +503,9 @@ model:
 loss: 
     # the main training loss
     # available options are "mse", "msle", "mae", "huber", "logcosh", "xtanh", "xsigmoid"
-    # ensemble training losses: "KCRPS"
+    # ensemble training losses: "KCRPS", "almost-fair-crps"
     training_loss: "mse"
+    training_loss_parameters: {}
 
     # use power or spectral loss
     # if True, this loss will be added to the training_loss: 

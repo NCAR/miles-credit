@@ -44,6 +44,7 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    Running Inference <Inference.md>
    Evaluation and Metrics <Evaluation.md>
    Deterministic vs ensemble model training  <Ensembles.md> and inference  <EnsemblesInference.md>
+   Working with loss functions <Losses.md>
 
 .. toctree::
    :maxdepth: 2
