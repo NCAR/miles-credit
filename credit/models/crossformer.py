@@ -76,8 +76,6 @@ class UpBlock(nn.Module):
         if self.upsample_v_conv:
             self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=3, stride=1, padding=1)
             self.sharp = nn.Conv2d(out_chans, out_chans, kernel_size=3, padding=1, stride=1, bias=True)
-            nn.init.zeros_(self.sharp.weight)
-            nn.init.zeros_(self.sharp.bias)
         else:
             self.upsample = None
             self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
@@ -524,8 +522,6 @@ class CrossFormer(BaseModel):
                 nn.Conv2d(2 * (last_dim // 8), output_channels, kernel_size=3, stride=1, padding=1),
             )
             self.sharp4 = nn.Conv2d(output_channels, output_channels, kernel_size=3, padding=1, stride=1, bias=True)
-            nn.init.zeros_(self.sharp4.weight)
-            nn.init.zeros_(self.sharp4.bias)
         else:
             self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1)
 
@@ -577,7 +573,7 @@ class CrossFormer(BaseModel):
         if self.upsample_v_conv:
             x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False, antialias=False)
             x = self.conv4up(x)
-            x = x + self.sharp(x)
+            x = x + self.sharp4(x)
         else:
             x = self.up_block4(x)
 
