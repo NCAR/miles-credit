@@ -74,8 +74,10 @@ class UpBlock(nn.Module):
         self.upsample_v_conv = upsample_v_conv
 
         if self.upsample_v_conv:
-            self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
             self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=3, stride=1, padding=1)
+            self.sharp = nn.Conv2d(out_chans, out_chans, kernel_size=3, padding=1, stride=1, bias=True)
+            nn.init.zeros_(self.sharp.weight)
+            nn.init.zeros_(self.sharp.bias)
         else:
             self.upsample = None
             self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
@@ -92,11 +94,13 @@ class UpBlock(nn.Module):
 
     def forward(self, x):
         if self.upsample_v_conv:
-            x = self.upsample(x)
-        x = self.conv(x)
+            x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False, antialias=False)
+            x = self.conv(x)
+            x = x + self.sharp(x)
+        else:
+            x = self.conv(x)
 
         shortcut = x
-
         x = self.b(x)
 
         return x + shortcut
@@ -517,9 +521,11 @@ class CrossFormer(BaseModel):
 
         if self.upsample_v_conv:
             self.up_block4 = nn.Sequential(
-                nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
                 nn.Conv2d(2 * (last_dim // 8), output_channels, kernel_size=3, stride=1, padding=1),
             )
+            self.sharp4 = nn.Conv2d(output_channels, output_channels, kernel_size=3, padding=1, stride=1, bias=True)
+            nn.init.zeros_(self.sharp4.weight)
+            nn.init.zeros_(self.sharp4.bias)
         else:
             self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1)
 
@@ -567,7 +573,13 @@ class CrossFormer(BaseModel):
         x = torch.cat([x, encodings[1]], dim=1)
         x = self.up_block3(x)
         x = torch.cat([x, encodings[0]], dim=1)
-        x = self.up_block4(x)
+
+        if self.upsample_v_conv:
+            x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False, antialias=False)
+            x = self.conv4up(x)
+            x = x + self.sharp(x)
+        else:
+            x = self.up_block4(x)
 
         if self.use_padding:
             x = self.padding_opt.unpad(x)
