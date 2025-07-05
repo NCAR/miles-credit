@@ -1,3 +1,10 @@
+"""
+Generates edges based on a fixed distance or radius from each grid point.
+
+Note: This method tends to produce densely connected regions near the poles due to grid point proximity.
+For a more uniform edge distribution, refer to `graph_edges_spread.py`.
+"""
+
 from haversine import haversine_vector, Unit
 import xarray as xr
 import argparse
@@ -23,7 +30,8 @@ def main():
     lon = coords["longitude"].values
     lon[lon > 180] = lon[lon > 180] - 360.0
     lat = coords["latitude"].values
-    resolution = "onedeg" if abs(lat[1] - lat[0]) > 0.5 else "quarter"
+    # resolution = "onedeg" if abs(lat[1] - lat[0]) > 0.5 else "quarter"
+    resolution = f"res_{len(lat)}_{len(lon)}"
     lon_grid, lat_grid = np.meshgrid(lon, lat)
     lon_flat = lon_grid.ravel()
     lat_flat = lat_grid.ravel()
@@ -41,12 +49,12 @@ def main():
     dist_arr = np.concatenate(dist_list).ravel()
     output_ds = xr.Dataset(
         {
-            "edges": (("node", "pair"), edge_indices_arr),
-            "distances": (("node",), dist_arr),
-            "longitude": (("index",), lon_flat),
-            "latitude": (("index",), lat_flat),
+            "edges": (("edge_idx", "pair"), edge_indices_arr),
+            "distances": (("edge_idx",), dist_arr),
+            "longitude": (("node_idx",), lon_flat),
+            "latitude": (("node_idx",), lat_flat),
         },
-        coords={"index": list(range(lon_flat.size))},
+        coords={"node_idx": list(range(lon_flat.size))},
         attrs=dict(coord_file=args.coord, max_distance=args.dist),
     )
     if not exists(args.out):
