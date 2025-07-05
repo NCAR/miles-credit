@@ -11,7 +11,6 @@ import torch.distributed as dist
 import xarray as xr
 from dgl.nn.functional import edge_softmax
 from torch import Tensor, nn
-from torch.cuda.amp import autocast
 from torch.nn import functional as F
 from torch.nn.utils import parametrizations
 from torch.utils.checkpoint import checkpoint
@@ -288,23 +287,7 @@ class GraphModel(BaseModel):
             nn.ELU(),
             nn.Linear(self.state_vars * 2, self.state_vars),
         )
-        max_dim = max(down_hid_dims)
-        self.lin_mean = nn.Sequential(
-            nn.Linear(self.total_n_vars, max_dim, bias=False),
-            nn.ELU(),
-            nn.Linear(max_dim, max_dim, bias=False),
-            nn.ELU(),
-            nn.Linear(max_dim, self.state_vars, bias=False),
-            nn.Tanh(),
-        )
-        self.lin_std = nn.Sequential(
-            nn.Linear(self.total_n_vars, max_dim, bias=False),
-            nn.ELU(),
-            nn.Linear(max_dim, max_dim, bias=False),
-            nn.ELU(),
-            nn.Linear(max_dim, self.state_vars, bias=False),
-            nn.Sigmoid(),
-        )
+
         self.block_list = nn.ModuleList()
         for i, graph_dict in enumerate(self.all_graph_chain):
             idx = int(i // 2)
@@ -348,7 +331,7 @@ class GraphModel(BaseModel):
         x = x.view(-1, self.total_n_vars, lat_lon_shape[0] * lat_lon_shape[1]).permute(
             2, 0, 1
         )
-        mean_x = x.mean(0, keepdim=True) * 10  # Get mean and std before partitioning
+        mean_x = x.mean(0, keepdim=True) * 10  # Get mean and std before partitionning
         std_x = x.std(0, keepdim=True, unbiased=False) / 10
         x = self.init_norm(x)
         x = self.first_graph.get_src_node_features_in_partition(
@@ -380,7 +363,6 @@ class GraphModel(BaseModel):
 
         x = self.last_graph.get_global_dst_node_features(x)
         x = self.lin_final(x)
-        x = x * self.lin_std(std_x) + self.lin_mean(mean_x)
         x = x.permute(1, 2, 0)
         x = x.view(-1, self.state_vars, 1, *lat_lon_shape)
 
@@ -487,6 +469,7 @@ class ProcessorBlock(nn.Module):
         self.graph_norm_layers = nn.ModuleList(
             nn.Sequential(
                 LayerNorm(self.hid_dim),
+                # nn.GELU(),
                 nn.ELU(),
                 nn.Linear(self.hid_dim, self.hid_dim),
             )
@@ -507,6 +490,7 @@ class ProcessorBlock(nn.Module):
                 x = self.graph_norm_layers[i](x)
 
         x = h
+
         x = self.lin_out(x)
         x = x + x_skip
         x = F.elu(x)
@@ -517,6 +501,7 @@ class ProcessorBlock(nn.Module):
 class GateCell(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
+
         self.hidden_size = hidden_size
         self.z_x_ln = nn.Linear(self.hidden_size, self.hidden_size)
         self.z_h_ln = nn.Linear(self.hidden_size, self.hidden_size)
