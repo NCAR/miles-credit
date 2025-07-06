@@ -20,6 +20,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install dgl 
+          pip install torchdata
           pip install . 
           pip install flake8 pytest pytest-cov
       - name: Lint with ruff
