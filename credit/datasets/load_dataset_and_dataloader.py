@@ -177,13 +177,20 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     # pair as the CDF is computed across GPUs. Randomness is handled by adding noise
     # to the input x to create different samples. There are many other ways to do this
     # but using the same rank and world_size is the fastest as far as communication.
-    if conf["loss"]["training_loss"] == "KCRPS":
+    if conf["loss"]["training_loss"] == "KCRPS" or conf["model"]["type"] in {"graph", "graph_no"}:
         rank = 0
         world_size = 1
-        logging.info(
-            "For CRPS loss, we maintain identical rank and world size across all "
-            "GPUs to ensure proper CDF calculation during synchronous distributed processing."
-        )
+        
+        if conf["loss"]["training_loss"] == "KCRPS": 
+            logging.info(
+                "For CRPS loss, we maintain identical rank and world size across all "
+                "GPUs to ensure proper CDF calculation during synchronous distributed processing."
+            )
+        elif conf["model"]["type"] in {"graph", "graph_no"}: 
+            logging.info(
+                "For the graph model, we maintain identical rank and world size across all "
+                "GPUs to ensure proper synchronization of partitioned data."
+            )
 
     # Instantiate the dataset based on the provided class name
     if dataset_type == "ERA5_and_Forcing_SingleStep":  # forecast-len = 0 dataset

@@ -22,8 +22,8 @@ def get_spaced_lon(num):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--coord", help="Path to csv file containing coordinates")
-    # For example /glade/u/home/akn7/miles-credit-data/gaussian_grid/n48.csv 
-    # Please see folder /glade/u/home/akn7/miles-credit-data/gaussian_grid for more gaussian grids 
+    # For example credit/models/graph_partition//graph_grid_gaussia/n48.csv 
+    # Please see folder credit/models/graph_partition//graph_grid_gaussia for more details
     parser.add_argument("-o", "--out", help="Path to output directory")
     parser.add_argument("-r", "--radius", type=int, help="Number of hops")
     # parser.add_argument("-p", "--procs", type=int, help="Number of processes")

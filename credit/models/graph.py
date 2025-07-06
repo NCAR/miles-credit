@@ -166,7 +166,7 @@ def load_graph(edge_path, hierarchy, partition_size, min_seps, max_seps, reverse
     }
 
 
-class GraphModel(BaseModel):
+class GraphGRUNet(BaseModel):
     """
     This model constructs a hierarchical bidirectional graph architecture using DGL, enabling fine-to-coarse
     and coarse-to-fine message passing. It incorporates configurable downsampling blocks and processor layers.

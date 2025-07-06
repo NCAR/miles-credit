@@ -149,6 +149,10 @@ def predict(rank, world_size, conf, backend=None, p=None):
             f'Number of forecast inits ({len(forecasts)}) given by conf["predict"]["duration"] x len(conf["predict"]["start_hours"]) should be divisible by number of processes/GPUs ({world_size})'
         )
 
+    is_partitioned = False # Needed to partition the graph for the graph model
+    if conf["model"]["type"] in {"graph", "graph_no"}:
+        is_partitioned = True
+        
     dataset = Predict_Dataset_Batcher(
         varname_upper_air=data_config["varname_upper_air"],
         varname_surface=data_config["varname_surface"],
@@ -169,8 +173,8 @@ def predict(rank, world_size, conf, backend=None, p=None):
         transform=load_transforms(conf),
         sst_forcing=data_config["sst_forcing"],
         batch_size=batch_size,
-        rank=rank,
-        world_size=world_size,
+        rank=0 if is_partitioned else rank,
+        world_size=1 if is_partitioned else world_size,
     )
 
     # Use a custom DataLoader so we get the len correct
@@ -180,6 +184,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
 
     # Load the model
+    conf["model"]["world_size"] = world_size  # Graph model needs this info
     if conf["predict"]["mode"] == "none":
         model = load_model(conf, load_weights=True).to(device)
 
