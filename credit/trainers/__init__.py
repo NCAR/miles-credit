@@ -5,6 +5,7 @@ import logging
 from credit.trainers.trainerERA5 import Trainer as TrainerERA5
 from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
 from credit.trainers.trainer404 import Trainer as Trainer404
+from credit.trainers.ic_optimization import Trainer as TrainerIC
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ trainer_types = {
         TrainerERA5,
         "Loading a single or multi-step trainer for the CAM dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
+    "ic-opt": (TrainerIC, "Loading an initial condition optimizer training class"),
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
 }
 
