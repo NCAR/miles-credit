@@ -234,6 +234,7 @@ def predict(rank, world_size, conf, p):
     elif conf["predict"]["mode"] == "ddp":
         model = load_model(conf).to(device)
         model = distributed_model_wrapper(conf, model, device)
+        save_loc = os.path.expandvars(conf["save_loc"])
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
         load_msg = model.module.load_state_dict(
@@ -326,7 +327,7 @@ def predict(rank, world_size, conf, p):
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
             y_pred_trans = state_transformer.inverse_transform(y_pred.cpu())
-
+            print("processing")
             result = p.apply_async(
                 process_forecast,
                 (
@@ -382,7 +383,7 @@ def predict(rank, world_size, conf, p):
     return 0
 
 
-if __name__ == "__main__":
+def main_cli():
     description = "Rollout Realtime AI-NWP forecasts"
     parser = ArgumentParser(description=description)
     # -------------------- #
@@ -502,3 +503,7 @@ if __name__ == "__main__":
         # Ensure all processes are finished
         pool.close()
         pool.join()
+
+
+if __name__ == "__main__":
+    main_cli()
