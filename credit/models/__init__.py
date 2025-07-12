@@ -8,7 +8,8 @@ from credit.models.unet import SegmentationModel
 from credit.models.unet404 import SegmentationModel404
 from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
-from credit.models.graph import GraphResTransfGRU
+from credit.models.graph import GraphGRUNet
+from credit.models.graph_no import GraphGRUNet_no
 from credit.models.debugger_model import DebuggerModel
 from credit.models.crossformer_ensemble import CrossFormerWithNoise
 
@@ -29,7 +30,8 @@ model_types = {
     "unet404": (SegmentationModel404, "Loading unet404 model"),
     "fuxi": (Fuxi, "Loading Fuxi model"),
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
-    "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
+    "graph": (GraphGRUNet, "Loading Graph GRU model"),
+    "graph_no": (GraphGRUNet_no, "Loading Graph GRU model without m/s"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
 }
 

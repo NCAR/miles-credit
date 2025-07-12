@@ -242,6 +242,7 @@ def main(rank, world_size, conf, backend=None, trial=False):
     seed_everything(seed)
 
     # model
+    conf["model"]["world_size"] = world_size # Graph model needs this info
     m = load_model(conf)
 
     # have to send the module to the correct device first

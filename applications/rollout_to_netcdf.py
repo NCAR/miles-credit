@@ -234,6 +234,10 @@ def predict(rank, world_size, conf, p):
             f"number of forecast init times {len(forecasts)} is less than batch_size {batch_size}, will result in under-utilization"
         )
 
+    is_partitioned = False # Needed to partition the graph for the graph model
+    if conf["model"]["type"] in {"graph", "graph_no"}:
+        is_partitioned = True
+        
     dataset = Predict_Dataset_Batcher(
         varname_upper_air=data_config["varname_upper_air"],
         varname_surface=data_config["varname_surface"],
@@ -254,8 +258,8 @@ def predict(rank, world_size, conf, p):
         transform=load_transforms(conf),
         sst_forcing=data_config["sst_forcing"],
         batch_size=batch_size,
-        rank=rank,
-        world_size=world_size,
+        rank=0 if is_partitioned else rank,
+        world_size=1 if is_partitioned else world_size,
         skip_target=True,
     )
 
@@ -269,6 +273,7 @@ def predict(rank, world_size, conf, p):
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
 
     # Load the model
+    conf["model"]["world_size"] = world_size  # Graph model needs this info
     if conf["predict"]["mode"] == "none":
         model = load_model(conf, load_weights=True).to(device)
     elif conf["predict"]["mode"] == "ddp":
@@ -301,7 +306,7 @@ def predict(rank, world_size, conf, p):
         save_datetimes = [0] * len(forecasts)
 
         # model inference loop
-        for batch in data_loader:
+        for item_i, batch in enumerate(data_loader):
             batch_size = batch["datetime"].shape[0]
             forecast_step = batch["forecast_step"].item()
 
@@ -366,18 +371,23 @@ def predict(rank, world_size, conf, p):
                 input_dict = {"y_pred": y_pred, "x": x}
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
-
-            result = p.apply_async(
-                result_processor.process,
-                (
-                    y_pred.cpu(),
-                    forecast_step,
-                    forecast_count,
-                    batch["datetime"],
-                    save_datetimes,
-                ),
-            )
-            results.append(result)
+                
+            # When data is partitioned (as in the graph model), 
+            # the gather operation results in all GPUs receiving the same data. 
+            # To avoid redundant saving, use `item_i % world_size == rank` 
+            # to distribute the save task across GPUs.
+            if not is_partitioned or item_i % world_size == rank:
+                result = p.apply_async(
+                    result_processor.process,
+                    (
+                        y_pred.cpu(),
+                        forecast_step,
+                        forecast_count,
+                        batch["datetime"],
+                        save_datetimes,
+                    ),
+                )
+                results.append(result)
 
             # use `varnum_diag > 0` to check if diagnostic vars exists
             # use previous step y_pred as the next step input
@@ -407,6 +417,7 @@ def predict(rank, world_size, conf, p):
                 # Wait for processes to finish
                 for result in results:
                     result.get()
+                results = [] # Empty the list for new set of results
 
                 y_pred = None
 
