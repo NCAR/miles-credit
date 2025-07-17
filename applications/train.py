@@ -21,8 +21,7 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 
 from credit.seed import seed_everything
-from credit.loss import VariableTotalLoss2D
-from credit.loss_downscaling import DownscalingLoss
+from credit.losses import load_loss
 
 from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
@@ -265,12 +264,8 @@ def main(rank, world_size, conf, backend=None, trial=False):
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
     # Train and validation losses
-    if is_downscaling:
-        train_criterion = DownscalingLoss(conf, train_dataset.tnames)
-        valid_criterion = DownscalingLoss(conf, valid_dataset.tnames, validation=True)
-    else:
-        train_criterion = VariableTotalLoss2D(conf)
-        valid_criterion = VariableTotalLoss2D(conf, validation=True)
+    train_criterion = load_loss(conf)
+    valid_criterion = load_loss(conf, validation=True)
 
     # Set up some metrics
     if is_downscaling:

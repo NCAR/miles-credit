@@ -1,4 +1,4 @@
-# Installing CREDIT from Scratch
+# Installing CREDIT from source
 
 If you want to take advantage of the full power of CREDIT,
 which includes scaling training across multiple nodes, you 
@@ -17,7 +17,7 @@ Mac or Linux laptop.
 ### MacOS (Intel or ARM)
 1. First, install either the [Homebrew](https://brew.sh/) or [MacPorts](https://www.macports.org/) package managers 
 so you can easily install all the system-level dependencies and other helpful Linux programs like wget, gcc, etc.
-Further instructions will assume the use of homebrew, but should also work for MacPorts. Homebrew
+Further instructions will assume the use of Homebrew, but should also work for MacPorts. Homebrew
 should also install the XCode Command Line tools, which include git and clang.
 2. Install the following programs with the `brew install <program>`
 command.

@@ -46,5 +46,6 @@ dependencies:
     - haversine
     - torchsummary
     - sphinx-autoapi
+    - properscoring
     - .
 

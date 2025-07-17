@@ -367,6 +367,7 @@ loss:
     # primary training loss
     # options: mse, msle, mae, huber, logcosh, xtanh, xsigmoid
     training_loss: "mse"
+    training_loss_parameters: {}
 
     # not yet implemented for downscaling:
     use_power_loss: False
@@ -374,15 +375,16 @@ loss:
     spectral_lambda_reg: 0.1
     spectral_wavenum_init: 20
 
-    # not appliable for downscaling:
+    # lat-weighting is not appliable for downscaling
+    use_latitude_weights: False
     # latitude_weights: <path>
 
     # not yet implemented for downscaling
     use_variable_weights: False
     # variable_weights:
-    #     dataset:
-    #         2dvar: 1.0
-    #         3dvar: [0.1, 0.2, 0.3, 0.4, 0.5]
+    #     <dataset>:
+    #         <2dvar>: 1.0
+    #         <3dvar>: [0.1, 0.2, 0.3, 0.4, 0.5]
 
 predict:
 

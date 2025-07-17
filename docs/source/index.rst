@@ -43,6 +43,9 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    Training a Model <Training.md>
    Running Inference <Inference.md>
    Evaluation and Metrics <Evaluation.md>
+   Ensemble Training <Ensembles.md>
+   Ensemble Inference <EnsemblesInference.md>
+   Working with Loss Functions <Losses.md>
 
 .. toctree::
    :maxdepth: 2

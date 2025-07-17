@@ -1416,7 +1416,7 @@ pbs:
 
 ## Additional Resources  
 
-- **NCAR HPC Guide**: *[Insert Link]*  
+[NCAR HPC Guide](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/)
 
 ---
 

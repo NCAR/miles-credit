@@ -1,0 +1,181 @@
+U:
+    long_name: "U component of wind"
+    standard_name: "eastward_wind"
+    short_name: "u"
+    units: "m s**-1"
+    _FillValue: 9.999e+20
+
+V:
+    long_name: "V component of wind"
+    standard_name: "northward_wind"
+    short_name: "v"
+    units: "m s**-1"
+    _FillValue: 9.999e+20
+
+T:
+    long_name: "Air temperature"
+    standard_name: "air_temperature"
+    short_name: "t"
+    units: "K"
+    _FillValue: 9.999e+20
+
+Qtot:
+    long_name: "Total specific humidity"
+    standard_name: "specific_humidity"
+    short_name: "qtot"
+    units: "kg kg**-1"
+    _FillValue: 9.999e+20
+
+PS:
+    long_name: "Surface pressure"
+    standard_name: "surface_air_pressure"
+    short_name: "ps"
+    units: "Pa"
+    _FillValue: 9.999e+20
+
+TREFHT:
+    long_name: "Reference height temperature (2 m)"
+    standard_name: "air_temperature"
+    short_name: "trefht"
+    units: "K"
+    _FillValue: 9.999e+20
+
+SST:
+    long_name: "Sea surface temperature"
+    standard_name: "sea_surface_temperature"
+    short_name: "sst"
+    units: "K"
+    _FillValue: 9.999e+20
+
+TS:
+    long_name: "Surface temperature (radiative)"
+    standard_name: "surface_temperature"
+    short_name: "ts"
+    units: "K"
+    _FillValue: 9.999e+20
+
+SOILWATER_10CM:
+    long_name: "Soil liquid water + ice in top 10cm of soil (veg land units only)"
+    standard_name: "volumetric_soil_moisture_content"
+    short_name: "soilw_10cm"
+    units: "m3 m**-3"
+    _FillValue: 9.999e+20
+
+SOLIN:
+    long_name: "Incoming solar radiation at top of atmosphere"
+    standard_name: "toa_incoming_shortwave_flux"
+    short_name: "solin"
+    units: "W m**-2"
+    _FillValue: 9.999e+20
+
+ICEFRAC:
+    long_name: "Sea ice area fraction"
+    standard_name: "sea_ice_area_fraction"
+    short_name: "icefrac"
+    units: "1"
+    _FillValue: 9.999e+20
+
+co2vmr_3d:
+    long_name: "Carbon dioxide volume mixing ratio"
+    standard_name: "mole_fraction_of_carbon_dioxide_in_air"
+    short_name: "co2"
+    units: "mol mol**-1"
+    _FillValue: 9.999e+20
+
+PRECT:
+    long_name: "Total precipitation rate"
+    standard_name: "precipitation_rate"
+    short_name: "prect"
+    units: "m s**-1"
+    _FillValue: 9.999e+20
+
+CLDHGH:
+    long_name: "High cloud fraction"
+    standard_name: "cloud_area_fraction_in_atmosphere_layer"
+    short_name: "cldhgh"
+    units: "1"
+    _FillValue: 9.999e+20
+
+CLDLOW:
+    long_name: "Low cloud fraction"
+    standard_name: "cloud_area_fraction_in_atmosphere_layer"
+    short_name: "cldlow"
+    units: "1"
+    _FillValue: 9.999e+20
+
+CLDMED:
+    long_name: "Mid-level cloud fraction"
+    standard_name: "cloud_area_fraction_in_atmosphere_layer"
+    short_name: "cldmed"
+    units: "1"
+    _FillValue: 9.999e+20
+
+TAUX:
+    long_name: "Zonal surface stress"
+    standard_name: "surface_downward_eastward_stress"
+    short_name: "taux"
+    units: "N m**-2"
+    _FillValue: 9.999e+20
+
+TAUY:
+    long_name: "Meridional surface stress"
+    standard_name: "surface_downward_northward_stress"
+    short_name: "tauy"
+    units: "N m**-2"
+    _FillValue: 9.999e+20
+
+U10:
+    long_name: "10 metre zonal wind"
+    standard_name: "eastward_wind"
+    short_name: "u10"
+    units: "m s**-1"
+    _FillValue: 9.999e+20
+
+QFLX:
+    long_name: "Surface water flux (evaporation)"
+    standard_name: "surface_downward_water_flux"
+    short_name: "qflx"
+    units: "kg m**-2 s**-1"
+    _FillValue: 9.999e+20
+
+FSNS:
+    long_name: "Surface net shortwave flux"
+    standard_name: "surface_net_downward_shortwave_flux"
+    short_name: "fsns"
+    units: "W m**-2"
+    _FillValue: 9.999e+20
+
+FLNS:
+    long_name: "Surface net longwave flux"
+    standard_name: "surface_net_downward_longwave_flux"
+    short_name: "flns"
+    units: "W m**-2"
+    _FillValue: 9.999e+20
+
+FSNT:
+    long_name: "TOA net shortwave flux"
+    standard_name: "toa_net_downward_shortwave_flux"
+    short_name: "fsnt"
+    units: "W m**-2"
+    _FillValue: 9.999e+20
+
+FLNT:
+    long_name: "TOA net longwave flux"
+    standard_name: "toa_net_downward_longwave_flux"
+    short_name: "flnt"
+    units: "W m**-2"
+    _FillValue: 9.999e+20
+
+SHFLX:
+    long_name: "Surface sensible heat flux"
+    standard_name: "surface_upward_sensible_heat_flux"
+    short_name: "shflx"
+    units: "W m**-2"
+    _FillValue: 9.999e+20
+
+LHFLX:
+    long_name: "Surface latent heat flux"
+    standard_name: "surface_upward_latent_heat_flux"
+    short_name: "lhflx"
+    units: "W m**-2"
+    _FillValue: 9.999e+20
