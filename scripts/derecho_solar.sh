@@ -7,16 +7,16 @@
 #PBS -l job_priority=regular
 #PBS -j oe
 #PBS -k eod
-#PBS -J 2025-2030
-module load conda craype/2.7.23 cray-mpich/8.1.27
+#PBS -J 2020-2026
+module load conda craype/2.7.31 cray-mpich/8.1.29
 conda activate hcredit
 cd ..
 mpiexec -n 512 -ppn 128 python -u applications/calc_global_solar.py \
   -s "${PBS_ARRAY_INDEX}-01-01" \
-  -e "${PBS_ARRAY_INDEX}-12-31 18:00" \
-  -i /glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc  \
-  -t 6h \
+  -e "${PBS_ARRAY_INDEX}-12-31 23:00" \
+  -i /glade/campaign/cisl/aiml/credit/static_scalers/static_whole_20250416.nc  \
+  -t 1h \
   -u 10Min \
-  -o /glade/derecho/scratch/dgagne/credit_solar_nc_6h_0.25deg/
+  -o /glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg_20250418/
 
 #  -o /glade/derecho/scratch/dgagne/credit_solar_6h_1deg/

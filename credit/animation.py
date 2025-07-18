@@ -35,6 +35,10 @@ def gp_to_height_dam(gp):
     return gp / GRAVITY / 10.0
 
 
+def pa_to_hpa(pressure):
+    return pressure / 100.0
+
+
 variable_transforms = {
     "T": k_to_c,
     "Z": gp_to_height_dam,
@@ -45,6 +49,9 @@ variable_transforms = {
     "Q_PRES": kgkg_to_gkg,
     "Z_PRES": gp_to_height_dam,
     "T_PRES": k_to_c,
+    "P": pa_to_hpa,
+    "SP": pa_to_hpa,
+    "mean_sea_level_pressure": pa_to_hpa,
 }
 
 
@@ -138,7 +145,7 @@ def plot_global_animation(
     f_dates = pd.date_range(
         start=init_date + pd.Timedelta(hours=forecast_step),
         end=init_date + pd.Timedelta(hours=final_forecast_step),
-        freq=forecast_step,
+        freq=f"{forecast_step:d}h",
     )
     if save_kwargs is None:
         save_kwargs = dict(writer="ffmpeg", fps=5, dpi=300)
@@ -152,16 +159,19 @@ def plot_global_animation(
 
         def plot_step(i):
             f_date = f_dates[i]
+            print(f_date)
             f_date_str = f_date.strftime(date_format)
             ax.clear()
             ax.set_title(f"{title} Valid {f_date_str}", fontsize=fontsize)
             if coastline_kwargs is not None:
                 ax.coastlines(**coastline_kwargs)
+            else:
+                ax.coastlines()
             if border_kwargs is not None:
                 ax.add_feature(cfeature.BORDERS, **border_kwargs)
             c_var = contourf_config["variable"]
             level = None
-            if level in contourf_config.keys():
+            if "level" in contourf_config.keys():
                 level = contourf_config["level"]
             if c_var in variable_transforms.keys():
                 if level is not None:
@@ -175,7 +185,6 @@ def plot_global_animation(
                     data_var = f_ds[c_var].loc[f_date, level]
                 else:
                     data_var = f_ds[c_var].loc[f_date, level]
-
             filled_cont = ax.contourf(
                 lon_g,
                 lat_g,
@@ -184,10 +193,11 @@ def plot_global_animation(
                 transform_first=True,
                 **contourf_config["contourf_kwargs"],
             )
+            ax.clabel(filled_cont)
             for c_var, c_var_config in contour_config.items():
                 c_var_name = c_var_config["variable"]
                 level = None
-                if level in c_var_config.keys():
+                if "level" in c_var_config.keys():
                     level = c_var_config["level"]
                 if c_var_name in variable_transforms.keys():
                     if level is not None:
@@ -207,7 +217,7 @@ def plot_global_animation(
                     **c_var_config["contour_kwargs"],
                 )
                 ax.clabel(reg_cont)
-            plt.colorbar(filled_cont, ax=ax, **colorbar_kwargs)
+                # plt.colorbar(filled_cont, ax=ax, **colorbar_kwargs)
             return
 
         ani = animation.FuncAnimation(fig, plot_step, frames=f_dates.size)
@@ -215,11 +225,130 @@ def plot_global_animation(
     return
 
 
-def plot_regional_animation():
+def plot_regional_animation(
+    forecast_dir: str,
+    init_date: str,
+    forecast_step: int,
+    final_forecast_step: int,
+    extent,
+    output_video_file: str = "./credit_prediction.mp4",
+    contourf_config: dict = None,
+    contour_config: dict = None,
+    projection_type: str = "robinson",
+    projection_config: dict = None,
+    title: str = "CREDIT Prediction",
+    date_format: str = "%Y-%m-%d %HZ",
+    figure_kwargs: dict = None,
+    axes_rect: tuple = (0.02, 0.02, 0.98, 0.96),
+    fontsize: int = 12,
+    coastline_kwargs: dict = None,
+    border_kwargs: dict = None,
+    colorbar_kwargs: dict = None,
+    save_kwargs: dict = None,
+):
     """
     Not implemented yet.
 
     Returns:
 
     """
+    if contourf_config is None:
+        contourf_config = dict(
+            variable="Q500",
+            contourf_kwargs=dict(
+                levels=[1, 2, 3, 4, 5], cmap="viridis", vmin=1, vmax=5, extend="max"
+            ),
+        )
+    if contour_config is None:
+        contour_config = dict(
+            Z500=dict(levels=np.arange(500, 605, 5), cmap="Purples"),
+            T500=dict(levels=np.arange(-40, 10, 5), cmap="RdBu_r"),
+        )
+    if projection_config is None:
+        projection_config = dict()
+    if figure_kwargs is None:
+        figure_kwargs = dict(figsize=(8, 6), dpi=300)
+
+    init_date = pd.Timestamp(init_date)
+    f_dates = pd.date_range(
+        start=init_date + pd.Timedelta(hours=forecast_step),
+        end=init_date + pd.Timedelta(hours=final_forecast_step),
+        freq=f"{forecast_step:d}h",
+    )
+    if save_kwargs is None:
+        save_kwargs = dict(writer="ffmpeg", fps=5, dpi=300)
+    with xr.open_mfdataset(os.path.join(forecast_dir, "*.nc")) as f_ds:
+        fig = plt.figure(**figure_kwargs)
+        ax = fig.add_axes(
+            axes_rect, projection=projections[projection_type](**projection_config)
+        )
+        ax.set_extent(extent, crs=ccrs.PlateCarree())
+        lon_g, lat_g = np.meshgrid(f_ds["longitude"], f_ds["latitude"])
+        ll_proj = ccrs.PlateCarree()
+
+        def plot_step(i):
+            f_date = f_dates[i]
+            print(f_date)
+            f_date_str = f_date.strftime(date_format)
+            ax.clear()
+            ax.set_title(f"{title} Valid {f_date_str}", fontsize=fontsize)
+            if coastline_kwargs is not None:
+                ax.coastlines(**coastline_kwargs)
+            else:
+                ax.coastlines()
+            if border_kwargs is not None:
+                ax.add_feature(cfeature.BORDERS, **border_kwargs)
+            c_var = contourf_config["variable"]
+            level = None
+            if "level" in contourf_config.keys():
+                level = contourf_config["level"]
+            if c_var in variable_transforms.keys():
+                if level is not None:
+                    data_var = variable_transforms[c_var](
+                        f_ds[c_var].loc[f_date, level]
+                    )
+                else:
+                    data_var = variable_transforms[c_var](f_ds[c_var].loc[f_date])
+            else:
+                if level is not None:
+                    data_var = f_ds[c_var].loc[f_date, level]
+                else:
+                    data_var = f_ds[c_var].loc[f_date, level]
+            filled_cont = ax.contourf(
+                lon_g,
+                lat_g,
+                data_var,
+                transform=ll_proj,
+                transform_first=True,
+                **contourf_config["contourf_kwargs"],
+            )
+            ax.clabel(filled_cont)
+            for c_var, c_var_config in contour_config.items():
+                c_var_name = c_var_config["variable"]
+                level = None
+                if "level" in c_var_config.keys():
+                    level = c_var_config["level"]
+                if c_var_name in variable_transforms.keys():
+                    if level is not None:
+                        data_var = variable_transforms[c_var_name](
+                            f_ds[c_var_name].loc[f_date, level]
+                        )
+                    else:
+                        data_var = variable_transforms[c_var_name](
+                            f_ds[c_var_name].loc[f_date]
+                        )
+                reg_cont = ax.contour(
+                    lon_g,
+                    lat_g,
+                    data_var,
+                    transform=ll_proj,
+                    transform_first=True,
+                    **c_var_config["contour_kwargs"],
+                )
+                ax.clabel(reg_cont)
+                # plt.colorbar(filled_cont, ax=ax, **colorbar_kwargs)
+            return
+
+        ani = animation.FuncAnimation(fig, plot_step, frames=f_dates.size)
+        ani.save(output_video_file, **save_kwargs)
     return
