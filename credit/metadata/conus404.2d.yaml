@@ -1,0 +1,59 @@
+PREC_ACC_NC:
+    units = "mm"
+    standard_name = "lwe_thickness_of_precipitation_amount"
+    long_name = "Precipitation (accumulated over last hour)"
+    coordinates = "lon lat"
+
+PSFC:
+    units = "Pa"
+    standard_name = "surface_air_pressure"
+    long_name = "SFC PRESSURE"
+    coordinates = "lon lat"
+
+Q2:
+    units = "kg kg-1"
+    standard_name = "humidity_mixing_ratio"
+    long_name = "Water vapor mixing ratio at 2 meters"
+    coordinates = "lon lat"
+
+SNOW:
+    long_name = "SNOW WATER EQUIVALENT"
+    standard_name = "surface_snow_amount"
+    units = "kg m-2"
+    coordinates = "lon lat"
+
+SWDNB:
+    units = "W m-2"
+    standard_name = "surface_downwelling_shortwave_flux_in_air"
+    long_name = "INSTANTANEOUS DOWNWELLING SHORTWAVE FLUX AT BOTTOM"
+    coordinates = "lon lat"
+
+T2:
+    units = "K"
+    standard_name = "air_temperature"
+    long_name = "TEMP at 2 M"
+    coordinates = "lon lat"
+
+TD2:
+    units = "K"
+    standard_name = "dew_point_temperature"
+    long_name = "2-m dewpoint temperature"
+    coordinates = "lon lat"
+
+U10:
+    units = "m s-1"
+    standard_name = "eastward_wind"
+    long_name = "U-component wind with respect to model grid at 10 meters"
+    coordinates = "lon lat"
+
+V10:
+    units = "m s-1"
+    standard_name = "northward_wind"
+    long_name = "V-component wind with respect to model grid at 10 meters"
+    coordinates = "lon lat"
+
+totalVap:
+    units = "kg m-2"
+    standard_name = "atmosphere_mass_content_of_water_vapor"
+    long_name = "Column-integrated water vapor content"
+    coordinates = "lon lat"
