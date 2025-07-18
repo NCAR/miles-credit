@@ -116,11 +116,7 @@ class XTanhLoss(torch.nn.Module):
             torch.Tensor: X-Tanh loss value.
         """
         ey_t = y_t - y_prime_t + 1e-12
-        return (
-            torch.mean(ey_t * torch.tanh(ey_t))
-            if self.reduction == "mean"
-            else ey_t * torch.tanh(ey_t)
-        )
+        return torch.mean(ey_t * torch.tanh(ey_t)) if self.reduction == "mean" else ey_t * torch.tanh(ey_t)
 
 
 class XSigmoidLoss(torch.nn.Module):
@@ -182,9 +178,7 @@ class MSLELoss(nn.Module):
         Returns:
             torch.Tensor: MSLE loss value.
         """
-        log_prediction = torch.log(
-            prediction.abs() + 1
-        )  # Adding 1 to avoid logarithm of zero
+        log_prediction = torch.log(prediction.abs() + 1)  # Adding 1 to avoid logarithm of zero
         log_target = torch.log(target.abs() + 1)
         loss = F.mse_loss(log_prediction, log_target, reduction=self.reduction)
         return loss
@@ -232,12 +226,8 @@ class KCRPSLoss(nn.Module):
 
     def forward(self, target, pred):
         # integer division but will error out next op if there is a remainder
-        ensemble_size = (
-            pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
-        )
-        pred = pred.view(
-            target.shape[0], ensemble_size, *target.shape[1:]
-        )  # b, ensemble, c, t, lat, lon
+        ensemble_size = pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
+        pred = pred.view(target.shape[0], ensemble_size, *target.shape[1:])  # b, ensemble, c, t, lat, lon
         # apply single_sample_forward to each dim
         target = target.unsqueeze(1)
         return self.batched_forward(target, pred).squeeze(1)
@@ -256,9 +246,7 @@ class KCRPSLoss(nn.Module):
         pred = torch.movedim(pred, 0, -1)
         return self._kernel_crps_implementation(pred, target, self.biased)
 
-    def _kernel_crps_implementation(
-        self, pred: torch.Tensor, obs: torch.Tensor, biased: bool
-    ) -> torch.Tensor:
+    def _kernel_crps_implementation(self, pred: torch.Tensor, obs: torch.Tensor, biased: bool) -> torch.Tensor:
         """An O(m log m) implementation of the kernel CRPS formulas"""
         skill = torch.abs(pred - obs[..., None]).mean(-1)
         pred, _ = torch.sort(pred)
@@ -348,10 +336,7 @@ class SpectralLoss2D(torch.nn.Module):
             target_fft_mean = torch.mean(target_fft_abs, dim=(fft_dim - 1))
 
         # Compute MSE, no sqrt according to FouRKS paper/ repo
-        loss = torch.square(
-            out_fft_mean[..., self.wavenum_init :]
-            - target_fft_mean[..., self.wavenum_init :]
-        )
+        loss = torch.square(out_fft_mean[..., self.wavenum_init :] - target_fft_mean[..., self.wavenum_init :])
         loss = loss.mean()
         return loss.to(device=device, dtype=dtype)
 
@@ -399,19 +384,12 @@ class PSDLoss(nn.Module):
         # Calculate mean of squared distance weighted by latitude
         lat_shape = pred_psd.shape[-2]
         if weights is None:  # weights for a normal average
-            weights = torch.full((1, lat_shape), 1 / lat_shape, dtype=torch.float32).to(
-                device=device, dtype=dtype
-            )
+            weights = torch.full((1, lat_shape), 1 / lat_shape, dtype=torch.float32).to(device=device, dtype=dtype)
         else:
-            weights = (
-                weights.permute(0, 2, 1).to(device=device, dtype=dtype) / weights.sum()
-            )
+            weights = weights.permute(0, 2, 1).to(device=device, dtype=dtype) / weights.sum()
             # (1, lat, 1) -> (1, 1, lat)
         # (B, C, t, lat, coeffs)
-        sq_diff = (
-            true_psd_log[..., self.wavenum_init :]
-            - pred_psd_log[..., self.wavenum_init :]
-        ) ** 2
+        sq_diff = (true_psd_log[..., self.wavenum_init :] - pred_psd_log[..., self.wavenum_init :]) ** 2
 
         loss = torch.mean(torch.matmul(weights, sq_diff))
         # (B, C, t, lat, coeffs) -> (B, C, t, 1, coeffs) -> ()
@@ -420,9 +398,7 @@ class PSDLoss(nn.Module):
     def get_psd(self, f_x, device, dtype):
         # (B, C, t, lat, lon)
         f_k = torch.fft.rfft(f_x, dim=-1, norm="forward")
-        mult_by_two = torch.full(f_k.shape[-1:], 2.0, dtype=torch.float32).to(
-            device=device, dtype=dtype
-        )
+        mult_by_two = torch.full(f_k.shape[-1:], 2.0, dtype=torch.float32).to(device=device, dtype=dtype)
         mult_by_two[0] = 1.0  # except first coord
         magnitudes = torch.real(f_k * torch.conj(f_k)) * mult_by_two
         # (B, C, t, lat, coeffs)
@@ -486,15 +462,12 @@ def variable_weights(conf, channels, frames):
     # surface + diag channels
     N_channels_single = len(varname_surface) + len(varname_diagnostics)
 
-    weights_upper_air = torch.tensor(
-        [conf["loss"]["variable_weights"][var] for var in varname_upper_air]
-    ).view(1, channels * frames, 1, 1)
+    weights_upper_air = torch.tensor([conf["loss"]["variable_weights"][var] for var in varname_upper_air]).view(
+        1, channels * frames, 1, 1
+    )
 
     weights_single = torch.tensor(
-        [
-            conf["loss"]["variable_weights"][var]
-            for var in (varname_surface + varname_diagnostics)
-        ]
+        [conf["loss"]["variable_weights"][var] for var in (varname_surface + varname_diagnostics)]
     ).view(1, N_channels_single, 1, 1)
 
     # Combine all weights along the color channel
@@ -566,11 +539,7 @@ class VariableTotalLoss2D(torch.nn.Module):
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
 
-        levels = (
-            conf["model"]["levels"]
-            if "levels" in conf["model"]
-            else conf["model"]["frames"]
-        )
+        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
@@ -589,13 +558,10 @@ class VariableTotalLoss2D(torch.nn.Module):
             logger.info("Using variable weights in loss calculations")
 
             var_weights = [
-                value if isinstance(value, list) else [value]
-                for value in conf["loss"]["variable_weights"].values()
+                value if isinstance(value, list) else [value] for value in conf["loss"]["variable_weights"].values()
             ]
 
-            var_weights = np.array(
-                [item for sublist in var_weights for item in sublist]
-            )
+            var_weights = np.array([item for sublist in var_weights for item in sublist])
 
             self.var_weights = torch.from_numpy(var_weights)
         # ------------------------------------------------------------- #
@@ -607,21 +573,13 @@ class VariableTotalLoss2D(torch.nn.Module):
                 wavenum_init=conf["loss"]["spectral_wavenum_init"], reduction="none"
             )
 
-        self.use_power_loss = (
-            conf["loss"]["use_power_loss"]
-            if "use_power_loss" in conf["loss"]
-            else False
-        )
+        self.use_power_loss = conf["loss"]["use_power_loss"] if "use_power_loss" in conf["loss"] else False
         if self.use_power_loss:
             self.power_lambda_reg = conf["loss"]["spectral_lambda_reg"]
-            self.power_loss = PSDLoss(
-                wavenum_init=conf["loss"]["spectral_wavenum_init"]
-            )
+            self.power_loss = PSDLoss(wavenum_init=conf["loss"]["spectral_wavenum_init"])
 
         self.validation = validation
-        if (
-            conf["loss"]["training_loss"] == "KCRPS"
-        ):  # for ensembles, load same loss for train and valid
+        if conf["loss"]["training_loss"] == "KCRPS":  # for ensembles, load same loss for train and valid
             self.loss_fn = load_loss(self.training_loss, reduction="none")
         elif self.validation:
             self.loss_fn = nn.L1Loss(reduction="none")
@@ -663,16 +621,9 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         # Add the spectral loss
         if not self.validation and self.use_power_loss:
-            loss += self.power_lambda_reg * self.power_loss(
-                target, pred, weights=self.lat_weights
-            )
+            loss += self.power_lambda_reg * self.power_loss(target, pred, weights=self.lat_weights)
 
         if not self.validation and self.use_spectral_loss:
-            loss += (
-                self.spectral_lambda_reg
-                * self.spectral_loss_surface(
-                    target, pred, weights=self.lat_weights
-                ).mean()
-            )
+            loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=self.lat_weights).mean()
 
         return loss

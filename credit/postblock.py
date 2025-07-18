@@ -9,6 +9,7 @@ Content:
     - GlobalEnergyFixer
 
 """
+
 import torch
 from torch import nn
 
@@ -28,6 +29,7 @@ from credit.skebs import SKEBS
 
 import logging
 from math import pi
+
 PI = pi
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,6 @@ class PostBlock(nn.Module):
             self.operations.append(SKEBS(post_conf))
 
         # global mass fixer
-        print('bingo bongo:', post_conf["global_mass_fixer"]["activate"])
         if post_conf["global_mass_fixer"]["activate"]:
             if post_conf["global_mass_fixer"]["activate_outside_model"] is False:
                 logger.info("GlobalMassFixer registered")
@@ -909,4 +910,3 @@ def concat_fix(y_pred, q_pred_correct, q_ind_start, q_ind_end, N_vars):
             var_list.append(y_pred[:, q_ind_end:, ...])
 
     return torch.cat(var_list, dim=1)
-

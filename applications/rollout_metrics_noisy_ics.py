@@ -494,9 +494,12 @@ def predict(rank, world_size, conf, backend=None, p=None):
             y_true_expanded = y.unsqueeze(0)
 
             rmse_per_channel, std_per_channel = calculate_ensemble_metrics(ensemble_predictions_zscore, y_true_expanded)
+<<<<<<< HEAD:applications/rollout_metrics_noisy_ics.py
             # print("RMSE (averaged over ensemble members):", rmse_per_channel)
             # print("STD (averaged across spatial dims):", std_per_channel)
             # raise
+=======
+>>>>>>> 53d1fab (Addressing DJs comments; cleanup):applications/rollout_ensemble.py
 
             if batch["stop_forecast"].item():
                 # Wait for processes to finish and gather results
