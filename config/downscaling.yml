@@ -63,8 +63,11 @@ image_size: &imsize  # round up to multiples of 128
 #  inference
 
 # 'unused' variables don't actually need to be listed in the yaml
-# file, they're just here for reference and convenience when changing
-# around the model configuration
+# file, but if you include them, the output writer will know to skip
+# over them, which allows you to create general-purpose output
+# templates by extracting a single timestep from the input files.
+# Including them also provides a handy reference for what's available
+# and makes it easier to change around the model configuration.
 
 # listing variables in the order they appear in the netcdf file should
 # result in faster reads from disk.  By default, NCO commands that
@@ -77,7 +80,6 @@ image_size: &imsize  # round up to multiples of 128
 # so the options here correspond to constructor arguments.
 
 # N.B.: variable and dataset names must not have a '.' in them!
-# (TODO: update parser to check)
 
 data_defaults: &ddefault
     <<: *samples
@@ -91,15 +93,6 @@ data_defaults: &ddefault
     # note: first_date and last_date must be quoted so that they
     # remain strings; otherwise the yaml parser converts them to
     # datetime objects, which can't handle non-standard GCM calendars.
-
-    # TODO: currently we're using <<: to make sure each dataset has
-    # the same first_date and last_date, which necessitates a
-    # recursive update of the configuration by the parser when running
-    # in prediction or validation mode.  Instead, we should only
-    # declare first_date and last_date at the conf['data'] level and
-    # have DownscalingDataset pass it on to its constituent Datamaps
-    # when it creates them; that way we can update it once at the top
-    # and be done with it.
     
 data:
     <<: *imsize
@@ -129,7 +122,7 @@ data:
                     - XLAT      # latitude
                     - XLONG     # longitude
             transforms:
-                default: none
+                default: none   # scaled during load; nothing further needed
 
 
         ## NOTE that U and V are on staggered grids that are 1 larger in
@@ -151,6 +144,7 @@ data:
                     - V       # V-component of wind *with respect to model grid*
                 diagnostic:
                     - Z       # geopotential height
+                unused:
             transforms:
                 paramfiles:
                     mmin: 'norms/min.conus404_3d.nc'
@@ -269,11 +263,6 @@ model:
     # channels parameter gets set by calling count_channels() in parser.py
     # all other parameters use default values
 
-    # type: "unet_downscaling" # useful for code development
-    #architecture:
-    #    name: "unet"
-    #    encoder_name: "resnet34"
-    #    encoder_weights: "imagenet"
 
 trainer:
     type: "conus404"
@@ -375,7 +364,7 @@ loss:
     spectral_lambda_reg: 0.1
     spectral_wavenum_init: 20
 
-    # lat-weighting is not appliable for downscaling
+    # lat-weighting is not appliable for RCM downscaling
     use_latitude_weights: False
     # latitude_weights: <path>
 

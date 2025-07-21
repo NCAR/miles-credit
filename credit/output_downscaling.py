@@ -16,8 +16,8 @@ import xarray as xr
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from credit.datamap import VarDict
-from credit.data_downscaling import DownscalingDataset
+from credit.datasets.datamap import VarDict
+from credit.datasets.downscaling_dataset import DownscalingDataset
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ from credit.datasets.era5_multistep_batcher import (
     MultiprocessingBatcher,
     MultiprocessingBatcherPrefetch,
 )
-from credit.data_downscaling import DownscalingDataset
+from credit.datasets.downscaling_dataset import DownscalingDataset
 from credit.datasets import setup_data_loading
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
