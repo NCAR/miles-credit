@@ -130,7 +130,6 @@ The CREDIT framework uses a YAML configuration file with several high-level sect
 
 Each dataset is defined with a new sub-subsection of YAML that describes the dimensions of the samples, the start and end dates you want to use, the file paths of the data, and, most importantly, how the variables in each dataset are used in the model, as well as their associated transformations.
 
-These YAML sections are converted to dictionaries that are used as 
 See `config/downscaling.yml` for detailed examples of how to define datasets.  Also note that the YAML corresponds to arguments passed to the constructors for `DownscalingDataset`, `DataMap`, and `DataTransform` objects, so see the docstrings of those classes for documentation of the available options.
 
 The most important thing to know is that each dataset in the YAML will have a `variables` section with 4 subsections (`prognostic`, `diagnostic`, `boundary`, and `unused`) that define how the variables in the dataset will be used in training and rollout.  The `unused` section exists primarily as a holding space that makes it easier to change the configuration of the dataset around (so you can just cut-and-paste variables from one section to another), but also, if a variable that is in the template netCDF file is listed in the `unused` section, the `OutputWrangler` will skip it when writing data out, which simplifies the creation of templates.
