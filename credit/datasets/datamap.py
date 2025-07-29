@@ -43,7 +43,6 @@ from glob import glob
 import netCDF4 as nc
 import cftime as cf
 import numpy as np
-import xarray as xr
 
 
 class VarDict(TypedDict, total=False):

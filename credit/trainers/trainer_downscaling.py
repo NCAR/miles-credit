@@ -385,6 +385,7 @@ class Trainer(BaseTrainer):
                         # copies each sample in the batch ensemble_size number of times.
                         # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                         # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
+                        ensemble_size = conf["trainer"].get("ensemble_size", 0)
                         if ensemble_size > 1:
                             x = torch.repeat_interleave(x, ensemble_size, 0)
 

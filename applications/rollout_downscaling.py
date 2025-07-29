@@ -1,6 +1,5 @@
 import os
 import sys
-import copy
 import yaml
 import logging
 import warnings
@@ -11,9 +10,7 @@ import multiprocessing as mp
 
 # ---------- #
 # Numerics
-from datetime import datetime, timedelta
-import xarray as xr
-import numpy as np
+# import xarray as xr
 
 # ---------- #
 import torch
@@ -22,13 +19,13 @@ import torch
 # credit
 
 from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
-from credit.distributed import distributed_model_wrapper, setup
+from credit.distributed import distributed_model_wrapper, get_rank_info, setup
 from credit.models import load_model
+from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output_downscaling import OutputWrangler
-from credit.parser import credit_main_parser, predict_data_check
+from credit.parser import credit_main_parser #, predict_data_check
 from credit.pbs import launch_script, launch_script_mpi
 from credit.seed import seed_everything
-from credit.distributed import get_rank_info
 
 
 logger = logging.getLogger(__name__)
@@ -134,6 +131,7 @@ def predict(rank, world_size, conf, p):
     ndiag  = conf['model']['channels']['diagnostic']
     
     # Rollout
+    y_pred = None
     first_loop = True
     with torch.no_grad():
 

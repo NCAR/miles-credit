@@ -17,9 +17,9 @@ from collections import Counter
 
 from credit.data import get_forward_data
 from credit.datasets.downscaling_dataset import DownscalingDataset
-from credit.datasets.datamap import DataMap
+#from credit.datasets.datamap import DataMap
 from credit.datasets.count_channels import count_channels
-from credit.transforms_downscaling import DataTransforms
+#from credit.transforms_downscaling import DataTransforms
 
 def validate_args(function, argdict, context, ignore=[]):
     """

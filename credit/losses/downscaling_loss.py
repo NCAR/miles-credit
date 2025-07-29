@@ -2,7 +2,7 @@ import logging
 import warnings
 
 import torch
-import numpy as np
+#import numpy as np
 
 from credit.losses.base_losses import base_losses
 # from credit.losses.spectral import SpectralLoss2D
