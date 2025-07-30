@@ -60,7 +60,9 @@ def rescale_minmax(x):
 
     '''
     x = x - np.min(x)
-    x = x / np.max(x)
+    xmax = np.max(x)
+    if xmax > 0:
+        x = x / np.max(x)
     return x
 
 

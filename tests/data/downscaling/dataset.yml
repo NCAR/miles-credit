@@ -1,8 +1,8 @@
 # simple yaml file for downscaling unit tests
 
 
-save_loc: /glade/work/$USER/CREDIT_runs/testing/c404/
-seed: 2222  # RNG seed
+#save_loc: /glade/work/$USER/CREDIT_runs/testing/c404/
+#seed: 2222  # RNG seed
 
 
 sampling: &samples
@@ -52,7 +52,7 @@ data:
 
         conus404_3D:
             <<: *ddefault
-            glob: 'conus404/3d/*/conus404.3d.*.nc'
+            glob: 'conus404/3d/conus404.3d.*.nc'
             dim: 3D
             variables:
                 prognostic:
@@ -74,7 +74,7 @@ data:
 
         conus404_2D:
             <<: *ddefault
-            glob: 'conus404/2d/*/conus404.2d.*.nc'
+            glob: 'conus404/2d/conus404.2d.*.nc'
             dim: 2D
             variables:
                 boundary:
@@ -123,7 +123,7 @@ data:
 
         era5_3D:
             <<: *ddefault
-            glob: 'era5/3d/*/era5.3d.*.nc'
+            glob: 'era5/3d/era5.3d.*.nc'
             dim: 3D
             zstride: 6
             variables:
@@ -143,7 +143,7 @@ data:
 
         era5_2D:
             <<: *ddefault
-            glob: 'era5/2d/*/era5.2d.*.nc'
+            glob: 'era5/2d/era5.2d.*.nc'
             dim: 2D
             variables:
                 boundary:
