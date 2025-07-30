@@ -43,7 +43,9 @@ dependencies = [
     "myst_parser",
     "sphinx-book-theme",
     "fsspec",
-    "gcsfs"
+    "gcsfs",
+    "miles-guess",
+    "keras"
    ]
 
 [tool.setuptools]
