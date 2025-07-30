@@ -1,0 +1,1 @@
+../../applications/calc_global_solar.py
