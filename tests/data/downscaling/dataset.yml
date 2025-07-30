@@ -1,0 +1,189 @@
+# simple yaml file for downscaling unit tests
+
+
+save_loc: /glade/work/$USER/CREDIT_runs/testing/c404/
+seed: 2222  # RNG seed
+
+
+sampling: &samples
+    history_len:  2
+    forecast_len: 1
+
+image_size: &imsize 
+    image_width:  5
+    image_height: 4
+
+data_defaults: &ddefault
+    <<: *samples
+
+
+    rootpath: "tests/data/downscaling"
+
+    first_date:   "1980-01-01 01:00:00"
+    last_date:    "1980-01-01 22:00:00"
+
+
+data:
+    <<: *imsize
+    <<: *ddefault
+
+    datasets:
+
+        conus404_static:
+            <<: *ddefault
+            glob: 'conus404/conus404.static.nc'
+            dim: static
+            normalize: True   # scale min,max == [0,1] iff dim = static
+            variables:
+                boundary:
+                    - HGT       # terrain height / orography
+                    - LANDMASK  # land/sea mask (0=water, 1=land)
+                unused:
+                    - COSALPHA  # local cosine of map rotation
+                    - E         # coriolis cosine latitude term
+                    - F         # coriolis sine latitude term
+                    - SINALPHA  # local sine of map rotation
+                    - VAR       # orographic variance
+                    - VAR_SSO   # variance of subgrid-scale orography
+                    - XLAT      # latitude
+                    - XLONG     # longitude
+            transforms:
+                default: none   # scaled during load; nothing further needed
+
+        conus404_3D:
+            <<: *ddefault
+            glob: 'conus404/3d/*/conus404.3d.*.nc'
+            dim: 3D
+            variables:
+                prognostic:
+                    - TK      # air temperature
+                    - U       # U-component of wind *with respect to model grid*
+                    - V       # V-component of wind *with respect to model grid*
+                diagnostic:
+                    - Z       # geopotential height
+                unused:
+                    - P       # total pressure (dataset uses hybrid sigma coordinates)
+                    - QVAPOR  # water vapor mixing ratio
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.conus404_3d.nc'
+                    mmax: 'norms/max.conus404_3d.nc'
+                default:
+                    minmax: paramfile
+
+
+        conus404_2D:
+            <<: *ddefault
+            glob: 'conus404/2d/*/conus404.2d.*.nc'
+            dim: 2D
+            variables:
+                boundary:
+                    - COSZEN  # cosine of solar zenith angle
+                prognostic:
+                    - T2      # 2-meter air temperature
+                    - U10     # u-wind at 10 meters
+                    - V10     # v-wind at 10 meters
+                diagnostic:
+                    - PSFC    # surface pressure
+                unused:
+                    - PREC_ACC_NC # total precip (mm) over previous (1-hr) timestep
+                    - Q2      # water vapor mixing ratio at 2 meters
+                    - SWDNB   # shortwave downwelling at bottom (instantaneous)
+                    - SNOW    # snow water equivalent
+                    - TD2     # 2-meter dewpoint temperature
+                    - totalVap # column-integrated water vapor content
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.conus404_2d.nc'
+                    mmax: 'norms/max.conus404_2d.nc'
+                default:
+                    minmax: paramfile
+                PREC_ACC_NC:
+                    clip:
+                        cmin: 0
+                    minmax: paramfile
+                    power:
+                        exponent: 0.25
+
+
+        solar:
+            <<: *ddefault
+            glob: 'solar/tisr.20km.*.nc'
+            dim: 2D
+            variables:
+                boundary:
+                    - tisr      # TOA incident solar radiation (J/m^2, integral dt)
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.solar.nc'
+                    mmax: 'norms/max.solar.nc'
+                tisr:
+                    minmax: paramfile
+
+
+        era5_3D:
+            <<: *ddefault
+            glob: 'era5/3d/*/era5.3d.*.nc'
+            dim: 3D
+            zstride: 6
+            variables:
+                boundary:
+                    - T   # temperature
+                    - Z   # geopotential
+                unused:
+                    - U   # u-winds
+                    - V   # v-winds
+                    - R   # humidity
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.era5_3d.nc'
+                    mmax: 'norms/max.era5_3d.nc'
+                default:
+                    minmax: paramfile
+
+        era5_2D:
+            <<: *ddefault
+            glob: 'era5/2d/*/era5.2d.*.nc'
+            dim: 2D
+            variables:
+                boundary:
+                    - MSL      # mean sea-level pressure
+                    - VAR_2T   # 2-meter temperature
+                unused:
+                    - SP       # surface pressure
+                    - TCWV     # total column water vapor
+                    - VAR_10U  # 10-meter u-wind
+                    - VAR_10V  # 10-meter v-wind
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.era5_2d.nc'
+                    mmax: 'norms/max.era5_2d.nc'
+                default:
+                    minmax: paramfile
+
+
+predict:
+
+    mode: none  # options: none, ddp, fsdp
+    batch_size: 1
+    ensemble_size: 1
+
+    downscaling:
+        driver: "test"
+        
+        start: "1980-01-01 01:00:00"
+        finish: "1980-01-01 22:00:00"
+
+        get_time_from: "era5_2D"
+
+    output:
+        # location to save output
+        output_dir: "tests/data/downscaling/output"
+
+        templates:
+            dir: "tests/data/downscaling/templates"
+            files:
+                conus404_3D: "conus404.3d.template.nc"
+                conus404_2D: "conus404.2d.template.nc"
+
+        # save_vars: []  # empty list & undefined both mean "all vars"
