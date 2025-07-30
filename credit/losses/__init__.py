@@ -1,6 +1,7 @@
 import logging
 from credit.losses.base_losses import base_losses
 from credit.losses.weighted_loss import VariableTotalLoss2D
+from credit.losses.downscaling_loss import DownscalingLoss
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,13 @@ def load_loss(conf, reduction="none", validation=False):
         ValueError: If the requested loss type is not recognized in `available_losses`.
     """
     loss_conf = conf["loss"]
+
+    is_downscaling = 'datasets' in conf['data']
+    # downscaling could also use_variable_weights, so it needs to come first
+    if is_downscaling:
+        logger.info("Loaded DownscalingLoss")
+        return(DownscalingLoss(conf, validation=validation))
+    
     use_weighted_loss = loss_conf.get("use_latitude_weights", False) or loss_conf.get("use_variable_weights", False)
 
     if use_weighted_loss:

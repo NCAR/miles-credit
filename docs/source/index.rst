@@ -60,6 +60,7 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    Supported Model Architectures <Model_Architectures.md>
    Post Blocks <postblock.md>
    Dataset Structure <DataSets.md>
+   Data Pipeline for Downscaling <downscaling-pipeline.md>
 
 ----
 

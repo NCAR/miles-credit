@@ -2,7 +2,7 @@ import os
 
 import torch
 
-from credit.loss import KCRPSLoss
+from credit.losses.kcrps import KCRPSLoss
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
 CONFIG_FILE_DIR = os.path.join(
