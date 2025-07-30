@@ -1,4 +1,5 @@
 import os
+import sys
 import copy
 import logging
 
@@ -12,6 +13,12 @@ from credit.models.debugger_model import DebuggerModel
 from credit.models.crossformer_ensemble import CrossFormerWithNoise
 from credit.models.crossformer_downscaling import DownscalingCrossFormer
 from credit.models.unet_downscaling import DownscalingSegmentationModel
+from credit.models.crossformer_diffusion import CrossFormerDiffusion
+from credit.models.unet_diffusion import UnetDiffusion
+
+from credit.diffusion import ModifiedGaussianDiffusion
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +27,14 @@ model_types = {
     "crossformer": (
         CrossFormer,
         "Loading the CrossFormer model with a conv decoder head and skip connections ...",
+    ),
+    "crossformer-diffusion": (
+        CrossFormerDiffusion,
+        "Loading A DDPM model with CrossFormer Backbone ....",
+    ),
+    "unet-diffusion": (
+        UnetDiffusion,
+        "Loading A DDPM model with UNET Backbone ....",
     ),
     "crossformer-style": (
         CrossFormerWithNoise,
@@ -52,7 +67,20 @@ def load_fsdp_or_checkpoint_policy(conf):
             FeedForward,
             CrossEmbedLayer,
         }
+    elif "unet" in conf["model"]["type"]:
+        from credit.models.crossformer import (
+            Attention,
+            DynamicPositionBias,
+            FeedForward,
+            CrossEmbedLayer,
+        )
 
+        transformer_layers_cls = {
+            Attention,
+            DynamicPositionBias,
+            FeedForward,
+            CrossEmbedLayer,
+        }
     # FuXi
     # FuXi supports "spectral_norm = True" only
     elif "fuxi" in conf["model"]["type"]:
@@ -114,7 +142,9 @@ def load_model(conf, load_weights=False, model_name=False):
                     ckpt = os.path.join(save_loc, "checkpoint.pt")
 
             if not os.path.isfile(ckpt):
-                raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
+                raise ValueError(
+                    "No saved checkpoint exists. You must train a model first. Exiting."
+                )
 
             logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
@@ -127,7 +157,56 @@ def load_model(conf, load_weights=False, model_name=False):
 
         return model(**model_conf)
 
-    if model_type in model_types:
+    elif model_type == "crossformer-diffusion":
+        model, message = model_types[model_type]
+        logger.info(message)
+        diffusion_config = conf.get("model", {}).get("diffusion")
+        if diffusion_config is not None:
+            diffusion_config = diffusion_config.copy()
+            self_condition = diffusion_config.pop("self_condition", False)
+            condition = diffusion_config.pop("condition", True)
+        else:
+            logger.warning(
+                "The diffusion details were not specified as model:diffusion, exiting"
+            )
+            sys.exit(0)
+
+        if load_weights:
+            if model_name:
+                return model.load_model_name(conf, model_name=model_name)
+            else:
+                return model.load_model(conf)
+
+        return ModifiedGaussianDiffusion(
+            model(**model_conf, self_condition=self_condition, condition=condition),
+            **diffusion_config,
+        )
+
+    elif model_type == "unet-diffusion":
+        model, message = model_types[model_type]
+        logger.info(message)
+        diffusion_config = conf.get("model", {}).get("diffusion")
+        if diffusion_config is not None:
+            diffusion_config = diffusion_config.copy()
+            self_condition = diffusion_config.pop("self_condition", False)
+            condition = diffusion_config.pop("condition", True)
+        else:
+            logger.warning(
+                "The diffusion details were not specified as model:diffusion, exiting"
+            )
+            sys.exit(0)
+
+        if load_weights:
+            if model_name:
+                return model.load_model_name(conf, model_name=model_name)
+            else:
+                return model.load_model(conf)
+
+        return ModifiedGaussianDiffusion(
+            model(**model_conf, self_condition=self_condition, condition=condition),
+            **diffusion_config,
+        )
+    elif model_type in model_types:
         model, message = model_types[model_type]
         logger.info(message)
         if load_weights:
@@ -136,11 +215,11 @@ def load_model(conf, load_weights=False, model_name=False):
             else:
                 return model.load_model(conf)
         return model(**model_conf)
-
     else:
         msg = f"Model type {model_type} not supported. Exiting."
         logger.warning(msg)
         raise ValueError(msg)
+
 
 def load_model_name(conf, model_name, load_weights=False):
     conf = copy.deepcopy(conf)

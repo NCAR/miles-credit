@@ -51,15 +51,9 @@ class CrossFormerWithNoise(CrossFormer):
             # Define separate learnable noise factors for encoder noise layers
             encoder_noise_factors = nn.ParameterList(
                 [
-                    nn.Parameter(
-                        torch.tensor(encoder_noise_factor, dtype=torch.float32)
-                    ),
-                    nn.Parameter(
-                        torch.tensor(encoder_noise_factor, dtype=torch.float32)
-                    ),
-                    nn.Parameter(
-                        torch.tensor(encoder_noise_factor, dtype=torch.float32)
-                    ),
+                    nn.Parameter(torch.tensor(encoder_noise_factor, dtype=torch.float32)),
+                    nn.Parameter(torch.tensor(encoder_noise_factor, dtype=torch.float32)),
+                    nn.Parameter(torch.tensor(encoder_noise_factor, dtype=torch.float32)),
                 ]
             )
             # Encoder noise injection layers
@@ -165,9 +159,7 @@ class CrossFormerWithNoise(CrossFormer):
             x = self.padding_opt.unpad(x)
 
         if self.use_interp:
-            x = F.interpolate(
-                x, size=(self.image_height, self.image_width), mode="bilinear"
-            )
+            x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
         x = x.unsqueeze(2)
 
@@ -272,9 +264,7 @@ class PixelNoiseInjection(nn.Module):
         batch, channels, height, width = feature_map.shape
 
         # Generate per-pixel, per-channel noise
-        pixel_noise = self.noise_factor * torch.randn(
-            batch, channels, height, width, device=feature_map.device
-        )
+        pixel_noise = self.noise_factor * torch.randn(batch, channels, height, width, device=feature_map.device)
 
         # Transform latent noise and reshape
         style = self.noise_transform(noise).view(batch, channels, 1, 1)
@@ -337,9 +327,7 @@ if __name__ == "__main__":
 
     ensemble_model = CrossFormerWithNoise(**crossformer_config).to("cuda")
 
-    x = torch.randn(5, 74, 1, 192, 288).to(
-        "cuda"
-    )  # (batch size * ensemble size, channels, time, height, width)
+    x = torch.randn(5, 74, 1, 192, 288).to("cuda")  # (batch size * ensemble size, channels, time, height, width)
 
     output = ensemble_model(x)
 
