@@ -199,6 +199,9 @@ class DataMap:
     first_date and last_date default to None, which means use the
     first/last timestep in the dataset.  Note that they must be
     YYYY-MM-DD strings (with optional HH:MM:SS), not datetime objects.
+
+    Note also that the time coordinate must be contiguous across the
+    files, with no gaps or overlaps.
     '''
     rootpath:     str
     glob:         str
@@ -286,7 +289,12 @@ class DataMap:
             else:
                 self.first = self.date2tindex(self.first_date)
 
-            if self.last_date is not None:
+            if self.last_date is None:
+                nclast = nc.Dataset(self.filepaths[0], mask_and_scale=False)
+                t_last = nc0.variables["time"][-1]
+                self.last = int((t_last - self.t0) / self.dt)
+                nclast.close()
+            else:
                 self.last = self.date2tindex(self.last_date)
 
             self.length = self.last - self.first + 1 - (self.sample_len - 1)
