@@ -9,6 +9,7 @@ from einops.layers.torch import Rearrange
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
 from credit.boundary_padding import TensorPadding
+from credit.models.unet_attention_modules import load_unet_attention
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,7 @@ class CubeEmbedding(nn.Module):
         patch_size: T, Lat, Lon
     """
 
-    def __init__(
-        self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm
-    ):
+    def __init__(self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm):
         super().__init__()
         patches_resolution = [
             img_size[0] // patch_size[0],
@@ -48,9 +47,7 @@ class CubeEmbedding(nn.Module):
         self.img_size = img_size
         self.patches_resolution = patches_resolution
         self.embed_dim = embed_dim
-        self.proj = nn.Conv3d(
-            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
-        )
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
         else:
@@ -72,7 +69,15 @@ class CubeEmbedding(nn.Module):
 
 class UpBlock(nn.Module):
     def __init__(
-        self, in_chans, out_chans, num_groups, num_residuals=2, upsample_v_conv=False
+        self,
+        in_chans,
+        out_chans,
+        num_groups,
+        num_residuals=2,
+        upsample_v_conv=False,
+        attention_type=None,
+        reduction=32,
+        spatial_kernel=7,
     ):
         super().__init__()
         # self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
@@ -80,12 +85,8 @@ class UpBlock(nn.Module):
         self.upsample_v_conv = upsample_v_conv
 
         if self.upsample_v_conv:
-            self.upsample = nn.Upsample(
-                scale_factor=2, mode="bilinear", align_corners=False
-            )
-            self.conv = nn.Conv2d(
-                in_chans, out_chans, kernel_size=3, stride=1, padding=1
-            )
+            self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+            self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=3, stride=1, padding=1)
         else:
             self.upsample = None
             self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
@@ -94,13 +95,14 @@ class UpBlock(nn.Module):
 
         blk = []
         for i in range(num_residuals):
-            blk.append(
-                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
-            )
+            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
 
         self.b = nn.Sequential(*blk)
+
+        # Load attention mechanism using factory function
+        self.attention = load_unet_attention(attention_type, out_chans, reduction, spatial_kernel)
 
     def forward(self, x):
         if self.upsample_v_conv:
@@ -111,7 +113,13 @@ class UpBlock(nn.Module):
 
         x = self.b(x)
 
-        return x + shortcut
+        x = x + shortcut
+
+        # Apply attention if specified
+        if self.attention is not None:
+            x = self.attention(x)
+
+        return x
 
 
 # cross embed layer
@@ -261,9 +269,7 @@ class Attention(nn.Module):
 
         # split heads
 
-        q, k, v = map(
-            lambda t: rearrange(t, "b (h d) x y -> b h (x y) d", h=heads), (q, k, v)
-        )
+        q, k, v = map(lambda t: rearrange(t, "b (h d) x y -> b h (x y) d", h=heads), (q, k, v))
         q = q * self.scale
 
         sim = einsum("b h i d, b h j d -> b h i j", q, k)
@@ -273,7 +279,8 @@ class Attention(nn.Module):
         pos = torch.arange(-wsz, wsz + 1, device=device)
         rel_pos = torch.stack(torch.meshgrid(pos, pos, indexing="ij"))
         rel_pos = rearrange(rel_pos, "c i j -> (i j) c")
-        biases = self.dpb(rel_pos.float())
+        rel_pos = rel_pos.to(x.dtype)
+        biases = self.dpb(rel_pos)
         rel_pos_bias = biases[self.rel_pos_indices]
 
         sim = sim + rel_pos_bias
@@ -384,8 +391,9 @@ class CrossFormer(BaseModel):
         attn_dropout: float = 0.0,
         ff_dropout: float = 0.0,
         use_spectral_norm: bool = True,
+        attention_type: str = None,
         interp: bool = True,
-        upsample_v_conv=False,
+        upsample_v_conv: bool = False,
         padding_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
@@ -477,9 +485,7 @@ class CrossFormer(BaseModel):
 
         # dimensions
         last_dim = dim[-1]
-        first_dim = (
-            self.input_channels if (patch_height == 1 and patch_width == 1) else dim[0]
-        )
+        first_dim = self.input_channels if (patch_height == 1 and patch_width == 1) else dim[0]
         dims = [first_dim, *dim]
         dim_in_and_out = tuple(zip(dims[:-1], dims[1:]))
 
@@ -532,19 +538,21 @@ class CrossFormer(BaseModel):
         # =================================================================================== #
 
         self.up_block1 = UpBlock(
-            1 * last_dim, last_dim // 2, dim[0], upsample_v_conv=self.upsample_v_conv
+            1 * last_dim, last_dim // 2, dim[0], upsample_v_conv=self.upsample_v_conv, attention_type=attention_type
         )
         self.up_block2 = UpBlock(
             2 * (last_dim // 2),
             last_dim // 4,
             dim[0],
             upsample_v_conv=self.upsample_v_conv,
+            attention_type=attention_type,
         )
         self.up_block3 = UpBlock(
             2 * (last_dim // 4),
             last_dim // 8,
             dim[0],
             upsample_v_conv=self.upsample_v_conv,
+            attention_type=attention_type,
         )
 
         if self.upsample_v_conv:
@@ -573,9 +581,7 @@ class CrossFormer(BaseModel):
                 if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
                     "freeze_base_model_weights", False
                 ):
-                    logger.warning(
-                        "freezing all base model weights due to skebs config"
-                    )
+                    logger.warning("freezing all base model weights due to skebs config")
                     for param in self.parameters():
                         param.requires_grad = False
 
@@ -618,9 +624,7 @@ class CrossFormer(BaseModel):
             x = self.padding_opt.unpad(x)
 
         if self.use_interp:
-            x = F.interpolate(
-                x, size=(self.image_height, self.image_width), mode="bilinear"
-            )
+            x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
         x = x.unsqueeze(2)
 
@@ -657,6 +661,8 @@ if __name__ == "__main__":
     surface_channels = 7
     input_only_channels = 3
     frame_patch_size = 2
+    upsample_v_conv = True
+    attention_type = "scse_standard"
 
     input_tensor = torch.randn(
         1,
@@ -675,6 +681,8 @@ if __name__ == "__main__":
         surface_channels=surface_channels,
         input_only_channels=input_only_channels,
         levels=levels,
+        upsample_v_conv=upsample_v_conv,
+        attention_type=attention_type,
         dim=(128, 256, 512, 1024),
         depth=(2, 2, 18, 2),
         global_window_size=(8, 4, 2, 1),
