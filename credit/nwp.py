@@ -2,10 +2,15 @@ import numpy as np
 import pandas as pd
 from os.path import join
 import xarray as xr
-import fsspec
+from functools import partial
+from multiprocessing import Pool
+
+# import fsspec
 from credit.interp import geopotential_from_model_vars, create_pressure_grid
 from credit.physics_constants import GRAVITY
 import datetime
+import time
+import traceback
 
 try:
     import xesmf as xe
@@ -24,8 +29,6 @@ gfs_map = {
     "spfh": "Q",
     "pressfc": "SP",
     "tmp2m": "t2m",
-    "hgtsfc": "Z_GDS4_SFC",
-    "land": "LSM",
 }
 level_map = {"T500": "T", "U500": "U", "V500": "V", "Q500": "Q", "Z500": "Z"}
 upper_air = ["T", "U", "V", "Q", "Z"]
@@ -38,6 +41,7 @@ def build_GFS_init(
     variables,
     model_level_indices,
     gdas_base_path="https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/",
+    n_procs=1,
 ):
     """
     Create GFS initial conditions on model levels that are interpolated from ECMWF L137 model levels.
@@ -47,6 +51,7 @@ def build_GFS_init(
         variables (list): list of variable names
         model_level_indices (list): list of model level indices to extract from L137 model levels
         gdas_base_path (str): Path to GFS base directory on NOMADS (archives last 10 days) or Google Cloud (since 2021)
+        n_procs (int): Number of processors to use in pool.
 
     Returns:
         (xr.Dataset) Interpolated GFS initial conditions
@@ -61,19 +66,37 @@ def build_GFS_init(
     gfs_variables = list(
         set([k for k, v in gfs_map.items() if v in variables]).union(required_variables)
     )
+    print(gfs_variables)
+    pool = Pool(n_procs)
     atm_full_path = build_file_path(date, gdas_base_path, file_type="atm")
     sfc_full_path = build_file_path(date, gdas_base_path, file_type="sfc")
     print("Download GFS atmospheric data")
-    gfs_atm_data = load_gfs_data(atm_full_path, gfs_variables)
+    start = time.perf_counter()
+    gfs_atm_data = load_gfs_data(atm_full_path, gfs_variables, pool=pool)
+    end = time.perf_counter()
+    dur = end - start
+    print(f"Elapsed: {dur:0.6f}")
     print("Download GFS surface data")
-    gfs_sfc_data = load_gfs_data(sfc_full_path, gfs_variables)
+    start = time.perf_counter()
+    gfs_sfc_data = load_gfs_data(sfc_full_path, gfs_variables, pool=pool)
+    end = time.perf_counter()
+    dur = end - start
+    print(f"Elapsed: {dur:0.6f}")
     gfs_data = combine_data(gfs_atm_data, gfs_sfc_data)
     print("Regrid data")
-    regridded_gfs = regrid(gfs_data, output_grid)
+    start = time.perf_counter()
+    regridded_gfs = regrid(gfs_data, output_grid, pool=pool)
+    end = time.perf_counter()
+    dur = end - start
+    print(f"Elapsed: {dur:0.6f}")
     print("Interpolate to model levels")
+    start = time.perf_counter()
     interpolated_gfs = interpolate_to_model_level(
         regridded_gfs, output_grid, model_level_indices, variables
     )
+    end = time.perf_counter()
+    dur = end - start
+    print(f"Elapsed: {dur:0.6f}")
     final_data = format_data(interpolated_gfs, regridded_gfs, model_level_indices)
 
     return final_data
@@ -126,7 +149,18 @@ def build_file_path(date, base_path, file_type="atm"):
     return join(base_path, dir_path, file_name)
 
 
-def load_gfs_data(full_file_path, variables):
+def load_gfs_variable(variable, full_file_path=None):
+    try:
+        print("Loading ", variable)
+        with xr.open_dataset(full_file_path, engine="h5netcdf") as full_ds:
+            sub_ds = full_ds[variable].load()
+    except Exception as e:
+        print(traceback.format_exc())
+        raise e
+    return sub_ds
+
+
+def load_gfs_data(full_file_path, variables, pool=None):
     """
     Load GFS data directly from Nomads or Google Cloud server
     Args:
@@ -136,15 +170,18 @@ def load_gfs_data(full_file_path, variables):
     Returns:
         xr.Dataset
     """
-    if full_file_path[:5] == "https":
-        ds = xr.open_dataset(fsspec.open(full_file_path).open())
-    else:
-        ds = xr.open_dataset(full_file_path, engine="h5netcdf")
-    available_vars = ds.data_vars
-    vars = [v for v in variables if v in available_vars]
-    ds = ds[vars].rename({"grid_xt": "longitude", "grid_yt": "latitude"}).load()
-
-    return ds
+    print(full_file_path)
+    ds = xr.open_dataset(full_file_path, engine="h5netcdf")
+    print(ds)
+    available_vars = list(ds.data_vars)
+    sub_variables = [v for v in variables if v in available_vars]
+    load_vars = partial(load_gfs_variable, full_file_path=full_file_path)
+    # ds = ds[sub_variables].rename({"grid_xt": "longitude", "grid_yt": "latitude"}).load()
+    var_ds_list = pool.map(load_vars, sub_variables)
+    full_ds = xr.merge(var_ds_list)
+    full_ds = full_ds.rename({"grid_xt": "longitude", "grid_yt": "latitude"})
+    full_ds.attrs = ds.attrs
+    return full_ds
 
 
 def combine_data(atm_data, sfc_data):
@@ -169,7 +206,17 @@ def combine_data(atm_data, sfc_data):
     return data
 
 
-def regrid(nwp_data, output_grid, method="conservative"):
+def regrid_variable(variable_data, regridder):
+    try:
+        regridded_data = regridder(variable_data)
+        regridded_data.name = variable_data.name
+        return regridded_data
+    except Exception as e:
+        print(traceback.format_exc())
+        raise e
+
+
+def regrid(nwp_data, output_grid, method="conservative", pool=None):
     """
     Spatially regrid (interpolate) from GFS grid to CREDIT grid
     Args:
@@ -186,8 +233,17 @@ def regrid(nwp_data, output_grid, method="conservative"):
         ds_out = output_grid[["longitude", "latitude"]].load()
     in_grid = nwp_data[["longitude", "latitude"]].load()
     regridder = xe.Regridder(in_grid, ds_out, method=method)
-    ds_regridded = regridder(nwp_data)
-
+    # ds_regridded = regridder(nwp_data)
+    results = []
+    for variable in list(nwp_data.data_vars):
+        da = nwp_data[variable]
+        da.name = variable
+        results.append(pool.apply_async(regrid_variable, (da, regridder)))
+    ds_re_list = []
+    for result in results:
+        ds_re_list.append(result.get())
+    print(ds_re_list)
+    ds_regridded = xr.merge(ds_re_list)
     return ds_regridded.squeeze()
 
 
