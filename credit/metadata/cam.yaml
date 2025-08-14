@@ -1,3 +1,15 @@
+latitude:
+   long_name: "latitude"
+   units: "degrees_north"
+   axis: "Y"
+longitude:
+   long_name: "longitude"
+   units: "degrees_east"
+   axis: "X"
+level:
+   axis: "Z"
+time:
+   axis: "T"
 U:
     long_name: "U component of wind"
     standard_name: "eastward_wind"
