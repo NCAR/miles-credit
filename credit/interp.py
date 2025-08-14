@@ -31,6 +31,7 @@ def full_state_pressure_interpolation(
     b_model_name: str = "b_model",
     a_half_name: str = "a_half",
     b_half_name: str = "b_half",
+    P0: float = 1.0,
 ) -> xr.Dataset:
     """Interpolate the full state of the model to pressure and height coordinates.
 
@@ -76,7 +77,7 @@ def full_state_pressure_interpolation(
         b_model_name (str): Name of B weight at level midpoints in sigma coordinate formula. 'b_model' by default.
         a_half_name (str): Name of A weight at level interfaces in sigma coordinate formula. 'a_half' by default.
         b_half_name (str): Name of B weight at level interfaces in sigma coordinate formula. 'b_half' by default.
-
+        P0 (float): reference pressure if pressure needs to be scaled.
     Returns:
         pressure_ds (xr.Dataset): Dataset containing pressure interpolated variables.
 
@@ -88,9 +89,14 @@ def full_state_pressure_interpolation(
         valid_levels = np.isin(
             mod_lev_ds[level_var].values, state_dataset[level_var].values
         )
+        if a_model_name == "hyam":
+            a_model = mod_lev_ds[a_model_name].values[valid_levels] * P0
+            a_half_full = mod_lev_ds[a_half_name].values * P0
+        else:
+            a_model = mod_lev_ds[a_model_name].values[valid_levels]
+            a_half_full = mod_lev_ds[a_half_name].values
         a_model = mod_lev_ds[a_model_name].values[valid_levels]
         b_model = mod_lev_ds[b_model_name].values[valid_levels]
-        a_half_full = mod_lev_ds[a_half_name].values
         b_half_full = mod_lev_ds[b_half_name].values
 
     pres_dims = (time_var, pres_var, lat_var, lon_var)
@@ -161,7 +167,7 @@ def full_state_pressure_interpolation(
             data=np.zeros(height_shape, dtype=np.float32),
             coords=coords_height,
             dims=height_dims,
-            name=var + height_ending,
+            name="P" + height_ending,
         )
 
     for t, time in enumerate(state_dataset[time_var]):
