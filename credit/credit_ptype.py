@@ -1,3 +1,5 @@
+import multiprocessing as mp
+mp.set_start_method("spawn", force=True)
 import numpy as np
 import os
 os.environ["KERAS_BACKEND"] = "torch"
@@ -167,21 +169,21 @@ class CreditPostProcessor:
         """
         if output_uncertainties:
     
-            probabilities = predictions[0].numpy()
+            probabilities = predictions[0].cpu().numpy() #predictions[0].numpy()
             ptype = probabilities.argmax(axis=1).reshape(-1, 1)
-            u = predictions[1].numpy().reshape(data['latitude'].size, data['longitude'].size)
+            u = predictions[1].cpu().numpy().reshape(data['latitude'].size, data['longitude'].size)
             data['ML_u'] = (['latitude', 'longitude'], u.astype('float64'))
             data[f"ML_u"].attrs = {"Description": f"Evidential Uncertainty (Dempster-Shafer Theory)"}
-            ale = predictions[2].numpy().reshape(data['latitude'].size, data['longitude'].size, probabilities.shape[-1])
-            epi = predictions[3].numpy().reshape(data['latitude'].size, data['longitude'].size, probabilities.shape[-1])
+            ale = predictions[2].cpu().numpy().reshape(data['latitude'].size, data['longitude'].size, probabilities.shape[-1])
+            epi = predictions[3].cpu().numpy().reshape(data['latitude'].size, data['longitude'].size, probabilities.shape[-1])
             for i, (var, v) in enumerate(zip(["Rain", "Snow", "Ice Pellets", "Freezing Rain"],
                                              ["rain", "snow", "icep", "frzr"])):
                 for uncertainty_type, long_name, short_name in zip([ale, epi], ["aleatoric", "epistemic"], ["ale", "epi"]):
                     data[f"ML_{v}_{short_name}"] = (['latitude', 'longitude'], uncertainty_type[:, :, i].astype('float64'))
                     data[f"ML_{v}_{short_name}"].attrs = {"Description": f"Machine Learned {long_name}u ncertainty of {var}"}
         else:
-            ptype = predictions.argmax(axis=1).reshape(-1, 1)
-            probabilities = predictions
+            ptype = predictions.cpu().argmax(axis=1).reshape(-1, 1)
+            probabilities = predictions.cpu()
     
         preds = np.hstack([probabilities, ptype])
         reshaped_preds = preds.reshape(data['latitude'].size, data['longitude'].size, preds.shape[-1])
