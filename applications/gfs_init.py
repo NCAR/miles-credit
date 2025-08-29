@@ -20,10 +20,10 @@ def main():
     os.makedirs(config["predict"]["initial_condition_path"], exist_ok=True)
     base_path = os.path.abspath(os.path.dirname(__file__))
     credit_grid = xr.open_dataset(
-        os.path.join(base_path, "../metadata/ERA5_Lev_Info.nc")
+        os.path.join(base_path, "../credit/metadata/ERA5_Lev_Info.nc")
     )
     model_levels = pd.read_csv(
-        join(base_path, "../metadata/L137_model_level_indices.csv")
+        join(base_path, "../credit/metadata/L137_model_level_indices.csv")
     )
     model_level_indices = model_levels["model_level_indices"].values
     variables = config["data"]["variables"] + config["data"]["surface_variables"]
