@@ -789,9 +789,52 @@ def mean_sea_level_pressure(
                 gamma = LAPSE_RATE
                 if temp_surface_k < 255:
                     temp_surface_k = 0.5 * (255 + temp_surface_k)
-            beta = surface_geopotential[i, j] / (RDGAS * temp_surface_k)
-            x = gamma * surface_geopotential[i, j] / (GRAVITY * temp_surface_k)
+            x = surface_geopotential[i, j] / (RDGAS * temp_surface_k)
             mslp[i, j] = surface_pressure_pa[i, j] * np.exp(
-                beta * (1.0 - x / 2.0 + x**2 / 3.0)
+                x * (1.0 - 0.5 * gamma * x + (gamma * x) ** 2 / 3.0)
+            )
+    return mslp
+
+
+def mean_sea_level_pressure_simple(
+    surface_pressure_pa, temperature_k, surface_geopotential
+):
+    """
+    Simpler calculation for mean sea level pressure that only requires 2D fields of pressure (Pa), temperature (K),
+    and surface geopotential (m ** 2 s ** -2).
+    Based on Trenberth et al. 1993 calculation but simplified by removing the T* calculation since it seemed to
+    only vary by about 0.2 K and requires a lot more data to compute.
+    Trenberth, K., J. Berry , and L. Buja, 1993: Vertical Interpolation and Truncation of Model-Coordinate,
+    University Corporation for Atmospheric Research, https://doi.org/10.5065/D6HX19NH.
+
+    Args:
+        surface_pressure_pa: surface pressure in Pascals
+        temperature_k: temperature in Kelvin
+        surface_geopotential: surface geopotential in m^2 s^-2. If you have surface height, multiply by g (9.81 m2s-2)
+
+    Returns:
+        mean sea level pressure in Pascals.
+    """
+    LAPSE_RATE = 0.0065  # K / m
+    ALPHA = LAPSE_RATE * RDGAS / GRAVITY
+    mslp = np.zeros(surface_pressure_pa.shape, dtype=surface_pressure_pa.dtype)
+    for (i, j), p in np.ndenumerate(mslp):
+        sgp = surface_geopotential[i, j]
+        if np.abs(sgp / GRAVITY) < 1e-4:
+            mslp[i, j] = surface_pressure_pa[i, j]
+        else:
+            temp = temperature_k[i, j]
+            tto = temp + LAPSE_RATE * sgp
+            alpha_local = ALPHA
+            if (temp <= 290.5) and (tto > 290.5):
+                alpha_local = RDGAS * (290.5 - temp) / sgp
+            elif temp > 290.5:
+                alpha_local = 0
+                temp = 0.5 * (290.5 + temp)
+            elif temp < 255:
+                temp = 0.5 * (255 + temp)
+            x = sgp / (RDGAS * temp)
+            mslp[i, j] = surface_pressure_pa[i, j] * np.exp(
+                x * (1 - 0.5 * alpha_local * x + 1 / 3.0 * (alpha_local * x) ** 2)
             )
     return mslp
