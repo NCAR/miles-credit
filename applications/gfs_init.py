@@ -19,6 +19,10 @@ def main():
     n_procs = args.proc
     os.makedirs(config["predict"]["initial_condition_path"], exist_ok=True)
     base_path = os.path.abspath(os.path.dirname(__file__))
+    if os.path.basename(os.path.abspath(os.path.join(base_path, os.pardir))) == "credit":
+        metadata_path = os.path.join(base_path, os.pardir, "metadata")
+    else:
+        metadata_path = os.path.join(base_path, os.pardir, "credit", "metadata")
     credit_grid = xr.open_dataset(
         os.path.join(base_path, "../credit/metadata/ERA5_Lev_Info.nc")
     )
