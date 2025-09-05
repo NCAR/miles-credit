@@ -19,11 +19,15 @@ def main():
     n_procs = args.proc
     os.makedirs(config["predict"]["initial_condition_path"], exist_ok=True)
     base_path = os.path.abspath(os.path.dirname(__file__))
+    if os.path.basename(os.path.abspath(os.path.join(base_path, os.pardir))) == "credit":
+        metadata_path = os.path.join(base_path, os.pardir, "metadata")
+    else:
+        metadata_path = os.path.join(base_path, os.pardir, "credit", "metadata")
     credit_grid = xr.open_dataset(
-        os.path.join(base_path, "../metadata/ERA5_Lev_Info.nc")
+        os.path.join(metadata_path, "ERA5_Lev_Info.nc")
     )
     model_levels = pd.read_csv(
-        join(base_path, "../metadata/L137_model_level_indices.csv")
+        os.path.join(metadata_path, "L137_model_level_indices.csv")
     )
     model_level_indices = model_levels["model_level_indices"].values
     variables = config["data"]["variables"] + config["data"]["surface_variables"]
