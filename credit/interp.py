@@ -32,6 +32,8 @@ def full_state_pressure_interpolation(
     a_half_name: str = "a_half",
     b_half_name: str = "b_half",
     P0: float = 1.0,
+    mslp_temp_height: float = 1000.0,
+    use_simple_mslp: bool = False,
 ) -> xr.Dataset:
     """Interpolate the full state of the model to pressure and height coordinates.
 
@@ -78,6 +80,8 @@ def full_state_pressure_interpolation(
         a_half_name (str): Name of A weight at level interfaces in sigma coordinate formula. 'a_half' by default.
         b_half_name (str): Name of B weight at level interfaces in sigma coordinate formula. 'b_half' by default.
         P0 (float): reference pressure if pressure needs to be scaled.
+        mslp_temp_height (float): height above ground level in meters where temperature is sampled for mslp calculation.
+        use_simple_mslp (bool): Whether to use the simple or complex MSLP calculation.
     Returns:
         pressure_ds (xr.Dataset): Dataset containing pressure interpolated variables.
 
@@ -241,13 +245,23 @@ def full_state_pressure_interpolation(
                 interp_full_data[temperature_var],
             )
         )
-        pressure_ds["mean_sea_level_" + pres_var][t] = mean_sea_level_pressure(
-            state_dataset[surface_pressure_var][t].values,
-            interp_full_data[temperature_var],
-            interp_full_data["P"],
-            surface_geopotential,
-            geopotential_full_grid,
-        )
+        if use_simple_mslp:
+            pressure_ds["mean_sea_level_" + pres_var][t] = (
+                mean_sea_level_pressure_simple(
+                    state_dataset[surface_pressure_var][t].values,
+                    state_dataset[temperature_var][t].values,
+                    surface_geopotential,
+                )
+            )
+        else:
+            pressure_ds["mean_sea_level_" + pres_var][t] = mean_sea_level_pressure(
+                state_dataset[surface_pressure_var][t].values,
+                interp_full_data[temperature_var],
+                interp_full_data["P"],
+                surface_geopotential,
+                geopotential_full_grid,
+                temp_height=mslp_temp_height,
+            )
         if height_levels is not None:
             for interp_field in interp_full_data.keys():
                 height_var = interp_field + height_ending
