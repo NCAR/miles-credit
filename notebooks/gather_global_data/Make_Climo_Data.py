@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     def get_forward_data(filename: str = ZARR) -> xr.DataArray:
         """Lazily opens the Zarr store on gladefilesystem."""
-        dataset = xr.open_zarr(filename, consolidated=True)
+        dataset = xr.open_zarr(filename)
         return dataset
 
     forcing_data = get_forward_data().unify_chunks()
