@@ -24,7 +24,7 @@ def main():
     else:
         metadata_path = os.path.join(base_path, os.pardir, "credit", "metadata")
     credit_grid = xr.open_dataset(
-        os.path.join(base_path, "../credit/metadata/ERA5_Lev_Info.nc")
+        os.path.join(metadata_path, "ERA5_Lev_Info.nc")
     )
     model_levels = pd.read_csv(
         os.path.join(metadata_path, "L137_model_level_indices.csv")
