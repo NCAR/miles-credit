@@ -23,7 +23,7 @@ def main():
         os.path.join(base_path, "../credit/metadata/ERA5_Lev_Info.nc")
     )
     model_levels = pd.read_csv(
-        join(base_path, "../credit/metadata/L137_model_level_indices.csv")
+        os.path.join(metadata_path, "L137_model_level_indices.csv")
     )
     model_level_indices = model_levels["model_level_indices"].values
     variables = config["data"]["variables"] + config["data"]["surface_variables"]
