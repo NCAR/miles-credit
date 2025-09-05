@@ -49,7 +49,7 @@ def main():
         "-v",
         "--variables",
         type=str,
-        default="ps,t,sphum,liq_wat,ice_wat,rainwat,snowwat,graupel,u_s,v_w,slmsk,tsea,fice,t2m,q2m",
+        default="ps,t,sphum,liq_wat,ice_wat,rainwat,snowwat,graupel,u_s,v_w,slmsk,tsea,fice,t2m,q2m,zh",
         help="Variables to use separated by commas.",
     )
     parser.add_argument(

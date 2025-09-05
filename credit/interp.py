@@ -788,7 +788,7 @@ def mean_sea_level_pressure(
             else:
                 gamma = LAPSE_RATE
                 if temp_surface_k < 255:
-                    temp_surface_k = 0.5 * (255.0 + temp_surface_k)
+                    temp_surface_k = 0.5 * (255 + temp_surface_k)
             beta = surface_geopotential[i, j] / (RDGAS * temp_surface_k)
             x = gamma * surface_geopotential[i, j] / (GRAVITY * temp_surface_k)
             mslp[i, j] = surface_pressure_pa[i, j] * np.exp(
