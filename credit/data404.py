@@ -13,7 +13,7 @@ import torch.utils.data
 
 def get_forward_data(filename) -> xr.DataArray:
     """Lazily opens a Zarr store"""
-    dataset = xr.open_zarr(filename, consolidated=True)
+    dataset = xr.open_zarr(filename)
     return dataset
 
 

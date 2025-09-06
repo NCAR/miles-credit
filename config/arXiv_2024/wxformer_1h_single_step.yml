@@ -3,7 +3,7 @@
 # on NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu) 
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
-# --------------------------------------------------------------------------------------------------------------------- #
+# ----------------------------------------------------------------------------------------------------------------------- #
 save_loc: '/glade/work/sakor/credit_arxiv_models/wxformer_1h/finetune_final/'
 seed: 1000
 

@@ -1,6 +1,11 @@
 name: Python Package using Mamba
 
-on: [push]
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build-linux:
@@ -35,6 +40,7 @@ jobs:
           pytest --cov=credit tests/ | tee pytest-coverage.txt
       - name: Pytest coverage comment
         uses: MishaKav/pytest-coverage-comment@main
+        if: ${{ !github.event.pull_request.head.repo.fork }}
         with:
           pytest-coverage-path: ./pytest-coverage.txt
 

@@ -151,7 +151,7 @@ def get_forward_data(filename) -> xr.Dataset:
     if filename[-3:] == ".nc" or filename[-4:] == ".nc4":
         dataset = xr.open_dataset(filename)
     else:
-        dataset = xr.open_zarr(filename, consolidated=True)
+        dataset = xr.open_zarr(filename)
     return dataset
 
 
