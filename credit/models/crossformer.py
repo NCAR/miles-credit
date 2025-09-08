@@ -9,7 +9,6 @@ from einops.layers.torch import Rearrange
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
 from credit.boundary_padding import TensorPadding
-from credit.models.unet_attention_modules import load_unet_attention
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +20,12 @@ def cast_tuple(val, length=1):
 
 
 def apply_spectral_norm(model):
-    for module in model.modules():
+    for name, module in model.named_modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
+            # skip any conv whose name contains "sharp"
+            if "sharp" in name:
+                continue
             nn.utils.spectral_norm(module)
-
-
 # cube embedding
 
 
@@ -68,31 +68,16 @@ class CubeEmbedding(nn.Module):
 
 
 class UpBlock(nn.Module):
-    def __init__(
-        self,
-        in_chans,
-        out_chans,
-        num_groups,
-        num_residuals=2,
-        upsample_v_conv=False,
-        attention_type=None,
-        reduction=32,
-        spatial_kernel=7,
-    ):
+    def __init__(self, in_chans, out_chans, num_groups, num_residuals=2):
         super().__init__()
         # self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
-
-        self.upsample_v_conv = upsample_v_conv
-
-        if self.upsample_v_conv:
-            self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
-            self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=3, stride=1, padding=1)
-        else:
-            self.upsample = None
-            self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
-
+        # self.upsample = nn.functional.interpolate(scale_factor=2, mode="bilinear", align_corners=False, antialias=True)
+        self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=3, stride=1, padding=1)
+        self.sharp = nn.Conv2d(out_chans, out_chans, kernel_size=3, padding=1, stride=1, bias=True)
+        nn.init.zeros_(self.sharp.weight)
+        nn.init.zeros_(self.sharp.bias)
         self.output_channels = out_chans
-
+        
         blk = []
         for i in range(num_residuals):
             blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
@@ -101,27 +86,40 @@ class UpBlock(nn.Module):
 
         self.b = nn.Sequential(*blk)
 
-        # Load attention mechanism using factory function
-        self.attention = load_unet_attention(attention_type, out_chans, reduction, spatial_kernel)
-
     def forward(self, x):
-        if self.upsample_v_conv:
-            x = self.upsample(x)
-        x = self.conv(x)
 
+        x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False, antialias=False)
+        x = self.conv(x)
+        x = x + self.sharp(x)
         shortcut = x
 
         x = self.b(x)
 
-        x = x + shortcut
+        return x + shortcut
 
-        # Apply attention if specified
-        if self.attention is not None:
-            x = self.attention(x)
+class UpBlockPS(nn.Module):
+    def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2):
+        super().__init__()
+        # sub-pixel conv at low res
+        self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
+        self.ps   = nn.PixelShuffle(scale)
+        # sharpening branch (identity init)
+        self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
+        nn.init.zeros_(self.sharp.weight); nn.init.zeros_(self.sharp.bias)
+        # residual stack
+        blk = []
+        for _ in range(num_residuals):
+            blk += [nn.Conv2d(out_ch, out_ch, 3, padding=1),
+                    nn.GroupNorm(num_groups, out_ch),
+                    nn.SiLU()]
+        self.b = nn.Sequential(*blk)
 
-        return x
-
-
+    def forward(self, x):
+        x = self.ps(self.conv(x))    # upsample+conv at low res
+        x = x + self.sharp(x)        # sharpen residual
+        sc = x
+        x = self.b(x)
+        return x + sc
 # cross embed layer
 
 
@@ -279,8 +277,7 @@ class Attention(nn.Module):
         pos = torch.arange(-wsz, wsz + 1, device=device)
         rel_pos = torch.stack(torch.meshgrid(pos, pos, indexing="ij"))
         rel_pos = rearrange(rel_pos, "c i j -> (i j) c")
-        rel_pos = rel_pos.to(x.dtype)
-        biases = self.dpb(rel_pos)
+        biases = self.dpb(rel_pos.float())
         rel_pos_bias = biases[self.rel_pos_indices]
 
         sim = sim + rel_pos_bias
@@ -391,9 +388,7 @@ class CrossFormer(BaseModel):
         attn_dropout: float = 0.0,
         ff_dropout: float = 0.0,
         use_spectral_norm: bool = True,
-        attention_type: str = None,
         interp: bool = True,
-        upsample_v_conv: bool = False,
         padding_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
@@ -441,7 +436,6 @@ class CrossFormer(BaseModel):
         self.image_width = image_width
         self.patch_height = patch_height
         self.patch_width = patch_width
-        self.upsample_v_conv = upsample_v_conv
         self.frames = frames
         self.channels = channels
         self.surface_channels = surface_channels
@@ -465,10 +459,6 @@ class CrossFormer(BaseModel):
         output_channels = channels * levels + surface_channels + output_only_channels
         self.output_channels = output_channels
 
-        if kwargs.get("diffusion"):
-            # do stuff
-            self.input_channels = self.input_channels + self.output_channels
-
         dim = cast_tuple(dim, 4)
         depth = cast_tuple(depth, 4)
         global_window_size = cast_tuple(global_window_size, 4)
@@ -485,7 +475,7 @@ class CrossFormer(BaseModel):
 
         # dimensions
         last_dim = dim[-1]
-        first_dim = self.input_channels if (patch_height == 1 and patch_width == 1) else dim[0]
+        first_dim = input_channels if (patch_height == 1 and patch_width == 1) else dim[0]
         dims = [first_dim, *dim]
         dim_in_and_out = tuple(zip(dims[:-1], dims[1:]))
 
@@ -537,39 +527,29 @@ class CrossFormer(BaseModel):
 
         # =================================================================================== #
 
-        self.up_block1 = UpBlock(
-            1 * last_dim, last_dim // 2, dim[0], upsample_v_conv=self.upsample_v_conv, attention_type=attention_type
+        self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
+        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
+        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
+        #self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1)
+        # self.up_block4 = nn.Sequential(
+        #     nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+        #     nn.Conv2d(2 * (last_dim // 8), output_channels, kernel_size=3, stride=1, padding=1),
+        # )
+        # replace your self.up_block4 = … block with this:
+        scale = 2
+        self.up_block4 = nn.Sequential(
+            nn.Conv2d(
+                2 * (last_dim // 8),              # in_channels
+                self.output_channels * (scale**2),# conv_out = target_channels * 4
+                kernel_size=3,
+                stride=1,
+                padding=1
+            ),
+            nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
+            nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1)
+            
         )
-        self.up_block2 = UpBlock(
-            2 * (last_dim // 2),
-            last_dim // 4,
-            dim[0],
-            upsample_v_conv=self.upsample_v_conv,
-            attention_type=attention_type,
-        )
-        self.up_block3 = UpBlock(
-            2 * (last_dim // 4),
-            last_dim // 8,
-            dim[0],
-            upsample_v_conv=self.upsample_v_conv,
-            attention_type=attention_type,
-        )
-
-        if self.upsample_v_conv:
-            self.up_block4 = nn.Sequential(
-                nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-                nn.Conv2d(
-                    2 * (last_dim // 8),
-                    output_channels,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                ),
-            )
-        else:
-            self.up_block4 = nn.ConvTranspose2d(
-                2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1
-            )
+        self.conv4up = self.up_block4[1]
 
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")
@@ -611,14 +591,20 @@ class CrossFormer(BaseModel):
 
         x = self.up_block1(x)
         x = torch.cat([x, encodings[2]], dim=1)
-
         x = self.up_block2(x)
         x = torch.cat([x, encodings[1]], dim=1)
-
         x = self.up_block3(x)
         x = torch.cat([x, encodings[0]], dim=1)
+        
+        # x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False, antialias=False)
+        # x = self.conv4up(x)
 
         x = self.up_block4(x)
+
+        # self.up_block4 = nn.Sequential(
+        #     nn.functional.interpolate(scale_factor=2, mode="bilinear", align_corners=False, antialias=True),
+        #     nn.Conv2d(2 * (last_dim // 8), output_channels, kernel_size=3, stride=1, padding=1),
+        # )
 
         if self.use_padding:
             x = self.padding_opt.unpad(x)
@@ -661,8 +647,6 @@ if __name__ == "__main__":
     surface_channels = 7
     input_only_channels = 3
     frame_patch_size = 2
-    upsample_v_conv = True
-    attention_type = "scse_standard"
 
     input_tensor = torch.randn(
         1,
@@ -681,8 +665,6 @@ if __name__ == "__main__":
         surface_channels=surface_channels,
         input_only_channels=input_only_channels,
         levels=levels,
-        upsample_v_conv=upsample_v_conv,
-        attention_type=attention_type,
         dim=(128, 256, 512, 1024),
         depth=(2, 2, 18, 2),
         global_window_size=(8, 4, 2, 1),

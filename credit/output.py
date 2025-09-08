@@ -15,9 +15,11 @@ import xarray as xr
 from credit.data import drop_var_from_dataset
 from credit.interp import full_state_pressure_interpolation
 from inspect import signature
+from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
+
 
 logger = logging.getLogger(__name__)
-from credit.credit_ptype import CreditPostProcessor
+#from credit.credit_ptype import CreditPostProcessor
 
 def load_metadata(conf):
     """
@@ -177,6 +179,10 @@ def save_netcdf_increment(
         # Add CF convention version
         ds_merged.attrs["Conventions"] = "CF-1.11"
 
+        if "climate_rescale_output" in conf["predict"].keys():
+            state_transformer = Normalize_ERA5_and_Forcing(conf) if conf["data"]["scaler_type"] == "std_new" else _not_supported()
+            ds_merged = state_transformer.inverse_transform_dataset(ds_merged)
+
         sig = signature(full_state_pressure_interpolation)
         pres_end = sig.parameters["pres_ending"].default
         height_end = sig.parameters["height_ending"].default
@@ -229,7 +235,7 @@ def save_netcdf_increment(
                     
                 pressure_interp = xr.merge([pressure_interp, ptype_classification])
         
-        ds_merged = xr.merge([ds_merged, pressure_interp])
+            ds_merged = xr.merge([ds_merged, pressure_interp])
         logger.info(f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
 
         save_location = os.path.join(conf["predict"]["save_forecast"], nc_filename)
