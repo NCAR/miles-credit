@@ -117,7 +117,7 @@ def process_forecast(
             print_str += f"Date: {utc_datetimes[j].strftime('%Y-%m-%d %H:%M:%S')} "
             print_str += f"Hour: {forecast_step * lead_time_periods} "
             print(print_str)
-        y_pred.unlink()
+        y_pred_buf.unlink()
     except Exception as e:
         print(traceback.format_exc())
         raise e
