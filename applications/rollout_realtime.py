@@ -279,7 +279,6 @@ def predict(rank, world_size, conf, p):
                 )
 
                 if "x_surf" in batch:
-                    print("concat and reshape")
                     x = (
                         concat_and_reshape(batch["x"], batch["x_surf"])
                         .to(device)
@@ -288,7 +287,6 @@ def predict(rank, world_size, conf, p):
                 else:
                     print("reshape only")
                     x = reshape_only(batch["x"]).to(device).float()
-                print(x.shape)
                 # create ensemble:
                 if ensemble_size > 1:
                     x = torch.repeat_interleave(x, ensemble_size, 0)
@@ -329,7 +327,6 @@ def predict(rank, world_size, conf, p):
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
             y_pred_trans = state_transformer.inverse_transform(y_pred.cpu())
-            print("processing")
             result = p.apply_async(
                 process_forecast,
                 (

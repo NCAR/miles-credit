@@ -157,14 +157,12 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
                     .expand_dims("time", 0)
                     .load()
                 )
-                print(upper_x)
                 surface_x = (
                     self.surface_files[valid_date]
                     .sel(time=valid_date)
                     .expand_dims("time", 0)
                     .load()
                 )
-                print(surface_x)
                 x_list.extend([upper_x, surface_x])
                 if self.filename_dyn_forcing is not None:
                     dyn_forcing_x = (
@@ -174,14 +172,12 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
                         .load()
                     )
                     x_list.append(dyn_forcing_x)
-                    print(dyn_forcing_x.longitude.values)
                 if self.filename_static is not None:
                     static_x = self.xarray_static
                     static_x["time"] = dyn_forcing_x["time"]
                     for var in static_x.data_vars:
                         static_x[var] = static_x[var].expand_dims(time=static_x.time)
                     x_list.append(static_x)
-                    print(static_x.longitude.values)
                 sliced_x = xr.merge(x_list)
             else:
                 raise NotImplementedError
@@ -203,7 +199,6 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
                 sliced_x = xr.merge(x_list)
             else:
                 raise NotImplementedError
-        print(sliced_x)
         sample = {"historical_ERA5_images": sliced_x}
         if self.transform:
             sample = self.transform(sample)
