@@ -46,7 +46,14 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 
 def process_forecast(
-    conf, y_pred_name, forecast_step, forecast_count, datetimes, save_datetimes
+    conf,
+    y_pred_name,
+    y_pred_shape,
+    y_pred_dtype,
+    forecast_step,
+    forecast_count,
+    datetimes,
+    save_datetimes,
 ):
     # Transform predictions
     try:
@@ -63,7 +70,8 @@ def process_forecast(
             + timedelta(hours=lead_time_periods)
             for i in range(batch_size)
         ]
-        y_pred = SharedMemory(y_pred_name)
+        y_pred_buf = SharedMemory(y_pred_name)
+        y_pred = np.ndarray(y_pred_shape, dtype=y_pred_dtype, buffer=y_pred_buf.buf)
         # Convert to xarray and handle results
         for j in range(batch_size):
             upper_air_list, single_level_list = [], []
@@ -329,13 +337,18 @@ def predict(rank, world_size, conf, p):
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
             y_pred_trans = state_transformer.inverse_transform(y_pred.cpu()).numpy()
-            y_pred_shared = SharedMemory(create=True, size=y_pred_trans.nbytes)
+            y_pred_buf = SharedMemory(create=True, size=y_pred_trans.nbytes)
+            y_pred_shared = np.ndarray(
+                y_pred_trans.shape, dtype=y_pred_trans.dtype, buffer=y_pred_buf.buf
+            )
             y_pred_shared[:] = y_pred_trans[:]
             result = p.apply_async(
                 process_forecast,
                 (
                     conf,
-                    y_pred_shared.name,
+                    y_pred_buf.name,
+                    y_pred_shared.shape,
+                    y_pred_shared.dtype,
                     forecast_step,
                     forecast_count,
                     batch["datetime"],
