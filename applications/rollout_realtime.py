@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 from argparse import ArgumentParser
 import multiprocessing as mp
+from multiprocessing.shared_memory import SharedMemory
 from tqdm import tqdm
 
 # ---------- #
@@ -45,7 +46,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 
 def process_forecast(
-    conf, y_pred, forecast_step, forecast_count, datetimes, save_datetimes
+    conf, y_pred_name, forecast_step, forecast_count, datetimes, save_datetimes
 ):
     # Transform predictions
     try:
@@ -62,7 +63,7 @@ def process_forecast(
             + timedelta(hours=lead_time_periods)
             for i in range(batch_size)
         ]
-
+        y_pred = SharedMemory(y_pred_name)
         # Convert to xarray and handle results
         for j in range(batch_size):
             upper_air_list, single_level_list = [], []
@@ -108,6 +109,7 @@ def process_forecast(
             print_str += f"Date: {utc_datetimes[j].strftime('%Y-%m-%d %H:%M:%S')} "
             print_str += f"Hour: {forecast_step * lead_time_periods} "
             print(print_str)
+        y_pred.unlink()
     except Exception as e:
         print(traceback.format_exc())
         raise e
@@ -326,12 +328,14 @@ def predict(rank, world_size, conf, p):
                 input_dict = {"y_pred": y_pred, "x": x}
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
-            y_pred_trans = state_transformer.inverse_transform(y_pred.cpu())
+            y_pred_trans = state_transformer.inverse_transform(y_pred.cpu()).numpy()
+            y_pred_shared = SharedMemory(create=True, size=y_pred_trans.nbytes)
+            y_pred_shared[:] = y_pred_trans[:]
             result = p.apply_async(
                 process_forecast,
                 (
                     conf,
-                    y_pred_trans.numpy(),
+                    y_pred_shared.name,
                     forecast_step,
                     forecast_count,
                     batch["datetime"],
