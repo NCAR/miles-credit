@@ -361,6 +361,19 @@ def combine_microphysics_terms(
 
 
 def rename_variables(ds, name_dict_file, meta_file, init_date_str):
+    """
+    Rename variables from GEFS to target modeling system (e.g., ERA5 or CAM) variables. Uses a yaml file
+    mapping GEFS to other names. Metadata can be added to the output Dataset using a metadata yaml file.
+
+    Args:
+        ds:
+        name_dict_file:
+        meta_file:
+        init_date_str:
+
+    Returns:
+
+    """
     if name_dict_file != "":
         with open(name_dict_file, "r") as name_dict_obj:
             name_dict = yaml.safe_load(name_dict_obj)
@@ -401,8 +414,6 @@ def process_member(
     print(member + ": Regrid")
     regrid_ds = regrid_member(member_tiles, weight_file)
     regrid_ds = combine_microphysics_terms(regrid_ds)
-    out_file = f"gefs_cam_grid_native_vert_{member}.nc"
-    regrid_ds.to_netcdf(join(out_path, out_file))
     print(member + ": Interpolate vertical levels")
     interp_ds = interpolate_vertical_levels(
         regrid_ds, member_path, init_date_str, member, vertical_level_file
