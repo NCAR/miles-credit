@@ -3,14 +3,23 @@ import numpy as np
 import gcsfs
 from tqdm import tqdm
 import pandas as pd
-from os.path import join, exists
+from os.path import join, exists, getsize
+import os
 from scipy.sparse import csr_matrix
 import logging
 import yaml
 from credit.interp import create_pressure_grid, interp_hybrid_to_hybrid_levels
 
 
-def download_gefs_run(init_date_str, out_path, n_pert_members=30):
+def download_gefs_run(init_date_str: str, out_path: str, n_pert_members: int = 30):
+    """
+    Download GEFS cube sphere netCDF files from AWS for a single initialization.
+
+    Args:
+        init_date_str: Initialization date in YYYY-MM-DD HHMM format or similar formats that pandas can handle.
+        out_path: Top-level path to save GEFS data on your local machines.
+        n_pert_members: Number of perturbation members to download. Max is 30. 0 only downloads the control member
+    """
     init_date = pd.Timestamp(init_date_str)
     init_date_path = init_date.strftime("gefs.%Y%m%d/%H")
     bucket = "gs://gfs-ensemble-forecast-system/"
@@ -24,14 +33,34 @@ def download_gefs_run(init_date_str, out_path, n_pert_members=30):
         member_path = join(ens_path, member)
         out_member_path = join(out_path, init_date_path, member)
         if fs.exists(member_path):
+            if not exists(out_member_path):
+                os.makedirs(out_member_path)
             member_files = fs.ls(member_path)
-            for member_file in member_files:
-                if not exists(join(out_member_path, member_file.split("/")[-1])):
-                    fs.get(member_file, out_member_path)
+            for member_file_path in member_files:
+                member_file = member_file_path.split("/")[-1]
+                out_file = join(out_member_path, member_file)
+                # Check if file exists before downloading
+                if not exists(join(out_member_path, member_file)):
+                    fs.get(member_file, out_file)
+                # If file exists but download was interrupted, delete file and try again.
+                elif fs.du(member_file) != getsize(out_file):
+                    os.remove(out_file)
+                    fs.get(member_file, out_file)
     return
 
 
 def load_member_tiles(path: str, init_date_str: str, member: str, variables: str):
+    """
+
+    Args:
+        path:
+        init_date_str:
+        member:
+        variables:
+
+    Returns:
+
+    """
     num_tiles = 6
     init_date = pd.Timestamp(init_date_str)
     init_date_path = init_date.strftime("gefs.%Y%m%d/%H")
