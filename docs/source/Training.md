@@ -1,6 +1,6 @@
 # Training a Model
 
-CREDIT v2.0 supports three modes for training a model. In your configuration file (`model.yml`), under the `trainer` field, you can set `mode` to one of the following:
+CREDIT supports three modes for training a model. In your configuration file (`model.yml`), under the `trainer` field, you can set `mode` to one of the following:
 
 - `None`: Trains on a single GPU without any special distributed settings.
 - `ddp`: Uses **Distributed Data Parallel (DDP)** for multi-GPU training.
@@ -11,7 +11,7 @@ CREDIT v2.0 supports three modes for training a model. In your configuration fil
 To start a training run from epoch 0, use:
 
 ```bash
-python applications/train.py -c config/model.yml
+credit_train -c config/model.yml
 ```
 
 Ensure the `trainer` section in `model.yml` is set as follows:
@@ -58,7 +58,7 @@ trainer:
 Then, start training as usual:
 
 ```bash
-python applications/train.py -c config/model.yml
+credit_train -c config/model.yml
 ```
 
 This command generates a **launch script (`launch.sh`)** and submits a job on **Derecho**, allocating the required number of nodes and GPUs. The settings for this job are controlled by the `pbs` field in `model.yml`.
@@ -160,7 +160,7 @@ pbs:
 Once again, to launch the job on Casper, run:
 
 ```bash
-python applications/train.py -c config/model.yml -l 1
+credit_train -c config/model.yml -l 1
 ```
 
 This command generates a **launch script (`launch.sh`)**, which will look like:
