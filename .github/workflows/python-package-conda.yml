@@ -39,7 +39,7 @@ jobs:
           pytest
           pytest --cov=credit tests/ | tee pytest-coverage.txt
       - name: Pytest coverage comment
-        uses: MishaKav/pytest-coverage-comment@main
+        uses: MishaKav/pytest-coverage-comment@1bdbba85fb74a2fdc1ec66383acec1091610f82b # v1.1.57
         if: ${{ !github.event.pull_request.head.repo.fork }}
         with:
           pytest-coverage-path: ./pytest-coverage.txt
