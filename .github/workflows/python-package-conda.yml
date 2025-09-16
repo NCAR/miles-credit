@@ -14,9 +14,9 @@ jobs:
       max-parallel: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -42,7 +42,7 @@ jobs:
         run: |
           pytest --cov=credit tests/ | tee pytest-coverage.txt
       - name: Pytest coverage comment
-        uses: MishaKav/pytest-coverage-comment@main
+        uses: MishaKav/pytest-coverage-comment@1bdbba85fb74a2fdc1ec66383acec1091610f82b # v1.1.57
         if: ${{ !github.event.pull_request.head.repo.fork }}
         with:
           pytest-coverage-path: ./pytest-coverage.txt
