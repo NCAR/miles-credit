@@ -3,14 +3,23 @@ import numpy as np
 import gcsfs
 from tqdm import tqdm
 import pandas as pd
-from os.path import join
+from os.path import join, exists, getsize
+import os
 from scipy.sparse import csr_matrix
 import logging
 import yaml
 from credit.interp import create_pressure_grid, interp_hybrid_to_hybrid_levels
 
 
-def download_gefs_run(init_date_str, out_path, n_pert_members=30):
+def download_gefs_run(init_date_str: str, out_path: str, n_pert_members: int = 30):
+    """
+    Download GEFS cube sphere netCDF files from AWS for a single initialization.
+
+    Args:
+        init_date_str: Initialization date in YYYY-MM-DD HHMM format or similar formats that pandas can handle.
+        out_path: Top-level path to save GEFS data on your local machines.
+        n_pert_members: Number of perturbation members to download. Max is 30. 0 only downloads the control member
+    """
     init_date = pd.Timestamp(init_date_str)
     init_date_path = init_date.strftime("gefs.%Y%m%d/%H")
     bucket = "gs://gfs-ensemble-forecast-system/"
@@ -24,11 +33,34 @@ def download_gefs_run(init_date_str, out_path, n_pert_members=30):
         member_path = join(ens_path, member)
         out_member_path = join(out_path, init_date_path, member)
         if fs.exists(member_path):
-            fs.get(member_path, out_member_path, recursive=True)
+            if not exists(out_member_path):
+                os.makedirs(out_member_path)
+            member_files = fs.ls(member_path)
+            for member_file_path in member_files:
+                member_file = member_file_path.split("/")[-1]
+                out_file = join(out_member_path, member_file)
+                # Check if file exists before downloading
+                if not exists(join(out_member_path, member_file)):
+                    fs.get(member_file, out_file)
+                # If file exists but download was interrupted, delete file and try again.
+                elif fs.du(member_file) != getsize(out_file):
+                    os.remove(out_file)
+                    fs.get(member_file, out_file)
     return
 
 
 def load_member_tiles(path: str, init_date_str: str, member: str, variables: str):
+    """
+
+    Args:
+        path:
+        init_date_str:
+        member:
+        variables:
+
+    Returns:
+
+    """
     num_tiles = 6
     init_date = pd.Timestamp(init_date_str)
     init_date_path = init_date.strftime("gefs.%Y%m%d/%H")
@@ -193,13 +225,21 @@ def regrid_member(member_tiles, regrid_weights_file):
         lon = regrid_ds["xc_b"].values.reshape(dst_dims)[0]
         lat = regrid_ds["yc_b"].values.reshape(dst_dims)[:, 0]
         lev = tiles_combined["lev"]
-        regrid_ds = xr.Dataset(coords=dict(lev=lev, lat=lat, lon=lon))
+        coord_dict = dict(lev=lev, lat=lat, lon=lon)
+        if "levp" in tiles_combined.dims:
+            levp = tiles_combined["levp"]
+            coord_dict["levp"] = levp
+            zh_var_dim = (tiles_combined["levp"].size, lat.size, lon.size)
+        else:
+            levp = None
+            zh_var_dim = None
+        regrid_ds = xr.Dataset(coords=coord_dict)
         ua_var_dim = (regrid_ds["lev"].size, regrid_ds["lat"].size, regrid_ds.lon.size)
         sfc_var_dim = (regrid_ds["lat"].size, regrid_ds["lon"].size)
         for variable in tiles_combined.data_vars:
             if "lev" in member_tiles[0][variable].dims:
                 regrid_ds[variable] = xr.DataArray(
-                    np.zeros(ua_var_dim, dtype=np.float32),
+                    np.zeros(ua_var_dim, dtype=np.float64),
                     coords=dict(lev=lev, lat=lat, lon=lon),
                     name=variable,
                 )
@@ -207,6 +247,24 @@ def regrid_member(member_tiles, regrid_weights_file):
                     regrid_ds[variable][lev_index] = (
                         regrid_weights @ tiles_combined[variable][lev_index].values
                     ).reshape(sfc_var_dim)
+            elif "levp" in member_tiles[0][variable].dims and levp is not None:
+                regrid_ds[variable] = xr.DataArray(
+                    np.zeros(zh_var_dim, dtype=np.float64),
+                    coords=dict(levp=levp, lat=lat, lon=lon),
+                    name=variable,
+                )
+                for lev_index in np.arange(tiles_combined["lev"].size):
+                    regrid_ds[variable][lev_index] = (
+                        regrid_weights @ tiles_combined[variable][lev_index].values
+                    ).reshape(sfc_var_dim)
+            elif variable == "ps":
+                regrid_ds[variable] = xr.DataArray(
+                    (
+                        np.exp(regrid_weights @ np.log(tiles_combined[variable].values))
+                    ).reshape(sfc_var_dim),
+                    coords=dict(lat=lat, lon=lon),
+                    name=variable,
+                )
             else:
                 regrid_ds[variable] = xr.DataArray(
                     (regrid_weights @ tiles_combined[variable].values).reshape(
@@ -303,6 +361,19 @@ def combine_microphysics_terms(
 
 
 def rename_variables(ds, name_dict_file, meta_file, init_date_str):
+    """
+    Rename variables from GEFS to target modeling system (e.g., ERA5 or CAM) variables. Uses a yaml file
+    mapping GEFS to other names. Metadata can be added to the output Dataset using a metadata yaml file.
+
+    Args:
+        ds:
+        name_dict_file:
+        meta_file:
+        init_date_str:
+
+    Returns:
+
+    """
     if name_dict_file != "":
         with open(name_dict_file, "r") as name_dict_obj:
             name_dict = yaml.safe_load(name_dict_obj)

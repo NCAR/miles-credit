@@ -521,10 +521,6 @@ def main():
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
 
-    # Create a project directory (to save launch.sh and model.yml) if they do not exist
-    save_loc = os.path.expandvars(conf["save_loc"])
-    os.makedirs(save_loc, exist_ok=True)
-
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:
         logger.info(f"Setting the running mode to {mode}")

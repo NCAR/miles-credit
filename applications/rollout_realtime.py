@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 from argparse import ArgumentParser
 import multiprocessing as mp
+from multiprocessing.shared_memory import SharedMemory
 from tqdm import tqdm
 
 # ---------- #
@@ -45,7 +46,14 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 
 def process_forecast(
-    conf, y_pred, forecast_step, forecast_count, datetimes, save_datetimes
+    conf,
+    y_pred_name,
+    y_pred_shape,
+    y_pred_dtype,
+    forecast_step,
+    forecast_count,
+    datetimes,
+    save_datetimes,
 ):
     # Transform predictions
     try:
@@ -62,7 +70,8 @@ def process_forecast(
             + timedelta(hours=lead_time_periods)
             for i in range(batch_size)
         ]
-
+        y_pred_buf = SharedMemory(y_pred_name)
+        y_pred = np.ndarray(y_pred_shape, dtype=y_pred_dtype, buffer=y_pred_buf.buf)
         # Convert to xarray and handle results
         for j in range(batch_size):
             upper_air_list, single_level_list = [], []
@@ -108,6 +117,7 @@ def process_forecast(
             print_str += f"Date: {utc_datetimes[j].strftime('%Y-%m-%d %H:%M:%S')} "
             print_str += f"Hour: {forecast_step * lead_time_periods} "
             print(print_str)
+        y_pred_buf.unlink()
     except Exception as e:
         print(traceback.format_exc())
         raise e
@@ -279,7 +289,6 @@ def predict(rank, world_size, conf, p):
                 )
 
                 if "x_surf" in batch:
-                    print("concat and reshape")
                     x = (
                         concat_and_reshape(batch["x"], batch["x_surf"])
                         .to(device)
@@ -288,7 +297,6 @@ def predict(rank, world_size, conf, p):
                 else:
                     print("reshape only")
                     x = reshape_only(batch["x"]).to(device).float()
-                print(x.shape)
                 # create ensemble:
                 if ensemble_size > 1:
                     x = torch.repeat_interleave(x, ensemble_size, 0)
@@ -328,13 +336,19 @@ def predict(rank, world_size, conf, p):
                 input_dict = {"y_pred": y_pred, "x": x}
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
-            y_pred_trans = state_transformer.inverse_transform(y_pred.cpu())
-            print("processing")
+            y_pred_trans = state_transformer.inverse_transform(y_pred.cpu()).numpy()
+            y_pred_buf = SharedMemory(create=True, size=y_pred_trans.nbytes)
+            y_pred_shared = np.ndarray(
+                y_pred_trans.shape, dtype=y_pred_trans.dtype, buffer=y_pred_buf.buf
+            )
+            y_pred_shared[:] = y_pred_trans[:]
             result = p.apply_async(
                 process_forecast,
                 (
                     conf,
-                    y_pred_trans.numpy(),
+                    y_pred_buf.name,
+                    y_pred_shared.shape,
+                    y_pred_shared.dtype,
                     forecast_step,
                     forecast_count,
                     batch["datetime"],
@@ -469,10 +483,6 @@ def main_cli():
     os.makedirs(forecast_save_loc, exist_ok=True)
 
     logging.info("Save roll-outs to {}".format(forecast_save_loc))
-
-    # Create a project directory (to save launch.sh and model.yml) if they do not exist
-    save_loc = os.path.expandvars(conf["save_loc"])
-    os.makedirs(save_loc, exist_ok=True)
 
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:

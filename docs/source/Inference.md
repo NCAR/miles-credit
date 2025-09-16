@@ -12,7 +12,7 @@ only dynamic forcing variable is top-of-atmosphere shortwave irradiance. Pre-cal
 irradiance values integrated over 1 and 6 hour periods are available on Derecho/Casper at 
 `/glade/campaign/cisl/aiml/credit/credit_solar_nc_6h_0.25deg` and `credit_solar_nc_1h_0.25deg`. You
 can calculate top of atmosphere solar irradiance for any grid and integration time period with
-`applications/calc_global_solar.py`. If you plan to issue regular predictions, we recommend
+`credit_calc_global_solar`. If you plan to issue regular predictions, we recommend
 pre-computing solar irradiance values for a given year of inference rather than calculating on the fly.
 3. ⛰️ Static forcing files with and without normalization. These forcing files include elements like
 terrain height, land-sea mask, and land-use type. Static forcing files for the initial CREDIT models
@@ -26,7 +26,7 @@ for the mean and `std_residual_6h_1979_2018_16lev_0.25deg.nc` for the combined s
 each variable and the standard deviation of the temporal residual.
 
 ## Realtime Rollouts
-The goal of realtime inference is to launch model forecasts from GFS or ERA5 initial conditions.
+The goal of realtime inference is to launch model forecasts from GFS, GEFS, or ERA5 initial conditions.
 The `predict` section of your configuration file should contain the following fields:
 ```yaml
 predict:
@@ -45,26 +45,29 @@ It will download fields from a GFS initial condition on model levels, which are 
 on the NOAA [NOMADS](https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/) server. GDAS Analyses and
 GFS initial timesteps on model levels are also available on 
 [Google Cloud](https://console.cloud.google.com/marketplace/product/noaa-public/gfs) back to 2021.
-The `gfs_init.py` program regrids the data onto the appropriate CREDIT grid and interpolates in
-the vertical from the GFS to selected CREDIT ERA5 hybrid sigma-pressure levels. 
+The `credit_gfs_init` program regrids the data onto the appropriate CREDIT grid and interpolates in
+the vertical from the GFS to selected CREDIT ERA5 hybrid sigma-pressure levels.
 
 :::{important}                                                                          
-`gfs_init.py` requires xesmf, which depends on the [ESMF](https://github.com/esmf-org/esmf) suite 
+`credit_gfs_init` requires xesmf, which depends on the [ESMF](https://github.com/esmf-org/esmf) suite 
 and cannot be installed from PyPI. The easist way to install xesmf without messing up your CREDIT
 environment is to run `conda install -c conda-forge esmf esmpy` then `pip install xesmf` after building
 your CREDIT environment first. 
 :::
 
-Realtime rollouts are handled by `applications/rollout_realtime.py`. Update the paths in the 
-data section of the config file to point to the GFS initial conditions zarr file. `rollout_realtime.py`
+If you want to launch ensemble rollouts, you can use `credit_gefs_init` to convert raw GEFS cube sphere data
+to grids for CREDIT models. 
+
+Realtime rollouts are handled by `credit_rollout_realtime`. Update the paths in the 
+data section of the config file to point to the GFS initial conditions zarr file. `credit_rollout_realtime`
 only outputs one forecast at a time.
 
 ## Rollout to netCDF for ERA5 initiated forecasts
-`rollout_to_netcdf.py` enables you to generate forecasts for many initialization times using 
+`credit_rollout_to_netcdf` enables you to generate forecasts for many initialization times using 
 processed ERA5 data as initial conditions. It can be run either in serial or parallel mode with
 both single node and multi node support (MPI-enabled PyTorch required). 
 
-To run `rollout_to_netcdf.py` include the following section in your config file.
+To run `credit_rollout_to_netcdf` include the following section in your config file.
 
 ```yaml
 predict:
@@ -81,10 +84,10 @@ predict:
         days: 10             # forecast lead time as days (1 means 24-hour forecast)
 ```
 
-To submit the rollout script as a PBS job, use `python rollout_to_netcdf.py -l 1 -c <config file>`.
+To submit the rollout script as a PBS job, use `credit_rollout_to_netcdf -l 1 -c <config file>`.
 
 To issue predictions on multiple GPUs on a single node:
-`torchrun rollout_to_netcdf.py -c <confg file>`
+`torchrun credit_rollout_to_netcdf -c <confg file>`
 
 For multi-node rollouts with MPI (MPI-enabled PyTorch required):
 ```bash
@@ -97,7 +100,7 @@ MASTER_PORT=1234
 mpiexec -n $NUM_RANKS -ppn 4 --cpu-bind none python rollout_to_netcdf.py -c <config file>
 ```
 ## Interpolation to constant pressure and height above ground levels
-Both `rollout_realtime.py` and `rollout_to_netcdf.py` support vertical interpolation to constant
+Both `credit_rollout_realtime` and `credit_rollout_to_netcdf` support vertical interpolation to constant
 pressure and constant height above ground level (AGL) levels from the hybrid sigma-pressure levels
 used by most models in CREDIT. To enable interpolation, add the following lines to your config
 file in the predict section

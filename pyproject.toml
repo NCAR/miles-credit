@@ -60,6 +60,7 @@ credit_gfs_init = "credit.applications.gfs_init:main"
 credit_gefs_init = "credit.applications.gefs_init:main"
 credit_rollout_to_netcdf = "credit.applications.rollout_to_netcdf:main"
 credit_rollout_metrics = "credit.applications.rollout_metrics:main"
+credit_calc_global_solar = "credit.applications.calc_global_solar:main"
 
 [tool.setuptools.dynamic]
 version = {file = "credit/VERSION"}
