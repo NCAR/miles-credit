@@ -37,6 +37,9 @@ jobs:
       - name: Test with pytest
         run: |
           pytest
+      - name: Pytest Coverage
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        run: |
           pytest --cov=credit tests/ | tee pytest-coverage.txt
       - name: Pytest coverage comment
         uses: MishaKav/pytest-coverage-comment@main
