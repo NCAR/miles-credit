@@ -1,7 +1,7 @@
 # NSF NCAR MILES Community Research Earth Digital Intelligence Twin (CREDIT)
 
 [![DOI](https://zenodo.org/badge/710968229.svg)](https://doi.org/10.5281/zenodo.14361005)
-![PyPI - Version](https://img.shields.io/pypi/v/miles-credit)
+![PyPI - Version](https://img.shields.io/pypi/v/miles-credit?link=https%3A%2F%2Fpypi.org%2Fproject%2Fmiles-credit%2F)
 [![arXiv](https://img.shields.io/badge/arXiv-2411.07814-b31b1b.svg)](https://arxiv.org/abs/2411.07814)
 
 ## About
