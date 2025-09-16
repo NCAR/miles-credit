@@ -1,8 +1,11 @@
 # NSF NCAR MILES Community Research Earth Digital Intelligence Twin (CREDIT)
 
 [![DOI](https://zenodo.org/badge/710968229.svg)](https://doi.org/10.5281/zenodo.14361005)
-![PyPI - Version](https://img.shields.io/pypi/v/miles-credit?link=https%3A%2F%2Fpypi.org%2Fproject%2Fmiles-credit%2F)
 [![arXiv](https://img.shields.io/badge/arXiv-2411.07814-b31b1b.svg)](https://arxiv.org/abs/2411.07814)
+
+[PyPI](https://pypi.org/project/miles-credit/)
+
+[CREDIT npj Climate and Atmospheric Science Article](nature.com/articles/s41612-025-01125-6)
 
 ## About
 CREDIT is an open software platform to train and deploy AI atmospheric prediction models. CREDIT offers fast models 
@@ -41,4 +44,4 @@ This software is based upon work supported by the NSF National Center for Atmosp
 U.S. National Science Foundation  under Cooperative Agreement No. 1852977 and managed by the University Corporation for Atmospheric Research. Any opinions, findings and conclusions or recommendations 
 expressed in this material do not necessarily reflect the views of NSF. Additional support for development was provided by 
 The NSF AI Institute for Research on Trustworthy AI for Weather, Climate, and Coastal Oceanography (AI2ES)  with grant
-number RISE-2019758. 
+number RISE-2019758 and by Schmidt Sciences, LLC. 
