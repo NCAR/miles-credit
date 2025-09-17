@@ -51,7 +51,7 @@ dependencies = [
    ]
 
 [tool.setuptools]
-packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
+packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers", "credit.losses"]
 
 [project.scripts]
 credit_train = "credit.applications.train:main_cli"
