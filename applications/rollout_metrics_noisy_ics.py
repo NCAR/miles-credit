@@ -236,6 +236,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
     # Set up metrics and containers
     ## We will loop over the forecasts produced from noisy ICs explicitly, in order to avoid a reshape
     ## in metrics.py we override here
+    ensemble_size = conf["predict"].get("ensemble_size", 1)
     conf["trainer"]["ensemble_size"] = 1
     if "climatology" in conf["predict"]:
         metrics = LatWeightedMetricsClimatology(conf, climatology=xr.open_dataset(conf["predict"]["climatology"]))
@@ -259,7 +260,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
     # Check if we have weights if working with bred-vectors
     weights = 1.0
-    if use_bred_vectors:
+    if use_bred_vectors or "weights" in conf["predict"]["ensemble"]["noise"]:
         weights = np.array(conf["predict"]["ensemble"]["bred_vector"].get("weights", [1.0]))
 
     noise_cfg["amplitude"] = noise_cfg["amplitude"] * weights
@@ -281,6 +282,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             noise_amplitude=bred_cfg["amplitude"] * weights,
             num_cycles=bred_cfg["num_cycles"],
             hemispheric_rescale=bred_cfg["hemispheric_rescale"],
+            terrain_file=conf["loss"]["latitude_weights"],
             perturb_channel_idx=bred_cfg.get("perturb_channel_idx", None),
             integration_steps=bred_cfg["integration_steps"],
             post_conf=conf["model"].get("post_conf", {}),
@@ -386,68 +388,77 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
                     # from credit.transforms import Normalize_ERA5_and_Forcing
 
-                    transformer = Normalize_ERA5_and_Forcing(conf)
-                    x = transformer.inverse_transform(x)
+                    # transformer = Normalize_ERA5_and_Forcing(conf)
+                    # x = transformer.inverse_transform(x)
 
-                    import matplotlib.pyplot as plt
-                    import cartopy.crs as ccrs
-                    import cartopy.feature as cfeature
+                    # import matplotlib.pyplot as plt
+                    # import cartopy.crs as ccrs
+                    # import cartopy.feature as cfeature
 
-                    for pc, bvec in enumerate(ensemble_members):
-                        bv = transformer.inverse_transform(bvec)
+                    # for pc, bvec in enumerate(ensemble_members):
+                    #     bv = transformer.inverse_transform(bvec)
 
-                        proj = ccrs.PlateCarree(central_longitude=0)
+                    #     proj = ccrs.PlateCarree(central_longitude=0)
 
-                        levels = 16
-                        # variables = ["U", "V", "T", "Q"]
-                        surface_variables = ["SP", "t2m", "V500", "U500", "T500", "Z500", "Q500"]
-                        # all_vars = [f"{var}_{i}" for var in variables for i in range(levels)] + surface_variables
+                    #     levels = 16
+                    #     # variables = ["U", "V", "T", "Q"]
+                    #     surface_variables = ["SP", "t2m", "V500", "U500", "T500", "Z500", "Q500"]
+                    #     # all_vars = [f"{var}_{i}" for var in variables for i in range(levels)] + surface_variables
 
-                        fig, axs = plt.subplots(
-                            len(surface_variables),
-                            3,
-                            figsize=(18, 3 * len(surface_variables)),
-                            subplot_kw={"projection": proj},
-                        )
-                        plt.subplots_adjust(wspace=0.005, hspace=0.3)
+                    #     fig, axs = plt.subplots(
+                    #         len(surface_variables),
+                    #         3,
+                    #         figsize=(18, 3 * len(surface_variables)),
+                    #         subplot_kw={"projection": proj},
+                    #     )
+                    #     plt.subplots_adjust(wspace=0.005, hspace=0.3)
 
-                        for i, var in enumerate(surface_variables):
-                            idx = 4 * levels + i  # Index in the full variable stack
-                            x_z500 = x[0][idx].squeeze(0).cpu()
-                            bred_z500 = bv[0][idx].squeeze(0).cpu()
-                            diff_z500 = bred_z500 - x_z500
+                    #     for i, var in enumerate(surface_variables):
+                    #         idx = 4 * levels + i  # Index in the full variable stack
+                    #         x_z500 = x[0][idx].squeeze(0).cpu()
+                    #         bred_z500 = bv[0][idx].squeeze(0).cpu()
+                    #         diff_z500 = bred_z500 - x_z500
 
-                            titles = [f"Original {var}", f"Perturbed {var}", "Bred"]
-                            fields = [x_z500, bred_z500, diff_z500]
-                            cmaps = ["viridis", "viridis", "bwr"]
-                            vmins = [None, None, -diff_z500.abs().max()]
-                            vmaxs = [None, None, diff_z500.abs().max()]
+                    #         titles = [f"Original {var}", f"Perturbed {var}", "Bred"]
+                    #         fields = [x_z500, bred_z500, diff_z500]
+                    #         cmaps = ["viridis", "viridis", "bwr"]
+                    #         vmins = [None, None, -diff_z500.abs().max()]
+                    #         vmaxs = [None, None, diff_z500.abs().max()]
 
-                            for j in range(3):
-                                ax = axs[i, j]
-                                im = ax.imshow(
-                                    fields[j],
-                                    transform=proj,
-                                    cmap=cmaps[j],
-                                    vmin=vmins[j],
-                                    vmax=vmaxs[j],
-                                    extent=[0, 360, -90, 90],
-                                    origin="upper",
-                                )
-                                ax.coastlines()
-                                ax.set_title(titles[j])
-                                ax.set_xticks([])
-                                ax.set_yticks([])
-                                ax.add_feature(cfeature.BORDERS, linewidth=0.5)
-                                ax.add_feature(cfeature.LAND, facecolor="lightgray", alpha=0.3)
-                                plt.colorbar(im, ax=ax, orientation="horizontal", pad=0.05, shrink=0.75)
+                    #         for j in range(3):
+                    #             ax = axs[i, j]
+                    #             im = ax.imshow(
+                    #                 fields[j],
+                    #                 transform=proj,
+                    #                 cmap=cmaps[j],
+                    #                 vmin=vmins[j],
+                    #                 vmax=vmaxs[j],
+                    #                 extent=[0, 360, -90, 90],
+                    #                 origin="upper",
+                    #             )
+                    #             ax.coastlines()
+                    #             ax.set_title(titles[j])
+                    #             ax.set_xticks([])
+                    #             ax.set_yticks([])
+                    #             ax.add_feature(cfeature.BORDERS, linewidth=0.5)
+                    #             ax.add_feature(cfeature.LAND, facecolor="lightgray", alpha=0.3)
+                    #             plt.colorbar(im, ax=ax, orientation="horizontal", pad=0.05, shrink=0.75)
 
-                        plt.tight_layout()
-                        plt.savefig(f"surface_variables_{init_datetimes[0]}_{pc}.png", dpi=300, bbox_inches="tight")
-                        plt.show()
+                    #     plt.tight_layout()
+                    #     plt.savefig(f"surface_variables_{init_datetimes[0]}_{pc}.png", dpi=300, bbox_inches="tight")
+                    #     plt.show()
 
                 else:
-                    ensemble_members = noise(x)
+                    # If not using bred-vectors, need to copy x tensor here then add noise
+                    if use_temporal_noise:
+                        ensemble_members, delta_x_members = zip(*[temporal_noise(x, None, 1) for _ in range(ensemble_size)])
+                        # Remove static and dynamic forcing channels from delta_x_members
+                        # Only keep perturbations for dynamic variables
+                        if static_dim_size > 0:
+                            delta_x_members = [delta_x[:, :-static_dim_size, ...] for delta_x in delta_x_members]
+
+                    else:
+                        ensemble_members = [x + noise(x) for _ in range(ensemble_size)]
 
                     # ensemble_members = generate_bred_vectors_cycle(
                     #     initial_condition=x,
@@ -465,9 +476,6 @@ def predict(rank, world_size, conf, backend=None, p=None):
                     #     static_dim_size=static_dim_size,
                     #     post_conf=post_conf,
                     # )
-
-                if use_temporal_noise:
-                    delta_x = None
 
             else:
                 # Add current forcing and static variables

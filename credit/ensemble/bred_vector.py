@@ -1,3 +1,4 @@
+import os
 import copy
 import torch
 from datetime import datetime, timedelta
@@ -8,8 +9,8 @@ from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
 from credit.postblock import PostBlock
 from typing import Callable, Optional
 from collections import OrderedDict
-import numpy as np
-
+import numpy as np 
+import xarray as xr
 
 class BredVector:
     def __init__(
@@ -20,6 +21,7 @@ class BredVector:
         integration_steps: int = 1,
         perturbation_method: Optional[Callable[[torch.Tensor, OrderedDict[str, np.ndarray]], torch.Tensor]] = None,
         hemispheric_rescale: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
+        terrain_file: str = None,
         perturb_channel_idx: int = None,
         ensemble_perturb: bool = False,
         clamp: bool = False,
@@ -81,6 +83,12 @@ class BredVector:
 
             # logger.info("using postblock")
             self.postblock = PostBlock(self.post_conf)
+
+        if self.hemispheric_rescale is not None:
+            if not os.path.exists(terrain_file) or terrain_file is None:
+                raise FileNotFoundError(f"Terrain file {terrain_file} not found")
+            latlons = xr.open_dataset(terrain_file).load()
+            self.latitudes = torch.tensor(latlons.latitude.values)
 
     def perturb(self, x_input: torch.Tensor, forecast_step: int = 1) -> torch.Tensor:
         x = x_input.clone()
