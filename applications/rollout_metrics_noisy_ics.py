@@ -384,70 +384,6 @@ def predict(rank, world_size, conf, backend=None, p=None):
                             bv = torch.cat((bv, x_forcing_batch), dim=1)
                         ensemble_members[i] = bv
 
-                    # ensemble_members.append(x)
-
-                    # from credit.transforms import Normalize_ERA5_and_Forcing
-
-                    # transformer = Normalize_ERA5_and_Forcing(conf)
-                    # x = transformer.inverse_transform(x)
-
-                    # import matplotlib.pyplot as plt
-                    # import cartopy.crs as ccrs
-                    # import cartopy.feature as cfeature
-
-                    # for pc, bvec in enumerate(ensemble_members):
-                    #     bv = transformer.inverse_transform(bvec)
-
-                    #     proj = ccrs.PlateCarree(central_longitude=0)
-
-                    #     levels = 16
-                    #     # variables = ["U", "V", "T", "Q"]
-                    #     surface_variables = ["SP", "t2m", "V500", "U500", "T500", "Z500", "Q500"]
-                    #     # all_vars = [f"{var}_{i}" for var in variables for i in range(levels)] + surface_variables
-
-                    #     fig, axs = plt.subplots(
-                    #         len(surface_variables),
-                    #         3,
-                    #         figsize=(18, 3 * len(surface_variables)),
-                    #         subplot_kw={"projection": proj},
-                    #     )
-                    #     plt.subplots_adjust(wspace=0.005, hspace=0.3)
-
-                    #     for i, var in enumerate(surface_variables):
-                    #         idx = 4 * levels + i  # Index in the full variable stack
-                    #         x_z500 = x[0][idx].squeeze(0).cpu()
-                    #         bred_z500 = bv[0][idx].squeeze(0).cpu()
-                    #         diff_z500 = bred_z500 - x_z500
-
-                    #         titles = [f"Original {var}", f"Perturbed {var}", "Bred"]
-                    #         fields = [x_z500, bred_z500, diff_z500]
-                    #         cmaps = ["viridis", "viridis", "bwr"]
-                    #         vmins = [None, None, -diff_z500.abs().max()]
-                    #         vmaxs = [None, None, diff_z500.abs().max()]
-
-                    #         for j in range(3):
-                    #             ax = axs[i, j]
-                    #             im = ax.imshow(
-                    #                 fields[j],
-                    #                 transform=proj,
-                    #                 cmap=cmaps[j],
-                    #                 vmin=vmins[j],
-                    #                 vmax=vmaxs[j],
-                    #                 extent=[0, 360, -90, 90],
-                    #                 origin="upper",
-                    #             )
-                    #             ax.coastlines()
-                    #             ax.set_title(titles[j])
-                    #             ax.set_xticks([])
-                    #             ax.set_yticks([])
-                    #             ax.add_feature(cfeature.BORDERS, linewidth=0.5)
-                    #             ax.add_feature(cfeature.LAND, facecolor="lightgray", alpha=0.3)
-                    #             plt.colorbar(im, ax=ax, orientation="horizontal", pad=0.05, shrink=0.75)
-
-                    #     plt.tight_layout()
-                    #     plt.savefig(f"surface_variables_{init_datetimes[0]}_{pc}.png", dpi=300, bbox_inches="tight")
-                    #     plt.show()
-
                 else:
                     # If not using bred-vectors, need to copy x tensor here then add noise
                     if use_temporal_noise:
@@ -459,23 +395,6 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
                     else:
                         ensemble_members = [x + noise(x) for _ in range(ensemble_size)]
-
-                    # ensemble_members = generate_bred_vectors_cycle(
-                    #     initial_condition=x,
-                    #     dataset=dataset_bred_vectors,
-                    #     model=model,
-                    #     num_cycles=num_cycles,
-                    #     perturbation_std=perturbation_std,
-                    #     epsilon=epsilon,
-                    #     flag_clamp=flag_clamp,
-                    #     clamp_min=clamp_min if flag_clamp else None,
-                    #     clamp_max=clamp_max if flag_clamp else None,
-                    #     device=device,
-                    #     history_len=history_len,
-                    #     varnum_diag=varnum_diag,
-                    #     static_dim_size=static_dim_size,
-                    #     post_conf=post_conf,
-                    # )
 
             else:
                 # Add current forcing and static variables
@@ -808,14 +727,6 @@ if __name__ == "__main__":
             logging.info("Launching to PBS on Derecho")
             launch_script_mpi(config, script_path)
         sys.exit()
-
-    #     wandb.init(
-    #         # set the wandb project where this run will be logged
-    #         project="Derecho parallelism",
-    #         name=f"Worker {os.environ["RANK"]} {os.environ["WORLD_SIZE"]}"
-    #         # track hyperparameters and run metadata
-    #         config=conf
-    #     )
 
     if number_of_subsets > 0:
         forecasts = load_forecasts(conf)
