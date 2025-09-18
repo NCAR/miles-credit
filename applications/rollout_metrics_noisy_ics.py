@@ -302,6 +302,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             temporal_cfg["temporal_correlation"],
             temporal_cfg["perturbation_std"],
             temporal_cfg["hemispheric_rescale"],
+            terrain_file=conf["loss"]["latitude_weights"]
         )
 
     # Rollout

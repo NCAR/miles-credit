@@ -1,4 +1,6 @@
+import os
 import torch
+import xarray as xr
 from typing import Optional, Union
 from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
 
@@ -7,8 +9,7 @@ class TemporalNoise:
     """AR(1) temporal noise generator that leverages spatial noise patterns.
 
     Implements an autoregressive process of order 1 for temporal correlation:
-
-        δ_t = ρ * δ_{t-1} + ε_t
+    δ_t = ρ * δ_{t-1} + ε_t
 
     where ρ is the temporal correlation coefficient and ε_t is generated using
     a Noise instance (allowing for spatially correlated innovations).
@@ -16,19 +17,18 @@ class TemporalNoise:
     This creates perturbations that evolve smoothly over forecast steps while
     maintaining realistic spatial patterns at each time step.
 
-    Args:
-        noise_generator (Noise): Noise generator instance used to create the white
-            noise innovations (ε_t).
-        temporal_correlation (float, optional): Temporal correlation coefficient in
-            the range [0, 1]. Higher values create smoother temporal evolution.
-            Defaults to 0.9.
-        perturbation_std (Union[float, torch.Tensor], optional): Noise standard
-            deviation scaling. Can be either:
-            * float: uniform scaling applied to all channels
-            * torch.Tensor: per-channel scaling with shape matching the channel
-                dimension
-            If provided, overrides the amplitude from the noise_generator.
-            Defaults to None.
+    Parameters
+    ----------
+    noise_generator : Noise
+        Noise generator instance used to create the white noise innovations (ε_t)
+    temporal_correlation : float, optional
+        Temporal correlation coefficient (0-1). Higher values create smoother
+        temporal evolution, by default 0.9
+    perturbation_std : Union[float, torch.Tensor], optional
+        Noise standard deviation scaling. Can be either:
+        - float: uniform scaling applied to all channels
+        - torch.Tensor: per-channel scaling with shape matching channel dimension
+        If provided, overrides the amplitude from the noise_generator, by default None
     """
 
     def __init__(
@@ -37,31 +37,39 @@ class TemporalNoise:
         temporal_correlation: float = 0.9,
         perturbation_std: Optional[Union[float, torch.Tensor]] = None,
         hemispheric_rescale: Optional[bool] = False,
+        terrain_file: str = None,
     ):
         self.noise_generator = noise_generator
         self.temporal_correlation = temporal_correlation
         self.perturbation_std = perturbation_std
         self.hemispheric_rescale = hemi_rescale if hemispheric_rescale else False
+        if self.hemispheric_rescale is not None:
+            if not os.path.exists(terrain_file) or terrain_file is None:
+                raise FileNotFoundError(f"Terrain file {terrain_file} not found")
+            latlons = xr.open_dataset(terrain_file).load()
+            self.latitudes = torch.tensor(latlons.latitude.values)
 
     def __call__(
         self, x: torch.Tensor, previous_perturbation: Optional[torch.Tensor] = None, forecast_step: int = 1
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply temporally correlated perturbation for sequential forecasting.
 
-        Args:
-            x (torch.Tensor): Input state tensor to perturb.
-            previous_perturbation (torch.Tensor, optional): Perturbation from the
-                previous forecast step. If None or if forecast_step == 1, generates a
-                new initial perturbation. Defaults to None.
-            forecast_step (int, optional): Current forecast step (1-indexed).
-                Defaults to 1.
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input state tensor to perturb
+        previous_perturbation : torch.Tensor, optional
+            Perturbation from the previous forecast step, by default None.
+            If None or forecast_step=1, generates new initial perturbation.
+        forecast_step : int, optional
+            Current forecast step (1-indexed), by default 1
 
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]:  
-                * Perturbed state tensor (x + perturbation).  
-                * Current perturbation tensor (for use in the next step).  
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            - Perturbed state tensor (x + perturbation)
+            - Current perturbation tensor (for use in next step)
         """
-
         # Generate white noise innovation using the spatial noise generator
         if self.perturbation_std is not None:
             # Generate base noise with original amplitude
@@ -95,8 +103,7 @@ class TemporalNoise:
             current_perturbation = self.temporal_correlation * previous_perturbation + white_noise
 
         if self.hemispheric_rescale is not None:
-            latitudes = torch.linspace(90, -90, current_perturbation.shape[-2], device=current_perturbation.device)
-            current_perturbation = self.hemispheric_rescale(current_perturbation, latitudes)
+            current_perturbation = self.hemispheric_rescale(current_perturbation, self.latitudes.to(current_perturbation.device))
 
         # Apply perturbation to input
         perturbed_state = x + current_perturbation
