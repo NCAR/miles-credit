@@ -7,7 +7,8 @@ class TemporalNoise:
     """AR(1) temporal noise generator that leverages spatial noise patterns.
 
     Implements an autoregressive process of order 1 for temporal correlation:
-    δ_t = ρ * δ_{t-1} + ε_t
+
+        δ_t = ρ * δ_{t-1} + ε_t
 
     where ρ is the temporal correlation coefficient and ε_t is generated using
     a Noise instance (allowing for spatially correlated innovations).
@@ -15,18 +16,19 @@ class TemporalNoise:
     This creates perturbations that evolve smoothly over forecast steps while
     maintaining realistic spatial patterns at each time step.
 
-    Parameters
-    ----------
-    noise_generator : Noise
-        Noise generator instance used to create the white noise innovations (ε_t)
-    temporal_correlation : float, optional
-        Temporal correlation coefficient (0-1). Higher values create smoother
-        temporal evolution, by default 0.9
-    perturbation_std : Union[float, torch.Tensor], optional
-        Noise standard deviation scaling. Can be either:
-        - float: uniform scaling applied to all channels
-        - torch.Tensor: per-channel scaling with shape matching channel dimension
-        If provided, overrides the amplitude from the noise_generator, by default None
+    Args:
+        noise_generator (Noise): Noise generator instance used to create the white
+            noise innovations (ε_t).
+        temporal_correlation (float, optional): Temporal correlation coefficient in
+            the range [0, 1]. Higher values create smoother temporal evolution.
+            Defaults to 0.9.
+        perturbation_std (Union[float, torch.Tensor], optional): Noise standard
+            deviation scaling. Can be either:
+            * float: uniform scaling applied to all channels
+            * torch.Tensor: per-channel scaling with shape matching the channel
+                dimension
+            If provided, overrides the amplitude from the noise_generator.
+            Defaults to None.
     """
 
     def __init__(
@@ -46,22 +48,20 @@ class TemporalNoise:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply temporally correlated perturbation for sequential forecasting.
 
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input state tensor to perturb
-        previous_perturbation : torch.Tensor, optional
-            Perturbation from the previous forecast step, by default None.
-            If None or forecast_step=1, generates new initial perturbation.
-        forecast_step : int, optional
-            Current forecast step (1-indexed), by default 1
+        Args:
+            x (torch.Tensor): Input state tensor to perturb.
+            previous_perturbation (torch.Tensor, optional): Perturbation from the
+                previous forecast step. If None or if forecast_step == 1, generates a
+                new initial perturbation. Defaults to None.
+            forecast_step (int, optional): Current forecast step (1-indexed).
+                Defaults to 1.
 
-        Returns
-        -------
-        tuple[torch.Tensor, torch.Tensor]
-            - Perturbed state tensor (x + perturbation)
-            - Current perturbation tensor (for use in next step)
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:  
+                * Perturbed state tensor (x + perturbation).  
+                * Current perturbation tensor (for use in the next step).  
         """
+
         # Generate white noise innovation using the spatial noise generator
         if self.perturbation_std is not None:
             # Generate base noise with original amplitude

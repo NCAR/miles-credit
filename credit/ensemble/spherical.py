@@ -9,35 +9,34 @@ from credit.boundary_padding import TensorPadding
 class SphericalNoise:
     """Spherical harmonic-based noise generator with Matérn covariance for lat/lon grids.
 
-    Generates spatially correlated noise on the sphere using spherical harmonics and
+    Generates spatially correlated noise on the sphere using spherical harmonics and a
     Matérn covariance structure. This method produces realistic geophysical noise
     patterns that respect the spherical geometry of Earth.
 
-    The generated noise has Matérn covariance: C = σ² (-Δ + τ²I)^(-α), where:
-    - Δ is the spherical Laplacian operator
-    - I is the identity operator
-    - σ, τ, α are scalar parameters controlling the covariance structure
+    The generated noise has Matérn covariance:
 
-    Warning
-    -------
-    For grids that don't naturally fit spherical harmonic constraints (N:2N or (N+1):2N),
-    this method generates noise at a larger valid grid size and symmetrically crops to
-    the target dimensions. This preserves most correlation properties but may introduce
-    minor boundary effects.
+        C = σ² (-Δ + τ²I)^(-α)
 
-    Parameters
-    ----------
-    amplitude : float, optional
-        Overall scaling factor for the generated noise, by default 0.05
-    smoothness : float, optional
-        Regularity/smoothness parameter (α). Higher values produce smoother fields,
-        by default 2.0. Must be > 1.0 for well-defined covariance.
-    length_scale : float, optional
-        Characteristic length scale parameter (τ). Higher values include more
-        spatial scales in the noise, by default 3.0
-    variance_scale : Union[float, None], optional
-        Variance scaling parameter (σ). If None, computed as
-        τ^(0.5*(2*α - 2)), by default None
+    where:
+    * Δ is the spherical Laplacian operator.
+    * I is the identity operator.
+    * σ, τ, α are scalar parameters controlling the covariance structure.
+
+    Warning:
+        For grids that don't naturally fit spherical harmonic constraints (N:2N or (N+1):2N),
+        this method generates noise at a larger valid grid size and symmetrically crops to
+        the target dimensions. This preserves most correlation properties but may introduce
+        minor boundary effects.
+
+    Args:
+        amplitude (float, optional): Overall scaling factor for the generated noise.
+            Defaults to 0.05.
+        smoothness (float, optional): Regularity/smoothness parameter (α). Higher values
+            produce smoother fields. Must be > 1.0 for well-defined covariance. Defaults to 2.0.
+        length_scale (float, optional): Characteristic length scale parameter (τ). Higher
+            values include more spatial scales in the noise. Defaults to 3.0.
+        variance_scale (float | None, optional): Variance scaling parameter (σ). If None,
+            computed as τ^(0.5*(2*α - 2)). Defaults to None.
     """
 
     def __init__(
@@ -66,22 +65,18 @@ class SphericalNoise:
     ) -> torch.Tensor:
         """Generate spherical noise matching input tensor dimensions.
 
-        Parameters
-        ----------
-        x : torch.Tensor
-            Reference tensor whose shape determines output noise dimensions.
-            Last two dimensions must correspond to lat/lon grid.
+        Args:
+            x (torch.Tensor): Reference tensor whose shape determines the output noise
+                dimensions. The last two dimensions must correspond to a lat/lon grid.
 
-        Returns
-        -------
-        torch.Tensor
-            Spherical noise tensor with same shape as input, scaled by amplitude.
+        Returns:
+            torch.Tensor: Spherical noise tensor with the same shape as the input, scaled
+            by the amplitude.
 
-        Raises
-        ------
-        ValueError
-            If lat/lon aspect ratio is not N:2N or (N+1):2N format.
+        Raises:
+            ValueError: If the lat/lon aspect ratio is not in N:2N or (N+1):2N format.
         """
+
         if self.use_padding:
             x = self.padding_opt.pad(x)
 
@@ -154,39 +149,34 @@ class SphericalRandomField(torch.nn.Module):
     Implements a mean-zero Gaussian Random Field on the sphere using spherical
     harmonics with Matérn covariance structure:
 
-    C = σ² (-Δ + τ²I)^(-α)
+        C = σ² (-Δ + τ²I)^(-α)
 
     where:
-    - Δ is the spherical Laplacian operator
-    - I is the identity operator
-    - σ² controls overall variance (variance_scale²)
-    - τ² controls characteristic length scale (length_scale²)
-    - α controls smoothness/regularity (smoothness)
+    - Δ is the spherical Laplacian operator.
+    - I is the identity operator.
+    - σ² controls overall variance (variance_scale²).
+    - τ² controls characteristic length scale (length_scale²).
+    - α controls smoothness/regularity (smoothness).
 
     The covariance is trace-class (well-defined) if and only if α > 1.
 
-    Parameters
-    ----------
-    latitude_modes : int
-        Number of spherical harmonic modes in latitude direction.
-        Longitude modes are automatically set to 2 * latitude_modes.
-    smoothness : float, optional
-        Regularity parameter (α). Higher values produce smoother fields,
-        by default 2.0. Must be > 1.0.
-    length_scale : float, optional
-        Characteristic length scale parameter (τ), by default 3.0
-    variance_scale : Union[float, None], optional
-        Variance parameter (σ). If None, computed automatically as
-        τ^(0.5*(2*α - 2)), by default None
-    sphere_radius : float, optional
-        Radius of the sphere for scaling, by default 1.0
-    grid_type : str, optional
-        Grid type for spherical harmonics. Options: "equiangular", "legendre-gauss",
-        by default "equiangular"
-    dtype : torch.dtype, optional
-        Numerical precision for calculations, by default torch.float32
-    device : torch.device, optional
-        PyTorch device for computations, by default "cuda:0"
+    Args:
+        latitude_modes (int): Number of spherical harmonic modes in the latitude
+            direction. Longitude modes are automatically set to 2 * latitude_modes.
+        smoothness (float, optional): Regularity parameter (α). Higher values produce
+            smoother fields. Must be > 1.0. Defaults to 2.0.
+        length_scale (float, optional): Characteristic length scale parameter (τ).
+            Defaults to 3.0.
+        variance_scale (Union[float, None], optional): Variance parameter (σ). If
+            None, computed automatically as τ^(0.5*(2*α - 2)). Defaults to None.
+        sphere_radius (float, optional): Radius of the sphere for scaling. Defaults
+            to 1.0.
+        grid_type (str, optional): Grid type for spherical harmonics. Options are
+            "equiangular" or "legendre-gauss". Defaults to "equiangular".
+        dtype (torch.dtype, optional): Numerical precision for calculations. Defaults
+            to torch.float32.
+        device (torch.device, optional): PyTorch device for computations. Defaults
+            to "cuda:0".
     """
 
     def __init__(
@@ -253,25 +243,22 @@ class SphericalRandomField(torch.nn.Module):
         """Generate random field samples on the sphere.
 
         Uses Karhunen-Loève expansion to generate correlated random fields:
-        1. Sample independent Gaussian noise in spherical harmonic space
-        2. Scale by square root of covariance eigenvalues
-        3. Transform back to physical space via inverse spherical harmonics
+        1. Sample independent Gaussian noise in spherical harmonic space.
+        2. Scale by the square root of covariance eigenvalues.
+        3. Transform back to physical space via inverse spherical harmonics.
 
-        Parameters
-        ----------
-        num_samples : int
-            Number of independent random field realizations to generate
-        noise_input : torch.Tensor, optional
-            Pre-generated complex Gaussian noise with shape
-            (num_samples, latitude_modes, latitude_modes+1).
-            If None, new noise is sampled automatically, by default None
+        Args:
+            num_samples (int): Number of independent random field realizations to generate.
+            noise_input (torch.Tensor, optional): Pre-generated complex Gaussian noise
+                with shape (num_samples, latitude_modes, latitude_modes+1). If None,
+                new noise is sampled automatically. Defaults to None.
 
-        Returns
-        -------
-        torch.Tensor
-            Random field samples with shape (num_samples, latitude_modes, longitude_modes)
-            on equiangular grid covering the sphere
+        Returns:
+            torch.Tensor: Random field samples with shape
+                (num_samples, latitude_modes, longitude_modes) on an equiangular grid
+                covering the sphere.
         """
+
         # Generate or use provided Gaussian noise in spherical harmonic space
         if noise_input is None:
             # Create standard Gaussian distribution
