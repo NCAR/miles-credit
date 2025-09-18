@@ -20,6 +20,7 @@ dependencies = [
     "pysteps",
     "xarray",
     "netcdf4",
+    "h5netcdf",
     "torch",
     "torchvision",
     "pyyaml",
@@ -45,11 +46,21 @@ dependencies = [
     "fsspec",
     "gcsfs",
     "miles-guess",
-    "keras"
+    "keras",
+    "metpy"
    ]
 
 [tool.setuptools]
-packages = ["credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
+packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
+
+[project.scripts]
+credit_train = "credit.applications.train:main_cli"
+credit_rollout_realtime = "credit.applications.rollout_realtime:main_cli"
+credit_gfs_init = "credit.applications.gfs_init:main"
+credit_gefs_init = "credit.applications.gefs_init:main"
+credit_rollout_to_netcdf = "credit.applications.rollout_to_netcdf:main"
+credit_rollout_metrics = "credit.applications.rollout_metrics:main"
+credit_calc_global_solar = "credit.applications.calc_global_solar:main"
 
 [tool.setuptools.dynamic]
 version = {file = "credit/VERSION"}

@@ -57,7 +57,7 @@ def ensure_numpy_datetime(value):
         except ValueError:
             pass  # If it fails, let it fall through
     elif isinstance(value, cftime.datetime):
-        return np.datetime64(value.strftime('%Y-%m-%dT%H:%M:%S'))  # Convert from cftime
+        return np.datetime64(value.strftime("%Y-%m-%dT%H:%M:%S"))  # Convert from cftime
     elif isinstance(value, object):  # Catch-all for potential unexpected object types
         try:
             return np.datetime64(pd.to_datetime(value))
@@ -126,6 +126,8 @@ def find_common_indices(list1, list2):
 
 def concat_and_reshape(x1, x2):
     """Flattening the "level" coordinate of upper-air variables and concatenate it will surface variables."""
+    print("x1 shape: ", x1.shape)
+    print("x2 shape: ", x2.shape)
     x1 = x1.view(
         x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5]
     )
@@ -149,7 +151,7 @@ def get_forward_data(filename) -> xr.Dataset:
     if filename[-3:] == ".nc" or filename[-4:] == ".nc4":
         dataset = xr.open_dataset(filename)
     else:
-        dataset = xr.open_zarr(filename, consolidated=True)
+        dataset = xr.open_zarr(filename)
     return dataset
 
 
@@ -1453,11 +1455,11 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         for init_time in self.init_time_list_np:
             for i_file, ds in enumerate(self.all_files):
                 # get the year of the current file
-                #print('Check time values, data.py:' ,ds["time"][0].values)
-                #print('Check time values, data.py:' ,ds["time"][0].values.dtype)
+                # print('Check time values, data.py:' ,ds["time"][0].values)
+                # print('Check time values, data.py:' ,ds["time"][0].values.dtype)
 
                 time_value = ensure_numpy_datetime(ds["time"][0].values)
-                
+
                 ds_year = int(np.datetime_as_string(time_value, unit="Y"))
 
                 # get the first and last years of init times
@@ -1469,7 +1471,9 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
 
                     # convert ds['time'] to a list of nanoseconds
                     ds_time_list = [
-                        np.datetime64(ensure_numpy_datetime(ds_time.values)).astype('datetime64[ns]').astype(int)
+                        np.datetime64(ensure_numpy_datetime(ds_time.values))
+                        .astype("datetime64[ns]")
+                        .astype(int)
                         for ds_time in ds["time"]
                     ]
 
@@ -1478,10 +1482,10 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
 
                     init_time_start = init_time
                     # if initalization time is within this (yearly) xr.Dataset
-                    #print('Check time values, data.py: start time',ds_start_time)
-                    #print('Check time values, data.py: end time' ,ds_end_time)
-                    #print('Check time values, data.py: init time' , init_time_start)
-                    
+                    # print('Check time values, data.py: start time',ds_start_time)
+                    # print('Check time values, data.py: end time' ,ds_end_time)
+                    # print('Check time values, data.py: init time' , init_time_start)
+
                     if ds_start_time <= init_time_start <= ds_end_time:
                         # try getting the index of the first initalization time
                         i_init_start = ds_time_list.index(init_time_start)

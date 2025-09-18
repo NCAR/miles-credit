@@ -710,7 +710,6 @@ if __name__ == "__main__":
 
     # Create a project directory (to save launch.sh and model.yml) if they do not exist
     save_loc = os.path.expandvars(conf["save_loc"])
-    os.makedirs(save_loc, exist_ok=True)
 
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:
