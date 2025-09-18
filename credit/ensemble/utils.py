@@ -3,16 +3,19 @@ import torch.nn.functional as F
 
 
 def add_spatially_correlated_noise(x, correlation_scale=10):
-    """
-    Adds spatially correlated Gaussian noise using a convolutional filter
-    independently at each time step.
+    """Add spatially correlated Gaussian noise using a convolutional filter.
+
+    Applies correlated noise independently at each time step.
 
     Args:
-        x: Tensor of shape (B, C, T, H, W)
-        correlation_scale: Std dev of the Gaussian kernel in pixels
+        x (torch.Tensor): Input tensor of shape (B, C, T, H, W).
+        correlation_scale (float): Standard deviation of the Gaussian kernel in pixels.
+
     Returns:
-        Tensor of the same shape with correlated noise
+        torch.Tensor: Tensor of the same shape as input with added spatially
+            correlated noise.
     """
+
     B, C, T, H, W = x.shape
     noise = torch.randn_like(x)
 
@@ -40,12 +43,13 @@ def add_spatially_correlated_noise(x, correlation_scale=10):
 
 
 def hemispheric_rescale(perturbation, latitudes, north_scale=1.0, south_scale=1.0):
-    """
-    Linearly interpolate scaling in tropics between 20S and 20N.
+    """Linearly interpolate scaling in the tropics between 20S and 20N.
 
     Args:
-        latitudes: Tensor of shape (H,) from +90 to -90
+        latitudes (torch.Tensor): Tensor of shape (H,) with latitude values
+            ranging from +90 to -90.
     """
+
     device = perturbation.device
     latitudes = latitudes.to(device)
     weights = torch.ones_like(latitudes)
