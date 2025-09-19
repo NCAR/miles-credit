@@ -1,6 +1,6 @@
 """Data.py contains modules for processing training data.
 
-Content:
+Heper functions:
     - generate_datetime(start_time, end_time, interval_hr)
     - hour_to_nanoseconds(input_hr)
     - nanoseconds_to_year(nanoseconds_value)
@@ -10,12 +10,24 @@ Content:
     - reshape_only(x1)
     - get_forward_data(filename)
     - drop_var_from_dataset()
+    - previous_hourly_steps()
+    - next_n_hour()
+    - encode_datetime64()
+
+Sample class:
+    - Sample
+    - Sample_WRF
+    - Sample_dscale
+    - Sample_diag
+    - Sample_LES
+
+Deprecated
     - ERA5_and_Forcing_Dataset(torch.utils.data.Dataset)
     - Predict_Dataset(torch.utils.data.IterableDataset)
 """
 
 # system tools
-from typing import TypedDict, Union, List
+from typing import TypedDict, Union, List, Sequence
 
 # data utils
 import datetime
@@ -33,7 +45,6 @@ from torch.utils.data.distributed import DistributedSampler
 #
 Array = Union[np.ndarray, xr.DataArray]
 IMAGE_ATTR_NAMES = ("historical_ERA5_images", "target_ERA5_images")
-
 
 def ensure_numpy_datetime(value):
     """
@@ -66,7 +77,6 @@ def ensure_numpy_datetime(value):
     else:
         raise TypeError(f"Unsupported type {type(value)} for datetime conversion")
 
-
 def generate_datetime(start_time, end_time, interval_hr):
     """Generate a list of datetime.datetime based on stat, end times, and hour interval.
 
@@ -87,21 +97,15 @@ def generate_datetime(start_time, end_time, interval_hr):
         current_time += interval
     return datetime_list
 
-
 def hour_to_nanoseconds(input_hr):
     """Convert hour to nanoseconds."""
     # hr * min_per_hr * sec_per_min * nanosec_per_sec
     return input_hr * 60 * 60 * 1000000000
 
-
 def nanoseconds_to_year(nanoseconds_value):
     """Given datetime info as nanoseconds, compute which year it belongs to."""
-    return (
-        np.datetime64(nanoseconds_value, "ns").astype("datetime64[Y]").astype(int)
-        + 1970
-    )
-
-
+    return np.datetime64(nanoseconds_value, "ns").astype("datetime64[Y]").astype(int) + 1970
+    
 def extract_month_day_hour(dates):
     """Given an 1-d array of np.datatime64[ns], extract their mon, day, hr into a zipped list."""
     months = dates.astype("datetime64[M]").astype(int) % 12 + 1
@@ -126,8 +130,8 @@ def find_common_indices(list1, list2):
 
 def concat_and_reshape(x1, x2):
     """Flattening the "level" coordinate of upper-air variables and concatenate it will surface variables."""
-    print("x1 shape: ", x1.shape)
-    print("x2 shape: ", x2.shape)
+    # print("x1 shape: ", x1.shape)
+    # print("x2 shape: ", x2.shape)
     x1 = x1.view(
         x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5]
     )
@@ -155,25 +159,6 @@ def get_forward_data(filename) -> xr.Dataset:
     return dataset
 
 
-class Sample(TypedDict):
-    """Simple class for structuring data for the ML model.
-
-    Using typing.TypedDict gives us several advantages:
-      1. Single 'source of truth' for the type and documentation of each example.
-      2. A static type checker can check the types are correct.
-
-    Instead of TypedDict, we could use typing.NamedTuple,
-    which would provide runtime checks, but the deal-breaker with Tuples is that they're immutable
-    so we cannot change the values in the transforms.
-    """
-
-    # IMAGES
-    # Shape: batch_size, seq_length, lat, lon, lev
-    historical_ERA5_images: Array
-    target_ERA5_images: Array
-
-    # METADATA
-    datetime_index: Array
 
 
 def flatten_list(list_of_lists):
@@ -263,6 +248,142 @@ def keep_dataset_vars(xarray_dataset: xr.Dataset, varnames_keep: List[str]):
 
     """
     return xarray_dataset[varnames_keep]
+
+
+def subset_patch(
+    ds: xr.Dataset,
+    input_size,
+    start,   # (ilat0, ilon0). If None → center crop
+    lat_name = "yIndex",
+    lon_name = "xIndex",
+) -> xr.Dataset:
+    """
+    Return a spatial subset of shape (time, input_size[0], input_size[1]).
+    Assumes ds has dims (time, lat, lon).
+    """
+    H = ds.dims[lat_name]
+    W = ds.dims[lon_name]
+    h, w = input_size
+
+    if h > H or w > W:
+        raise ValueError(f"Requested patch {h}x{w} exceeds dataset size {H}x{W}")
+
+    if start is None:
+        i0 = (H - h) // 2
+        j0 = (W - w) // 2
+    else:
+        i0, j0 = start
+        if i0 < 0 or j0 < 0 or i0 + h > H or j0 + w > W:
+            raise ValueError(f"Start {(i0, j0)} with size {(h, w)} is out of bounds for {H}x{W}")
+
+    i1 = i0 + h
+    j1 = j0 + w
+
+    return ds.isel({lat_name: slice(i0, i1), lon_name: slice(j0, j1)})
+
+def encode_datetime64(dt_array):
+    dt_array = np.atleast_1d(dt_array).astype('datetime64[ns]')
+    dt_s = dt_array.astype('datetime64[s]')
+
+    # Time components
+    seconds_in_day = 86400
+    seconds_since_midnight = (dt_s - dt_s.astype('datetime64[D]')).astype('timedelta64[s]').astype(int)
+    hour = seconds_since_midnight / 3600.0
+
+    # Day of year
+    year_start = dt_s.astype('datetime64[Y]')
+    day_of_year = (dt_s - year_start).astype('timedelta64[D]').astype(int) + 1
+
+    # Cyclical encodings
+    hour_sin = np.sin(2 * np.pi * hour / 24)
+    hour_cos = np.cos(2 * np.pi * hour / 24)
+    doy_sin = np.sin(2 * np.pi * day_of_year / 365.25)
+    doy_cos = np.cos(2 * np.pi * day_of_year / 365.25)
+
+    return np.concatenate((hour_sin, hour_cos, doy_sin, doy_cos), axis=0)
+
+
+def next_n_hour(dt, period_hours):
+    """
+    Round dt forward to the next N-hour boundary.
+
+    Parameters:
+    - dt: np.datetime64[ns] or array of such values
+    - period_hours: int, the interval in hours (e.g., 3, 6)
+
+    Returns:
+    - np.datetime64[ns] rounded forward to the next period_hours boundary
+    """
+    period_ns = int(np.timedelta64(period_hours, "h") / np.timedelta64(1, "ns"))
+    ns = dt.astype("int64")
+    out = (ns // period_ns + 1) * period_ns
+    return out.astype("datetime64[ns]")
+
+def previous_hourly_steps(time_pick, hour, step):
+    """
+    Given a datetime64[ns] time_pick, compute time_pick - step * hours.
+    """
+    return time_pick - np.timedelta64(hour * step, 'h')
+
+def filter_ds(ds: xr.Dataset, varnames_keep: Sequence[str]) -> xr.Dataset:
+    """
+    Return a new Dataset containing only the variables in varnames_keep.
+    Raises if any var in varnames_keep is missing.
+    """
+    missing = set(varnames_keep) - set(ds.data_vars)
+    if missing:
+        raise KeyError(f"Missing variables in dataset: {missing}")
+    # this builds the new Dataset by iterating only over varnames_keep
+    return ds[list(varnames_keep)]
+    
+class Sample(TypedDict):
+    """Simple class for structuring data for the ML model.
+
+    Using typing.TypedDict gives us several advantages:
+      1. Single 'source of truth' for the type and documentation of each example.
+      2. A static type checker can check the types are correct.
+
+    Instead of TypedDict, we could use typing.NamedTuple,
+    which would provide runtime checks, but the deal-breaker with Tuples is that they're immutable
+    so we cannot change the values in the transforms.
+    """
+
+    # IMAGES
+    # Shape: batch_size, seq_length, lat, lon, lev
+    historical_ERA5_images: Array
+    target_ERA5_images: Array
+
+    # METADATA
+    datetime_index: Array
+
+class Sample_WRF(TypedDict):
+    # Shape: batch_size, seq_length, lat, lon, lev
+    WRF_input: Array
+    WRF_target: Array
+    boundary_input: Array
+    time_encode: Array
+    datetime_index: Array
+
+class Sample_dscale(TypedDict):
+    # Shape: batch_size, seq_length, lat, lon, lev
+    LR_input: Array
+    HR_input: Array
+    HR_target: Array
+    time_encode: Array
+    datetime_index: Array
+
+class Sample_diag(TypedDict):
+    # Shape: batch_size, seq_length, lat, lon, lev
+    WRF_input: Array
+    WRF_target: Array
+    time_encode: Array
+    datetime_index: Array
+
+class Sample_LES(TypedDict):
+    # Shape: batch_size, seq_length, lat, lon, lev
+    LES_input: Array
+    LES_target: Array
+    datetime_index: Array
 
 
 class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
