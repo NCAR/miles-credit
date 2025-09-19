@@ -14,7 +14,7 @@ import xarray as xr
 
 import torch
 from credit.data import Sample
-from credit.transforms import device_compatible_to
+from . import device_compatible_to
 
 logger = logging.getLogger(__name__)
 
