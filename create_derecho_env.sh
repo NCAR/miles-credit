@@ -70,7 +70,7 @@ find ${CONDA_PREFIX} -name "libnccl.*"
 
 # remove PIP NCCL, if any.
 #  (echo-opt -> xgboost -> nvidia-nccl-cu12 -> problem.)
-pip uninstall -y $(pip list | grep nvidia-nccl | awk '{print $1}')
+pip uninstall -y $(pip list | grep nvidia-nccl | awk '{print $1}') || true
 
 conda-tree deptree --small
 pipdeptree --depth 3
