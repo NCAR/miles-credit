@@ -26,10 +26,12 @@ set -e
 ml conda
 
 topdir=$(git rev-parse --show-toplevel)
-CREDIT_ENV_PATH=${CREDIT_ENV_PATH:-"${topdir}/derecho-env"}
+CREDIT_ENV_NAME=${CREDIT_ENV_NAME:-"credit-derecho"}
 yml=$(mktemp --tmpdir=${topdir} credit-derecho-tmp-XXXXXXXXXX.yml)
 echo ${yml}
 #yml=derecho.yml
+
+echo "Creating conda env \"${CREDIT_ENV_NAME}\""
 
 cat <<EOF > ${yml}
 name: credit
@@ -52,14 +54,16 @@ EOF
 # create the environment
 export CONDA_VERBOSITY=1
 export TIMEFORMAT=$'--> Real time: %3R seconds'
-time conda env create --prefix ${CREDIT_ENV_PATH} --file ${yml} \
+time conda env create \
+     --name ${CREDIT_ENV_NAME} \
+     --file ${yml} \
     || { cat ${yml}; echo "ERROR Creating Conda env!"; exit 1; }
 
 rm -f ${yml}
 
 #-----------------------------------------------------------
 # activate & fix the environment
-conda activate ${CREDIT_ENV_PATH}
+conda activate ${CREDIT_ENV_NAME}
 
 echo "NCCLs - before cleanup:"
 find ${CONDA_PREFIX} -name "libnccl.*"
@@ -76,4 +80,6 @@ find ${CONDA_PREFIX} -name "libnccl.*"
 
 python -c "import credit"
 
-echo "CREDIT for Derecho successfully installed into ${CREDIT_ENV_PATH}"
+echo
+echo "\"${CREDIT_ENV_NAME}\" conda environment for Derecho successfully installed into CONDA_PREFIX"
+echo "use \"conda activate ${CREDIT_ENV_NAME}\" to activate"
