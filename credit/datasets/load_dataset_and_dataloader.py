@@ -149,23 +149,25 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     """
     try:
         data_config = setup_data_loading(conf)
+        
     except KeyError:
         logging.warning("You must run credit.parser.credit_main_parser(conf) before loading data. Exiting.")
         sys.exit()
+        
     seed = conf["seed"]
     shuffle = is_train
+    
     training_type = "train" if is_train else "valid"
-    dataset_type = conf["data"].get(
-        "dataset_type",
-    )
+    dataset_type = conf["data"].get("dataset_type",)
     batch_size = conf["trainer"][f"{training_type}_batch_size"]
-    shuffle = is_train
+    
+    #shuffle = is_train
     num_workers = conf["trainer"]["thread_workers"] if is_train else conf["trainer"]["valid_thread_workers"]
-    prefetch_factor = conf["trainer"].get(
-        "prefetch_factor",
-    )
+    prefetch_factor = conf["trainer"].get("prefetch_factor",)
+    
     history_len = data_config["history_len"] if is_train else data_config["valid_history_len"]
     forecast_len = data_config["forecast_len"] if is_train else data_config["valid_forecast_len"]
+    
     if prefetch_factor is None:
         logging.warning(
             "prefetch_factor not found in config under 'trainer'. Using default value of 4. "
@@ -211,6 +213,7 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
             transform=load_transforms(conf),
             sst_forcing=data_config["sst_forcing"],
         )
+        
     # All datasets from here on are multi-step examples
     elif dataset_type == "ERA5_and_Forcing_MultiStep":
         logging.warning(
