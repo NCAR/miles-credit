@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from functools import partial
 from queue import Queue
 from threading import Thread
+import cftime
 
 import numpy as np
 import xarray as xr
@@ -23,6 +24,7 @@ from credit.data import (
     get_forward_data,
     hour_to_nanoseconds,
     nanoseconds_to_year,
+    ensure_numpy_datetime
 )
 from credit.datasets.era5_multistep import worker
 
@@ -1224,16 +1226,19 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 if init_year0 == ds_year:
                     N_times = len(ds["time"])
                     # convert ds['time'] to a list of nanosecondes
-                    ds_time_list = ds["time"].values.astype(datetime).tolist()
+                    ds_time_list = ds["time"].values.tolist()
+                    ds_dttime_list = [ensure_numpy_datetime(timeval) for timeval in ds_time_list]
+                    # ds_time_list = ds["time"].values.astype(datetime).tolist()
                     # ds_time_list = [ds_time.astype("datetime64[ns]").values.astype(datetime) for ds_time in ds["time"]]
-                    ds_start_time = ds_time_list[0]
-                    ds_end_time = ds_time_list[-1]
+                    
+                    ds_start_time = ensure_numpy_datetime(ds_time_list[0])
+                    ds_end_time = ensure_numpy_datetime(ds_time_list[-1])
 
-                    init_time_start = init_time
+                    init_time_start = ensure_numpy_datetime(init_time)
                     # if initalization time is within this (yearly) xr.Dataset
                     if ds_start_time <= init_time_start <= ds_end_time:
                         # try getting the index of the first initalization time
-                        i_init_start = ds_time_list.index(init_time_start)
+                        i_init_start = ds_dttime_list.index(init_time_start)
 
                         # for multiple init time inputs (history_len > 1), init_end is different for init_start
                         init_time_end = init_time_start + hour_to_nanoseconds(
@@ -1243,12 +1248,12 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                         # see if init_time_end is alos in this file
                         if ds_start_time <= init_time_end <= ds_end_time:
                             # try getting the index
-                            i_init_end = ds_time_list.index(init_time_end)
+                            i_init_end = ds_dttime_list.index(init_time_end)
                         else:
                             # this set of initalizations have crossed years
                             # get the last element of the current file
                             # we have anthoer section that checks additional input data
-                            i_init_end = len(ds_time_list) - 1
+                            i_init_end = len(ds_dttime_list) - 1
 
                         info.append([i_file, i_init_start, i_init_end, N_times])
         return info
