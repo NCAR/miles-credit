@@ -178,7 +178,7 @@ class BredVector:
                 dx = dx * gamma
 
             if self.hemispheric_rescale is not None:
-                latitudes = torch.tensor(np.linspace(90, -90, x.shape[-2])).to(device)
+                latitudes = self.latitudes.to(device)
                 dx = self.hemispheric_rescale(dx, latitudes)
 
             # Update x for next iteration - but x_current needs to keep static channels
@@ -580,9 +580,9 @@ def generate_bred_vectors_cycle(
             norm_delta_x = torch.norm(delta_x, p=2, dim=(2, 3), keepdim=True)
             delta_x_rescaled = epsilon * (norm_delta_x0 / (norm_delta_x + 1e-8)) * delta_x
 
-            # Perform hemispheric rescaling
-            latitudes = torch.linspace(90, -90, delta_x.shape[3], device=delta_x.device)
-            delta_x_rescaled = hemi_rescale(delta_x_rescaled, latitudes)
+            # Perform hemispheric rescaling -- need the latlon file so we use the right grid spacing, removing for now also this function is unused.
+            # latitudes = torch.linspace(90, -90, delta_x.shape[3], device=delta_x.device)
+            # delta_x_rescaled = hemi_rescale(delta_x_rescaled, latitudes)
 
             # Add the perturbation to the model input
             x[:, : delta_x_rescaled.shape[1], :, :, :] += delta_x_rescaled

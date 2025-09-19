@@ -1,4 +1,6 @@
+import os
 import torch
+import xarray as xr
 from typing import Optional, Union
 from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
 
@@ -35,11 +37,17 @@ class TemporalNoise:
         temporal_correlation: float = 0.9,
         perturbation_std: Optional[Union[float, torch.Tensor]] = None,
         hemispheric_rescale: Optional[bool] = False,
+        terrain_file: str = None,
     ):
         self.noise_generator = noise_generator
         self.temporal_correlation = temporal_correlation
         self.perturbation_std = perturbation_std
         self.hemispheric_rescale = hemi_rescale if hemispheric_rescale else False
+        if self.hemispheric_rescale is not None:
+            if not os.path.exists(terrain_file) or terrain_file is None:
+                raise FileNotFoundError(f"Terrain file {terrain_file} not found")
+            latlons = xr.open_dataset(terrain_file).load()
+            self.latitudes = torch.tensor(latlons.latitude.values)
 
     def __call__(
         self, x: torch.Tensor, previous_perturbation: Optional[torch.Tensor] = None, forecast_step: int = 1
@@ -95,8 +103,7 @@ class TemporalNoise:
             current_perturbation = self.temporal_correlation * previous_perturbation + white_noise
 
         if self.hemispheric_rescale is not None:
-            latitudes = torch.linspace(90, -90, current_perturbation.shape[-2], device=current_perturbation.device)
-            current_perturbation = self.hemispheric_rescale(current_perturbation, latitudes)
+            current_perturbation = self.hemispheric_rescale(current_perturbation, self.latitudes.to(current_perturbation.device))
 
         # Apply perturbation to input
         perturbed_state = x + current_perturbation

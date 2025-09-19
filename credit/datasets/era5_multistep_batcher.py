@@ -292,7 +292,9 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         self.batch_size = batch_size
         self.batch_indices = None  # To track initial indices for each batch item
         self.time_steps = None  # Tracks time steps for each batch index
-        self.forecast_step_counts = None  # Track forecast step counts for each batch item
+        self.forecast_step_counts = (
+            None  # Track forecast step counts for each batch item
+        )
 
         # initialze the batch indices by faking the epoch number here and resetting to None
         # this is mainly a feature for working with smaller datasets / testing purposes
@@ -316,7 +318,9 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
 
         # Set epoch for DistributedSampler to ensure consistent shuffling across devices
         if self.current_epoch is None:
-            logging.warning("You must first set the epoch number using set_epoch method.")
+            logging.warning(
+                "You must first set the epoch number using set_epoch method."
+            )
 
         # Retrieve indices for this GPU
         total_indices = len(self.batch_indices)
@@ -334,7 +338,10 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
         else:
             if end > total_indices:
                 # Wrap-around to ensure no index is skipped
-                indices = self.batch_indices[start:] + self.batch_indices[: (end % total_indices)]
+                indices = (
+                    self.batch_indices[start:]
+                    + self.batch_indices[: (end % total_indices)]
+                )
             else:
                 indices = self.batch_indices[start:end]
 
@@ -344,7 +351,9 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
             self.batch_call_count = 0  # Reset for next cycle
 
         # Assign batch indices
-        self.current_batch_indices = list(indices)  # this will be the local indices used in getitem
+        self.current_batch_indices = list(
+            indices
+        )  # this will be the local indices used in getitem
         self.time_steps = [0 for _ in self.batch_indices]
         self.forecast_step_counts = [0 for _ in self.batch_indices]
 
@@ -399,9 +408,15 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
                     value = torch.tensor(value)
                 elif isinstance(value, np.int64):  # If it's a numpy scalar (int64)
                     value = torch.tensor(value, dtype=torch.int64)
-                elif isinstance(value, (int, float)):  # If it's a native Python scalar (int/float)
-                    value = torch.tensor(value, dtype=torch.float32)  # Ensure tensor is float for scalar
-                elif not isinstance(value, torch.Tensor):  # If it's not already a tensor
+                elif isinstance(
+                    value, (int, float)
+                ):  # If it's a native Python scalar (int/float)
+                    value = torch.tensor(
+                        value, dtype=torch.float32
+                    )  # Ensure tensor is float for scalar
+                elif not isinstance(
+                    value, torch.Tensor
+                ):  # If it's not already a tensor
                     value = torch.tensor(value)  # Ensure conversion to tensor
 
                 # Convert zero-dimensional tensor (scalar) to 1D tensor
@@ -417,7 +432,9 @@ class ERA5_MultiStep_Batcher(torch.utils.data.Dataset):
                 if key not in batch:
                     batch[key] = value  # Initialize the key in the batch dictionary
                 else:
-                    batch[key] = torch.cat((batch[key], value), dim=0)  # Concatenate values along the batch dimension
+                    batch[key] = torch.cat(
+                        (batch[key], value), dim=0
+                    )  # Concatenate values along the batch dimension
 
             # Increment time steps and forecast step counts for this batch item
             self.time_steps[k] += 1
@@ -480,7 +497,9 @@ class MultiprocessingBatcher(ERA5_MultiStep_Batcher):
         splits = np.array_split(range(len(args)), self.num_workers)
         start_ends = [(split[0], split[-1] + 1) for split in splits if len(split)]
         for start_idx, end_idx in start_ends:
-            p = multiprocessing.Process(target=worker_process, args=(start_idx, end_idx))
+            p = multiprocessing.Process(
+                target=worker_process, args=(start_idx, end_idx)
+            )
             processes.append(p)
             p.start()
 
@@ -575,7 +594,9 @@ class MultiprocessingBatcherPrefetch(ERA5_MultiStep_Batcher):
         """
         try:
             while not self.stop_signal.is_set():
-                if not self.prefetch_queue.full():  # Only prefetch if the queue has space
+                if (
+                    not self.prefetch_queue.full()
+                ):  # Only prefetch if the queue has space
                     try:
                         batch = self._fetch_batch()
                         self.prefetch_queue.put(batch)  # Add batch to the queue
@@ -621,7 +642,10 @@ class MultiprocessingBatcherPrefetch(ERA5_MultiStep_Batcher):
         batch = {}
 
         # Reset items if forecast step count exceeds forecast length
-        if self.forecast_step_counts[0] == self.forecast_len + 1 or self.batch_indices is None:
+        if (
+            self.forecast_step_counts[0] == self.forecast_len + 1
+            or self.batch_indices is None
+        ):
             self.initialize_batch()
 
         # Prepare arguments for processing
@@ -633,14 +657,18 @@ class MultiprocessingBatcherPrefetch(ERA5_MultiStep_Batcher):
 
         # Split tasks among workers (efficient chunking)
         chunk_size = max(1, len(tasks) // self.num_workers)
-        task_chunks = [tasks[i : i + chunk_size] for i in range(0, len(tasks), chunk_size)]
+        task_chunks = [
+            tasks[i : i + chunk_size] for i in range(0, len(tasks), chunk_size)
+        ]
 
         # Shared dictionary to collect results from workers
         results = self.results
 
         processes = []
         for chunk in task_chunks:
-            p = multiprocessing.Process(target=self._process_chunk, args=(chunk, results))
+            p = multiprocessing.Process(
+                target=self._process_chunk, args=(chunk, results)
+            )
             processes.append(p)
             p.start()
 
@@ -978,8 +1006,12 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         # Initialize the first forecast so we can get the forecast_len
         # which up to here is not defined. Needed in __len__ so DataLoader knows when to stop
         # convert to datetime object
-        fcst_datetime_0 = datetime.strptime(self.init_datetime[0][0], "%Y-%m-%d %H:%M:%S")
-        fcst_datetime_1 = datetime.strptime(self.init_datetime[0][1], "%Y-%m-%d %H:%M:%S")
+        fcst_datetime_0 = datetime.strptime(
+            self.init_datetime[0][0], "%Y-%m-%d %H:%M:%S"
+        )
+        fcst_datetime_1 = datetime.strptime(
+            self.init_datetime[0][1], "%Y-%m-%d %H:%M:%S"
+        )
         # convert the 1st & last init times to a list of init times
         self.forecast_period = len(
             generate_datetime(
@@ -988,10 +1020,14 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 self.lead_time_periods,
             )
         )
-        self.forecast_len = self.forecast_period - 1  # For consistency with other datasets that use  forecast_len
+        self.forecast_len = (
+            self.forecast_period - 1
+        )  # For consistency with other datasets that use  forecast_len
         # logger.info(f'rank={self.rank} {self.forecast_period=:} {self.forecast_len=:}')
 
-        all_indices_splits = torch.tensor_split(torch.arange(len(self.init_datetime)), world_size)
+        all_indices_splits = torch.tensor_split(
+            torch.arange(len(self.init_datetime)), world_size
+        )
         self.batch_indices = all_indices_splits[rank].long()
         self.batch_indices_splits = []
         total_indices = len(self.batch_indices)
@@ -1023,11 +1059,11 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         if filename.endswith((".nc", ".nc4")):
             dataset = xr.open_dataset(filename, decode_times=False, engine="h5netcdf")
         else:
-            dataset = xr.open_zarr(filename, consolidated=True)
-        
+            dataset = xr.open_zarr(filename)
+
         dataset = dataset.drop_vars(list(dataset.data_vars))
         dataset = dataset.isel(time=slice(time_start, time_end))
-        
+
         return dataset
 
     def load_zarr_as_input(self, i_file, i_init_start, i_init_end, mode="input"):
@@ -1041,7 +1077,11 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             # sliced_x = self.ds_read_and_subset(
             #     self.filenames[i_file], i_init_start, i_init_end + 1, self.varname_upper_air
             # )
-            sliced_x = self.all_files[i_file].isel(time=slice(i_init_start, i_init_end + 1)).load()
+            sliced_x = (
+                self.all_files[i_file]
+                .isel(time=slice(i_init_start, i_init_end + 1))
+                .load()
+            )
             # surface variables
             if self.filename_surface is not None:
                 # sliced_surface = self.ds_read_and_subset(
@@ -1051,7 +1091,11 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 #    self.varname_surface,
                 # )
                 # merge surface to sliced_x
-                sliced_surface = self.surface_files[i_file].isel(time=slice(i_init_start, i_init_end + 1)).load()
+                sliced_surface = (
+                    self.surface_files[i_file]
+                    .isel(time=slice(i_init_start, i_init_end + 1))
+                    .load()
+                )
                 # sliced_surface["time"] = sliced_x["time"]
                 sliced_x = sliced_x.merge(sliced_surface)
 
@@ -1059,7 +1103,9 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             # dynamic forcing variables
             if self.filename_dyn_forcing is not None:
                 sliced_dyn_forcing = (
-                    self.dyn_forcing_files[i_file].isel(time=slice(i_init_start, i_init_end + 1)).load()
+                    self.dyn_forcing_files[i_file]
+                    .isel(time=slice(i_init_start, i_init_end + 1))
+                    .load()
                 )
                 # sliced_dyn_forcing = self.ds_read_and_subset(
                 #    self.filename_dyn_forcing[i_file],
@@ -1080,23 +1126,29 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 # See also `ERA5_and_Forcing_Dataset`
                 # matching month, day, hour between forcing and upper air [time]
                 # this approach handles leap year forcing file and non-leap-year upper air file
-                month_day_forcing = extract_month_day_hour(np.array(sliced_forcing["time"]))
+                month_day_forcing = extract_month_day_hour(
+                    np.array(sliced_forcing["time"])
+                )
                 month_day_inputs = extract_month_day_hour(np.array(sliced_x["time"]))
                 # indices to subset
-                ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
+                ind_forcing, _ = find_common_indices(
+                    month_day_forcing, month_day_inputs
+                )
                 sliced_forcing = sliced_forcing.isel(time=ind_forcing).load()
                 # forcing and upper air have different years but the same mon/day/hour
                 # safely replace forcing time with upper air time
                 sliced_forcing["time"] = sliced_x["time"]
-                
+
                 # merge forcing to sliced_x
                 sliced_x = sliced_x.merge(sliced_forcing)
-                
+
             if self.filename_static is not None:
                 # sliced_static = get_forward_data(self.filename_static)
                 # sliced_static = drop_var_from_dataset(sliced_static, self.varname_static)
                 sliced_static = self.xarray_static
-                sliced_static = sliced_static.expand_dims(dim={"time": sliced_x["time"].shape[0]})
+                sliced_static = sliced_static.expand_dims(
+                    dim={"time": sliced_x["time"].shape[0]}
+                )
                 sliced_static["time"] = sliced_x["time"]
                 # merge static to sliced_x
                 sliced_x = sliced_x.merge(sliced_static)
@@ -1119,16 +1171,18 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
     def find_start_stop_indices(self, index):
         # shift hours for history_len > 1, because more than one init times are needed
         # <--- !! it MAY NOT work when self.skip_period != 1
-        shifted_hours = self.lead_time_periods * self.skip_periods * (self.history_len - 1)
+        shifted_hours = (
+            self.lead_time_periods * self.skip_periods * (self.history_len - 1)
+        )
 
         # subtrack shifted_hour form the 1st & last init times
         # convert to datetime object
-        self.init_datetime[index][0] = datetime.strptime(self.init_datetime[index][0], "%Y-%m-%d %H:%M:%S") - timedelta(
-            hours=shifted_hours
-        )
-        self.init_datetime[index][1] = datetime.strptime(self.init_datetime[index][1], "%Y-%m-%d %H:%M:%S") - timedelta(
-            hours=shifted_hours
-        )
+        self.init_datetime[index][0] = datetime.strptime(
+            self.init_datetime[index][0], "%Y-%m-%d %H:%M:%S"
+        ) - timedelta(hours=shifted_hours)
+        self.init_datetime[index][1] = datetime.strptime(
+            self.init_datetime[index][1], "%Y-%m-%d %H:%M:%S"
+        ) - timedelta(hours=shifted_hours)
 
         # convert the 1st & last init times to a list of init times
         self.init_datetime[index] = generate_datetime(
@@ -1137,13 +1191,17 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             self.lead_time_periods,
         )
         # convert datetime obj to nanosecondes
-        init_time_list_dt = [np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S")) for date in self.init_datetime[index]]
+        init_time_list_dt = [
+            np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S"))
+            for date in self.init_datetime[index]
+        ]
 
         # init_time_list_np: a list of python datetime objects, each is a forecast step
         # init_time_list_np[0]: the first initialization time
         # init_time_list_np[t]: the forcasted time of the (t-1)th step; the initialization time of the t-th step
         self.init_time_list_np = [
-            np.datetime64(str(dt_obj) + ".000000000").astype(datetime) for dt_obj in init_time_list_dt
+            np.datetime64(str(dt_obj) + ".000000000").astype(datetime)
+            for dt_obj in init_time_list_dt
         ]
 
         info = []
@@ -1151,7 +1209,13 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             for i_file, ds in enumerate(self.all_files):
                 # get the year of the current file
                 # looks messy because extra code needed to handle cftime
-                ds_year = int((np.datetime_as_string(ds["time"][0].astype("datetime64[ns]").values, unit="Y")))
+                ds_year = int(
+                    (
+                        np.datetime_as_string(
+                            ds["time"][0].astype("datetime64[ns]").values, unit="Y"
+                        )
+                    )
+                )
 
                 # get the first and last years of init times
                 init_year0 = nanoseconds_to_year(init_time)
@@ -1160,7 +1224,8 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                 if init_year0 == ds_year:
                     N_times = len(ds["time"])
                     # convert ds['time'] to a list of nanosecondes
-                    ds_time_list = [ds_time.astype("datetime64[ns]").values.astype(datetime) for ds_time in ds["time"]]
+                    ds_time_list = ds["time"].values.astype(datetime).tolist()
+                    # ds_time_list = [ds_time.astype("datetime64[ns]").values.astype(datetime) for ds_time in ds["time"]]
                     ds_start_time = ds_time_list[0]
                     ds_end_time = ds_time_list[-1]
 
@@ -1171,7 +1236,9 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                         i_init_start = ds_time_list.index(init_time_start)
 
                         # for multiple init time inputs (history_len > 1), init_end is different for init_start
-                        init_time_end = init_time_start + hour_to_nanoseconds(shifted_hours)
+                        init_time_end = init_time_start + hour_to_nanoseconds(
+                            shifted_hours
+                        )
 
                         # see if init_time_end is alos in this file
                         if ds_start_time <= init_time_end <= ds_end_time:
@@ -1197,7 +1264,9 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
 
         indices = self.batch_indices_splits[self.batch_call_count]
         # Assign batch indices
-        self.current_batch_indices = list(indices)  # this will be the local indices used in getitem
+        self.current_batch_indices = list(
+            indices
+        )  # this will be the local indices used in getitem
         self.time_steps = [0] * len(self.current_batch_indices)
         self.forecast_step_counts = [0] * len(self.current_batch_indices)
 
@@ -1216,7 +1285,9 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             self.initialize_batch()
 
         if self.forecast_step_counts[0] == 0:
-            self.data_lookup = [self.find_start_stop_indices(idx) for idx in self.current_batch_indices]
+            self.data_lookup = [
+                self.find_start_stop_indices(idx) for idx in self.current_batch_indices
+            ]
             mode = "input"
         else:
             mode = "forcing"
@@ -1227,24 +1298,38 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             i_file, i_init_start, i_init_end, N_times = self.data_lookup[k][current_t]
 
             # Load input data
-            sliced_x = self.load_zarr_as_input(i_file, i_init_start, i_init_end, mode=mode)
+            sliced_x = self.load_zarr_as_input(
+                i_file, i_init_start, i_init_end, mode=mode
+            )
             # Handle cross-file data if needed
-            if (len(sliced_x["time"]) < self.history_len) or (i_init_end + 1 >= N_times):
+            if (len(sliced_x["time"]) < self.history_len) or (
+                i_init_end + 1 >= N_times
+            ):
                 next_file_idx = self.filenames.index(self.filenames[i_file]) + 1
                 if next_file_idx >= len(self.filenames):
                     raise OSError("End of available data reached.")
                 # Input data
-                sliced_x_next = self.load_zarr_as_input(next_file_idx, 0, self.history_len, mode=mode)
-                sliced_x = xr.concat([sliced_x, sliced_x_next], dim="time").isel(time=slice(0, self.history_len))
+                sliced_x_next = self.load_zarr_as_input(
+                    next_file_idx, 0, self.history_len, mode=mode
+                )
+                sliced_x = xr.concat([sliced_x, sliced_x_next], dim="time").isel(
+                    time=slice(0, self.history_len)
+                )
                 # Truth data
                 if not self.skip_target:
-                    sliced_y = self.load_zarr_as_input(i_file, i_init_end, i_init_end, mode="target")
-                    sliced_y_next = self.load_zarr_as_input(next_file_idx, 0, 1, mode="target")
+                    sliced_y = self.load_zarr_as_input(
+                        i_file, i_init_end, i_init_end, mode="target"
+                    )
+                    sliced_y_next = self.load_zarr_as_input(
+                        next_file_idx, 0, 1, mode="target"
+                    )
                     sliced_y = xr.concat([sliced_y, sliced_y_next], dim="time").isel(
                         time=slice(self.history_len, self.history_len + 1)
                     )
             elif not self.skip_target:
-                sliced_y = self.load_zarr_as_input(i_file, i_init_end + 1, i_init_end + 1, mode="target")
+                sliced_y = self.load_zarr_as_input(
+                    i_file, i_init_end + 1, i_init_end + 1, mode="target"
+                )
 
             # Transform data
             sample = {"historical_ERA5_images": sliced_x}
@@ -1255,7 +1340,9 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
 
             # Add metadata
             sample["index"] = idx + current_t
-            sample["datetime"] = sliced_x.time.values.astype("datetime64[s]").astype(int)[-1]
+            sample["datetime"] = sliced_x.time.values.astype("datetime64[s]").astype(
+                int
+            )[-1]
 
             # Convert and add to batch
             for key, value in sample.items():
@@ -1314,10 +1401,14 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger(__name__)  # Create a logger with the module name
 
-    with open("/glade/derecho/scratch/schreck/repos/miles-credit/production/multistep/wxformer_6h/model.yml") as cf:
+    with open(
+        "/glade/derecho/scratch/schreck/repos/miles-credit/production/multistep/wxformer_6h/model.yml"
+    ) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
+    conf = credit_main_parser(
+        conf, parse_training=True, parse_predict=False, print_summary=False
+    )
     training_data_check(conf, print_summary=False)
     data_config = setup_data_loading(conf)
 

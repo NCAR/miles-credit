@@ -15,9 +15,10 @@ import xarray as xr
 from credit.data import drop_var_from_dataset
 from credit.interp import full_state_pressure_interpolation
 from inspect import signature
+from credit.credit_ptype import CreditPostProcessor
 
 logger = logging.getLogger(__name__)
-from credit.credit_ptype import CreditPostProcessor
+
 
 def load_metadata(conf):
     """
@@ -197,38 +198,50 @@ def save_netcdf_increment(
             pressure_interp = full_state_pressure_interpolation(
                 ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"]
             )
-            
+
             # Do ptype here before merging!
-            if conf['use_ptype']:
+            if "use_ptype" in conf.keys() and conf["use_ptype"]:
                 credit_processor = CreditPostProcessor()
                 ds_output = credit_processor.dewpoint_temp(pressure_interp)
                 subset_array = credit_processor.extract_variable_levels(ds_output)
-                
-                scaler, input_features = credit_processor.load_scaler(conf['ptype']["input_scaler_file"])
-                transformed_data = credit_processor.transform_data(subset_array, scaler, input_features)
-                ptype_model = credit_processor.load_model(conf['ptype']['ML_model_path'])
-                
-                predictions = ptype_model.predict(
-                    transformed_data, 
-                    conf['ptype']['output_uncertainties'],
-                    batch_size=conf['ptype']["predict_batch_size"]
+
+                scaler, input_features = credit_processor.load_scaler(
+                    conf["ptype"]["input_scaler_file"]
                 )
-                
+                transformed_data = credit_processor.transform_data(
+                    subset_array, scaler, input_features
+                )
+                ptype_model = credit_processor.load_model(
+                    conf["ptype"]["ML_model_path"]
+                )
+
+                predictions = ptype_model.predict(
+                    transformed_data,
+                    conf["ptype"]["output_uncertainties"],
+                    batch_size=conf["ptype"]["predict_batch_size"],
+                )
+
                 gridded_preds = credit_processor.grid_predictions(
                     data=ds_output,
                     predictions=predictions,
-                    output_uncertainties=conf['ptype']["output_uncertainties"]
+                    output_uncertainties=conf["ptype"]["output_uncertainties"],
                 )
-                ptype_classification = credit_processor.ptype_classification(gridded_preds)
+                ptype_classification = credit_processor.ptype_classification(
+                    gridded_preds
+                )
 
                 # check for overlapping variables and remove them
-                overlapping_vars = [var for var in ptype_classification.data_vars if var in pressure_interp.data_vars]
-                
+                overlapping_vars = [
+                    var
+                    for var in ptype_classification.data_vars
+                    if var in pressure_interp.data_vars
+                ]
+
                 if overlapping_vars:
                     pressure_interp = pressure_interp.drop_vars(overlapping_vars)
-                    
+
                 pressure_interp = xr.merge([pressure_interp, ptype_classification])
-        
+
         ds_merged = xr.merge([ds_merged, pressure_interp])
         logger.info(f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
 

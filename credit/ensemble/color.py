@@ -9,21 +9,20 @@ class ColorNoise:
     scaling in the frequency domain. The noise characteristics are determined by
     the reddening parameter:
 
-    - reddening = 0: White noise (uncorrelated, flat power spectrum)
-    - reddening = 1: Pink noise (1/f power spectrum)
-    - reddening = 2: Brown/Brownian/Red noise (1/f² power spectrum)
-    - reddening > 2: Higher-order red noise (1/f^n power spectrum)
+    * reddening = 0: White noise (uncorrelated, flat power spectrum)
+    * reddening = 1: Pink noise (1/f power spectrum)
+    * reddening = 2: Brown/Brownian/Red noise (1/f² power spectrum)
+    * reddening > 2: Higher-order red noise (1/f^n power spectrum)
 
     Higher reddening values produce smoother, more spatially coherent patterns,
     which are often more realistic for geophysical applications.
 
-    Parameters
-    ----------
-    amplitude : float, optional
-        Scaling factor for the generated noise, by default 0.05
-    reddening : int, optional
-        Power-law exponent controlling spatial correlation. Higher values create
-        smoother, more correlated noise patterns, by default 2 (Brown noise)
+    Args:
+        amplitude (float, optional): Scaling factor for the generated noise.
+            Defaults to 0.05.
+        reddening (int, optional): Power-law exponent controlling spatial
+            correlation. Higher values create smoother, more correlated noise
+            patterns. Defaults to 2 (Brown noise).
     """
 
     def __init__(self, amplitude: float = 0.05, reddening: int = 2):
@@ -33,18 +32,16 @@ class ColorNoise:
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """Generate spatially correlated noise matching input tensor dimensions.
 
-        Parameters
-        ----------
-        x : torch.Tensor
-            Reference tensor whose shape determines the output noise dimensions.
-            The last two dimensions are treated as the spatial lat/lon grid.
+        Args:
+            x (torch.Tensor): Reference tensor whose shape determines the output noise
+                dimensions. The last two dimensions are treated as the spatial lat/lon
+                grid.
 
-        Returns
-        -------
-        torch.Tensor
-            Spatially correlated noise tensor with the same shape as input,
-            scaled by the amplitude parameter.
+        Returns:
+            torch.Tensor: Spatially correlated noise tensor with the same shape as the
+            input, scaled by the amplitude parameter.
         """
+
         correlated_noise = self._create_correlated_noise(x.shape, x.device)
         return self.amplitude * correlated_noise
 
@@ -52,22 +49,18 @@ class ColorNoise:
         """Generate spatially correlated noise using frequency domain filtering.
 
         Creates colored noise by:
-        1. Starting with white noise (uniform power spectrum)
-        2. Transforming to frequency domain
-        3. Applying power-law scaling (1/f^reddening)
-        4. Transforming back to spatial domain
+        1. Starting with white noise (uniform power spectrum).
+        2. Transforming to frequency domain.
+        3. Applying power-law scaling (1/f^reddening).
+        4. Transforming back to spatial domain.
 
-        Parameters
-        ----------
-        shape : tuple[int, ...]
-            Shape of the output noise tensor
-        device : torch.device
-            Device to generate tensors on
+        Args:
+            shape (tuple[int, ...]): Shape of the output noise tensor.
+            device (torch.device): Device to generate tensors on.
 
-        Returns
-        -------
-        torch.Tensor
-            Spatially correlated noise with unit variance (before amplitude scaling)
+        Returns:
+            torch.Tensor: Spatially correlated noise with unit variance (before
+            amplitude scaling).
         """
         # Generate initial white noise
         white_noise = torch.randn(*shape, device=device)

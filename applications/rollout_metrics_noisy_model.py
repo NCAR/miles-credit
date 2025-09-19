@@ -59,7 +59,9 @@ def compute_spread_skill_metric(all_files, ensemble_size):
         forecast_steps = df["forecast_step"]
 
         std_vars = [
-            col.replace("_std", "").replace("rmse_", "") for col in df.columns if "rmse_" in col and "_std" in col
+            col.replace("_std", "").replace("rmse_", "")
+            for col in df.columns
+            if "rmse_" in col and "_std" in col
         ]
 
         for var in std_vars:
@@ -70,7 +72,13 @@ def compute_spread_skill_metric(all_files, ensemble_size):
                 skill = df[rmse_col]
                 ratio = spread / skill
                 all_data.append(
-                    pd.DataFrame({"forecast_step": forecast_steps, "spread_skill_ratio": ratio, "variable": var})
+                    pd.DataFrame(
+                        {
+                            "forecast_step": forecast_steps,
+                            "spread_skill_ratio": ratio,
+                            "variable": var,
+                        }
+                    )
                 )
 
     binned_data = pd.concat(all_data, ignore_index=True)
@@ -114,13 +122,17 @@ def calculate_ensemble_metrics(ensemble_preds, true_values):
 
     # RMSE calculation (equation C3)
     # First calculate MSE per forecast/batch
-    mse_per_forecast = ((ensemble_mean - true_values) ** 2).mean(dim=[3, 4])  # (batch, channels, 1)
+    mse_per_forecast = ((ensemble_mean - true_values) ** 2).mean(
+        dim=[3, 4]
+    )  # (batch, channels, 1)
     # Take sqrt first, then average across forecasts
     rmse_per_channel = torch.sqrt(mse_per_forecast).mean(dim=[0, 2])  # (channels,)
 
     # STD/SES calculation (equation C4)
     # Compute deviations from ensemble mean
-    deviations = ensemble_preds - ensemble_mean.unsqueeze(0)  # (n_members, batch, channels, 1, h, w)
+    deviations = ensemble_preds - ensemble_mean.unsqueeze(
+        0
+    )  # (n_members, batch, channels, 1, h, w)
     # Calculate MSE of deviations per member
     mse_spread = (deviations**2).mean(dim=[0, 3, 4])  # (batch, channels, 1)
     # Take sqrt first, then average
@@ -167,7 +179,9 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
         logger.info("Loading Normalize_ERA5_and_Forcing transforms")
         state_transformer = Normalize_ERA5_and_Forcing(conf)
     else:
-        logger.warning("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
+        logger.warning(
+            "Scaler type {} not supported".format(conf["data"]["scaler_type"])
+        )
         raise
 
     # number of diagnostic variables
@@ -262,9 +276,13 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
         if conf["predict"]["mode"] in ["ddp", "fsdp"]:
-            load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            load_msg = model.module.load_state_dict(
+                checkpoint["model_state_dict"], strict=False
+            )
         else:
-            load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            load_msg = model.load_state_dict(
+                checkpoint["model_state_dict"], strict=False
+            )
         load_state_dict_error_handler(load_msg)
 
     elif conf["predict"]["mode"] == "fsdp":
@@ -280,14 +298,19 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
     conf["trainer"]["ensemble_size"] = 1  # conf["predict"]["ensemble_size"]
     conf["predict"]["ensemble_size"] = 1  # conf["predict"]["ensemble_size"]
     if "climatology" in conf["predict"]:
-        metrics = LatWeightedMetricsClimatology(conf, climatology=xr.open_dataset(conf["predict"]["climatology"]))
+        metrics = LatWeightedMetricsClimatology(
+            conf, climatology=xr.open_dataset(conf["predict"]["climatology"])
+        )
     else:
         metrics = LatWeightedMetrics(conf, training_mode=False)
     metrics_results = defaultdict(list)
     dpf = None
 
     # Set up the diffusion and pole filters
-    if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
+    if (
+        "use_laplace_filter" in conf["predict"]
+        and conf["predict"]["use_laplace_filter"]
+    ):
         dpf = Diffusion_and_Pole_Filter(
             nlat=conf["model"]["image_height"],
             nlon=conf["model"]["image_width"],
@@ -316,11 +339,17 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
 
                 # Process the entire batch at once
                 init_datetimes = [
-                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime("%Y-%m-%dT%HZ")
+                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime(
+                        "%Y-%m-%dT%HZ"
+                    )
                     for i in range(batch_size)
                 ]
                 if "x_surf" in batch:
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(device).float()
+                    x = (
+                        concat_and_reshape(batch["x"], batch["x_surf"])
+                        .to(device)
+                        .float()
+                    )
                 else:
                     x = reshape_only(batch["x"]).to(device).float()
                 # create ensemble:
@@ -329,9 +358,13 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
 
             # Add forcing and static variables
             if "x_forcing_static" in batch:
-                x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                x_forcing_batch = (
+                    batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                )
                 if ensemble_size > 1:
-                    x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                    x_forcing_batch = torch.repeat_interleave(
+                        x_forcing_batch, ensemble_size, 0
+                    )
                 x = torch.cat((x, x_forcing_batch), dim=1)
 
             # Load y-truth
@@ -376,12 +409,22 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
             y_pred = state_transformer.inverse_transform(y_pred.cpu())
             y_true_units = state_transformer.inverse_transform(y.cpu())
 
-            if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
-                y_pred = dpf.diff_lap2d_filt(y_pred.to(device).squeeze()).unsqueeze(0).unsqueeze(2).cpu()
+            if (
+                "use_laplace_filter" in conf["predict"]
+                and conf["predict"]["use_laplace_filter"]
+            ):
+                y_pred = (
+                    dpf.diff_lap2d_filt(y_pred.to(device).squeeze())
+                    .unsqueeze(0)
+                    .unsqueeze(2)
+                    .cpu()
+                )
 
             # Calculate correct datetime for current forecast
             init_datetime = [datetime.utcfromtimestamp(t) for t in batch["datetime"]]
-            utc_datetime = [t + timedelta(hours=lead_time_periods) for t in init_datetime]
+            utc_datetime = [
+                t + timedelta(hours=lead_time_periods) for t in init_datetime
+            ]
             _y_pred = y_pred.clone()
 
             # Prepare for next iteration
@@ -389,11 +432,15 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
 
             if ensemble_size > 1:
                 _y_pred = _y_pred.view(batch_size, ensemble_size, *_y_pred.shape[1:])
-                y_pred_zscore = y_pred_zscore.view(batch_size, ensemble_size, *y_pred_zscore.shape[1:])
+                y_pred_zscore = y_pred_zscore.view(
+                    batch_size, ensemble_size, *y_pred_zscore.shape[1:]
+                )
 
                 # Compute CRPS for ensemble predictions and save individual ensemble member results
                 for j in range(batch_size):
-                    crps_scores = calculate_crps_per_channel(_y_pred[j], y_true_units[j].unsqueeze(0))
+                    crps_scores = calculate_crps_per_channel(
+                        _y_pred[j], y_true_units[j].unsqueeze(0)
+                    )
                     crps_dict[j]["forecast_step"].append(forecast_step)
                     for q, var in enumerate(metrics.vars):
                         crps_dict[j][f"crps_{var}"].append(crps_scores[:, q].item())
@@ -402,7 +449,9 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
                         if p is None:
                             ensemble_result = compute_metrics(
                                 metrics,
-                                _y_pred[j, ensemble_number].unsqueeze(0),  # Add batch and ensemble dims
+                                _y_pred[j, ensemble_number].unsqueeze(
+                                    0
+                                ),  # Add batch and ensemble dims
                                 y_true_units[j].unsqueeze(0),
                                 batch["datetime"][j].item(),
                                 forecast_step,
@@ -462,7 +511,9 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
 
                     # Print to screen
                     print_str = f"{rank=:} Forecast: {forecast_count + 1 + j} "
-                    print_str += f"Date: {utc_datetime[j].strftime('%Y-%m-%d %H:%M:%S')} "
+                    print_str += (
+                        f"Date: {utc_datetime[j].strftime('%Y-%m-%d %H:%M:%S')} "
+                    )
                     print_str += f"Hour: {forecast_step * lead_time_periods} "
                     print(print_str)
 
@@ -478,7 +529,9 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
                     x_detach = x[:, :-static_dim_size, 1:, ...].detach()
 
                 if "y_diag" in batch:
-                    x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
+                    x = torch.cat(
+                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
+                    )
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
@@ -486,7 +539,9 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
                 # Wait for processes to finish and collect metrics
                 if ensemble_size > 1:
                     # For ensemble case, we have individual ensemble member results
-                    ensemble_metrics_results = [defaultdict(list) for _ in range(batch_size)]
+                    ensemble_metrics_results = [
+                        defaultdict(list) for _ in range(batch_size)
+                    ]
 
                     for batch_idx, result in results:
                         metric_dict = result if p is None else result.get()
@@ -500,7 +555,9 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
                             metrics_results[batch_idx][h].append(v)
 
                 # Save results using the first scheme approach
-                save_location = os.path.join(os.path.expandvars(conf["save_loc"]), "metrics")
+                save_location = os.path.join(
+                    os.path.expandvars(conf["save_loc"]), "metrics"
+                )
                 os.makedirs(save_location, exist_ok=True)
 
                 for j in range(batch_size):
@@ -510,32 +567,57 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
                         crps = pd.DataFrame(crps_dict[j])
 
                         # Save the ensemble results (contains all individual ensemble members)
-                        ensemble_df.to_csv(os.path.join(save_location, f"{init_datetimes[j]}_ensemble.csv"))
+                        ensemble_df.to_csv(
+                            os.path.join(
+                                save_location, f"{init_datetimes[j]}_ensemble.csv"
+                            )
+                        )
 
                         # Compute the mean and std for the ensemble (following first scheme)
                         # Drop any Unnamed columns
-                        ensemble_df_clean = ensemble_df.loc[:, ~ensemble_df.columns.str.contains("^Unnamed")]
+                        ensemble_df_clean = ensemble_df.loc[
+                            :, ~ensemble_df.columns.str.contains("^Unnamed")
+                        ]
 
                         # Group by datetime and compute mean and std, excluding 'forecast_step'
-                        ave_df = ensemble_df_clean.groupby("datetime").agg(["mean", "std"]).reset_index()
+                        ave_df = (
+                            ensemble_df_clean.groupby("datetime")
+                            .agg(["mean", "std"])
+                            .reset_index()
+                        )
 
                         # Flatten the MultiIndex columns created by aggregation
-                        ave_df.columns = ["_".join(col).rstrip("_") for col in ave_df.columns]
+                        ave_df.columns = [
+                            "_".join(col).rstrip("_") for col in ave_df.columns
+                        ]
 
                         # Drop forecast_step_std column
-                        ave_df = ave_df.drop(columns=["forecast_step_std"], errors="ignore")
+                        ave_df = ave_df.drop(
+                            columns=["forecast_step_std"], errors="ignore"
+                        )
 
                         # Rename forecast_step_mean to forecast_step
-                        ave_df.rename(columns={"forecast_step_mean": "forecast_step"}, inplace=True)
+                        ave_df.rename(
+                            columns={"forecast_step_mean": "forecast_step"},
+                            inplace=True,
+                        )
 
                         cols = list(ave_df.columns)
-                        cols.remove("forecast_step")  # Remove forecast_step from its current position
-                        cols.insert(1, "forecast_step")  # Insert forecast_step as the second column
+                        cols.remove(
+                            "forecast_step"
+                        )  # Remove forecast_step from its current position
+                        cols.insert(
+                            1, "forecast_step"
+                        )  # Insert forecast_step as the second column
                         ave_df = ave_df[cols]
 
                         # Sort and merge with CRPS
-                        df1_sorted = ave_df.sort_index(axis=1)  # Sort columns of df1 alphabetically
-                        df2_sorted = crps.sort_index(axis=1)  # Sort columns of df2 alphabetically
+                        df1_sorted = ave_df.sort_index(
+                            axis=1
+                        )  # Sort columns of df1 alphabetically
+                        df2_sorted = crps.sort_index(
+                            axis=1
+                        )  # Sort columns of df2 alphabetically
 
                         # Merge the DataFrames on 'forecast_step'
                         merged_df = pd.merge(df1_sorted, df2_sorted, on="forecast_step")
@@ -544,15 +626,27 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
                         ave_df = merged_df.sort_index(axis=1)
 
                         # Save average results
-                        ave_df.to_csv(os.path.join(save_location, f"{init_datetimes[j]}_average.csv"))
+                        ave_df.to_csv(
+                            os.path.join(
+                                save_location, f"{init_datetimes[j]}_average.csv"
+                            )
+                        )
 
                         # Add ensemble dataframe to all_dfs for spread-skill computation
                         all_dfs.append(ave_df)
                     else:
                         # For non-ensemble case, just save the regular results
                         df = pd.DataFrame(metrics_results[j])
-                        df.to_csv(os.path.join(save_location, f"{init_datetimes[j]}_ensemble.csv"))
-                        df.to_csv(os.path.join(save_location, f"{init_datetimes[j]}_average.csv"))
+                        df.to_csv(
+                            os.path.join(
+                                save_location, f"{init_datetimes[j]}_ensemble.csv"
+                            )
+                        )
+                        df.to_csv(
+                            os.path.join(
+                                save_location, f"{init_datetimes[j]}_average.csv"
+                            )
+                        )
                         all_dfs.append(df)
 
                 # Clear everything
@@ -564,7 +658,9 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
         if distributed:
             torch.distributed.destroy_process_group()
 
-    spread_skill_mean_deviation = compute_spread_skill_metric(all_dfs, ensemble_size=ensemble_size)
+    spread_skill_mean_deviation = compute_spread_skill_metric(
+        all_dfs, ensemble_size=ensemble_size
+    )
 
     results_dict = {"spead_skill_dev": spread_skill_mean_deviation}
 
@@ -606,7 +702,9 @@ class Objective(BaseObjective):
             Any: The result of the training process.
         """
 
-        conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
+        conf = credit_main_parser(
+            conf, parse_training=False, parse_predict=True, print_summary=False
+        )
         predict_data_check(conf, print_summary=False)
 
         try:
@@ -617,10 +715,14 @@ class Objective(BaseObjective):
 
         except Exception as E:
             if "CUDA" in str(E) or "non-singleton" in str(E):
-                logging.warning(f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}.")
+                logging.warning(
+                    f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}."
+                )
                 raise optuna.TrialPruned()
             elif "non-singleton" in str(E):
-                logging.warning(f"Pruning trial {trial.number} due to shape mismatch: {str(E)}.")
+                logging.warning(
+                    f"Pruning trial {trial.number} due to shape mismatch: {str(E)}."
+                )
                 raise optuna.TrialPruned()
             else:
                 logging.warning(f"Trial {trial.number} failed due to error: {str(E)}.")
@@ -725,19 +827,22 @@ if __name__ == "__main__":
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
+    conf = credit_main_parser(
+        conf, parse_training=False, parse_predict=True, print_summary=False
+    )
     predict_data_check(conf, print_summary=False)
     data_config = setup_data_loading(conf)
 
     # create a save location for rollout
-    assert "save_forecast" in conf["predict"], "Please specify the output dir through conf['predict']['save_forecast']"
+    assert (
+        "save_forecast" in conf["predict"]
+    ), "Please specify the output dir through conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
 
     # Create a project directory (to save launch.sh and model.yml) if they do not exist
     save_loc = os.path.expandvars(conf["save_loc"])
-    os.makedirs(save_loc, exist_ok=True)
 
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:
