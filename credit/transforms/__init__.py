@@ -13,7 +13,7 @@ from torchvision import transforms as tforms
 from credit.transforms.transforms_les import Normalize_LES, ToTensor_LES
 from credit.transforms.transforms_wrf import Normalize_WRF, ToTensor_WRF
 from credit.transforms.transforms_global import Normalize_ERA5_and_Forcing, ToTensor_ERA5_and_Forcing
-from credit.transforms.transforms_quantile import NormalizeState_Quantile_Bridgescalar, ToTensor_BridgeScaler
+from credit.transforms.transforms_quantile import BridgescalerScaleState, NormalizeState_Quantile_Bridgescalar, ToTensor_BridgeScaler
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,13 @@ def load_transforms(conf, scaler_only=False):
         
     elif conf["data"]["scaler_type"] == "std_cached":
         transform_scaler = None
-
+        
     elif conf["data"]["scaler_type"] == "quantile-cached":
         transform_scaler = NormalizeState_Quantile_Bridgescalar(conf)
-    
+
+    elif conf["data"]["scaler_type"] == "bridgescaler":
+        transform_scaler = BridgescalerScaleState(conf)
+
     elif conf["data"]["scaler_type"] == "std-les":
         transform_scaler = Normalize_LES(conf)
 

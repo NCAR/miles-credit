@@ -14,9 +14,10 @@ from credit.models.debugger_model import DebuggerModel
 from credit.models.crossformer_ensemble import CrossFormerWithNoise
 from credit.models.crossformer_diffusion import CrossFormerDiffusion
 from credit.models.unet_diffusion import UnetDiffusion
-
 from credit.diffusion import ModifiedGaussianDiffusion
 
+from credit.models.swin_wrf import WRF_Tansformer
+from credit.models.dscale_wrf import Dscale_Tansformer
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,8 @@ model_types = {
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
+    'wrf': (WRF_Tansformer, 'Loading WRF Transformer'),
+    'dscale': (Dscale_Tansformer, 'Loading downscaling Transformer'),
 }
 
 
@@ -80,7 +83,7 @@ def load_fsdp_or_checkpoint_policy(conf):
         }
     # FuXi
     # FuXi supports "spectral_norm = True" only
-    elif "fuxi" in conf["model"]["type"]:
+    elif "fuxi" in conf["model"]["type"] or ("wrf" in conf["model"]["type"]) or ("dscale" in conf["model"]["type"]):
         from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
 
         transformer_layers_cls = {SwinTransformerV2Stage}
