@@ -97,7 +97,7 @@ pbs:
 
 # Load modules
 module load ncarenv/24.12 gcc/12.4.0 ncarcompilers cray-mpich/8.1.29 cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
-conda activate /path/to/my/miles-credit/derecho-env
+conda activate credit-derecho
 
 # Export environment variables
 export LSCRATCH=/glade/derecho/scratch/schreck/
