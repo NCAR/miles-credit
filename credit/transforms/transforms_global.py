@@ -14,8 +14,12 @@ import xarray as xr
 
 import torch
 from credit.data import Sample
+from credit.transforms import device_compatible_to
 
 logger = logging.getLogger(__name__)
+
+
+
 
 class Normalize_ERA5_and_Forcing:
     """Class to normalize ERA5 and Forcing Datasets."""
