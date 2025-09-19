@@ -64,7 +64,7 @@ class CubeEmbedding(nn.Module):
             x = self.norm(x)
         x = x.transpose(1, 2).reshape(B, self.embed_dim, *self.patches_resolution)
 
-        return x.squeeze(2)
+        return x
 
 
 class UpBlock(nn.Module):
@@ -376,6 +376,7 @@ class CrossFormer(BaseModel):
         image_width: int = 1280,
         patch_width: int = 1,
         frames: int = 2,
+        output_frames: int = 1,
         channels: int = 4,
         surface_channels: int = 7,
         input_only_channels: int = 3,
@@ -443,6 +444,7 @@ class CrossFormer(BaseModel):
         self.patch_width = patch_width
         self.upsample_v_conv = upsample_v_conv
         self.frames = frames
+        self.output_frames = output_frames
         self.channels = channels
         self.surface_channels = surface_channels
         self.levels = levels
@@ -458,12 +460,12 @@ class CrossFormer(BaseModel):
 
         # input channels
         self.input_only_channels = input_only_channels
-        input_channels = channels * levels + surface_channels + input_only_channels
-        self.input_channels = input_channels
+        self.base_input_channels = channels * levels + surface_channels + input_only_channels
+        self.input_channels = self.base_input_channels * frames
 
         # output channels
-        output_channels = channels * levels + surface_channels + output_only_channels
-        self.output_channels = output_channels
+        self.base_output_channels = channels * levels + surface_channels + output_only_channels
+        self.output_channels = self.base_output_channels * output_frames
 
         if kwargs.get("diffusion"):
             # do stuff
@@ -531,7 +533,7 @@ class CrossFormer(BaseModel):
         self.cube_embedding = CubeEmbedding(
             (frames, image_height, image_width),
             (frames, patch_height, patch_width),
-            input_channels,
+            self.input_channels,
             dim[0],
         )
 
@@ -560,7 +562,7 @@ class CrossFormer(BaseModel):
                 nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
                 nn.Conv2d(
                     2 * (last_dim // 8),
-                    output_channels,
+                    self.output_channels,
                     kernel_size=3,
                     stride=1,
                     padding=1,
@@ -568,7 +570,7 @@ class CrossFormer(BaseModel):
             )
         else:
             self.up_block4 = nn.ConvTranspose2d(
-                2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1
+                2 * (last_dim // 8), self.output_channels, kernel_size=4, stride=2, padding=1
             )
 
         if self.use_spectral_norm:
@@ -598,8 +600,11 @@ class CrossFormer(BaseModel):
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
-        elif self.frames > 1:
-            x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
+        
+        if self.frames > 1:
+            # x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
+            b, c, t, h, w = x.shape
+            x = x.reshape(b, c * t, h, w)
         else:  # case where only using one time-step as input
             x = x.squeeze(2)
 
@@ -626,7 +631,8 @@ class CrossFormer(BaseModel):
         if self.use_interp:
             x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
-        x = x.unsqueeze(2)
+        b, _, h, w = x.shape
+        x = x.view(b, self.base_output_channels, self.output_frames, h, w)
 
         if self.use_post_block:
             x = {
@@ -653,16 +659,23 @@ class CrossFormer(BaseModel):
 
 
 if __name__ == "__main__":
-    image_height = 640  # 640, 192
-    image_width = 1280  # 1280, 288
-    levels = 15
+    image_height = 180  # 640, 192
+    image_width = 360  # 1280, 288
+    levels = 19
     frames = 2
+    output_frames = 2
     channels = 4
-    surface_channels = 7
-    input_only_channels = 3
-    frame_patch_size = 2
+    surface_channels = 1
+    input_only_channels = 4
+    frame_patch_size = 0
     upsample_v_conv = True
-    attention_type = "scse_standard"
+    # attention_type = "scse_standard"
+    padding_conf = {
+        "activate": True,
+        "mode": "earth",
+        "pad_lat": [70, 70],
+        "pad_lon": [140, 140],
+    }
 
     input_tensor = torch.randn(
         1,
@@ -676,21 +689,23 @@ if __name__ == "__main__":
         image_height=image_height,
         image_width=image_width,
         frames=frames,
+        output_frames=output_frames,
         frame_patch_size=frame_patch_size,
         channels=channels,
         surface_channels=surface_channels,
         input_only_channels=input_only_channels,
         levels=levels,
         upsample_v_conv=upsample_v_conv,
-        attention_type=attention_type,
+        # attention_type=attention_type,
         dim=(128, 256, 512, 1024),
-        depth=(2, 2, 18, 2),
-        global_window_size=(8, 4, 2, 1),
+        depth=(2, 2, 8, 2),
+        global_window_size=(20, 10, 5, 2),
         local_window_size=5,
         cross_embed_kernel_sizes=((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
-        cross_embed_strides=(4, 2, 2, 2),
+        cross_embed_strides=(2, 2, 2, 2),
         attn_dropout=0.0,
         ff_dropout=0.0,
+        padding_conf=padding_conf
     ).to("cuda")
 
     num_params = sum(p.numel() for p in model.parameters())
@@ -699,4 +714,4 @@ if __name__ == "__main__":
     y_pred = model(input_tensor.to("cuda"))
     print("Predicted shape:", y_pred.shape)
 
-    # print(model.rk4(input_tensor.to("cpu")).shape)
+    # # print(model.rk4(input_tensor.to("cpu")).shape)

@@ -1,0 +1,278 @@
+save_loc: '/glade/derecho/scratch/schreck/CREDIT_runs/mom/'
+seed: 1000
+
+data:
+    # 3D ocean variables (76 channels: 4 vars × 19 levels)
+    variables: ['uo','vo','thetao','so']  # 3D variables across depth levels
+    level_ids: [2.5, 10, 22.5, 40, 65, 105, 165, 250, 375, 550, 775, 1050, 1400, 1850, 2400, 3100, 4000, 5000, 6000]
+    data_path: '/glade/derecho/scratch/schreck/samudra/data/data.zarr'
+    
+    # surface variables (1 channel: 2D only)
+    surface_variables: ['zos']  # sea surface height
+
+    # Experiment keys per Samudra setup
+    prognostic_vars_key: 'thermo_dynamic'
+    boundary_vars_key: 'hfds_anom'
+    
+    # boundary/forcing variables (4 channels)
+    boundary_variables: ['tauuo','tauvo','hfds','hfds_anomalies']
+    
+    # wet masks (from your existing data loading)
+    wet_mask_save_path: '/glade/derecho/scratch/schreck/samudra/data/data.zarr'  # extract from data
+    
+    # normalization
+    mean_path: '/glade/derecho/scratch/schreck/samudra/data/means.zarr'
+    std_path: '/glade/derecho/scratch/schreck/samudra/data/stds.zarr'
+    
+    # train / validation split (from Samudra paper)
+    train_years: [1975, 2014]  # paper used 1975-01-03 to 2014-09-20 for training
+    valid_years: [2014, 2022]  # paper used 2014-09-30 to 2022 for testing
+    
+    # state-in-state-out configuration
+    input_length: 2      # 2-input like Samudra (hist=1)
+    output_length: 2     # 1-output per step
+    
+    forecast_len: 4      # 4-step rollout like Samudra paper
+    valid_forecast_len: 4  # single-step validation
+        
+    # 5-day timesteps like Samudra
+    lead_time_periods: 5  # 5-day resolution
+    
+    dataset_type: Ocean_MultiStep_Batcher
+
+trainer:
+    type: mom # <---------- change to your type: single/multi-step training
+
+    mode: ddp
+    cpu_offload: False
+    activation_checkpoint: True
+    
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    skip_validation: False
+    update_learning_rate: False
+
+    save_backup_weights: False
+    save_best_weights: False
+    
+    learning_rate: 1.0e-03
+    weight_decay: 1.0e-06
+    # save_metric_vars: ["std", "rmse"]
+    
+    train_batch_size: 4
+    valid_batch_size: 4
+    ensemble_size: 1
+    
+    batches_per_epoch: 0 # Total number of samples = 341,880  (1h) ~56,960 (6h)
+    valid_batches_per_epoch: 100
+    stopping_patience: 999
+    
+    start_epoch: 0
+    num_epoch: 2
+    reload_epoch: True
+    epochs: &epochs 70
+     
+    use_scheduler: True
+    scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
+    
+    # Automatic Mixed Precision: False
+    amp: False
+    
+    # rescale loss as loss = loss / grad_accum_every
+    grad_accum_every: 1 
+    # gradient clipping
+    grad_max_norm: 'dynamic'
+    
+    # number of workers
+    thread_workers: 4
+    valid_thread_workers: 4
+
+    # compile 
+    # compile: True
+    prefetch_factor: 4
+
+
+model:
+    # crossformer example
+    type: "crossformer"
+    frames: 2                         # number of input states (default: 1)
+    output_frames: 2                  # number of output states (default: 1)
+    image_height: 180                 # number of latitude grids (default: 640)
+    image_width: 360                  # number of longitude grids (default: 1280)
+    levels: 19                        # number of upper-air variable levels (default: 15)
+    channels: 4                       # upper-air variable channels
+    surface_channels: 1               # surface variable channels
+    input_only_channels: 4            # dynamic forcing, forcing, static channels
+    output_only_channels: 0           # diagnostic variable channels
+    
+    patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
+    patch_height: 1                   # number of longitude grids in each 3D patch (default: 1)
+    frame_patch_size: 1               # number of input states in each 3D patch (default: 1)
+    
+    dim: [128, 256, 512, 1024]       # Dimensionality of each layer
+    depth: [2, 2, 8, 2]               # Depth of each layer
+    global_window_size: [8, 4, 2, 1]  # Global window size for each layer
+    local_window_size: 3              # Local window size
+    cross_embed_kernel_sizes:         # kernel sizes for cross-embedding
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+    cross_embed_strides: [2, 2, 2, 2] # Strides for cross-embedding (default: [4, 2, 2, 2])
+    attn_dropout: 0.                  # Dropout probability for attention layers (default: 0.0)
+    ff_dropout: 0.                    # Dropout probability for feed-forward layers (default: 0.0)
+    
+    # use interpolation to match the output size
+    interp: True
+
+    # spectral norm
+    use_spectral_norm: True
+
+    # noise injection
+    # noise_latent_dim: 442
+    # # encoder_noise_factor: 0.04971295522390862
+    # decoder_noise_factor: 0.25
+    # encoder_noise: False
+    # freeze: False
+    
+    # map boundary padding
+    padding_conf:
+        activate: True
+        mode: earth
+        pad_lat: 48
+        pad_lon: 48
+        
+    # post_conf: 
+    #     activate: True
+    #     tracer_fixer:
+    #         activate: True
+    #         denorm: True
+    #         tracer_name: ['Q', 'Q500']
+    #         tracer_thres: [1e-8, 1e-8]
+    
+loss: 
+    # the main training loss
+    training_loss: "mse" #"KCRPS"
+    
+    # power loss (x), spectral_loss (x)
+    use_power_loss: False
+    use_spectral_loss: False
+    
+    # use latitude weighting
+    use_latitude_weights: True
+    latitude_weights: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/static/ERA5_mlevel_cesm_static.zarr'
+    
+    # turn-off variable weighting
+    use_variable_weights: False
+    
+predict:
+    mode: ddp
+    batch_size: 1
+    ensemble_size: &ensemble_size 2
+    forecasts:
+        type: "custom"       # keep it as "custom"
+        start_year: 2020     # year of the first initialization (where rollout will start)
+        start_month: 1       # month of the first initialization
+        start_day: 1         # day of the first initialization
+        start_hours: [0] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
+        duration: 1          # number of days to initialize, starting from the (year, mon, day) above
+                             # duration should be divisible by the number of GPUs 
+                             # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
+        days: 10             # forecast lead time as days (1 means 24-hour forecast)
+        
+    metadata: '/glade/u/home/akn7/miles-credit/credit/metadata/era5.yaml'
+    save_forecast: '/glade/derecho/scratch/schreck/CREDIT_runs/single_step/netcdf'
+    
+    # turn-off low-pass filter
+    use_laplace_filter: False
+
+    static_fields: "/glade/campaign/cisl/aiml/credit/static_scalers/static_variables_ERA5_zhght_onedeg.nc"
+    interp_pressure:
+        interp_fields: ["U", "V", "T", "Q"]
+        q_var: "Q"
+        surface_pressure_var: "SP"
+        pressure_levels: [500.0, 700.0, 850.0]
+    
+
+    ensemble:
+        noise:
+            type: "spherical"  # "gaussian", "red", "white", "pink"       
+            amplitude: 0.25 
+            smoothness: 2.0
+            length_scale: 3.0
+            padding_conf:
+                activate: True
+                mode: earth
+                pad_lat: [160, 160]
+                pad_lon: [112, 112]
+
+        bred_vector:
+            enabled: true
+            num_cycles: *ensemble_size
+            hemispheric_rescale: true
+            perturb_channel_idx: 69 # Z500. Set to None to do the full tensor
+            integration_steps: 1 # 50
+            bred_time_lag: 6 # 48
+            amplitude: 0.25
+            weights: [
+                0.4014972 , 0.39774364, 0.3792097 , 0.38236109, 0.40767634,
+                0.39912404, 0.34785054, 0.33406586, 0.33808283, 0.3481379 ,
+                0.35312887, 0.35      , 0.32093613, 0.31208973, 0.31432467,
+                0.31496031, 0.33391616, 0.35594943, 0.34669872, 0.35312887,
+                0.38288379, 0.37536649, 0.31906112, 0.3057777 , 0.30951575,
+                0.31984371, 0.32680269, 0.32649655, 0.30099834, 0.29983329,
+                0.30331502, 0.30397368, 0.40112342, 0.38820098, 0.38431758,
+                0.39051248, 0.40112342, 0.35496479, 0.33045423, 0.32893768,
+                0.31543621, 0.31953091, 0.3254228 , 0.3324154 , 0.32109189,
+                0.29664794, 0.26907248, 0.25845696, 0.23194827, 0.34102786,
+                0.29647934, 0.32848135, 0.43703547, 0.4014972 , 0.40435133,
+                0.41231056, 0.40298883, 0.39987498, 0.39987498, 0.39812058,
+                0.38470768, 0.3748333 , 0.36959437, 0.36864617, 0.28231188,
+                0.24677925, 0.31064449, 0.34029399, 0.31288976, 0.26645825,
+                0.40112342
+            ]
+
+        temporal_noise:
+            enabled: false
+            temporal_correlation: 0.95
+            perturbation_std: 0.15
+            hemispheric_rescale: true
+
+    # ensemble:
+    #     noise:
+    #         type: "red"  # placeholder, in case other types are added later
+    #         amplitude: 0.35
+    #         reddening: 2.0
+    #         padding_conf:
+    #             activate: True
+    #             mode: earth
+    #             pad_lat: 32    # (256-192)/2 = 32
+    #             pad_lon: 112   # (512-288)/2 = 112
+    
+    #     bred_vector:
+    #         enabled: true
+    #         num_cycles: *ensemble_size
+    #         hemispheric_rescale: true
+    #         perturb_channel_idx: 66 # Z500. Set to None to do the full tensor
+    #         bred_time_lag: 48
+            
+    
+    #     temporal_noise:
+    #         enabled: false
+    #         temporal_correlation: 0.95
+    #         perturbation_std: 0.05
+    #         hemispheric_rescale: true
+
+pbs: #derecho
+    conda: "/glade/work/akn7/conda-envs/credit-derecho"
+    project: "NAML0001"
+    job_name: "style-wxf"
+    walltime: "12:00:00"
+    nodes: 8
+    ncpus: 64
+    ngpus: 4
+    mem: '480GB'
+    queue: 'main'
