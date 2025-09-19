@@ -399,7 +399,7 @@ def save_netcdf_clean(
     ds_merged["forecast_hour"] = forecast_hour
 
     if use_logger:
-        logger.info(f"Save forecast hour {forecast_hour} to {nc_filename}")
+        logger.info(f"Process forecast hour {forecast_hour} to {nc_filename}")
         
     save_location = os.path.join(conf["predict"]["save_forecast"], nc_filename)
     os.makedirs(save_location, exist_ok=True)
@@ -412,7 +412,6 @@ def save_netcdf_clean(
         if len(conf["predict"]["save_vars"]) > 0:
             ds_merged = drop_var_from_dataset(ds_merged, conf["predict"]["save_vars"])
             
-
     # ---------------------------------------------------- #
     # handle meta data and time encoding
     encoding_dict = {}
