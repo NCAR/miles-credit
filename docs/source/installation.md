@@ -1,11 +1,11 @@
 # Installing CREDIT from source
 
 If you want to take advantage of the full power of CREDIT,
-which includes scaling training across multiple nodes, you 
+which includes scaling training across multiple nodes, you
 will need to build PyTorch from source. The instructions
 for building PyTorch from source can leave out important
-details if you want proper CUDA, numpy, and MPI support, 
-so follow along here as we take you on the journey to 
+details if you want proper CUDA, numpy, and MPI support,
+so follow along here as we take you on the journey to
 CREDIT.
 
 ## Prerequisites
@@ -15,7 +15,7 @@ enable the building of PyTorch. You can even do this on your
 Mac or Linux laptop.
 
 ### MacOS (Intel or ARM)
-1. First, install either the [Homebrew](https://brew.sh/) or [MacPorts](https://www.macports.org/) package managers 
+1. First, install either the [Homebrew](https://brew.sh/) or [MacPorts](https://www.macports.org/) package managers
 so you can easily install all the system-level dependencies and other helpful Linux programs like wget, gcc, etc.
 Further instructions will assume the use of Homebrew, but should also work for MacPorts. Homebrew
 should also install the XCode Command Line tools, which include git and clang.
@@ -33,9 +33,9 @@ they are installed:
    * wget (for downloading files from the internet)
    * mpich, openmpi, or cray-mpi (for MPI distributed training support)
 2. Install a recent version of the CUDA toolkit, cuDNN, and NCCL (needed for multi-GPU and distributed training).
-3. If you plan to do multi-node distributed training with CREDIT, you will also need to install 
+3. If you plan to do multi-node distributed training with CREDIT, you will also need to install
 [libfabric](https://github.com/ofiwg/libfabric) and the [aws-ofi-nccl](https://github.com/aws/aws-ofi-nccl) plugin
-to interface between libfabric and NCCL. If you do not compile PyTorch with Libfabric and aws-ofi-nccl, 
+to interface between libfabric and NCCL. If you do not compile PyTorch with Libfabric and aws-ofi-nccl,
 we have found that inter-node communication speeds on Derecho and other HPE/Cray HPC systems are much slower.
 
 ## NSF NCAR Derecho
@@ -43,12 +43,12 @@ The NSF NCAR Derecho system has some special requirements in place to support Cr
 interconnect. Ben Kirk has created a special [makefile](https://github.com/benkirk/derecho-pytorch-mpi) to
 build PyTorch and Torchvision from source on Derecho with all appropriate environment variables and dependencies.
 Please follow instructions there if you wish to build your own version of PyTorch from source. Otherwise,
-built wheels of PyTorch 2.5.1 and Torchvision 0.20.1 are available on Derecho 
-at `/glade/work/dgagne/credit-pytorch-envs/derecho-pytorch-mpi/wheels/`. 
+Conda packages for PyTorch 2.5.1 and Torchvision 0.20.1 are available on Derecho
+at `/glade/work/benkirk/consulting/conda-recipes/output/` and are used when running `create_env_derecho.sh`.
 
 ## PyTorch Python Dependencies
 1. Install a Python virtual environment manager. My preferred one for now is
-[miniforge](https://github.com/conda-forge/miniforge), which has both conda and mamba included and does not have the 
+[miniforge](https://github.com/conda-forge/miniforge), which has both conda and mamba included and does not have the
 licensing issues that may come with miniconda. [uv](https://astral.sh/blog/uv) might also work but has not been tested.
 2. Create a clean virtual environment with the following command:
 `mamba create -n credit python=3.12`
@@ -75,9 +75,9 @@ cd pytorch # if not already in your pytorch directory
 python -m build --wheel
 ```
 
-With either build approach, PyTorch performs a bunch of configuration checks to know what files to compile for a given 
+With either build approach, PyTorch performs a bunch of configuration checks to know what files to compile for a given
 setup. Before letting it compile, which can take at least 1 hour, review key configuration settings in the summary.
-Make sure `USE_DISTRIBUTED=1`, that numpy is included, and if on a Linux cluster, that 
+Make sure `USE_DISTRIBUTED=1`, that numpy is included, and if on a Linux cluster, that
 CUDA and NCCL have been found and are being used.
 
 Once a wheel file is created, you can install it into a Python environment with
@@ -86,7 +86,7 @@ Once a wheel file is created, you can install it into a Python environment with
 ## Building Torchvision
 CREDIT also uses [torchvision](https://github.com/pytorch/vision), which also needs to be built and compiled to match
 with your installed version of PyTorch. Instructions for building torchvision from source
-can be found [here](https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#development-installation). 
+can be found [here](https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#development-installation).
 
 ## Installing CREDIT
 Clone miles-credit from github and install using pip:
@@ -96,7 +96,7 @@ cd miles-credit
 pip install -e .
 ```
 The CREDIT installer should be able to install all dependencies from PyPI using
-pip. 
+pip.
 
 ## Test Your Installation
 To verify that you have installed all dependencies correctly, you can conduct the following tests.
