@@ -67,7 +67,7 @@ version = {file = "credit/VERSION"}
 
 [tool.ruff]
 src = ["credit", "applications", "tests"]
-line-length = 360
+line-length = 180
 
 [tool.ruff.lint.per-file-ignores]
 "*.ipynb" = ["E402"]
