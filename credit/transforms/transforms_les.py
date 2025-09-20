@@ -16,6 +16,7 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+
 class Normalize_LES:
     def __init__(self, conf):
         self.mean_ds = xr.open_dataset(conf["data"]["mean_path"]).load()
@@ -38,21 +39,11 @@ class Normalize_LES:
         self.num_upper_air = len(self.varname_upper_air) * self.levels
 
         # Identify the existence of other variables
-        self.flag_surface = ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        )
-        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (
-            len(conf["data"]["dynamic_forcing_variables"]) > 0
-        )
-        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (
-            len(conf["data"]["diagnostic_variables"]) > 0
-        )
-        self.flag_forcing = ("forcing_variables" in conf["data"]) and (
-            len(conf["data"]["forcing_variables"]) > 0
-        )
-        self.flag_static = ("static_variables" in conf["data"]) and (
-            len(conf["data"]["static_variables"]) > 0
-        )
+        self.flag_surface = ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0)
+        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0)
+        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0)
+        self.flag_forcing = ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0)
+        self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
 
         # Get surface varnames
         if self.flag_surface:
@@ -91,9 +82,7 @@ class Normalize_LES:
         else:
             self.has_forcing_static = False
 
-        logger.info(
-            "Loading stored mean and std data for z-score-based transform and inverse transform"
-        )
+        logger.info("Loading stored mean and std data for z-score-based transform and inverse transform")
 
     def __call__(self, sample, inverse: bool = False):
         if inverse:
@@ -116,9 +105,7 @@ class Normalize_LES:
 
         # Surface variables
         if self.flag_surface:
-            tensor_surface = x[
-                :, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :
-            ]
+            tensor_surface = x[:, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :]
             transformed_surface = tensor_surface.clone()
 
         # y_pred does not have dynamic_forcing, skip this var type
@@ -137,9 +124,7 @@ class Normalize_LES:
             for level in range(self.levels):
                 var_mean = mean_tensor[level]
                 var_std = std_tensor[level]
-                transformed_upper_air[:, k] = (
-                    tensor_upper_air[:, k] - var_mean
-                ) / var_std
+                transformed_upper_air[:, k] = (tensor_upper_air[:, k] - var_mean) / var_std
                 k += 1
 
         # Standardize surface variables
@@ -166,11 +151,9 @@ class Normalize_LES:
                 for level in range(self.levels):
                     var_mean = mean_tensor[level]
                     var_std = std_tensor[level]
-                    transformed_diagnostic[:, k] = (
-                        transformed_diagnostic[:, k] - var_mean
-                    ) / var_std
+                    transformed_diagnostic[:, k] = (transformed_diagnostic[:, k] - var_mean) / var_std
                     k += 1
-        
+
         # Concatenate everything
         if self.flag_surface:
             if self.flag_diagnostic:
@@ -183,14 +166,10 @@ class Normalize_LES:
                     dim=1,
                 )
             else:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_surface), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_surface), dim=1)
         else:
             if self.flag_diagnostic:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_diagnostic), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_diagnostic), dim=1)
             else:
                 transformed_x = transformed_upper_air
 
@@ -209,7 +188,7 @@ class Normalize_LES:
                 # value: the xarray datasets
                 if isinstance(value, xr.Dataset):
                     # training input
-                    if key == "historical_ERA5_images" or ('input' in key):
+                    if key == "historical_ERA5_images" or ("input" in key):
                         # get all the input vars
                         varname_inputs = value.keys()
 
@@ -217,9 +196,7 @@ class Normalize_LES:
                         for varname in varname_inputs:
                             # if forcing and static skip it, otherwise do z-score
                             if (varname in self.varname_forcing_static) is False:
-                                value[varname] = (
-                                    value[varname] - self.mean_ds[varname]
-                                ) / self.std_ds[varname]
+                                value[varname] = (value[varname] - self.mean_ds[varname]) / self.std_ds[varname]
 
                         # put transformed xr.Dataset to the output dictionary
                         normalized_sample[key] = value
@@ -249,9 +226,7 @@ class Normalize_LES:
 
         # Surface variables
         if self.flag_surface:
-            tensor_surface = x[
-                :, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :
-            ]
+            tensor_surface = x[:, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :]
             transformed_surface = tensor_surface.clone()
 
         # Diagnostic variables (the very last of the stack)
@@ -301,14 +276,10 @@ class Normalize_LES:
                     dim=1,
                 )
             else:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_surface), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_surface), dim=1)
         else:
             if self.flag_diagnostic:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_diagnostic), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_diagnostic), dim=1)
             else:
                 transformed_x = transformed_upper_air
 
@@ -340,9 +311,7 @@ class Normalize_LES:
             if self.static_first:
                 tensor_dyn_forcing = x[
                     :,
-                    idx + self.num_static : idx
-                    + self.num_static
-                    + self.num_dyn_forcing,
+                    idx + self.num_static : idx + self.num_static + self.num_dyn_forcing,
                     :,
                     :,
                 ]
@@ -416,7 +385,6 @@ class Normalize_LES:
         transformed_x = torch.cat(tensors, dim=1)
 
         return transformed_x.to(device)
-
 
 
 class ToTensor_LES:
@@ -498,7 +466,7 @@ class ToTensor_LES:
                     list_vars_upper_air.append(var_value)
 
                 # [num_vars, hist_len, num_levels, lat, lon]
-                numpy_vars_upper_air = np.array(list_vars_upper_air)  
+                numpy_vars_upper_air = np.array(list_vars_upper_air)
 
                 # organize surface vars
                 if self.flag_surface:
@@ -507,27 +475,18 @@ class ToTensor_LES:
                     for var_name in self.varname_surface:
                         var_value = value[var_name].values
                         list_vars_surface.append(var_value)
-                        
+
                     # [num_surf_vars, hist_len, lat, lon]
-                    numpy_vars_surface = np.array(list_vars_surface) 
-                    
+                    numpy_vars_surface = np.array(list_vars_surface)
+
                 # organize forcing and static (input only)
                 if self.has_forcing_static or self.flag_dyn_forcing:
-                    
                     # enter this scope if one of the (dyn_forcing, folrcing, static) exists
                     if self.flag_static_first:
-                        varname_forcing_static = (
-                            self.varname_static
-                            + self.varname_dyn_forcing
-                            + self.varname_forcing
-                        )
-                        
+                        varname_forcing_static = self.varname_static + self.varname_dyn_forcing + self.varname_forcing
+
                     else:
-                        varname_forcing_static = (
-                            self.varname_dyn_forcing
-                            + self.varname_forcing
-                            + self.varname_static
-                        )
+                        varname_forcing_static = self.varname_dyn_forcing + self.varname_forcing + self.varname_static
 
                     if key == "LES_input":
                         list_vars_forcing_static = []
@@ -555,12 +514,7 @@ class ToTensor_LES:
             # ToTensor: upper-air varialbes
             ## produces [time, upper_var, level, lat, lon]
             ## np.hstack concatenates the second dim (axis=1)
-            x_upper_air = np.hstack(
-                [
-                    np.expand_dims(var_upper_air, axis=1)
-                    for var_upper_air in numpy_vars_upper_air
-                ]
-            )
+            x_upper_air = np.hstack([np.expand_dims(var_upper_air, axis=1) for var_upper_air in numpy_vars_upper_air])
             x_upper_air = torch.as_tensor(x_upper_air)
 
             # ---------------------------------------------------------------------- #
@@ -589,7 +543,6 @@ class ToTensor_LES:
                     x_surf = x_surf.unsqueeze(0).unsqueeze(0)
 
             if key == "LES_input":
-                
                 # ToTensor: forcing and static
                 if self.has_forcing_static:
                     # this line produces [forcing_var, time, lat, lon]
@@ -622,33 +575,31 @@ class ToTensor_LES:
                 # ---------------------------------------------------------------------- #
                 # ToTensor: diagnostic
                 if self.flag_diagnostic:
-                    
                     # single diagnositc var
                     if self.num_diagnostic == 1:
                         y_diag = torch.as_tensor(numpy_vars_diagnostic)
-                        
+
                     # multiple diagnositc var
                     else:
                         list_diag_collect = []
                         for var_diag in numpy_vars_diagnostic:
-                            
                             # (time, level, lat, lon)
                             if len(var_diag.shape) == 4:
                                 list_diag_collect.append(np.expand_dims(var_diag, axis=1))
-                                
+
                             # (time, lat, lon)
-                            elif len(var_diag.shape) == 3: 
+                            elif len(var_diag.shape) == 3:
                                 list_diag_collect.append(np.expand_dims(var_diag, axis=(1, 2)))
-                                
+
                         y_diag = torch.as_tensor(np.hstack(list_diag_collect))
-                            
+
                     if len(y_diag.shape) == 5:
                         # (time, var, level, lat, lon)
                         pass
                     elif len(y_diag.shape) == 4:
                         # permute: [diag_var, time, lat, lon] --> [time, diag_var, lat, lon]
                         y_diag = y_diag.permute(1, 0, 2, 3)
-                        
+
                     # =============================================== #
                     # separate single variable vs. single history_len
                     elif len(y_diag.shape) == 3:

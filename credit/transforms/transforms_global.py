@@ -18,8 +18,6 @@ from credit.data import Sample, device_compatible_to
 logger = logging.getLogger(__name__)
 
 
-
-
 class Normalize_ERA5_and_Forcing:
     """Class to normalize ERA5 and Forcing Datasets."""
 
@@ -65,21 +63,11 @@ class Normalize_ERA5_and_Forcing:
         self.num_upper_air = len(self.varname_upper_air) * self.levels
 
         # Identify the existence of other variables
-        self.flag_surface = ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        )
-        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (
-            len(conf["data"]["dynamic_forcing_variables"]) > 0
-        )
-        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (
-            len(conf["data"]["diagnostic_variables"]) > 0
-        )
-        self.flag_forcing = ("forcing_variables" in conf["data"]) and (
-            len(conf["data"]["forcing_variables"]) > 0
-        )
-        self.flag_static = ("static_variables" in conf["data"]) and (
-            len(conf["data"]["static_variables"]) > 0
-        )
+        self.flag_surface = ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0)
+        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0)
+        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0)
+        self.flag_forcing = ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0)
+        self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
 
         # Get surface varnames
         if self.flag_surface:
@@ -118,9 +106,7 @@ class Normalize_ERA5_and_Forcing:
         else:
             self.has_forcing_static = False
 
-        logger.info(
-            "Loading stored mean and std data for z-score-based transform and inverse transform"
-        )
+        logger.info("Loading stored mean and std data for z-score-based transform and inverse transform")
 
     def __call__(self, sample: Sample, inverse: bool = False) -> Sample:
         """Normalize ERA5 and Forcing.
@@ -141,7 +127,7 @@ class Normalize_ERA5_and_Forcing:
             return self.transform(sample)
 
     def transform_dataset(self, DS: xr.Dataset) -> xr.Dataset:
-        DS = (DS - self.mean_ds)/self.std_ds
+        DS = (DS - self.mean_ds) / self.std_ds
         return DS
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
@@ -166,9 +152,7 @@ class Normalize_ERA5_and_Forcing:
 
         # Surface variables
         if self.flag_surface:
-            tensor_surface = x[
-                :, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :
-            ]
+            tensor_surface = x[:, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :]
             transformed_surface = tensor_surface.clone()
 
         # y_pred does not have dynamic_forcing, skip this var type
@@ -182,31 +166,27 @@ class Normalize_ERA5_and_Forcing:
         # Upper air variable structure: var 1 [all levels] --> var 2 [all levels]
         k = 0
         for name in self.varname_upper_air:
-            mean_tensor = device_compatible_to(self.mean_tensors[name],device)
-            std_tensor = device_compatible_to(self.std_tensors[name],device)
+            mean_tensor = device_compatible_to(self.mean_tensors[name], device)
+            std_tensor = device_compatible_to(self.std_tensors[name], device)
             for level in range(self.levels):
                 var_mean = mean_tensor[level]
                 var_std = std_tensor[level]
-                transformed_upper_air[:, k] = (
-                    tensor_upper_air[:, k] - var_mean
-                ) / var_std
+                transformed_upper_air[:, k] = (tensor_upper_air[:, k] - var_mean) / var_std
                 k += 1
 
         # Standardize surface variables
         if self.flag_surface:
             for k, name in enumerate(self.varname_surface):
-                var_mean = device_compatible_to(self.mean_tensors[name],device)
-                var_std = device_compatible_to(self.std_tensors[name],device)
+                var_mean = device_compatible_to(self.mean_tensors[name], device)
+                var_std = device_compatible_to(self.std_tensors[name], device)
                 transformed_surface[:, k] = (tensor_surface[:, k] - var_mean) / var_std
 
         # Standardize diagnostic variables
         if self.flag_diagnostic:
             for k, name in enumerate(self.varname_diagnostic):
-                var_mean = device_compatible_to(self.mean_tensors[name],device)
-                var_std = device_compatible_to(self.std_tensors[name],device)
-                transformed_diagnostic[:, k] = (
-                    transformed_diagnostic[:, k] - var_mean
-                ) / var_std
+                var_mean = device_compatible_to(self.mean_tensors[name], device)
+                var_std = device_compatible_to(self.std_tensors[name], device)
+                transformed_diagnostic[:, k] = (transformed_diagnostic[:, k] - var_mean) / var_std
 
         # Concatenate everything
         if self.flag_surface:
@@ -220,18 +200,14 @@ class Normalize_ERA5_and_Forcing:
                     dim=1,
                 )
             else:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_surface), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_surface), dim=1)
         else:
             if self.flag_diagnostic:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_diagnostic), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_diagnostic), dim=1)
             else:
                 transformed_x = transformed_upper_air
 
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Transform training batches.
@@ -262,9 +238,7 @@ class Normalize_ERA5_and_Forcing:
                         for varname in varname_inputs:
                             # if forcing and static skip it, otherwise do z-score
                             if (varname in self.varname_forcing_static) is False:
-                                value[varname] = (
-                                    value[varname] - self.mean_ds[varname]
-                                ) / self.std_ds[varname]
+                                value[varname] = (value[varname] - self.mean_ds[varname]) / self.std_ds[varname]
 
                         # put transformed xr.Dataset to the output dictionary
                         normalized_sample[key] = value
@@ -303,9 +277,7 @@ class Normalize_ERA5_and_Forcing:
 
         # Surface variables
         if self.flag_surface:
-            tensor_surface = x[
-                :, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :
-            ]
+            tensor_surface = x[:, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :]
             transformed_surface = tensor_surface.clone()
 
         # Diagnostic variables (the very last of the stack)
@@ -316,8 +288,8 @@ class Normalize_ERA5_and_Forcing:
         # Reverse upper air variables
         k = 0
         for name in self.varname_upper_air:
-            mean_tensor = device_compatible_to(self.mean_tensors[name],device)
-            std_tensor = device_compatible_to(self.std_tensors[name],device)
+            mean_tensor = device_compatible_to(self.mean_tensors[name], device)
+            std_tensor = device_compatible_to(self.std_tensors[name], device)
             for level in range(self.levels):
                 mean = mean_tensor[level]
                 std = std_tensor[level]
@@ -327,15 +299,15 @@ class Normalize_ERA5_and_Forcing:
         # Reverse surface variables
         if self.flag_surface:
             for k, name in enumerate(self.varname_surface):
-                mean = device_compatible_to(self.mean_tensors[name],device)
-                std = device_compatible_to(self.std_tensors[name],device)
+                mean = device_compatible_to(self.mean_tensors[name], device)
+                std = device_compatible_to(self.std_tensors[name], device)
                 transformed_surface[:, k] = tensor_surface[:, k] * std + mean
 
         # Reverse diagnostic variables
         if self.flag_diagnostic:
             for k, name in enumerate(self.varname_diagnostic):
-                mean = device_compatible_to(self.mean_tensors[name],device)
-                std = device_compatible_to(self.std_tensors[name],device)
+                mean = device_compatible_to(self.mean_tensors[name], device)
+                std = device_compatible_to(self.std_tensors[name], device)
                 transformed_diagnostic[:, k] = transformed_diagnostic[:, k] * std + mean
 
         # Concatenate everything
@@ -350,18 +322,14 @@ class Normalize_ERA5_and_Forcing:
                     dim=1,
                 )
             else:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_surface), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_surface), dim=1)
         else:
             if self.flag_diagnostic:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_diagnostic), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_diagnostic), dim=1)
             else:
                 transformed_x = transformed_upper_air
 
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
     def inverse_transform_input(self, x: torch.Tensor) -> torch.Tensor:
         """Inverse transform for input x.
@@ -396,9 +364,7 @@ class Normalize_ERA5_and_Forcing:
             if self.static_first:
                 tensor_dyn_forcing = x[
                     :,
-                    idx + self.num_static : idx
-                    + self.num_static
-                    + self.num_dyn_forcing,
+                    idx + self.num_static : idx + self.num_static + self.num_dyn_forcing,
                     :,
                     :,
                 ]
@@ -420,8 +386,8 @@ class Normalize_ERA5_and_Forcing:
         # Inverse transform upper air variables
         k = 0
         for name in self.varname_upper_air:
-            mean_tensor = device_compatible_to(self.mean_tensors[name],device)
-            std_tensor = device_compatible_to(self.std_tensors[name],device)
+            mean_tensor = device_compatible_to(self.mean_tensors[name], device)
+            std_tensor = device_compatible_to(self.std_tensors[name], device)
             for level in range(self.levels):
                 mean = mean_tensor[level]
                 std = std_tensor[level]
@@ -431,15 +397,15 @@ class Normalize_ERA5_and_Forcing:
         # Inverse transform surface variables
         if self.flag_surface:
             for k, name in enumerate(self.varname_surface):
-                mean = device_compatible_to(self.mean_tensors[name],device)
-                std = device_compatible_to(self.std_tensors[name],device)
+                mean = device_compatible_to(self.mean_tensors[name], device)
+                std = device_compatible_to(self.std_tensors[name], device)
                 transformed_surface[:, k] = tensor_surface[:, k] * std + mean
 
         # Inverse transform dynamic forcing variables
         if self.flag_dyn_forcing:
             for k, name in enumerate(self.varname_dyn_forcing):
-                mean = device_compatible_to(self.mean_tensors[name],device)
-                std = device_compatible_to(self.std_tensors[name],device)
+                mean = device_compatible_to(self.mean_tensors[name], device)
+                std = device_compatible_to(self.std_tensors[name], device)
                 transformed_dyn_forcing[:, k] = tensor_dyn_forcing[:, k] * std + mean
 
         # Reconstruct input tensor
@@ -471,8 +437,7 @@ class Normalize_ERA5_and_Forcing:
 
         transformed_x = torch.cat(tensors, dim=1)
 
-        return device_compatible_to(transformed_x,device)
-
+        return device_compatible_to(transformed_x, device)
 
 
 class ToTensor_ERA5_and_Forcing:
@@ -507,21 +472,11 @@ class ToTensor_ERA5_and_Forcing:
         self.for_len = int(conf["data"]["forecast_len"])
 
         # identify the existence of other variables
-        self.flag_surface = ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        )
-        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (
-            len(conf["data"]["dynamic_forcing_variables"]) > 0
-        )
-        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (
-            len(conf["data"]["diagnostic_variables"]) > 0
-        )
-        self.flag_forcing = ("forcing_variables" in conf["data"]) and (
-            len(conf["data"]["forcing_variables"]) > 0
-        )
-        self.flag_static = ("static_variables" in conf["data"]) and (
-            len(conf["data"]["static_variables"]) > 0
-        )
+        self.flag_surface = ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0)
+        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0)
+        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0)
+        self.flag_forcing = ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0)
+        self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
 
         self.varname_upper_air = conf["data"]["variables"]
 
@@ -561,9 +516,7 @@ class ToTensor_ERA5_and_Forcing:
             # ======================================================================================== #
             # forcing variable first (new models) vs. static variable first (some old models)
             # this flag makes sure that the class is compatible with some old CREDIT models
-            self.flag_static_first = ("static_first" in conf["data"]) and (
-                conf["data"]["static_first"]
-            )
+            self.flag_static_first = ("static_first" in conf["data"]) and (conf["data"]["static_first"])
             # ======================================================================================== #
         else:
             self.has_forcing_static = False
@@ -584,9 +537,7 @@ class ToTensor_ERA5_and_Forcing:
                 for var_name in self.varname_upper_air:
                     var_value = value[var_name].values
                     list_vars_upper_air.append(var_value)
-                numpy_vars_upper_air = np.array(
-                    list_vars_upper_air
-                )  # [num_vars, hist_len, num_levels, lat, lon]
+                numpy_vars_upper_air = np.array(list_vars_upper_air)  # [num_vars, hist_len, num_levels, lat, lon]
 
                 # organize surface vars
                 if self.flag_surface:
@@ -596,25 +547,15 @@ class ToTensor_ERA5_and_Forcing:
                         var_value = value[var_name].values
                         list_vars_surface.append(var_value)
 
-                    numpy_vars_surface = np.array(
-                        list_vars_surface
-                    )  # [num_surf_vars, hist_len, lat, lon]
+                    numpy_vars_surface = np.array(list_vars_surface)  # [num_surf_vars, hist_len, lat, lon]
 
                 # organize forcing and static (input only)
                 if self.has_forcing_static or self.flag_dyn_forcing:
                     # enter this scope if one of the (dyn_forcing, folrcing, static) exists
                     if self.flag_static_first:
-                        varname_forcing_static = (
-                            self.varname_static
-                            + self.varname_dyn_forcing
-                            + self.varname_forcing
-                        )
+                        varname_forcing_static = self.varname_static + self.varname_dyn_forcing + self.varname_forcing
                     else:
-                        varname_forcing_static = (
-                            self.varname_dyn_forcing
-                            + self.varname_forcing
-                            + self.varname_static
-                        )
+                        varname_forcing_static = self.varname_dyn_forcing + self.varname_forcing + self.varname_static
 
                     if key == "historical_ERA5_images" or key == "x":
                         list_vars_forcing_static = []
@@ -642,12 +583,7 @@ class ToTensor_ERA5_and_Forcing:
             # ToTensor: upper-air varialbes
             ## produces [time, upper_var, level, lat, lon]
             ## np.hstack concatenates the second dim (axis=1)
-            x_upper_air = np.hstack(
-                [
-                    np.expand_dims(var_upper_air, axis=1)
-                    for var_upper_air in numpy_vars_upper_air
-                ]
-            )
+            x_upper_air = np.hstack([np.expand_dims(var_upper_air, axis=1) for var_upper_air in numpy_vars_upper_air])
             x_upper_air = torch.as_tensor(x_upper_air)
 
             # ---------------------------------------------------------------------- #
@@ -676,7 +612,6 @@ class ToTensor_ERA5_and_Forcing:
                     x_surf = x_surf.unsqueeze(0).unsqueeze(0)
 
             if key == "historical_ERA5_images" or key == "x":
-                
                 # ---------------------------------------------------------------------- #
                 # ToTensor: forcing and static
                 if self.has_forcing_static:
@@ -739,4 +674,3 @@ class ToTensor_ERA5_and_Forcing:
 
                 return_dict["y"] = x_upper_air.type(self.output_dtype)
         return return_dict
-

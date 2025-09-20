@@ -21,6 +21,7 @@ from credit.data import Sample, device_compatible_to
 
 logger = logging.getLogger(__name__)
 
+
 class BridgescalerScaleState(object):
     """Convert to rescaled tensor using Bridgescaler."""
 
@@ -83,19 +84,15 @@ class BridgescalerScaleState(object):
             dims=("time", "variable", "latitude", "longitude"),
             coords=dict(variable=self.var_levels),
         )
-        x_3d_transformed.numpy()[:] = self.scaler_3d.inverse_transform(
-            x_3d_da, channels_last=False
-        ).values
+        x_3d_transformed.numpy()[:] = self.scaler_3d.inverse_transform(x_3d_da, channels_last=False).values
         x_surface_da = xr.DataArray(
             x_surface.numpy(),
             dims=("time", "variable", "latitude", "longitude"),
             coords=dict(variable=self.surface_variables),
         )
-        x_surface_transformed.numpy()[:] = self.scaler_surf.inverse_transform(
-            x_surface_da, channels_last=False
-        ).values
+        x_surface_transformed.numpy()[:] = self.scaler_surf.inverse_transform(x_surface_da, channels_last=False).values
         x_transformed = torch.cat((x_3d_transformed, x_surface_transformed), dim=1)
-        return device_compatible_to(x_transformed,device)
+        return device_compatible_to(x_transformed, device)
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
         """Transform.
@@ -119,19 +116,15 @@ class BridgescalerScaleState(object):
             dims=("time", "variable", "latitude", "longitude"),
             coords=dict(variable=self.var_levels),
         )
-        x_3d_transformed.numpy()[:] = self.scaler_3d.transform(
-            x_3d_da, channels_last=False
-        ).values
+        x_3d_transformed.numpy()[:] = self.scaler_3d.transform(x_3d_da, channels_last=False).values
         x_surface_da = xr.DataArray(
             x_surface.numpy(),
             dims=("time", "variable", "latitude", "longitude"),
             coords=dict(variable=self.surface_variables),
         )
-        x_surface_transformed.numpy()[:] = self.scaler_surf.transform(
-            x_surface_da, channels_last=False
-        ).values
+        x_surface_transformed.numpy()[:] = self.scaler_surf.transform(x_surface_da, channels_last=False).values
         x_transformed = torch.cat((x_3d_transformed, x_surface_transformed), dim=1)
-        return device_compatible_to(x_transformed,device)
+        return device_compatible_to(x_transformed, device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Transform.
@@ -152,23 +145,14 @@ class BridgescalerScaleState(object):
                 for variable in self.variables:
                     single_var = ds[variable]
                     single_var["level"] = [f"{variable}_{lev:d}" for lev in ds["level"]]
-                    transformed_var = self.scaler_3d.transform(
-                        single_var, channels_last=False
-                    )
+                    transformed_var = self.scaler_3d.transform(single_var, channels_last=False)
                     transformed_var["level"] = ds["level"]
                     normalized_sample[data_id][variable] = transformed_var
-                surface_ds = (
-                    ds[self.surface_variables]
-                    .to_dataarray()
-                    .transpose("time", "variable", "latitude", "longitude")
-                )
-                surface_ds_transformed = self.scaler_surf.transform(
-                    surface_ds, channels_last=False
-                )
-                normalized_sample[data_id] = normalized_sample[data_id].merge(
-                    surface_ds_transformed.to_dataset(dim="variable")
-                )
+                surface_ds = ds[self.surface_variables].to_dataarray().transpose("time", "variable", "latitude", "longitude")
+                surface_ds_transformed = self.scaler_surf.transform(surface_ds, channels_last=False)
+                normalized_sample[data_id] = normalized_sample[data_id].merge(surface_ds_transformed.to_dataset(dim="variable"))
         return normalized_sample
+
 
 class NormalizeState_Quantile_Bridgescalar:
     """Class to use the bridgescaler Quantile functionality.
@@ -239,29 +223,21 @@ class NormalizeState_Quantile_Bridgescalar:
         """
         device = x.device
         tensor = x[:, : (len(self.variables) * self.levels), :, :]  # B, Var, H, W
-        surface_tensor = x[
-            :, (len(self.variables) * self.levels) :, :, :
-        ]  # B, Var, H, W
+        surface_tensor = x[:, (len(self.variables) * self.levels) :, :, :]  # B, Var, H, W
         # Reverse quantile transform using bridge scaler:
         transformed_tensor = tensor.clone()
         transformed_surface_tensor = surface_tensor.clone()
         # 3dvars
         rscal_3d = np.array(x[:, : (len(self.variables) * self.levels), :, :])
 
-        transformed_tensor[:, :, :, :] = device_compatible_to(torch.tensor(
-            (self.scaler_3d.inverse_transform(rscal_3d))
-        ),device)
+        transformed_tensor[:, :, :, :] = device_compatible_to(torch.tensor((self.scaler_3d.inverse_transform(rscal_3d))), device)
         # surf
         rscal_surf = np.array(x[:, (len(self.variables) * self.levels) :, :, :])
-        transformed_surface_tensor[:, :, :, :] = device_compatible_to(torch.tensor(
-            (self.scaler_surf.inverse_transform(rscal_surf))
-        ),device)
+        transformed_surface_tensor[:, :, :, :] = device_compatible_to(torch.tensor((self.scaler_surf.inverse_transform(rscal_surf))), device)
         # cat them
-        transformed_x = torch.cat(
-            (transformed_tensor, transformed_surface_tensor), dim=1
-        )
+        transformed_x = torch.cat((transformed_tensor, transformed_surface_tensor), dim=1)
         # return
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
     def transform(self, sample):
         """Transform.
@@ -338,9 +314,7 @@ class ToTensor_BridgeScaler:
 
             if key == "historical_ERA5_images" or key == "x":
                 x_surf = torch.tensor(np.array(value["surface"])).squeeze()
-                return_dict["x_surf"] = (
-                    x_surf if len(x_surf.shape) == 4 else x_surf.unsqueeze(0)
-                )
+                return_dict["x_surf"] = x_surf if len(x_surf.shape) == 4 else x_surf.unsqueeze(0)
                 len_vars = len(self.variables)
                 return_dict["x"] = torch.tensor(
                     np.reshape(
@@ -351,9 +325,7 @@ class ToTensor_BridgeScaler:
 
             elif key == "target_ERA5_images" or key == "y":
                 y_surf = torch.tensor(np.array(value["surface"])).squeeze()
-                return_dict["y_surf"] = (
-                    y_surf if len(y_surf.shape) == 4 else y_surf.unsqueeze(0)
-                )
+                return_dict["y_surf"] = y_surf if len(y_surf.shape) == 4 else y_surf.unsqueeze(0)
                 len_vars = len(self.variables)
                 if self.one_shot:
                     return_dict["y"] = torch.tensor(
@@ -383,30 +355,13 @@ class ToTensor_BridgeScaler:
                 if sv == "tsi":
                     TOA = xr.open_dataset(self.conf["data"]["TOA_forcing_path"])
                     times_b = pd.to_datetime(TOA.time.values)
-                    mask_toa = [
-                        any(
-                            i == time.dayofyear and j == time.hour
-                            for i, j in zip(self.doy, self.hod)
-                        )
-                        for time in times_b
-                    ]
-                    return_dict["TOA"] = torch.tensor(
-                        ((TOA[sv].sel(time=mask_toa)) / 2540585.74).to_numpy()
-                    )
+                    mask_toa = [any(i == time.dayofyear and j == time.hour for i, j in zip(self.doy, self.hod)) for time in times_b]
+                    return_dict["TOA"] = torch.tensor(((TOA[sv].sel(time=mask_toa)) / 2540585.74).to_numpy())
                     # Need the datetime at time t(i) (which is the last element) to do multi-step training
-                    return_dict["datetime"] = (
-                        pd.to_datetime(self.datetime).astype(int).values[-1]
-                    )
+                    return_dict["datetime"] = pd.to_datetime(self.datetime).astype(int).values[-1]
 
                 if sv == "Z_GDS4_SFC":
-                    arr = 2 * torch.tensor(
-                        np.array(
-                            (
-                                (DSD[sv] - DSD[sv].min())
-                                / (DSD[sv].max() - DSD[sv].min())
-                            )
-                        )
-                    )
+                    arr = 2 * torch.tensor(np.array(((DSD[sv] - DSD[sv].min()) / (DSD[sv].max() - DSD[sv].min()))))
                 else:
                     try:
                         arr = DSD[sv].squeeze()
@@ -476,9 +431,7 @@ class ToTensor_BridgeScaler:
 
             if key == "historical_ERA5_images" or key == "x":
                 x_surf = torch.tensor(np.array(value["surface"])).squeeze()
-                return_dict["x_surf"] = (
-                    x_surf if len(x_surf.shape) == 4 else x_surf.unsqueeze(0)
-                )
+                return_dict["x_surf"] = x_surf if len(x_surf.shape) == 4 else x_surf.unsqueeze(0)
                 len_vars = len(self.variables)
                 return_dict["x"] = torch.tensor(
                     np.reshape(
@@ -489,9 +442,7 @@ class ToTensor_BridgeScaler:
 
             elif key == "target_ERA5_images" or key == "y":
                 y_surf = torch.tensor(np.array(value["surface"])).squeeze()
-                return_dict["y_surf"] = (
-                    y_surf if len(y_surf.shape) == 4 else y_surf.unsqueeze(0)
-                )
+                return_dict["y_surf"] = y_surf if len(y_surf.shape) == 4 else y_surf.unsqueeze(0)
                 len_vars = len(self.variables)
                 if self.one_shot:
                     return_dict["y"] = torch.tensor(
@@ -521,30 +472,13 @@ class ToTensor_BridgeScaler:
                 if sv == "tsi":
                     TOA = xr.open_dataset(self.conf["data"]["TOA_forcing_path"])
                     times_b = pd.to_datetime(TOA.time.values)
-                    mask_toa = [
-                        any(
-                            i == time.dayofyear and j == time.hour
-                            for i, j in zip(self.doy, self.hod)
-                        )
-                        for time in times_b
-                    ]
-                    return_dict["TOA"] = torch.tensor(
-                        ((TOA[sv].sel(time=mask_toa)) / 2540585.74).to_numpy()
-                    )
+                    mask_toa = [any(i == time.dayofyear and j == time.hour for i, j in zip(self.doy, self.hod)) for time in times_b]
+                    return_dict["TOA"] = torch.tensor(((TOA[sv].sel(time=mask_toa)) / 2540585.74).to_numpy())
                     # Need the datetime at time t(i) (which is the last element) to do multi-step training
-                    return_dict["datetime"] = (
-                        pd.to_datetime(self.datetime).astype(int).values[-1]
-                    )
+                    return_dict["datetime"] = pd.to_datetime(self.datetime).astype(int).values[-1]
 
                 if sv == "Z_GDS4_SFC":
-                    arr = 2 * torch.tensor(
-                        np.array(
-                            (
-                                (DSD[sv] - DSD[sv].min())
-                                / (DSD[sv].max() - DSD[sv].min())
-                            )
-                        )
-                    )
+                    arr = 2 * torch.tensor(np.array(((DSD[sv] - DSD[sv].min()) / (DSD[sv].max() - DSD[sv].min()))))
                 else:
                     try:
                         arr = DSD[sv].squeeze()
