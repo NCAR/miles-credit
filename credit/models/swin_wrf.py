@@ -1,4 +1,3 @@
-
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -36,9 +35,7 @@ def get_pad3d(input_resolution, window_size):
     Pl, Lat, Lon = input_resolution
     win_pl, win_lat, win_lon = window_size
 
-    padding_left = padding_right = padding_top = padding_bottom = padding_front = (
-        padding_back
-    ) = 0
+    padding_left = padding_right = padding_top = padding_bottom = padding_front = padding_back = 0
     pl_remainder = Pl % win_pl
     lat_remainder = Lat % win_lat
     lon_remainder = Lon % win_lon
@@ -88,9 +85,7 @@ class CubeEmbedding(nn.Module):
         patch_size: T, Lat, Lon
     """
 
-    def __init__(
-        self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm
-    ):
+    def __init__(self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm):
         super().__init__()
 
         # input size
@@ -108,9 +103,7 @@ class CubeEmbedding(nn.Module):
         self.embed_dim = embed_dim
 
         # Conv3d-based patching
-        self.proj = nn.Conv3d(
-            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
-        )
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
         # layer norm
         if norm_layer is not None:
@@ -150,22 +143,16 @@ class CubeEmbedding(nn.Module):
 
 
 class DownBlock(nn.Module):
-    def __init__(
-        self, in_chans: int, out_chans: int, num_groups: int, num_residuals: int = 2
-    ):
+    def __init__(self, in_chans: int, out_chans: int, num_groups: int, num_residuals: int = 2):
         super().__init__()
 
         # down-sampling with Conv2d
-        self.conv = nn.Conv2d(
-            in_chans, out_chans, kernel_size=(3, 3), stride=2, padding=1
-        )
+        self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=(3, 3), stride=2, padding=1)
 
         # blocks of residual path
         blk = []
         for i in range(num_residuals):
-            blk.append(
-                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
-            )
+            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -194,9 +181,7 @@ class UpBlock(nn.Module):
         # blocks of residual path
         blk = []
         for i in range(num_residuals):
-            blk.append(
-                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
-            )
+            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -226,15 +211,7 @@ class UTransformer(nn.Module):
         depth (int): Number of blocks.
     """
 
-    def __init__(
-        self, embed_dim, 
-        num_groups, 
-        input_resolution, 
-        num_heads, 
-        window_size, 
-        depth,
-        drop_path
-    ):
+    def __init__(self, embed_dim, num_groups, input_resolution, num_heads, window_size, depth, drop_path):
         super().__init__()
         num_groups = to_2tuple(num_groups)
         window_size = to_2tuple(window_size)  # convert window_size[int] to tuple
@@ -255,13 +232,7 @@ class UTransformer(nn.Module):
 
         # SwinT block
         self.layer = SwinTransformerV2Stage(
-            embed_dim, 
-            embed_dim, 
-            input_resolution, 
-            depth, 
-            num_heads, 
-            window_size[0],
-            drop_path=drop_path
+            embed_dim, embed_dim, input_resolution, depth, num_heads, window_size[0], drop_path=drop_path
         )  # <--- window_size[0] get window_size[int] from tuple
 
         # up-sampling block
@@ -270,7 +241,7 @@ class UTransformer(nn.Module):
     def forward(self, x):
         B, C, Lat, Lon = x.shape
         padding_left, padding_right, padding_top, padding_bottom = self.padding
-        
+
         x = self.down(x)
         shortcut = x
 
@@ -327,41 +298,41 @@ class WRF_Tansformer(BaseModel):
     ):
         super().__init__()
         self.time_encode = time_encode_dim
-        image_height_inside = param_interior['image_height']
-        patch_height_inside = param_interior['patch_height']
-        image_width_inside = param_interior['image_width']
-        patch_width_inside = param_interior['patch_width']
-        levels_inside = param_interior['levels']
-        frames_inside = param_interior['frames']
-        frame_patch_size_inside = param_interior['frame_patch_size']
-        channels_inside = param_interior['channels']
-        surface_channels_inside = param_interior['surface_channels']
-        input_only_channels_inside = param_interior['input_only_channels']
-        output_only_channels_inside = param_interior['output_only_channels']
-        dim_inside = param_interior['dim']
+        image_height_inside = param_interior["image_height"]
+        patch_height_inside = param_interior["patch_height"]
+        image_width_inside = param_interior["image_width"]
+        patch_width_inside = param_interior["patch_width"]
+        levels_inside = param_interior["levels"]
+        frames_inside = param_interior["frames"]
+        frame_patch_size_inside = param_interior["frame_patch_size"]
+        channels_inside = param_interior["channels"]
+        surface_channels_inside = param_interior["surface_channels"]
+        input_only_channels_inside = param_interior["input_only_channels"]
+        output_only_channels_inside = param_interior["output_only_channels"]
+        dim_inside = param_interior["dim"]
 
-        image_height_outside = param_outside['image_height']
-        patch_height_outside = param_outside['patch_height']
-        image_width_outside = param_outside['image_width']
-        patch_width_outside = param_outside['patch_width']
-        levels_outside = param_outside['levels']
-        frames_outside = param_outside['frames']
-        frame_patch_size_outside = param_outside['frame_patch_size']
-        channels_outside = param_outside['channels']
-        surface_channels_outside = param_outside['surface_channels']
-        dim_outside = param_outside['dim']
-        
+        image_height_outside = param_outside["image_height"]
+        patch_height_outside = param_outside["patch_height"]
+        image_width_outside = param_outside["image_width"]
+        patch_width_outside = param_outside["patch_width"]
+        levels_outside = param_outside["levels"]
+        frames_outside = param_outside["frames"]
+        frame_patch_size_outside = param_outside["frame_patch_size"]
+        channels_outside = param_outside["channels"]
+        surface_channels_outside = param_outside["surface_channels"]
+        dim_outside = param_outside["dim"]
+
         self.use_interp = interp
         self.use_spectral_norm = use_spectral_norm
-        
+
         if padding_conf is None:
             padding_conf = {"activate": False}
-            
+
         self.use_padding = padding_conf["activate"]
-        
+
         if post_conf is None:
             post_conf = {"activate": False}
-            
+
         self.use_post_block = post_conf["activate"]
 
         # input tensor size (time, lat, lon)
@@ -370,7 +341,7 @@ class WRF_Tansformer(BaseModel):
             pad_lon = padding_conf["pad_lon"]
             image_height_pad = image_height_inside + pad_lat[0] + pad_lat[1]
             image_width_pad = image_width_inside + pad_lon[0] + pad_lon[1]
-            
+
             img_size_inside = (frames_inside, image_height_pad, image_width_pad)
             self.img_size_original = (frames_inside, image_height_inside, image_width_inside)
         else:
@@ -378,11 +349,11 @@ class WRF_Tansformer(BaseModel):
             self.img_size_original = img_size_inside
 
         img_size_outside = (frames_outside, image_height_outside, image_width_outside)
-        
+
         # the size of embedded patches
         patch_size_inside = (frame_patch_size_inside, patch_height_inside, patch_width_inside)
         patch_size_outside = (frame_patch_size_outside, patch_height_outside, patch_width_outside)
-        
+
         # number of channels = levels * varibales per level + surface variables
         # in_chans = out_chans = levels * channels + surface_channels
 
@@ -390,7 +361,7 @@ class WRF_Tansformer(BaseModel):
         out_chans_inside = channels_inside * levels_inside + surface_channels_inside + output_only_channels_inside
 
         in_chans_outside = channels_outside * levels_outside + surface_channels_outside
-        
+
         # input resolution = number of embedded patches / 2
         # divide by two because "u_trasnformer" has a down-sampling block
 
@@ -398,27 +369,19 @@ class WRF_Tansformer(BaseModel):
             round(img_size_inside[1] / patch_size_inside[1] / 2),
             round(img_size_inside[2] / patch_size_inside[2] / 2),
         )
-        
+
         input_resolution_outside = (
             round(img_size_outside[1] / patch_size_outside[1] / 2),
             round(img_size_outside[2] / patch_size_outside[2] / 2),
         )
-        
+
         # FuXi cube embedding layer
         self.cube_embedding_inside = CubeEmbedding(img_size_inside, patch_size_inside, in_chans_inside, dim_inside)
         self.cube_embedding_outside = CubeEmbedding(img_size_outside, patch_size_outside, in_chans_outside, dim_outside)
-        self.total_dim = dim_inside # + dim_outside
-        
+        self.total_dim = dim_inside  # + dim_outside
+
         # Downsampling --> SwinTransformerV2 stacks --> Upsampling
-        self.u_transformer = UTransformer(
-            self.total_dim, 
-            num_groups, 
-            input_resolution_inside, 
-            num_heads, 
-            window_size, 
-            depth=depth,
-            drop_path=drop_path
-        )
+        self.u_transformer = UTransformer(self.total_dim, num_groups, input_resolution_inside, num_heads, window_size, depth=depth, drop_path=drop_path)
 
         # dense layer applied on channel dmension
         # channel * patch_size beucase dense layer recovers embedded dimensions to the input dimensions
@@ -430,9 +393,9 @@ class WRF_Tansformer(BaseModel):
         self.out_chans = out_chans_inside
         self.img_size = img_size_inside
 
-        #self.channels = channels_inside
-        #self.surface_channels = surface_channels_inside
-        #self.levels = levels
+        # self.channels = channels_inside
+        # self.surface_channels = surface_channels_inside
+        # self.levels = levels
 
         if self.use_padding:
             self.padding_opt = TensorPadding(**padding_conf)
@@ -447,16 +410,16 @@ class WRF_Tansformer(BaseModel):
         if self.use_post_block:
             self.postblock = PostBlock(post_conf)
 
-        self.film = nn.Linear(self.time_encode, 2*(self.total_dim))
-        
+        self.film = nn.Linear(self.time_encode, 2 * (self.total_dim))
+
     def _match_spatial(self, src: torch.Tensor, ref: torch.Tensor):
-        #if src.shape[-2:] != ref.shape[-2:]:
-        return F.interpolate(src, size=ref.shape[-2:], mode='bilinear', align_corners=False)
-        #return src
-    
+        # if src.shape[-2:] != ref.shape[-2:]:
+        return F.interpolate(src, size=ref.shape[-2:], mode="bilinear", align_corners=False)
+        # return src
+
     def forward(
-        self, 
-        x: torch.Tensor, 
+        self,
+        x: torch.Tensor,
         x_outside: torch.Tensor,
         x_extra: torch.Tensor,
     ):
@@ -483,28 +446,26 @@ class WRF_Tansformer(BaseModel):
         # x: input size = (Batch, Variables, Time, Lat grids, Lon grids)
         # x: output size = (Batch, Embedded dimension, time, number of patches, number of patches)
         x = self.cube_embedding_inside(x).squeeze(2)  # B C Lat Lon
-        
+
         x_outside = self.cube_embedding_outside(x_outside).squeeze(2)  # B C Lat Lon
-        #x_outside = self._match_spatial(x_outside, x)
+        # x_outside = self._match_spatial(x_outside, x)
 
         # Feature‑wise Linear Modulation
-        alpha_beta = self.film(x_extra)            # [batch, 2*dim]
-        alpha, beta = alpha_beta.chunk(2, dim=1)   # each is [batch, dim]
-        alpha = alpha.view(B, self.total_dim, 1, 1)     # [batch, dim, 1, 1]
-        beta  = beta .view(B, self.total_dim, 1, 1)     # [batch, dim, 1, 1]
+        alpha_beta = self.film(x_extra)  # [batch, 2*dim]
+        alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
+        alpha = alpha.view(B, self.total_dim, 1, 1)  # [batch, dim, 1, 1]
+        beta = beta.view(B, self.total_dim, 1, 1)  # [batch, dim, 1, 1]
         x_outside = alpha * x_outside + beta
-        
-        #x = torch.cat((x, x_outside), 1)
+
+        # x = torch.cat((x, x_outside), 1)
         x = x + x_outside
-        
+
         # u_transformer stage
         x = self.u_transformer(x)
 
         # recover embeddings to lat/lon grids with dense layer and reshape operation.
         x = self.fc(x.permute(0, 2, 3, 1))  # B Lat Lon C
-        x = x.reshape(B, Lat, Lon, patch_lat, patch_lon, self.out_chans).permute(
-            0, 1, 3, 2, 4, 5
-        )
+        x = x.reshape(B, Lat, Lon, patch_lat, patch_lon, self.out_chans).permute(0, 1, 3, 2, 4, 5)
         # B, lat, patch_lat, lon, patch_lon, C
         x = x.reshape(B, Lat * patch_lat, Lon * patch_lon, self.out_chans)
         x = x.permute(0, 3, 1, 2)  # B C Lat Lon
@@ -526,4 +487,3 @@ class WRF_Tansformer(BaseModel):
             x = self.postblock(x)
 
         return x
-        

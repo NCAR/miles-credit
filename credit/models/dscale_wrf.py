@@ -35,9 +35,7 @@ def get_pad3d(input_resolution, window_size):
     Pl, Lat, Lon = input_resolution
     win_pl, win_lat, win_lon = window_size
 
-    padding_left = padding_right = padding_top = padding_bottom = padding_front = (
-        padding_back
-    ) = 0
+    padding_left = padding_right = padding_top = padding_bottom = padding_front = padding_back = 0
     pl_remainder = Pl % win_pl
     lat_remainder = Lat % win_lat
     lon_remainder = Lon % win_lon
@@ -87,9 +85,7 @@ class CubeEmbedding(nn.Module):
         patch_size: T, Lat, Lon
     """
 
-    def __init__(
-        self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm
-    ):
+    def __init__(self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm):
         super().__init__()
 
         # input size
@@ -107,9 +103,7 @@ class CubeEmbedding(nn.Module):
         self.embed_dim = embed_dim
 
         # Conv3d-based patching
-        self.proj = nn.Conv3d(
-            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
-        )
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
         # layer norm
         if norm_layer is not None:
@@ -149,22 +143,16 @@ class CubeEmbedding(nn.Module):
 
 
 class DownBlock(nn.Module):
-    def __init__(
-        self, in_chans: int, out_chans: int, num_groups: int, num_residuals: int = 2
-    ):
+    def __init__(self, in_chans: int, out_chans: int, num_groups: int, num_residuals: int = 2):
         super().__init__()
 
         # down-sampling with Conv2d
-        self.conv = nn.Conv2d(
-            in_chans, out_chans, kernel_size=(3, 3), stride=2, padding=1
-        )
+        self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=(3, 3), stride=2, padding=1)
 
         # blocks of residual path
         blk = []
         for i in range(num_residuals):
-            blk.append(
-                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
-            )
+            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -193,9 +181,7 @@ class UpBlock(nn.Module):
         # blocks of residual path
         blk = []
         for i in range(num_residuals):
-            blk.append(
-                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
-            )
+            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -338,7 +324,7 @@ class Dscale_Tansformer(BaseModel):
         **kwargs,
     ):
         super().__init__()
-        
+
         self.use_interp = interp
         self.use_spectral_norm = use_spectral_norm
 
@@ -384,9 +370,7 @@ class Dscale_Tansformer(BaseModel):
         self.cube_embedding = CubeEmbedding(img_size, patch_size, in_chans, dim)
 
         # Downsampling --> SwinTransformerV2 stacks --> Upsampling
-        logger.info(
-            f"Define UTransforme with proj_drop={proj_drop}, attn_drop={attn_drop}, drop_path={drop_path}"
-        )
+        logger.info(f"Define UTransforme with proj_drop={proj_drop}, attn_drop={attn_drop}, drop_path={drop_path}")
 
         self.u_transformer = UTransformer(
             dim,
@@ -409,7 +393,7 @@ class Dscale_Tansformer(BaseModel):
         self.input_resolution = input_resolution
         self.out_chans = out_chans
         self.img_size = img_size
-        
+
         if self.use_padding:
             self.padding_opt = TensorPadding(**padding_conf)
 
@@ -423,11 +407,11 @@ class Dscale_Tansformer(BaseModel):
 
         if self.use_post_block:
             self.postblock = PostBlock(post_conf)
-            
+
         self.total_dim = dim
         self.time_encode = time_encode_dim
-        self.film = nn.Linear(self.time_encode, 2*(self.total_dim))
-        
+        self.film = nn.Linear(self.time_encode, 2 * (self.total_dim))
+
     def forward(self, x: torch.Tensor, x_extra: torch.Tensor):
         #
         # copy tensor to feed into postblock later
@@ -455,12 +439,12 @@ class Dscale_Tansformer(BaseModel):
         # x: output size = (Batch, Embedded dimension, time, number of patches, number of patches)
 
         # Feature‑wise Linear Modulation
-        alpha_beta = self.film(x_extra)            # [batch, 2*dim]
-        alpha, beta = alpha_beta.chunk(2, dim=1)   # each is [batch, dim]
-        alpha = alpha.view(B, self.total_dim, 1, 1)     # [batch, dim, 1, 1]
-        beta  = beta .view(B, self.total_dim, 1, 1)     # [batch, dim, 1, 1]
+        alpha_beta = self.film(x_extra)  # [batch, 2*dim]
+        alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
+        alpha = alpha.view(B, self.total_dim, 1, 1)  # [batch, dim, 1, 1]
+        beta = beta.view(B, self.total_dim, 1, 1)  # [batch, dim, 1, 1]
         x = alpha * x + beta
-        
+
         # u_transformer stage
         # the size of x does notchange
         x = self.u_transformer(x)

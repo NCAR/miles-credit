@@ -45,8 +45,8 @@ model_types = {
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
-    'wrf': (WRF_Tansformer, 'Loading WRF Transformer'),
-    'dscale': (Dscale_Tansformer, 'Loading downscaling Transformer'),
+    "wrf": (WRF_Tansformer, "Loading WRF Transformer"),
+    "dscale": (Dscale_Tansformer, "Loading downscaling Transformer"),
 }
 
 
@@ -142,9 +142,7 @@ def load_model(conf, load_weights=False, model_name=False):
                     ckpt = os.path.join(save_loc, "checkpoint.pt")
 
             if not os.path.isfile(ckpt):
-                raise ValueError(
-                    "No saved checkpoint exists. You must train a model first. Exiting."
-                )
+                raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
 
             logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
@@ -166,9 +164,7 @@ def load_model(conf, load_weights=False, model_name=False):
             self_condition = diffusion_config.pop("self_condition", False)
             condition = diffusion_config.pop("condition", True)
         else:
-            logger.warning(
-                "The diffusion details were not specified as model:diffusion, exiting"
-            )
+            logger.warning("The diffusion details were not specified as model:diffusion, exiting")
             sys.exit(0)
 
         if load_weights:
@@ -191,9 +187,7 @@ def load_model(conf, load_weights=False, model_name=False):
             self_condition = diffusion_config.pop("self_condition", False)
             condition = diffusion_config.pop("condition", True)
         else:
-            logger.warning(
-                "The diffusion details were not specified as model:diffusion, exiting"
-            )
+            logger.warning("The diffusion details were not specified as model:diffusion, exiting")
             sys.exit(0)
 
         if load_weights:
@@ -243,9 +237,7 @@ def load_model_name(conf, model_name, load_weights=False):
             ckpt = os.path.join(save_loc, model_name)
 
             if not os.path.isfile(ckpt):
-                raise ValueError(
-                    "No saved checkpoint exists. You must train a model first. Exiting."
-                )
+                raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
 
             logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
