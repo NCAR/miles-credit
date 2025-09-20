@@ -37,7 +37,7 @@ trainer_types = {
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
     "standard-les": (TrainerLES, "Loading a single-step LES trainer"),
     "standard-wrf": (TrainerWRF, "Loading a single-step WRF trainer"),
-    "multi-step-wrf": (TrainerWRF_Multi, "Loading a multi-step WRF trainer")
+    "multi-step-wrf": (TrainerWRF_Multi, "Loading a multi-step WRF trainer"),
 }
 
 
