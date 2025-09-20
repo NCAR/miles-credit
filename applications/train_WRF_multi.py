@@ -1,4 +1,3 @@
-
 import os
 import sys
 import yaml
@@ -52,7 +51,6 @@ def load_dataset_and_sampler(
     rank,
     is_train=True,
 ):
-    
     seed = conf["seed"]
     # transforms
     transforms = load_transforms(conf)
@@ -66,7 +64,7 @@ def load_dataset_and_sampler(
         world_size=world_size,
         seed=seed,
     )
-    
+
     # Pytorch sampler
     sampler = DistributedSampler(
         dataset,
@@ -108,7 +106,7 @@ def load_model_states_and_optimizer(conf, model, device):
     load_optimizer_conf = conf["trainer"]["load_optimizer"]
     load_scaler_conf = conf["trainer"]["load_scaler"]
     load_scheduler_conf = conf["trainer"]["load_scheduler"]
-    
+
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
     if not load_weights:  # Loaded after loading model weights when reloading
         optimizer = torch.optim.AdamW(
@@ -117,44 +115,38 @@ def load_model_states_and_optimizer(conf, model, device):
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
         )
-        
+
         if conf["trainer"]["mode"] == "fsdp":
             optimizer = FSDPOptimizerWrapper(optimizer, model)
-            
+
         scheduler = load_scheduler(optimizer, conf)
-        
-        scaler = (
-            ShardedGradScaler(enabled=amp)
-            if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
-        )
+
+        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
 
     # Multi-step training case -- when starting, only load the model weights (then after load all states)
-    elif load_weights and not (
-        load_optimizer_conf or load_scaler_conf or load_scheduler_conf
-    ):
+    elif load_weights and not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=learning_rate,
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
         )
-        
+
         # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
             logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            
+
             optimizer = torch.optim.AdamW(
                 model.parameters(),
                 lr=learning_rate,
                 weight_decay=weight_decay,
                 betas=(0.9, 0.95),
             )
-            
+
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
-            
+
         else:
             # DDP settings
             ckpt = os.path.join(save_loc, "checkpoint.pt")
@@ -165,15 +157,11 @@ def load_model_states_and_optimizer(conf, model, device):
             else:
                 logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
                 model.load_state_dict(checkpoint["model_state_dict"])
-                
+
         # Load the learning rate scheduler and mixed precision grad scaler
         scheduler = load_scheduler(optimizer, conf)
-        
-        scaler = (
-            ShardedGradScaler(enabled=amp)
-            if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
-        )
+
+        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
 
     # load optimizer and grad scaler states
     else:
@@ -183,18 +171,18 @@ def load_model_states_and_optimizer(conf, model, device):
         # FSDP checkpoint settings
         if conf["trainer"]["mode"] == "fsdp":
             logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
-            
+
             optimizer = torch.optim.AdamW(
                 model.parameters(),
                 lr=learning_rate,
                 weight_decay=weight_decay,
                 betas=(0.9, 0.95),
             )
-            
+
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
-            
+
             if conf["trainer"]["load_optimizer"]:
                 checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
 
@@ -203,28 +191,24 @@ def load_model_states_and_optimizer(conf, model, device):
             if conf["trainer"]["mode"] == "ddp":
                 logging.info(f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
                 model.module.load_state_dict(checkpoint["model_state_dict"])
-                
+
             else:
                 logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
                 model.load_state_dict(checkpoint["model_state_dict"])
-                
+
             optimizer = torch.optim.AdamW(
                 model.parameters(),
                 lr=learning_rate,
                 weight_decay=weight_decay,
                 betas=(0.9, 0.95),
             )
-            
+
             if conf["trainer"]["load_optimizer"]:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         scheduler = load_scheduler(optimizer, conf)
-        
-        scaler = (
-            ShardedGradScaler(enabled=amp)
-            if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
-        )
+
+        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
 
         # Update the config file to the current epoch
         if "reload_epoch" in conf["trainer"] and conf["trainer"]["reload_epoch"]:
@@ -251,7 +235,6 @@ def load_model_states_and_optimizer(conf, model, device):
 
 
 def main(rank, world_size, conf, backend, trial=False):
-    
     # convert $USER to the actual user name
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
@@ -260,7 +243,7 @@ def main(rank, world_size, conf, backend, trial=False):
 
     # infer device id from rank
 
-    device = (torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu"))
+    device = torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
     # Config settings
@@ -270,13 +253,9 @@ def main(rank, world_size, conf, backend, trial=False):
     train_batch_size = conf["trainer"]["train_batch_size"]
     valid_batch_size = conf["trainer"]["valid_batch_size"]
     thread_workers = conf["trainer"]["thread_workers"]
-    
-    valid_thread_workers = (
-        conf["trainer"]["valid_thread_workers"]
-        if "valid_thread_workers" in conf["trainer"]
-        else thread_workers
-    )
-    
+
+    valid_thread_workers = conf["trainer"]["valid_thread_workers"] if "valid_thread_workers" in conf["trainer"] else thread_workers
+
     # -------------------------------------------------- #
     # import training / validation years from conf
     train_years_range = conf["data"]["train_years"]
@@ -285,135 +264,134 @@ def main(rank, world_size, conf, backend, trial=False):
     # convert year info to str for file name search
     train_years = [str(year) for year in range(train_years_range[0], train_years_range[1])]
     valid_years = [str(year) for year in range(valid_years_range[0], valid_years_range[1])]
-    
+
     if conf["data"]["scaler_type"] == "std-wrf":
-        
         param_interior = {}
         param_outside = {}
         # --------------- #
         # upper air files
         upper_files = sorted(glob(conf["data"]["save_loc"]))
-        upper_files_outside = sorted(glob(conf["data"]['boundary']["save_loc"]))
-        
+        upper_files_outside = sorted(glob(conf["data"]["boundary"]["save_loc"]))
+
         # --------------- #
         # surface files
-        if ('surface_variables' in conf['data']) and (len(conf['data']['surface_variables']) > 0):
+        if ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0):
             list_surf_ds = sorted(glob(conf["data"]["save_loc_surface"]))
         else:
             list_surf_ds = None
-        
-        list_surf_ds_outside = sorted(glob(conf["data"]['boundary']["save_loc_surface"]))
-        
+
+        list_surf_ds_outside = sorted(glob(conf["data"]["boundary"]["save_loc_surface"]))
+
         # --------------- #
         # dyn forcing files
-        if ('dynamic_forcing_variables' in conf['data']) and (len(conf['data']['dynamic_forcing_variables']) > 0):
+        if ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0):
             list_dyn_forcing_ds = sorted(glob(conf["data"]["save_loc_dynamic_forcing"]))
         else:
             list_dyn_forcing_ds = None
-        
+
         # --------------- #
         # diagnostic files
-        if ('diagnostic_variables' in conf['data']) and (len(conf['data']['diagnostic_variables']) > 0):
+        if ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0):
             list_diag_ds = sorted(glob(conf["data"]["save_loc_diagnostic"]))
         else:
             list_diag_ds = None
-        
+
         # convert year info to str for file name search
         train_years = [str(year) for year in range(train_years_range[0], train_years_range[1])]
         valid_years = [str(year) for year in range(valid_years_range[0], valid_years_range[1])]
-        
+
         # Filter the files for training / validation
         train_files = [file for file in upper_files if any(year in file for year in train_years)]
         valid_files = [file for file in upper_files if any(year in file for year in valid_years)]
-        
+
         train_files_outside = [file for file in upper_files_outside if any(year in file for year in train_years)]
         valid_files_outside = [file for file in upper_files_outside if any(year in file for year in valid_years)]
-        
+
         if list_surf_ds is not None:
             train_list_surf_ds = [file for file in list_surf_ds if any(year in file for year in train_years)]
             valid_list_surf_ds = [file for file in list_surf_ds if any(year in file for year in valid_years)]
         else:
             train_list_surf_ds = None
             valid_list_surf_ds = None
-        
+
         train_list_surf_ds_outside = [file for file in list_surf_ds_outside if any(year in file for year in train_years)]
         valid_list_surf_ds_outside = [file for file in list_surf_ds_outside if any(year in file for year in valid_years)]
-        
+
         if list_dyn_forcing_ds is not None:
             train_list_dyn_forcing_ds = [file for file in list_dyn_forcing_ds if any(year in file for year in train_years)]
             valid_list_dyn_forcing_ds = [file for file in list_dyn_forcing_ds if any(year in file for year in valid_years)]
-        
+
         else:
             train_list_dyn_forcing_ds = None
             valid_list_dyn_forcing_ds = None
-        
+
         if list_diag_ds is not None:
             train_list_diag_ds = [file for file in list_diag_ds if any(year in file for year in train_years)]
             valid_list_diag_ds = [file for file in list_diag_ds if any(year in file for year in valid_years)]
         else:
             train_list_diag_ds = None
             valid_list_diag_ds = None
-            
-        param_interior['varname_upper_air'] = conf['data']['variables']
-        param_interior['varname_surface'] = conf['data']['surface_variables']
-        param_interior['varname_dyn_forcing'] = conf['data']['dynamic_forcing_variables']
-        param_interior['varname_forcing'] = conf['data']['forcing_variables']
-        param_interior['varname_static'] = conf['data']['static_variables']
-        param_interior['varname_diagnostic'] = conf['data']['diagnostic_variables']
-        param_interior['filename_forcing'] = conf['data']['save_loc_forcing']
-        param_interior['filename_static'] = conf['data']['save_loc_static']
-        
-        param_outside['varname_upper_air'] = conf["data"]['boundary']['variables']
-        param_outside['varname_surface'] = conf["data"]['boundary']['surface_variables']
-        
+
+        param_interior["varname_upper_air"] = conf["data"]["variables"]
+        param_interior["varname_surface"] = conf["data"]["surface_variables"]
+        param_interior["varname_dyn_forcing"] = conf["data"]["dynamic_forcing_variables"]
+        param_interior["varname_forcing"] = conf["data"]["forcing_variables"]
+        param_interior["varname_static"] = conf["data"]["static_variables"]
+        param_interior["varname_diagnostic"] = conf["data"]["diagnostic_variables"]
+        param_interior["filename_forcing"] = conf["data"]["save_loc_forcing"]
+        param_interior["filename_static"] = conf["data"]["save_loc_static"]
+
+        param_outside["varname_upper_air"] = conf["data"]["boundary"]["variables"]
+        param_outside["varname_surface"] = conf["data"]["boundary"]["surface_variables"]
+
         # training set and sampler
         param_interior_train = copy.deepcopy(param_interior)
-        param_interior_train['filenames'] = train_files
-        param_interior_train['filename_surface'] = train_list_surf_ds
-        param_interior_train['filename_dyn_forcing'] = train_list_dyn_forcing_ds
-        param_interior_train['filename_diagnostic'] = train_list_diag_ds
-        param_interior_train['history_len'] = conf["data"]["history_len"]
-        param_interior_train['forecast_len'] = conf["data"]["forecast_len"]
-        
+        param_interior_train["filenames"] = train_files
+        param_interior_train["filename_surface"] = train_list_surf_ds
+        param_interior_train["filename_dyn_forcing"] = train_list_dyn_forcing_ds
+        param_interior_train["filename_diagnostic"] = train_list_diag_ds
+        param_interior_train["history_len"] = conf["data"]["history_len"]
+        param_interior_train["forecast_len"] = conf["data"]["forecast_len"]
+
         param_outside_train = copy.deepcopy(param_outside)
-        param_outside_train['filenames'] = train_files_outside
-        param_outside_train['filename_surface'] = train_list_surf_ds_outside
-        param_outside_train['history_len'] = conf["data"]['boundary']["history_len"]
-        param_outside_train['forecast_len'] = conf["data"]['boundary']["forecast_len"]
+        param_outside_train["filenames"] = train_files_outside
+        param_outside_train["filename_surface"] = train_list_surf_ds_outside
+        param_outside_train["history_len"] = conf["data"]["boundary"]["history_len"]
+        param_outside_train["forecast_len"] = conf["data"]["boundary"]["forecast_len"]
 
         train_dataset, train_sampler = load_dataset_and_sampler(
-            conf, 
-            param_interior_train, 
+            conf,
+            param_interior_train,
             param_outside_train,
             world_size,
             rank,
             is_train=True,
         )
-        
+
         # validation set and sampler
         param_interior_valid = copy.deepcopy(param_interior)
-        param_interior_valid['filenames'] = valid_files
-        param_interior_valid['filename_surface'] = valid_list_surf_ds
-        param_interior_valid['filename_dyn_forcing'] = valid_list_dyn_forcing_ds
-        param_interior_valid['filename_diagnostic'] = valid_list_diag_ds
-        param_interior_valid['history_len'] = conf["data"]["valid_history_len"]
-        param_interior_valid['forecast_len'] = conf["data"]["valid_forecast_len"]
-        
+        param_interior_valid["filenames"] = valid_files
+        param_interior_valid["filename_surface"] = valid_list_surf_ds
+        param_interior_valid["filename_dyn_forcing"] = valid_list_dyn_forcing_ds
+        param_interior_valid["filename_diagnostic"] = valid_list_diag_ds
+        param_interior_valid["history_len"] = conf["data"]["valid_history_len"]
+        param_interior_valid["forecast_len"] = conf["data"]["valid_forecast_len"]
+
         param_outside_valid = copy.deepcopy(param_outside)
-        param_outside_valid['filenames'] = valid_files_outside
-        param_outside_valid['filename_surface'] = valid_list_surf_ds_outside
-        param_outside_valid['history_len'] = conf["data"]['boundary']["history_len"]
-        param_outside_valid['forecast_len'] = conf["data"]['boundary']["forecast_len"]
-        
+        param_outside_valid["filenames"] = valid_files_outside
+        param_outside_valid["filename_surface"] = valid_list_surf_ds_outside
+        param_outside_valid["history_len"] = conf["data"]["boundary"]["history_len"]
+        param_outside_valid["forecast_len"] = conf["data"]["boundary"]["forecast_len"]
+
         valid_dataset, valid_sampler = load_dataset_and_sampler(
             conf,
-            param_interior_valid, 
+            param_interior_valid,
             param_outside_valid,
             world_size,
             rank,
             is_train=False,
         )
-        
+
     else:
         raise Exception("unsupported scaler")
 
@@ -462,9 +440,7 @@ def main(rank, world_size, conf, backend, trial=False):
 
     # Load model weights (if any), an optimizer, scheduler, and gradient scaler
 
-    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(
-        conf, model, device
-    )
+    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
     # Train and validation losses
 
@@ -542,14 +518,10 @@ class Objective(BaseObjective):
 
         except Exception as E:
             if "CUDA" in str(E) or "non-singleton" in str(E):
-                logging.warning(
-                    f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}."
-                )
+                logging.warning(f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}.")
                 raise optuna.TrialPruned()
             elif "non-singleton" in str(E):
-                logging.warning(
-                    f"Pruning trial {trial.number} due to shape mismatch: {str(E)}."
-                )
+                logging.warning(f"Pruning trial {trial.number} due to shape mismatch: {str(E)}.")
                 raise optuna.TrialPruned()
             else:
                 logging.warning(f"Trial {trial.number} failed due to error: {str(E)}.")
@@ -604,9 +576,7 @@ if __name__ == "__main__":
 
     # ======================================================== #
     # handling config args
-    conf = credit_main_parser(
-        conf, parse_training=True, parse_predict=False, print_summary=False
-    )
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
     # training_data_check(conf, print_summary=False)
     # ======================================================== #
 

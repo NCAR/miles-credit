@@ -31,7 +31,6 @@ from credit.data import (
     concat_and_reshape,
     reshape_only,
     get_forward_data,
-   
 )
 
 from credit.datasets.wrf_singlestep import WRF_Predict
@@ -68,19 +67,15 @@ def predict(rank, world_size, conf, p):
     # config settings
     seed = conf["seed"]
     seed_everything(seed)
-    
+
     # length of forecast steps
     lead_time_periods = conf["data"]["lead_time_periods"]
-    
+
     # number of diagnostic variables
     varnum_diag = len(conf["data"]["diagnostic_variables"])
 
     # number of dynamic forcing + forcing + static
-    static_dim_size = (
-        len(conf["data"]["dynamic_forcing_variables"])
-        + len(conf["data"]["forcing_variables"])
-        + len(conf["data"]["static_variables"])
-    )
+    static_dim_size = len(conf["data"]["dynamic_forcing_variables"]) + len(conf["data"]["forcing_variables"]) + len(conf["data"]["static_variables"])
 
     # ======================================================== #
     # testing year range
@@ -92,103 +87,93 @@ def predict(rank, world_size, conf, p):
     # --------------- #
     # upper air files
     upper_files = sorted(glob(conf["data"]["save_loc"]))
-    upper_files_outside = sorted(glob(conf["data"]['boundary']["save_loc"]))
-    
+    upper_files_outside = sorted(glob(conf["data"]["boundary"]["save_loc"]))
+
     # --------------- #
     # surface files
-    if ('surface_variables' in conf['data']) and (len(conf['data']['surface_variables']) > 0):
+    if ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0):
         list_surf_ds = sorted(glob(conf["data"]["save_loc_surface"]))
     else:
         list_surf_ds = None
-    
-    list_surf_ds_outside = sorted(glob(conf["data"]['boundary']["save_loc_surface"]))
-    
+
+    list_surf_ds_outside = sorted(glob(conf["data"]["boundary"]["save_loc_surface"]))
+
     # --------------- #
     # dyn forcing files
-    if ('dynamic_forcing_variables' in conf['data']) and (len(conf['data']['dynamic_forcing_variables']) > 0):
+    if ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0):
         list_dyn_forcing_ds = sorted(glob(conf["data"]["save_loc_dynamic_forcing"]))
     else:
         list_dyn_forcing_ds = None
-    
+
     # --------------- #
     # diagnostic files
-    if ('diagnostic_variables' in conf['data']) and (len(conf['data']['diagnostic_variables']) > 0):
+    if ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0):
         list_diag_ds = sorted(glob(conf["data"]["save_loc_diagnostic"]))
     else:
         list_diag_ds = None
-    
+
     # convert year info to str for file name search
     test_years = [str(year) for year in range(test_years_range[0], test_years_range[1])]
-    
+
     # Filter files
     test_files = [file for file in upper_files if any(year in file for year in test_years)]
     test_files_outside = [file for file in upper_files_outside if any(year in file for year in test_years)]
-    
+
     if list_surf_ds is not None:
         test_list_surf_ds = [file for file in list_surf_ds if any(year in file for year in test_years)]
     else:
         test_list_surf_ds = None
-    
+
     test_list_surf_ds_outside = [file for file in list_surf_ds_outside if any(year in file for year in test_years)]
-    
-    
+
     if list_dyn_forcing_ds is not None:
         test_list_dyn_forcing_ds = [file for file in list_dyn_forcing_ds if any(year in file for year in test_years)]
     else:
         test_list_dyn_forcing_ds = None
-    
+
     if list_diag_ds is not None:
         test_list_diag_ds = [file for file in list_diag_ds if any(year in file for year in test_years)]
     else:
         test_list_diag_ds = None
 
-    
-    param_interior['varname_upper_air'] = conf['data']['variables']
-    param_interior['varname_surface'] = conf['data']['surface_variables']
-    param_interior['varname_dyn_forcing'] = conf['data']['dynamic_forcing_variables']
-    param_interior['varname_forcing'] = conf['data']['forcing_variables']
-    param_interior['varname_static'] = conf['data']['static_variables']
-    param_interior['varname_diagnostic'] = conf['data']['diagnostic_variables']
-    param_interior['filename_forcing'] = conf['data']['save_loc_forcing']
-    param_interior['filename_static'] = conf['data']['save_loc_static']
-    
-    param_interior['filenames'] = test_files
-    param_interior['filename_surface'] = test_list_surf_ds
-    param_interior['filename_dyn_forcing'] = test_list_dyn_forcing_ds
-    param_interior['filename_diagnostic'] = test_list_diag_ds
-    param_interior['history_len'] = conf["data"]["history_len"]
-    param_interior['forecast_len'] = conf["data"]["forecast_len"]
-    
-    history_len = param_interior['history_len']
+    param_interior["varname_upper_air"] = conf["data"]["variables"]
+    param_interior["varname_surface"] = conf["data"]["surface_variables"]
+    param_interior["varname_dyn_forcing"] = conf["data"]["dynamic_forcing_variables"]
+    param_interior["varname_forcing"] = conf["data"]["forcing_variables"]
+    param_interior["varname_static"] = conf["data"]["static_variables"]
+    param_interior["varname_diagnostic"] = conf["data"]["diagnostic_variables"]
+    param_interior["filename_forcing"] = conf["data"]["save_loc_forcing"]
+    param_interior["filename_static"] = conf["data"]["save_loc_static"]
+
+    param_interior["filenames"] = test_files
+    param_interior["filename_surface"] = test_list_surf_ds
+    param_interior["filename_dyn_forcing"] = test_list_dyn_forcing_ds
+    param_interior["filename_diagnostic"] = test_list_diag_ds
+    param_interior["history_len"] = conf["data"]["history_len"]
+    param_interior["forecast_len"] = conf["data"]["forecast_len"]
+
+    history_len = param_interior["history_len"]
 
     # ----------------------------------------------------------------- #
-    
-    param_outside['varname_upper_air'] = conf["data"]['boundary']['variables']
-    param_outside['varname_surface'] = conf["data"]['boundary']['surface_variables']
-    param_outside['filenames'] = test_files_outside
-    param_outside['filename_surface'] = test_list_surf_ds_outside
-    param_outside['history_len'] = conf["data"]['boundary']["history_len"]
-    param_outside['forecast_len'] = conf["data"]['boundary']["forecast_len"]
+
+    param_outside["varname_upper_air"] = conf["data"]["boundary"]["variables"]
+    param_outside["varname_surface"] = conf["data"]["boundary"]["surface_variables"]
+    param_outside["filenames"] = test_files_outside
+    param_outside["filename_surface"] = test_list_surf_ds_outside
+    param_outside["history_len"] = conf["data"]["boundary"]["history_len"]
+    param_outside["forecast_len"] = conf["data"]["boundary"]["forecast_len"]
 
     # ----------------------------------------------------------------- #
-    
+
     state_transformer = Normalize_WRF(conf)
     to_tensor_scaler = ToTensor_WRF(conf)
     transforms = tforms.Compose([state_transformer, to_tensor_scaler])
-    
+
     fcst_datetime = load_forecasts(conf)
-    
+
     # ----------------------------------------------------------------- #
     # get dataset
-    dataset = WRF_Predict(
-        param_interior,
-        param_outside,
-        fcst_datetime,
-        lead_time_periods=lead_time_periods,
-        transform=transforms,
-        rank=rank,
-        world_size=world_size
-    )
+    dataset = WRF_Predict(param_interior, param_outside, fcst_datetime, lead_time_periods=lead_time_periods, transform=transforms, rank=rank, world_size=world_size)
 
     # setup the dataloder
     data_loader = torch.utils.data.DataLoader(
@@ -202,11 +187,11 @@ def predict(rank, world_size, conf, p):
 
     # flag for distributed inference
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
-    
+
     # ================================================================================ #
     if conf["predict"]["mode"] == "none":
-        model = load_model(conf, load_weights=True).to(device) 
-        
+        model = load_model(conf, load_weights=True).to(device)
+
     elif conf["predict"]["mode"] == "ddp":
         model = load_model(conf).to(device)
         # if conf["trainer"].get("compile", False):
@@ -216,7 +201,7 @@ def predict(rank, world_size, conf, p):
         checkpoint = torch.load(ckpt, map_location=device)
         load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
         load_state_dict_error_handler(load_msg)
-        
+
     elif conf["predict"]["mode"] == "fsdp":
         model = load_model(conf, load_weights=True).to(device)
         model = distributed_model_wrapper(conf, model, device)
@@ -242,7 +227,7 @@ def predict(rank, world_size, conf, p):
 
         # y_pred allocation
         results = []
-        
+
         # model inference loop
         for k, batch in enumerate(data_loader):
             # get the datetime and forecasted hours
@@ -268,10 +253,10 @@ def predict(rank, world_size, conf, p):
             if "x_forcing_static" in batch:
                 # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
                 x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4)
-                
+
                 # concat on var dimension
                 x = torch.cat((x, x_forcing_batch), dim=1)
-            
+
             # -------------------------------------------------------------------------------------- #
             # Load y-truth
             if "y_surf" in batch:
@@ -280,29 +265,28 @@ def predict(rank, world_size, conf, p):
             else:
                 # no y_surf
                 y = reshape_only(batch["y"]).to(device)
-                
+
             # adding diagnostic vars to y
             if "y_diag" in batch:
                 y_diag_batch = batch["y_diag"].to(device).permute(0, 2, 1, 3, 4)
-                
+
                 y = torch.cat((y, y_diag_batch), dim=1)
-                
+
             # --------------------------------------------------------------------------------- #
             # boundary conditions
-            if 'x_surf_boundary' in batch:
-                x_boundary = concat_and_reshape(batch['x_boundary'], batch['x_surf_boundary']).to(device)
+            if "x_surf_boundary" in batch:
+                x_boundary = concat_and_reshape(batch["x_boundary"], batch["x_surf_boundary"]).to(device)
             else:
-                x_boundary = reshape_only(batch['x_boundary']).to(device)
-                
+                x_boundary = reshape_only(batch["x_boundary"]).to(device)
+
             # --------------------------------------------------------------------------------- #
             # time encoding
-            x_time_encode = batch['x_time_encode'].to(device)
+            x_time_encode = batch["x_time_encode"].to(device)
 
-            
             # -------------------------------------------------------------------------------------- #
             # start prediction
             y_pred = model(x, x_boundary, x_time_encode)
-            
+
             # y_pred with unit
             y_pred = state_transformer.inverse_transform(y_pred.cpu())
             # y_target with unit
@@ -310,20 +294,20 @@ def predict(rank, world_size, conf, p):
 
             # Compute metrics
             metrics_dict = metrics(y_pred, y, forecast_datetime=forecast_hour)
-            
+
             for k, m in metrics_dict.items():
                 metrics_results[k].append(m.item())
             metrics_results["forecast_hour"].append(forecast_hour)
-            
+
             # Save the current forecast hour data in parallel
             utc_datetime = init_datetime + timedelta(hours=lead_time_periods * forecast_hour)
-            
+
             # convert the current step result as x-array
             darray_upper_air, darray_single_level = make_xarray(
                 y_pred,
                 utc_datetime,
-                ds_domain['south_north'].values,
-                ds_domain['west_east'].values,
+                ds_domain["south_north"].values,
+                ds_domain["west_east"].values,
                 conf,
             )
 
@@ -502,13 +486,13 @@ if __name__ == "__main__":
     # ======================================================== #
     # handling config args
     conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
-    #predict_data_check(conf, print_summary=False)
-    
+    # predict_data_check(conf, print_summary=False)
+
     # ======================================================== #
 
     # create a save location for rollout
     # ---------------------------------------------------- #
-    assert ("save_forecast" in conf["predict"]), "Missing conf['predict']['save_forecast']"
+    assert "save_forecast" in conf["predict"], "Missing conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
@@ -535,7 +519,7 @@ if __name__ == "__main__":
             logging.info("Launching to PBS on Derecho")
             launch_script_mpi(config, script_path)
         sys.exit()
-        
+
     if number_of_subsets > 0:
         forecasts = load_forecasts(conf)
         if number_of_subsets > 0 and subset >= 0:
