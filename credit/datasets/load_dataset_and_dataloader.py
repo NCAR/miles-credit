@@ -149,30 +149,31 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     """
     try:
         data_config = setup_data_loading(conf)
-        
+
     except KeyError:
         logging.warning("You must run credit.parser.credit_main_parser(conf) before loading data. Exiting.")
         sys.exit()
-        
+
     seed = conf["seed"]
     shuffle = is_train
-    
+
     training_type = "train" if is_train else "valid"
-    dataset_type = conf["data"].get("dataset_type",)
+    dataset_type = conf["data"].get(
+        "dataset_type",
+    )
     batch_size = conf["trainer"][f"{training_type}_batch_size"]
-    
-    #shuffle = is_train
+
+    # shuffle = is_train
     num_workers = conf["trainer"]["thread_workers"] if is_train else conf["trainer"]["valid_thread_workers"]
-    prefetch_factor = conf["trainer"].get("prefetch_factor",)
-    
+    prefetch_factor = conf["trainer"].get(
+        "prefetch_factor",
+    )
+
     history_len = data_config["history_len"] if is_train else data_config["valid_history_len"]
     forecast_len = data_config["forecast_len"] if is_train else data_config["valid_forecast_len"]
-    
+
     if prefetch_factor is None:
-        logging.warning(
-            "prefetch_factor not found in config under 'trainer'. Using default value of 4. "
-            "Please specify prefetch_factor in the 'trainer' section of your config."
-        )
+        logging.warning("prefetch_factor not found in config under 'trainer'. Using default value of 4. " "Please specify prefetch_factor in the 'trainer' section of your config.")
         prefetch_factor = 4
 
     # If loss is CRPS, we need all samplers-dataloaders to return the same (x, y)
@@ -182,16 +183,11 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     if conf["loss"]["training_loss"] == "KCRPS":
         rank = 0
         world_size = 1
-        logging.info(
-            "For CRPS loss, we maintain identical rank and world size across all "
-            "GPUs to ensure proper CDF calculation during synchronous distributed processing."
-        )
+        logging.info("For CRPS loss, we maintain identical rank and world size across all " "GPUs to ensure proper CDF calculation during synchronous distributed processing.")
 
     # Instantiate the dataset based on the provided class name
     if dataset_type == "ERA5_and_Forcing_SingleStep":  # forecast-len = 0 dataset
-        logging.warning(
-            "ERA5_and_Forcing_SingleStep is deprecated. Use ERA5_MultiStep_Batcher or MultiprocessingBatcher for all forecast lengths"
-        )
+        logging.warning("ERA5_and_Forcing_SingleStep is deprecated. Use ERA5_MultiStep_Batcher or MultiprocessingBatcher for all forecast lengths")
         dataset = ERA5_and_Forcing_SingleStep(
             varname_upper_air=conf["data"]["variables"],
             varname_surface=conf["data"]["surface_variables"],
@@ -213,7 +209,7 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
             transform=load_transforms(conf),
             sst_forcing=data_config["sst_forcing"],
         )
-        
+
     # All datasets from here on are multi-step examples
     elif dataset_type == "ERA5_and_Forcing_MultiStep":
         logging.warning(
@@ -350,10 +346,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
     forecast_len = conf["data"]["forecast_len"] if is_train else conf["data"]["valid_forecast_len"]
     prefetch_factor = conf["trainer"].get("prefetch_factor")
     if prefetch_factor is None:
-        logging.warning(
-            "prefetch_factor not found in config. Using default value of 4. "
-            "Please specify prefetch_factor in the 'trainer' section of your config."
-        )
+        logging.warning("prefetch_factor not found in config. Using default value of 4. " "Please specify prefetch_factor in the 'trainer' section of your config.")
         prefetch_factor = 4
 
     # If loss is CRPS, we need all samplers-dataloaders to return the same (x, y)
@@ -363,10 +356,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
     if conf["loss"]["training_loss"] == "KCRPS" and conf["trainer"]["type"] == "era5-ensemble":
         rank = 0
         world_size = 1
-        logging.info(
-            "For CRPS loss, we maintain identical rank and world size across all "
-            "GPUs to ensure proper CDF calculation during synchronous distributed processing."
-        )
+        logging.info("For CRPS loss, we maintain identical rank and world size across all " "GPUs to ensure proper CDF calculation during synchronous distributed processing.")
 
     if type(dataset) is ERA5_and_Forcing_SingleStep:
         # This is the single-step dataset, original version
@@ -379,9 +369,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
                 if torch.is_tensor(items[0]):
                     collated_batch[key] = torch.stack(items)
                 elif isinstance(items[0], (int, float, bool)):
-                    collated_batch[key] = torch.tensor(
-                        [items[0]] if key in ["forecast_step", "stop_forecast"] else items
-                    )
+                    collated_batch[key] = torch.tensor([items[0]] if key in ["forecast_step", "stop_forecast"] else items)
                 else:
                     collated_batch[key] = items
             return collated_batch

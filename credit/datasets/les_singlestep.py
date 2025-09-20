@@ -1,11 +1,12 @@
-'''
+"""
 les_dataset.py
 -------------------------------------------------------
 Content:
     - LES_Dataset
     - LES_Predict
 
-'''
+"""
+
 import datetime
 import numpy as np
 import xarray as xr
@@ -30,14 +31,14 @@ from credit.data import (
     nanoseconds_to_year,
     find_key_for_number,
     subset_patch,
-    filter_ds
+    filter_ds,
 )
 
 
 class LES_Dataset(torch.utils.data.Dataset):
-    '''
+    """
     LES model Pytorch Dataset class
-    '''
+    """
 
     def __init__(
         self,
@@ -47,18 +48,18 @@ class LES_Dataset(torch.utils.data.Dataset):
     ):
         # ========================================================== #
         # LES domain variable and filename info
-        varname_upper_air = param_interior['varname_upper_air']
-        varname_surface = param_interior['varname_surface']
-        varname_dyn_forcing = param_interior['varname_dyn_forcing']
-        varname_forcing = param_interior['varname_forcing']
-        varname_static = param_interior['varname_static']
-        varname_diagnostic = param_interior['varname_diagnostic']
-        filenames = param_interior['filenames']
-        filename_surface = param_interior['filename_surface']
-        filename_dyn_forcing = param_interior['filename_dyn_forcing']
-        filename_forcing = param_interior['filename_forcing']
-        filename_static = param_interior['filename_static']
-        filename_diagnostic = param_interior['filename_diagnostic']
+        varname_upper_air = param_interior["varname_upper_air"]
+        varname_surface = param_interior["varname_surface"]
+        varname_dyn_forcing = param_interior["varname_dyn_forcing"]
+        varname_forcing = param_interior["varname_forcing"]
+        varname_static = param_interior["varname_static"]
+        varname_diagnostic = param_interior["varname_diagnostic"]
+        filenames = param_interior["filenames"]
+        filename_surface = param_interior["filename_surface"]
+        filename_dyn_forcing = param_interior["filename_dyn_forcing"]
+        filename_forcing = param_interior["filename_forcing"]
+        filename_static = param_interior["filename_static"]
+        filename_diagnostic = param_interior["filename_diagnostic"]
         # ----------------------------------------------------------- #
         # collecting xr.datasets
         list_upper_ds = []
@@ -66,12 +67,12 @@ class LES_Dataset(torch.utils.data.Dataset):
         list_dyn_forcing_ds = []
         list_diag_ds = []
         filenames = sorted(filenames)
-        
+
         all_ds = [get_forward_data(fn) for fn in filenames]
-        
+
         # 1. Upper‐air
         list_upper_ds = [filter_ds(ds, varname_upper_air) for ds in all_ds]
-        
+
         # 2. Surface
         if filename_surface:
             list_surf_ds = [filter_ds(ds, varname_surface) for ds in all_ds]
@@ -83,19 +84,19 @@ class LES_Dataset(torch.utils.data.Dataset):
             list_dyn_forcing_ds = [filter_ds(ds, varname_dyn_forcing) for ds in all_ds]
         else:
             list_dyn_forcing_ds = False
-            
+
         # 4. Diagnostics
         if filename_diagnostic:
             list_diag_ds = [filter_ds(ds, varname_diagnostic) for ds in all_ds]
         else:
             list_diag_ds = False
-        
+
         self.list_upper_ds = list_upper_ds
         self.list_surf_ds = list_surf_ds
         self.list_dyn_forcing_ds = list_dyn_forcing_ds
         self.list_diag_ds = list_diag_ds
-        self.history_len = param_interior['history_len']
-        self.forecast_len = param_interior['forecast_len']
+        self.history_len = param_interior["history_len"]
+        self.forecast_len = param_interior["forecast_len"]
         self.total_seq_len = self.history_len + self.forecast_len
         # -------------------------------------------------------------------------- #
         # get sample indices from LES upper-air files:
@@ -120,7 +121,7 @@ class LES_Dataset(torch.utils.data.Dataset):
             self.xarray_forcing = ds_forcing
         else:
             self.xarray_forcing = False
-        
+
         # -------------------------------------------------------------------------- #
         # static file
         self.filename_static = filename_static
@@ -131,16 +132,16 @@ class LES_Dataset(torch.utils.data.Dataset):
             self.xarray_static = ds_static
         else:
             self.xarray_static = False
-            
+
         self.transform = transform
-        self.size_list = param_interior['size_list']
-        self.size_full = param_interior['size_full']
+        self.size_list = param_interior["size_list"]
+        self.size_full = param_interior["size_full"]
         self.rng = np.random.default_rng(seed=seed)
-        
+
         self.total_len = 0
         for LES_file_xarray in self.list_upper_ds:
             self.total_len += len(LES_file_xarray["time"]) - self.total_seq_len + 1
-            
+
     def __post_init__(self):
         # Total sequence length of each sample.
         self.total_seq_len = self.history_len + self.forecast_len
@@ -157,8 +158,8 @@ class LES_Dataset(torch.utils.data.Dataset):
         # cross-year indices --> the index of the year + indices within that year
         if index > self.total_len:
             n_fold = index // self.total_len
-            index = index - n_fold*self.total_len
-        
+            index = index - n_fold * self.total_len
+
         # select the ind_file based on the iter index
         ind_file = find_key_for_number(index, self.LES_file_indices)
 
@@ -167,35 +168,27 @@ class LES_Dataset(torch.utils.data.Dataset):
         ind_start_in_file = index - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(self.list_upper_ds[int(ind_file)]["time"]) - (
-            self.history_len + self.forecast_len + 1
-        )
+        ind_largest = len(self.list_upper_ds[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
+
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
-            
+
         # ========================================================================== #
         # subset xarray on time dimension
-
         ind_end_in_file = ind_start_in_file + self.history_len + self.forecast_len
 
         ## LES_file_subset: a xarray dataset that contains training input and target (for the current batch)
-        LES_subset = self.list_upper_ds[int(ind_file)].isel(
-            time=slice(ind_start_in_file, ind_end_in_file + 1)
-        )
+        LES_subset = self.list_upper_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
         # ========================================================================== #
         # merge surface into the dataset
 
         if self.list_surf_ds:
             ## subset surface variables
-            surface_subset = self.list_surf_ds[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            surface_subset = self.list_surf_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
             ## merge upper-air and surface here:
-            LES_subset = LES_subset.merge(
-                surface_subset
-            )  # <-- lazy merge, upper and surface both not loaded
+            LES_subset = LES_subset.merge(surface_subset)
 
         # ==================================================== #
         # split LES_subset into training inputs and targets
@@ -211,19 +204,14 @@ class LES_Dataset(torch.utils.data.Dataset):
         # xarray dataset as input
         ## LES_input: the final input
 
-        LES_input = LES_subset.isel(
-            time=slice(0, self.history_len, 1)
-        ).load()
+        LES_input = LES_subset.isel(time=slice(0, self.history_len, 1)).load()
 
         # ========================================================================== #
         # merge dynamic forcing inputs
         if self.list_dyn_forcing_ds:
-            dyn_forcing_subset = self.list_dyn_forcing_ds[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
-            dyn_forcing_subset = dyn_forcing_subset.isel(
-                time=slice(0, self.history_len, 1)
-            ).load()
+            dyn_forcing_subset = self.list_dyn_forcing_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
+
+            dyn_forcing_subset = dyn_forcing_subset.isel(time=slice(0, self.history_len, 1)).load()
 
             LES_input = LES_input.merge(dyn_forcing_subset)
 
@@ -262,58 +250,47 @@ class LES_Dataset(torch.utils.data.Dataset):
         # ==================================================== #
         # xarray dataset as target
         ## LES_target: the final target
-        
+
         LES_target = LES_subset.isel(time=slice(self.history_len, ind_end_time, 1)).load()
 
         ## merge diagnoisc input here:
         if self.list_diag_ds:
             # subset diagnostic variables
-            diagnostic_subset = self.list_diag_ds[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            diagnostic_subset = self.list_diag_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
-            diagnostic_subset = diagnostic_subset.isel(
-                time=slice(self.history_len, ind_end_time, 1)
-            ).load()
+            diagnostic_subset = diagnostic_subset.isel(time=slice(self.history_len, ind_end_time, 1)).load()
 
             # merge into the target dataset
             LES_target = LES_target.merge(diagnostic_subset)
-
 
         # ============================================== #
         # random subsetting
         subset_size = random.choice(self.size_list)
         dy, dx = subset_size
-        
+
         # Compute the max allowable start indices
         max_iy_start = self.size_full[0] - dy
         max_ix_start = self.size_full[1] - dx
-        
+
         # Sample random starting indices
         iy_start = random.randint(0, max_iy_start)
         ix_start = random.randint(0, max_ix_start)
-        
+
         # Compute end indices
         iy_end = iy_start + dy
         ix_end = ix_start + dx
-        
-        LES_input = LES_input.isel(
-            yIndex=slice(iy_start, iy_end), 
-            xIndex=slice(ix_start, ix_end)
-        )
-        
-        LES_target = LES_target.isel(
-            yIndex=slice(iy_start, iy_end), 
-            xIndex=slice(ix_start, ix_end)
-        )
-        
+
+        LES_input = LES_input.isel(yIndex=slice(iy_start, iy_end), xIndex=slice(ix_start, ix_end))
+
+        LES_target = LES_target.isel(yIndex=slice(iy_start, iy_end), xIndex=slice(ix_start, ix_end))
+
         # pipe xarray datasets to the sampler
         sample = Sample_LES(
             LES_input=LES_input,
             LES_target=LES_target,
             datetime_index=datetime_as_number,
         )
-        
+
         # ==================================== #
         # data normalization
         if self.transform:
@@ -338,19 +315,19 @@ class LES_Predict(torch.utils.data.IterableDataset):
         # varname_diagnostic = None
         # ========================================================== #
         # LES domain variable and filename info
-        varname_upper_air = param_interior['varname_upper_air']
-        varname_surface = param_interior['varname_surface']
-        varname_dyn_forcing = param_interior['varname_dyn_forcing']
-        varname_forcing = param_interior['varname_forcing']
-        varname_static = param_interior['varname_static']
-        varname_diagnostic = param_interior['varname_diagnostic']
-        filenames = param_interior['filenames']
-        filename_surface = param_interior['filename_surface']
-        filename_dyn_forcing = param_interior['filename_dyn_forcing']
-        filename_forcing = param_interior['filename_forcing']
-        filename_static = param_interior['filename_static']
-        filename_diagnostic = param_interior['filename_diagnostic']
-        
+        varname_upper_air = param_interior["varname_upper_air"]
+        varname_surface = param_interior["varname_surface"]
+        varname_dyn_forcing = param_interior["varname_dyn_forcing"]
+        varname_forcing = param_interior["varname_forcing"]
+        varname_static = param_interior["varname_static"]
+        varname_diagnostic = param_interior["varname_diagnostic"]
+        filenames = param_interior["filenames"]
+        filename_surface = param_interior["filename_surface"]
+        filename_dyn_forcing = param_interior["filename_dyn_forcing"]
+        filename_forcing = param_interior["filename_forcing"]
+        filename_static = param_interior["filename_static"]
+        filename_diagnostic = param_interior["filename_diagnostic"]
+
         # ----------------------------------------------------------- #
         # collecting xr.datasets
         list_upper_ds = []
@@ -359,10 +336,10 @@ class LES_Predict(torch.utils.data.IterableDataset):
         list_diag_ds = []
         filenames = sorted(filenames)
         all_ds = [get_forward_data(fn) for fn in filenames]
-        
+
         # 1. Upper‐air
         list_upper_ds = [filter_ds(ds, varname_upper_air) for ds in all_ds]
-        
+
         # 2. Surface
         if filename_surface:
             list_surf_ds = [filter_ds(ds, varname_surface) for ds in all_ds]
@@ -374,13 +351,13 @@ class LES_Predict(torch.utils.data.IterableDataset):
             list_dyn_forcing_ds = [filter_ds(ds, varname_dyn_forcing) for ds in all_ds]
         else:
             list_dyn_forcing_ds = False
-            
+
         # 4. Diagnostics
         if filename_diagnostic:
             list_diag_ds = [filter_ds(ds, varname_diagnostic) for ds in all_ds]
         else:
             list_diag_ds = False
-            
+
         self.list_upper_ds = list_upper_ds
         self.list_surf_ds = list_surf_ds
         self.list_dyn_forcing_ds = list_dyn_forcing_ds
@@ -394,7 +371,7 @@ class LES_Predict(torch.utils.data.IterableDataset):
         self.filename_forcing = filename_forcing  # <-- single file
         self.filename_static = filename_static  # <---- single file
         self.filename_diagnostic = filename_diagnostic  # <---- single file
-        
+
         # -------------------------------------------------------------------------- #
         # forcing file
         self.filename_forcing = filename_forcing
@@ -416,36 +393,35 @@ class LES_Predict(torch.utils.data.IterableDataset):
             self.xarray_static = ds_static
         else:
             self.xarray_static = False
-            
+
         # -------------------------------------- #
         # other settings
         self.rank = rank
         self.world_size = world_size
         self.transform = transform
-        self.history_len = param_interior['history_len']
+        self.history_len = param_interior["history_len"]
         self.data_lookup = data_lookup
-        #self.lead_time_periods = lead_time_periods
-    
+        # self.lead_time_periods = lead_time_periods
+
     def load_zarr_as_input(self, i_file, i_init_start, i_init_end, mode="input"):
-        
         # sliced_x: the final output, starts with an upper air xr.dataset
         sliced_x = self.list_upper_ds[i_file].isel(time=slice(i_init_start, i_init_end + 1))
-        
+
         # surface variables
         if self.filename_surface is not None:
             sliced_surface = self.list_surf_ds[i_file].isel(time=slice(i_init_start, i_init_end + 1))
-            #sliced_surface["time"] = sliced_x["time"]
+            # sliced_surface["time"] = sliced_x["time"]
             sliced_x = sliced_x.merge(sliced_surface)
 
         if mode == "input":
             # dynamic forcing variables
             if self.filename_dyn_forcing is not None:
                 sliced_dyn_forcing = self.list_dyn_forcing_ds[i_file].isel(time=slice(i_init_start, i_init_end + 1))
-                #sliced_dyn_forcing["time"] = sliced_x["time"]
+                # sliced_dyn_forcing["time"] = sliced_x["time"]
                 sliced_x = sliced_x.merge(sliced_dyn_forcing)
-                
+
             if self.filename_forcing is not None:
-                sliced_forcing = self.xarray_forcing.copy() # <-- shallow copy
+                sliced_forcing = self.xarray_forcing.copy()  # <-- shallow copy
                 month_day_forcing = extract_month_day_hour(np.array(sliced_forcing["time"]))
                 month_day_inputs = extract_month_day_hour(np.array(sliced_x["time"]))
                 # indices to subset
@@ -453,9 +429,9 @@ class LES_Predict(torch.utils.data.IterableDataset):
                 sliced_forcing = sliced_forcing.isel(time=ind_forcing)
                 sliced_forcing["time"] = sliced_x["time"]
                 sliced_x = sliced_x.merge(sliced_forcing)
-                
+
             if self.filename_static is not None:
-                sliced_static = self.xarray_static.copy() # <-- shallow copy
+                sliced_static = self.xarray_static.copy()  # <-- shallow copy
                 sliced_static = sliced_static.expand_dims(dim={"time": len(sliced_x["time"])})
                 sliced_static["time"] = sliced_x["time"]
                 # merge static to sliced_x
@@ -467,9 +443,9 @@ class LES_Predict(torch.utils.data.IterableDataset):
                 sliced_diagnostic = self.list_diag_ds[i_file].isel(time=slice(i_init_start, i_init_end + 1))
                 # sliced_diagnostic["time"] = sliced_x["time"]
                 sliced_x = sliced_x.merge(sliced_diagnostic)
-                
+
         return sliced_x
-        
+
     def __len__(self):
         return len(self.data_lookup)
 
@@ -477,22 +453,22 @@ class LES_Predict(torch.utils.data.IterableDataset):
         worker_info = get_worker_info()
         num_workers = worker_info.num_workers if worker_info is not None else 1
         worker_id = worker_info.id if worker_info is not None else 0
-        
+
         sampler = DistributedSampler(
             self,
             num_replicas=num_workers * self.world_size,
             rank=self.rank * num_workers + worker_id,
             shuffle=False,
         )
-        
+
         for index in sampler:
             # get the init time info for the current sample
             data_lookup = self.data_lookup
 
             i_file, i_init_start, i_init_end, N_times = data_lookup[index]
-            
+
             while i_init_end <= N_times:
-            # for k, _ in enumerate(data_lookup):
+                # for k, _ in enumerate(data_lookup):
                 # the first initialization time: get initalization from data
                 # i_file, i_init_start, i_init_end, N_times = data_lookup
 
@@ -507,10 +483,10 @@ class LES_Predict(torch.utils.data.IterableDataset):
                 sliced_y = subset_patch(sliced_y, input_size=(256, 256), start=None)
 
                 # print((i_init_start, i_init_end))
-                
+
                 i_init_start += 1
                 i_init_end += 1
-                
+
                 sample_x = {
                     "LES_input": sliced_x,
                     "LES_target": sliced_y,
@@ -524,19 +500,13 @@ class LES_Predict(torch.utils.data.IterableDataset):
 
                 # <--- !! 'forecast_hour' is actually "forecast_step" but named by assuming hourly
                 output_dict["forecast_hour"] = i_init_end
-                
+
                 # Adjust stopping condition
-                output_dict["stop_forecast"] = (i_init_end == N_times)
+                output_dict["stop_forecast"] = i_init_end == N_times
                 output_dict["datetime"] = sliced_x.time.values.astype("datetime64[s]").astype(int)[-1]
 
                 # return output_dict
                 yield output_dict
-                
+
                 if output_dict["stop_forecast"]:
                     break
-
-
-
-
-
-
