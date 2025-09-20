@@ -8,6 +8,10 @@ from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
 from credit.trainers.trainer404 import Trainer as Trainer404
 from credit.trainers.ic_optimization import Trainer as TrainerIC
 
+from credit.trainers.trainerLES import Trainer as TrainerLES
+from credit.trainers.trainerWRF import Trainer as TrainerWRF
+from credit.trainers.trainerWRF_multi import Trainer as TrainerWRF_Multi
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +35,9 @@ trainer_types = {
     ),
     "ic-opt": (TrainerIC, "Loading an initial condition optimizer training class"),
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
+    "standard-les": (TrainerLES, "Loading a single-step LES trainer"),
+    "standard-wrf": (TrainerWRF, "Loading a single-step WRF trainer"),
+    "multi-step-wrf": (TrainerWRF_Multi, "Loading a multi-step WRF trainer")
 }
 
 
