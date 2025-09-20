@@ -13,8 +13,7 @@ import numpy as np
 import xarray as xr
 
 import torch
-from credit.data import Sample
-from . import device_compatible_to
+from credit.data import Sample, device_compatible_to
 
 logger = logging.getLogger(__name__)
 

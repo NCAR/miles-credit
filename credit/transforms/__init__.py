@@ -1,13 +1,6 @@
-import os
-import sys
-import glob
+
 import logging
 import numpy as np
-
-import logging
-from typing import Dict
-
-import torch
 from torchvision import transforms as tforms
 
 from credit.transforms.transforms_les import Normalize_LES, ToTensor_LES
@@ -16,24 +9,6 @@ from credit.transforms.transforms_global import Normalize_ERA5_and_Forcing, ToTe
 from credit.transforms.transforms_quantile import BridgescalerScaleState, NormalizeState_Quantile_Bridgescalar, ToTensor_BridgeScaler
 
 logger = logging.getLogger(__name__)
-
-def device_compatible_to(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
-    """
-    Safely move tensor to device, with float32 casting on MPS (Metal Performance Shaders). Addresses runtime error in OSX about MPS not supporting float64. 
-
-    Args:
-        tensor (torch.Tensor): Input tensor to move.
-        device (torch.device): Target device.
-
-    Returns:
-        torch.Tensor: Tensor moved to device (cast to float32 if device is MPS).
-    """
-
-    if device.type == "mps":
-        return tensor.to(dtype=torch.float32, device=device)
-    else:
-        return tensor.to(device) 
-
 
 def load_transforms(conf, scaler_only=False):
     """Load transforms.
@@ -104,7 +79,4 @@ def load_transforms(conf, scaler_only=False):
         transforms = [to_tensor_scaler]
 
     return tforms.Compose(transforms)
-
-
-__all__ = ["device_compatible_to", "load_transforms"]
 

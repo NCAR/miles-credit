@@ -16,10 +16,8 @@ import xarray as xr
 import netCDF4 as nc
 
 import torch
-from credit.data import Sample
 from bridgescaler import read_scaler
-from . import device_compatible_to
-
+from credit.data import Sample, device_compatible_to
 
 logger = logging.getLogger(__name__)
 

@@ -46,6 +46,23 @@ from torch.utils.data.distributed import DistributedSampler
 Array = Union[np.ndarray, xr.DataArray]
 IMAGE_ATTR_NAMES = ("historical_ERA5_images", "target_ERA5_images")
 
+def device_compatible_to(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """
+    Safely move tensor to device, with float32 casting on MPS (Metal Performance Shaders). Addresses runtime error in OSX about MPS not supporting float64. 
+
+    Args:
+        tensor (torch.Tensor): Input tensor to move.
+        device (torch.device): Target device.
+
+    Returns:
+        torch.Tensor: Tensor moved to device (cast to float32 if device is MPS).
+    """
+
+    if device.type == "mps":
+        return tensor.to(dtype=torch.float32, device=device)
+    else:
+        return tensor.to(device) 
+
 def ensure_numpy_datetime(value):
     """
     Converts an input value (or array) to numpy.datetime64.
