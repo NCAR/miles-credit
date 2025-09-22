@@ -52,7 +52,6 @@ def get_rank_info(trainer_mode):
     Returns:
         tuple: A tuple containing LOCAL_RANK (int), WORLD_RANK (int), and WORLD_SIZE (int).
     """
-
     if trainer_mode in ["fsdp", "ddp"]:
         try:
             from mpi4py import MPI
@@ -64,7 +63,20 @@ def get_rank_info(trainer_mode):
             WORLD_SIZE = comm.Get_size()
             WORLD_RANK = comm.Get_rank()
 
-        except Exception:
+            # Set MASTER_ADDR and MASTER_PORT if not already set.
+            # (broadcast these from rank 0 - they must be consistent on every node)
+            if "MASTER_ADDR" not in os.environ:
+                os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostbyname(socket.gethostname()), root=0)
+            if "MASTER_PORT" not in os.environ:
+                os.environ["MASTER_PORT"] = comm.bcast(str(np.random.randint(1000, 8000)), root=0)
+
+            if 0 == WORLD_RANK:
+                logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
+                logging.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
+
+        except Exception as e:
+            logging.info(e)
+
             if "LOCAL_RANK" in os.environ:
                 # Environment variables set by torch.distributed.launch or torchrun
                 LOCAL_RANK = int(os.environ["LOCAL_RANK"])
@@ -86,11 +98,6 @@ def get_rank_info(trainer_mode):
                     "If you are on casper you'll want to use torchrun for now."
                 )
 
-        # Set MASTER_ADDR and MASTER_PORT if not already set
-        if "MASTER_ADDR" not in os.environ:
-            os.environ["MASTER_ADDR"] = socket.gethostbyname(socket.gethostname())
-        if "MASTER_PORT" not in os.environ:
-            os.environ["MASTER_PORT"] = str(np.random.randint(1000, 8000))
     else:
         LOCAL_RANK = 0
         WORLD_RANK = 0
@@ -232,7 +239,7 @@ def distributed_model_wrapper(conf, neural_network, device):
         )
 
     elif conf["trainer"]["mode"] == "ddp":
-        model = DDP(neural_network, device_ids=[device], find_unused_parameters=True) 
+        model = DDP(neural_network, device_ids=[device], find_unused_parameters=True)
 
     else:
         model = neural_network
