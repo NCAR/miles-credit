@@ -48,11 +48,16 @@ dependencies = [
     "gcsfs",
     "miles-guess",
     "keras",
-    "metpy"
+    "metpy",
+    "setuptools_scm",
+    "setuptools"
    ]
 
 [tool.setuptools]
 packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
+
+[tool.setuptools_scm]
+version_file = "credit/_version.py"
 
 [project.scripts]
 credit_train = "credit.applications.train:main_cli"
@@ -62,9 +67,6 @@ credit_gefs_init = "credit.applications.gefs_init:main"
 credit_rollout_to_netcdf = "credit.applications.rollout_to_netcdf:main"
 credit_rollout_metrics = "credit.applications.rollout_metrics:main"
 credit_calc_global_solar = "credit.applications.calc_global_solar:main"
-
-[tool.setuptools.dynamic]
-version = {file = "credit/VERSION"}
 
 [tool.ruff]
 target-version = "py311"
