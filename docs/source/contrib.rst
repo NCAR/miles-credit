@@ -1,8 +1,8 @@
 .. _contributing:
 
-===========================
+============================
 Contributing to miles-credit
-===========================
+============================
 
 ************
 Introduction
@@ -252,8 +252,7 @@ The ``miles-credit`` top-level directory is organized as follows:
     └── tests
 
 
-* The ``applications`` directory contains scripts for training and running models
-developed in CREDIT.
+* The ``applications`` directory contains scripts for training and running models developed in CREDIT.
 
 * The ``docs`` directory contains the ``sphinx`` documentation for
   ``miles-credit``.
@@ -267,8 +266,6 @@ developed in CREDIT.
 * The ``tests`` directory contains the unit tests for ``miles-credit``. Most
   modules in ``credit`` has a corresponding test module in the ``tests``
   directory.
-
-
 
 Write and run tests
 -------------------

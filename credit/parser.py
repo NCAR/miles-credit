@@ -10,12 +10,52 @@ Content:
 
 import os
 import copy
+import inspect
 import warnings
 from glob import glob
 from collections import Counter
 
-
 from credit.data import get_forward_data
+from credit.datasets.downscaling_dataset import DownscalingDataset
+#from credit.datasets.datamap import DataMap
+from credit.datasets.count_channels import count_channels
+#from credit.transforms_downscaling import DataTransforms
+
+def validate_args(function, argdict, context, ignore=[]):
+    """
+    For calling 'function(**argdict)'.  Checks that all arguments
+    required by function exist in argdict and throws an error if they
+    don't.  Checks that arguments in argdict appear in the sigature of
+    function and deletes any that don't (with a warning).  'context'
+    is a string added to the warning/error messages to make them more
+    informative. 'ignore' is a list of parameters to leave alone even if
+    they don't appear in the signature.
+    """
+    sig = inspect.signature(function)
+
+    for argname, argval in sig.parameters.items():
+        if argval.default is inspect._empty and argname not in argdict:
+            raise ValueError(f"required parameter '{argname}' for {function} is missing from {context}")
+    for argname in list(argdict):
+        if argname not in ignore:
+            if argname not in sig.parameters:
+                del argdict[argname]
+                warnings.warn(f"'{argname}' is not a valid parameter for {function};"+
+                              f" removing from configuration for {context}")
+    return argdict
+
+
+def replace_nested_key(data, key, value):
+    """Recursively searches a nested dictionary and sets each instance
+    of `key` to `value`.  Behavior may be unpredictable if the
+    original value is also a dict.
+    """
+    if isinstance(data, dict):
+        return {k: value if k == key else replace_nested_key(v, key, value)
+                    for k, v in data.items()
+                }
+    else:
+        return data
 
 
 def remove_string_by_pattern(list_string, pattern):
@@ -62,10 +102,15 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     """
 
+    # many config options don't apply when downscaling to regional
+    is_downscaling = 'datasets' in conf['data']
+
+
     assert "save_loc" in conf, "save location of the CREDIT project ('save_loc') is missing from conf"
     assert "data" in conf, "data section ('data') is missing from conf"
     assert "model" in conf, "model section ('model') is missing from conf"
-    assert "latitude_weights" in conf["loss"], "lat / lon file ('latitude_weights') is missing from conf['loss']"
+    if not is_downscaling:
+        assert "latitude_weights" in conf["loss"], "lat / lon file ('latitude_weights') is missing from conf['loss']"
 
     if parse_training:
         assert "trainer" in conf, "trainer section ('trainer') is missing from conf"
@@ -79,213 +124,261 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # --------------------------------------------------------- #
     # conf['data'] section
 
-    # must have upper-air variables
-    assert "variables" in conf["data"], "upper-air variable names ('variables') is missing from conf['data']"
+    if is_downscaling:
+        # new-style data configuration
 
-    if (conf["data"]["variables"] is None) or (len(conf["data"]["variables"]) == 0):
-        print(
-            "Upper-air variable name conf['data']['variables']: {} cannot be processed".format(
-                conf["data"]["variables"]
+        # DownscalingDataset gets intiatlized with **conf['data']
+        validate_args(DownscalingDataset, conf['data'], "'data' section")
+
+        # Each element of conf['data']['datasets'] is a separate dataset.
+        # There must be at least one dataset.
+        if not conf['data']['datasets']:
+            raise ValueError("conf['data']['datasets'] must not be empty")
+
+        # validate all the datasets
+        vartypes = ('boundary', 'prognostic', 'diagnostic', 'unused')
+        dconf = conf['data']['datasets']
+
+        for dset in dconf:
+            # todo: more comprehensive validation using schema library; skipping for now
+            # todo: dset name cannot have a '.' in it
+
+            if not dconf[dset]['variables']:
+                raise ValueError(f"variables must not be empty for dataset {dset} configuration")
+
+            for usage in dconf[dset]['variables']:
+                if usage not in vartypes:
+                    raise ValueError(f"unknown variable usage '{usage}' for dataset {dset};"+
+                                     f" must be one of {vartypes}")
+
+        # todo: should this move down to the predict section below?
+        if parse_predict:
+            # update start and finish for rollout
+            # note: this is an in-place modification of conf['data']
+            downconf = conf['predict']['downscaling']
+            conf = replace_nested_key(conf, 'first_date', downconf['start'])
+            conf = replace_nested_key(conf, 'last_date', downconf['finish'])
+
+            if 'get_time_from' in downconf:
+                assert(downconf['get_time_from'] in conf['data']['datasets'])
+                conf['data']['get_time_from'] = downconf['get_time_from']
+
+        # end new-style conf['data'] check
+        # ===========================================#
+
+    else:
+
+        # must have upper-air variables
+        assert "variables" in conf["data"], "upper-air variable names ('variables') is missing from conf['data']"
+
+        if (conf["data"]["variables"] is None) or (len(conf["data"]["variables"]) == 0):
+            print(
+                "Upper-air variable name conf['data']['variables']: {} cannot be processed".format(
+                    conf["data"]["variables"]
+                )
             )
-        )
-        raise
-
-    assert "save_loc" in conf["data"], "upper-air var save locations ('save_loc') is missing from conf['data']"
-
-    if conf["data"]["save_loc"] is None:
-        print(
-            "Upper-air var save locations conf['data']['save_loc']: {} cannot be processed".format(
-                conf["data"]["save_loc"]
-            )
-        )
-        raise
-
-    if "levels" not in conf["data"]:
-        if "levels" in conf["model"]:
-            conf["data"]["levels"] = conf["model"]["levels"]
-        else:
-            print("number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']")
             raise
-    # ========================================================================================= #
-    # Check other input / output variable types
-    # if varname is provided, its corresponding save_loc should exist
-    # if varname is None, missing, or [], assign flag = False
-    # the default missing varname will be converted to []
 
-    # surface inputs
-    if "surface_variables" in conf["data"]:
-        if conf["data"]["surface_variables"] is None:
-            conf["data"]["flag_surface"] = False
-        elif len(conf["data"]["surface_variables"]) > 0:
-            conf["data"]["flag_surface"] = True
-            assert (
-                "save_loc_surface" in conf["data"]
-            ), "surface var save locations ('save_loc_surface') is missing from conf['data']"
+        assert "save_loc" in conf["data"], "upper-air var save locations ('save_loc') is missing from conf['data']"
+
+        if conf["data"]["save_loc"] is None:
+            print(
+                "Upper-air var save locations conf['data']['save_loc']: {} cannot be processed".format(
+                    conf["data"]["save_loc"]
+                )
+            )
+            raise
+
+        if "levels" not in conf["data"]:
+            if "levels" in conf["model"]:
+                conf["data"]["levels"] = conf["model"]["levels"]
+            else:
+                print("number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']")
+                raise
+        # ========================================================================================= #
+        # Check other input / output variable types
+        # if varname is provided, its corresponding save_loc should exist
+        # if varname is None, missing, or [], assign flag = False
+        # the default missing varname will be converted to []
+
+        # surface inputs
+        if "surface_variables" in conf["data"]:
+            if conf["data"]["surface_variables"] is None:
+                conf["data"]["flag_surface"] = False
+            elif len(conf["data"]["surface_variables"]) > 0:
+                conf["data"]["flag_surface"] = True
+                assert (
+                    "save_loc_surface" in conf["data"]
+                ), "surface var save locations ('save_loc_surface') is missing from conf['data']"
+            else:
+                conf["data"]["flag_surface"] = False
         else:
             conf["data"]["flag_surface"] = False
-    else:
-        conf["data"]["flag_surface"] = False
 
-    # dyn forcing inputs
-    if "dynamic_forcing_variables" in conf["data"]:
-        if conf["data"]["dynamic_forcing_variables"] is None:
-            conf["data"]["flag_dyn_forcing"] = False
-        elif len(conf["data"]["dynamic_forcing_variables"]) > 0:
-            conf["data"]["flag_dyn_forcing"] = True
-            assert (
-                "save_loc_dynamic_forcing" in conf["data"]
-            ), "dynamic forcing var save locations ('save_loc_dynamic_forcing') is missing from conf['data']"
+        # dyn forcing inputs
+        if "dynamic_forcing_variables" in conf["data"]:
+            if conf["data"]["dynamic_forcing_variables"] is None:
+                conf["data"]["flag_dyn_forcing"] = False
+            elif len(conf["data"]["dynamic_forcing_variables"]) > 0:
+                conf["data"]["flag_dyn_forcing"] = True
+                assert (
+                    "save_loc_dynamic_forcing" in conf["data"]
+                ), "dynamic forcing var save locations ('save_loc_dynamic_forcing') is missing from conf['data']"
+            else:
+                conf["data"]["flag_dyn_forcing"] = False
         else:
             conf["data"]["flag_dyn_forcing"] = False
-    else:
-        conf["data"]["flag_dyn_forcing"] = False
 
-    # diagnostic outputs
-    if "diagnostic_variables" in conf["data"]:
-        if conf["data"]["diagnostic_variables"] is None:
-            conf["data"]["flag_diagnostic"] = False
-        elif len(conf["data"]["diagnostic_variables"]) > 0:
-            conf["data"]["flag_diagnostic"] = True
-            assert (
-                "save_loc_diagnostic" in conf["data"]
-            ), "diagnostic var save locations ('save_loc_diagnostic') is missing from conf['data']"
+        # diagnostic outputs
+        if "diagnostic_variables" in conf["data"]:
+            if conf["data"]["diagnostic_variables"] is None:
+                conf["data"]["flag_diagnostic"] = False
+            elif len(conf["data"]["diagnostic_variables"]) > 0:
+                conf["data"]["flag_diagnostic"] = True
+                assert (
+                    "save_loc_diagnostic" in conf["data"]
+                ), "diagnostic var save locations ('save_loc_diagnostic') is missing from conf['data']"
+            else:
+                conf["data"]["flag_diagnostic"] = False
         else:
             conf["data"]["flag_diagnostic"] = False
-    else:
-        conf["data"]["flag_diagnostic"] = False
 
-    # forcing inputs
-    if "forcing_variables" in conf["data"]:
-        if conf["data"]["forcing_variables"] is None:
-            conf["data"]["flag_forcing"] = False
-        elif len(conf["data"]["forcing_variables"]) > 0:
-            conf["data"]["flag_forcing"] = True
-            assert (
-                "save_loc_forcing" in conf["data"]
-            ), "forcing var save locations ('save_loc_forcing') is missing from conf['data']"
+        # forcing inputs
+        if "forcing_variables" in conf["data"]:
+            if conf["data"]["forcing_variables"] is None:
+                conf["data"]["flag_forcing"] = False
+            elif len(conf["data"]["forcing_variables"]) > 0:
+                conf["data"]["flag_forcing"] = True
+                assert (
+                    "save_loc_forcing" in conf["data"]
+                ), "forcing var save locations ('save_loc_forcing') is missing from conf['data']"
+            else:
+                conf["data"]["flag_forcing"] = False
         else:
             conf["data"]["flag_forcing"] = False
-    else:
-        conf["data"]["flag_forcing"] = False
 
-    # static inputs
-    if "static_variables" in conf["data"]:
-        if conf["data"]["static_variables"] is None:
-            conf["data"]["flag_static"] = False
-        elif len(conf["data"]["static_variables"]) > 0:
-            conf["data"]["flag_static"] = True
-            assert (
-                "save_loc_static" in conf["data"]
-            ), "static var save locations ('save_loc_static') is missing from conf['data']"
+        # static inputs
+        if "static_variables" in conf["data"]:
+            if conf["data"]["static_variables"] is None:
+                conf["data"]["flag_static"] = False
+            elif len(conf["data"]["static_variables"]) > 0:
+                conf["data"]["flag_static"] = True
+                assert (
+                    "save_loc_static" in conf["data"]
+                ), "static var save locations ('save_loc_static') is missing from conf['data']"
+            else:
+                conf["data"]["flag_static"] = False
         else:
             conf["data"]["flag_static"] = False
-    else:
-        conf["data"]["flag_static"] = False
 
-    # ===================================================== #
-    # assign default values for the missing data
-    # varname = [] if not needed
-    # save_loc = None if not needed
-    if conf["data"]["flag_surface"] is False:
-        conf["data"]["save_loc_surface"] = None
-        conf["data"]["surface_variables"] = []
+        # ===================================================== #
+        # assign default values for the missing data
+        # varname = [] if not needed
+        # save_loc = None if not needed
+        if conf["data"]["flag_surface"] is False:
+            conf["data"]["save_loc_surface"] = None
+            conf["data"]["surface_variables"] = []
 
-    if conf["data"]["flag_dyn_forcing"] is False:
-        conf["data"]["save_loc_dynamic_forcing"] = None
-        conf["data"]["dynamic_forcing_variables"] = []
+        if conf["data"]["flag_dyn_forcing"] is False:
+            conf["data"]["save_loc_dynamic_forcing"] = None
+            conf["data"]["dynamic_forcing_variables"] = []
 
-    if conf["data"]["flag_diagnostic"] is False:
-        conf["data"]["save_loc_diagnostic"] = None
-        conf["data"]["diagnostic_variables"] = []
+        if conf["data"]["flag_diagnostic"] is False:
+            conf["data"]["save_loc_diagnostic"] = None
+            conf["data"]["diagnostic_variables"] = []
 
-    if conf["data"]["flag_forcing"] is False:
-        conf["data"]["save_loc_forcing"] = None
-        conf["data"]["forcing_variables"] = []
+        if conf["data"]["flag_forcing"] is False:
+            conf["data"]["save_loc_forcing"] = None
+            conf["data"]["forcing_variables"] = []
 
-    if conf["data"]["flag_static"] is False:
-        conf["data"]["save_loc_static"] = None
-        conf["data"]["static_variables"] = []
-    # ===================================================== #
+        if conf["data"]["flag_static"] is False:
+            conf["data"]["save_loc_static"] = None
+            conf["data"]["static_variables"] = []
+        # ===================================================== #
 
-    # duplicated variable name check
-    all_varnames = (
-        conf["data"]["variables"]
-        + conf["data"]["surface_variables"]
-        + conf["data"]["dynamic_forcing_variables"]
-        + conf["data"]["diagnostic_variables"]
-        + conf["data"]["forcing_variables"]
-        + conf["data"]["static_variables"]
-    )
+        # duplicated variable name check
+        all_varnames = (
+            conf["data"]["variables"]
+            + conf["data"]["surface_variables"]
+            + conf["data"]["dynamic_forcing_variables"]
+            + conf["data"]["diagnostic_variables"]
+            + conf["data"]["forcing_variables"]
+            + conf["data"]["static_variables"]
+        )
 
-    varname_counts = Counter(all_varnames)
-    duplicates = [varname for varname, count in varname_counts.items() if count > 1]
+        varname_counts = Counter(all_varnames)
+        duplicates = [varname for varname, count in varname_counts.items() if count > 1]
 
-    assert len(duplicates) == 0, "Duplicated variable names: [{}] found. No duplicates allowed, stop.".format(
-        duplicates
-    )
+        assert len(duplicates) == 0, "Duplicated variable names: [{}] found. No duplicates allowed, stop.".format(
+            duplicates
+        )
 
-    conf["data"]["all_varnames"] = (
-        conf["data"]["variables"]
-        + conf["data"]["surface_variables"]
-        + conf["data"]["dynamic_forcing_variables"]
-        + conf["data"]["diagnostic_variables"]
-    )
+        conf["data"]["all_varnames"] = (
+            conf["data"]["variables"]
+            + conf["data"]["surface_variables"]
+            + conf["data"]["dynamic_forcing_variables"]
+            + conf["data"]["diagnostic_variables"]
+        )
 
-    ## I/O data sizes
+        ## I/O data sizes
 
-    conf["data"].setdefault("data_clamp", None)
+        conf["data"].setdefault("data_clamp", None)
 
-    if parse_training:
-        assert "train_years" in conf["data"], "year range for training ('train_years') is missing from conf['data']"
+        if parse_training:
+            assert "train_years" in conf["data"], "year range for training ('train_years') is missing from conf['data']"
 
-        # 'valid_years' is required even for conf['trainer']['skip_validation']: True
-        # 'valid_years' and 'train_years' can overlap
-        assert "valid_years" in conf["data"], "year range for validation ('valid_years') is missing from conf['data']"
+            # 'valid_years' is required even for conf['trainer']['skip_validation']: True
+            # 'valid_years' and 'train_years' can overlap
+            assert "valid_years" in conf["data"], "year range for validation ('valid_years') is missing from conf['data']"
 
+            assert (
+                "forecast_len" in conf["data"]
+            ), "Number of time frames for loss compute ('forecast_len') is missing from conf['data']"
+
+            if "valid_history_len" not in conf["data"]:
+                # use "history_len" for "valid_history_len"
+                conf["data"]["valid_history_len"] = conf["data"]["history_len"]
+
+            if "valid_forecast_len" not in conf["data"]:
+                # use "forecast_len" for "valid_forecast_len"
+                conf["data"]["valid_forecast_len"] = conf["data"]["forecast_len"]
+
+            if "max_forecast_len" not in conf["data"]:
+                conf["data"]["max_forecast_len"] = None  # conf['data']['forecast_len']
+
+            # one_shot
+            if "one_shot" not in conf["data"]:
+                conf["data"]["one_shot"] = None
+
+            if conf["data"]["one_shot"] is not True:
+                conf["data"]["one_shot"] = None
+
+            if "total_time_steps" not in conf["data"]:
+                conf["data"]["total_time_steps"] = conf["data"]["forecast_len"]
+
+        assert "history_len" in conf["data"], "Number of input time frames ('history_len') is missing from conf['data']"
         assert (
-            "forecast_len" in conf["data"]
-        ), "Number of time frames for loss compute ('forecast_len') is missing from conf['data']"
+            "lead_time_periods" in conf["data"]
+        ), "Number of forecast hours ('lead_time_periods') is missing from conf['data']"
+        assert "scaler_type" in conf["data"], "'scaler_type' is missing from conf['data']"
 
-        if "valid_history_len" not in conf["data"]:
-            # use "history_len" for "valid_history_len"
-            conf["data"]["valid_history_len"] = conf["data"]["history_len"]
+        if conf["data"]["scaler_type"] == "std_new":
+            assert "mean_path" in conf["data"], "The z-score mean file ('mean_path') is missing from conf['data']"
+            assert "std_path" in conf["data"], "The z-score std file ('std_path') is missing from conf['data']"
 
-        if "valid_forecast_len" not in conf["data"]:
-            # use "forecast_len" for "valid_forecast_len"
-            conf["data"]["valid_forecast_len"] = conf["data"]["forecast_len"]
+        # skip_periods
+        if ("skip_periods" not in conf["data"]) or (conf["data"]["skip_periods"] is None):
+            conf["data"]["skip_periods"] = 1
 
-        if "max_forecast_len" not in conf["data"]:
-            conf["data"]["max_forecast_len"] = None  # conf['data']['forecast_len']
+        if "static_first" not in conf["data"]:
+            conf["data"]["static_first"] = True
 
-        # one_shot
-        if "one_shot" not in conf["data"]:
-            conf["data"]["one_shot"] = None
+        if "sst_forcing" not in conf["data"]:
+            conf["data"]["sst_forcing"] = {"activate": False}
 
-        if conf["data"]["one_shot"] is not True:
-            conf["data"]["one_shot"] = None
+        # end old-style conf['data'] check
+        # ===========================================#
 
-        if "total_time_steps" not in conf["data"]:
-            conf["data"]["total_time_steps"] = conf["data"]["forecast_len"]
-
-    assert "history_len" in conf["data"], "Number of input time frames ('history_len') is missing from conf['data']"
-    assert (
-        "lead_time_periods" in conf["data"]
-    ), "Number of forecast hours ('lead_time_periods') is missing from conf['data']"
-    assert "scaler_type" in conf["data"], "'scaler_type' is missing from conf['data']"
-
-    if conf["data"]["scaler_type"] == "std_new":
-        assert "mean_path" in conf["data"], "The z-score mean file ('mean_path') is missing from conf['data']"
-        assert "std_path" in conf["data"], "The z-score std file ('std_path') is missing from conf['data']"
-
-    # skip_periods
-    if ("skip_periods" not in conf["data"]) or (conf["data"]["skip_periods"] is None):
-        conf["data"]["skip_periods"] = 1
-
-    if "static_first" not in conf["data"]:
-        conf["data"]["static_first"] = True
-
-    if "sst_forcing" not in conf["data"]:
-        conf["data"]["sst_forcing"] = {"activate": False}
 
     # --------------------------------------------------------- #
     # conf['model'] section
@@ -299,6 +392,10 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # use interpolation
     if "interp" not in conf["model"]:
         conf["model"]["interp"] = True
+
+    if is_downscaling:
+        # compute number of channels
+        conf["model"]["channels"] = count_channels(conf["data"]["datasets"])
 
     # ======================================================== #
     # padding opts
@@ -813,93 +910,141 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # conf['loss'] section
 
     if parse_training:
+
         assert "training_loss" in conf["loss"], "Training loss ('training_loss') is missing from conf['loss']"
-        assert "use_latitude_weights" in conf["loss"], "must specify 'use_latitude_weights' in conf['loss']"
-        assert "use_variable_weights" in conf["loss"], "must specify 'use_variable_weights' in conf['loss']"
 
-        if conf["loss"]["use_variable_weights"]:
-            assert (
-                "variable_weights" in conf["loss"]
-            ), "must specify 'variable_weights' in conf['loss'] if 'use_variable_weights': True"
+        if is_downscaling:
+            pass
+        else:
 
-            # ----------------------------------------------------------------------------------------- #
-            # check and reorganize variable weights
-            varname_upper_air = conf["data"]["variables"]
-            varname_surface = conf["data"]["surface_variables"]
-            varname_diagnostics = conf["data"]["diagnostic_variables"]
-            N_levels = conf["data"]["levels"]
+            assert "use_latitude_weights" in conf["loss"], "must specify 'use_latitude_weights' in conf['loss']"
+            assert "use_variable_weights" in conf["loss"], "must specify 'use_variable_weights' in conf['loss']"
 
-            weights_dict_ordered = {}
+            if conf["loss"]["use_variable_weights"]:
+                assert (
+                    "variable_weights" in conf["loss"]
+                ), "must specify 'variable_weights' in conf['loss'] if 'use_variable_weights': True"
 
-            varname_covered = list(conf["loss"]["variable_weights"].keys())
+                # ----------------------------------------------------------------------------------------- #
+                # check and reorganize variable weights
+                varname_upper_air = conf["data"]["variables"]
+                varname_surface = conf["data"]["surface_variables"]
+                varname_diagnostics = conf["data"]["diagnostic_variables"]
+                N_levels = conf["data"]["levels"]
 
-            for varname in varname_upper_air:
-                assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
-                N_weights = len(conf["loss"]["variable_weights"][varname])
-                assert N_weights == N_levels, "{} levels were defined, but weights only have {} levels".format(
-                    N_levels, N_weights
-                )
-                weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
+                weights_dict_ordered = {}
 
-            for varname in varname_surface + varname_diagnostics:
-                assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
-                weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
+                varname_covered = list(conf["loss"]["variable_weights"].keys())
 
-            conf["loss"]["variable_weights"] = weights_dict_ordered
-            # ----------------------------------------------------------------------------------------- #
+                for varname in varname_upper_air:
+                    assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
+                    N_weights = len(conf["loss"]["variable_weights"][varname])
+                    assert N_weights == N_levels, "{} levels were defined, but weights only have {} levels".format(
+                        N_levels, N_weights
+                    )
+                    weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
 
-        if "use_power_loss" not in conf["loss"]:
-            conf["loss"]["use_power_loss"] = False
+                for varname in varname_surface + varname_diagnostics:
+                    assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
+                    weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
 
-        if "use_spectral_loss" not in conf["loss"]:
-            conf["loss"]["use_spectral_loss"] = False
+                conf["loss"]["variable_weights"] = weights_dict_ordered
+                # ----------------------------------------------------------------------------------------- #
 
-        if conf["loss"]["use_power_loss"] and conf["loss"]["use_spectral_loss"]:
-            warnings.warn("'use_power_loss: True' and 'use_spectral_loss: True' are both applied")
+            if "use_power_loss" not in conf["loss"]:
+                conf["loss"]["use_power_loss"] = False
 
-        if conf["loss"]["use_power_loss"] or conf["loss"]["use_spectral_loss"]:
-            if "spectral_lambda_reg" not in conf["loss"]:
-                conf["loss"]["spectral_lambda_reg"] = 0.1
+            if "use_spectral_loss" not in conf["loss"]:
+                conf["loss"]["use_spectral_loss"] = False
 
-            if "spectral_wavenum_init" not in conf["loss"]:
-                conf["loss"]["spectral_wavenum_init"] = 20
+            if conf["loss"]["use_power_loss"] and conf["loss"]["use_spectral_loss"]:
+                warnings.warn("'use_power_loss: True' and 'use_spectral_loss: True' are both applied")
+
+            if conf["loss"]["use_power_loss"] or conf["loss"]["use_spectral_loss"]:
+                if "spectral_lambda_reg" not in conf["loss"]:
+                    conf["loss"]["spectral_lambda_reg"] = 0.1
+
+                if "spectral_wavenum_init" not in conf["loss"]:
+                    conf["loss"]["spectral_wavenum_init"] = 20
 
     # --------------------------------------------------------- #
     # conf['parse_predict'] section
 
     if parse_predict:
-        assert "forecasts" in conf["predict"], "Rollout settings ('forecasts') is missing from conf['predict']"
-        assert (
-            "save_forecast" in conf["predict"]
-        ), "Rollout save location ('save_forecast') is missing from conf['predict']"
+        if "downscaling" in conf["predict"]:
+            if "forecasts" in conf["predict"]:
+                raise ValueError("conf['predict'] should contain 'downscaling' or 'forecasts', not both")
+            # todo: use schema library to validate (untested):
 
-        conf["predict"]["save_forecast"] = os.path.expandvars(conf["predict"]["save_forecast"])
+            # from schema import And, Optional, Regex, Schema, Use, SchemaError
+            # isodate = Regex(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$')
+            # is_dataset = lambda s: s in conf["data"]["datasets"].keys()
+            # 
+            # downscaling_schema = Schema(
+            #     {"start": isodate,
+            #      "finish": isodate,
+            #      Optional("get_time_from"): is_dataset
+            #      })
+            #
+            # template_schema = Schema(
+            #     {"dir": And(str, os.path.exists),
+            #      "files": Schema({is_dataset: str})
+            #      })
+            #
+            # predict_schema = Schema({
+            #     "mode": lambda s: s in ("none", "ddp", "fsdp"),
+            #     Optional("batch_size"): int,
+            #     Optional("ensemble_size"): int,
+            #     "downscaling": downscaling_schema,
+            #     "templates": template_schema
+            # })
 
-        if "use_laplace_filter" not in conf["predict"]:
-            conf["predict"]["use_laplace_filter"] = False
+            # check that all dirs & files exist
+            # check that start < finish (just convert to numbers)
 
-        if "metadata" not in conf["predict"]:
-            conf["predict"]["metadata"] = False
+            # ? warn if overlap between training, validation, & prediction periods
 
-        if "save_vars" not in conf["predict"]:
-            conf["predict"]["save_vars"] = []
 
-        if "mode" not in conf["predict"]:
-            if "mode" in conf["trainer"]:
-                conf["predict"]["mode"] = conf["trainer"]["mode"]
-            else:
-                print("Resource type ('mode') is missing from both conf['trainer'] and conf['predict']")
-                raise
+        else:
+            assert "forecasts" in conf["predict"], "Rollout settings ('forecasts') is missing from conf['predict']"
+            assert (
+                "save_forecast" in conf["predict"]
+            ), "Rollout save location ('save_forecast') is missing from conf['predict']"
+
+            conf["predict"]["save_forecast"] = os.path.expandvars(conf["predict"]["save_forecast"])
+
+            if "use_laplace_filter" not in conf["predict"]:
+                conf["predict"]["use_laplace_filter"] = False
+
+            if "metadata" not in conf["predict"]:
+                conf["predict"]["metadata"] = False
+
+            if "save_vars" not in conf["predict"]:
+                conf["predict"]["save_vars"] = []
+
+            if "mode" not in conf["predict"]:
+                if "mode" in conf["trainer"]:
+                    conf["predict"]["mode"] = conf["trainer"]["mode"]
+                else:
+                    print("Resource type ('mode') is missing from both conf['trainer'] and conf['predict']")
+                    raise
 
     # ==================================================== #
     # print summary
     if print_summary:
-        print("Upper-air variables: {}".format(conf["data"]["variables"]))
-        print("Surface variables: {}".format(conf["data"]["surface_variables"]))
-        print("Dynamic forcing variables: {}".format(conf["data"]["dynamic_forcing_variables"]))
-        print("Diagnostic variables: {}".format(conf["data"]["diagnostic_variables"]))
-        print("Forcing variables: {}".format(conf["data"]["forcing_variables"]))
-        print("Static variables: {}".format(conf["data"]["static_variables"]))
+        if is_downscaling:
+            cdata = conf['data']
+            channels = conf['model']['channels']
+            print("Datasets: "+", ".join([k for k in cdata['datasets'].keys()]))
+            print("Channels: "+", ".join([f"{k}: {v}" for k,v in channels.items()]))
+            print(f"First: {cdata['first_date']}; last: {cdata['last_date']}")
+        else:
+            print("Upper-air variables: {}".format(conf["data"]["variables"]))
+            print("Surface variables: {}".format(conf["data"]["surface_variables"]))
+            print("Dynamic forcing variables: {}".format(conf["data"]["dynamic_forcing_variables"]))
+            print("Diagnostic variables: {}".format(conf["data"]["diagnostic_variables"]))
+            print("Forcing variables: {}".format(conf["data"]["forcing_variables"]))
+            print("Static variables: {}".format(conf["data"]["static_variables"]))
 
     return conf
 
