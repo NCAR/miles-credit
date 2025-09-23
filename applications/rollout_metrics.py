@@ -149,6 +149,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             f'Number of forecast inits ({len(forecasts)}) given by conf["predict"]["duration"] x len(conf["predict"]["start_hours"]) should be divisible by number of processes/GPUs ({world_size})'
         )
 
+    data_config = setup_data_loading(conf)
     dataset = Predict_Dataset_Batcher(
         varname_upper_air=data_config["varname_upper_air"],
         varname_surface=data_config["varname_surface"],
@@ -188,6 +189,8 @@ def predict(rank, world_size, conf, backend=None, p=None):
         # if conf["trainer"].get("compile", False):
         #     model = torch.compile(model)
         model = distributed_model_wrapper(conf, model, device)
+
+        save_loc = os.path.expandvars(conf["save_loc"])
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
         if conf["predict"]["mode"] in ["ddp", "fsdp"]:
@@ -407,7 +410,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
     return 1
 
 
-if __name__ == "__main__":
+def main():
     description = "Rollout AI-NWP forecasts"
     parser = ArgumentParser(description=description)
     parser.add_argument(
@@ -484,11 +487,11 @@ if __name__ == "__main__":
     config = args_dict.pop("model_config")
     launch = int(args_dict.pop("launch"))
     mode = str(args_dict.pop("mode"))
-    no_data = 0 if "no-data" not in args_dict else int(args_dict.pop("no-data"))
+    # no_data = 0 if "no-data" not in args_dict else int(args_dict.pop("no-data"))
     subset = int(args_dict.pop("subset"))
     number_of_subsets = int(args_dict.pop("no_subset"))
     num_cpus = int(args_dict.pop("num_cpus"))
-    backend = args_dict.pop("backend")
+    # backend = args_dict.pop("backend")
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -509,19 +512,14 @@ if __name__ == "__main__":
         conf, parse_training=False, parse_predict=True, print_summary=False
     )
     predict_data_check(conf, print_summary=False)
-    data_config = setup_data_loading(conf)
 
     # create a save location for rollout
-    assert "save_forecast" in conf["predict"], (
-        "Please specify the output dir through conf['predict']['save_forecast']"
-    )
+    assert (
+        "save_forecast" in conf["predict"]
+    ), "Please specify the output dir through conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
-
-    # Create a project directory (to save launch.sh and model.yml) if they do not exist
-    save_loc = os.path.expandvars(conf["save_loc"])
-    os.makedirs(save_loc, exist_ok=True)
 
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:
@@ -568,3 +566,7 @@ if __name__ == "__main__":
     # Ensure all processes are finished
     p.close()
     p.join()
+
+
+if __name__ == "__main__":
+    main()

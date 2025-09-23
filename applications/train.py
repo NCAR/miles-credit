@@ -73,10 +73,26 @@ def load_model_states_and_optimizer(conf, model, device):
     amp = conf["trainer"]["amp"]
 
     # load weights / states flags
-    load_weights = False if "load_weights" not in conf["trainer"] else conf["trainer"]["load_weights"]
-    load_optimizer_conf = False if "load_optimizer" not in conf["trainer"] else conf["trainer"]["load_optimizer"]
-    load_scaler_conf = False if "load_scaler" not in conf["trainer"] else conf["trainer"]["load_scaler"]
-    load_scheduler_conf = False if "load_scheduler" not in conf["trainer"] else conf["trainer"]["load_scheduler"]
+    load_weights = (
+        False
+        if "load_weights" not in conf["trainer"]
+        else conf["trainer"]["load_weights"]
+    )
+    load_optimizer_conf = (
+        False
+        if "load_optimizer" not in conf["trainer"]
+        else conf["trainer"]["load_optimizer"]
+    )
+    load_scaler_conf = (
+        False
+        if "load_scaler" not in conf["trainer"]
+        else conf["trainer"]["load_scaler"]
+    )
+    load_scheduler_conf = (
+        False
+        if "load_scheduler" not in conf["trainer"]
+        else conf["trainer"]["load_scheduler"]
+    )
 
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
     if not load_weights:  # Loaded after loading model weights when reloading
@@ -89,10 +105,16 @@ def load_model_states_and_optimizer(conf, model, device):
         if conf["trainer"]["mode"] == "fsdp":
             optimizer = FSDPOptimizerWrapper(optimizer, model)
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp)
+            if conf["trainer"]["mode"] == "fsdp"
+            else GradScaler(enabled=amp)
+        )
 
     # Multi-step training case -- when starting, only load the model weights (then after load all states)
-    elif load_weights and not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
+    elif load_weights and not (
+        load_optimizer_conf or load_scaler_conf or load_scheduler_conf
+    ):
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
             lr=learning_rate,
@@ -110,23 +132,33 @@ def load_model_states_and_optimizer(conf, model, device):
             )
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
+            checkpoint_io.load_unsharded_model(
+                model, os.path.join(save_loc, "model_checkpoint.pt")
+            )
         else:
             # DDP settings
             ckpt = os.path.join(save_loc, "checkpoint.pt")
             checkpoint = torch.load(ckpt, map_location=device)
             if conf["trainer"]["mode"] == "ddp":
                 logging.info(f"Loading DDP model state only from {save_loc}")
-                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+                load_msg = model.module.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
             else:
                 logging.info(f"Loading model state only from {save_loc}")
-                load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+                load_msg = model.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
 
         # Load the learning rate scheduler and mixed precision grad scaler
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp)
+            if conf["trainer"]["mode"] == "fsdp"
+            else GradScaler(enabled=amp)
+        )
         # Update the config file to the current epoch based on the checkpoint
         if (
             "reload_epoch" in conf["trainer"]
@@ -153,9 +185,16 @@ def load_model_states_and_optimizer(conf, model, device):
             )
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
-            if "load_optimizer" in conf["trainer"] and conf["trainer"]["load_optimizer"]:
-                checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
+            checkpoint_io.load_unsharded_model(
+                model, os.path.join(save_loc, "model_checkpoint.pt")
+            )
+            if (
+                "load_optimizer" in conf["trainer"]
+                and conf["trainer"]["load_optimizer"]
+            ):
+                checkpoint_io.load_unsharded_optimizer(
+                    optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt")
+                )
 
         else:
             # DDP settings
@@ -163,13 +202,17 @@ def load_model_states_and_optimizer(conf, model, device):
                 logging.info(
                     f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+                load_msg = model.module.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
             else:
                 logging.info(
                     f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+                load_msg = model.load_state_dict(
+                    checkpoint["model_state_dict"], strict=False
+                )
                 load_state_dict_error_handler(load_msg)
 
             optimizer = torch.optim.AdamW(
@@ -178,11 +221,18 @@ def load_model_states_and_optimizer(conf, model, device):
                 weight_decay=weight_decay,
                 betas=(0.9, 0.95),
             )
-            if "load_optimizer" in conf["trainer"] and conf["trainer"]["load_optimizer"]:
+            if (
+                "load_optimizer" in conf["trainer"]
+                and conf["trainer"]["load_optimizer"]
+            ):
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp)
+            if conf["trainer"]["mode"] == "fsdp"
+            else GradScaler(enabled=amp)
+        )
 
         # Update the config file to the current epoch
         if "reload_epoch" in conf["trainer"] and conf["trainer"]["reload_epoch"]:
@@ -197,7 +247,11 @@ def load_model_states_and_optimizer(conf, model, device):
             scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
     # Enable updating the lr if not using a policy
-    if conf["trainer"]["update_learning_rate"] if "update_learning_rate" in conf["trainer"] else False:
+    if (
+        conf["trainer"]["update_learning_rate"]
+        if "update_learning_rate" in conf["trainer"]
+        else False
+    ):
         for param_group in optimizer.param_groups:
             param_group["lr"] = learning_rate
 
@@ -219,7 +273,7 @@ def main(rank, world_size, conf, backend=None, trial=False):
         Any: The result of the training process.
     """
 
-    is_downscaling = 'datasets' in conf['data']
+    is_downscaling = "datasets" in conf["data"]
 
     # convert $USER to the actual user name
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
@@ -229,7 +283,9 @@ def main(rank, world_size, conf, backend=None, trial=False):
 
     # infer device id from rank
     device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
+        torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+        if torch.cuda.is_available()
+        else torch.device("cpu")
     )
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
@@ -238,8 +294,12 @@ def main(rank, world_size, conf, backend=None, trial=False):
     valid_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=False)
 
     # Load the dataloader
-    train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
-    valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
+    train_loader = load_dataloader(
+        conf, train_dataset, rank=rank, world_size=world_size, is_train=True
+    )
+    valid_loader = load_dataloader(
+        conf, valid_dataset, rank=rank, world_size=world_size, is_train=False
+    )
 
     seed = conf["seed"] + rank
     seed_everything(seed)
@@ -261,7 +321,9 @@ def main(rank, world_size, conf, backend=None, trial=False):
         model = m
 
     # Load model weights (if any), an optimizer, scheduler, and gradient scaler
-    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
+    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(
+        conf, model, device
+    )
 
     # Train and validation losses
     train_criterion = load_loss(conf)
@@ -334,20 +396,22 @@ class Objective(BaseObjective):
 
         except Exception as E:
             if "CUDA" in str(E) or "non-singleton" in str(E):
-                logging.warning(f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}.")
+                logging.warning(
+                    f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}."
+                )
                 raise optuna.TrialPruned()
             elif "non-singleton" in str(E):
-                logging.warning(f"Pruning trial {trial.number} due to shape mismatch: {str(E)}.")
+                logging.warning(
+                    f"Pruning trial {trial.number} due to shape mismatch: {str(E)}."
+                )
                 raise optuna.TrialPruned()
             else:
                 logging.warning(f"Trial {trial.number} failed due to error: {str(E)}.")
                 raise E
 
 
-if __name__ == "__main__":
-    description = (
-        "Train an AI model for Numerical Weather Prediction (NWP) using a specified dataset and configuration."
-    )
+def main_cli():
+    description = "Train an AI model for Numerical Weather Prediction (NWP) using a specified dataset and configuration."
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "-c",
@@ -384,7 +448,6 @@ if __name__ == "__main__":
     config = args_dict.pop("model_config")
     launch = int(args_dict.pop("launch"))
     backend = args_dict.pop("backend")
-    use_wandb = int(args_dict.pop("wandb"))
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -414,7 +477,7 @@ if __name__ == "__main__":
     conf = credit_main_parser(
         conf, parse_training=True, parse_predict=False, print_summary=False
     )
-    if not conf['data']['datasets']:
+    if not conf["data"]["datasets"]:
         training_data_check(conf, print_summary=False)
         # todo: data check for downscaling mode
 
@@ -441,3 +504,7 @@ if __name__ == "__main__":
 
     local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
     main(world_rank, world_size, conf, backend)
+
+
+if __name__ == "__main__":
+    main_cli()

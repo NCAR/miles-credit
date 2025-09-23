@@ -135,6 +135,8 @@ Inside `credit/postblock.py`, append your postblock to the list of postblock ope
 
 ```python
 from credit.skebs import SKEBS
+import logger
+from torch import nn
 
 class PostBlock(nn.Module):
     def __init__(self, post_conf):

@@ -27,3 +27,6 @@ torch_geometric
 ruff
 fsspec
 gcsfs
+metpy
+keras
+miles-guess

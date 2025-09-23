@@ -386,6 +386,7 @@ model:
             train_pattern_filter: False
 
             # data config - does the backscatter model get statics variables?
+    
             use_statics: False 
 
             # [Optional] early skebs shutoff on iteration number:
@@ -563,14 +564,51 @@ predict:
     # this batches init_datetimes together so that we are fully utilizing the GPUs 
     batch_size: 1
     # set the ensemble size for inference mode (default is 1 if not set)
-    ensemble_size: 1
-    ensemble_method:
-        type: "bred_vector" # gaussian
-    num_cycles: 3
-    perturbation_std: 0.15
-    epsilon: 0.1
-    bred_time_lag: 480
+    ensemble_size: &ensemble_size 5
 
+    ensemble:
+        noise:
+            type: "spherical"  # "gaussian", "red", "white", "pink"       
+            amplitude: 0.25 
+            smoothness: 2.0
+            length_scale: 3.0
+            padding_conf:
+                activate: True
+                mode: earth
+                pad_lat: [160, 160]
+                pad_lon: [112, 112]
+
+        bred_vector:
+            enabled: true
+            num_cycles: *ensemble_size
+            hemispheric_rescale: true
+            perturb_channel_idx: 69 # Z500. Set to None to do the full tensor
+            integration_steps: 50
+            bred_time_lag: 48
+            amplitude: 0.25
+            weights: [
+                0.4014972 , 0.39774364, 0.3792097 , 0.38236109, 0.40767634,
+                0.39912404, 0.34785054, 0.33406586, 0.33808283, 0.3481379 ,
+                0.35312887, 0.35      , 0.32093613, 0.31208973, 0.31432467,
+                0.31496031, 0.33391616, 0.35594943, 0.34669872, 0.35312887,
+                0.38288379, 0.37536649, 0.31906112, 0.3057777 , 0.30951575,
+                0.31984371, 0.32680269, 0.32649655, 0.30099834, 0.29983329,
+                0.30331502, 0.30397368, 0.40112342, 0.38820098, 0.38431758,
+                0.39051248, 0.40112342, 0.35496479, 0.33045423, 0.32893768,
+                0.31543621, 0.31953091, 0.3254228 , 0.3324154 , 0.32109189,
+                0.29664794, 0.26907248, 0.25845696, 0.23194827, 0.34102786,
+                0.29647934, 0.32848135, 0.43703547, 0.4014972 , 0.40435133,
+                0.41231056, 0.40298883, 0.39987498, 0.39987498, 0.39812058,
+                0.38470768, 0.3748333 , 0.36959437, 0.36864617, 0.28231188,
+                0.24677925, 0.31064449, 0.34029399, 0.31288976, 0.26645825,
+                0.40112342
+            ]
+
+        temporal_noise:
+            enabled: false
+            temporal_correlation: 0.95
+            perturbation_std: 0.15
+            hemispheric_rescale: true
 
     forecasts:
         type: "custom"       # keep it as "custom". See also credit.forecast

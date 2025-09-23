@@ -6,16 +6,19 @@ from properscoring import crps_ensemble
 def calculate_crps_per_channel(
     ensemble_predictions: torch.Tensor, y_true: torch.Tensor
 ) -> torch.Tensor:
-    """
-    Calculate CRPS score for each channel.
+    """Calculate CRPS score for each channel.
 
     Args:
-        ensemble_predictions: Tensor of shape [ensemble_size, 1, channels, 1, height, width]
-        y_true: Tensor of shape [1, channels, 1, height, width]
+        ensemble_predictions (torch.Tensor): Tensor of shape
+            [ensemble_size, 1, channels, 1, height, width] containing ensemble forecasts.
+        y_true (torch.Tensor): Tensor of shape [1, channels, 1, height, width] with
+            the true values.
 
     Returns:
-        Tensor of CRPS scores [channels] where each score is averaged over the ensemble
+        torch.Tensor: CRPS scores with shape [channels], where each score is
+            averaged over the ensemble.
     """
+
     # Get dimensions
     ensemble_size = ensemble_predictions.shape[0]
     num_channels = y_true.shape[1]  # Number of channels from y_true
