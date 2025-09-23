@@ -55,12 +55,13 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
 
 .. toctree::
    :maxdepth: 1
-   :caption: Adding New Models and Datasets (Coming Soon)
+   :caption: Adding New Models and Datasets
 
    Supported Model Architectures <Model_Architectures.md>
    Post Blocks <postblock.md>
    Dataset Structure <DataSets.md>
    Data Pipeline for Downscaling <downscaling-pipeline.md>
+   Prepare New Dataset <prepare_new_dataset.md>
 
 ----
 

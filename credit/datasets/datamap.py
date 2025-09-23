@@ -1,4 +1,4 @@
-'''datamap.py
+"""datamap.py
 --------------------------------------------------
 
 The xarray library can be slow on very large datasets, so we need to
@@ -34,7 +34,7 @@ values.
 
 Content:
 
-'''
+"""
 
 import os
 from typing import List, TypedDict
@@ -46,7 +46,8 @@ import numpy as np
 
 
 class VarDict(TypedDict, total=False):
-    '''a dictionary of the variables that could be in a dataset'''
+    """a dictionary of the variables that could be in a dataset"""
+
     boundary: List
     prognostic: List
     diagnostic: List
@@ -54,11 +55,11 @@ class VarDict(TypedDict, total=False):
 
 
 def rescale_minmax(x):
-    '''rescale data to [0,1].  Don't use
+    """rescale data to [0,1].  Don't use
     `sklearn.preprocessing.minmax_scale` because it requires reshaping
     the data, which is silly for a use case this simple.
 
-    '''
+    """
     x = x - np.min(x)
     xmax = np.max(x)
     if xmax > 0:
@@ -177,9 +178,10 @@ def rescale_minmax(x):
 # Normal use pattern is that all the args come from a yaml file that
 # gets read into a dictionary that is passed via **kwargs
 
+
 @dataclass
 class DataMap:
-    '''Class for reading in netCDF data from multiple files.
+    """Class for reading in netCDF data from multiple files.
 
     rootpath: pathway to the files
     glob: filename glob of netcdf files (relative to rootpath)
@@ -204,17 +206,18 @@ class DataMap:
 
     Note also that the time coordinate must be contiguous across the
     files, with no gaps or overlaps.
-    '''
-    rootpath:     str
-    glob:         str
-    dim:          str = "2D"
-    normalize:    bool = False
-    zstride:      int = 1
-    variables:    VarDict[str, List] = field(default_factory=list)
-    history_len:  int = 2
+    """
+
+    rootpath: str
+    glob: str
+    dim: str = "2D"
+    normalize: bool = False
+    zstride: int = 1
+    variables: VarDict[str, List] = field(default_factory=list)
+    history_len: int = 2
     forecast_len: int = 1
-    first_date:   str = None
-    last_date:    str = None
+    first_date: str = None
+    last_date: str = None
 
     def __post_init__(self):
         super().__init__()
@@ -227,17 +230,19 @@ class DataMap:
 
         # canonicalize capitalization
         self.dim = self.dim.upper() if len(self.dim) < 3 else self.dim.lower()
-        if self.dim not in ['static', '2D', '3D']:
+        if self.dim not in ["static", "2D", "3D"]:
             raise ValueError(f"credit.datamap: unknown dimensionality: {self.dim}")
 
         if self.normalize and self.dim != "static":
-            raise ValueError("credit.datamap: 'normalize' only applies to dim=='static'")
+            raise ValueError(
+                "credit.datamap: 'normalize' only applies to dim=='static'"
+            )
 
         if self.zstride != 1 and self.dim != "3D":
             raise ValueError("credit.datamap: zstride not applicable if dim != '3D'")
 
         # set any missing keys in VarDict
-        for use in ('boundary', 'prognostic', 'diagnostic'):
+        for use in ("boundary", "prognostic", "diagnostic"):
             if use not in self.variables:
                 self.variables[use] = ()
 
@@ -245,17 +250,23 @@ class DataMap:
             if len(glob(self.glob, root_dir=self.rootpath)) != 1:
                 raise ValueError("credit.datamap: dim='static' requires a single file")
 
-            if (len(self.variables['prognostic']) > 0 or
-                len(self.variables['diagnostic']) > 0):
+            if (
+                len(self.variables["prognostic"]) > 0
+                or len(self.variables["diagnostic"]) > 0
+            ):
                 raise ValueError("credit.datamap: static vars must be boundary vars")
 
             # if static, load data from netcdf
-            staticfile = nc.Dataset(self.rootpath + '/' + self.glob, mask_and_scale=False)
+            staticfile = nc.Dataset(
+                self.rootpath + "/" + self.glob, mask_and_scale=False
+            )
 
             # [:] forces data to load
-            staticdata = [np.array(staticfile[v][:]) for v in self.variables['boundary']]
+            staticdata = [
+                np.array(staticfile[v][:]) for v in self.variables["boundary"]
+            ]
             self.shape = staticdata[0].shape
-            self.data = dict(zip(self.variables['boundary'], staticdata))
+            self.data = dict(zip(self.variables["boundary"], staticdata))
 
             # cleanup
             staticfile.close()
@@ -321,10 +332,10 @@ class DataMap:
     # end of __post_init__
 
     def date2tindex(self, datestring):
-        '''Convert datestring (in ISO8601 YYYY-MM-DD format) to
+        """Convert datestring (in ISO8601 YYYY-MM-DD format) to
         internal time index.  Datestring can optionally also have an
         HH:MM:SS component; if absent, it defaults to 00:00:00.
-        Returns 0 if dataset is static.'''
+        Returns 0 if dataset is static."""
         if self.dim == "static":
             return 0
         # todo: check that string matches expected format
@@ -339,22 +350,21 @@ class DataMap:
         return tindex
 
     def sindex2dates(self, sindex):
-        '''Returns dates associated with sample index as a dict
+        """Returns dates associated with sample index as a dict
         containing time coordinates, units, calendar, and ISO8601
         dates from the cftime library.  Returns None if dataset is
         static.
 
-        '''
+        """
         if self.dim == "static":
             return None
-        dates = {"calendar": self.calendar,
-                 "units": self.units}
+        dates = {"calendar": self.calendar, "units": self.units}
         tindexes = [sindex + self.first + i for i in range(self.sample_len)]
         timecoords = [self.t0 + t * self.dt for t in tindexes]
         dates["time"] = timecoords
         cfdates = [str(cf.num2date(t, self.units, self.calendar)) for t in timecoords]
         dates["cf_datetimes"] = cfdates
-        return(dates)
+        return dates
 
     def __len__(self):
         if self.dim == "static":
@@ -365,7 +375,7 @@ class DataMap:
         if self.dim == "static":
             return {"boundary": self.data}
 
-        if index < 0 or index > self.length-1:
+        if index < 0 or index > self.length - 1:
             raise IndexError()
 
         start = index + self.first + 1
@@ -377,13 +387,13 @@ class DataMap:
         # get segment (which file) and subindex (within file) for start & finish.
         # subindexes are all negative, but that works fine & makes math simpler
 
-        startseg =  np.searchsorted(self.ends, start)
+        startseg = np.searchsorted(self.ends, start)
         finishseg = np.searchsorted(self.ends, finish)
-        startsub =  start  - (self.ends[startseg] + 1)
+        startsub = start - (self.ends[startseg] + 1)
         finishsub = finish - (self.ends[finishseg])
         if finishsub == 0:
-            finishsub = None    # needed to get the last element in the array
-                                # x[-1:0] gives you an empty list
+            finishsub = None  # needed to get the last element in the array
+            # x[-1:0] gives you an empty list
 
         if startseg == finishseg:
             result = self.read(startseg, startsub, finishsub)
@@ -409,14 +419,15 @@ class DataMap:
 
     @mode.setter
     def mode(self, mode: str):
-        if mode not in ('train', 'init', 'infer'):
+        if mode not in ("train", "init", "infer"):
             raise ValueError("invalid DataMap mode")
         self._mode = mode
 
     def read(self, segment, start, finish):
-        '''open file & read data from start to finish for needed variables'''
+        """open file & read data from start to finish for needed variables"""
 
         # Note: static DataMaps never call read; they short-circuit in getitem
+        uses = ()
         match self.mode:
             case "train":
                 uses = ("boundary", "prognostic", "diagnostic")
@@ -432,8 +443,10 @@ class DataMap:
         for use in uses:
             data[use] = {}
             for var in self.variables[use]:
-                if self.dim == '3D' and self.zstride != 1:
-                    data[use][var] = np.array(ds[var][start:finish, ::self.zstride, ...])
+                if self.dim == "3D" and self.zstride != 1:
+                    data[use][var] = np.array(
+                        ds[var][start:finish, :: self.zstride, ...]
+                    )
                 else:
                     data[use][var] = np.array(ds[var][start:finish, ...])
         ds.close()
