@@ -128,53 +128,67 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        data,
-        prognostic_vars,
-        boundary_vars,
-        wet,
-        wet_surface,
-        input_length=2,   # number of input timesteps
-        output_length=1,  # number of output timesteps  
-        forecast_len=0,
-        transform=None,
+        conf,
         seed=42,
         rank=0,
         world_size=1,
-        skip_periods=None,
         batch_size=1,
         shuffle=True,
     ):
         """
         Parameters:
-        - input_length: number of input timesteps (equivalent to hist + 1)
-        - output_length: number of output timesteps to predict
-        - forecast_len: number of forecast steps during rollout training
+        
         """
         
-        self.input_length = input_length
-        self.output_length = output_length
-        self.forecast_len = forecast_len
-        self.transform = transform
+        self.input_length = conf["data"]["input_length"]
+        self.output_length = conf["data"]["output_length"]
+        self.forecast_len = conf["data"]["forecast_len"]
         self.seed = seed
         self.rank = rank
         self.world_size = world_size
         self.shuffle = shuffle
-        self.batch_size = batch_size
-
-        # skip periods
-        self.skip_periods = skip_periods if skip_periods is not None else 1
-
-        # total sequence length needed
-        self.total_seq_len = self.input_length + self.output_length
+        self.batch_size = batch_size 
 
         # set random seed
         self.rng = np.random.default_rng(seed=seed)
+
+        # Construct full paths
+        data_path = conf["data"]["data_path"]
+        data_means_path = conf["data"]["mean_path"]
+        data_stds_path = conf["data"]["std_path"]
+
+        # Open the zarr/dataset files
+        data_xr = xr.open_zarr(data_path, chunks={})
+        data_mean_xr = xr.open_zarr(data_means_path, chunks={})
+        data_std_xr = xr.open_zarr(data_stds_path, chunks={})
+
+        try:
+            # whatever call initializes TensorMap
+            TensorMap.init_instance(
+                conf["data"]["prognostic_vars_key"], conf["data"]["boundary_vars_key"]
+            )
+        except ValueError as e:
+            if "TensorMap already initialized" in str(e):
+                TensorMap.get_instance()
+            else:
+                raise
+
+        #   Validate data (assuming this function is available from your utils)
+        data, data_mean, data_std = validate_data(data_xr, data_mean_xr, data_std_xr)
+
+        # Get prognostic and boundary variables from your constants file
+        prognostic_vars = PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]]
+        boundary_vars = BOUND_VARS_MAP[conf["data"]["boundary_vars_key"]]
 
         # Store ocean data
         self._prognostic_data = data[prognostic_vars]
         self._boundary_data = data[boundary_vars]
         self.num_prognostic_vars = len(prognostic_vars)
         self.num_boundary_vars = len(boundary_vars)
+
+        # Extract wet masks
+        ## Set original Samudra history = 0 as we do things step-by-step
+        wet, wet_surface = extract_wet_mask(data_xr, prognostic_vars, 0)
         
         self.wet = wet.bool()
         self.wet_surface = wet_surface.bool()
@@ -185,7 +199,7 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
             data_std,
             prognostic_vars,
             boundary_vars,
-            wet_without_hist,
+            wet,
         )
         self._prognostic_data = self.normalize.normalize_prognostics(self._prognostic_data)
         self._boundary_data = self.normalize.normalize_boundary(self._boundary_data)
@@ -459,46 +473,32 @@ if __name__ == "__main__":
     with open("/glade/derecho/scratch/schreck/samudra/mom.yml", "r") as f:
         conf = yaml.safe_load(f)
 
-    input_length = conf["data"]["input_length"]
-    output_length = conf["data"]["output_length"]
-    batch_size = 1
-    forecast_len = conf["data"]["forecast_len"]
-
     # Construct full paths
-    data_path = conf["data"]["data_path"]
-    data_means_path = conf["data"]["mean_path"]
-    data_stds_path = conf["data"]["std_path"]
+    # data_path = conf["data"]["data_path"]
+    # data_means_path = conf["data"]["mean_path"]
+    # data_stds_path = conf["data"]["std_path"]
 
-    # Open the zarr/dataset files
-    data_xr = xr.open_zarr(data_path, chunks={})
-    data_mean_xr = xr.open_zarr(data_means_path, chunks={})
-    data_std_xr = xr.open_zarr(data_stds_path, chunks={})
+    # # Open the zarr/dataset files
+    # data_xr = xr.open_zarr(data_path, chunks={})
+    # data_mean_xr = xr.open_zarr(data_means_path, chunks={})
+    # data_std_xr = xr.open_zarr(data_stds_path, chunks={})
 
-    tensor_map = TensorMap.init_instance(
-        conf["data"]["prognostic_vars_key"], conf["data"]["boundary_vars_key"]
-    )
-    #   Validate data (assuming this function is available from your utils)
-    data, data_mean, data_std = validate_data(data_xr, data_mean_xr, data_std_xr)
+    # tensor_map = TensorMap.init_instance(
+    #     conf["data"]["prognostic_vars_key"], conf["data"]["boundary_vars_key"]
+    # )
+    # #   Validate data (assuming this function is available from your utils)
+    # data, data_mean, data_std = validate_data(data_xr, data_mean_xr, data_std_xr)
 
-    # Get prognostic and boundary variables from your constants file
-    prognostic_vars = PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]]
-    boundary_vars = BOUND_VARS_MAP[conf["data"]["boundary_vars_key"]]
+    # # Get prognostic and boundary variables from your constants file
+    # prognostic_vars = PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]]
+    # boundary_vars = BOUND_VARS_MAP[conf["data"]["boundary_vars_key"]]
 
-    # Extract wet masks
-    wet, wet_surface = extract_wet_mask(data_xr, prognostic_vars, input_length)
-    wet_without_hist, _ = extract_wet_mask(data_xr, prognostic_vars, 0)
+    # # Extract wet masks
+    # ## Set original Samudra history = 0 as we do things step-by-step
+    # wet, wet_surface = extract_wet_mask(data_xr, prognostic_vars, 0)
+    # wet_without_hist, _ = extract_wet_mask(data_xr, prognostic_vars, 0)
 
-    dataset = Ocean_MultiStep_Batcher(
-        data=data,
-        prognostic_vars=prognostic_vars,
-        boundary_vars=boundary_vars,
-        wet=wet,
-        wet_surface=wet_surface,
-        input_length=input_length,
-        output_length=output_length,
-        batch_size=batch_size,
-        forecast_len=forecast_len
-    )
+    dataset = Ocean_MultiStep_Batcher(conf=conf, batch_size=1)
     dataset.set_epoch(0)
 
     # Get first batch
