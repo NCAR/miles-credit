@@ -6,7 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "miles-credit"
 authors = [{name = "NCAR Machine Integration and Learning for Earth Systems (MILES)", email = "miles@ucar.edu"}]
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dynamic = ["version"]
 requires-python = ">=3.10"
 dependencies = [
