@@ -6,6 +6,9 @@ import logging
 import math 
 import numpy as np
 from torch.utils.data import DistributedSampler
+from pathlib import Path
+import cftime
+import pandas as pd
 
 
 class StandardScaler:
@@ -133,7 +136,7 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
         rank=0,
         world_size=1,
         batch_size=1,
-        shuffle=True,
+        shuffle=True
     ):
         """
         Parameters:
@@ -176,6 +179,19 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
         #   Validate data (assuming this function is available from your utils)
         data, data_mean, data_std = validate_data(data_xr, data_mean_xr, data_std_xr)
 
+        # Subset by time range if provided
+        # Convert config strings to cftime.DatetimeJulian
+        if shuffle:
+            start, end = conf["train_years"]
+        else:
+            start, end = conf["valid_years"]
+
+        start_cf = cftime.DatetimeJulian(*pd.to_datetime(start).timetuple()[:6])
+        end_cf   = cftime.DatetimeJulian(*pd.to_datetime(end).timetuple()[:6])
+
+        # Subset data using cftime-compatible times
+        data = data.sel(time=slice(start_cf, end_cf))
+ 
         # Get prognostic and boundary variables from your constants file
         prognostic_vars = PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]]
         boundary_vars = BOUND_VARS_MAP[conf["data"]["boundary_vars_key"]]
@@ -465,6 +481,220 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
         }
         
         return sample
+
+
+class Ocean_Tensor_Batcher(torch.utils.data.Dataset):
+    """
+    Ocean dataset that handles both single-step and multi-step autoregressive training.
+    Loads cached .pt samples while preserving autoregressive logic.
+    """
+
+    def __init__(
+        self,
+        conf,
+        seed=42,
+        rank=0,
+        world_size=1,
+        batch_size=1,
+        shuffle=True,
+    ):
+
+        # Construct full paths
+        data_path = conf["data"]["data_path"]
+        data_means_path = conf["data"]["mean_path"]
+        data_stds_path = conf["data"]["std_path"]
+
+        # Open the zarr/dataset files
+        data_xr = xr.open_zarr(data_path, chunks={})
+        data_mean_xr = xr.open_zarr(data_means_path, chunks={})
+        data_std_xr = xr.open_zarr(data_stds_path, chunks={})
+
+        try:
+            # whatever call initializes TensorMap
+            TensorMap.init_instance(
+                conf["data"]["prognostic_vars_key"], conf["data"]["boundary_vars_key"]
+            )
+        except ValueError as e:
+            if "TensorMap already initialized" in str(e):
+                TensorMap.get_instance()
+            else:
+                raise
+
+        #   Validate data (assuming this function is available from your utils)
+        data, _, _ = validate_data(data_xr, data_mean_xr, data_std_xr)
+
+        # Get prognostic and boundary variables from your constants file
+        prognostic_vars = PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]]
+
+        # Extract wet masks
+        ## Set original Samudra history = 0 as we do things step-by-step
+        wet, wet_surface = extract_wet_mask(data_xr, prognostic_vars, 0)
+
+        self.wet = wet.bool()
+        self.wet_surface = wet_surface.bool()
+
+        # Regular arguments
+        self.seed = seed
+        self.rank = rank
+        self.world_size = world_size
+        self.shuffle = shuffle
+        self.batch_size = batch_size
+
+        # Add these missing lines:
+        self.input_length = conf["data"]["input_length"]
+        self.output_length = conf["data"]["output_length"]
+        self.forecast_len = conf["data"]["forecast_len"]
+
+        # Cached samples directory
+        self.samples_dir = Path(conf["data"]["data_path"]).parent / "cached" / "samples"
+        all_files = sorted(list(self.samples_dir.glob("sample_*.pt")))
+
+        train_years = conf["data"]["train_years"]
+        valid_years = conf["data"]["valid_years"]
+
+        # Convert config strings to cftime.DatetimeJulian
+        train_start = cftime.DatetimeJulian(*pd.to_datetime(train_years[0]).timetuple()[:6])
+        train_end   = cftime.DatetimeJulian(*pd.to_datetime(train_years[1]).timetuple()[:6])
+        valid_start = cftime.DatetimeJulian(*pd.to_datetime(valid_years[0]).timetuple()[:6])
+        valid_end   = cftime.DatetimeJulian(*pd.to_datetime(valid_years[1]).timetuple()[:6])
+
+        # Map timesteps to indices
+        time_index = data.time.values  # still cftime.DatetimeJulian
+        train_mask = (time_index >= train_start) & (time_index <= train_end)
+        valid_mask = (time_index > valid_start) & (time_index <= valid_end)
+
+        train_indices = np.where(train_mask)[0]
+        valid_indices = np.where(valid_mask)[0]
+
+        all_files = sorted(list(self.samples_dir.glob("sample_*.pt")))
+
+        if shuffle:
+            self.sample_files = [all_files[i] for i in train_indices]
+        else:
+            self.sample_files = [all_files[i] for i in valid_indices]
+
+        self.size = len(self.sample_files)
+
+        # Use DistributedSampler for index management
+        self.sampler = DistributedSampler(
+            self, num_replicas=world_size, rank=rank, shuffle=shuffle, seed=seed, drop_last=True
+        )
+
+        # Initialize batch tracking
+        self.batch_indices = None
+        self.time_steps = None
+        self.forecast_step_counts = None
+        self.current_epoch = None
+        self.sampler.set_epoch(0)
+        self.batch_indices = list(self.sampler)
+        if len(self.batch_indices) < batch_size:
+            self.batch_size = len(self.batch_indices)
+
+    def initialize_batch(self):
+        if not hasattr(self, "batch_call_count"):
+            self.batch_call_count = 0
+
+        if self.current_epoch is None:
+            logging.warning("You must first set the epoch number using set_epoch method.")
+
+        total_indices = len(self.batch_indices)
+        start = self.batch_call_count * self.batch_size
+        end = start + self.batch_size
+
+        if not self.shuffle:
+            if end > total_indices:
+                start = start % total_indices
+                end = min(start + self.batch_size, total_indices)
+            indices = self.batch_indices[start:end]
+        else:
+            if end > total_indices:
+                indices = self.batch_indices[start:] + self.batch_indices[:(end % total_indices)]
+            else:
+                indices = self.batch_indices[start:end]
+
+        self.batch_call_count += 1
+        if start + self.batch_size >= total_indices:
+            self.batch_call_count = 0
+
+        self.current_batch_indices = list(indices)
+        self.time_steps = [0 for _ in self.current_batch_indices]
+        self.forecast_step_counts = [0 for _ in self.current_batch_indices]
+
+    def __len__(self):
+        return self.size
+
+    def set_epoch(self, epoch):
+        self.current_epoch = epoch
+        self.sampler.set_epoch(epoch)
+        self.batch_indices = list(self.sampler)
+        self.batch_call_count = 0
+        self.initialize_batch()
+
+    def batches_per_epoch(self):
+        return math.ceil(len(list(self.batch_indices)) / self.batch_size)
+
+    def _get_batch_samples(self, sample_indices):
+        """
+        Load multiple cached .pt samples at once.
+        """
+        input_list = []
+        target_list = []
+        input_datetime_list = []
+        target_datetime_list = []
+
+        for idx in sample_indices:
+            sample = self._get_ocean_sample(idx)
+            input_list.append(sample["input"])
+            target_list.append(sample["target"])
+            input_datetime_list.append(sample["input_datetime"])
+            target_datetime_list.append(sample["target_datetime"])
+
+        batch = {
+            "input": torch.stack(input_list, dim=0).float(),
+            "target": torch.stack(target_list, dim=0).float(),
+            "input_datetime": torch.stack(input_datetime_list, dim=0).long(),
+            "target_datetime": torch.stack(target_datetime_list, dim=0).long(),
+            "index": torch.tensor(sample_indices, dtype=torch.int64).unsqueeze(-1),
+        }
+        return batch
+
+    def __getitem__(self, _):
+        """
+        Returns batch with tensors shaped (batch, channels, time, lat, lon)
+        using autoregressive logic.
+        """
+        if self.forecast_step_counts[0] == self.forecast_len:
+            self.initialize_batch()
+
+        sample_indices = []
+        for k, idx in enumerate(self.current_batch_indices):
+            sample_idx = idx + self.time_steps[k]
+            sample_indices.append(sample_idx)
+
+        batch = self._get_batch_samples(sample_indices)
+
+        for k in range(len(self.current_batch_indices)):
+            self.time_steps[k] += 1
+            self.forecast_step_counts[k] += 1
+
+        batch["forecast_step"] = torch.tensor([self.forecast_step_counts[0]])
+        batch["stop_forecast"] = batch["forecast_step"] == self.forecast_len
+
+        return batch
+
+    def _get_ocean_sample(self, idx):
+        """
+        Load a cached sample from disk.
+        """
+        sample_file = self.samples_dir / f"sample_{idx:06d}.pt"
+        sample = torch.load(sample_file, map_location="cpu")
+        return {
+            "input": sample["input"],
+            "target": sample["target"],
+            "input_datetime": sample["input_datetime"],
+            "target_datetime": sample["target_datetime"],
+        }
+
 
 if __name__ == "__main__":
     import yaml

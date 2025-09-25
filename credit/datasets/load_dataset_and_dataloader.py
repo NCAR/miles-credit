@@ -8,6 +8,7 @@ from credit.datasets.era5_multistep_batcher import (
     MultiprocessingBatcher,
     MultiprocessingBatcherPrefetch,
 )
+from credit.datasets.om4_multistep_batcher import Ocean_MultiStep_Batcher, Ocean_Tensor_Batcher
 from credit.datasets import setup_data_loading
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -64,6 +65,13 @@ class BatchForecastLenSampler:
         """
         return self.len
 
+
+class BatchForecastLenSamplerSamudra(BatchForecastLenSampler):
+    def __init__(self, dataset):
+        super().__init__(dataset)
+        # override forecast_len to remove +1
+        self.forecast_len = dataset.forecast_len
+        self.len = self.dataset.batches_per_epoch() * self.forecast_len
 
 class BatchForecastLenDataLoader:
     def __init__(self, dataset):
@@ -147,11 +155,7 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     Returns:
         Dataset: The loaded dataset.
     """
-    try:
-        data_config = setup_data_loading(conf)
-    except KeyError:
-        logging.warning("You must run credit.parser.credit_main_parser(conf) before loading data. Exiting.")
-        sys.exit()
+
     seed = conf["seed"]
     shuffle = is_train
     training_type = "train" if is_train else "valid"
@@ -164,14 +168,24 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     prefetch_factor = conf["trainer"].get(
         "prefetch_factor",
     )
-    history_len = data_config["history_len"] if is_train else data_config["valid_history_len"]
-    forecast_len = data_config["forecast_len"] if is_train else data_config["valid_forecast_len"]
+    
     if prefetch_factor is None:
         logging.warning(
             "prefetch_factor not found in config under 'trainer'. Using default value of 4. "
             "Please specify prefetch_factor in the 'trainer' section of your config."
         )
         prefetch_factor = 4
+
+    # This piece allow to overtide some of the baked in ERA structure. In this case we are loading a MOM6 dataset instead
+    if dataset_type not in ("Ocean_MultiStep_Batcher", "Ocean_Tensor_Batcher"):
+        try:
+            data_config = setup_data_loading(conf)
+        except KeyError:
+            logging.warning("You must run credit.parser.credit_main_parser(conf) before loading data. Exiting.")
+            sys.exit()
+        
+        history_len = data_config["history_len"] if is_train else data_config["valid_history_len"]
+        forecast_len = data_config["forecast_len"] if is_train else data_config["valid_forecast_len"]
 
     # If loss is CRPS, we need all samplers-dataloaders to return the same (x, y)
     # pair as the CDF is computed across GPUs. Randomness is handled by adding noise
@@ -314,12 +328,37 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
             num_workers=num_workers,
             prefetch_factor=prefetch_factor,
         )
+    elif dataset_type == "Ocean_MultiStep_Batcher":
+        dataset = Ocean_MultiStep_Batcher(
+            conf,
+            seed=seed,
+            rank=rank,
+            world_size=world_size,
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
+    elif dataset_type == "Ocean_Tensor_Batcher":
+        dataset = Ocean_Tensor_Batcher(
+            conf,
+            seed=seed,
+            rank=rank,
+            world_size=world_size,
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
+    
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
     train_flag = "training" if is_train else "validation"
 
-    logging.info(f"Loaded a {train_flag} {dataset_type} dataset (forecast length = {data_config['forecast_len'] + 1})")
+    # Logger message -- make sure the reported forecast length is human-readble
+    if dataset_type in ("Ocean_MultiStep_Batcher", "Ocean_Tensor_Batcher"):
+        forecast_len_actual = conf["data"]["forecast_len"] 
+    else:
+        forecast_len_actual = data_config['forecast_len'] + 1
+    
+    logging.info(f"Loaded a {train_flag} {dataset_type} dataset (forecast length = {forecast_len_actual})")
 
     return dataset
 
@@ -428,6 +467,19 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
             collate_fn=collate_fn,
             prefetch_factor=prefetch_factor,
             sampler=BatchForecastLenSampler(dataset),  # Ensure len is correct
+        )
+    elif type(dataset) in (ERA5_MultiStep_Batcher, Ocean_MultiStep_Batcher, Ocean_Tensor_Batcher):
+        if type(dataset) in (Ocean_MultiStep_Batcher, Ocean_Tensor_Batcher):
+            sampler = BatchForecastLenSamplerSamudra(dataset)
+        else:
+            sampler = BatchForecastLenSampler(dataset)
+
+        dataloader = DataLoader(
+            dataset,
+            num_workers=1,  # Must be 1 to use prefetching
+            collate_fn=collate_fn,
+            prefetch_factor=prefetch_factor,
+            sampler=sampler,  # Ensure len is correct
         )
     elif type(dataset) is MultiprocessingBatcher:
         dataloader = BatchForecastLenDataLoader(dataset)
