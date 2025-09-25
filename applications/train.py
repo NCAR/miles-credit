@@ -466,11 +466,12 @@ def main_cli():
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     # ======================================================== #
-    # handling config args
-    conf = credit_main_parser(
-        conf, parse_training=True, parse_predict=False, print_summary=False
-    )
-    training_data_check(conf, print_summary=False)
+    # # handling config args
+    if conf["data"]["dataset_type"] not in ("Ocean_MultiStep_Batcher", "Ocean_Tensor_Batcher"):
+        conf = credit_main_parser(
+            conf, parse_training=True, parse_predict=False, print_summary=False
+        )
+        training_data_check(conf, print_summary=False)
     # ======================================================== #
 
     # Create directories if they do not exist and copy yml file
