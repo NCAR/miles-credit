@@ -6,18 +6,20 @@ import logging
 # Import model classes
 from credit.models.crossformer import CrossFormer
 from credit.models.unet import SegmentationModel
-from credit.models.unet404 import SegmentationModel404
 from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
 from credit.models.graph import GraphResTransfGRU
 from credit.models.debugger_model import DebuggerModel
 from credit.models.crossformer_ensemble import CrossFormerWithNoise
+from credit.models.crossformer_downscaling import DownscalingCrossFormer
+from credit.models.unet_downscaling import DownscalingSegmentationModel
 from credit.models.crossformer_diffusion import CrossFormerDiffusion
 from credit.models.unet_diffusion import UnetDiffusion
 from credit.diffusion import ModifiedGaussianDiffusion
 
 from credit.models.swin_wrf import WRF_Tansformer
 from credit.models.dscale_wrf import Dscale_Tansformer
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +42,14 @@ model_types = {
         "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
     ),
     "unet": (SegmentationModel, "Loading a unet model"),
-    "unet404": (SegmentationModel404, "Loading unet404 model"),
     "fuxi": (Fuxi, "Loading Fuxi model"),
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
     "wrf": (WRF_Tansformer, "Loading WRF Transformer"),
     "dscale": (Dscale_Tansformer, "Loading downscaling Transformer"),
+    "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
+    "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
 }
 
 

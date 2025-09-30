@@ -96,44 +96,28 @@ pbs:
 #PBS -r n
 
 # Load modules
-module purge
-module load ncarenv/23.09
-module reset
-module load gcc craype cray-mpich cuda cudnn/8.8.1.3-12 conda
+module load ncarenv/24.12 gcc/12.4.0 ncarcompilers cray-mpich/8.1.29 cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
 conda activate credit-derecho
 
 # Export environment variables
 export LSCRATCH=/glade/derecho/scratch/schreck/
 export LOGLEVEL=INFO
-export NCCL_DEBUG=INFO
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-export NCCL_SOCKET_IFNAME=hsn
-export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
-export MPICH_OFI_NIC_POLICY=GPU
-export MPICH_GPU_SUPPORT_ENABLED=1
-export NCCL_IB_DISABLE=1
-export NCCL_CROSS_NIC=1
-export NCCL_NCHANNELS_PER_NET_PEER=4
-export MPICH_RDMA_ENABLED_CUDA=1
+# NCCL environment variables:
+#  default NCCL and LibFabric environment variables are set by
+#  the conda envionment upon activation, we will simply query them here.
+#
+#  It is good practice to make sure NCCL_NET is explicitly set to "AWS Libfabric"
+#  this will cause the application to fail if it cannot locate the requested
+#  network plugin, otherwise it is likely to fall back to a very slow and problematic
+#  communication protocol.
 export NCCL_NET="AWS Libfabric"
-export NCCL_NET_GDR_LEVEL=PBH
-export FI_CXI_DISABLE_HOST_REGISTER=1
-export FI_CXI_OPTIMIZED_MRS=false
-export FI_MR_CACHE_MONITOR=userfaultfd
-export FI_CXI_DEFAULT_CQ_SIZE=131072
-
-# Log GPU and node details
-echo "Number of nodes: 1"
-echo "Number of GPUs per node: 32"
-echo "Total number of GPUs: 4"
-
-# Find head node's IP
-nodes=( $(cat $PBS_NODEFILE) )
-head_node=${nodes[0]}
-head_node_ip=$(ssh $head_node hostname -i | awk '{print $1}')
+#  increased logging level for NCCL events (optional)
+export NCCL_DEBUG=INFO
+# print any NCCL/LibFabric related environment variables
+env | egrep "NCCL|FI_" | sort -u
 
 # Launch training
-MASTER_ADDR=$head_node_ip MASTER_PORT=1234 mpiexec -n 4 --ppn 4 --cpu-bind none \
+mpiexec --cpu-bind none --no-transfer \
     python applications/train.py -c model.yml --backend nccl
 ```
 
@@ -180,7 +164,7 @@ conda activate credit
 torchrun applications/train.py -c model.yml
 ```
 
-and note that the ```torchrun``` command is used rather than MPIs. For now MPIs are not supported on Casper but that will change in a future release. But to get torch to run in distributed mode (either DDP or FSDP) we use torchrun to faciliate that (rather than setting that up manuanlly in train.py). 
+and note that the ```torchrun``` command is used rather than MPIs. For now MPIs are not supported on Casper but that will change in a future release. But to get torch to run in distributed mode (either DDP or FSDP) we use torchrun to faciliate that (rather than setting that up manuanlly in train.py).
 
 ### Key Differences
 

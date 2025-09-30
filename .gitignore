@@ -133,6 +133,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+*-env/
+credit-derecho-tmp-*.yml
 
 # Spyder project settings
 .spyderproject

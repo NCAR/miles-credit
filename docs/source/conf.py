@@ -1,3 +1,4 @@
+from importlib.metadata import version as get_version
 # Configuration file for the Sphinx documentation builder.
 #
 # For the full list of built-in configuration values, see the documentation:
@@ -9,7 +10,8 @@
 project = "miles-credit"
 copyright = "2024, University Corporation for Atmospheric Research"
 author = "University Corporation for Atmospheric Research"
-release = "2025.2.0"
+release = get_version("miles-credit")
+version = ".".join(release.split(".")[:3])
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

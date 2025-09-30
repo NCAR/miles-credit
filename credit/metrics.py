@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from datetime import datetime
-from credit.loss import latitude_weights
+from credit.losses.weighted_loss import latitude_weights
 
 
 class LatWeightedMetrics:
