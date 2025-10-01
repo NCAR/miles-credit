@@ -202,7 +202,7 @@ class Trainer(BaseTrainer):
                 # add forcing and static variables (regardless of fcst hours)
                 if forecast_step > 1:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = batch["input"][:, -len(conf["data"]["boundary_variables"]):].to(self.device)
+                    x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]):].to(self.device)
 
                     # ---------------- ensemble ----------------- #
                     # ensemble x_forcing_batch for concat. see above for explanation of code
@@ -357,7 +357,7 @@ class Trainer(BaseTrainer):
             if distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
-            results_dict["train_forecast_len"].append(forecast_length + 1)
+            results_dict["train_forecast_len"].append(forecast_length)
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(
@@ -420,6 +420,8 @@ class Trainer(BaseTrainer):
 
         # number of diagnostic variables
         varnum_diag = len(conf["data"]["diagnostic_variables"])
+        input_length = conf["data"]["input_length"]
+        output_length = conf["data"]["output_length"]
 
         # number of dynamic forcing + forcing + static
         # static_dim_size = (
@@ -527,12 +529,12 @@ class Trainer(BaseTrainer):
                             x = torch.repeat_interleave(x, ensemble_size, 0)
 
                     # add forcing and static variables (regardless of fcst hours)
-                    if "x_forcing_static" in batch:
+                    else:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        x_forcing_batch = batch["input"][:, -len(conf["data"]["boundary_variables"]):].to(self.device)
+                        x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]):].to(self.device)
                         # ---------------- ensemble ----------------- #
                         # ensemble x_forcing_batch for concat. see above for explanation of code
-                        if ensemble_size > 1:
+                        if ensemble_size > 1: 
                             x_forcing_batch = torch.repeat_interleave(
                                 x_forcing_batch, ensemble_size, 0
                             )
@@ -634,7 +636,9 @@ class Trainer(BaseTrainer):
                             x = y_pred.detach()
                     else:
                         # multi-step input
-                        x_detach = x[:, :, 1:, ...].detach()  # drop first timestep
+                        ### This is not quite right for general use. Its essentially two-in one-out assumption
+                        length = output_length if output_length > input_length else input_length
+                        x_detach = x[:, :, length:, ...].detach()  # drop first timestep
                         if "y_diag" in batch:
                             x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
                         else:

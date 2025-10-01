@@ -12,10 +12,10 @@ data:
 
     # Experiment keys per Samudra setup
     prognostic_vars_key: 'thermo_dynamic'
-    boundary_vars_key: 'hfds_anom'
+    dynamic_forcing_key: 'hfds_anom'
     
     # boundary/forcing variables (4 channels)
-    boundary_variables: ['tauuo','tauvo','hfds','hfds_anomalies']
+    dynamic_forcing_variables: ['tauuo','tauvo','hfds','hfds_anomalies']
     
     # wet masks (from your existing data loading)
     wet_mask_save_path: '/glade/derecho/scratch/schreck/samudra/data/data.zarr'  # extract from data

@@ -28,7 +28,7 @@ class WetMaskBlock(nn.Module):
         try:
             # whatever call initializes TensorMap
             TensorMap.init_instance(
-                conf["data"]["prognostic_vars_key"], conf["data"]["boundary_vars_key"]
+                conf["data"]["prognostic_vars_key"], conf["data"]["dynamic_forcing_vars_key"]
             )
         except ValueError as e:
             if "TensorMap already initialized" in str(e):

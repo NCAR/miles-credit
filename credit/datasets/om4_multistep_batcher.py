@@ -168,7 +168,7 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
         try:
             # whatever call initializes TensorMap
             TensorMap.init_instance(
-                conf["data"]["prognostic_vars_key"], conf["data"]["boundary_vars_key"]
+                conf["data"]["prognostic_vars_key"], conf["data"]["dynamic_forcing_vars_key"]
             )
         except ValueError as e:
             if "TensorMap already initialized" in str(e):
@@ -194,7 +194,7 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
  
         # Get prognostic and boundary variables from your constants file
         prognostic_vars = PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]]
-        boundary_vars = BOUND_VARS_MAP[conf["data"]["boundary_vars_key"]]
+        boundary_vars = BOUND_VARS_MAP[conf["data"]["dynamic_forcing_vars_key"]]
 
         # Store ocean data
         self._prognostic_data = data[prognostic_vars]
@@ -512,7 +512,7 @@ class Ocean_Tensor_Batcher(torch.utils.data.Dataset):
         try:
             # whatever call initializes TensorMap
             TensorMap.init_instance(
-                conf["data"]["prognostic_vars_key"], conf["data"]["boundary_vars_key"]
+                conf["data"]["prognostic_vars_key"], conf["data"]["dynamic_forcing_vars_key"]
             )
         except ValueError as e:
             if "TensorMap already initialized" in str(e):
@@ -714,14 +714,14 @@ if __name__ == "__main__":
     # data_std_xr = xr.open_zarr(data_stds_path, chunks={})
 
     # tensor_map = TensorMap.init_instance(
-    #     conf["data"]["prognostic_vars_key"], conf["data"]["boundary_vars_key"]
+    #     conf["data"]["prognostic_vars_key"], conf["data"]["dynamic_forcing_vars_key"]
     # )
     # #   Validate data (assuming this function is available from your utils)
     # data, data_mean, data_std = validate_data(data_xr, data_mean_xr, data_std_xr)
 
     # # Get prognostic and boundary variables from your constants file
     # prognostic_vars = PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]]
-    # boundary_vars = BOUND_VARS_MAP[conf["data"]["boundary_vars_key"]]
+    # boundary_vars = BOUND_VARS_MAP[conf["data"]["dynamic_forcing_vars_key"]]
 
     # # Extract wet masks
     # ## Set original Samudra history = 0 as we do things step-by-step
