@@ -146,7 +146,7 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
         
         self.input_length = conf["data"]["input_length"]
         self.output_length = conf["data"]["output_length"]
-        self.forecast_len = conf["data"]["forecast_len"]
+        self.forecast_len = conf["data"]["forecast_len"] if shuffle else conf["data"]["valid_forecast_len"]
         self.seed = seed
         self.rank = rank
         self.world_size = world_size
@@ -544,7 +544,7 @@ class Ocean_Tensor_Batcher(torch.utils.data.Dataset):
         # Add these missing lines:
         self.input_length = conf["data"]["input_length"]
         self.output_length = conf["data"]["output_length"]
-        self.forecast_len = conf["data"]["forecast_len"]
+        self.forecast_len = conf["data"]["forecast_len"] if shuffle else conf["data"]["valid_forecast_len"]
 
         # Cached samples directory
         self.samples_dir = Path(conf["data"]["data_path"]).parent / "cached" / "samples"
