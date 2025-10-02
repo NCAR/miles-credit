@@ -195,9 +195,6 @@ def predict(rank, world_size, conf, p):
         + len(conf["data"].get("static_variables", []))
     )
 
-    # Multiprocessing prefetch factor
-    prefetch_factor = conf["trainer"].get("prefetch_factor", 4)
-
     # postblock opts outside of model
     post_conf = conf["model"].get("post_conf", {"activate": False})
     flag_mass_conserve = False
@@ -256,7 +253,7 @@ def predict(rank, world_size, conf, p):
 
     data_loader = DataLoader(
         dataset,
-        num_workers=0,  # Must be 1 to use prefetching
+        num_workers=0, # Do not try to mix mp as Pool from main is used here for data processing
         collate_fn=collate_fn,
         sampler=sampler,  # Ensure len is correct
     )
