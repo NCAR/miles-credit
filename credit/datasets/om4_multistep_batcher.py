@@ -73,9 +73,10 @@ class StandardScaler:
         if data.ndim == 4:  # (B, C, H, W)
             tensor_mean = tensor_mean.reshape([1, -1, 1, 1])
             tensor_std = tensor_std.reshape([1, -1, 1, 1])
-        elif data.ndim == 5:  # (B, T, C, H, W)
-            tensor_mean = tensor_mean.reshape([1, 1, -1, 1, 1])
-            tensor_std = tensor_std.reshape([1, 1, -1, 1, 1])
+        elif data.ndim == 5:  # (B, C, T, H, W)
+            tensor_mean = tensor_mean.reshape([1, data.shape[1], 1, 1, 1])
+            tensor_std  = tensor_std.reshape([1, data.shape[1], 1, 1, 1])
+
 
         norm = (data - tensor_mean) / tensor_std
         if fill_nan:
@@ -91,15 +92,15 @@ class StandardScaler:
             assert data.shape[1] == self._prognostic_mean_np.shape[0]
             tensor_mean = tensor_mean.reshape([1, -1, 1, 1])
             tensor_std = tensor_std.reshape([1, -1, 1, 1])
-        elif data.ndim == 5:  # (B, T, C, H, W)
-            assert data.shape[2] == self._prognostic_mean_np.shape[0]
-            tensor_mean = tensor_mean.reshape([1, 1, -1, 1, 1])
-            tensor_std = tensor_std.reshape([1, 1, -1, 1, 1])
+        elif data.ndim == 5:  # (B, C, T, H, W)
+            assert data.shape[1] == self._prognostic_mean_np.shape[0]
+            tensor_mean = tensor_mean.reshape([1, data.shape[1], 1, 1, 1])
+            tensor_std  = tensor_std.reshape([1, data.shape[1], 1, 1, 1])
         else:
             raise ValueError(f"Invalid data shape: {data.shape}")
 
         unnorm = data * tensor_std + tensor_mean
-        unnorm = unnorm * self.wet_mask.to(data.device)
+        unnorm = unnorm * self.wet_mask.unsqueeze(0).unsqueeze(2).to(data.device)
         return unnorm
 
     def normalize_numpy_prognostics(
@@ -182,9 +183,9 @@ class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):
         # Subset by time range if provided
         # Convert config strings to cftime.DatetimeJulian
         if shuffle:
-            start, end = conf["train_years"]
+            start, end = conf["data"]["train_years"]
         else:
-            start, end = conf["valid_years"]
+            start, end = conf["data"]["valid_years"]
 
         start_cf = cftime.DatetimeJulian(*pd.to_datetime(start).timetuple()[:6])
         end_cf   = cftime.DatetimeJulian(*pd.to_datetime(end).timetuple()[:6])
@@ -694,6 +695,157 @@ class Ocean_Tensor_Batcher(torch.utils.data.Dataset):
             "input_datetime": sample["input_datetime"],
             "target_datetime": sample["target_datetime"],
         }
+
+
+class Predict_Ocean_Batcher(Ocean_MultiStep_Batcher):
+    """
+    Ocean dataset that uses fixed forecast windows instead of continuous sampling.
+    Accepts a list of [start, end] datetime string pairs for forecasting.
+    """
+
+    def __init__(
+        self,
+        conf,
+        forecast_windows,
+        seed=42,
+        rank=0,
+        world_size=1,
+        batch_size=1,
+        shuffle=True
+    ):
+        """
+        Parameters:
+            conf: Configuration dictionary
+            forecast_windows: List of [start, end] datetime string pairs
+                             e.g., [['2014-09-30T00:00:00', '2022-12-29T00:00:00']]
+        """
+        # Initialize valid_indices before parent init
+        self.valid_indices = []
+        self.forecast_windows = forecast_windows
+        
+        # Initialize parent class
+        super().__init__(conf, seed, rank, world_size, batch_size, shuffle)
+        
+        # Convert windows to time indices
+        self._convert_windows_to_indices()
+        
+        # Build valid sample indices from windows
+        self._build_valid_indices()
+        
+        # Override size based on valid indices
+        self.size = len(self.valid_indices)
+        
+        # Set forecast_len based on the longest window
+        # Calculate how many steps can fit in each window
+        max_steps = 0
+        for start_idx, end_idx in self.window_indices:
+            window_size = end_idx - start_idx + 1
+            steps = (window_size - self.input_length) // self.output_length
+            max_steps = max(max_steps, steps)
+        self.forecast_len = max_steps
+        
+        # Recreate sampler with new size
+        self.sampler = DistributedSampler(
+            self, num_replicas=world_size, rank=rank, shuffle=shuffle, seed=seed, drop_last=True
+        )
+        
+        # Reinitialize batch indices with epoch 0
+        self.sampler.set_epoch(0)
+        self.batch_indices = list(self.sampler)
+        # Always set batch_size properly
+        self.batch_size = min(batch_size, len(self.batch_indices))
+        
+        # Initialize the first batch
+        self.current_epoch = 0
+        self.batch_call_count = 0
+        self.initialize_batch()
+
+    def _convert_windows_to_indices(self):
+        """Convert datetime string windows to time indices."""
+        self.window_indices = []
+        time_values = self._prognostic_data.time.values
+        
+        for start_str, end_str in self.forecast_windows:
+            # Convert strings to cftime objects
+            start_dt = cftime.DatetimeJulian(*pd.to_datetime(start_str).timetuple()[:6])
+            end_dt = cftime.DatetimeJulian(*pd.to_datetime(end_str).timetuple()[:6])
+            
+            # Find corresponding indices
+            start_idx = None
+            end_idx = None
+            
+            for i, t in enumerate(time_values):
+                if start_idx is None and t >= start_dt:
+                    start_idx = i
+                if t <= end_dt:
+                    end_idx = i
+                if start_idx is not None and end_idx is not None and t > end_dt:
+                    break
+            
+            if start_idx is not None and end_idx is not None:
+                self.window_indices.append([start_idx, end_idx])
+            else:
+                logging.warning(f"Could not find indices for window {start_str} to {end_str}")
+
+    def _build_valid_indices(self):
+        """Build list of valid sample indices from forecast windows.
+        Each window gets ONE starting index (the first valid one)."""
+        self.valid_indices = []
+        
+        for start_idx, end_idx in self.window_indices:
+            # For each window, use only the FIRST valid starting index
+            # This treats each window as a separate forecast run
+            window_size = end_idx - start_idx + 1
+            max_samples = window_size - self.input_length - self.output_length + 1
+            
+            if max_samples > 0:
+                # Only add the first index for this window
+                self.valid_indices.append(start_idx)
+            else:
+                logging.warning(
+                    f"Window [{start_idx}, {end_idx}] too small for "
+                    f"input_length={self.input_length} + output_length={self.output_length}"
+                )
+    
+    def __len__(self):
+        """Return number of valid samples across all windows."""
+        return len(self.valid_indices)
+    
+    def initialize_batch(self):
+        """Initialize batch indices from valid indices."""
+        if not hasattr(self, "batch_call_count"):
+            self.batch_call_count = 0
+
+        if self.current_epoch is None:
+            logging.warning("You must first set the epoch number using set_epoch method.")
+
+        total_indices = len(self.batch_indices)
+        start = self.batch_call_count * self.batch_size
+        end = start + self.batch_size
+
+        if not self.shuffle:
+            if end > total_indices:
+                start = start % total_indices
+                end = min(start + self.batch_size, total_indices)
+            indices = self.batch_indices[start:end]
+        else:
+            if end > total_indices:
+                indices = (
+                    self.batch_indices[start:] + self.batch_indices[:(end % total_indices)]
+                )
+            else:
+                indices = self.batch_indices[start:end]
+
+        self.batch_call_count += 1
+        if start + self.batch_size >= total_indices:
+            self.batch_call_count = 0
+
+        # indices are positions in batch_indices list
+        # batch_indices values are positions in valid_indices list  
+        # valid_indices contains the actual time indices
+        self.current_batch_indices = [self.valid_indices[idx] for idx in indices]
+        self.time_steps = [0 for _ in self.current_batch_indices]
+        self.forecast_step_counts = [0 for _ in self.current_batch_indices]
 
 
 if __name__ == "__main__":

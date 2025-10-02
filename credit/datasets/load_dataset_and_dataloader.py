@@ -75,7 +75,7 @@ class BatchForecastLenSamplerSamudra(BatchForecastLenSampler):
         self.len = self.dataset.batches_per_epoch() * self.forecast_len
 
 class BatchForecastLenDataLoader:
-    def __init__(self, dataset):
+    def __init__(self, dataset, offset=1):
         """
         A custom DataLoader that supports datasets with a non-trivial forecast length.
 
@@ -89,7 +89,7 @@ class BatchForecastLenDataLoader:
             forecast_len: The forecast length incremented by 1.
         """
         self.dataset = dataset
-        self.forecast_len = dataset.forecast_len + 1
+        self.forecast_len = dataset.forecast_len + offset
 
     def __iter__(self):
         """

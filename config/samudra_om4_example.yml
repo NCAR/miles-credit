@@ -12,7 +12,7 @@ data:
 
     # Experiment keys per Samudra setup
     prognostic_vars_key: 'thermo_dynamic'
-    dynamic_forcing_key: 'hfds_anom'
+    dynamic_forcing_vars_key: 'hfds_anom'
     
     # boundary/forcing variables (4 channels)
     dynamic_forcing_variables: ['tauuo','tauvo','hfds','hfds_anomalies']
