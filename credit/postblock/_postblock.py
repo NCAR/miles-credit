@@ -116,6 +116,7 @@ class TracerFixer(nn.Module):
         # identify variables of interest
         self.tracer_indices = post_conf["tracer_fixer"]["tracer_inds"]
         self.tracer_thres = post_conf["tracer_fixer"]["tracer_thres"]
+        self.tracer_thres_max = post_conf["tracer_fixer"].get("tracer_thres_max", None)
 
         # ------------------------------------------------------------------------------ #
         # setup a scaler
@@ -143,6 +144,10 @@ class TracerFixer(nn.Module):
             # in-place modification of y_pred
             thres = self.tracer_thres[i]
             tracer_vals[tracer_vals < thres] = thres
+
+            if self.tracer_thres_max[i] is not None:
+                thres = self.tracer_thres_max[i]
+                tracer_vals[tracer_vals >= thres] = thres
 
         if self.state_trans:
             y_pred = self.state_trans.transform_array(y_pred)

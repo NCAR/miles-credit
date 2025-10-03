@@ -11,6 +11,49 @@ import cftime
 import pandas as pd
 
 
+def load_transform(conf):
+    """
+    Load data and return the StandardScaler normalization object.
+    Only essentials are kept.
+    """
+
+    # Load datasets
+    data_xr = xr.open_zarr(conf["data"]["data_path"], chunks={})
+    data_mean_xr = xr.open_zarr(conf["data"]["mean_path"], chunks={})
+    data_std_xr = xr.open_zarr(conf["data"]["std_path"], chunks={})
+
+    # Initialize TensorMap
+    try:
+        TensorMap.init_instance(
+            conf["data"]["prognostic_vars_key"],
+            conf["data"]["dynamic_forcing_vars_key"]
+        )
+    except ValueError as e:
+        if "TensorMap already initialized" in str(e):
+            TensorMap.get_instance()
+        else:
+            raise
+
+    #   Validate data (assuming this function is available from your utils)
+    data, data_mean, data_std = validate_data(data_xr, data_mean_xr, data_std_xr)
+
+    # Get variable lists
+    prognostic_vars = PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]]
+    boundary_vars   = BOUND_VARS_MAP[conf["data"]["dynamic_forcing_vars_key"]]
+
+    # Extract wet mask
+    wet, _ = extract_wet_mask(data_xr, prognostic_vars, 0)
+
+    # Return StandardScaler
+    return StandardScaler(
+        data_mean,
+        data_std,
+        prognostic_vars,
+        boundary_vars,
+        wet,
+    )
+
+
 class StandardScaler:
     def __init__(
         self,
@@ -122,6 +165,20 @@ class StandardScaler:
         data_unnorm = data * self._prognostic_std_np + self._prognostic_mean_np
         data_unnorm = data_unnorm * self._wet_mask_np
         return data_unnorm
+
+    def transform_array(self, data: torch.Tensor, fill_nan=True, fill_value=0.0) -> torch.Tensor:
+        """
+        Normalize prognostic variables of a torch tensor.
+        Expects shape (B, C, H, W) or (B, C, T, H, W).
+        """
+        return self.normalize_tensor_prognostics(data, fill_nan=fill_nan, fill_value=fill_value)
+
+    def inverse_transform(self, data: torch.Tensor) -> torch.Tensor:
+        """
+        Unnormalize prognostic variables of a torch tensor.
+        Expects shape (B, C, H, W) or (B, C, T, H, W).
+        """
+        return self.unnormalize_tensor_prognostics(data)
 
 
 class Ocean_MultiStep_Batcher(torch.utils.data.Dataset):

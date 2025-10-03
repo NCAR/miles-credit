@@ -104,7 +104,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # many config options don't apply when downscaling to regional
     is_downscaling = 'datasets' in conf['data']
-
+    is_ocean = "Ocean" in conf['data']['dataset_type']
 
     assert "save_loc" in conf, "save location of the CREDIT project ('save_loc') is missing from conf"
     assert "data" in conf, "data section ('data') is missing from conf"
@@ -123,8 +123,18 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # --------------------------------------------------------- #
     # conf['data'] section
+    if is_ocean:
+        conf['data']['levels'] = len(conf['data']['level_ids'])
+        # Ensure required keys exist with defaults
+        for key, default in {
+            "static_variables": [],
+            "forcing_variables": [],
+            "diagnostic_variables": [],
+            "static_first": False,
+        }.items():
+            conf["data"].setdefault(key, default)
 
-    if is_downscaling:
+    elif is_downscaling:
         # new-style data configuration
 
         # DownscalingDataset gets intiatlized with **conf['data']
@@ -558,20 +568,28 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
         varname_tracers = conf["model"]["post_conf"]["tracer_fixer"]["tracer_name"]
         tracers_thres_input = conf["model"]["post_conf"]["tracer_fixer"]["tracer_thres"]
+        tracers_thres_maximum = conf["model"]["post_conf"]["tracer_fixer"].get("tracer_thres_max", None)
 
         # create a mapping from tracer variable names to their thresholds
         tracer_threshold_dict = dict(zip(varname_tracers, tracers_thres_input))
+        if tracers_thres_maximum is not None:
+            tracer_threshold_dict_max = dict(zip(varname_tracers, tracers_thres_maximum))
 
         # Iterate over varname_output to find tracer indices and thresholds
         tracer_inds = []
         tracer_thres = []
+        tracer_thres_max = []
         for i_var, var in enumerate(varname_output):
             if var in tracer_threshold_dict:
                 tracer_inds.append(i_var)
                 tracer_thres.append(float(tracer_threshold_dict[var]))
+                if tracers_thres_maximum is not None:
+                    tracer_thres_max.append(float(tracer_threshold_dict_max[var]))
 
         conf["model"]["post_conf"]["tracer_fixer"]["tracer_inds"] = tracer_inds
         conf["model"]["post_conf"]["tracer_fixer"]["tracer_thres"] = tracer_thres
+        if tracers_thres_maximum is not None:
+            conf["model"]["post_conf"]["tracer_fixer"]["tracer_thres_max"] = tracer_thres_max
 
     # --------------------------------------------------------------------- #
     # global mass fixer

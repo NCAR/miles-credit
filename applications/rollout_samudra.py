@@ -33,6 +33,7 @@ from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.parser import credit_main_parser
 
 
 logger = logging.getLogger(__name__)
@@ -261,6 +262,9 @@ def predict(rank, world_size, conf, p):
     # Class for saving in parallel
     result_processor = ForecastProcessor(conf, dataset.normalize, device)
 
+    # Load the wet-mask
+    wet_mask = dataset.wet[None, :, None, :, :].to(device)
+
     # Warning -- see next line
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
 
@@ -358,6 +362,10 @@ def predict(rank, world_size, conf, p):
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
 
+            # Lastly, multiply by the wet-mask
+            y_pred = y_pred * wet_mask
+
+            # Save the results
             result = p.apply_async(
                 result_processor.process,
                 (
@@ -503,6 +511,11 @@ def main():
     # Load the configuration and get the relevant variables
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
+
+    # handling config args
+    conf = credit_main_parser(
+        conf, parse_training=False, parse_predict=False, print_summary=False
+    )
 
     # create a save location for rollout
     assert (
