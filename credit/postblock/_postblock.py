@@ -145,7 +145,7 @@ class TracerFixer(nn.Module):
             thres = self.tracer_thres[i]
             tracer_vals[tracer_vals < thres] = thres
 
-            if self.tracer_thres_max[i] is not None:
+            if self.tracer_thres_max is not None:
                 thres = self.tracer_thres_max[i]
                 tracer_vals[tracer_vals >= thres] = thres
 
