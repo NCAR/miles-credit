@@ -104,7 +104,11 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # many config options don't apply when downscaling to regional
     is_downscaling = 'datasets' in conf['data']
-    is_ocean = "Ocean" in conf['data'].get('dataset_type', None)
+    dataset_type = conf['data'].get('dataset_type', None)
+    if isinstance(dataset_type, str):
+        is_ocean = "Ocean" in dataset_type
+    else:
+        is_ocean = False
 
     assert "save_loc" in conf, "save location of the CREDIT project ('save_loc') is missing from conf"
     assert "data" in conf, "data section ('data') is missing from conf"
