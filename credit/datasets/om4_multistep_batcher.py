@@ -647,6 +647,7 @@ class Ocean_Tensor_Batcher(torch.utils.data.Dataset):
         self.batch_indices = list(self.sampler)
         if len(self.batch_indices) < batch_size:
             self.batch_size = len(self.batch_indices)
+        self.num_prognostic_vars = len(PROG_VARS_MAP[conf["data"]["prognostic_vars_key"]])
 
     def initialize_batch(self):
         if not hasattr(self, "batch_call_count"):
@@ -693,20 +694,45 @@ class Ocean_Tensor_Batcher(torch.utils.data.Dataset):
 
     def _get_batch_samples(self, sample_indices):
         """
-        Load multiple cached .pt samples at once.
+        Load multiple cached .pt samples and concatenate along time dimension.
         """
         input_list = []
         target_list = []
         input_datetime_list = []
         target_datetime_list = []
-
+    
         for idx in sample_indices:
-            sample = self._get_ocean_sample(idx)
-            input_list.append(sample["input"])
-            target_list.append(sample["target"])
-            input_datetime_list.append(sample["input_datetime"])
-            target_datetime_list.append(sample["target_datetime"])
-
+            # Load input_length consecutive samples for input
+            input_samples = []
+            input_times = []
+            for t in range(self.input_length):
+                sample = self._get_ocean_sample(idx + t)
+                input_samples.append(sample["input"])
+                input_times.append(sample["input_datetime"])
+            
+            # Concatenate along time dimension (axis 1)
+            input_data = torch.cat(input_samples, dim=1)  # (channels, time, lat, lon)
+            input_datetime = torch.cat(input_times, dim=0)
+            
+            # For targets, use the INPUT from the next timesteps
+            # (because each sample's target is one step ahead)
+            target_samples = []
+            target_times = []
+            target_start = idx + self.input_length
+            for t in range(self.output_length):
+                sample = self._get_ocean_sample(target_start + t)
+                # Use INPUT as target (it's the prognostic state at that time)
+                target_samples.append(sample["input"][:self.num_prognostic_vars])  # Only prognostic vars
+                target_times.append(sample["input_datetime"])
+            
+            target_data = torch.cat(target_samples, dim=1)
+            target_datetime = torch.cat(target_times, dim=0)
+            
+            input_list.append(input_data)
+            target_list.append(target_data)
+            input_datetime_list.append(input_datetime)
+            target_datetime_list.append(target_datetime)
+    
         batch = {
             "input": torch.stack(input_list, dim=0).float(),
             "target": torch.stack(target_list, dim=0).float(),
