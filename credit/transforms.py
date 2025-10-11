@@ -368,9 +368,67 @@ class Normalize_ERA5_and_Forcing:
             # Transformation
             return self.transform(sample)
 
+    def _align_coords(self, DS: xr.Dataset,
+                  ref_ds: xr.Dataset,
+                  rtol: float = 1e-6,
+                  atol: float = 1e-8) -> xr.Dataset:
+        """
+        Ensure DS has the same lat/lon as ref_ds (to within tolerance),
+        then re-assign DS.coords to exactly match ref_ds.coords.
+        """
+        for coord in ("level",):
+            if coord not in ref_ds.coords:
+                continue
+            if coord not in DS.coords:
+                break
+            ref_vals = ref_ds.coords[coord].values
+            ds_vals  = DS.coords[coord].values
+
+            if ref_vals.shape != ds_vals.shape:
+                raise ValueError(
+                    f"Shape mismatch for '{coord}': "
+                    f"{ds_vals.shape} vs {ref_vals.shape}"
+                )
+            DS = DS.assign_coords({coord: ref_ds.coords[coord]})
+        
+        for coord in ("latitude", "longitude"):
+            if coord not in ref_ds.coords:
+                continue
+            if coord not in DS.coords:
+                raise ValueError(f"Input dataset missing coordinate '{coord}'")
+            ref_vals = ref_ds.coords[coord].values
+            ds_vals  = DS.coords[coord].values
+    
+            if ref_vals.shape != ds_vals.shape:
+                raise ValueError(
+                    f"Shape mismatch for '{coord}': "
+                    f"{ds_vals.shape} vs {ref_vals.shape}"
+                )
+            if not np.allclose(ds_vals, ref_vals, rtol=rtol, atol=atol):
+                raise ValueError(
+                    f"Values for '{coord}' differ by more than "
+                    f"rtol={rtol}, atol={atol}"
+                )
+    
+            DS = DS.assign_coords({coord: ref_ds.coords[coord]})
+        return DS
+
     def transform_dataset(self, DS: xr.Dataset) -> xr.Dataset:
         DS = (DS - self.mean_ds)/self.std_ds
         return DS
+        
+    def inverse_transform_dataset(self, DS: xr.Dataset,
+                              rtol: float = 1e-6,
+                              atol: float = 1e-8) -> xr.Dataset:
+        """
+        Inverse‐transform DS by (DS * std_ds) + mean_ds, after
+        aligning its coordinates to mean_ds/std_ds.
+        """
+        DS_aligned = self._align_coords(DS, self.mean_ds, rtol=rtol, atol=atol)
+        mean_b = self.mean_ds.broadcast_like(DS)
+        std_b  = self.std_ds.broadcast_like(DS)
+        
+        return (DS_aligned * self.std_ds) + self.mean_ds
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
         """Transform of y_pred.

@@ -17,6 +17,8 @@ import json
 import pickle
 import argparse
 
+from WindPP import wind_filter, post_process_wind_artifacts, apply_wind_artifact_filter_to_tensor, simple_wind_artifact_filter
+
 # ---------- #
 # Numerics
 from datetime import datetime, timedelta
@@ -28,15 +30,17 @@ import matplotlib.pyplot as plt
 
 # ---------- #
 import torch
+from torch.utils.data import IterableDataset, DataLoader
 from torch.utils.data import get_worker_info
 from torch.utils.data.distributed import DistributedSampler
 from torch.profiler import profile, record_function, ProfilerActivity
-
+import torch.nn.functional as F
 
 # ---------- #
 # credit
 from credit.models import load_model, load_model_name
 from credit.seed import seed_everything
+from credit.loss import latitude_weights
 
 from credit.data import (
     concat_and_reshape,
@@ -69,7 +73,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 
 def save_task(data, meta_data, conf):
-    """Wrapper function for saving data in parallel."""  # noqa: D401
+    """Wrapper function for saving data in parallel."""
     darray_upper_air, darray_single_level, init_datetime_str, lead_time, forecast_hour = data
     save_netcdf_increment(
         darray_upper_air,
@@ -80,390 +84,263 @@ def save_task(data, meta_data, conf):
         conf,
     )
 
-
-def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, model_name=None, init_noise=None):
-    """Function to compute RMSE for a year-long climate model prediction.
-
-    Parameters
-    ----------
-    - config: str
-        Path to the YAML configuration file.
-    - input_shape: tuple
-        Shape of the input tensor to the model.
-    - forcing_shape: tuple
-        Shape of the forcing tensor for the model.
-    - output_shape: tuple
-        Shape of the output tensor from the model.
-    - device: torch.device
-        Device to run the model on (CPU/GPU).
-    - model_name: str, optional
-        Name of the model to load, if specified.
-
-    The function handles:
-    - Loading configurations, model, and transforms
-    - Setting up data pre-processing steps
-    - Handling dynamic/static variables and conservation constraints
-    - Preparing input/output tensors for prediction and RMSE computation
-    - Tracing the model for optimized execution
-    - running for a specified amount of time and saving mean
-
+class ForcingDataset(IterableDataset):
     """
-    # Load configuration from the YAML file
+    Streams dynamic forcing data in time-chunks, moves them to GPU asynchronously.
+    """
+    def __init__(self, ds, df_vars, start, num_ts, chunk_size):
+        self.ds = ds
+        self.df_vars = df_vars
+        self.start = start
+        self.num_ts = num_ts
+        self.chunk = chunk_size
+
+    def __iter__(self):
+        for block_start in range(self.start, self.start + self.num_ts, self.chunk):
+            block_end = min(block_start + self.chunk, self.start + self.num_ts)
+            arr = self.ds.isel(time=slice(block_start, block_end)).load().values
+            cpu_tensor = torch.from_numpy(arr).pin_memory()
+            gpu_tensor = cpu_tensor.to(self.ds.encoding.get('device', torch.device('cuda')), non_blocking=True)
+            yield gpu_tensor
+
+
+
+def shift_input_for_next(x, y_pred, history_len, varnum_diag, static_dim):
+    """
+    Roll the input tensor forward by one time-step using cached dimension values.
+    """
+    if history_len == 1:
+        if varnum_diag > 0:
+            return y_pred[:, :-varnum_diag, ...].detach()
+        else:
+            return y_pred.detach()
+    else:
+        if static_dim == 0:
+            x_detach = x[:, :, 1:, ...].detach()
+        else:
+            x_detach = x[:, :-static_dim, 1:, ...].detach()
+        if varnum_diag > 0:
+            return torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
+        else:
+            return torch.cat([x_detach, y_pred.detach()], dim=2)
+
+
+def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, model_name=None, init_noise=None, save_append=None):
+    # Load and parse configuration
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
-
-    # Parse and preprocess the configuration for prediction
     conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
     conf["predict"]["mode"] = None
 
-    # Extract the history length for the data
+    if save_append:
+        base = conf["predict"].get("save_forecast")
+        if not base:
+            raise KeyError("'save_forecast' missing in config")
+        conf["predict"]["save_forecast"] = str(Path(base).expanduser() / save_append)
+
+    # Cache these once for speed
     history_len = conf["data"]["history_len"]
+    varnum_diag = len(conf["data"]["diagnostic_variables"])
+    static_dim = len(conf["data"]["static_variables"]) if not conf["data"]["static_first"] else 0
 
-    # Load transformation utilities and scalers
+    print('...starting transform...')
+    
+    # Transform and model setup
     transform = load_transforms(conf)
-    if conf["data"]["scaler_type"] == "std_new":
-        state_transformer = Normalize_ERA5_and_Forcing(conf)
-    else:
-        print("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
-        raise
+    state_transformer = Normalize_ERA5_and_Forcing(conf) if conf["data"]["scaler_type"] == "std_new" else _not_supported()
 
-    # Load the model (optionally a custom model) and configure distributed mode
-    if model_name is not None:
-        print("loading custom: ", model_name)
-        model = load_model_name(conf, model_name, load_weights=True).to(device)
-    else:
-        model = load_model(conf, load_weights=True).to(device)
-
+    print(f'loading model {model_name}')
+    model = (load_model_name(conf, model_name, load_weights=True) if model_name else load_model(conf, load_weights=True)).to(device)
+    truth_field = torch.load(conf['predict']['seasonal_mean_fast_climate'], map_location=torch.device(device))
+    
+    print('...loading model...')
+    
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
-    print(distributed)
     if distributed:
         model = distributed_model_wrapper(conf, model, device)
-        if conf["predict"]["mode"] == "fsdp":
-            model = load_model_state(conf, model, device)
-
+        if conf["predict"]["mode"] == "fsdp": model = load_model_state(conf, model, device)
     model.eval()
-    post_conf = conf["model"]["post_conf"]
 
-    # number of dynamic forcing + forcing + static
-    static_dim_size = (
-        len(conf["data"]["dynamic_forcing_variables"])
-        + len(conf["data"]["forcing_variables"])
-        + len(conf["data"]["static_variables"])
-    )
-
-    # Extract conservation flags from the configuration
-    flag_mass_conserve, flag_water_conserve, flag_energy_conserve = False, False, False
-    if post_conf["activate"]:
-        if post_conf["global_mass_fixer"]["activate"] and post_conf["global_mass_fixer"]["activate_outside_model"]:
-            flag_mass_conserve = True
-            opt_mass = GlobalMassFixer(post_conf)
-        if post_conf["global_water_fixer"]["activate"] and post_conf["global_water_fixer"]["activate_outside_model"]:
-            flag_water_conserve = True
-            opt_water = GlobalWaterFixer(post_conf)
-        if post_conf["global_energy_fixer"]["activate"] and post_conf["global_energy_fixer"]["activate_outside_model"]:
-            flag_energy_conserve = True
-            opt_energy = GlobalEnergyFixer(post_conf)
-
-    # Extract variable names from configuration
-    df_variables = conf["data"]["dynamic_forcing_variables"]
-    sf_variables = conf["data"]["static_variables"]
-    varnum_diag = len(conf["data"]["diagnostic_variables"])
-    lead_time_periods = conf["data"]["lead_time_periods"]
-
-    # Load initial condition and forcing dataset
-    x = torch.load(conf["predict"]["init_cond_fast_climate"], map_location=torch.device(device)).to(device)
-    DSforc = xr.open_dataset(conf["predict"]["forcing_file"])
-
-    # Set up metrics and transformations
-    metrics = LatWeightedMetrics(conf)
-    DSforc_norm = state_transformer.transform_dataset(DSforc)
-
-    # Extract indices for RMSE computation and load the truth field
-    inds_to_rmse = conf["predict"]["inds_rmse_fast_climate"]
-    truth_field = torch.load(conf["predict"]["seasonal_mean_fast_climate"], map_location=torch.device(device))
-    print(f'torch loaded truth: {conf["predict"]["seasonal_mean_fast_climate"]}')
-
-    # Load metadata and set up static and dynamic forcing variables
-    latlons = xr.open_dataset(conf["loss"]["latitude_weights"])
-    meta_data = load_metadata(conf)
-    num_ts = conf["predict"]["timesteps_fast_climate"]
-
-    if conf["data"]["static_first"]:
-        df_sf_variables = conf["data"]["static_variables"] + conf["data"]["dynamic_forcing_variables"]
-    else:
-        df_sf_variables = conf["data"]["dynamic_forcing_variables"] + conf["data"]["static_variables"]
-
-    y_diag_present = len(conf["data"]["diagnostic_variables"]) > 0
-
-    DS_forcx_static = DSforc[sf_variables].load()
-
-    # Initialize prediction start date
-    conf_pred = conf["predict"]
-    conf_pred_for = conf_pred["forecasts"]
-    year_ = conf_pred_for.get("start_year", 1970)  # Default to 1970 if missing
-    month_ = conf_pred_for.get("start_month", 1)  # Default to January
-    day_ = conf_pred_for.get("start_day", 1)  # Default to 1st
-    hours_ = conf_pred_for.get("start_hours", [0])  # Default to [0]
-
-    # Ensure hours is a list and take the first value
-    hour_ = hours_[0] if isinstance(hours_, list) and hours_ else 0
-    init_date_obj = datetime(year_, month_, day_, hour_)
-
-    init_date_obj = DatetimeNoLeap(year_, month_, day_, hour_)
-    print("init date obj: ", init_date_obj)
-
-    # Align forcing dataset to the initial date
-    nearest_time = DSforc_norm.sel(time=init_date_obj, method="nearest")
-
-    index = DSforc_norm.indexes["time"].get_loc(init_date_obj)
-    indx_start = index
-    print("index start: ", indx_start)
-    init_datetime_str = init_date_obj.strftime("%Y-%m-%d %H:%M:%S")
-    print("init_datetime_str: ", init_datetime_str)
-    print(f"Index of start time: {indx_start}")
-
-    # Select dynamic forcing data for prediction window
-    DS_forcx_dynamic = DSforc_norm[df_variables].isel(time=slice(indx_start, indx_start + num_ts + 10)).load()
-    DS_forcx_dynamic_time = DS_forcx_dynamic["time"].values
+    x = torch.load(conf['predict']['init_cond_fast_climate'], map_location=torch.device(device)).to(device)
 
     if init_noise is not None:
-        print("adding forecast noise")
+        print('adding forecast noise')
         # Define the standard deviation for the noise (e.g., 0.01)
         noise_std = 0.05
-
+        
         # Generate random noise tensor with the same shape as `x`
         # Use `torch.randn` for a normal distribution with mean=0 and std=1
         noise = torch.randn_like(x) * noise_std
 
         # Add the noise to `x`
         x = x + noise.to(device)
+    
+    # Post-processing flags (cached)
+    post_conf = conf["model"]["post_conf"]
+    flag_mass = post_conf["activate"] and post_conf["global_mass_fixer"]["activate"]
+    flag_water = post_conf["activate"] and post_conf["global_water_fixer"]["activate"]
+    flag_energy = post_conf["activate"] and post_conf["global_energy_fixer"]["activate"]
+    if flag_mass: opt_mass = GlobalMassFixer(post_conf)
+    if flag_water: opt_water = GlobalWaterFixer(post_conf)
+    if flag_energy: opt_energy = GlobalEnergyFixer(post_conf)
 
-    # Initialize RMSE computation parameters
-    if inds_to_rmse is None:
-        inds_to_rmse = np.arange(0, output_shape[1])
+    print('...done with fixers...')
 
-    test_tensor_rmse = torch.zeros(output_shape).to(device)
-    x_forcing_batch = torch.zeros(forcing_shape).to(device)
+    # Load forcing data
+    df_vars = conf["data"]["dynamic_forcing_variables"]
+    sf_vars = conf["data"]["static_variables"]
+    num_ts = conf["predict"]["timesteps_fast_climate"]
+    lead_time_periods = conf["data"]["lead_time_periods"]
+    
+    print('...loading forcing file...')
+    chunk_size = conf["data"].get("forcing_chunk_size", 32)
+    DSforc = xr.open_dataset(conf["predict"]["forcing_file"], chunks={"time": chunk_size})
+    print('... start normalization ...')
+    DSforc_norm = state_transformer.transform_dataset(DSforc)
+    metrics = LatWeightedMetrics(conf)
+    latlons = xr.open_dataset(conf["loss"]["latitude_weights"])
+    print('...doing static loading...')
 
-    # Prepare forcing dictionary for input tensors
-    forcing_dict = {sfv: torch.tensor(DS_forcx_static[sfv].values).to(device) for sfv in sf_variables}
-    forcing_dict.update({dfv: torch.tensor(DS_forcx_dynamic[dfv].values).to(device) for dfv in df_variables})
+    # STATIC: load once
+    static_arr = np.stack([DSforc[s].values for s in sf_vars], axis=0)
+    static_gpu = (torch.from_numpy(static_arr).unsqueeze(0)).unsqueeze(2).to(device, non_blocking=True)
 
-    forecast_hour = 1
-    add_it = 0
-    num_steps = 0
+    print('shape static gpu:', static_gpu.shape)
 
-    # Trace the model for optimized execution
-    print("jit trace model start")
-    model = torch.jit.trace(model, x)
-    print("jit trace model done")
+    print('...doing dynamic loading...')
 
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"Total parameters: {total_params}")
-
-    model_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2)
-    print(f"Model size: {model_size:.2f} MB")
-
-    for k in range(num_ts):
-        loop_start = time.time()
-        if (k + 1) % 20 == 0:
-            print(f"model step: {k:05}")
-
-        start_forcing = time.time()
-        if k != 0:
-            if conf["data"]["static_first"]:
-                for bb, sfv in enumerate(sf_variables):
-                    x_forcing_batch[:, bb, :, :, :] = forcing_dict[sfv]
-                for bb, dfv in enumerate(df_variables):
-                    x_forcing_batch[:, len(sf_variables) + bb, :, :, :] = forcing_dict[dfv][k, :, :]
-            else:
-                for bb, dfv in enumerate(df_variables):
-                    x_forcing_batch[:, bb, :, :, :] = forcing_dict[dfv][k, :, :]
-                for bb, sfv in enumerate(sf_variables):
-                    x_forcing_batch[:, len(df_variables) + bb, :, :, :] = forcing_dict[sfv]
-            x = torch.cat((x, x_forcing_batch), dim=1)
-
-        if k == 0:
-            cftime_obj = DS_forcx_dynamic_time[k]
-            init_datetime_str = cftime_obj.strftime("%Y-%m-%dT%HZ")
-
-        cftime_obj = DS_forcx_dynamic_time[k + 1]
-        # Convert to string directly using str()
-        cftime_str = str(cftime_obj)  # This will look like 'YYYY-MM-DD HH:SS:MM'
-        # Parse the string into a standard datetime object
-        utc_datetime = datetime.strptime(cftime_str, "%Y-%m-%d %H:%M:%S")
-
-        # print('Forcing time:', time.time() - start_forcing)
-
-        start_model = time.time()
-        x = x.contiguous()
-        with torch.no_grad():
-            y_pred = model(x)
-        # print('Model inference time:', time.time() - start_model)
-
-        start_postprocess = time.time()
-        # test_tensor_rmse.add_(y_pred)
-
-        if flag_mass_conserve:
-            if forecast_hour == 1:
-                x_init = x.clone()
-            input_dict = {"y_pred": y_pred, "x": x_init}
-            input_dict = opt_mass(input_dict)
-            y_pred = input_dict["y_pred"]
-        if flag_water_conserve:
-            input_dict = {"y_pred": y_pred, "x": x}
-            input_dict = opt_water(input_dict)
-            y_pred = input_dict["y_pred"]
-        if flag_energy_conserve:
-            input_dict = {"y_pred": y_pred, "x": x}
-            input_dict = opt_energy(input_dict)
-            y_pred = input_dict["y_pred"]
-        # print('Postprocess time:', time.time() - start_postprocess)
-        test_tensor_rmse.add_(y_pred)
-        darray_upper_air, darray_single_level = make_xarray(
-            y_pred.cpu(),
-            utc_datetime,
-            latlons.latitude.values,
-            latlons.longitude.values,
-            conf,
-        )
-
-        result = p.apply_async(
-            save_netcdf_increment,
-            (
-                darray_upper_air,
-                darray_single_level,
-                init_datetime_str,
-                lead_time_periods * forecast_hour,
-                meta_data,
-                conf,
-            ),
-        )
-
-        # cuda_empty_start = time.time()
-        # torch.cuda.empty_cache()
-        # gc.collect()
-        add_it += 1
-        num_steps += 1
-        forecast_hour += 1
-        # print('CUDA empty time:', time.time() - cuda_empty_start)
-        start_switch = time.time()
-        # ============================================================ #
-        # use previous step y_pred as the next step input
-        if history_len == 1:
-            # cut diagnostic vars from y_pred, they are not inputs
-            if y_diag_present:
-                x = y_pred[:, :-varnum_diag, ...].detach()
-            else:
-                x = y_pred.detach()
-
-        # multi-step in
-        else:
-            if static_dim_size == 0:
-                x_detach = x[:, :, 1:, ...].detach()
-            else:
-                x_detach = x[:, :-static_dim_size, 1:, ...].detach()
-
-            # cut diagnostic vars from y_pred, they are not inputs
-            if y_diag_present:
-                x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
-            else:
-                x = torch.cat([x_detach, y_pred.detach()], dim=2)
-
-        # print('Total loop time:', time.time() - loop_start)
-        # ============================================================ #
-        # print('Switch time:', time.time() - start_switch)
-        # print('Total loop time:', time.time() - loop_start)
-        # print('add_it: ', add_it)
-        # if add_it == 365:
-        #     break
-
-    if model_name is not None:
-        fsout = f"{os.path.basename(config)}_{model_name}"
+    # DYNAMIC: chunk + loader
+    init_dt = conf['predict']['start_datetime']
+    DSforc_norm = DSforc_norm.chunk({"time": chunk_size})
+    dynamic_ds = DSforc_norm[df_vars]
+    
+    loc = dynamic_ds.indexes['time'].get_loc(conf['predict']['start_datetime'])
+    if isinstance(loc, slice):
+        start_ix = loc.start
     else:
-        fsout = os.path.basename(config)
+        start_ix = loc
+        
+    print("Resolved start_ix =", start_ix)
+    # forcing_ds = ForcingDataset(dynamic_ds, df_vars, start_ix, num_ts, chunk_size)
+    # loader = DataLoader(forcing_ds, batch_size=1, num_workers=0, pin_memory=True, prefetch_factor=2)
 
-    METS = metrics(test_tensor_rmse.cpu() / add_it, truth_field.cpu())
+    # Trace model
+    dummy_x = torch.zeros(input_shape, device=device)
+    model = torch.jit.trace(model, dummy_x)
 
-    # save out: test_tensor_rmse/num_ts, MET, plots
-    with open(f'{conf["save_loc"]}/{fsout}_quick_climate_METS.pkl', "wb") as f:
-        pickle.dump(METS, f)
+    # Run & save
+    forecast_hour = 1
+    print(conf['predict']['start_datetime'])
 
-    torch.save(test_tensor_rmse.cpu() / add_it, f'{conf["save_loc"]}/{fsout}_quick_climate_avg_tensor.pt')
+    #datetime handling:
+    raw_ds = conf['predict']['start_datetime']
+    if isinstance(raw_ds, str):
+        # parse the “YYYY-MM-DD HH:MM:SS” string
+        init_dt = datetime.strptime(raw_ds, '%Y-%m-%d %H:%M:%S')
+    else:
+        init_dt = raw_ds  # already datetime-like
 
-    fig, axes = plt.subplots(2, 3, figsize=(25, 15))
+    # put it back into conf so later code can use it
+    conf['predict']['start_datetime'] = init_dt
+    
+    init_str = conf['predict']['start_datetime'].strftime('%Y-%m-%dT%HZ')
+    test_tensor_rmse = torch.zeros(output_shape).to(device)
 
-    p1 = axes[0, 0].pcolor(test_tensor_rmse.squeeze()[-16, :, :].cpu() / add_it, vmin=-2, vmax=2, cmap="RdBu_r")
-    fig.colorbar(p1, ax=axes[0, 0])
-    axes[0, 0].set_title("Test Tensor RMSE")
+    kk = 0 
+    loop = 0
+    for block_start in range(start_ix, start_ix + num_ts, chunk_size):
+        block_end = min(block_start + chunk_size, start_ix + num_ts)
+        # Pure xarray slice → NumPy
 
-    p2 = axes[0, 1].pcolor(truth_field.squeeze()[-16, :, :].cpu(), vmin=-2, vmax=2, cmap="RdBu_r")
-    fig.colorbar(p2, ax=axes[0, 1])
-    axes[0, 1].set_title("Truth Field")
+        ds_slice = dynamic_ds.isel(time=slice(block_start, block_end)).load()
+        ds_slice_times = ds_slice['time'].values
+        # build a list of 2D arrays per time-step per var
+        arr_list = [ds_slice[var].values  for var in dynamic_ds.data_vars]
+        # each ds_slice[var].values has shape (t_block, H, W)
+        # stack them into shape (t_block, n_dyn, H, W)
+        arr = np.stack(arr_list, axis=1)
 
-    p3 = axes[0, 2].pcolor(
-        (test_tensor_rmse.squeeze()[-16, :, :].cpu() / add_it) - truth_field.squeeze()[-16, :, :].cpu(),
-        vmin=-0.1,
-        vmax=0.1,
-        cmap="RdBu_r",
-    )
-    fig.colorbar(p3, ax=axes[0, 2])
-    axes[0, 2].set_title("Difference (RMSE - Truth)")
+        # Torchify & transfer once per block
+        cpu = torch.from_numpy(arr).unsqueeze(2).pin_memory()
+        gpu = cpu.to(device, non_blocking=True)
 
-    p1 = axes[1, 0].pcolor(test_tensor_rmse.squeeze()[-15, :, :].cpu() / add_it, vmin=-2, vmax=2, cmap="RdBu_r")
-    fig.colorbar(p1, ax=axes[1, 0])
-    axes[1, 0].set_title("Test Tensor RMSE")
+        for t in range(gpu.shape[0]):
 
-    p2 = axes[1, 1].pcolor(truth_field.squeeze()[-15, :, :].cpu(), vmin=-2, vmax=2, cmap="RdBu_r")
-    fig.colorbar(p2, ax=axes[1, 1])
-    axes[1, 1].set_title("Truth Field")
+            cftime_obj =ds_slice_times[t]
+            cftime_str = str(cftime_obj)
+            utc_datetime = datetime.strptime(cftime_str, '%Y-%m-%d %H:%M:%S')
+                
+            if (kk+1)%20 == 0:
+                print(f'model step: {kk:05}, time: {utc_datetime}')
+            dyn_t = gpu[t].unsqueeze(0)
+            # build input
+            if kk !=0:
+                if conf["data"]["static_first"]:
+                    x_forc = torch.cat((static_gpu, dyn_t), dim=1)
+                else:
+                    x_forc = torch.cat((dyn_t, static_gpu), dim=1)
+                x = torch.cat((x, x_forc), dim=1)
+                # inference
+            
+            with torch.no_grad(): pred = model(x.float())
+            kk+=1
 
-    p3 = axes[1, 2].pcolor(
-        (test_tensor_rmse.squeeze()[-15, :, :].cpu() / add_it) - truth_field.squeeze()[-15, :, :].cpu(),
-        vmin=-0.5,
-        vmax=0.5,
-        cmap="RdBu_r",
-    )
-    fig.colorbar(p3, ax=axes[1, 2])
-    axes[1, 2].set_title("Difference (RMSE - Truth)")
+            # Usage - this modifies your original tensor x:
+            post_process_wind_artifacts(pred, conf, enable_filtering=True)
 
-    plt.tight_layout()
-    plt.savefig(f'{conf["save_loc"]}/{fsout}_quick_climate_plot_slow.png', bbox_inches="tight")
-    plt.show()
+            if flag_mass: pred = opt_mass({"y_pred": pred, "x": x})["y_pred"]
+            if flag_water: pred = opt_water({"y_pred": pred, "x": x})["y_pred"]
+            if flag_energy: pred = opt_energy({"y_pred": pred, "x": x})["y_pred"]
+            
+            up, sl = make_xarray(pred.cpu(), utc_datetime, latlons.latitude.values,
+            latlons.longitude.values, conf)
+            p.apply_async(save_netcdf_increment, (up, sl, init_str, lead_time_periods * forecast_hour, load_metadata(conf), conf))
+            
+            # shift input
+            x = shift_input_for_next(x, pred, history_len, varnum_diag, static_dim)
+            forecast_hour += 1
 
-    return test_tensor_rmse, truth_field, inds_to_rmse, metrics, conf, METS
+    print('sleeping for 30 seconds to let any last files build')
+    time.sleep(30)
+    
+    return flag_energy
+
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run year RMSE for WxFormer model.")
-    parser.add_argument("--config", type=str, required=True, help="Path to the model configuration YAML file.")
-    parser.add_argument("--input_shape", type=int, nargs="+", required=True, help="Input shape as a list of integers.")
-    parser.add_argument(
-        "--forcing_shape", type=int, nargs="+", required=True, help="Forcing shape as a list of integers."
-    )
-    parser.add_argument(
-        "--output_shape", type=int, nargs="+", required=True, help="Output shape as a list of integers."
-    )
-    parser.add_argument("--device", type=str, default="cuda", help="Device to run the model on (cuda or cpu).")
-    parser.add_argument("--model_name", type=str, default=None, help="Optional model checkpoint name.")
-    parser.add_argument("--init_noise", type=int, default=None, help="init model noise")
+    parser = argparse.ArgumentParser(description="Run year RMSE for CAMULATOR model.")
+    parser.add_argument('--config', type=str, required=True, help='Path to the model configuration YAML file.')
+    parser.add_argument('--input_shape', type=int, nargs='+', required=True, help='Input shape as a list of integers.')
+    parser.add_argument('--forcing_shape', type=int, nargs='+', required=True, help='Forcing shape as a list of integers.')
+    parser.add_argument('--output_shape', type=int, nargs='+', required=True, help='Output shape as a list of integers.')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to run the model on (cuda or cpu).')
+    parser.add_argument('--model_name', type=str, default=None, help='Optional model checkpoint name.')
+    parser.add_argument('--init_noise', type=int, default=None, help='init model noise')
+    parser.add_argument('--save_append', type=str, default=None, help='append a folder to the output to save to')
 
     args = parser.parse_args()
 
     start_time = time.time()
 
+    # # Call the run_year_rmse function with parsed arguments
+    # test_tensor_rmse, truth_field, inds_to_rmse, metrics, conf, METS = run_year_rmse(
+    #     config=args.config,
+    #     input_shape=args.input_shape,
+    #     forcing_shape=args.forcing_shape,
+    #     output_shape=args.output_shape,
+    #     device=args.device,
+    #     model_name=args.model_name
+    # )
+    
     num_cpus = 8
     with mp.Pool(num_cpus) as p:
-        run_year_rmse(
-            p,
-            config=args.config,
-            input_shape=args.input_shape,
-            forcing_shape=args.forcing_shape,
-            output_shape=args.output_shape,
-            device=args.device,
-            model_name=args.model_name,
-            init_noise=args.init_noise,
-        )
+        run_year_rmse(p, config=args.config, input_shape=args.input_shape,
+        forcing_shape=args.forcing_shape,
+        output_shape=args.output_shape,
+        device=args.device,
+        model_name=args.model_name,
+        init_noise=args.init_noise,
+        save_append=args.save_append)
 
     end_time = time.time()
     elapsed_time = end_time - start_time
