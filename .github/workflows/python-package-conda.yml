@@ -38,12 +38,16 @@ jobs:
         run: |
           pytest
       - name: Pytest Coverage
-        if: ${{ !github.event.pull_request.head.repo.fork }}
         run: |
-          pytest --cov=credit tests/ | tee pytest-coverage.txt
-      - name: Pytest coverage comment
-        uses: MishaKav/pytest-coverage-comment@1bdbba85fb74a2fdc1ec66383acec1091610f82b # v1.1.57
-        if: ${{ !github.event.pull_request.head.repo.fork }}
+           pytest --cov=credit --cov-branch --cov-report=xml
+        #  pytest --cov=credit tests/ | tee pytest-coverage.txt
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
         with:
-          pytest-coverage-path: ./pytest-coverage.txt
+            token: ${{ secrets.CODECOV_TOKEN }} 
+      #- name: Pytest coverage comment
+      #  uses: MishaKav/pytest-coverage-comment@1bdbba85fb74a2fdc1ec66383acec1091610f82b # v1.1.57
+      #  if: ${{ !github.event.pull_request.head.repo.fork }}
+      #  with:
+      #    pytest-coverage-path: ./pytest-coverage.txt
 
