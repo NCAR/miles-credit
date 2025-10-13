@@ -39,7 +39,7 @@ jobs:
           pytest
       - name: Pytest Coverage
         run: |
-           pytest --cov --cov-branch --cov-report=xml
+           pytest --cov=credit --cov-branch --cov-report=xml
         #  pytest --cov=credit tests/ | tee pytest-coverage.txt
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
