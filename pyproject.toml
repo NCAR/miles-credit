@@ -54,7 +54,7 @@ dependencies = [
    ]
 
 [tool.setuptools]
-packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
+packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers", "credit.losses", "credit.transforms"]
 
 [tool.setuptools_scm]
 version_file = "credit/_version.py"
@@ -71,7 +71,7 @@ credit_calc_global_solar = "credit.applications.calc_global_solar:main"
 [tool.ruff]
 target-version = "py311"
 src = ["credit", "applications", "tests"]
-line-length = 120
+line-length = 180
 
 [tool.ruff.lint.per-file-ignores]
 "*.ipynb" = ["E402"]
