@@ -272,7 +272,6 @@ def main(rank, world_size, conf, backend=None, trial=False):
     Returns:
         Any: The result of the training process.
     """
-
     is_downscaling = "datasets" in conf["data"]
 
     # convert $USER to the actual user name
@@ -473,14 +472,12 @@ def main_cli():
 
     # ======================================================== #
     # handling config args
-
     conf = credit_main_parser(
         conf, parse_training=True, parse_predict=False, print_summary=False
     )
-    if not conf["data"]["datasets"]:
-        training_data_check(conf, print_summary=False)
+    if conf["data"].get("datasets", False) and (conf["data"]["dataset_type"] not in ("Ocean_MultiStep_Batcher", "Ocean_Tensor_Batcher")):
         # todo: data check for downscaling mode
-
+        training_data_check(conf, print_summary=False)
     # ======================================================== #
 
     # Create directories if they do not exist and copy yml file
