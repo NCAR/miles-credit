@@ -477,7 +477,7 @@ def main_cli():
     conf = credit_main_parser(
         conf, parse_training=True, parse_predict=False, print_summary=False
     )
-    if not conf["data"]["datasets"]:
+    if "datasets" not in conf["data"].keys():
         training_data_check(conf, print_summary=False)
         # todo: data check for downscaling mode
 
