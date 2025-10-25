@@ -133,7 +133,7 @@ class Trainer:
                             # Metrics
                             metrics_dict = metrics(y_pred.float(), y.float())
                             for name, value in metrics_dict.items():
-                                value = torch.Tensor([value]).cuda(
+                                value = torch.Tensor([value]).to(
                                     self.device, non_blocking=True
                                 )
                                 if distributed:
@@ -174,7 +174,7 @@ class Trainer:
                     scaler.update()
                     optimizer.zero_grad()
 
-            batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
+            batch_loss = torch.Tensor([logs["loss"]]).to(self.device)
             if distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
@@ -280,7 +280,7 @@ class Trainer:
                         # Metrics
                         metrics_dict = metrics(y_pred.float(), y.float())
                         for name, value in metrics_dict.items():
-                            value = torch.Tensor([value]).cuda(
+                            value = torch.Tensor([value]).to(
                                 self.device, non_blocking=True
                             )
                             if distributed:
@@ -294,7 +294,7 @@ class Trainer:
                 if not stop_forecast:
                     continue
 
-                batch_loss = torch.Tensor([loss.item()]).cuda(self.device)
+                batch_loss = torch.Tensor([loss.item()]).to(self.device)
                 if distributed:
                     torch.distributed.barrier()
                 results_dict["valid_loss"].append(batch_loss[0].item())

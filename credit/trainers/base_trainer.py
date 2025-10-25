@@ -285,7 +285,14 @@ class BaseTrainer(ABC):
             if hasattr(train_loader, "sampler") and hasattr(
                 train_loader.sampler, "set_epoch"
             ):
+                logger.debug("setting epoch on sampler")
                 train_loader.sampler.set_epoch(epoch)  # Start a new forecast
+
+            if hasattr(train_loader, "batch_sampler") and hasattr(
+                train_loader.batch_sampler, "set_epoch"
+            ):
+                logger.debug("setting epoch on BATCH sampler")
+                train_loader.batch_sampler.set_epoch(epoch)  # Start a new forecast
 
             if hasattr(train_loader.dataset, "set_epoch"):
                 train_loader.dataset.set_epoch(
@@ -300,6 +307,12 @@ class BaseTrainer(ABC):
                         valid_loader.sampler, "set_epoch"
                     ):
                         valid_loader.sampler.set_epoch(epoch)
+
+                    if hasattr(valid_loader, "batch_sampler") and hasattr(
+                        valid_loader.batch_sampler, "set_epoch"
+                    ):
+                        logger.debug("setting epoch for valid BATCH sampler")
+                        valid_loader.batch_sampler.set_epoch(epoch)
 
                     if hasattr(valid_loader.dataset, "set_epoch"):
                         valid_loader.dataset.set_epoch(epoch)

@@ -21,6 +21,7 @@ dependencies:
 ## Earth sciences and visualization
   - xarray
   - netcdf4
+  - h5netcdf
   - zarr
   - xesmf
   - dask
@@ -47,5 +48,4 @@ dependencies:
     - torchsummary
     - sphinx-autoapi
     - properscoring
-    - .
 

@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+#vscode
+.vscode/
+
+#outfiles
+*.o[0-9]*
 
 #images
 .png
@@ -41,6 +46,7 @@ MANIFEST
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
+_version.py
 
 # Unit test / coverage reports
 htmlcov/

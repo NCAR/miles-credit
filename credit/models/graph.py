@@ -498,7 +498,7 @@ if __name__ == "__main__":
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Number of parameters in the model: {num_params}")
 
-    # y_pred = model(input_tensor.to("cuda"), edge_index.cuda())
+    # y_pred = model(input_tensor.to("cuda"), edge_index.to())
     y_pred = model(input_tensor.to("cpu"))
     print("Predicted shape:", y_pred.shape)
 

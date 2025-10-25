@@ -1,6 +1,7 @@
 import gc
 import logging
 from collections import defaultdict
+import time
 
 import numpy as np
 import torch
@@ -84,30 +85,17 @@ class Trainer(BaseTrainer):
         logger.info(f"Using grad-max-norm value: {grad_max_norm}")
 
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
+        # varnum_diag = len(conf["data"]["diagnostic_variables"])
 
-        # number of dynamic forcing + forcing + static
-        static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-        )
-
-        ensemble_size = conf["trainer"].get("ensemble_size", 1)
+        # # number of dynamic forcing + forcing + static
+        # static_dim_size = (
+        #     len(conf["data"]["dynamic_forcing_variables"])
+        #     + len(conf["data"]["forcing_variables"])
+        #     + len(conf["data"]["static_variables"])
+        # )
 
         # [Optional] retain graph for multiple backward passes
         retain_graph = conf["data"].get("retain_graph", False)
-
-        # [Optional] Use the config option to set when to backprop
-        if "backprop_on_timestep" in conf["data"]:
-            backprop_on_timestep = conf["data"]["backprop_on_timestep"]
-        else:
-            # If not specified in config, use the range 1 to forecast_len
-            backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
-
-        assert (
-            forecast_length <= backprop_on_timestep[-1]
-        ), f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
         if (
@@ -125,32 +113,6 @@ class Trainer(BaseTrainer):
             clamp_min = float(conf["data"]["data_clamp"][0])
             clamp_max = float(conf["data"]["data_clamp"][1])
 
-        # ====================================================== #
-        # postblock opts outside of model
-        post_conf = conf["model"]["post_conf"]
-        flag_mass_conserve = False
-        flag_water_conserve = False
-        flag_energy_conserve = False
-
-        if post_conf["activate"]:
-            if post_conf["global_mass_fixer"]["activate"]:
-                if post_conf["global_mass_fixer"]["activate_outside_model"]:
-                    logger.info("Activate GlobalMassFixer outside of model")
-                    flag_mass_conserve = True
-                    opt_mass = GlobalMassFixer(post_conf)
-
-            if post_conf["global_water_fixer"]["activate"]:
-                if post_conf["global_water_fixer"]["activate_outside_model"]:
-                    logger.info("Activate GlobalWaterFixer outside of model")
-                    flag_water_conserve = True
-                    opt_water = GlobalWaterFixer(post_conf)
-
-            if post_conf["global_energy_fixer"]["activate"]:
-                if post_conf["global_energy_fixer"]["activate_outside_model"]:
-                    logger.info("Activate GlobalEnergyFixer outside of model")
-                    flag_energy_conserve = True
-                    opt_energy = GlobalEnergyFixer(post_conf)
-        # ====================================================== #
 
         # set up a custom tqdm
         if not isinstance(trainloader.dataset, IterableDataset):
@@ -161,42 +123,45 @@ class Trainer(BaseTrainer):
                 dataset_batches_per_epoch = trainloader.sampler.batches_per_epoch()
             else:
                 dataset_batches_per_epoch = len(trainloader)
+                logger.info(f"len trainloader {dataset_batches_per_epoch}")
             # Use the user-given number if not larger than the dataset
             batches_per_epoch = (
                 batches_per_epoch
                 if 0 < batches_per_epoch < dataset_batches_per_epoch
                 else dataset_batches_per_epoch
             )
+        logger.debug(f"batches_per_epoch: {batches_per_epoch}")
+
+
+        self.model.train()
+
+        dl = iter(trainloader)
+        results_dict = defaultdict(list)
 
         batch_group_generator = tqdm.tqdm(
             range(batches_per_epoch), total=batches_per_epoch, leave=True
         )
 
-        self.model.train()
-
-        dl = cycle(trainloader)
-        results_dict = defaultdict(list)
         for steps in range(batches_per_epoch):
             logs = {}
-            loss = 0
+            loss = 0.
             stop_forecast = False
             y_pred = None  # Place holder that gets updated after first roll-out
-            while not stop_forecast:
-                batch = next(dl)
-                forecast_step = batch["forecast_step"].item()
-                if forecast_step == 1:
-                    # Initialize x and x_surf with the first time step
-                    if "x_surf" in batch:
-                        # combine x and x_surf
-                        # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
-                        # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                        x = concat_and_reshape(batch["x"], batch["x_surf"]).to(
-                            self.device
-                        )  # .float()
-                    else:
-                        # no x_surf
-                        x = reshape_only(batch["x"]).to(self.device)  # .float()
 
+            # start = time.time()
+
+            batch = next(dl)
+            mode = batch["mode"][0]
+            while not stop_forecast:
+                logger.debug(f"current mode: {mode}")
+                logger.debug(batch.keys())
+
+                if mode == "init":
+                    # Initialize x and x_surf with the first time step
+                    x = batch["x"].to(self.device)
+                    
+                    # xload_time = time.time()
+                    # logger.info(f"x on device, t {xload_time - start}")
                     # --------------------------------------------- #
                     # ensemble x and x_surf on initialization
                     # copies each sample in the batch ensemble_size number of times.
@@ -227,60 +192,24 @@ class Trainer(BaseTrainer):
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
+                start = time.time()
+
                 # predict with the model
                 x = x.float()
                 with torch.autocast(device_type="cuda", enabled=amp):
                     y_pred = self.model(x)
 
-                # ============================================= #
-                # postblock opts outside of model
-
-                # backup init state
-                if flag_mass_conserve:
-                    if forecast_step == 1:
-                        x_init = x.clone()
-
-                # mass conserve using initialization as reference
-                if flag_mass_conserve:
-                    input_dict = {"y_pred": y_pred, "x": x_init}
-                    input_dict = opt_mass(input_dict)
-                    y_pred = input_dict["y_pred"]
-
-                # water conserve use previous step output as reference
-                if flag_water_conserve:
-                    input_dict = {"y_pred": y_pred, "x": x}
-                    input_dict = opt_water(input_dict)
-                    y_pred = input_dict["y_pred"]
-
-                # energy conserve use previous step output as reference
-                if flag_energy_conserve:
-                    input_dict = {"y_pred": y_pred, "x": x}
-                    input_dict = opt_energy(input_dict)
-                    y_pred = input_dict["y_pred"]
-                # ============================================= #
+                batch = next(dl)
+                mode = batch["mode"][0]
+                logger.debug(f"current mode: {mode}")
 
                 # only load y-truth data if we intend to backprop (default is every step gets grads computed
-                if forecast_step in backprop_on_timestep: #steps go from 1 to n
+                if mode == "y" or mode == "stop":
                     # calculate rolling loss
-                    if "y_surf" in batch:
-                        y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
-                            self.device
-                        )
-                    else:
-                        y = reshape_only(batch["y"]).to(self.device)
-
-                    if "y_diag" in batch:
-                        # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        y_diag_batch = (
-                            batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                        )  # .float()
-
-                        # concat on var dimension
-                        y = torch.cat((y, y_diag_batch), dim=1)
-
+                    y = batch["y"].to(self.device)
                     # --------------------------------------------- #
                     # clamp
-                    if flag_clamp:
+                    if flag_clamp:     
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
                     with torch.autocast(enabled=amp, device_type="cuda"):
@@ -291,45 +220,25 @@ class Trainer(BaseTrainer):
 
                     # compute gradients
                     scaler.scale(loss).backward(retain_graph=retain_graph)
+                    
+                    logger.info(f"forward/backward time, t {time.time() - start}s")
+
 
                 if distributed:
                     torch.distributed.barrier()
-
-                # stop after X steps
-                stop_forecast = batch["stop_forecast"].item()
-                if stop_forecast:
-                    break
 
                 # Discard current computational graph, which still 
                 # exists (through y_pred reference) if `forecast_step` not in `backprop_on_timestep`
                 if not retain_graph:
                     y_pred = y_pred.detach()
-                
-                # single timestep input
-                if x.shape[2] == 1:
-                    # cut diagnostic vars from y_pred, they are not inputs
-                    if "y_diag" in batch:
-                        x = y_pred[:, :-varnum_diag, ...]
-                    else:
-                        x = y_pred
 
-                # multi-timestep input
+                # stop after X steps
+                if mode == "stop":
+                    stop_forecast = True
+                    break
                 else:
-                    # static channels will get updated on next pass
-
-                    if static_dim_size == 0:
-                        x_detach = x[:, :, 1:, ...].detach()
-                    else:
-                        x_detach = x[:, :-static_dim_size, 1:, ...].detach()
-
-                    # cut diagnostic vars from y_pred, they are not inputs
-                    if "y_diag" in batch:
-                        x = torch.cat(
-                            [x_detach, y_pred[:, :-varnum_diag, ...]],
-                            dim=2,
-                        )
-                    else:
-                        x = torch.cat([x_detach, y_pred], dim=2)
+                    x = y_pred
+                
 
             if distributed:
                 torch.distributed.barrier()
@@ -370,12 +279,16 @@ class Trainer(BaseTrainer):
             # Metrics
             metrics_dict = metrics(y_pred, y)
             for name, value in metrics_dict.items():
-                value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                value = torch.Tensor([value])
+
+                value = value.to(self.device, non_blocking=True)
                 if distributed:
                     dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
                 results_dict[f"train_{name}"].append(value[0].item())
 
-            batch_loss = torch.Tensor([logs["loss"]]).to(self.device)
+            batch_loss = torch.Tensor([logs["loss"]])
+            batch_loss = batch_loss.to(self.device)
+
             if distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
@@ -437,18 +350,19 @@ class Trainer(BaseTrainer):
         Returns:
             dict: Dictionary containing validation metrics and loss for the epoch.
         """
-
+        
+        # TODO: two dataloader inits? every time
         self.model.eval()
 
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
+        # varnum_diag = len(conf["data"]["diagnostic_variables"])
 
-        # number of dynamic forcing + forcing + static
-        static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-        )
+        # # number of dynamic forcing + forcing + static
+        # static_dim_size = (
+        #     len(conf["data"]["dynamic_forcing_variables"])
+        #     + len(conf["data"]["forcing_variables"])
+        #     + len(conf["data"]["static_variables"])
+        # )
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
         history_len = (
@@ -493,31 +407,6 @@ class Trainer(BaseTrainer):
             clamp_max = float(conf["data"]["data_clamp"][1])
 
         # ====================================================== #
-        # postblock opts outside of model
-        post_conf = conf["model"]["post_conf"]
-        flag_mass_conserve = False
-        flag_water_conserve = False
-        flag_energy_conserve = False
-
-        if post_conf["activate"]:
-            if post_conf["global_mass_fixer"]["activate"]:
-                if post_conf["global_mass_fixer"]["activate_outside_model"]:
-                    logger.info("Activate GlobalMassFixer outside of model")
-                    flag_mass_conserve = True
-                    opt_mass = GlobalMassFixer(post_conf)
-
-            if post_conf["global_water_fixer"]["activate"]:
-                if post_conf["global_water_fixer"]["activate_outside_model"]:
-                    logger.info("Activate GlobalWaterFixer outside of model")
-                    flag_water_conserve = True
-                    opt_water = GlobalWaterFixer(post_conf)
-
-            if post_conf["global_energy_fixer"]["activate"]:
-                if post_conf["global_energy_fixer"]["activate_outside_model"]:
-                    logger.info("Activate GlobalEnergyFixer outside of model")
-                    flag_energy_conserve = True
-                    opt_energy = GlobalEnergyFixer(post_conf)
-        # ====================================================== #
 
         batch_group_generator = tqdm.tqdm(
             range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True
@@ -530,22 +419,17 @@ class Trainer(BaseTrainer):
                 loss = 0
                 stop_forecast = False
                 y_pred = None  # Place holder that gets updated after first roll-out
+
+                batch = next(dl)
+                mode = batch["mode"][0]
                 while not stop_forecast:
-                    batch = next(dl)
-                    forecast_step = batch["forecast_step"].item()
-                    stop_forecast = batch["stop_forecast"].item()
-                    if forecast_step == 1:
+                    logger.debug(f"current mode: {mode}")
+                    logger.debug(batch.keys())
+
+                    if mode == "init":
                         # Initialize x and x_surf with the first time step
-                        if "x_surf" in batch:
-                            # combine x and x_surf
-                            # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
-                            # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                            x = concat_and_reshape(batch["x"], batch["x_surf"]).to(
-                                self.device
-                            )  # .float()
-                        else:
-                            # no x_surf
-                            x = reshape_only(batch["x"]).to(self.device)  # .float()
+                        x = batch["x"].to(self.device)
+
                         # --------------------------------------------- #
                         # ensemble x and x_surf on initialization
                         # copies each sample in the batch ensemble_size number of times.
@@ -558,9 +442,7 @@ class Trainer(BaseTrainer):
                     if "x_forcing_static" in batch:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
                         x_forcing_batch = (
-                            batch["x_forcing_static"]
-                            .to(self.device)
-                            .permute(0, 2, 1, 3, 4)
+                            batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
                         )  # .float()
                         # ---------------- ensemble ----------------- #
                         # ensemble x_forcing_batch for concat. see above for explanation of code
@@ -572,7 +454,6 @@ class Trainer(BaseTrainer):
 
                         # concat on var dimension
                         x = torch.cat((x, x_forcing_batch), dim=1)
-
                     # --------------------------------------------- #
                     # clamp
                     if flag_clamp:
@@ -580,53 +461,18 @@ class Trainer(BaseTrainer):
 
                     y_pred = self.model(x.float())
 
-                    # ============================================= #
-                    # postblock opts outside of model
-
-                    # backup init state
-                    if flag_mass_conserve:
-                        if forecast_step == 1:
-                            x_init = x.clone()
-
-                    # mass conserve using initialization as reference
-                    if flag_mass_conserve:
-                        input_dict = {"y_pred": y_pred, "x": x_init}
-                        input_dict = opt_mass(input_dict)
-                        y_pred = input_dict["y_pred"]
-
-                    # water conserve use previous step output as reference
-                    if flag_water_conserve:
-                        input_dict = {"y_pred": y_pred, "x": x}
-                        input_dict = opt_water(input_dict)
-                        y_pred = input_dict["y_pred"]
-
-                    # energy conserve use previous step output as reference
-                    if flag_energy_conserve:
-                        input_dict = {"y_pred": y_pred, "x": x}
-                        input_dict = opt_energy(input_dict)
-                        y_pred = input_dict["y_pred"]
-                    # ============================================= #
-
                     # ================================================================================== #
                     # scope of reaching the final forecast_len
-                    if forecast_step == (forecast_len + 1):
-                        # ----------------------------------------------------------------------- #
-                        # creating `y` tensor for loss compute
-                        if "y_surf" in batch:
-                            y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
-                                self.device
-                            )
-                        else:
-                            y = reshape_only(batch["y"]).to(self.device)
 
-                        if "y_diag" in batch:
-                            # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                            y_diag_batch = (
-                                batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                            )  # .float()
+                    batch = next(dl)
+                    mode = batch["mode"][0]
 
-                            # concat on var dimension
-                            y = torch.cat((y, y_diag_batch), dim=1)
+                    # only load y-truth data if we intend to backprop (default is every step gets grads computed
+                    if mode == "stop":
+                        stop_forecast = True
+                    # ----------------------------------------------------------------------- #
+                    # creating `y` tensor for loss compute
+                        y = batch["y"].to(self.device)
 
                         # --------------------------------------------- #
                         # clamp
@@ -635,7 +481,7 @@ class Trainer(BaseTrainer):
 
                         # ----------------------------------------------------------------------- #
                         # calculate rolling loss
-                        loss = criterion(y.to(y_pred.dtype), y_pred).mean()
+                        loss = criterion(y.to(dtype=y_pred.dtype), y_pred).mean()
 
                         # Metrics
                         # metrics_dict = metrics(y_pred, y.float)
@@ -653,35 +499,12 @@ class Trainer(BaseTrainer):
 
                             results_dict[f"valid_{name}"].append(value[0].item())
 
-                        assert stop_forecast
+                        assert mode == "stop"
                         break  # stop after X steps
-
-                    # ================================================================================== #
-                    # scope of keep rolling out
-
-                    # step-in-step-out
-                    elif history_len == 1:
-                        # cut diagnostic vars from y_pred, they are not inputs
-                        if "y_diag" in batch:
-                            x = y_pred[:, :-varnum_diag, ...].detach()
-                        else:
-                            x = y_pred.detach()
-
-                    # multi-step in
                     else:
-                        if static_dim_size == 0:
-                            x_detach = x[:, :, 1:, ...].detach()
-                        else:
-                            x_detach = x[:, :-static_dim_size, 1:, ...].detach()
+                        x = y_pred.detach()
 
-                        # cut diagnostic vars from y_pred, they are not inputs
-                        if "y_diag" in batch:
-                            x = torch.cat(
-                                [x_detach, y_pred[:, :-varnum_diag, ...].detach()],
-                                dim=2,
-                            )
-                        else:
-                            x = torch.cat([x_detach, y_pred.detach()], dim=2)
+                        
 
                 batch_loss = torch.Tensor([loss.item()]).to(self.device)
 

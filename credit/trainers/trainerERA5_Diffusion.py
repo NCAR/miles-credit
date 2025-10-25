@@ -347,12 +347,12 @@ class Trainer(BaseTrainer):
             # Metrics
             metrics_dict = metrics(y_pred, y)
             for name, value in metrics_dict.items():
-                value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
+                value = torch.Tensor([value]).to(self.device, non_blocking=True)
                 if distributed:
                     dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
                 results_dict[f"train_{name}"].append(value[0].item())
 
-            batch_loss = torch.Tensor([logs["loss"]]).cuda(self.device)
+            batch_loss = torch.Tensor([logs["loss"]]).to(self.device)
             if distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
@@ -605,7 +605,7 @@ class Trainer(BaseTrainer):
                         metrics_dict["psnr"] = psnr.compute().item()
 
                         for name, value in metrics_dict.items():
-                            value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
+                            value = torch.Tensor([value]).to(self.device, non_blocking=True)
 
                             if distributed:
                                 dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
@@ -645,7 +645,7 @@ class Trainer(BaseTrainer):
                         else:
                             x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
-                batch_loss = torch.Tensor([loss.item()]).cuda(self.device)
+                batch_loss = torch.Tensor([loss.item()]).to(self.device)
 
                 if distributed:
                     torch.distributed.barrier()

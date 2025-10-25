@@ -7,6 +7,7 @@ from credit.trainers.trainerERA5_Diffusion import Trainer as TrainerERA5_Diffusi
 from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
 from credit.trainers.trainer_downscaling import Trainer as Trainer404
 from credit.trainers.ic_optimization import Trainer as TrainerIC
+from credit.trainers.trainerGOES10km import Trainer as TrainerGOES10km
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ trainer_types = {
     ),
     "ic-opt": (TrainerIC, "Loading an initial condition optimizer training class"),
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
+    "goes10km": (TrainerGOES10km, "loading a trainer for GOES 10km dataset")
 }
 
 

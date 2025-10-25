@@ -35,6 +35,16 @@ def latitude_weights(conf):
     weights = torch.cos(torch.deg2rad(lat))
     weights = weights / weights.mean()
 
+    image_height = conf["model"]["image_height"]
+
+    if image_height > len(weights):
+        total_pad = image_height - len(lat)
+        pad_l = total_pad // 2
+        pad_r = total_pad // 2 + total_pad % 2
+
+        weights = torch.nn.functional.pad(weights.unsqueeze(0), (pad_l, pad_r), "replicate").squeeze(0)
+
+
     # Create a 2D tensor of weights
     L = weights.unsqueeze(1).expand(-1, lon_dim)
 
@@ -154,7 +164,7 @@ class VariableTotalLoss2D(torch.nn.Module):
         self.lat_weights = None
         if conf["loss"]["use_latitude_weights"]:
             logger.info("Using latitude weights in loss calculations")
-            self.lat_weights = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
+            self.lat_weights = latitude_weights(conf)[:, 0].unsqueeze(0).unsqueeze(-1)
 
         # ------------------------------------------------------------- #
         # variable weights
