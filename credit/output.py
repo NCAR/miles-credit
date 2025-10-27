@@ -15,7 +15,6 @@ import xarray as xr
 from credit.data import drop_var_from_dataset
 from credit.interp import full_state_pressure_interpolation
 from inspect import signature
-from credit.credit_ptype import CreditPostProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,7 @@ def split_and_reshape(tensor, conf):
     tensor_upper_air = tensor_upper_air.reshape(shape_upper_air[0], channels, levels, shape_upper_air[-2], shape_upper_air[-1])
 
     # subset surface variables
-    tensor_single_level = tensor[:, -int(single_level_channels) :, :, :]
+    tensor_single_level = tensor[:, -int(single_level_channels):, :, :]
 
     # return x, surf for B, c, lat, lon output
     return tensor_upper_air, tensor_single_level
@@ -85,8 +84,8 @@ def make_xarray(pred, forecast_datetime, lat, lon, conf):
     Returns:
         darray_upper_air (xarray.DataArray): DataArray containing upper air variables with dimensions
             [time, vars, level, latitude, longitude].
-    darray_single_level (xarray.DataArray): DataArray containing surface variables with dimensions
-        [time, vars, latitude, longitude].
+        darray_single_level (xarray.DataArray): DataArray containing surface variables with dimensions
+            [time, vars, latitude, longitude].
     """
     # subset upper air and surface variables
     tensor_upper_air, tensor_single_level = split_and_reshape(pred, conf)
@@ -208,10 +207,42 @@ def save_netcdf_increment(
 
             with xr.open_dataset(conf["predict"]["static_fields"]) as static_ds:
                 surface_geopotential = static_ds[surface_geopotential_var].values
-            pressure_interp = full_state_pressure_interpolation(ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"])
+
+            # with xr.open_dataset(conf["predict"]["static_fields"]) as static_ds:
+            #     surface_geopotential = static_ds["Z_GDS4_SFC"].values[::-1, :]
+
+            # Check if ensemble dimension exists (could be 'ensemble', 'ensemble_member_label', etc.)
+            ensemble_dim = None
+            for dim in ["ensemble_member_label", "ensemble", "member"]:
+                if dim in ds_merged.dims:
+                    ensemble_dim = dim
+                    break
+
+            if ensemble_dim is not None:
+                # Loop over ensemble members and interpolate each one
+                ensemble_interp_list = []
+                for ens_member in ds_merged[ensemble_dim].values:
+                    ds_ens = ds_merged.sel({ensemble_dim: ens_member})
+                    pressure_interp_ens = full_state_pressure_interpolation(
+                        ds_ens, surface_geopotential, **conf["predict"]["interp_pressure"]
+                    )
+                    # Add ensemble coordinate back with the original dimension name
+                    pressure_interp_ens = pressure_interp_ens.expand_dims(
+                        {ensemble_dim: [ens_member]})
+                    ensemble_interp_list.append(pressure_interp_ens)
+
+                # Concatenate all ensemble members back together using the original dimension name
+                pressure_interp = xr.concat(
+                    ensemble_interp_list, dim=ensemble_dim)
+            else:
+                # No ensemble dimension, process as before
+                pressure_interp = full_state_pressure_interpolation(
+                    ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"]
+                )
 
             # Do ptype here before merging!
             if "use_ptype" in conf.keys() and conf["use_ptype"]:
+                from credit.credit_ptype import CreditPostProcessor
                 credit_processor = CreditPostProcessor()
                 ds_output = credit_processor.dewpoint_temp(pressure_interp)
                 subset_array = credit_processor.extract_variable_levels(ds_output)
@@ -242,9 +273,16 @@ def save_netcdf_increment(
                 pressure_interp = xr.merge([pressure_interp, ptype_classification])
 
             ds_merged = xr.merge([ds_merged, pressure_interp])
-        logger.info(f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
 
-        save_location = os.path.join(conf["predict"]["save_forecast"], nc_filename)
+        # Rename ensemble_member_label to ensemble before saving
+        if "ensemble_member_label" in ds_merged.dims:
+            ds_merged = ds_merged.rename({"ensemble_member_label": "ensemble"})
+
+        logger.info(
+            f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
+
+        save_location = os.path.join(
+            conf["predict"]["save_forecast"], nc_filename)
         os.makedirs(save_location, exist_ok=True)
 
         unique_filename = os.path.join(save_location, f"pred_{nc_filename}_{forecast_hour:03d}.nc")
@@ -293,7 +331,8 @@ def save_netcdf_increment(
         # Use Dask to write the dataset in parallel
         ds_merged.to_netcdf(unique_filename, mode="w", encoding=encoding_dict)
 
-        logger.info(f"Saved forecast hour {forecast_hour} to {unique_filename}")
+        logger.info(
+            f"Saved forecast hour {forecast_hour} to {unique_filename}")
     except Exception:
         print(traceback.format_exc())
 
