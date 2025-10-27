@@ -5,10 +5,13 @@ import logging
 from credit.trainers.trainerERA5 import Trainer as TrainerERA5
 from credit.trainers.trainerERA5_Diffusion import Trainer as TrainerERA5_Diffusion
 from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
-from credit.trainers.trainerERA5_ensemble_finetune import Trainer as TrainerEnsembleFinetune
 from credit.trainers.trainer_downscaling import Trainer as Trainer404
 from credit.trainers.ic_optimization import Trainer as TrainerIC
 from credit.trainers.trainer_om4_samudra import Trainer as TrainerSamudra
+
+from credit.trainers.trainerLES import Trainer as TrainerLES
+from credit.trainers.trainerWRF import Trainer as TrainerWRF
+from credit.trainers.trainerWRF_multi import Trainer as TrainerWRFMulti
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +30,19 @@ trainer_types = {
         TrainerEnsemble,
         "Loading a single or multi-step trainer for the ERA5 dataset for parallel computation of the CRPS loss.",
     ),
-    "era5-ensemble-finetune": (
-        TrainerEnsembleFinetune,
-        "Loading a single or multi-step trainer for the ERA5 dataset for parallel computation of the CRPS loss.",
-    ),
     "cam": (
         TrainerERA5,
         "Loading a single or multi-step trainer for the CAM dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
     "ic-opt": (TrainerIC, "Loading an initial condition optimizer training class"),
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
-    "samudra": (TrainerSamudra, "Loading a single or multi-step trainer for the Samudra OM4 dataset that uses gradient accumulation on forecast lengths > 1.")
+    "standard-les": (TrainerLES, "Loading a single-step LES trainer"),
+    "standard-wrf": (TrainerWRF, "Loading a single-step WRF trainer"),
+    "multi-step-wrf": (TrainerWRFMulti, "Loading a multi-step WRF trainer"),
+    "samudra": (
+        TrainerSamudra,
+        "Loading a single or multi-step trainer for the Samudra OM4 dataset that uses gradient accumulation on forecast lengths > 1.",
+    ),
 }
 
 

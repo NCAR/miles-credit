@@ -468,10 +468,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
         )
     prefetch_factor = conf["trainer"].get("prefetch_factor")
     if prefetch_factor is None:
-        logging.warning(
-            "prefetch_factor not found in config. Using default value of 4. "
-            "Please specify prefetch_factor in the 'trainer' section of your config."
-        )
+        logging.warning("prefetch_factor not found in config. Using default value of 4. " "Please specify prefetch_factor in the 'trainer' section of your config.")
         prefetch_factor = 4
 
     # If loss is CRPS, we need all samplers-dataloaders to return the same (x, y)
@@ -484,10 +481,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
     ):
         rank = 0
         world_size = 1
-        logging.info(
-            "For CRPS loss, we maintain identical rank and world size across all "
-            "GPUs to ensure proper CDF calculation during synchronous distributed processing."
-        )
+        logging.info("For CRPS loss, we maintain identical rank and world size across all " "GPUs to ensure proper CDF calculation during synchronous distributed processing.")
 
     if type(dataset) is ERA5_and_Forcing_SingleStep:
         # This is the single-step dataset, original version
@@ -500,11 +494,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
                 if torch.is_tensor(items[0]):
                     collated_batch[key] = torch.stack(items)
                 elif isinstance(items[0], (int, float, bool)):
-                    collated_batch[key] = torch.tensor(
-                        [items[0]]
-                        if key in ["forecast_step", "stop_forecast"]
-                        else items
-                    )
+                    collated_batch[key] = torch.tensor([items[0]] if key in ["forecast_step", "stop_forecast"] else items)
                 else:
                     collated_batch[key] = items
             return collated_batch
