@@ -629,7 +629,7 @@ class Objective(BaseObjective):
                 raise E
 
 
-if __name__ == "__main__":
+def primary_main():
     description = "Train a segmengation model on a hologram data set"
     parser = ArgumentParser(description=description)
     parser.add_argument(
@@ -707,3 +707,7 @@ if __name__ == "__main__":
 
     local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
     main(world_rank, world_size, conf, backend)
+
+
+if __name__ == "__main__":
+    primary_main()

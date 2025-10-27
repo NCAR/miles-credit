@@ -618,7 +618,7 @@ class Objective(BaseObjective):
                 raise E
 
 
-if __name__ == "__main__":
+def primary_main():
     description = "Train a LES model"
     parser = ArgumentParser(description=description)
 
@@ -696,3 +696,7 @@ if __name__ == "__main__":
 
     local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
     main(world_rank, world_size, conf, backend)
+
+
+if __name__ == "__main__":
+    primary_main()

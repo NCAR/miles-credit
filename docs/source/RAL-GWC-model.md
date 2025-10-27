@@ -45,7 +45,7 @@ Go to the `ksha` branch, copy the following two folders to your directory, modif
 
  * Single-step training using a single `Casper` GPU: 
 ```
-python applications/train_WRF.py -c /glade/work/ksha/DWC_runs/TEST_WRF/model_single_none.yml
+credit_train_wrf -c /glade/work/ksha/DWC_runs/TEST_WRF/model_single_none.yml
 ```
  * Single-step training using FSDP on 4 `Derecho` GPUs:
 ```
@@ -57,7 +57,7 @@ qsub /glade/work/ksha/DWC_runs/TEST_WRF/launch_multi_01.sh
 ```
 * Inference using a single `Casper` GPU:
 ```
-python applications/rollout_WRF.py -c /glade/work/ksha/DWC_runs/TEST_WRF/model_predict_none.yml
+credit_rollout_wrf -c /glade/work/ksha/DWC_runs/TEST_WRF/model_predict_none.yml
 ```
 * Inference using FSDP on 4 `Derecho` GPUs:
 ```
@@ -67,7 +67,7 @@ qsub /glade/work/ksha/DWC_runs/TEST_WRF/launch_predict.sh
 
  * Single-step training using a single `Casper` GPU: 
 ```
-python applications/train_LES.py -c /glade/work/ksha/DWC_runs/TEST_LES/model_single_none.yml
+credit_train_les -c /glade/work/ksha/DWC_runs/TEST_LES/model_single_none.yml
 ```
 
  * Single-step training using FSDP on 4 `Derecho` GPUs:
@@ -77,7 +77,7 @@ qsub /glade/work/ksha/DWC_runs/TEST_LES/launch_single.sh
 
 * Inference using a single `Casper` GPU:
 ```
-python applications/rollout_LES.py -c /glade/work/ksha/DWC_runs/TEST_LES/model_predict_none.yml
+credit_rollout_les -c /glade/work/ksha/DWC_runs/TEST_LES/model_predict_none.yml
 ```
 
 * Inference using FSDP on 4 `Derecho` GPUs:

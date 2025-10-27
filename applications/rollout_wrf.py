@@ -229,6 +229,7 @@ def predict(rank, world_size, conf, p):
         # if conf["trainer"].get("compile", False):
         #     model = torch.compile(model)
         model = distributed_model_wrapper(conf, model, device)
+        save_loc = os.path.expandvars(conf["save_loc"])
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
         load_msg = model.module.load_state_dict(
@@ -439,7 +440,7 @@ def predict(rank, world_size, conf, p):
     return 1
 
 
-if __name__ == "__main__":
+def main():
     description = "Rollout AI-NWP forecasts"
     parser = ArgumentParser(description=description)
     # -------------------- #
@@ -511,7 +512,6 @@ if __name__ == "__main__":
     config = args_dict.pop("model_config")
     launch = int(args_dict.pop("launch"))
     mode = str(args_dict.pop("mode"))
-    no_data = 0 if "no-data" not in args_dict else int(args_dict.pop("no-data"))
     subset = int(args_dict.pop("subset"))
     number_of_subsets = int(args_dict.pop("no_subset"))
     num_cpus = int(args_dict.pop("num_cpus"))
@@ -593,3 +593,7 @@ if __name__ == "__main__":
         # Ensure all processes are finished
         p.close()
         p.join()
+
+
+if __name__ == "__main__":
+    main()
