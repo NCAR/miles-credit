@@ -3,11 +3,10 @@ import logging
 from collections import defaultdict
 
 import numpy as np
-import torch
+
 import torch.distributed as dist
 import torch.fft
 import tqdm
-from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
 from credit.scheduler import update_on_batch
 from credit.trainers.utils import cycle, accum_log
@@ -260,7 +259,7 @@ class Trainer(BaseTrainer):
                 # ============================================= #
 
                 # only load y-truth data if we intend to backprop (default is every step gets grads computed
-                if forecast_step in backprop_on_timestep: #steps go from 1 to n
+                if forecast_step in backprop_on_timestep:  # steps go from 1 to n
                     # calculate rolling loss
                     if "y_surf" in batch:
                         y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
@@ -300,11 +299,11 @@ class Trainer(BaseTrainer):
                 if stop_forecast:
                     break
 
-                # Discard current computational graph, which still 
+                # Discard current computational graph, which still
                 # exists (through y_pred reference) if `forecast_step` not in `backprop_on_timestep`
                 if not retain_graph:
                     y_pred = y_pred.detach()
-                
+
                 # single timestep input
                 if x.shape[2] == 1:
                     # cut diagnostic vars from y_pred, they are not inputs
