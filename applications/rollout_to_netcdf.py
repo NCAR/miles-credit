@@ -228,7 +228,8 @@ def predict(rank, world_size, conf, p):
         clamp_max = float(conf["data"]["data_clamp"][1])
 
     # Load the forecasts we wish to compute
-    forecasts = load_forecasts(conf)
+    forecasts = conf["predict"]["forecasts"] # load_forecasts(conf)
+
     if len(forecasts) < batch_size:
         logger.warning(
             f"number of forecast init times {len(forecasts)} is less than batch_size {batch_size}, will result in under-utilization"
@@ -546,20 +547,28 @@ def main():
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    #     wandb.init(
-    #         # set the wandb project where this run will be logged
-    #         project="Derecho parallelism",
-    #         name=f"Worker {os.environ["RANK"]} {os.environ["WORLD_SIZE"]}"
-    #         # track hyperparameters and run metadata
-    #         config=conf
-    #     )
-
+    forecasts = load_forecasts(conf)
     if number_of_subsets > 0:
-        forecasts = load_forecasts(conf)
         if number_of_subsets > 0 and subset >= 0:
             subsets = np.array_split(forecasts, number_of_subsets)
-            forecasts = subsets[subset - 1]  # Select the subset based on subset_size
-            conf["predict"]["forecasts"] = forecasts
+            forecasts = subsets[subset - 1].tolist()  # Select the subset based on subset_size
+            
+            def fmt_datetime(dt_str):
+                return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%dT%HZ")
+
+            subforecast_list = []
+            # Ensure forecasts is a list of tuples
+            for k, (start_date, end_date) in enumerate(forecasts):
+                start_fmt = fmt_datetime(start_date)
+                forecast_dir = os.path.join(conf['predict']['save_forecast'], start_fmt)
+                if os.path.isdir(forecast_dir):
+                    print(f"✅ Exists: {forecast_dir}")
+                else:
+                    print(f"❌ Missing: {forecast_dir}")
+                    subforecast_list.append(forecasts[k])
+            conf["predict"]["forecasts"] = list(subforecast_list)
+    else:
+        conf["predict"]["forecasts"] = forecasts
 
     seed = conf["seed"]
     seed_everything(seed)
