@@ -17,8 +17,8 @@ from credit.models.crossformer_diffusion import CrossFormerDiffusion
 from credit.models.unet_diffusion import UnetDiffusion
 from credit.diffusion import ModifiedGaussianDiffusion
 
-from credit.models.swin_wrf import WRF_Tansformer
-from credit.models.dscale_wrf import Dscale_Tansformer
+from credit.models.swin_wrf import WRFTransformer
+from credit.models.dscale_wrf import DscaleTransformer
 
 
 logger = logging.getLogger(__name__)
@@ -46,9 +46,12 @@ model_types = {
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
-    "wrf": (WRF_Tansformer, "Loading WRF Transformer"),
-    "dscale": (Dscale_Tansformer, "Loading downscaling Transformer"),
-    "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
+    "wrf": (WRFTransformer, "Loading WRF Transformer"),
+    "dscale": (DscaleTransformer, "Loading downscaling Transformer"),
+    "crossformer_downscaling": (
+        DownscalingCrossFormer,
+        "Loading downscaling crossformer model",
+    ),
     "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
 }
 
@@ -86,7 +89,11 @@ def load_fsdp_or_checkpoint_policy(conf):
         }
     # FuXi
     # FuXi supports "spectral_norm = True" only
-    elif "fuxi" in conf["model"]["type"] or ("wrf" in conf["model"]["type"]) or ("dscale" in conf["model"]["type"]):
+    elif (
+        "fuxi" in conf["model"]["type"]
+        or ("wrf" in conf["model"]["type"])
+        or ("dscale" in conf["model"]["type"])
+    ):
         from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
 
         transformer_layers_cls = {SwinTransformerV2Stage}
@@ -145,7 +152,9 @@ def load_model(conf, load_weights=False, model_name=False):
                     ckpt = os.path.join(save_loc, "checkpoint.pt")
 
             if not os.path.isfile(ckpt):
-                raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
+                raise ValueError(
+                    "No saved checkpoint exists. You must train a model first. Exiting."
+                )
 
             logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
@@ -167,7 +176,9 @@ def load_model(conf, load_weights=False, model_name=False):
             self_condition = diffusion_config.pop("self_condition", False)
             condition = diffusion_config.pop("condition", True)
         else:
-            logger.warning("The diffusion details were not specified as model:diffusion, exiting")
+            logger.warning(
+                "The diffusion details were not specified as model:diffusion, exiting"
+            )
             sys.exit(0)
 
         if load_weights:
@@ -190,7 +201,9 @@ def load_model(conf, load_weights=False, model_name=False):
             self_condition = diffusion_config.pop("self_condition", False)
             condition = diffusion_config.pop("condition", True)
         else:
-            logger.warning("The diffusion details were not specified as model:diffusion, exiting")
+            logger.warning(
+                "The diffusion details were not specified as model:diffusion, exiting"
+            )
             sys.exit(0)
 
         if load_weights:
@@ -240,7 +253,9 @@ def load_model_name(conf, model_name, load_weights=False):
             ckpt = os.path.join(save_loc, model_name)
 
             if not os.path.isfile(ckpt):
-                raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
+                raise ValueError(
+                    "No saved checkpoint exists. You must train a model first. Exiting."
+                )
 
             logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
 

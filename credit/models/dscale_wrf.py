@@ -8,6 +8,7 @@ import logging
 from credit.postblock import PostBlock
 from credit.models.base_model import BaseModel
 from credit.boundary_padding import TensorPadding
+from credit.models.fuxi import Fuxi
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,9 @@ def get_pad3d(input_resolution, window_size):
     Pl, Lat, Lon = input_resolution
     win_pl, win_lat, win_lon = window_size
 
-    padding_left = padding_right = padding_top = padding_bottom = padding_front = padding_back = 0
+    padding_left = padding_right = padding_top = padding_bottom = padding_front = (
+        padding_back
+    ) = 0
     pl_remainder = Pl % win_pl
     lat_remainder = Lat % win_lat
     lon_remainder = Lon % win_lon
@@ -85,7 +88,9 @@ class CubeEmbedding(nn.Module):
         patch_size: T, Lat, Lon
     """
 
-    def __init__(self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm):
+    def __init__(
+        self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm
+    ):
         super().__init__()
 
         # input size
@@ -103,7 +108,9 @@ class CubeEmbedding(nn.Module):
         self.embed_dim = embed_dim
 
         # Conv3d-based patching
-        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv3d(
+            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
+        )
 
         # layer norm
         if norm_layer is not None:
@@ -143,16 +150,22 @@ class CubeEmbedding(nn.Module):
 
 
 class DownBlock(nn.Module):
-    def __init__(self, in_chans: int, out_chans: int, num_groups: int, num_residuals: int = 2):
+    def __init__(
+        self, in_chans: int, out_chans: int, num_groups: int, num_residuals: int = 2
+    ):
         super().__init__()
 
         # down-sampling with Conv2d
-        self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=(3, 3), stride=2, padding=1)
+        self.conv = nn.Conv2d(
+            in_chans, out_chans, kernel_size=(3, 3), stride=2, padding=1
+        )
 
         # blocks of residual path
         blk = []
         for i in range(num_residuals):
-            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
+            blk.append(
+                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
+            )
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -181,7 +194,9 @@ class UpBlock(nn.Module):
         # blocks of residual path
         blk = []
         for i in range(num_residuals):
-            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
+            blk.append(
+                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
+            )
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -285,7 +300,7 @@ class UTransformer(nn.Module):
         return x
 
 
-class Dscale_Tansformer(BaseModel):
+class DscaleTransformer(BaseModel):
     """
     Args:
         img_size (Sequence[int], optional): T, Lat, Lon.
@@ -370,7 +385,9 @@ class Dscale_Tansformer(BaseModel):
         self.cube_embedding = CubeEmbedding(img_size, patch_size, in_chans, dim)
 
         # Downsampling --> SwinTransformerV2 stacks --> Upsampling
-        logger.info(f"Define UTransforme with proj_drop={proj_drop}, attn_drop={attn_drop}, drop_path={drop_path}")
+        logger.info(
+            f"Define UTransforme with proj_drop={proj_drop}, attn_drop={attn_drop}, drop_path={drop_path}"
+        )
 
         self.u_transformer = UTransformer(
             dim,
@@ -451,7 +468,9 @@ class Dscale_Tansformer(BaseModel):
 
         # recover embeddings to lat/lon grids with dense layer and reshape operation.
         x = self.fc(x.permute(0, 2, 3, 1))  # B Lat Lon C
-        x = x.reshape(B, Lat, Lon, patch_lat, patch_lon, self.out_chans).permute(0, 1, 3, 2, 4, 5)
+        x = x.reshape(B, Lat, Lon, patch_lat, patch_lon, self.out_chans).permute(
+            0, 1, 3, 2, 4, 5
+        )
         # B, lat, patch_lat, lon, patch_lon, C
         x = x.reshape(B, Lat * patch_lat, Lon * patch_lon, self.out_chans)
         x = x.permute(0, 3, 1, 2)  # B C Lat Lon

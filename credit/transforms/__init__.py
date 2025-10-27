@@ -1,11 +1,17 @@
 import logging
-import numpy as np
 from torchvision import transforms as tforms
-
-from credit.transforms.transforms_les import Normalize_LES, ToTensor_LES
-from credit.transforms.transforms_wrf import Normalize_WRF, ToTensor_WRF
-from credit.transforms.transforms_global import Normalize_ERA5_and_Forcing, ToTensor_ERA5_and_Forcing
-from credit.transforms.transforms_quantile import BridgescalerScaleState, NormalizeState_Quantile_Bridgescalar, ToTensor_BridgeScaler
+from credit.transforms.deprecated._transforms import ToTensor
+from credit.transforms.transforms_les import NormalizeLES, ToTensorLES
+from credit.transforms.transforms_wrf import NormalizeWRF, ToTensorWRF
+from credit.transforms.transforms_global import (
+    Normalize_ERA5_and_Forcing,
+    ToTensor_ERA5_and_Forcing,
+)
+from credit.transforms.transforms_quantile import (
+    BridgescalerScaleState,
+    NormalizeState_Quantile_Bridgescalar,
+    ToTensor_BridgeScaler,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +43,10 @@ def load_transforms(conf, scaler_only=False):
         transform_scaler = BridgescalerScaleState(conf)
 
     elif conf["data"]["scaler_type"] == "std-les":
-        transform_scaler = Normalize_LES(conf)
+        transform_scaler = NormalizeLES(conf)
 
     elif conf["data"]["scaler_type"] == "std-wrf":
-        transform_scaler = Normalize_WRF(conf)
+        transform_scaler = NormalizeWRF(conf)
 
     else:
         logger.log("scaler type not supported check data: scaler_type in config file")
@@ -52,7 +58,10 @@ def load_transforms(conf, scaler_only=False):
     # ------------------------------------------------------------------- #
     # ToTensor class
 
-    if conf["data"]["scaler_type"] == "std_new" or conf["data"]["scaler_type"] == "std_cached":
+    if (
+        conf["data"]["scaler_type"] == "std_new"
+        or conf["data"]["scaler_type"] == "std_cached"
+    ):
         to_tensor_scaler = ToTensor_ERA5_and_Forcing(conf)
 
     elif conf["data"]["scaler_type"] == "quantile-cached":
@@ -60,10 +69,10 @@ def load_transforms(conf, scaler_only=False):
         to_tensor_scaler = ToTensor_BridgeScaler(conf)
 
     elif conf["data"]["scaler_type"] == "std-les":
-        to_tensor_scaler = ToTensor_LES(conf)
+        to_tensor_scaler = ToTensorLES(conf)
 
     elif conf["data"]["scaler_type"] == "std-wrf":
-        to_tensor_scaler = ToTensor_WRF(conf)
+        to_tensor_scaler = ToTensorWRF(conf)
 
     else:
         # the old ToTensor
