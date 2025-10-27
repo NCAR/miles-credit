@@ -55,7 +55,7 @@ dependencies = [
    ]
 
 [tool.setuptools]
-packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
+packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers", "credit.postblock", "credit.ocean"]
 
 [tool.setuptools_scm]
 version_file = "credit/_version.py"
