@@ -16,6 +16,7 @@ dependencies = [
     "matplotlib",
     "cartopy",
     "scikit-learn",
+    "h5py<=3.14.0",
     "pyarrow",
     "pytest",
     "pysteps",
@@ -54,7 +55,9 @@ dependencies = [
    ]
 
 [tool.setuptools]
-packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers", "credit.losses", "credit.transforms"]
+
+packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", 
+            "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
 
 [tool.setuptools_scm]
 version_file = "credit/_version.py"

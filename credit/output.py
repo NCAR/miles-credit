@@ -241,7 +241,7 @@ def save_netcdf_increment(
 
                 pressure_interp = xr.merge([pressure_interp, ptype_classification])
 
-        ds_merged = xr.merge([ds_merged, pressure_interp])
+            ds_merged = xr.merge([ds_merged, pressure_interp])
         logger.info(f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
 
         save_location = os.path.join(conf["predict"]["save_forecast"], nc_filename)

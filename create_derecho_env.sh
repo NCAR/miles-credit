@@ -43,12 +43,12 @@ dependencies:
   - conda-tree
   - mpi4py =*=derecho*
   - pip
-  - pytorch ==2.5.1=derecho*
+  - pytorch ==2.8.0=derecho*
   - torchvision =*=derecho*
   - torchmetrics
   - pip:
     - pipdeptree
-    - .
+    - -e .
 EOF
 
 # create the environment

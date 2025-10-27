@@ -193,7 +193,8 @@ def load_model_states_and_optimizer(conf, model, device):
                 and conf["trainer"]["load_optimizer"]
             ):
                 checkpoint_io.load_unsharded_optimizer(
-                    optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt")
+                    optimizer, os.path.join(
+                        save_loc, "optimizer_checkpoint.pt")
                 )
 
         else:
@@ -290,8 +291,10 @@ def main(rank, world_size, conf, backend=None, trial=False):
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
     # Load the dataset using the provided dataset_type
-    train_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=True)
-    valid_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=False)
+    train_dataset = load_dataset(
+        conf, rank=rank, world_size=world_size, is_train=True)
+    valid_dataset = load_dataset(
+        conf, rank=rank, world_size=world_size, is_train=False)
 
     # Load the dataloader
     train_loader = load_dataloader(
@@ -406,7 +409,8 @@ class Objective(BaseObjective):
                 )
                 raise optuna.TrialPruned()
             else:
-                logging.warning(f"Trial {trial.number} failed due to error: {str(E)}.")
+                logging.warning(
+                    f"Trial {trial.number} failed due to error: {str(E)}.")
                 raise E
 
 
@@ -477,7 +481,7 @@ def main_cli():
     conf = credit_main_parser(
         conf, parse_training=True, parse_predict=False, print_summary=False
     )
-    if not conf["data"]["datasets"]:
+    if "datasets" not in conf["data"].keys() and (conf["data"]["dataset_type"] not in ("Ocean_MultiStep_Batcher", "Ocean_Tensor_Batcher")):
         training_data_check(conf, print_summary=False)
         # todo: data check for downscaling mode
 
