@@ -16,6 +16,7 @@ dependencies = [
     "matplotlib",
     "cartopy",
     "scikit-learn",
+    "h5py<=3.14.0",
     "pyarrow",
     "pytest",
     "pysteps",
