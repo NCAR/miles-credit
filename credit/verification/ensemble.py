@@ -1,7 +1,6 @@
 import logging
 
 import numpy as np
-import xarray as xr
 from pysteps.verification.ensscores import rankhist
 
 logger = logging.getLogger(__name__)
@@ -13,12 +12,13 @@ latitude_slices = {
     "n_extratropics": slice(24.5, 91),
 }
 
+
 def spread_error(da_pred, da_true, w_lat=None):
     """
-        computes the latitude weighted ensemble standard deviation of da_pred and ensemble rmse with respect to da_true
+    computes the latitude weighted ensemble standard deviation of da_pred and ensemble rmse with respect to da_true
 
-        input: da_pred, da_true with matching time, lat, lon dimensions
-        output: result_dict with std and rmse for regions defined by latitude partition (see above)
+    input: da_pred, da_true with matching time, lat, lon dimensions
+    output: result_dict with std and rmse for regions defined by latitude partition (see above)
     """
     if w_lat is None:
         w_lat = np.cos(np.deg2rad(da_pred.latitude))
@@ -27,7 +27,9 @@ def spread_error(da_pred, da_true, w_lat=None):
     result_dict = {}
 
     std_raw = da_pred.std(dim="ensemble_member_label").mean(dim=["time", "longitude"])
-    rmse_raw = np.sqrt((da_pred.mean(dim="ensemble_member_label") - da_true) ** 2).mean(dim=["time", "longitude"])
+    rmse_raw = np.sqrt((da_pred.mean(dim="ensemble_member_label") - da_true) ** 2).mean(
+        dim=["time", "longitude"]
+    )
 
     for slice_name, s in latitude_slices.items():
         w_lat_slice = w_lat.sel(latitude=s)
@@ -38,29 +40,40 @@ def spread_error(da_pred, da_true, w_lat=None):
         rmse = (rmse_raw.sel(latitude=s) * w_lat_slice).sum() / sum_wts
 
         # add to dict and apply correction factor
-        result_dict[f"std_{slice_name}"] = (ensemble_size + 1) / (ensemble_size - 1) * std.values
+        result_dict[f"std_{slice_name}"] = (
+            (ensemble_size + 1) / (ensemble_size - 1) * std.values
+        )
         result_dict[f"rmse_{slice_name}"] = float(rmse.values)
 
     return result_dict
 
+
 def binned_spread_skill(da_pred, da_true, num_bins, w_lat=None):
     """
-        computes the binned spread-skill 
+    computes the binned spread-skill
 
-        input: da_pred, da_true with matching time, lat, lon dimensions
-        output: result_dict
+    input: da_pred, da_true with matching time, lat, lon dimensions
+    output: result_dict
     """
     spread = da_pred.std(dim="ensemble_member_label").values.flatten()
-    rmse = np.sqrt((da_pred.mean(dim="ensemble_member_label") - da_true) ** 2).values.flatten()
+    rmse = np.sqrt(
+        (da_pred.mean(dim="ensemble_member_label") - da_true) ** 2
+    ).values.flatten()
 
     bins = np.linspace(spread.min(), spread.max(), num_bins + 1)
     bin_indices = np.digitize(spread, bins)  # Assign bins
 
     bin_centers = [(bins[i] + bins[i - 1]) / 2 for i in range(1, len(bins))]
-    spread_means = [spread[bin_indices == i].mean() if (bin_indices == i).sum() > 0 else np.nan for i in range(1, len(bins))]
-    rmse_means = [rmse[bin_indices == i].mean() if (bin_indices == i).sum() > 0 else np.nan for i in range(1, len(bins))]
+    spread_means = [
+        spread[bin_indices == i].mean() if (bin_indices == i).sum() > 0 else np.nan
+        for i in range(1, len(bins))
+    ]
+    rmse_means = [
+        rmse[bin_indices == i].mean() if (bin_indices == i).sum() > 0 else np.nan
+        for i in range(1, len(bins))
+    ]
     counts = [(bin_indices == i).sum() for i in range(1, len(bins))]
-    
+
     return {
         "bin_centers": bin_centers,
         "spread_means": spread_means,
@@ -68,12 +81,13 @@ def binned_spread_skill(da_pred, da_true, num_bins, w_lat=None):
         "counts": counts,
     }
 
+
 def rank_histogram_apply(da_pred, da_true, w_lat=None):
     """
-        computes the rank histogram
+    computes the rank histogram
 
-        input: da_pred, da_true with matching time, lat, lon dimensions
-        output: result_dict
+    input: da_pred, da_true with matching time, lat, lon dimensions
+    output: result_dict
     """
 
     ensemble_size = len(da_pred.ensemble_member_label)
@@ -83,9 +97,12 @@ def rank_histogram_apply(da_pred, da_true, w_lat=None):
 
     # TODO: vectorize this computation
     for time in da_pred.time:
-        rank_hist += rankhist(da_pred.sel(time=time).values, #requires ensemble_member_label to be first dim after removing time
-                              da_true.sel(time=time).values,
-                              normalize=False)
-    
+        rank_hist += rankhist(
+            da_pred.sel(
+                time=time
+            ).values,  # requires ensemble_member_label to be first dim after removing time
+            da_true.sel(time=time).values,
+            normalize=False,
+        )
+
     return rank_hist
-        

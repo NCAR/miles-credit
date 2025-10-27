@@ -6,22 +6,26 @@ import torch
 from torch import nn, einsum
 import torch.nn.functional as F
 
-from einops import rearrange
-
 # constants
 
-AttentionConfig = namedtuple('AttentionConfig', ['enable_flash', 'enable_math', 'enable_mem_efficient'])
+AttentionConfig = namedtuple(
+    "AttentionConfig", ["enable_flash", "enable_math", "enable_mem_efficient"]
+)
 
 # helpers
+
 
 def exists(val):
     return val is not None
 
+
 def default(val, d):
     return val if exists(val) else d
 
+
 def once(fn):
     called = False
+
     @wraps(fn)
     def inner(x):
         nonlocal called
@@ -29,26 +33,26 @@ def once(fn):
             return
         called = True
         return fn(x)
+
     return inner
+
 
 print_once = once(print)
 
 # main class
 
+
 class Attend(nn.Module):
-    def __init__(
-        self,
-        dropout = 0.,
-        flash = False,
-        scale = None
-    ):
+    def __init__(self, dropout=0.0, flash=False, scale=None):
         super().__init__()
         self.dropout = dropout
         self.scale = scale
         self.attn_dropout = nn.Dropout(dropout)
 
         self.flash = flash
-        assert not (flash and version.parse(torch.__version__) < version.parse('2.0.0')), 'in order to use flash attention, you must be using pytorch 2.0 or above'
+        assert not (
+            flash and version.parse(torch.__version__) < version.parse("2.0.0")
+        ), "in order to use flash attention, you must be using pytorch 2.0 or above"
 
         # determine efficient attention configs for cuda and cpu
 
@@ -58,19 +62,25 @@ class Attend(nn.Module):
         if not torch.cuda.is_available() or not flash:
             return
 
-        device_properties = torch.cuda.get_device_properties(torch.device('cuda'))
+        device_properties = torch.cuda.get_device_properties(torch.device("cuda"))
 
-        device_version = version.parse(f'{device_properties.major}.{device_properties.minor}')
+        device_version = version.parse(
+            f"{device_properties.major}.{device_properties.minor}"
+        )
 
-        if device_version > version.parse('8.0'):
-            print_once('A100 GPU detected, using flash attention if input tensor is on cuda')
+        if device_version > version.parse("8.0"):
+            print_once(
+                "A100 GPU detected, using flash attention if input tensor is on cuda"
+            )
             self.cuda_config = AttentionConfig(True, False, False)
         else:
-            print_once('Non-A100 GPU detected, using math or mem efficient attention if input tensor is on cuda')
+            print_once(
+                "Non-A100 GPU detected, using math or mem efficient attention if input tensor is on cuda"
+            )
             self.cuda_config = AttentionConfig(False, True, True)
 
     def flash_attn(self, q, k, v):
-        _, heads, q_len, _, k_len, is_cuda, device = *q.shape, k.shape[-2], q.is_cuda, q.device
+        is_cuda = q.is_cuda
 
         if exists(self.scale):
             default_scale = q.shape[-1]
@@ -86,8 +96,7 @@ class Attend(nn.Module):
 
         with torch.backends.cuda.sdp_kernel(**config._asdict()):
             out = F.scaled_dot_product_attention(
-                q, k, v,
-                dropout_p = self.dropout if self.training else 0.
+                q, k, v, dropout_p=self.dropout if self.training else 0.0
             )
 
         return out
@@ -100,9 +109,6 @@ class Attend(nn.Module):
         n, i, j - sequence length (base sequence length, source, target)
         d - feature dimension
         """
-
-        q_len, k_len, device = q.shape[-2], k.shape[-2], q.device
-
         if self.flash:
             return self.flash_attn(q, k, v)
 
@@ -110,15 +116,15 @@ class Attend(nn.Module):
 
         # similarity
 
-        sim = einsum(f"b h i d, b h j d -> b h i j", q, k) * scale
+        sim = einsum("b h i d, b h j d -> b h i j", q, k) * scale
 
         # attention
 
-        attn = sim.softmax(dim = -1)
+        attn = sim.softmax(dim=-1)
         attn = self.attn_dropout(attn)
 
         # aggregate values
 
-        out = einsum(f"b h i j, b h j d -> b h i d", attn, v)
+        out = einsum("b h i j, b h j d -> b h i d", attn, v)
 
         return out

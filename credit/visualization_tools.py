@@ -451,7 +451,7 @@ def draw_variables(pred, level, step, visualization_key, conf=None, save_locatio
             transform=ccrs.PlateCarree(),
         )
         # colorbar operations
-        CBar = colorbar_opt(fig, ax, cbar, cbar_extend)
+        colorbar_opt(fig, ax, cbar, cbar_extend)
 
         # title
         dt_str = np.datetime_as_string(pred.datetime.values, unit="h", timezone="UTC")
