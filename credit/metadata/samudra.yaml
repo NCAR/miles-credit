@@ -1,0 +1,80 @@
+latitude:
+   long_name: "latitude"
+   units: "degrees_north"
+   axis: "Y"
+
+longitude:
+   long_name: "longitude"
+   units: "degrees_east"
+   axis: "X"
+
+level:
+   long_name: "ocean vertical level"
+   units: "1"
+   axis: "Z"
+
+time:
+   axis: "T"
+
+uo:
+    long_name: "Zonal velocity"
+    standard_name: "eastward_sea_water_velocity"
+    short_name: "uo"
+    units: "m s**-1"
+    _FillValue: 9.999e+20
+
+vo:
+    long_name: "Meridional velocity"
+    standard_name: "northward_sea_water_velocity"
+    short_name: "vo"
+    units: "m s**-1"
+    _FillValue: 9.999e+20
+
+thetao:
+    long_name: "Sea water potential temperature"
+    standard_name: "sea_water_potential_temperature"
+    short_name: "thetao"
+    units: "K"
+    _FillValue: 9.999e+20
+
+so:
+    long_name: "Sea water salinity"
+    standard_name: "sea_water_salinity"
+    short_name: "so"
+    units: "psu"
+    _FillValue: 9.999e+20
+
+zos:
+    long_name: "Sea surface height"
+    standard_name: "sea_surface_height_above_geoid"
+    short_name: "zos"
+    units: "m"
+    _FillValue: 9.999e+20
+
+tauuo:
+    long_name: "Surface zonal stress"
+    standard_name: "surface_downward_eastward_stress"
+    short_name: "tauuo"
+    units: "N m**-2"
+    _FillValue: 9.999e+20
+
+tauvo:
+    long_name: "Surface meridional stress"
+    standard_name: "surface_downward_northward_stress"
+    short_name: "tauvo"
+    units: "N m**-2"
+    _FillValue: 9.999e+20
+
+hfds:
+    long_name: "Surface downward heat flux"
+    standard_name: "surface_downward_heat_flux_in_sea_water"
+    short_name: "hfds"
+    units: "W m**-2"
+    _FillValue: 9.999e+20
+
+hfds_anomalies:
+    long_name: "Surface downward heat flux anomalies"
+    standard_name: "surface_downward_heat_flux_in_sea_water_anomaly"
+    short_name: "hfds_anom"
+    units: "W m**-2"
+    _FillValue: 9.999e+20

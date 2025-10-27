@@ -55,7 +55,9 @@ dependencies = [
    ]
 
 [tool.setuptools]
-packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", "credit.trainers"]
+
+packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", 
+            "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
 
 [tool.setuptools_scm]
 version_file = "credit/_version.py"
@@ -68,11 +70,15 @@ credit_gefs_init = "credit.applications.gefs_init:main"
 credit_rollout_to_netcdf = "credit.applications.rollout_to_netcdf:main"
 credit_rollout_metrics = "credit.applications.rollout_metrics:main"
 credit_calc_global_solar = "credit.applications.calc_global_solar:main"
-
+credit_train_wrf = "credit.applications.train_wrf:primary_main"
+credit_train_wrf_multi = "credit.applications.train_wrf_multi:primary_main"
+credit_train_les = "credit.applications.train_les:primary_main"
+credit_rollout_wrf = "credit.applications.rollout_wrf:main"
+credit_rollout_les = "credit.applications.rollout_les:main"
 [tool.ruff]
 target-version = "py311"
 src = ["credit", "applications", "tests"]
-line-length = 120
+line-length = 180
 
 [tool.ruff.lint.per-file-ignores]
 "*.ipynb" = ["E402"]

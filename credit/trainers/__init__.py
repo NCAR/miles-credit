@@ -7,6 +7,11 @@ from credit.trainers.trainerERA5_Diffusion import Trainer as TrainerERA5_Diffusi
 from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
 from credit.trainers.trainer_downscaling import Trainer as Trainer404
 from credit.trainers.ic_optimization import Trainer as TrainerIC
+from credit.trainers.trainer_om4_samudra import Trainer as TrainerSamudra
+
+from credit.trainers.trainerLES import Trainer as TrainerLES
+from credit.trainers.trainerWRF import Trainer as TrainerWRF
+from credit.trainers.trainerWRF_multi import Trainer as TrainerWRFMulti
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +36,17 @@ trainer_types = {
     ),
     "ic-opt": (TrainerIC, "Loading an initial condition optimizer training class"),
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
+    "standard-les": (TrainerLES, "Loading a single-step LES trainer"),
+    "standard-wrf": (TrainerWRF, "Loading a single-step WRF trainer"),
+    "multi-step-wrf": (TrainerWRFMulti, "Loading a multi-step WRF trainer"),
+    "samudra": (
+        TrainerSamudra,
+        "Loading a single or multi-step trainer for the Samudra OM4 dataset that uses gradient accumulation on forecast lengths > 1.",
+    ),
 }
 
 
-def load_trainer(conf, load_weights=False):
+def load_trainer(conf):
     conf = copy.deepcopy(conf)
     trainer_conf = conf["trainer"]
 
