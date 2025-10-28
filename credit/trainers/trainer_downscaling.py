@@ -17,6 +17,7 @@ from credit.scheduler import update_on_batch
 from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
 from credit.data import concat_and_reshape, reshape_only
+
 # from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.datasets.count_channels import count_channels
 
@@ -68,7 +69,6 @@ class Trainer(BaseTrainer):
             logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
         logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
 
-
         self.forecast_length = dconf["forecast_len"]
 
         self.ccount = count_channels(conf)
@@ -78,22 +78,24 @@ class Trainer(BaseTrainer):
     ###################################
 
     # Training function
-    def train_one_epoch(self,
-                        epoch,
-                        conf,
-                        trainloader,
-                        optimizer,
-                        criterion,
-                        scaler,
-                        scheduler,
-                        metrics,
-                        ):
-
+    def train_one_epoch(
+        self,
+        epoch,
+        conf,
+        trainloader,
+        optimizer,
+        criterion,
+        scaler,
+        scheduler,
+        metrics,
+    ):
         self.setup(conf)
 
         # update the learning rate if epoch-by-epoch updates don't depend on a metric
-        if(conf["trainer"]["use_scheduler"] and
-           conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"):
+        if (
+            conf["trainer"]["use_scheduler"]
+            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
+        ):
             scheduler.step()
 
         # setup custom tqdm progress meter
@@ -107,29 +109,29 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches_per_epoch = len(trainloader)
             # Use the user-given number if not larger than the dataset
-            batches_per_epoch = (
+            self.batches_per_epoch = (
                 self.batches_per_epoch
                 if 0 < self.batches_per_epoch < dataset_batches_per_epoch
                 else dataset_batches_per_epoch
             )
 
-        batch_group_generator = tqdm.tqdm(range(self.batches_per_epoch),
-                                          total=self.batches_per_epoch,
-                                          leave=True)
+        batch_group_generator = tqdm.tqdm(
+            range(self.batches_per_epoch), total=self.batches_per_epoch, leave=True
+        )
 
         self.model.train()
 
-        dl= cycle(trainloader)
+        dl = cycle(trainloader)
         results_dict = defaultdict(list)
         for steps in range(self.batches_per_epoch):
             logs = {}
             loss = 0
 
-            y_pred = None     # placeholder for predicted values
+            y_pred = None  # placeholder for predicted values
 
             batch = next(dl)
 
-            x = batch['x'].to(self.device)
+            x = batch["x"].to(self.device)
 
             # if we were doing multistep training, everything from
             # this point to grad norm clipping would go into a loop
@@ -139,8 +141,8 @@ class Trainer(BaseTrainer):
             # predict with the model
             with autocast(enabled=self.amp):
                 y_pred = self.model(x)
-                
-            y = batch['y'].to(self.device)
+
+            y = batch["y"].to(self.device)
 
             with autocast(enabled=self.amp):
                 loss = criterion(y.to(y_pred.dtype), y_pred).mean()
@@ -213,14 +215,13 @@ class Trainer(BaseTrainer):
                 except Exception as E:
                     raise E
 
-
             # aggregate the results
             to_print = (
-                f"Epoch: {epoch}".format(epoch) +
-                f" train_loss: {np.mean(results_dict['train_loss']):.6f}" +
-                f" train_acc: {np.mean(results_dict['train_acc']):.6f}" +
-                f" train_mae: {np.mean(results_dict['train_mae']):.6f}" +
-                f" finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"Epoch: {epoch}".format(epoch)
+                + f" train_loss: {np.mean(results_dict['train_loss']):.6f}"
+                + f" train_acc: {np.mean(results_dict['train_acc']):.6f}"
+                + f" train_mae: {np.mean(results_dict['train_mae']):.6f}"
+                + f" finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 # f" forecast_len: {self.forecast_length+1:.6f}"
             )
 
@@ -246,12 +247,14 @@ class Trainer(BaseTrainer):
         gc.collect()
 
         # write last training sample & prediction to file every so often
-        if conf['trainer']['save_data']:
-            saveconf = conf['trainer']['save_data']
-            if epoch % saveconf['frequency'] == 0:
-                wrangler = OutputWrangler(trainloader.dataset, **saveconf['output'])
-                wrangler.process(batch['y'], batch['dates'], prefix=f"ep{epoch}.target")
-                wrangler.process(y_pred.cpu().detach(), batch['dates'], prefix=f"ep{epoch}.predicted")
+        if conf["trainer"]["save_data"]:
+            saveconf = conf["trainer"]["save_data"]
+            if epoch % saveconf["frequency"] == 0:
+                wrangler = OutputWrangler(trainloader.dataset, **saveconf["output"])
+                wrangler.process(batch["y"], batch["dates"], prefix=f"ep{epoch}.target")
+                wrangler.process(
+                    y_pred.cpu().detach(), batch["dates"], prefix=f"ep{epoch}.predicted"
+                )
 
         return results_dict
 
@@ -292,7 +295,7 @@ class Trainer(BaseTrainer):
 
         # ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
-        #distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        # distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         results_dict = defaultdict(list)
 

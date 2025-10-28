@@ -9,6 +9,7 @@ from credit.losses.kcrps import KCRPSLoss
 from credit.losses.spectral import SpectralLoss2D
 from credit.losses.power import PSDLoss
 from credit.losses.almost_fair_crps import AlmostFairKCRPSLoss
+from credit.losses.covariance import CovarianceWeightedMSELoss
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,9 @@ def base_losses(conf, reduction="mean", validation=False):
         torch.nn.Module: Instantiated loss function.
     """
     loss_key = "validation_loss" if validation else "training_loss"
-    params_key = "validation_loss_parameters" if validation else "training_loss_parameters"
+    params_key = (
+        "validation_loss_parameters" if validation else "training_loss_parameters"
+    )
 
     loss_type = conf["loss"][loss_key]
     loss_params = conf["loss"].get(params_key, {})
@@ -49,6 +52,7 @@ def base_losses(conf, reduction="mean", validation=False):
         "almost-fair-crps": AlmostFairKCRPSLoss,
         "spectral": SpectralLoss2D,
         "power": PSDLoss,
+        "covmse": CovarianceWeightedMSELoss,
     }
 
     if loss_type in losses:
