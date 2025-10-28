@@ -285,8 +285,8 @@ model:
     
     dim: [32, 64, 128, 256]           # Dimensionality of each layer
     depth: [2, 2, 2, 2]               # Depth of each layer
-    global_window_size: [10, 5, 2, 1] # Global window size for each layer
-    local_window_size: 5              # Local window size
+    global_window_size: [8, 4, 2, 1] # Global window size for each layer
+    local_window_size: 4             # Local window size
     cross_embed_kernel_sizes:         # kernel sizes for cross-embedding
     - [4, 8, 16, 32]
     - [2, 4]
@@ -333,8 +333,8 @@ model:
     padding_conf:
         activate: True
         mode: earth
-        pad_lat: [10, 11]
-        pad_lon: [10, 10]
+        pad_lat: [37, 38]
+        pad_lon: [76, 76]
 
     # configuration for postblock processing
     post_conf: 
@@ -524,7 +524,7 @@ loss:
     
     # this file is MANDATORY for the "predict" section below (inference stage)
     # the file must be nc and must contain 1D variables named "latitude" and "longitude"
-    latitude_weights: "/glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc"
+    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
 
     # use latitude weighting
     # if True, the latitude_weights file MUST have a variable named "coslat"
