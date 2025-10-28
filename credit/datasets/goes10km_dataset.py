@@ -51,6 +51,18 @@ class GOES10kmDataset(Dataset):
         
         self.scaler_ds = xr.open_dataset(scaler_ds_path)
 
+        # setup rollout mode if configured
+        if "rollout_init_times" in time_config.keys():
+            logger.info("setting up GOES 10km dataset for rollout mode by subsetting times")
+            self._rollout_mode(time_config["rollout_init_times"],
+                               time_config.get("time_tol_hr", 1),
+                               )
+
+
+    def _rollout_mode(self, rollout_init_times, time_tol_hr):
+        self.init_times = self.init_times.sel(t=rollout_init_times, method="nearest",
+                                              tolerance=pd.Timedelta(time_tol_hr, "h"))
+        self.num_forecast_steps = 0 # only load init
 
     def _generate_valid_init_times(self, valid_init_filepath):
         # due to missing data, need to have a different list of valid init times
@@ -69,15 +81,15 @@ class GOES10kmDataset(Dataset):
             if check_valid_forecast_times(t, self.timestep, self.num_forecast_steps):
                 valid_times.append(t.values)
 
-        valid_da = xr.DataArray(valid_times, coords={"t": valid_times})
+        valid_times_da = xr.DataArray(valid_times, coords={"t": valid_times})
 
         times_to_drop = xr.open_dataarray(join(self.valid_init_dir, "nan_times.nc"))
-        valid_da = valid_da[ ~ valid_da.t.isin(times_to_drop)]
+        valid_times_da = valid_times_da[ ~ valid_times_da.t.isin(times_to_drop)]
 
-        valid_da.to_netcdf(valid_init_filepath)
+        valid_times_da.to_netcdf(valid_init_filepath)
         logger.info(f"wrote valid init times to {valid_init_filepath}")
 
-        return valid_da
+        return valid_times_da
 
     def _timestamps(self):
         # grab or compute valid init times across whole dataset, due to missing data
@@ -99,6 +111,16 @@ class GOES10kmDataset(Dataset):
     def __len__(self):
         # total number of valid start times
         return len(self.init_times)
+    
+    def inverse_transform_ABI(self, da):
+        # da must be in the same order as the source data
+        # channels must be the first dimension
+        unscaled = da * self.scaler_ds["std"] + self.scaler_ds["mean"]
+
+        if self.log_normal_scaling:
+            da[0] = np.exp(unscaled[0])
+
+        return da
         
     def _normalize_ABI(self, da):
         return (da - self.scaler_ds["mean"]) / self.scaler_ds["std"]
@@ -109,6 +131,12 @@ class GOES10kmDataset(Dataset):
     def __getitem__(self, args):
         # default: load target state
         ts, mode = args
+        time_str = pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+        if mode == "forcing":
+            return {"mode": mode,
+                    "stop_forecast": False,
+                    "datetime": time_str,}
 
         ds = self.ds.sel(t=ts, method="nearest")
         # no need to check time tolerance, should be taken care of by init time generation
@@ -130,17 +158,17 @@ class GOES10kmDataset(Dataset):
         if mode == "init":
             return {"x": data,
                     "mode": mode,
-                    "stop_forecast": False}
-        elif mode == "forcing":
-            return {"mode": mode,
-                    "stop_forecast": False}
+                    "stop_forecast": False,
+                    "datetime": time_str,}
         elif mode == "y":
             return {"y": data,
                     "mode": mode,
-                    "stop_forecast": False}      
+                    "stop_forecast": False,
+                    "datetime": time_str,}      
         elif mode == "stop":
             return {"y": data,
                     "mode": mode,
-                    "stop_forecast": True}
+                    "stop_forecast": True,
+                    "datetime": time_str,}
         else:
             raise ValueError(f"{mode} is not a valid sampling mode")

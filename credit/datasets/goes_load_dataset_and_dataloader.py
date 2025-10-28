@@ -27,16 +27,44 @@ def load_dataset(conf, rank, world_size, is_train=True):
 
     return GOES10kmDataset(zarr_ds, data_config, time_config)
 
+def load_predict_dataset(conf, rank, world_size, rollout_init_times):
+    logger.info("loading a GOES 10km dataset for prediction")
 
-def load_dataloader(conf, train_dataset, rank, world_size, is_train=True):
+    data_config = conf["data"]
 
+    zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
+    years = [data_config["train_years"][0], data_config["valid_years"][1]] #all years
+
+    num_forecast_steps = conf["predict"]["forecasts"]["num_forecast_steps"]
+    time_tol_hr = conf["predict"]["forecasts"].get("time_tol_hr", 1)
+
+    time_config = {
+        "timestep": pd.Timedelta(data_config["lead_time_periods"], "h"),
+        "num_forecast_steps": num_forecast_steps,
+        "years": years,
+        "rollout_init_times": rollout_init_times,
+        "time_tol_hr": time_tol_hr,
+    }
+
+    return GOES10kmDataset(zarr_ds, data_config, time_config)
+
+
+def load_dataloader(conf, train_dataset, rank, world_size, is_train=True, is_predict=False):
+    """
+    is_predict will override is_train no matter what is_train is. 
+    It will grab num_workers from validation config as the rollout times should be the same
+    """
     logger.info("loading a GOES 10km dataloader")
 
-    sampling_modes = conf["data"]["sampling_modes"]
+    sampling_modes = conf["data"]["sampling_modes"] if not is_predict else ["init"]
 
     seed = conf["seed"]
     training_type = "train" if is_train else "valid"
     batch_size = conf["trainer"][f"{training_type}_batch_size"]
+
+    if is_predict: 
+        batch_size = conf["predict"]["batch_size"]
+        is_train = False
 
     num_workers = (
         conf["trainer"]["thread_workers"]
@@ -60,7 +88,8 @@ def load_dataloader(conf, train_dataset, rank, world_size, is_train=True):
                                                   sampling_modes,
                                                   num_replicas=world_size,
                                                   rank=rank,
-                                                  seed=seed
+                                                  seed=seed,
+                                                  shuffle=(not is_predict),
                                                   )
     
     dataloader = DataLoader(train_dataset,
@@ -74,7 +103,8 @@ def load_dataloader(conf, train_dataset, rank, world_size, is_train=True):
     
     return dataloader
 
-def generate_default_sampling_modes(dataset):
+def generate_default_sampling_modes(dataset, rollout_only=True):
+    # TODO
     num_forecast_steps = dataset.num_forecast_steps
 
     return ["init"] + ["y"] * (num_forecast_steps - 1) + ["stop"]

@@ -306,67 +306,24 @@ predict:
 
     # Set the batch_size for the prediction inference mode (default is 1)
     # this batches init_datetimes together so that we are fully utilizing the GPUs 
-    batch_size: 1
+    batch_size: 2
     # set the ensemble size for inference mode (default is 1 if not set)
-    ensemble_size: &ensemble_size 5
+    ensemble_size: &ensemble_size 1
 
-    ensemble:
-        noise:
-            type: "spherical"  # "gaussian", "red", "white", "pink"       
-            amplitude: 0.25 
-            smoothness: 2.0
-            length_scale: 3.0
-            padding_conf:
-                activate: True
-                mode: earth
-                pad_lat: [160, 160]
-                pad_lon: [112, 112]
-
-        bred_vector:
-            enabled: true
-            num_cycles: *ensemble_size
-            hemispheric_rescale: true
-            perturb_channel_idx: 69 # Z500. Set to None to do the full tensor
-            integration_steps: 50
-            bred_time_lag: 48
-            amplitude: 0.25
-            weights: [
-                0.4014972 , 0.39774364, 0.3792097 , 0.38236109, 0.40767634,
-                0.39912404, 0.34785054, 0.33406586, 0.33808283, 0.3481379 ,
-                0.35312887, 0.35      , 0.32093613, 0.31208973, 0.31432467,
-                0.31496031, 0.33391616, 0.35594943, 0.34669872, 0.35312887,
-                0.38288379, 0.37536649, 0.31906112, 0.3057777 , 0.30951575,
-                0.31984371, 0.32680269, 0.32649655, 0.30099834, 0.29983329,
-                0.30331502, 0.30397368, 0.40112342, 0.38820098, 0.38431758,
-                0.39051248, 0.40112342, 0.35496479, 0.33045423, 0.32893768,
-                0.31543621, 0.31953091, 0.3254228 , 0.3324154 , 0.32109189,
-                0.29664794, 0.26907248, 0.25845696, 0.23194827, 0.34102786,
-                0.29647934, 0.32848135, 0.43703547, 0.4014972 , 0.40435133,
-                0.41231056, 0.40298883, 0.39987498, 0.39987498, 0.39812058,
-                0.38470768, 0.3748333 , 0.36959437, 0.36864617, 0.28231188,
-                0.24677925, 0.31064449, 0.34029399, 0.31288976, 0.26645825,
-                0.40112342
-            ]
-
-        temporal_noise:
-            enabled: false
-            temporal_correlation: 0.95
-            perturbation_std: 0.15
-            hemispheric_rescale: true
-
+    time_tol_hr: 1
     forecasts:
-        type: "custom"       # keep it as "custom". See also credit.forecast
-        start_year: 2019     # year of the first initialization (where rollout will start)
+        type: "standard"       # standard forecast for start_year
+        start_year: 2024     # year of the first initialization (where rollout will start)
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 1152       # number of days to initialize from, starting from the (year, mon, day) above
+        num_inits: 2       # number of days to initialize from, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         # [Optional] defaults to 1
-        ic_interval_days: 1   # spacing between init days. defaults to 1 total number of ICs will be duration // ic_interval_days
-        days: 10             # forecast lead time as days (1 means 24-hour forecast)
-
+        ic_interval_days: 30   # spacing between init days. defaults to 1 total number of ICs will be duration // ic_interval_days
+        num_forecast_steps: 24
+    
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables
     # remove save_vars from config will save ALL variables
@@ -375,7 +332,7 @@ predict:
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
     # each forecast lead time produces a file.nc
-    save_forecast: '/glade/u/home/schreck/scratch/finetune/wx12/'
+    save_forecast: '/glade/derecho/scratch/dkimpara/goes_10km_train/debugger'
     
     # this keyword will apply a low-pass filter to all fields and each forecast step
     # it will reduce high-freq noise, but may impact performance
@@ -388,26 +345,6 @@ predict:
     # Optional: Interpolate data field from hybrid sigma-pressure vertical coordinates to pressure levels.
     # Used with rollout_to_netcdf.py
 
-    # interp_pressure:
-    #     pressure_levels: [300.0, 500.0, 850.0, 925.0]
-
-    # ua_var_encoding:
-    #     zlib: True
-    #     complevel: 1
-    #     shuffle: True
-    #     chunksizes: [1, *levels, *height, *width]
-
-    # pressure_var_encoding:
-    #     zlib: True
-    #     complevel: 1
-    #     shuffle: True
-    #     chunksizes: [ 1, 4, *height, *width]
-
-    # surface_var_encoding:
-    #     zlib: true
-    #     complevel: 1
-    #     shuffle: True
-    #     chunksizes: [1, *height, *width]
 
 
 # credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
