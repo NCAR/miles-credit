@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 class GOES10kmDataset(Dataset):
     def __init__(self,
                  ds: xr.Dataset,
+                 data_conf: Dict,
                  time_config: Dict = None,
                  valid_init_dir = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/valid_init_times",
-                 scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/intermediate_files/data_stats.nc",):
+                 scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats.nc",):
         """
         taking advantage of DistributedSampler class code with this dataset
         
@@ -42,6 +43,12 @@ class GOES10kmDataset(Dataset):
         self.init_times = self._timestamps() # will generate valid init times if needed
 
         # setup scaler
+
+        self.log_normal_scaling = data_conf.get("log_normal_scaling", False)
+        if self.log_normal_scaling:
+            scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats_logC04.nc"
+            logger.info("log normalizing visible channels")
+        
         self.scaler_ds = xr.open_dataset(scaler_ds_path)
 
 
@@ -106,8 +113,11 @@ class GOES10kmDataset(Dataset):
         ds = self.ds.sel(t=ts, method="nearest")
         # no need to check time tolerance, should be taken care of by init time generation
         
-        da = ds["BT_or_R"]
+        da = ds["BT_or_R"].copy()
 
+        if self.log_normal_scaling: #channels is the first axis
+            da[0] = np.log(da[0])
+        
         da = self._normalize_ABI(da)
         da = self._nanfill_ABI(da)
         

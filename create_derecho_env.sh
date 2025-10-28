@@ -26,7 +26,7 @@ set -e
 ml conda
 
 topdir=$(git rev-parse --show-toplevel)
-CREDIT_ENV_NAME=${CREDIT_ENV_NAME:-"credit-derecho"}
+CREDIT_ENV_NAME=$CREDIT_ENV_PATH/credit-derecho
 yml=$(mktemp --tmpdir=${topdir} credit-derecho-tmp-XXXXXXXXXX.yml)
 echo ${yml}
 #yml=derecho.yml
@@ -43,19 +43,19 @@ dependencies:
   - conda-tree
   - mpi4py =*=derecho*
   - pip
-  - pytorch ==2.5.1=derecho*
+  - pytorch ==2.8.0=derecho*
   - torchvision =*=derecho*
   - torchmetrics
   - pip:
     - pipdeptree
-    - .
+    - -e .
 EOF
 
 # create the environment
 export CONDA_VERBOSITY=1
 export TIMEFORMAT=$'--> Real time: %3R seconds'
 time conda env create \
-     --name ${CREDIT_ENV_NAME} \
+     -p ${CREDIT_ENV_NAME} \
      --file ${yml} \
     || { cat ${yml}; echo "ERROR Creating Conda env!"; exit 1; }
 

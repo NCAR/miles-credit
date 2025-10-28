@@ -148,9 +148,11 @@ class Trainer(BaseTrainer):
             stop_forecast = False
             y_pred = None  # Place holder that gets updated after first roll-out
 
-            # start = time.time()
-
+            start = time.time()
             batch = next(dl)
+            logger.debug(f"dataload time: {time.time() - start}s")
+
+            start = time.time()
             mode = batch["mode"][0]
             while not stop_forecast:
                 logger.debug(f"current mode: {mode}")
@@ -221,7 +223,7 @@ class Trainer(BaseTrainer):
                     # compute gradients
                     scaler.scale(loss).backward(retain_graph=retain_graph)
                     
-                    logger.info(f"forward/backward time, t {time.time() - start}s")
+                    logger.debug(f"forward/backward time, t {time.time() - start}s")
 
 
                 if distributed:

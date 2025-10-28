@@ -15,7 +15,7 @@ def load_dataset(conf, rank, world_size, is_train=True):
 
     data_config = conf["data"]
 
-    zarr_ds = xr.open_dataset(data_config["save_loc"])
+    zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
 
     years = data_config["train_years"] if is_train else data_config["valid_years"]
 
@@ -25,7 +25,7 @@ def load_dataset(conf, rank, world_size, is_train=True):
         "years": years,
     }
 
-    return GOES10kmDataset(zarr_ds, time_config)
+    return GOES10kmDataset(zarr_ds, data_config, time_config)
 
 
 def load_dataloader(conf, train_dataset, rank, world_size, is_train=True):

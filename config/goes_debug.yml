@@ -17,7 +17,7 @@
 # the location to save your workspace, it will have 
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
-save_loc: '/glade/derecho/scratch/$USER/goes_10km_train/simple_wxformer_lognormal'
+save_loc: '/glade/derecho/scratch/$USER/goes_10km_train/debugger'
 seed: 1000
 
 data:
@@ -76,7 +76,7 @@ trainer:
     # fsdp: fully sharded data parallel
     # ddp: distributed data parallel
     # none: single-GPU training
-    mode: ddp
+    mode: none
 
     # fsdp-specific GPU optimization
     #
@@ -124,15 +124,15 @@ trainer:
 
     # define training and validation batch size
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 8
-    valid_batch_size: 8
+    train_batch_size: 1
+    valid_batch_size: 1
     ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
     # set to 0 to use all available training samples e.g. `len(dataloader)`
     # if the number is larger than all training samples, all available training samples will be used
-    batches_per_epoch: 0 
-    valid_batches_per_epoch: 20
+    batches_per_epoch: 2
+    valid_batches_per_epoch: 2
     # early stopping
     stopping_patience: 50 
     # True: do not validate, always save weights
@@ -142,7 +142,7 @@ trainer:
     start_epoch: 0
     # the trainer will stop after iterating a given number of epochs
     # this works for any start_epoch and reload_epoch: True
-    num_epoch: 24 # 2 epochs per hour
+    num_epoch: 2 # 2 epochs per hour
     # epcoh is saved in the checkpot.pt, this option reads the last epoch 
     # of the previous job and continue from there
     # useful for epoch-dependent schedulers
@@ -186,8 +186,8 @@ trainer:
     # GOES batch size of 8 
     # loading time: < 2.5s
     # forward time: ~ 1s
-    thread_workers: 4
-    valid_thread_workers: 4
+    thread_workers: 0
+    valid_thread_workers: 0
 
     # Number of prefetch samples in the DataLoader
     # This only works with ERA5_MultiStep_Batcher or MultiprocessingBatcherPrefetch
@@ -195,7 +195,7 @@ trainer:
   
 model:
     # NCAR WXFormer example
-    type: "crossformer"               # use "debugger" with any config to use debugger model type. compatible with basic model args
+    type: "debugger"               # use "debugger" with any config to use debugger model type. compatible with basic model args
     frames: 1                         # number of input states (default: 1)
     image_height: 1024                 # number of latitude grids (default: 640)
     image_width: 960                  # number of longitude grids (default: 1280)
@@ -413,24 +413,24 @@ predict:
 # credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
 pbs: 
     # example for derecho
-    conda: "~/credit-derecho"
-    project: "NMMM0015"
-    job_name: "train_goes_lognorm"
-    walltime: "12:00:00"
-    nodes: 8
-    ncpus: 64
-    ngpus: 4
-    mem: '480GB'
-    queue: 'main'
+    # conda: "~/credit-derecho"
+    # project: "NMMM0015"
+    # job_name: "train_goes_lognorm"
+    # walltime: "12:00:00"
+    # nodes: 8
+    # ncpus: 64
+    # ngpus: 4
+    # mem: '480GB'
+    # queue: 'main'
     
     # examaple for casper
-    # conda: "~/credit"
-    # job_name: 'train_goes'
-    # nodes: 1
-    # ncpus: 32
-    # ngpus: 1
-    # mem: '128GB'
-    # walltime: '24:00:00'
-    # gpu_type: 'a100'
-    # project: 'NMMM0015'
-    # queue: 'casper'
+    conda: "~/credit"
+    job_name: 'train_goes'
+    nodes: 1
+    ncpus: 32
+    ngpus: 1
+    mem: '128GB'
+    walltime: '24:00:00'
+    gpu_type: 'a100'
+    project: 'NMMM0015'
+    queue: 'casper'
