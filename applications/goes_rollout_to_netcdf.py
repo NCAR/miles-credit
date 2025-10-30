@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import yaml
 import logging
 import warnings
@@ -7,6 +8,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 import multiprocessing as mp
 import traceback
+from os.path import join
 
 import pandas as pd
 # ---------- #
@@ -23,19 +25,11 @@ import torch
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info
-from credit.datasets import setup_data_loading
-from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
 from credit.datasets.goes_load_dataset_and_dataloader import load_predict_dataset, load_dataloader
-from credit.data import concat_and_reshape, reshape_only
-from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
 from credit.pbs import launch_script, launch_script_mpi
-from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
 from credit.forecast import load_forecasts
 from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
-from credit.parser import credit_main_parser, predict_data_check
-from credit.output import load_metadata, make_xarray, save_netcdf_increment
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
 
 logger = logging.getLogger(__name__)
@@ -70,6 +64,13 @@ def get_rollout_init_times(conf):
             rollout_init_times += [start + k * ic_interval_days for start in start_dts]
         
         return rollout_init_times
+    
+    elif forecast_conf["type"] == "debugger":
+        start_dt = pd.Timestamp(year=forecast_conf["start_year"], month=1, day=1, hour=0)
+        ic_interval = pd.Timedelta(2, "w")
+        num_inits = 3
+        rollout_init_times = [start_dt + k * ic_interval for k in range(num_inits)]
+        return rollout_init_times
 
     raise ValueError(f"{forecast_conf['type']} is not a valid type")
 
@@ -79,91 +80,96 @@ class ForecastProcessor:
         self.conf = conf
         self.device = device
 
+        self.save_forecast_dir = conf["predict"]["save_forecast"]
+
         self.batch_size = conf["predict"].get("batch_size", 1)
         self.ensemble_size = conf["predict"].get("ensemble_size", 1)
         self.lead_time_periods = conf["data"]["lead_time_periods"]
 
-        # transform and ToTensor class
-        if conf["data"]["scaler_type"] == "std_new":
-            self.state_transformer = Normalize_ERA5_and_Forcing(conf)
-        else:
-            print("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
-            raise
-
-        # get lat/lons from x-array
-        self.latlons = xr.open_dataset(conf["loss"]["latitude_weights"]).load()
-        # grab ERA5 (etc) metadata
-        self.meta_data = load_metadata(conf)
-
-        # Set up the diffusion and pole filters
-        if (
-            "use_laplace_filter" in conf["predict"]
-            and conf["predict"]["use_laplace_filter"]
-        ):
-            self.dpf = Diffusion_and_Pole_Filter(
-                nlat=conf["model"]["image_height"],
-                nlon=conf["model"]["image_width"],
-                device=device,
+        if self.ensemble_size > 1:
+            self.ensemble_index = xr.DataArray(
+                np.arange(self.ensemble_size), dims="ensemble_member_label"
             )
 
-    def process(self, y_pred, forecast_step, forecast_count, datetimes, save_datetimes):
-        try:
-            # Transform predictions
-            conf = self.conf
-            y_pred = self.state_transformer.inverse_transform(y_pred)
+        # setup xarray saving
+        self.ref_array = self._ref_array()
 
-            # Calculate correct datetime for current forecast
-            utc_datetimes = [
-                datetime.utcfromtimestamp(datetimes[i].item())
-                + timedelta(hours=self.lead_time_periods)
-                for i in range(self.batch_size)
-            ]
+        #setup scaler
+        scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats.nc"
+        self.log_normal_scaling = conf["data"].get("log_normal_scaling", False)
+        if self.log_normal_scaling:
+            scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats_logC04.nc"
+            logger.info("inverse log normalizing visible channels")
+        self.scaler_ds = xr.open_dataset(scaler_ds_path)
+
+    def _ref_array(self):
+        ds = xr.open_dataset(self.conf["data"]["save_loc"])
+        ref_array = ds.isel(t=0)["BT_or_R"].copy()
+
+        self.channel = ref_array.channel
+
+        self.padded_lat = np.pad(ref_array.latitude, 
+                            (11,10), 
+                            mode="linear_ramp", 
+                            end_values=(-50.1 - 11* 0.1, 50.1 + 10*.1))
+        self.padded_lon = np.pad(ref_array.longitude, 
+                            (19,18), 
+                            mode="linear_ramp", 
+                            end_values=(-121.1 - 19 * 0.1, -28.9 + 18*.1))
+        
+    def inverse_transform_ABI(self, da):
+        unscaled = da * self.scaler_ds["std"] + self.scaler_ds["mean"]
+
+        if self.log_normal_scaling: #log normal for ch4
+            unscaled[:,0] = np.exp(unscaled[:,0])
+        
+        return unscaled
+    
+    def make_dataarray(self, y_pred_member, save_datetime):
+        y_pred_member = y_pred_member.squeeze(2) # 1,c,t,lat,lon -> 1, c, lat lon
+
+        da = xr.DataArray(y_pred_member, 
+                        dims=[ "t", "channel", "latitude", "longitude"],
+                                coords={
+                                    "t": [pd.Timestamp(save_datetime)],
+                                    "channel": self.channel,
+                                    "latitude": self.padded_lat,
+                                    "longitude": self.padded_lon,
+                                },
+                        )
+        da = self.inverse_transform_ABI(da)
+        return da
+    
+    def save_dataarray(self, pred_da, init_datetime, save_datetime):
+        
+        pred_ds = xr.Dataset({"BT_or_R": pred_da})
+        pred_ds.to_netcdf(join(self.save_forecast_dir,
+                               init_datetime,
+                               f"{save_datetime}.nc"))
+
+    def process(self, y_pred, init_datetimes, save_datetimes):
+        try:
+            for dt in init_datetimes:
+                os.makedirs(join(self.save_forecast_dir, dt), exist_ok=True)
 
             # Convert to xarray and handle results
-            for j in range(self.batch_size):
-                upper_air_list, single_level_list = [], []
-                for i in range(
-                    self.ensemble_size
-                ):  # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
-                    darray_upper_air, darray_single_level = make_xarray(
-                        y_pred[j + i : j + i + 1],  # Process each ensemble member
-                        utc_datetimes[j],
-                        self.latlons.latitude.values,
-                        self.latlons.longitude.values,
-                        conf,
-                    )
-                    upper_air_list.append(darray_upper_air)
-                    single_level_list.append(darray_single_level)
+            for j, times in enumerate(zip(init_datetimes, save_datetimes)):
+                init_datetime, save_datetime = times
+                y_pred_ensemble = []
+                for i in range(self.ensemble_size):  
+                    # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
+                    y_pred_member = self.make_dataarray(y_pred[j + i : j + i + 1], save_datetime)
+                    y_pred_ensemble.append(y_pred_member)
 
                 if self.ensemble_size > 1:
-                    ensemble_index = xr.DataArray(
-                        np.arange(self.ensemble_size), dims="ensemble_member_label"
-                    )
-                    all_upper_air = xr.concat(
-                        upper_air_list, ensemble_index
-                    )  # .transpose("time", ...)
-                    all_single_level = xr.concat(
-                        single_level_list, ensemble_index
-                    )  # .transpose("time", ...)
+                    pred_da = xr.concat(y_pred_ensemble, self.ensemble_index)
                 else:
-                    all_upper_air = darray_upper_air
-                    all_single_level = darray_single_level
+                    pred_da = y_pred_member
 
-                # Save the current forecast hour data in parallel
-                save_netcdf_increment(
-                    all_upper_air,
-                    all_single_level,
-                    save_datetimes[
-                        forecast_count + j
-                    ],  # Use correct index for current batch item
-                    self.lead_time_periods * forecast_step,
-                    self.meta_data,
-                    conf,
-                )
+                # Save the current forecast hour data
+                self.save_dataarray(pred_da, init_datetime, save_datetime)
 
-                print_str = f"Forecast: {forecast_count + 1 + j} "
-                print_str += f"Date: {utc_datetimes[j].strftime('%Y-%m-%d %H:%M:%S')} "
-                print_str += f"Hour: {forecast_step * self.lead_time_periods} "
+                print_str = f"processed {save_datetime} initialized at {init_datetime}"
                 print(print_str)
         except Exception as e:
             print(traceback.format_exc())
@@ -175,8 +181,6 @@ def predict(rank, world_size, conf, p):
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["predict"]["mode"])
 
-    # Set up dataloading
-    data_config = setup_data_loading(conf)
 
     # infer device id from rank
     if torch.cuda.is_available():
@@ -190,11 +194,6 @@ def predict(rank, world_size, conf, p):
     # config settings
     seed_everything(conf["seed"])
 
-    # number of input time frames
-    history_len = conf["data"]["history_len"]
-
-    # length of forecast steps
-    lead_time_periods = conf["data"]["lead_time_periods"]
 
     # batch size
     batch_size = conf["predict"].get("batch_size", 1)
@@ -212,6 +211,8 @@ def predict(rank, world_size, conf, p):
 
     # Load the forecasts we wish to compute
     rollout_init_times = get_rollout_init_times(conf)
+
+    logger.info(f"rolling out with init times {rollout_init_times}")
 
     if len(rollout_init_times) < batch_size:
         logger.warning(
@@ -253,33 +254,36 @@ def predict(rank, world_size, conf, p):
 
     mode = None
 
+    num_batches = len(dataloader)
+
+    dl = iter(dataloader)
+
+    # forecast count = a constant for each run
+    forecast_count = 0
+    
+    # y_pred allocation and results tracking
+    results = []
+    
+    start_time = time.time()
     # Rollout
     with torch.no_grad():
-        # forecast count = a constant for each run
-        forecast_count = 0
+        # model inference loop
+        for _ in range(num_batches):
 
-        # y_pred allocation and results tracking
-        results = []
-        save_datetimes = [0] * len(rollout_init_times)
-        for init_batch in dataloader:
-            init_datetimes = init_batch["datetime"]
-            save_datetimes[forecast_count : forecast_count + batch_size] = (
-                init_datetimes
-            )
+            # init
+            batch = next(dl)
 
-            x = init_batch["x"]
+            init_datetimes = batch["datetime"]
+            batch_size = len(init_datetimes)
 
+            mode = batch["mode"][0]
+
+            x = batch["x"].to(device)
             # create ensemble:
             if ensemble_size > 1:
-                x = torch.repeat_interleave(x, ensemble_size, 0)           
-            
-            batch = init_batch 
-            
-            # model inference loop
+                x = torch.repeat_interleave(x, ensemble_size, 0)
+
             while mode != "stop":
-                batch_size = batch["datetime"].shape[0]
-                mode = batch["mode"][0]
-                    
                 # Add forcing and static variables for the entire batch
                 if "x_forcing_static" in batch:
                     x_forcing_batch = (
@@ -289,32 +293,40 @@ def predict(rank, world_size, conf, p):
                         x_forcing_batch = torch.repeat_interleave(
                             x_forcing_batch, ensemble_size, 0
                         )
-                    x = torch.cat((x, x_forcing_batch), dim=1)
-
-                # Clamp if needed
+                    x = torch.cat((x, x_forcing_batch), dim=1)   
+                
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
                 # Model inference on the entire batch
                 y_pred = model(x.float())
 
+                batch = next(dl) # load in y timestep for metric computation and forecast timestamp
+                
+                save_datetimes = batch["datetime"]
+                # process according to y timestep
 
                 result = p.apply_async(
                     result_processor.process,
                     (
                         y_pred.cpu(),
-                        forecast_step,
-                        forecast_count,
-                        batch["datetime"],
+                        init_datetimes,
                         save_datetimes,
                     ),
                 )
                 results.append(result)
 
-                
+                # result_processor.process(
+                #         y_pred.cpu(),
+                #         init_datetimes,
+                #         save_datetimes,
+                #     )
+
+                # reset for next iter
+                mode = batch["mode"][0]
                 x = y_pred.detach()
 
-                if batch["stop_forecast"][0]:
+                if mode == "stop":
                     # Wait for processes to finish
                     for result in results:
                         result.get()
@@ -326,9 +338,12 @@ def predict(rank, world_size, conf, p):
 
                     forecast_count += batch_size
 
+
         if distributed:
             torch.distributed.barrier()
 
+    end_time = time.time()
+    logger.info(f"total rollout time: {end_time - start_time:02}s for {len(rollout_init_times) * conf['predict']['forecasts']['num_forecast_steps']} forecasts")
     return 1
 
 
@@ -398,6 +413,14 @@ def main():
         help="Number of CPU workers to use per GPU",
     )
 
+    parser.add_argument(
+        "-debug",
+        "--debug",
+        type=int,
+        default=-1, # -1 does nothing
+        help="debug mode",
+    )
+
     # parse
     args = parser.parse_args()
     args_dict = vars(args)
@@ -407,6 +430,7 @@ def main():
     subset = int(args_dict.pop("subset"))
     number_of_subsets = int(args_dict.pop("no_subset"))
     num_cpus = int(args_dict.pop("num_cpus"))
+    debug = int(args_dict.pop("debug"))
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -415,19 +439,24 @@ def main():
 
     # Stream output to stdout
     ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(formatter)
-    root.addHandler(ch)
+
+
 
     # Load the configuration and get the relevant variables
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    # handling config args
-    conf = credit_main_parser(
-        conf, parse_training=False, parse_predict=True, print_summary=False
-    )
-    predict_data_check(conf, print_summary=False)
+    if debug == 1 or conf["model"]["type"] == "debugger" or conf["predict"]["forecasts"]["type"] == "debugger" or conf.get("debug", False):
+        print("setting logging to debug")
+        ch.setLevel(logging.DEBUG)
+    else:
+        ch.setLevel(logging.INFO)
+
+    if debug == 0:
+        ch.setLevel(logging.INFO) 
+
+    ch.setFormatter(formatter)
+    root.addHandler(ch)
 
     # create a save location for rollout
     assert (
@@ -476,16 +505,16 @@ def main():
 
     local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
 
+    logger.info(f"saving forecasts with {num_cpus} cpus")
     with mp.Pool(num_cpus) as p:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
             _ = predict(world_rank, world_size, conf, p=p)
         else:  # single device inference
             _ = predict(0, 1, conf, p=p)
 
-    # Ensure all processes are finished
-    p.close()
-    p.join()
-
-
+        # Ensure all processes are finished
+        p.close()
+        p.join()
+    
 if __name__ == "__main__":
     main()

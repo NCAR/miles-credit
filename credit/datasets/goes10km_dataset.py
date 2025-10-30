@@ -37,7 +37,7 @@ class GOES10kmDataset(Dataset):
         self.timestep = time_config["timestep"]
         self.num_forecast_steps = time_config["num_forecast_steps"]
         self.years = time_config["years"]
-        self.valid_sampling_modes = ["init", "y", "stop"]
+        self.valid_sampling_modes = ["init", "forcing", "y", "stop"]
         
         self.valid_init_dir = valid_init_dir
         self.init_times = self._timestamps() # will generate valid init times if needed
@@ -55,14 +55,16 @@ class GOES10kmDataset(Dataset):
         if "rollout_init_times" in time_config.keys():
             logger.info("setting up GOES 10km dataset for rollout mode by subsetting times")
             self._rollout_mode(time_config["rollout_init_times"],
-                               time_config.get("time_tol_hr", 1),
+                               time_config.get("time_tol", (1, "D")),
                                )
 
 
-    def _rollout_mode(self, rollout_init_times, time_tol_hr):
+    def _rollout_mode(self, rollout_init_times, time_tol):
+        
+        logger.info(f"selecting rollout times with time tolerance {time_tol}")
         self.init_times = self.init_times.sel(t=rollout_init_times, method="nearest",
-                                              tolerance=pd.Timedelta(time_tol_hr, "h"))
-        self.num_forecast_steps = 0 # only load init
+                                              tolerance=pd.Timedelta(time_tol[0], time_tol[1])
+                                              )
 
     def _generate_valid_init_times(self, valid_init_filepath):
         # due to missing data, need to have a different list of valid init times
@@ -131,15 +133,16 @@ class GOES10kmDataset(Dataset):
     def __getitem__(self, args):
         # default: load target state
         ts, mode = args
-        time_str = pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+        ds = self.ds.sel(t=ts, method="nearest")
+        # no need to check time tolerance, should be taken care of by init time generation
+        
+        time_str = pd.Timestamp(ds.t.values).strftime("%Y-%m-%dT%H:%M:%S")
 
         if mode == "forcing":
             return {"mode": mode,
                     "stop_forecast": False,
                     "datetime": time_str,}
-
-        ds = self.ds.sel(t=ts, method="nearest")
-        # no need to check time tolerance, should be taken care of by init time generation
         
         da = ds["BT_or_R"].copy()
 

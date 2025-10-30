@@ -55,7 +55,7 @@ class MultiStepBatchSamplerSubset(Sampler):
         ) // self.batch_size
 
     def __len__(self):
-        # actual number of iters of the sampler
+        # actual number of init batches
         return self.num_start_batches
 
     def __iter__(self):
@@ -99,7 +99,7 @@ class DistributedMultiStepBatchSampler(DistributedSampler):
     def __iter__(self):
 
         indices = list(super().__iter__())
-        print(f"num indices: {len(indices)}")
+        logger.debug(f"num indices: {len(indices)}")
         batch_sampler = MultiStepBatchSamplerSubset(self.dataset,
                                                     sampling_modes=self.sampling_modes,
                                                     index_subset=indices,

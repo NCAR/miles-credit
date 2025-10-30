@@ -194,8 +194,6 @@ class Trainer(BaseTrainer):
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-                start = time.time()
-
                 # predict with the model
                 x = x.float()
                 with torch.autocast(device_type="cuda", enabled=amp):
@@ -223,8 +221,6 @@ class Trainer(BaseTrainer):
                     # compute gradients
                     scaler.scale(loss).backward(retain_graph=retain_graph)
                     
-                    logger.debug(f"forward/backward time, t {time.time() - start}s")
-
 
                 if distributed:
                     torch.distributed.barrier()
@@ -328,6 +324,9 @@ class Trainer(BaseTrainer):
                 and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
             ):
                 scheduler.step()
+
+            logger.debug(f"forward/backward/optimizer time, {time.time() - start}s")
+
 
         #  Shutdown the progbar
         batch_group_generator.close()

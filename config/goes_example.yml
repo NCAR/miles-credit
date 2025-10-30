@@ -306,13 +306,18 @@ predict:
 
     # Set the batch_size for the prediction inference mode (default is 1)
     # this batches init_datetimes together so that we are fully utilizing the GPUs 
-    batch_size: 1
+    batch_size: 3
     # set the ensemble size for inference mode (default is 1 if not set)
     ensemble_size: &ensemble_size 1
-
+    # [optional] number of dataloader workers, prefetch factor. default to 0
+    thread_workers: 4
+    prefetch_factor: 1 # will be none if thread_workers=0
+    
+    time_tol: [1, "D"] # time tolerance for init times
     forecasts:
-        type: "custom"       # keep it as "custom". See also credit.forecast
-        start_year: 2019     # year of the first initialization (where rollout will start)
+        type: "standard"       # standard forecast for start_year, num_forecast_steps, 2 wk spacing between inits
+        num_forecast_steps: 24
+        start_year: 2024     # year of the first initialization (where rollout will start)
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z

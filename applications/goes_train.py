@@ -466,7 +466,7 @@ def main_cli():
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
     
-    if debug or conf["model"]["type"] == "debugger":
+    if debug or conf["model"]["type"] == "debugger" or conf.get("debug", False):
         print("setting logging to debug")
         ch.setLevel(logging.DEBUG)
     else:
