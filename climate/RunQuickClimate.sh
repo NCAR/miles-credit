@@ -1,15 +1,15 @@
 #!/bin/bash
-# -*- coding: utf-8 -*-
-# PBS -N Run_Noise_Script
-# PBS -A NAML0001 
-# PBS -l walltime=12:00:00
-# PBS -o RUN_Climate_RMSE.out
-# PBS -e RUN_Climate_RMSE.out
-# PBS -q casper
-# PBS -l select=1:ncpus=32:ngpus=1:mem=250GB
-# PBS -l gpu_type=a100
-# PBS -m a
-# PBS -M wchapman@ucar.edu
+#-*- coding: utf-8 -*-
+#PBS -N Run_Noise_Script
+#PBS -A NAML0001 
+#PBS -l walltime=12:00:00
+#PBS -o RUN_Climate_RMSE.out
+#PBS -e RUN_Climate_RMSE.out
+#PBS -q casper
+#PBS -l select=1:ncpus=32:ngpus=1:mem=250GB
+#PBS -l gpu_type=a100
+#PBS -m a
+#PBS -M wchapman@ucar.edu
 
 module load conda
 conda activate /glade/work/wchapman/conda-envs/credit-casper-modern

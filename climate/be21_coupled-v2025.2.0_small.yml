@@ -259,7 +259,7 @@ trainer:
   
 model:
     # NCAR WXFormer example
-    type: "crossformer"
+    type: "camulator"
     frames: 1                         # number of input states (default: 1)
     image_height: 192                 # number of latitude grids (default: 640)
     image_width: 288                  # number of longitude grids (default: 1280)
