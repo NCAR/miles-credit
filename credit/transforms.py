@@ -758,6 +758,19 @@ class Normalize_ERA5_and_Forcing:
         transformed_x = torch.cat(tensors, dim=1)
 
         return device_compatible_to(transformed_x,device)
+    
+    def inverse_transform_dataset(self, DS: xr.Dataset,
+                              rtol: float = 1e-6,
+                              atol: float = 1e-8) -> xr.Dataset:
+        """
+        Inverse‐transform DS by (DS * std_ds) + mean_ds, after
+        aligning its coordinates to mean_ds/std_ds.
+        """
+        DS_aligned = self._align_coords(DS, self.mean_ds, rtol=rtol, atol=atol)
+        mean_b = self.mean_ds.broadcast_like(DS)
+        std_b  = self.std_ds.broadcast_like(DS)
+        
+        return (DS_aligned * self.std_ds) + self.mean_ds
 
 
 class BridgescalerScaleState(object):
