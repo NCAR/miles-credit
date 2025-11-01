@@ -40,7 +40,7 @@ import torch.nn.functional as F
 # credit
 from credit.models import load_model, load_model_name
 from credit.seed import seed_everything
-from credit.loss import latitude_weights
+from credit.losses.weighted_loss import latitude_weights
 
 from credit.data import (
     concat_and_reshape,
