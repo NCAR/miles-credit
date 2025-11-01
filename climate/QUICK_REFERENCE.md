@@ -36,10 +36,10 @@ else:
 |---------|----------|-----|
 | **Interface** | Monolithic 300-line function | Clean `CAMulatorStepper` class |
 | **State docs** | Undocumented | Fully documented in `StateManager` |
-| **Shape args** | Manual `--input_shape 1 136 1 192 288` | Auto-detected ✨ |
+| **Shape args** | Manual `--input_shape 1 136 1 192 288` | Auto-detected |
 | **Dead code** | ~30 lines unused | Removed |
 | **Imports** | ~70 imports (many unused) | ~30 imports (clean) |
-| **Performance** | ⚡ Fast | ⚡ Same speed (parallel I/O preserved) |
+| **Performance** | Fast | Same speed (parallel I/O preserved) |
 
 ---
 
