@@ -1,8 +1,7 @@
 #!/bin/bash -l
 #PBS -N gwm
-#PBS -l select=1:ncpus=8:ngpus=1:mem=128GB
+#PBS -l select=1:ncpus=8:ngpus=1:mem=128GB:gpu_type=a100
 #PBS -l walltime=12:00:00
-#PBS -l gpu_type=a100
 #PBS -A NAML0001
 #PBS -q casper
 #PBS -j oe

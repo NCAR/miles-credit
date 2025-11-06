@@ -5,8 +5,7 @@
 #PBS -o RUN_Climate_RMSE.out
 #PBS -e RUN_Climate_RMSE.out
 #PBS -q casper
-#PBS -l select=1:ncpus=32:ngpus=1:mem=250GB
-#PBS -l gpu_type=a100
+#PBS -l select=1:ncpus=32:ngpus=1:mem=250GB:gpu_type=a100
 #PBS -m a
 #PBS -M email@ucar.edu
 
