@@ -18,6 +18,10 @@ class MultiStepBatchSamplerSubset(Sampler):
         index_subset: Optional[List[int]] = None,  # if None, use entire dataset
     ) -> None:
         """
+        The dataset is required to have attributes: 
+         - init_times of valid init times, each time object compatible with:
+         - timestep, the timestep to sample with
+
         This sampler will draw multistep batches with init indices drawn from index_subset. 
         if index_subset=None, it will draw init indices from the entire dataset.
         

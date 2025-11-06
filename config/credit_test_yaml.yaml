@@ -1,0 +1,26 @@
+data:
+  source:
+  
+    prognostic:
+    
+      vars_3D: ['T', 'U', 'V', 'Q']
+      vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 't2m','SP']
+      path: "/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/"
+
+    dynamic_forcing: 
+    
+      vars_2D: ['tsi']
+      path: "/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/"
+
+    static:
+    
+      vars_static: ['Z_GDS4_SFC','LSM'] 
+      path: "/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/static/ERA5_mlevel_cesm_static.zarr"
+
+    diagnostic: None
+        
+  start_datetime: "2022-01-13" 
+  end_datetime: "2022-01-18"
+  time_step: "6h"
+
+  history_len: 1

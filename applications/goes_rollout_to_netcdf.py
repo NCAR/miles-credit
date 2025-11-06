@@ -43,7 +43,8 @@ def get_rollout_init_times(conf):
     forecast_conf = conf["predict"]["forecasts"]
 
     if forecast_conf["type"] == "standard":
-        start_dt = pd.Timestamp(year=forecast_conf["start_year"], month=1, day=1, hour=0)
+        # start_dt = pd.Timestamp(year=forecast_conf["start_year"], month=1, day=1, hour=0)
+        start_dt = pd.Timestamp(year=2024, month=1, day=1, hour=0)
         ic_interval = pd.Timedelta(2, "w")
         num_inits = 26
         rollout_init_times = [start_dt + k * ic_interval for k in range(num_inits)]
@@ -66,7 +67,7 @@ def get_rollout_init_times(conf):
         return rollout_init_times
     
     elif forecast_conf["type"] == "debugger":
-        start_dt = pd.Timestamp(year=forecast_conf["start_year"], month=1, day=1, hour=0)
+        start_dt = pd.Timestamp(year=2024, month=1, day=1, hour=0)
         ic_interval = pd.Timedelta(2, "w")
         num_inits = 3
         rollout_init_times = [start_dt + k * ic_interval for k in range(num_inits)]
