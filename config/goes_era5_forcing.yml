@@ -1,0 +1,441 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# This is an example YAML file. It explains the major keywords that are used in the training and 
+# inference of CREDIT models.
+
+# Contents
+#     - data
+#     - trainer
+#     - model
+#     - loss
+#     - predict
+#     - pbs
+
+# Note: this is NOT a runable YAML. The purposes is to explain how to use each keyword with examples.
+# --------------------------------------------------------------------------------------------------------------------- #
+
+
+# the location to save your workspace, it will have 
+# (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
+# if save_loc does not exist, it will be created automatically
+save_loc: '/glade/derecho/scratch/$USER/goes_10km_train/simple_wxformer_lognormal'
+seed: 1000
+
+data:
+    save_loc: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/goes_10km.zarr"
+    surface_variables: ["C04", "C07", "C08", "C09", "C10", "C13"]
+    levels: []
+    variables: []
+    diagnostic_variables: []
+    
+    log_normal_scaling: True #log-normal scale visible channels
+
+    source:
+        ERA5:
+            prognostic:
+                # upper-air variables
+                vars_3D: ['U','V','T','Q']
+                vars_2D: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
+                path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
+            
+            diagnostic: null
+                
+            dynamic_forcing:
+                # dynamic forcing variables
+                vars_2D: ['tsi']
+                path: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
+                
+            static: null
+                # vars_2D: ['Z_GDS4_SFC','LSM'] 
+                # path: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
+    regrid_loc: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/regrid_era5_to_goes.nc"
+    outgrid_loc: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/outgrid_era5_to_goes.nc"
+    ingrid_loc: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/ingrid_era5_to_goes.nc"
+    # compatible with the old 'std'
+    static_first: True
+
+    # mean / std path
+    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
+    # regular z-score version
+    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
+    # residual norm version
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
+
+    train:
+        start_datetime: "2017-01-01" 
+        end_datetime: "2022-07-01"
+    valid:
+        start_datetime: "2022-07-01" 
+        end_datetime: "2022-12-31"
+    timestep: "1h"
+
+    # number of input time frames
+    history_len: 1
+    valid_history_len: 1 # keep it the same as "history_len"
+
+    # number of forecast lead times to predict during TRAINING 
+    # 0 for single-step training
+    # 1, 2, 3, ... for multi-step training
+    forecast_len: 0
+    # the "forecast_len" used for validation set, can be the same as or smaller than "forecast_len"
+    valid_forecast_len: 0
+
+    # TRAINING ONLY
+    sampling_modes: ["init", "stop"] # stop, y = backprop
+    # [Optional] retain_graph to backprop on multiple timesteps on multi-step training
+    retain_graph: False
+
+    # when forecast_len = 0, it does nothing
+    # when forecast_len > 0, it computes training loss on the last forecast state only
+    # this option speed-up multi-step training, it ONLY works with trainer type: standard
+    # use one_shot --> True
+    # do not use one_shot --> False or null
+    one_shot: False   
+                            
+    # number of hours for each forecast step
+    # lead_time_periods = 6 for 6 hourly model and 6 hourly taining data
+    # lead_time_periods = 1 for hourly model and hourly taining data
+    # ------------------------------------------------------------ #
+    # Note: This keyword is applied in both training and inference
+    lead_time_periods: 1
+    # ------------------------------------------------------------ #
+    
+    data_clamp: null
+    
+    # dataset type. For now you may choose from 
+    # ERA5_and_Forcing_MultiStep MultiprocessingBatcherPrefetch ERA5_MultiStep_Batcher MultiprocessingBatcher
+    # All of these support single or multi-step training (e.g. forecast lengths >= 0)
+
+trainer:
+    type: goes10km
+    # the keyword that controls GPU usage
+    # fsdp: fully sharded data parallel
+    # ddp: distributed data parallel
+    # none: single-GPU training
+    mode: ddp
+
+    # fsdp-specific GPU optimization
+    #
+    # allow FSDP offloads gradients to CPU and free GPU memory
+    # This can cause CPU out-of-memory if for some large models, do your diligence
+    cpu_offload: False
+    # save forward pass activation to checkpoints and free GPU memory
+    activation_checkpoint: False
+    # Set to True for all layers with activations otherwise use custom (see credit/distributed.py)
+    checkpoint_all_layers: False
+
+    # (optional) use torch.compile: False. May not be compatible with custom models
+    compile: False
+
+    # load existing weights / optimizer / mixed-precision grad scaler / learning rate scheduler state(s)
+    # when starting multi-step training, only use load weights initially, then set all to true
+    load_weights: True
+    load_optimizer: True
+    load_scaler: True 
+    load_scheduler: True
+
+    # CREDIT save checkpoints at the end of every epoch
+    # save_backup_weights will also save checkpoints in the beginning of every epoch
+    save_backup_weights: True
+    # save_best_weights will save the best checkpoint separatly based on validation loss
+    # does not work if skip_validation: True
+    save_best_weights: True
+
+    # Optional for user to control which variable metrics get saved to training_log.csv
+    # Set to True to save metrics for all predicted variables
+    # Set to ["Z500", "Q500", "Q", "T"] for example to save these variables (with levels in the case of Q and T)
+    # Set to [] or None to save only bulk metrics averaged over all variables
+    save_metric_vars: True
+    
+    # update learning rate to optimizer.param_groups
+    # False if a scheduler is used
+    update_learning_rate: False
+    
+    # learning rate
+    learning_rate: 1.0e-03
+
+    # L2 regularization on trained weights
+    # weight_decay: 0 --> turn-off L2 reg
+    weight_decay: 0
+
+    # define training and validation batch size
+    # for ddp and fsdp, actual batch size = batch_size * number of GPUs
+    train_batch_size: 8
+    valid_batch_size: 8
+    ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
+
+    # number of batches per epoch for training and validation
+    # set to 0 to use all available training samples e.g. `len(dataloader)`
+    # if the number is larger than all training samples, all available training samples will be used
+    batches_per_epoch: 0 
+    valid_batches_per_epoch: 20
+    # early stopping
+    stopping_patience: 50 
+    # True: do not validate, always save weights
+    skip_validation: False
+
+    # total number of epochs
+    start_epoch: 0
+    # the trainer will stop after iterating a given number of epochs
+    # this works for any start_epoch and reload_epoch: True
+    num_epoch: 24 # 2 epochs per hour
+    # epcoh is saved in the checkpot.pt, this option reads the last epoch 
+    # of the previous job and continue from there
+    # useful for epoch-dependent schedulers
+    reload_epoch: True # can also use --> train_one_epoch: True
+    epochs: &epochs 70
+    # if use_scheduler: False
+    # reload_epoch: False
+    # epochs: 20
+
+    use_scheduler: True
+    #scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
+    scheduler:
+      scheduler_type: cosine-annealing-restarts
+      first_cycle_steps: 250
+      cycle_mult: 6.0  # Multiplier for steps in subsequent cycles
+      max_lr: 1.0e-03
+      min_lr: 1.0e-06
+      warmup_steps: 249
+      gamma: 0.7  # LR reduction factor at each cycle restart
+
+    # Pytorch automatic mixed precision (amp). See also 'mixed_precision' below
+    amp: True
+    
+    # This version of mixed precision is supported only with FSDP and gives you more control. Set amp = False.
+    # See https://pytorch.org/docs/stable/fsdp.html#torch.distributed.fsdp.MixedPrecision for details
+    # Many different precision types are supported. See credit.mixed_precision
+    # If commented out, the default is float32.
+    mixed_precision: 
+        param_dtype: "float32"
+        reduce_dtype: "float32"
+        buffer_dtype: "float32"
+
+    # rescale loss as loss = loss / grad_accum_every -- currently is not being used
+    grad_accum_every: 1
+
+    # gradient clipping. Set to 'dynamic' to compute global norm (default). Set to 0 to ignore entirely.
+    grad_max_norm: 'dynamic'
+    
+    # number of CPU workers used in datasets/dataloaders
+    # 0 means load into main process. recommend using 0 for debugging. will default to prefetch=None
+    # GOES batch size of 8 
+    # loading time: < 2.5s
+    # forward time: ~ 1s
+    thread_workers: 15
+    valid_thread_workers: 15
+
+    # Number of prefetch samples in the DataLoader
+    prefetch_factor: 1
+  
+model:
+    # NCAR WXFormer example
+    type: "crossformer"               # use "debugger" with any config to use debugger model type. compatible with basic model args
+    frames: 1                         # number of input states (default: 1)
+    image_height: 1024                 # number of latitude grids (default: 640)
+    image_width: 960                  # number of longitude grids (default: 1280)
+    levels: 0                        # number of upper-air variable levels (default: 15)
+    channels: 0                       # upper-air variable channels
+    surface_channels: 6               # surface variable channels
+    input_only_channels: 0            # dynamic forcing, forcing, static channels
+    output_only_channels: 0           # diagnostic variable channels
+    
+    patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
+    patch_height: 1                   # number of longitude grids in each 3D patch (default: 1)
+    frame_patch_size: 1               # number of input states in each 3D patch (default: 1)
+    
+    dim: [32, 64, 128, 256]           # Dimensionality of each layer
+    depth: [2, 2, 2, 2]               # Depth of each layer
+    global_window_size: [16, 8, 2, 1] # Global window size for each layer
+    local_window_size: 2             # Local window size
+    cross_embed_kernel_sizes:         # kernel sizes for cross-embedding
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+    cross_embed_strides: [4, 2, 2, 2] # Strides for cross-embedding (default: [4, 2, 2, 2])
+    attn_dropout: 0.                  # Dropout probability for attention layers (default: 0.0)
+    ff_dropout: 0.                    # Dropout probability for feed-forward layers (default: 0.0)
+
+
+    # for BOTH fuxi and crossformer 
+    # use spectral norm
+    use_spectral_norm: True
+    # upsample before applying convtranspose layers in decoder -- eliminates grid artefacts!
+    upsample_v_conv: True
+    # decoder attention type
+    decoder_attention_type: "scse"
+    
+    # use interpolation to match the output size
+    interp: True
+    
+    # map boundary padding
+    padding_conf:
+        activate: False
+        mode: earth
+        pad_lat: 80
+        pad_lon: 80
+
+    # configuration for postblock processing
+    post_conf: 
+        activate: False
+        
+loss: 
+    # the main training loss
+    # available options are "mse", "msle", "mae", "huber", "logcosh", "xtanh", "xsigmoid"
+    # ensemble training losses: "KCRPS", "almost-fair-crps"
+    training_loss: "mse"
+    training_loss_parameters: {}
+
+    # use power or spectral loss
+    # if True, this loss will be added to the training_loss: 
+    #     total_loss = training_loss + spectral_lambda_reg * power_loss (or spectral_loss)
+    #
+    # it is preferred that power loss and spectral loss are NOT applied at the same time
+    use_power_loss: False
+    use_spectral_loss: False # if power_loss is on, turn off spectral_loss, vice versa
+    # rescale power or spectral loss when added to the total loss
+    spectral_lambda_reg: 0.1 
+    # truncate small wavenumber (large wavelength) in power or spectral loss
+    spectral_wavenum_init: 20
+    
+    # this file is MANDATORY for the "predict" section below (inference stage)
+    # the file must be nc and must contain 1D variables named "latitude" and "longitude"
+    latitude_weights: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/goes_10km.zarr"
+
+    # use latitude weighting
+    # if True, the latitude_weights file MUST have a variable named "coslat"
+    # coslat is the np.cos(latitude)
+    use_latitude_weights: True
+
+    # variable weighting
+    # if True, specify your weights
+    use_variable_weights: False
+    # # an example
+    # variable_weights:
+    #     U: [0.005, 0.011, 0.02, 0.029, 0.039, 0.048, 0.057, 0.067, 0.076, 0.085, 0.095, 0.104, 0.113, 0.123, 0.132, 0.141]
+    #     V: [0.005, 0.011, 0.02, 0.029, 0.039, 0.048, 0.057, 0.067, 0.076, 0.085, 0.095, 0.104, 0.113, 0.123, 0.132, 0.141]
+    #     T: [0.005, 0.011, 0.02, 0.029, 0.039, 0.048, 0.057, 0.067, 0.076, 0.085, 0.095, 0.104, 0.113, 0.123, 0.132, 0.141]
+    #     Q: [0.005, 0.011, 0.02, 0.029, 0.039, 0.048, 0.057, 0.067, 0.076, 0.085, 0.095, 0.104, 0.113, 0.123, 0.132, 0.141]
+    #     SP: 0.1
+    #     t2m: 1.0
+    #     V500: 0.1
+    #     U500: 0.1
+    #     T500: 0.1
+    #     Z500: 0.1
+    #     Q500: 0.1
+
+    
+predict:
+    # You have the choice to run rollout_metrics.py, which will only save various metrics like RMSE, etc.
+    # A directory called metrics will be added to the save_forecast field below.
+    # To instead save the states to file (netcdf), run rollout_to_metrics.py. You will need to post-process
+    # all the data with this option. A directory called netcdf will be added to the save_forecast field
+    
+
+    # the keyword that controls GPU usage
+    # fsdp: fully sharded data parallel
+    # ddp: distributed data parallel
+    # none: single-GPU training
+    mode: none
+
+    # Set the batch_size for the prediction inference mode (default is 1)
+    # this batches init_datetimes together so that we are fully utilizing the GPUs 
+    batch_size: 3
+    # set the ensemble size for inference mode (default is 1 if not set)
+    ensemble_size: &ensemble_size 1
+    # [optional] number of dataloader workers, prefetch factor. default to 0
+    thread_workers: 4
+    prefetch_factor: 1 # will be none if thread_workers=0
+
+    forecasts:
+        type: "standard"       # keep it as "custom". See also credit.forecast
+        num_forecast_steps: 24
+        start_year: 2019     # year of the first initialization (where rollout will start)
+        start_month: 1       # month of the first initialization
+        start_day: 1         # day of the first initialization
+        start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
+        duration: 1152       # number of days to initialize from, starting from the (year, mon, day) above
+                             # duration should be divisible by the number of GPUs 
+                             # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
+        # [Optional] defaults to 1
+        ic_interval_days: 1   # spacing between init days. defaults to 1 total number of ICs will be duration // ic_interval_days
+        days: 10             # forecast lead time as days (1 means 24-hour forecast)
+
+    # saved variables (rollout_to_netcdf.yml)
+    # save_vars: [] will save ALL variables
+    # remove save_vars from config will save ALL variables
+    metadata: '/glade/work/schreck/repos/credit/miles-credit/metadata/era5.yaml'
+    
+    # The location to store rollout predictions, the folder structure will be:
+    # $save_forecast/$initialization_time/file.nc
+    # each forecast lead time produces a file.nc
+    save_forecast: '/glade/derecho/scratch/dkimpara/goes_10km_train/simple_wxformer_lognormal/forecasts'
+    
+    # this keyword will apply a low-pass filter to all fields and each forecast step
+    # it will reduce high-freq noise, but may impact performance
+    use_laplace_filter: False
+    
+    # climatology file to be used with rollout_metrics.py. 
+    # Supplying this will compute anomaly ACC, otherwise its Pearson coefficient (acc in metrics).
+    climatology: '/glade/campaign/cisl/aiml/ksha/CREDIT_arXiv/VERIF/verif_6h/ERA5_clim/ERA5_clim_1990_2019_6h_interp.nc'
+
+    # Optional: Interpolate data field from hybrid sigma-pressure vertical coordinates to pressure levels.
+    # Used with rollout_to_netcdf.py
+
+    # interp_pressure:
+    #     pressure_levels: [300.0, 500.0, 850.0, 925.0]
+
+    # ua_var_encoding:
+    #     zlib: True
+    #     complevel: 1
+    #     shuffle: True
+    #     chunksizes: [1, *levels, *height, *width]
+
+    # pressure_var_encoding:
+    #     zlib: True
+    #     complevel: 1
+    #     shuffle: True
+    #     chunksizes: [ 1, 4, *height, *width]
+
+    # surface_var_encoding:
+    #     zlib: true
+    #     complevel: 1
+    #     shuffle: True
+    #     chunksizes: [1, *height, *width]
+
+
+# credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
+pbs: 
+    # example for derecho
+    # conda: "~/credit-derecho"
+    # project: "NMMM0015"
+    # job_name: "train_goes_lognorm"
+    # walltime: "00:30:00"
+    # nodes: 1
+    # ncpus: 64
+    # ngpus: 4
+    # mem: '480GB'
+    # queue: 'preempt'
+    
+    # examaple for casper
+    # conda: "~/credit"
+    # job_name: 'train_goes'
+    # nodes: 1
+    # ncpus: 32
+    # ngpus: 1
+    # mem: '128GB'
+    # walltime: '24:00:00'
+    # gpu_type: 'a100'
+    # project: 'NMMM0015'
+    # queue: 'casper'
+
+    conda: "~/credit"
+    job_name: 'rollout_goes'
+    nodes: 1
+    ncpus: 16
+    ngpus: 1
+    mem: '64GB'
+    walltime: '00:15:00'
+    gpu_type: 'a100'
+    project: 'NMMM0015'
+    queue: 'casper'

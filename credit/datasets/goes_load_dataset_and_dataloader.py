@@ -4,10 +4,20 @@ import xarray as xr
 from torch.utils.data import DataLoader
 
 from credit.datasets.goes10km_dataset import GOES10kmDataset
+from credit.datasets.era5 import ERA5Dataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 import logging
 logger = logging.getLogger(__name__)
+
+def load_era5_forcing(conf, start_datetime, end_datetime):
+    time_config = {
+        "timestep": pd.Timedelta("1h"),
+        "num_forecast_steps": 1,
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime,
+    }
+    return ERA5Dataset(conf, time_config, "ERA5")
 
 def load_dataset(conf, rank, world_size, is_train=True):
 
@@ -17,15 +27,24 @@ def load_dataset(conf, rank, world_size, is_train=True):
 
     zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
 
-    years = data_config["train_years"] if is_train else data_config["valid_years"]
+    mode = "train" if is_train else "valid"
 
     time_config = {
-        "timestep": pd.Timedelta(data_config["lead_time_periods"], "h"),
+        "timestep": pd.Timedelta(data_config["timestep"]),
         "num_forecast_steps": data_config["forecast_len"] + 1,
-        "years": years,
+        "start_datetime": pd.Timestamp(data_config[mode]["start_datetime"]),
+        "end_datetime": pd.Timestamp(data_config[mode]["end_datetime"]),
     }
+    # give it a era5dataset
+    if "ERA5" in data_config["source"].keys():
+        logger.info("loading an era5 dataset for forcing")
+        era5dataset = load_era5_forcing(conf,
+                                        time_config["start_datetime"],
+                                        time_config["end_datetime"] + pd.Timedelta("1D"))
+    else:
+        era5dataset = None
 
-    return GOES10kmDataset(zarr_ds, data_config, time_config)
+    return GOES10kmDataset(zarr_ds, data_config, time_config, era5dataset=era5dataset)
 
 def load_predict_dataset(conf, rank, world_size, rollout_init_times):
     logger.info("loading a GOES 10km dataset for rollout")
@@ -33,20 +52,30 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times):
     data_config = conf["data"]
 
     zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
-    years = [data_config["train_years"][0], data_config["valid_years"][1]] #all years
+    # years = [data_config["train_years"][0], data_config["valid_years"][1]] #all years
 
     num_forecast_steps = conf["predict"]["forecasts"]["num_forecast_steps"]
     time_tol = conf["predict"]["forecasts"].get("time_tol", (1, "d"))
 
     time_config = {
-        "timestep": pd.Timedelta(data_config["lead_time_periods"], "h"),
+        "timestep": pd.Timedelta(data_config["timestep"]),
         "num_forecast_steps": num_forecast_steps,
-        "years": years,
+        "start_datetime": zarr_ds.t.min(),
+        "end_datetime": zarr_ds.t.max(),
         "rollout_init_times": rollout_init_times,
         "time_tol": time_tol,
     }
+    
+    if "ERA5" in data_config["source"].keys():
+        logger.info("loading an era5 dataset for forcing")
 
-    return GOES10kmDataset(zarr_ds, data_config, time_config)
+        era5dataset = load_era5_forcing(conf,
+                                        time_config["start_datetime"],
+                                        time_config["end_datetime"])
+    else:
+        era5dataset = None
+
+    return GOES10kmDataset(zarr_ds, data_config, time_config, era5dataset=era5dataset)
 
 
 def load_dataloader(conf, train_dataset, rank, world_size, is_train=True, is_predict=False):

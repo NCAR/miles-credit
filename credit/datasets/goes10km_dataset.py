@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import logging
+import xesmf as xe
 logger = logging.getLogger(__name__)
 
 
@@ -18,6 +19,7 @@ class GOES10kmDataset(Dataset):
                  ds: xr.Dataset,
                  data_conf: Dict,
                  time_config: Dict = None,
+                 era5dataset: Dataset = None,
                  valid_init_dir = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/valid_init_times",
                  scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats.nc",):
         """
@@ -32,11 +34,13 @@ class GOES10kmDataset(Dataset):
                  },
         """
         self.ds = ds.drop_duplicates(dim="t").sortby("t")
-        self.num_items = len(ds)
-        
+        self.era5dataset = era5dataset
+
+        # setup init times        
         self.timestep = time_config["timestep"]
         self.num_forecast_steps = time_config["num_forecast_steps"]
-        self.years = time_config["years"]
+        self.start_datetime = time_config["start_datetime"]
+        self.end_datetime = time_config["end_datetime"]
         self.valid_sampling_modes = ["init", "forcing", "y", "stop"]
         
         self.valid_init_dir = valid_init_dir
@@ -51,13 +55,20 @@ class GOES10kmDataset(Dataset):
         
         self.scaler_ds = xr.open_dataset(scaler_ds_path)
 
+        # setup regridder
+        self.regridder = None
+        if era5dataset and data_conf.get("regrid_loc", None):
+            regrid_loc = data_conf["regrid_loc"]
+            da_outgrid = xr.open_dataset(data_conf["outgrid_loc"], engine="h5netcdf")
+            ds_ingrid = xr.open_dataset(data_conf["ingrid_loc"], engine="h5netcdf")
+            self.regridder = xe.Regridder(ds_ingrid, da_outgrid, 'bilinear', unmapped_to_nan=True, weights=regrid_loc)
+
         # setup rollout mode if configured
         if "rollout_init_times" in time_config.keys():
             logger.info("setting up GOES 10km dataset for rollout mode by subsetting times")
             self._rollout_mode(time_config["rollout_init_times"],
                                time_config.get("time_tol", (1, "D")),
                                )
-
 
     def _rollout_mode(self, rollout_init_times, time_tol):
         
@@ -104,9 +115,9 @@ class GOES10kmDataset(Dataset):
         else:
             timestamps = self._generate_valid_init_times(valid_init_filepath)
         
-        logger.debug(f"loading years {self.years}")
-        timestamps = timestamps.sel(t=(timestamps.t.dt.year >= self.years[0]) 
-                                    & (timestamps.t.dt.year < self.years[1]))
+        logger.debug(f"loading date range {self.start_datetime} to {self.end_datetime}")
+        timestamps = timestamps.sel(t=(timestamps.t >= self.start_datetime) 
+                                    & (timestamps.t < self.end_datetime))
 
         return timestamps
     
@@ -139,39 +150,59 @@ class GOES10kmDataset(Dataset):
         
         time_str = pd.Timestamp(ds.t.values).strftime("%Y-%m-%dT%H:%M:%S")
 
-        if mode == "forcing":
-            return {"mode": mode,
-                    "stop_forecast": False,
+        return_data = {"mode": mode,
+                    "stop_forecast": mode == "stop",
                     "datetime": time_str,}
         
-        da = ds["BT_or_R"].copy()
+        if mode != "forcing": #don't draw goes
+            da = ds["BT_or_R"].copy()
 
-        if self.log_normal_scaling: #channels is the first axis
-            da[0] = np.log(da[0])
+            if self.log_normal_scaling: #channels is the first axis
+                da[0] = np.log(da[0])
+            
+            da = self._normalize_ABI(da)
+            da = self._nanfill_ABI(da)
+            
+            # da.shape = c, 1003, 923
+            data = torch.tensor(da.values).unsqueeze(1)
+            # data = torch.nn.functional.pad(data, (0,0,11,10), "replicate")
+            data = torch.nn.functional.pad(data, (19,18,11,10), "constant", 0.0)
+            # coerce to c, t, 1024, 960 to work with wxformer
         
-        da = self._normalize_ABI(da)
-        da = self._nanfill_ABI(da)
-        
-        # da.shape = c, 1003, 923
-        data = torch.tensor(da.values).unsqueeze(1)
-        # data = torch.nn.functional.pad(data, (0,0,11,10), "replicate")
-        data = torch.nn.functional.pad(data, (19,18,11,10), "constant", 0.0)
-        # coerce to c, t, 1024, 960 to work with wxformer
+        if self.era5dataset and mode != "stop": # draw era5 if not stopping
+            return_data["era5"] = self.get_era5(ds)
 
         if mode == "init":
-            return {"x": data,
-                    "mode": mode,
-                    "stop_forecast": False,
-                    "datetime": time_str,}
-        elif mode == "y":
-            return {"y": data,
-                    "mode": mode,
-                    "stop_forecast": False,
-                    "datetime": time_str,}      
-        elif mode == "stop":
-            return {"y": data,
-                    "mode": mode,
-                    "stop_forecast": True,
-                    "datetime": time_str,}
+            return_data["x"] = data
+            return return_data
+        elif mode == "forcing":
+            return return_data
+        elif mode == "y" or mode == "stop":
+            return_data["y"] = data
+            return return_data
         else:
             raise ValueError(f"{mode} is not a valid sampling mode")
+        
+    def get_era5(self, ds):
+        # TODO: how to sample era5 forcing? next hour?
+        ts =  pd.Timestamp(ds.t.values)
+        era5_ts = ts.round("h") # round to the nearest hour
+        
+        if not self.regridder:
+            era5_data = self.era5dataset[(era5_ts, "init")]
+            era5_data["timedelta_seconds"] = int((era5_ts - ts).total_seconds())
+
+            return era5_data
+        
+        # run interpolation
+        era5_ds_dict = self.era5dataset[(era5_ts, "init_xarray")] #draw an xarray
+        field_types = ["prognostic", "static", "dynamic_forcing"]
+        combined_ds = xr.merge([era5_ds_dict[field] for field in field_types])
+        regridded = self.regridder(combined_ds, skipna=True, na_thres=1.0)
+
+        ts = pd.Timestamp(combined_ds.time.values)
+        save_dir = os.path.join("/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/",
+                                 str(ts.year))
+        os.makedirs(save_dir, exist_ok=True)
+        regridded.to_netcdf(os.path.join(save_dir, ts.strftime("%Y-%m-%dT%H:%M:%S")), engine="h5netcdf")
+    
