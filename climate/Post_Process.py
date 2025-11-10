@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import yaml
 import pandas as pd
+from pathlib import Path
 
 from multiprocessing import Pool, cpu_count
 from functools import partial
@@ -20,6 +21,9 @@ import os
 
 # example:
 # python Post_Process.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191/model_multi_WxFormer.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT
+
+# python Post_Process_Parallel.py /glade/work/wchapman/miles_branchs/CESM_Spatial_PS/be21_coupled-v2025.2.0.yml 1MS --variables U V T Qtot PS PRECT TREFHT TS TAUX TAUY --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHTTAUXTAUY --rescale_it False
+# python Post_Process_Parallel.py /glade/work/wchapman/miles_branchs/CESM_Spatial_PS/be21_coupled-v2025.2.0.yml 1MS --variables U V T Qtot PS PRECT TREFHT TS TAUX TAUY --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHTTAUXTAUY --rescale_it False
 
 def extract_time_single(filename):
     """Extract time from a single file."""
@@ -68,8 +72,17 @@ def rescale_file(fn, mean_, std_):
                     
                     DSfirst[var][:] = ((DSfirst[var].values * std_broadcast.values) + 
                                      mean_broadcast.values)
+
+                elif 'longitude' in mean_[var].dims:
+                    mean_['longitude'] = DSfirst['longitude']
+                    mean_['latitude'] = DSfirst['latitude']
+                    std_['longitude'] = DSfirst['longitude']
+                    std_['latitude'] = DSfirst['latitude']
+                    place_resc = ((DSfirst[var].squeeze() * std_[var].squeeze()) + mean_[var].squeeze()).values
+                    DSfirst[var][:] = ((DSfirst[var].squeeze() * std_[var].squeeze()) + mean_[var].squeeze()).values
                 else:
-                    DSfirst[var][:] = ((DSfirst[var] * std_[var]) + mean_[var]).values
+                    place_resc = ((DSfirst[var].squeeze() * std_[var].squeeze()) + mean_[var].squeeze()).values
+                    DSfirst[var][:] = ((DSfirst[var].squeeze() * std_[var].squeeze()) + mean_[var].squeeze()).values
             else:
                 print(f"Variable {var} not found in scaling datasets. Skipping...")
         
@@ -126,7 +139,7 @@ def add_hours_noleap(start, hours):
     return datetime(year, month, day, remaining_hours)
 
 def post_process(conf, avg_window, variables, name_string='',reset_times=True, 
-                 dask_do=False, monthly=False, rescale_it=False, n_processes=None):
+                 dask_do=False, monthly=False, rescale_it=False, n_processes=None, save_append=None):
     """
     Post-process NetCDF files by padding numerical suffixes, and optionally average variables over a specified time window.
 
@@ -160,7 +173,15 @@ def post_process(conf, avg_window, variables, name_string='',reset_times=True,
     init_date_str = init_date_obj.strftime('%Y-%m-%d %H:%M:%S')
     print('init time is: ', init_date_str)
     init_date_strz = init_date_obj.strftime('%Y-%m-%dT%HZ')
-    source_dir = f'{conf_pred["save_forecast"]}/{init_date_strz}/'
+
+    if save_append:
+        base_boo = conf_pred.get("save_forecast")
+        if not base_boo:
+            raise KeyError("'save_forecast' missing in config")
+        conf_pred["save_forecast"] = str(Path(base_boo).expanduser() / save_append)
+        source_dir = f'{conf_pred["save_forecast"]}/{init_date_strz}/'
+    else:
+        source_dir = f'{conf_pred["save_forecast"]}/{init_date_strz}/'
     print('source dir: ', source_dir)
 
     # Get all .nc files in the directory
@@ -366,6 +387,7 @@ if __name__ == "__main__":
     parser.add_argument("--rescale_it", type=str2bool, nargs='?', const=True, default=False,
                     help="Enable dask parallel processing. Use 'True' or 'False'. Default is False.")
     parser.add_argument("--n_processes", type=int, default=1, help="number of parallel processes")
+    parser.add_argument("--save_append", type=str, default=None, help='append a folder to the output to save to')
     
     args = parser.parse_args()
 
@@ -378,7 +400,9 @@ if __name__ == "__main__":
             reset_times=args.reset_times,
             dask_do=args.dask_do,
             rescale_it=args.rescale_it,
-            n_processes=args.n_processes
+            n_processes=args.n_processes,
+            save_append=args.save_append,
+            
         )
         print("Processing complete.")
     except Exception as e:

@@ -23,7 +23,7 @@ import torch
 
 # ---------- #
 # credit
-from credit.models import load_model
+from credit.models import load_model, load_model_name
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info
 
@@ -51,7 +51,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 
-def predict(rank, world_size, conf, p):
+def predict(rank, world_size, conf, p, model_name=None):
     # setup rank and world size for GPU-based rollout
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["predict"]["mode"])
@@ -206,14 +206,20 @@ def predict(rank, world_size, conf, p):
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
     # ================================================================================ #
     if conf["predict"]["mode"] == "none":
-        model = load_model(conf, load_weights=True).to(device)
+        print('bingo')
+        if model_name:
+            model = load_model_name(conf, model_name, load_weights=True).to(device)
+        else:
+            model = load_model(conf, load_weights=True).to(device)
 
     elif conf["predict"]["mode"] == "ddp":
         model = load_model(conf).to(device)
         # if conf["trainer"].get("compile", False):
         #     model = torch.compile(model)
         model = distributed_model_wrapper(conf, model, device)
-        ckpt = os.path.join(save_loc, "checkpoint.pt")
+        # Use specific model checkpoint if provided, otherwise default to checkpoint.pt
+        ckpt_name = model_name if model_name else "checkpoint.pt"
+        ckpt = os.path.join(save_loc, ckpt_name)
         checkpoint = torch.load(ckpt, map_location=device)
         load_msg = model.module.load_state_dict(
             checkpoint["model_state_dict"], strict=False
@@ -221,10 +227,14 @@ def predict(rank, world_size, conf, p):
         load_state_dict_error_handler(load_msg)
 
     elif conf["predict"]["mode"] == "fsdp":
-        model = load_model(conf, load_weights=True).to(device)
+        if model_name:
+            model = load_model_name(conf, model_name, load_weights=True).to(device)
+        else:
+            model = load_model(conf, load_weights=True).to(device)
         model = distributed_model_wrapper(conf, model, device)
         # Load model weights (if any), an optimizer, scheduler, and gradient scaler
-        model = load_model_state(conf, model, device)
+        if not model_name:  # Only use load_model_state if not using specific model
+            model = load_model_state(conf, model, device)
     # ================================================================================ #
 
     model.eval()
@@ -312,8 +322,8 @@ def predict(rank, world_size, conf, p):
             os.makedirs(
                     save_location, exist_ok=True
                 )
-            torch.save(x, f'{save_location}/init_condition_tensor_{init_datetime_str}.pth')
-            print('init cond saved to:' f'{save_location}/init_condition_tensor_{init_datetime_str}.pth') 
+            torch.save(x, f'{save_location}/init_camulator_condition_tensor_{init_datetime_str}.pth')
+            print('init cond saved to:' f'{save_location}/init_camulator_condition_tensor_{init_datetime_str}.pth') 
             break
     return 1
 
@@ -323,6 +333,8 @@ if __name__ == "__main__":
     parser = ArgumentParser(description=description)
     # -------------------- #
     # parser args: -c, -l, -w
+    #example usage:
+    # torchrun /glade/derecho/scratch/wchapman/miles_branchs/pretrain_CESM_Spatial_PS_WXmod_pxshf_LR/applications/Make_Climate_Initial_Conditions.py -c /glade/derecho/scratch/wchapman/miles_branchs/pretrain_CESM_Spatial_PS_WXmod_pxshf_LR/be21_coupled-v2025.2.0_small.yml
     parser.add_argument(
         "-c",
         dest="model_config",
@@ -384,6 +396,13 @@ if __name__ == "__main__":
         help="Number of CPU workers to use per GPU",
     )
 
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default=None,
+        help="Optional model checkpoint name (e.g., checkpoint.pt00091.pt). Defaults to checkpoint.pt",
+    )
+
     # parse
     args = parser.parse_args()
     args_dict = vars(args)
@@ -394,6 +413,7 @@ if __name__ == "__main__":
     subset = int(args_dict.pop("subset"))
     number_of_subsets = int(args_dict.pop("no_subset"))
     num_cpus = int(args_dict.pop("num_cpus"))
+    model_name = args_dict.pop("model_name")
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -450,7 +470,6 @@ if __name__ == "__main__":
             launch_script_mpi(config, script_path)
         sys.exit()
 
-
     if number_of_subsets > 0:
         forecasts = load_forecasts(conf)
         if number_of_subsets > 0 and subset >= 0:
@@ -465,9 +484,9 @@ if __name__ == "__main__":
 
     with mp.Pool(num_cpus) as p:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
-            _ = predict(world_rank, world_size, conf, p=p)
+            _ = predict(world_rank, world_size, conf, p=p, model_name=model_name)
         else:  # single device inference
-            _ = predict(0, 1, conf, p=p)
+            _ = predict(0, 1, conf, p=p, model_name=model_name)
 
     # Ensure all processes are finished
     p.close()
