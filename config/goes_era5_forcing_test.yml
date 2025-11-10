@@ -17,7 +17,7 @@
 # the location to save your workspace, it will have 
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
-save_loc: '/glade/derecho/scratch/$USER/goes_10km_train/wxformer_era5_forcing'
+save_loc: '/glade/derecho/scratch/$USER/goes_10km_train/debugger_era5_forcing'
 seed: 1000
 
 data:
@@ -30,29 +30,29 @@ data:
     log_normal_scaling: True #log-normal scale visible channels
 
     source:
-        ERA5:
+        ERA5: # using interpolated data
             prognostic:
                 # upper-air variables
                 vars_3D: ['U','V','T','Q']
                 vars_2D: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-                path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
+                path: '/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/era5_interp_*.zarr'
             
             diagnostic: null
                 
             dynamic_forcing:
                 # dynamic forcing variables
                 vars_2D: ['tsi']
-                path: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
+                path: '/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/era5_interp_*.zarr'
                 
             static:
                 vars_2D: ['Z_GDS4_SFC','LSM'] 
                 path: '/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/static_interpolated.nc'
     
-    regrid_loc: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/regrid_era5_to_goes.nc"
-    outgrid_loc: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/outgrid_era5_to_goes.nc"
-    ingrid_loc: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/ingrid_era5_to_goes.nc"
     # compatible with the old 'std'
     static_first: True
+
+
+    scaler_type: 'std_new'
 
     # mean / std path
     mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
@@ -112,7 +112,7 @@ trainer:
     # fsdp: fully sharded data parallel
     # ddp: distributed data parallel
     # none: single-GPU training
-    mode: ddp
+    mode: None
 
     # fsdp-specific GPU optimization
     #
@@ -129,10 +129,10 @@ trainer:
 
     # load existing weights / optimizer / mixed-precision grad scaler / learning rate scheduler state(s)
     # when starting multi-step training, only use load weights initially, then set all to true
-    load_weights: True
-    load_optimizer: True
-    load_scaler: True 
-    load_scheduler: True
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False 
+    load_scheduler: False
 
     # CREDIT save checkpoints at the end of every epoch
     # save_backup_weights will also save checkpoints in the beginning of every epoch
@@ -160,15 +160,15 @@ trainer:
 
     # define training and validation batch size
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 8
-    valid_batch_size: 8
+    train_batch_size: 2
+    valid_batch_size: 2
     ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
     # set to 0 to use all available training samples e.g. `len(dataloader)`
     # if the number is larger than all training samples, all available training samples will be used
-    batches_per_epoch: 0 
-    valid_batches_per_epoch: 20
+    batches_per_epoch: 2
+    valid_batches_per_epoch: 2
     # early stopping
     stopping_patience: 50 
     # True: do not validate, always save weights
@@ -178,7 +178,7 @@ trainer:
     start_epoch: 0
     # the trainer will stop after iterating a given number of epochs
     # this works for any start_epoch and reload_epoch: True
-    num_epoch: 24 # 2 epochs per hour
+    num_epoch: 2 # 2 epochs per hour
     # epcoh is saved in the checkpot.pt, this option reads the last epoch 
     # of the previous job and continue from there
     # useful for epoch-dependent schedulers
@@ -188,7 +188,7 @@ trainer:
     # reload_epoch: False
     # epochs: 20
 
-    use_scheduler: True
+    use_scheduler: False
     #scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
     scheduler:
       scheduler_type: cosine-annealing-restarts
@@ -200,7 +200,7 @@ trainer:
       gamma: 0.7  # LR reduction factor at each cycle restart
 
     # Pytorch automatic mixed precision (amp). See also 'mixed_precision' below
-    amp: True
+    amp: False
     
     # This version of mixed precision is supported only with FSDP and gives you more control. Set amp = False.
     # See https://pytorch.org/docs/stable/fsdp.html#torch.distributed.fsdp.MixedPrecision for details
@@ -222,15 +222,15 @@ trainer:
     # GOES batch size of 8 
     # loading time: < 2.5s
     # forward time: ~ 1s
-    thread_workers: 15
-    valid_thread_workers: 15
+    thread_workers: 0
+    valid_thread_workers: 0
 
     # Number of prefetch samples in the DataLoader
     prefetch_factor: 1
   
 model:
     # NCAR WXFormer example
-    type: "crossformer_regional"               # use "debugger" with any config to use debugger model type. compatible with basic model args
+    type: "debugger"               # use "debugger" with any config to use debugger model type. compatible with basic model args
     frames: 1                         # number of input states (default: 1)
     image_height: 1024                 # number of latitude grids (default: 640)
     image_width: 960                  # number of longitude grids (default: 1280)
@@ -256,7 +256,8 @@ model:
     cross_embed_strides: [4, 2, 2, 2] # Strides for cross-embedding (default: [4, 2, 2, 2])
     attn_dropout: 0.                  # Dropout probability for attention layers (default: 0.0)
     ff_dropout: 0.                    # Dropout probability for feed-forward layers (default: 0.0)
-    
+
+
     # for BOTH fuxi and crossformer 
     # use spectral norm
     use_spectral_norm: True

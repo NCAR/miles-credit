@@ -154,40 +154,44 @@ class Trainer(BaseTrainer):
 
             start = time.time()
             mode = batch["mode"][0]
+            # TODO: mean std scaling for era5
             while not stop_forecast:
                 logger.debug(f"current mode: {mode}")
                 logger.debug(batch.keys())
+                
+                if "era5" in batch.keys():
+                    batch_era5 = batch["era5"]
 
                 if mode == "init":
-                    # Initialize x and x_surf with the first time step
                     x = batch["x"].to(self.device)
-                    
-                    # xload_time = time.time()
-                    # logger.info(f"x on device, t {xload_time - start}")
+
+                    if ensemble_size > 1:
+                        x = torch.repeat_interleave(x, ensemble_size, 0)
                     # --------------------------------------------- #
-                    # ensemble x and x_surf on initialization
+                    # ensemble x on initialization
                     # copies each sample in the batch ensemble_size number of times.
                     # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                     # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
-                    if ensemble_size > 1:
-                        x = torch.repeat_interleave(x, ensemble_size, 0)
+                
+                    if "era5" in batch.keys():
+                        era5_static = batch_era5["static"].to(self.device)
 
-                # add forcing and static variables (regardless of fcst hours)
-                if "x_forcing_static" in batch:
-                    # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = (
-                        batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )  # .float()
-                    # ---------------- ensemble ----------------- #
-                    # ensemble x_forcing_batch for concat. see above for explanation of code
-                    if ensemble_size > 1:
-                        x_forcing_batch = torch.repeat_interleave(
-                            x_forcing_batch, ensemble_size, 0
-                        )
-                    # --------------------------------------------- #
+                    # xload_time = time.time()
+                    # logger.info(f"x on device, t {xload_time - start}")
+                
+                # add era5 forcing to the tensor
+                # concat order is prognostic, static, forcing
+                if "era5" in batch.keys():
+                    x_era5 = torch.concat([batch_era5["prognostic"].to(self.device),
+                                           era5_static,
+                                           batch_era5["dynamic_forcing"].to(self.device)],
+                                           dim=1)
 
-                    # concat on var dimension
-                    x = torch.cat((x, x_forcing_batch), dim=1)
+                    if ensemble_size > 1:
+                        x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
+
+                    x = torch.concat((x, x_era5), dim=1)
+                    # model_input += [x_era5, batch["era5"]["timedelta_seconds"]]
 
                 # --------------------------------------------- #
                 # clamp
@@ -196,8 +200,9 @@ class Trainer(BaseTrainer):
 
                 # predict with the model
                 x = x.float()
+
                 with torch.autocast(device_type="cuda", enabled=amp):
-                    y_pred = self.model(x)
+                    y_pred = self.model(x, batch_era5["timedelta_seconds"]) if "era5" in batch.keys() else self.model(x)
 
                 batch = next(dl)
                 mode = batch["mode"][0]
@@ -417,44 +422,52 @@ class Trainer(BaseTrainer):
         dl = cycle(valid_loader)
         with torch.no_grad():
             for steps in range(valid_batches_per_epoch):
-                loss = 0
+                loss = 0.
                 stop_forecast = False
                 y_pred = None  # Place holder that gets updated after first roll-out
 
+                start = time.time()
                 batch = next(dl)
+                logger.debug(f"dataload time: {time.time() - start}s")
+
+                start = time.time()
                 mode = batch["mode"][0]
                 while not stop_forecast:
                     logger.debug(f"current mode: {mode}")
                     logger.debug(batch.keys())
+                    
+                    if "era5" in batch.keys():
+                        batch_era5 = batch["era5"]
 
                     if mode == "init":
-                        # Initialize x and x_surf with the first time step
                         x = batch["x"].to(self.device)
 
+                        if ensemble_size > 1:
+                            x = torch.repeat_interleave(x, ensemble_size, 0)
                         # --------------------------------------------- #
-                        # ensemble x and x_surf on initialization
+                        # ensemble x on initialization
                         # copies each sample in the batch ensemble_size number of times.
                         # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                         # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
-                        if ensemble_size > 1:
-                            x = torch.repeat_interleave(x, ensemble_size, 0)
+                    
+                        if "era5" in batch.keys():
+                            era5_static = batch_era5["static"].to(self.device)
 
-                    # add forcing and static variables (regardless of fcst hours)
-                    if "x_forcing_static" in batch:
-                        # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        x_forcing_batch = (
-                            batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-                        )  # .float()
-                        # ---------------- ensemble ----------------- #
-                        # ensemble x_forcing_batch for concat. see above for explanation of code
-                        if ensemble_size > 1:
-                            x_forcing_batch = torch.repeat_interleave(
-                                x_forcing_batch, ensemble_size, 0
-                            )
-                        # --------------------------------------------- #
+                        # xload_time = time.time()
+                        # logger.info(f"x on device, t {xload_time - start}")
+                        
+                    # add era5 forcing to the tensor
+                    # concat order is prognostic, static, forcing
+                    if "era5" in batch.keys():
+                        x_era5 = torch.concat([batch_era5["prognostic"].to(self.device),
+                                            era5_static,
+                                            batch_era5["dynamic_forcing"].to(self.device)],
+                                            dim=1)
 
-                        # concat on var dimension
-                        x = torch.cat((x, x_forcing_batch), dim=1)
+                        if ensemble_size > 1:
+                            x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
+
+                    x = torch.concat((x, x_era5), dim=1)
                     # --------------------------------------------- #
                     # clamp
                     if flag_clamp:

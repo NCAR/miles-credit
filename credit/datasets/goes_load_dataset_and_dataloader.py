@@ -70,8 +70,8 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times):
         logger.info("loading an era5 dataset for forcing")
 
         era5dataset = load_era5_forcing(conf,
-                                        time_config["start_datetime"],
-                                        time_config["end_datetime"])
+                                        time_config["start_datetime"].values,
+                                        time_config["end_datetime"].values)
     else:
         era5dataset = None
 

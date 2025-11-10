@@ -14,7 +14,7 @@ CONFIG_FILE_DIR = os.path.join(
 )
 
 def test_dataset():
-    config = os.path.join(CONFIG_FILE_DIR, "/glade/u/home/dkimpara/miles-credit/config/goes_era5_forcing.yml")
+    config = os.path.join(CONFIG_FILE_DIR, "goes_era5_forcing.yml")
 
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
@@ -25,6 +25,10 @@ def test_dataset():
     print(init_times.values)
     
     data = dataset[(init_times[0], "init")]
-
+    
     print(f'''seconds delta {data["era5"]["timedelta_seconds"]}''')
     print(data["datetime"])
+    print(data["era5"].keys())
+    print(data["era5"]["prognostic"].shape)
+    print(data["era5"]["static"].shape)
+    print(data["era5"]["dynamic_forcing"].shape)

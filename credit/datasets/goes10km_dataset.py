@@ -55,14 +55,6 @@ class GOES10kmDataset(Dataset):
         
         self.scaler_ds = xr.open_dataset(scaler_ds_path)
 
-        # setup regridder
-        self.regridder = None
-        if era5dataset and data_conf.get("regrid_loc", None):
-            regrid_loc = data_conf["regrid_loc"]
-            da_outgrid = xr.open_dataset(data_conf["outgrid_loc"], engine="h5netcdf")
-            ds_ingrid = xr.open_dataset(data_conf["ingrid_loc"], engine="h5netcdf")
-            self.regridder = xe.Regridder(ds_ingrid, da_outgrid, 'bilinear', unmapped_to_nan=True, weights=regrid_loc)
-
         # setup rollout mode if configured
         if "rollout_init_times" in time_config.keys():
             logger.info("setting up GOES 10km dataset for rollout mode by subsetting times")
@@ -185,24 +177,53 @@ class GOES10kmDataset(Dataset):
         
     def get_era5(self, ds):
         # TODO: how to sample era5 forcing? next hour?
-        ts =  pd.Timestamp(ds.t.values)
+
+        ts = pd.Timestamp(ds.t.values)
         era5_ts = ts.round("h") # round to the nearest hour
         
-        if not self.regridder:
-            era5_data = self.era5dataset[(era5_ts, "init")]
-            era5_data["timedelta_seconds"] = int((era5_ts - ts).total_seconds())
+        # interpolated data source baked into paths we init era5 with
+        era5_data = self.era5dataset[(era5_ts, "init")]
+        era5_data["timedelta_seconds"] = int((era5_ts - ts).total_seconds())
 
-            return era5_data
+        return era5_data
+
+class ERA5Interpolator:
+    def __init__(self,
+                 data_conf: Dict,
+                 era5dataset: Dataset = None,):
+        """
+        taking advantage of DistributedSampler class code with this dataset
         
+        Args:
+            ds: xr dataset with a time attribute
+
+            example time config:
+            {"timestep": pd.Timedelta(1, "h"),
+                "num_forecast_steps": 1
+                 },
+        """
+        self.era5dataset = era5dataset
+        # setup regridder
+        self.regridder = None
+        if era5dataset and data_conf.get("regrid_loc", None):
+            regrid_loc = data_conf["regrid_loc"]
+            da_outgrid = xr.open_dataset(data_conf["outgrid_loc"], engine="h5netcdf")
+            ds_ingrid = xr.open_dataset(data_conf["ingrid_loc"], engine="h5netcdf")
+            self.regridder = xe.Regridder(ds_ingrid, da_outgrid, 'bilinear', unmapped_to_nan=True, weights=regrid_loc)
+
+    def __getitem__(self, args):
+        # default: load target state
+        ts, mode = args
+
         # run interpolation
-        era5_ds_dict = self.era5dataset[(era5_ts, "init_xarray")] #draw an xarray
-        field_types = ["prognostic", "static", "dynamic_forcing"]
+        era5_ds_dict = self.era5dataset[(ts, "y_xarray")] #draw an xarray
+        field_types = ["prognostic", "dynamic_forcing"]
         combined_ds = xr.merge([era5_ds_dict[field] for field in field_types])
         regridded = self.regridder(combined_ds, skipna=True, na_thres=1.0)
 
-        ts = pd.Timestamp(combined_ds.time.values)
-        save_dir = os.path.join("/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/",
-                                 str(ts.year))
-        os.makedirs(save_dir, exist_ok=True)
-        regridded.to_netcdf(os.path.join(save_dir, ts.strftime("%Y-%m-%dT%H:%M:%S")), engine="h5netcdf")
-    
+        return regridded
+        # ts = pd.Timestamp(combined_ds.time.values)
+        # save_dir = os.path.join("/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/",
+        #                          str(ts.year))
+        # os.makedirs(save_dir, exist_ok=True)
+        # regridded.to_netcdf(os.path.join(save_dir, ts.strftime("%Y-%m-%dT%H:%M:%S")), engine="h5netcdf")

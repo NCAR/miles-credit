@@ -12,6 +12,7 @@ from credit.models.graph import GraphResTransfGRU
 from credit.models.debugger_model import DebuggerModel
 from credit.models.crossformer_ensemble import CrossFormerWithNoise
 from credit.models.crossformer_downscaling import DownscalingCrossFormer
+from credit.models.crossformer_regional import RegionalCrossFormer
 from credit.models.unet_downscaling import DownscalingSegmentationModel
 from credit.models.crossformer_diffusion import CrossFormerDiffusion
 from credit.models.unet_diffusion import UnetDiffusion
@@ -46,6 +47,7 @@ model_types = {
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
     "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
+    "crossformer_regional": (RegionalCrossFormer, "Loading regional crossformer model"),
     "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
 }
 
