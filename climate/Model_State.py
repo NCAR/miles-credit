@@ -168,30 +168,15 @@ class StateVariableAccessor:
         self.var_indices['state'] = indices
 
     def _build_input_indices(self):
-        """Build indices for model input tensor (with forcing)."""
+        """Build indices for model input tensor (with forcing).
+
+        Input tensor structure: [state] + [forcing]
+        Where state = prognostic + surface
+        """
         indices = {}
         idx = 0
 
-        # Forcing variables come first or second depending on static_first
-        if self.static_first:
-            # Order: static + dynamic_forcing + forcing + prognostic + surface
-            forcing_order = self.static_vars + self.dynamic_forcing_vars + self.forcing_vars
-        else:
-            # Order: dynamic_forcing + forcing + static + prognostic + surface
-            forcing_order = self.dynamic_forcing_vars + self.forcing_vars + self.static_vars
-
-        # Add all forcing variables (2D)
-        for var in forcing_order:
-            indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + 1,
-                'n_channels': 1,
-                'is_3d': False,
-                'available': True
-            }
-            idx += 1
-
-        # Prognostic variables (3D with levels)
+        # FIRST: Prognostic variables (3D with levels) - part of state
         for var in self.prognostic_vars:
             indices[var] = {
                 'start_idx': idx,
@@ -202,8 +187,26 @@ class StateVariableAccessor:
             }
             idx += self.levels
 
-        # Surface variables (2D)
+        # SECOND: Surface variables (2D) - part of state
         for var in self.surface_vars:
+            indices[var] = {
+                'start_idx': idx,
+                'end_idx': idx + 1,
+                'n_channels': 1,
+                'is_3d': False,
+                'available': True
+            }
+            idx += 1
+
+        # THIRD: Forcing variables - appended after state
+        # Order depends on static_first flag
+        if self.static_first:
+            forcing_order = self.static_vars + self.dynamic_forcing_vars + self.forcing_vars
+        else:
+            forcing_order = self.dynamic_forcing_vars + self.forcing_vars + self.static_vars
+
+        # Add all forcing variables (2D)
+        for var in forcing_order:
             indices[var] = {
                 'start_idx': idx,
                 'end_idx': idx + 1,
