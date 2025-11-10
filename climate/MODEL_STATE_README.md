@@ -276,8 +276,6 @@ accessor.set_state_var(state, 'U', wrong_shape)
 ## Files Created
 
 1. **Model_State.py** - Main module (561 lines)
-2. **USAGE_EXAMPLES.md** - Comprehensive examples (500+ lines)
-3. **test_model_state.py** - Test suite
 4. **MODEL_STATE_README.md** - This file
 
 ## Benefits
