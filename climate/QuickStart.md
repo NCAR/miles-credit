@@ -10,7 +10,7 @@ CAMulator integrates machine learning predictions with physical conservation law
 
 ### 1. Environment Setup
 
-Make sure you have the CREDIT environment activated:
+Make sure you have the CREDIT environment activated. 
 
 ```bash
 # On NCAR HPCs (Derecho/Casper)
@@ -37,7 +37,10 @@ You'll need:
 
 ## Configuration
 
-Before running, adjust these critical fields in `camulator_config.yml`:
+Before running, adjust these critical fields in `camulator_config.yml`.
+<br>
+For the Standard CAMulator, they are set to the correct default values, if you train your own model, you must ensure they match your simulation. 
+
 
 ### Key Paths to Update
 
@@ -97,8 +100,6 @@ predict:
     start_day: 1             # Day (1-31)
     start_hours: [0]         # Hour: [0]=00Z, [12]=12Z, [0,12]=both
     duration: 1              # Number of consecutive days to initialize (1=single run)
-    days: 365                # Length of EACH simulation in days (365=1 year)
-
   start_datetime: '1983-01-01 00:00:00'  # Must exactly match forecasts above!
 ```
 
@@ -123,7 +124,12 @@ predict:
   # ============================================================================
   # FORCING DATA - STATIC (only change for custom scenarios)
   # ============================================================================
+  #the forcing file carries SST, CO2 and SOLIN data to force the model.
+  #structure custom forcing files after this one. 
   forcing_file: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate_branch_1980_2014.nc'
+
+  #additional forcing file for the future runs /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING//glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate_branch_2000_2053.nc
+
   # Time-evolving boundary conditions: SST, sea ice, solar, CO2
   # STATIC in /campaign/ - only update if:
   #   - Running dates outside 1980-2014 range
@@ -146,16 +152,12 @@ predict:
   # PROCESSING OPTIONS
   # ============================================================================
   climate_rescale_output: True      # Rescale outputs to physical units (keep True)
-  climate_timesteps: 200            # Internal parameter (don't change)
   use_laplace_filter: False         # Spatial smoothing (may reduce noise but affects skill)
 
   # ============================================================================
   # FAST CLIMATE MODE - For quick testing
   # ============================================================================
-  run_fast_climate: False           # Enable for rapid test runs
-  timesteps_fast_climate: 200       # Number of steps for fast mode
-  inds_rmse_fast_climate: ['rmse_PRECT','rmse_TREFHT']  # Metrics to compute
-  seasonal_mean_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_Spatial_PS/truth_be21_condition_tensor_2013-01-01T00Z.pth'
+  timesteps_fast_climate: 200       # Number of timesteps to run the mode !!!!! 
   # Reference seasonal mean for fast mode verification
 ```
 
@@ -183,9 +185,8 @@ predict:
     start_month: 1
     start_day: 1
     start_hours: [0]
-    duration: 1
-    days: 365
   start_datetime: '1983-01-01 00:00:00'
+  timesteps_fast_climate: 1460 #6-hour timesteps 
 ```
 
 **Example 2: 10-year simulation starting July 1, 2000**
@@ -195,22 +196,9 @@ predict:
     start_year: 2000
     start_month: 7
     start_day: 1
-    days: 3650  # 10 years
   start_datetime: '2000-07-01 00:00:00'
   init_cond_fast_climate: '/.../init_condition_tensor_2000-07-01T00Z.pth'  # Must match!
-```
-
-**Example 3: Ensemble (multiple initializations)**
-```yaml
-predict:
-  forecasts:
-    start_year: 1983
-    start_month: 1
-    start_day: 1
-    start_hours: [0, 12]  # Both 00Z and 12Z
-    duration: 5           # 5 consecutive days
-    days: 365
-  # Creates 10 simulations: 5 days × 2 times/day
+  timesteps_fast_climate: 14600 #6-hour timesteps 
 ```
 
 **Example 4: Save only surface variables (reduce disk space)**
@@ -223,23 +211,19 @@ predict:
 #### **Understanding Duration vs. Days**
 
 - **days**: How long EACH simulation runs (forecast length)
-  - `days: 365` = each run is 1 year long
+  - `timesteps_fast_climate: 1460` = each run is 1 years long, 6-hour timestep (365 * 4 steps per day)
 
-- **duration**: How many DIFFERENT starting times
-  - `duration: 1` = single initialization
-  - `duration: 10` = 10 consecutive days as initialization times
 
 - **start_hours**: Time(s) of day for each initialization
   - `[0]` = 00Z only → 1 run per day
-  - `[0, 12]` = 00Z and 12Z → 2 runs per day
+  - `[12]` = 12Z only → 1 run per day
 
-**Total simulations** = `duration × len(start_hours)`
-
-Example: `duration: 10`, `start_hours: [0, 12]` → 20 total simulations
 
 ### Model Configuration
 
 Verify these match your trained model:
+
+Currently the model is set for standard CAMulator, but if you train your own model it will have to match the model you are poiting at. 
 
 ```yaml
 model:
@@ -267,7 +251,7 @@ predict:
     start_month: 1
     start_day: 1
     start_hours: [0]  # Both 00Z and 12Z
-
+  start_datetime: '1983-01-01 00:00:00'
 ```
 
 then: 
@@ -300,23 +284,18 @@ Run the climate rollout using `Quick_Climate.py`:
 python Quick_Climate.py \
   --config ./camulator_config.yml \
   --model_name checkpoint.pt00091.pt \
-  --device cuda \
   --save_append test_run_001
 ```
 
 **Parameter Explanation:**
 - `--config`: Path to your YAML configuration file
 - `--model_name`: Name of the model checkpoint file (must be in `save_loc`). **Important: Use the same checkpoint for both Step 1 and Step 2**
-- `--input_shape`: `[batch, state_channels, time, lat, lon]`
-  - `136 = 4*32 (U,V,T,Q at 32 levels) + 2 (PS, TREFHT) + 6 (forcing/static)`
-- `--forcing_shape`: `[batch, forcing_channels, time, lat, lon]`
-- `--output_shape`: `[batch, total_output_channels, time, lat, lon]`
-  - `145 = 4*32 (state) + 2 (surface) + 15 (diagnostics)`
-- `--device`: `cuda` for GPU, `cpu` for CPU
 - `--save_append`: Suffix for output directory (helps organize multiple runs)
 
+**Note:** Input/output shapes are now automatically derived from the config file - no need to specify them manually!
+
 **Output:**
-- NetCDF files saved to `save_forecast/YYYY-MM-DD_HHZ/`
+- NetCDF files saved to `save_forecast/save_append/YYYY-MM-DD_HHZ/`
 - One file per forecast timestep (6-hourly by default)
 
 ### Step 3: Post-Process Output
@@ -346,81 +325,231 @@ python Post_Process.py \
 - `--save_append`: Must match the simulation run
 
 **Output:**
-- Processed files in `save_forecast/processed/`
+- Processed files in `save_forecast/processed/1D/`
 
-## Complete Workflow Script
+## Complete Workflow Script with PBS
 
-For convenience, use the provided shell script that runs all steps:
+For convenience, use the provided `RunQuickClimate.sh` script that runs both simulation and post-processing.
 
-### Edit `RunQuickClimate.sh`
+### Understanding the PBS Script
 
-Update these variables:
+The `RunQuickClimate.sh` is a PBS job script for NCAR HPCs. Here's what each section does:
+
+#### **PBS Directives** (Lines 1-12)
+
+```bash
+#!/bin/bash
+#PBS -N Run_Climate_CAMulator      # Job name (shows in qstat)
+#PBS -A NAML0001                   # Project code (UPDATE THIS!)
+#PBS -l walltime=12:00:00          # Max run time (hours:minutes:seconds)
+#PBS -o RUN_Climate.out            # Output file
+#PBS -e RUN_Climate.out            # Error file (same as output)
+#PBS -q casper                     # Queue: 'casper' or 'main' (Derecho)
+#PBS -l select=1:ncpus=32:ngpus=1:mem=250GB  # Resources: 1 node, 32 CPUs, 1 GPU, 250GB RAM
+#PBS -l gpu_type=a100              # GPU type: 'a100' (Casper) or 'h100' (Derecho)
+#PBS -m a                          # Email when job aborts
+#PBS -M your.email@ucar.edu        # Your email (UPDATE THIS!)
+```
+
+**Key PBS Options to Adjust:**
+- **`-A`**: Your project code (e.g., `NAML0001`, `NCAR0001`)
+- **`-q`**: Queue selection
+  - `casper`: Analysis cluster with A100 GPUs (good for CAMulator)
+  - `main`: Derecho main queue with H100 GPUs (for large runs)
+- **`-l walltime`**: Adjust based on simulation length
+  - 1-year run: ~4-8 hours
+  - 10-year run: ~24-48 hours
+- **`-l mem`**: Memory allocation
+  - CAMulator typically needs 250GB
+  - Increase if you get OOM errors
+- **`-M`**: Your email for job notifications
+
+#### **Environment Setup** (Lines 14-15)
+
+```bash
+module load conda
+conda activate /glade/work/<username>/conda-envs/credit-casper  # UPDATE PATH!
+```
+
+Update the conda environment path to YOUR environment.
+
+#### **Script Configuration** (Lines 17-24)
+
+Edit these variables in `RunQuickClimate.sh`:
 
 ```bash
 CONFIG=./camulator_config.yml
 SCRIPT=./Quick_Climate.py
-FOLD_OUT=your_experiment_name  # Unique identifier for this run
+FOLD_OUT=test_run_001  # Unique identifier for this run (UPDATE THIS!)
 
-# Adjust these to match your model architecture
-BASE_ARGS="--config $CONFIG \
-  --input_shape 1 136 1 192 288 \
-  --forcing_shape 1 6 1 192 288 \
-  --output_shape 1 145 1 192 288 \
-  --device cuda"
-
-# Model checkpoint name
-python $SCRIPT $BASE_ARGS --model_name checkpoint.pt00091.pt --save_append $FOLD_OUT
+# Run simulation
+python $SCRIPT \
+  --config $CONFIG \
+  --model_name checkpoint.pt00091.pt \
+  --device cuda \
+  --save_append $FOLD_OUT
 ```
 
-### Submit to PBS (NCAR HPCs)
+**Variables to update:**
+- **`FOLD_OUT`**: Unique name for output organization (e.g., `1yr_1983`, `decadal_2000`)
+- **`--model_name`**: Your model checkpoint filename
+- **`--config`**: Path to config (usually `./camulator_config.yml`)
+
+#### **Post-Processing** (Line 29-30)
 
 ```bash
-# Make sure RunQuickClimate.sh is executable
+# Post-process to daily means
+python ./Post_Process.py $CONFIG 1D \
+  --variables U V T Qtot PS PRECT TREFHT TS TAUX TAUY \
+  --reset_times False \
+  --dask_do False \
+  --name_string UVTQtotPS_daily \
+  --rescale_it False \
+  --save_append $FOLD_OUT
+```
+
+Adjust `--variables` to only include what you need (saves time and disk space).
+
+### Submitting the Job
+
+#### **Step 1: Edit the script**
+
+```bash
+cd /glade/work/<username>/credit/climate
+
+# Edit PBS directives and paths
+vi RunQuickClimate.sh
+# or
+nano RunQuickClimate.sh
+```
+
+Make sure to update:
+- [x] `-A` project code
+- [x] `-M` email address
+- [x] `conda activate` path
+- [x] `FOLD_OUT` experiment name
+- [x] `--model_name` checkpoint
+
+#### **Step 2: Make executable and submit**
+
+```bash
+# Make executable (only needed once)
 chmod +x RunQuickClimate.sh
 
-# Submit job
+# Submit to PBS queue
 qsub RunQuickClimate.sh
+```
 
+#### **Step 3: Monitor the job**
+
+```bash
 # Check job status
 qstat -u $USER
 
-# View output
-tail -f RUN_Climate_RMSE.out
+# View output in real-time
+tail -f RUN_Climate.out
+
+# Check if job is running on which node
+qstat -f <job_id>
+
+# View completed job details
+qhist -u $USER
 ```
 
-### Or Run Interactively
+### Running Interactively (Without PBS)
+
+For testing or short runs:
 
 ```bash
+cd /glade/work/<username>/credit/climate
+
+# Activate environment
+conda activate /glade/work/<username>/conda-envs/credit-casper
+
+# Run directly
 bash RunQuickClimate.sh
 ```
+
+**Note:** Interactive runs are best for:
+- Testing configuration changes
+- Short simulations (<1 year)
+- Debugging issues
+- Running on login nodes is NOT recommended (use `qsub -I` for interactive sessions)
+
+### PBS Job Management
+
+```bash
+# Submit job
+qsub RunQuickClimate.sh
+
+# Check status
+qstat -u $USER
+
+# Delete/cancel job
+qdel <job_id>
+
+# Interactive session (for debugging)
+qsub -I -A NAML0001 -l select=1:ncpus=8:ngpus=1:mem=64GB -l walltime=2:00:00 -q casper
+
+# Check remaining project hours
+gladequota
+```
+
+### Choosing Between Casper and Derecho
+
+**Use Casper when:**
+- Running CAMulator inference (lighter workload)
+- Need A100 GPUs (perfect for CAMulator)
+- Want faster queue times
+- Running multi-year climate simulations
+
+**Use Derecho when:**
+- Training models (heavy computation)
+- Need H100 GPUs (more powerful)
+- Running many concurrent jobs
+- Need more than 1 node
+
+**For CAMulator specifically:** Casper is recommended - it has lower wait times and A100 GPUs are sufficient.
 
 ## Troubleshooting
 
 ### Common Issues
 
-**1. Shape Mismatch Errors**
-
-If you get tensor shape errors, verify your `--input_shape` and `--output_shape`:
-- Input shape: `state_channels = (variables * levels) + surface_channels + forcing_channels`
-- Output shape: `(variables * levels) + surface_channels + diagnostic_channels`
-
-**2. Out of Memory (OOM)**
+**1. Out of Memory (OOM)**
 
 - Reduce `predict.batch_size` in config (default: 1)
 - Use CPU offloading: set `cpu_offload: True` in config
 - Enable activation checkpointing: `activation_checkpoint: True`
+- Request more memory in PBS: increase `-l mem=250GB` to `-l mem=480GB`
 
-**3. Missing Initial Conditions**
+**2. Missing Initial Conditions**
 
 Make sure you ran `Make_Climate_Initial_Conditions.py` first and check that:
 - Initial condition files exist in `save_loc/init_times/`
 - The start date in `predict` section matches your IC files
+- File naming: should be `init_condition_tensor_YYYY-MM-DDT00Z.pth`
 
-**4. Normalization Issues**
+**3. Normalization Issues**
 
 Verify that:
 - All variables in your config exist in `mean_path` and `std_path`
 - Mean/std files match the training data exactly
+- Paths in /campaign/ are accessible (check with `ls`)
+
+**4. PBS Job Fails Immediately**
+
+Check:
+- Project code (`-A`) is correct and has remaining hours (`gladequota`)
+- Conda environment path is correct
+- All paths in config file are absolute (not relative)
+- Output directory (`save_forecast`) exists or parent directory is writable
+
+**5. Forcing File Date Range**
+
+If you get errors about missing forcing data:
+- Default forcing file covers 1980-2014
+- Check `forcing_file` in config matches your simulation dates
+- For dates outside this range, you'll need different forcing data
 
 ### Checking Progress
 
