@@ -15,6 +15,7 @@ import xarray as xr
 from credit.data import drop_var_from_dataset
 from credit.interp import full_state_pressure_interpolation
 from inspect import signature
+from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,10 @@ def save_netcdf_increment(
 
         # Add CF convention version
         ds_merged.attrs["Conventions"] = "CF-1.11"
+
+        if "climate_rescale_output" in conf["predict"].keys():
+            state_transformer = Normalize_ERA5_and_Forcing(conf) if conf["data"]["scaler_type"] == "std_new" else _not_supported()
+            ds_merged = state_transformer.inverse_transform_dataset(ds_merged)
 
         sig = signature(full_state_pressure_interpolation)
         pres_end = sig.parameters["pres_ending"].default

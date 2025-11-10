@@ -206,6 +206,7 @@ def predict(rank, world_size, conf, p):
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
     # ================================================================================ #
     if conf["predict"]["mode"] == "none":
+        print('bingo')
         model = load_model(conf, load_weights=True).to(device)
 
     elif conf["predict"]["mode"] == "ddp":
@@ -312,8 +313,8 @@ def predict(rank, world_size, conf, p):
             os.makedirs(
                     save_location, exist_ok=True
                 )
-            torch.save(x, f'{save_location}/init_condition_tensor_{init_datetime_str}.pth')
-            print('init cond saved to:' f'{save_location}/init_condition_tensor_{init_datetime_str}.pth') 
+            torch.save(x, f'{save_location}/init_camulator_condition_tensor_{init_datetime_str}.pth')
+            print('init cond saved to:' f'{save_location}/init_camulator_condition_tensor_{init_datetime_str}.pth') 
             break
     return 1
 
@@ -323,6 +324,8 @@ if __name__ == "__main__":
     parser = ArgumentParser(description=description)
     # -------------------- #
     # parser args: -c, -l, -w
+    #example usage:
+    # torchrun /glade/derecho/scratch/wchapman/miles_branchs/pretrain_CESM_Spatial_PS_WXmod_pxshf_LR/applications/Make_Climate_Initial_Conditions.py -c /glade/derecho/scratch/wchapman/miles_branchs/pretrain_CESM_Spatial_PS_WXmod_pxshf_LR/be21_coupled-v2025.2.0_small.yml
     parser.add_argument(
         "-c",
         dest="model_config",
@@ -449,7 +452,6 @@ if __name__ == "__main__":
             logging.info("Launching to PBS on Derecho")
             launch_script_mpi(config, script_path)
         sys.exit()
-
 
     if number_of_subsets > 0:
         forecasts = load_forecasts(conf)
