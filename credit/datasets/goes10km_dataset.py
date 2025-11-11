@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import logging
-import xesmf as xe
+# import xesmf as xe
 logger = logging.getLogger(__name__)
 
 
@@ -146,7 +146,7 @@ class GOES10kmDataset(Dataset):
                     "stop_forecast": mode == "stop",
                     "datetime": time_str,}
         
-        if mode != "forcing": #don't draw goes
+        if mode != "forcing": # draw goes if mode is not forcing
             da = ds["BT_or_R"].copy()
 
             if self.log_normal_scaling: #channels is the first axis
@@ -161,7 +161,7 @@ class GOES10kmDataset(Dataset):
             data = torch.nn.functional.pad(data, (19,18,11,10), "constant", 0.0)
             # coerce to c, t, 1024, 960 to work with wxformer
         
-        if self.era5dataset and mode != "stop": # draw era5 if not stopping
+        if self.era5dataset and mode != "stop": # always draw era5 if not stopping
             return_data["era5"] = self.get_era5(ds)
 
         if mode == "init":
@@ -187,43 +187,43 @@ class GOES10kmDataset(Dataset):
 
         return era5_data
 
-class ERA5Interpolator:
-    def __init__(self,
-                 data_conf: Dict,
-                 era5dataset: Dataset = None,):
-        """
-        taking advantage of DistributedSampler class code with this dataset
+# class ERA5Interpolator:
+#     def __init__(self,
+#                  data_conf: Dict,
+#                  era5dataset: Dataset = None,):
+#         """
+#         taking advantage of DistributedSampler class code with this dataset
         
-        Args:
-            ds: xr dataset with a time attribute
+#         Args:
+#             ds: xr dataset with a time attribute
 
-            example time config:
-            {"timestep": pd.Timedelta(1, "h"),
-                "num_forecast_steps": 1
-                 },
-        """
-        self.era5dataset = era5dataset
-        # setup regridder
-        self.regridder = None
-        if era5dataset and data_conf.get("regrid_loc", None):
-            regrid_loc = data_conf["regrid_loc"]
-            da_outgrid = xr.open_dataset(data_conf["outgrid_loc"], engine="h5netcdf")
-            ds_ingrid = xr.open_dataset(data_conf["ingrid_loc"], engine="h5netcdf")
-            self.regridder = xe.Regridder(ds_ingrid, da_outgrid, 'bilinear', unmapped_to_nan=True, weights=regrid_loc)
+#             example time config:
+#             {"timestep": pd.Timedelta(1, "h"),
+#                 "num_forecast_steps": 1
+#                  },
+#         """
+#         self.era5dataset = era5dataset
+#         # setup regridder
+#         self.regridder = None
+#         if era5dataset and data_conf.get("regrid_loc", None):
+#             regrid_loc = data_conf["regrid_loc"]
+#             da_outgrid = xr.open_dataset(data_conf["outgrid_loc"], engine="h5netcdf")
+#             ds_ingrid = xr.open_dataset(data_conf["ingrid_loc"], engine="h5netcdf")
+#             self.regridder = xe.Regridder(ds_ingrid, da_outgrid, 'bilinear', unmapped_to_nan=True, weights=regrid_loc)
 
-    def __getitem__(self, args):
-        # default: load target state
-        ts, mode = args
+#     def __getitem__(self, args):
+#         # default: load target state
+#         ts, mode = args
 
-        # run interpolation
-        era5_ds_dict = self.era5dataset[(ts, "y_xarray")] #draw an xarray
-        field_types = ["prognostic", "dynamic_forcing"]
-        combined_ds = xr.merge([era5_ds_dict[field] for field in field_types])
-        regridded = self.regridder(combined_ds, skipna=True, na_thres=1.0)
+#         # run interpolation
+#         era5_ds_dict = self.era5dataset[(ts, "y_xarray")] #draw an xarray
+#         field_types = ["prognostic", "dynamic_forcing"]
+#         combined_ds = xr.merge([era5_ds_dict[field] for field in field_types])
+#         regridded = self.regridder(combined_ds, skipna=True, na_thres=1.0)
 
-        return regridded
-        # ts = pd.Timestamp(combined_ds.time.values)
-        # save_dir = os.path.join("/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/",
-        #                          str(ts.year))
-        # os.makedirs(save_dir, exist_ok=True)
-        # regridded.to_netcdf(os.path.join(save_dir, ts.strftime("%Y-%m-%dT%H:%M:%S")), engine="h5netcdf")
+#         return regridded
+#         # ts = pd.Timestamp(combined_ds.time.values)
+#         # save_dir = os.path.join("/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/",
+#         #                          str(ts.year))
+#         # os.makedirs(save_dir, exist_ok=True)
+#         # regridded.to_netcdf(os.path.join(save_dir, ts.strftime("%Y-%m-%dT%H:%M:%S")), engine="h5netcdf")

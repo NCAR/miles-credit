@@ -30,9 +30,8 @@ def launch_script(config_file, script_path, launch=True):
     # Generate the PBS script
     script = f"""#!/bin/bash -l
     #PBS -N {pbs_options['job_name']}
-    #PBS -l select=1:ncpus={pbs_options['ncpus']}:ngpus={pbs_options['ngpus']}:mem={pbs_options['mem']}
+    #PBS -l select=1:ncpus={pbs_options['ncpus']}:ngpus={pbs_options['ngpus']}:gpu_type={pbs_options['gpu_type']}:mem={pbs_options['mem']}
     #PBS -l walltime={pbs_options['walltime']}
-    #PBS -l gpu_type={pbs_options['gpu_type']}
     #PBS -A {pbs_options['project']}
     #PBS -q {pbs_options['queue']}
     #PBS -j oe

@@ -1,4 +1,5 @@
 from glob import glob
+import logging
 
 import pandas as pd
 import xarray as xr
@@ -7,7 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-
+logger = logging.getLogger(__name__)
 class ERA5Dataset(Dataset):
     
     """ Pytorch Dataset for processed ERA5 data. Relies on a configuration dictionary to define:
@@ -36,7 +37,7 @@ class ERA5Dataset(Dataset):
             5) Stored Zarr data should be chunked efficiently for a fast read (recommend small chunks across time dimension).
             
             """ 
-    def __init__(self, config, time_config, source):
+    def __init__(self, config, time_config, source, transform=None):
         
         self.source_name = source
 
@@ -65,9 +66,20 @@ class ERA5Dataset(Dataset):
                 self.var_dict[field_type] = {
                         "vars_3D": d.get("vars_3D", []),
                         "vars_2D": d.get("vars_2D", []),
+                        "levels": d.get("levels", []), # will return all levels by default
                                            }
+                if self.var_dict[field_type]["levels"]:
+                    logger.info(f"subsetting {field_type} to levels {self.var_dict[field_type]['levels']}")
             else:
                 self.file_dict[field_type] = None
+
+        # handle transform:
+        if not transform:
+            self.transform_xarray = lambda x: x
+        else:
+            self.transform_xarray = transform.transform_xarray
+            print("transforming prognostic data with given transform")
+
         
     def _timestamps(self):
         return pd.date_range(self.start_datetime,
@@ -124,14 +136,24 @@ class ERA5Dataset(Dataset):
     def _open_ds_extract_fields(self, field_type, ts, return_data):
         """
         opens the dataset, reshapes and concats the variables into an np array, packs it into the return dict if the data exists
+        assumes both vars_3D and vars_2D are in teh same file
         """
         if self.file_dict[field_type]: #if the file map is not None, do the op
             ds = xr.open_dataset(self.file_dict[field_type][ts.year])
             if field_type != "static":
                 ds = ds.sel(time=ts)
+
+            ds = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
+            if field_type in ["prognostic", "dynamic_forcing"]:
+                ds = self.transform_xarray(ds)
+
             ds_3D = ds[self.var_dict[field_type]["vars_3D"]]
             ds_2D = ds[self.var_dict[field_type]["vars_2D"]]
-    
+            
+            levels = self.var_dict[field_type]["levels"]
+            if levels:
+                ds_3D = ds_3D.sel(level=levels)
+
             data_np = self._reshape_and_concat(ds_3D, ds_2D)
 
             if data_np.size > 0:
@@ -140,6 +162,9 @@ class ERA5Dataset(Dataset):
         return return_data
     
     def _open_ds_extract_xarray(self, field_type, ts, return_data):
+        """
+        warning: this does not transform the data
+        """
         if self.file_dict[field_type]: #if the file map is not None, do the op
             ds = xr.open_dataset(self.file_dict[field_type][ts.year])
             if field_type != "static":

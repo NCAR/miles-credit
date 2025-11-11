@@ -602,8 +602,8 @@ class RegionalCrossFormer(BaseModel):
         # Feature‑wise Linear Modulation for time embedding
         alpha_beta = self.film(forcing_t_delta.view(batch_size, 1) / 3600.)  # [batch, 2*dim]
         alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
-        alpha = alpha.view(batch_size, self.total_dim, 1, 1, 1)  # [batch, dim, 1, 1, 1]
-        beta = beta.view(batch_size, self.total_dim, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        alpha = alpha.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        beta = beta.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
         x_era5 = alpha * x_era5 + beta
 
         x = torch.concat([x, x_era5], dim=1)

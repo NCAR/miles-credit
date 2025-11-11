@@ -34,9 +34,14 @@ data:
             prognostic:
                 # upper-air variables
                 vars_3D: ['U','V','T','Q']
+                levels: [70,  80,  90,  95, 100, 105, 110, 120, 130, 136, 137]
+                num_levels: 16
                 vars_2D: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
                 path: '/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/era5_interp_*.zarr'
-            
+                transform:
+                    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
+                    # residual norm version
+                    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
             diagnostic: null
                 
             dynamic_forcing:
@@ -48,19 +53,6 @@ data:
                 vars_2D: ['Z_GDS4_SFC','LSM'] 
                 path: '/glade/derecho/scratch/dkimpara/goes-cloud-dataset/era5_regrid/static_interpolated.nc'
     
-    # compatible with the old 'std'
-    static_first: True
-
-
-    scaler_type: 'std_new'
-
-    # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
-    # regular z-score version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
-    # residual norm version
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
-
     train:
         start_datetime: "2017-01-01" 
         end_datetime: "2022-07-01"
@@ -160,15 +152,15 @@ trainer:
 
     # define training and validation batch size
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 2
-    valid_batch_size: 2
+    train_batch_size: 1
+    valid_batch_size: 1
     ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
     # set to 0 to use all available training samples e.g. `len(dataloader)`
     # if the number is larger than all training samples, all available training samples will be used
-    batches_per_epoch: 2
-    valid_batches_per_epoch: 2
+    batches_per_epoch: 25
+    valid_batches_per_epoch: 1
     # early stopping
     stopping_patience: 50 
     # True: do not validate, always save weights
@@ -200,7 +192,7 @@ trainer:
       gamma: 0.7  # LR reduction factor at each cycle restart
 
     # Pytorch automatic mixed precision (amp). See also 'mixed_precision' below
-    amp: False
+    amp: True
     
     # This version of mixed precision is supported only with FSDP and gives you more control. Set amp = False.
     # See https://pytorch.org/docs/stable/fsdp.html#torch.distributed.fsdp.MixedPrecision for details
@@ -220,24 +212,22 @@ trainer:
     # number of CPU workers used in datasets/dataloaders
     # 0 means load into main process. recommend using 0 for debugging. will default to prefetch=None
     # GOES batch size of 8 
-    # loading time: < 2.5s
-    # forward time: ~ 1s
-    thread_workers: 0
-    valid_thread_workers: 0
+    thread_workers: 6
+    valid_thread_workers: 6
 
     # Number of prefetch samples in the DataLoader
     prefetch_factor: 1
   
 model:
     # NCAR WXFormer example
-    type: "debugger"               # use "debugger" with any config to use debugger model type. compatible with basic model args
+    type: "crossformer_regional"               # use "debugger" with any config to use debugger model type. compatible with basic model args
     frames: 1                         # number of input states (default: 1)
     image_height: 1024                 # number of latitude grids (default: 640)
     image_width: 960                  # number of longitude grids (default: 1280)
     levels: 0                        # number of upper-air variable levels (default: 15)
     channels: 0                       # upper-air variable channels
     surface_channels: 6               # surface variable channels
-    input_only_channels: 74            # dynamic forcing, forcing, static channels
+    input_only_channels: 54            # dynamic forcing, forcing, static channels
     output_only_channels: 0           # diagnostic variable channels
     
     patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
@@ -407,16 +397,16 @@ predict:
 
 # credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
 pbs: 
-    # example for derecho
-    # conda: "~/credit-derecho"
-    # project: "NMMM0015"
-    # job_name: "train_goes_lognorm"
-    # walltime: "00:30:00"
-    # nodes: 1
-    # ncpus: 64
-    # ngpus: 4
-    # mem: '480GB'
-    # queue: 'preempt'
+    #example for derecho
+    conda: "~/credit-derecho"
+    project: "NMMM0015"
+    job_name: "train_goes_era5"
+    walltime: "00:15:00"
+    nodes: 1
+    ncpus: 64
+    ngpus: 4
+    mem: '480GB'
+    queue: 'preempt'
     
     # examaple for casper
     # conda: "~/credit"
@@ -430,13 +420,13 @@ pbs:
     # project: 'NMMM0015'
     # queue: 'casper'
 
-    conda: "~/credit"
-    job_name: 'rollout_goes'
-    nodes: 1
-    ncpus: 16
-    ngpus: 1
-    mem: '64GB'
-    walltime: '00:15:00'
-    gpu_type: 'a100'
-    project: 'NMMM0015'
-    queue: 'casper'
+    # conda: "~/credit"
+    # job_name: 'rollout_goes'
+    # nodes: 1
+    # ncpus: 16
+    # ngpus: 1
+    # mem: '64GB'
+    # walltime: '00:15:00'
+    # gpu_type: 'a100'
+    # project: 'NMMM0015'
+    # queue: 'casper'

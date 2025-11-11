@@ -73,6 +73,7 @@ class Trainer(BaseTrainer):
         Returns:
             dict: Dictionary containing training metrics and loss for the epoch.
         """
+        profile_training = conf["trainer"].get("profile_training", False)
 
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_max_norm = conf["trainer"].get("grad_max_norm", 0.0)
@@ -150,11 +151,8 @@ class Trainer(BaseTrainer):
 
             start = time.time()
             batch = next(dl)
-            logger.debug(f"dataload time: {time.time() - start}s")
 
-            start = time.time()
             mode = batch["mode"][0]
-            # TODO: mean std scaling for era5
             while not stop_forecast:
                 logger.debug(f"current mode: {mode}")
                 logger.debug(batch.keys())
@@ -175,9 +173,6 @@ class Trainer(BaseTrainer):
                 
                     if "era5" in batch.keys():
                         era5_static = batch_era5["static"].to(self.device)
-
-                    # xload_time = time.time()
-                    # logger.info(f"x on device, t {xload_time - start}")
                 
                 # add era5 forcing to the tensor
                 # concat order is prognostic, static, forcing
@@ -191,8 +186,9 @@ class Trainer(BaseTrainer):
                         x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
 
                     x = torch.concat((x, x_era5), dim=1)
-                    # model_input += [x_era5, batch["era5"]["timedelta_seconds"]]
-
+                    forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device)
+                
+                xload_time = time.time()
                 # --------------------------------------------- #
                 # clamp
                 if flag_clamp:
@@ -202,7 +198,7 @@ class Trainer(BaseTrainer):
                 x = x.float()
 
                 with torch.autocast(device_type="cuda", enabled=amp):
-                    y_pred = self.model(x, batch_era5["timedelta_seconds"]) if "era5" in batch.keys() else self.model(x)
+                    y_pred = self.model(x, forcing_t_delta=forcing_t_delta) if "era5" in batch.keys() else self.model(x)
 
                 batch = next(dl)
                 mode = batch["mode"][0]
@@ -225,7 +221,6 @@ class Trainer(BaseTrainer):
 
                     # compute gradients
                     scaler.scale(loss).backward(retain_graph=retain_graph)
-                    
 
                 if distributed:
                     torch.distributed.barrier()
@@ -278,6 +273,12 @@ class Trainer(BaseTrainer):
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+            
+            if  profile_training and self.rank==0:
+                end_time = time.time()
+                load_time = xload_time - start
+                fwd_time = end_time - xload_time
+                logger.info(f'''load/fwd time: {load_time:.2f}s/{fwd_time:.2f}s = {load_time/fwd_time:.1}''')
 
             # Metrics
             metrics_dict = metrics(y_pred, y)
@@ -357,7 +358,6 @@ class Trainer(BaseTrainer):
             dict: Dictionary containing validation metrics and loss for the epoch.
         """
         
-        # TODO: two dataloader inits? every time
         self.model.eval()
 
         # number of diagnostic variables
@@ -426,11 +426,8 @@ class Trainer(BaseTrainer):
                 stop_forecast = False
                 y_pred = None  # Place holder that gets updated after first roll-out
 
-                start = time.time()
                 batch = next(dl)
-                logger.debug(f"dataload time: {time.time() - start}s")
 
-                start = time.time()
                 mode = batch["mode"][0]
                 while not stop_forecast:
                     logger.debug(f"current mode: {mode}")
@@ -453,8 +450,6 @@ class Trainer(BaseTrainer):
                         if "era5" in batch.keys():
                             era5_static = batch_era5["static"].to(self.device)
 
-                        # xload_time = time.time()
-                        # logger.info(f"x on device, t {xload_time - start}")
                         
                     # add era5 forcing to the tensor
                     # concat order is prognostic, static, forcing
@@ -467,13 +462,18 @@ class Trainer(BaseTrainer):
                         if ensemble_size > 1:
                             x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
 
-                    x = torch.concat((x, x_era5), dim=1)
+                        x = torch.concat((x, x_era5), dim=1)
+                        forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device)
+                    
+                    # predict with the model
+                    x = x.float()
+                    
                     # --------------------------------------------- #
                     # clamp
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-                    y_pred = self.model(x.float())
+                    y_pred = self.model(x, forcing_t_delta=forcing_t_delta) if "era5" in batch.keys() else self.model(x)
 
                     # ================================================================================== #
                     # scope of reaching the final forecast_len

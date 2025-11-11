@@ -27,6 +27,7 @@ from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
 from credit.parser import credit_main_parser, training_data_check
 from credit.datasets.goes_load_dataset_and_dataloader import load_dataset, load_dataloader
+from credit.transform import load_transform
 
 from credit.metrics import LatWeightedMetrics
 from credit.metrics_downscaling import UnWeightedMetrics
@@ -291,9 +292,11 @@ def main(rank, world_size, conf, backend=None, trial=False):
     if torch.cuda.is_available():
         torch.cuda.set_device(rank % torch.cuda.device_count())
 
+    transform = load_transform(conf, "ERA5", device=device)
+
     # Load the dataset using the provided dataset_type
-    train_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=True)
-    valid_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=False)
+    train_dataset = load_dataset(conf, rank=rank, world_size=world_size, era5_transform=transform, is_train=True)
+    valid_dataset = load_dataset(conf, rank=rank, world_size=world_size, era5_transform=transform, is_train=False)
 
     # Load the dataloader
     train_loader = load_dataloader(

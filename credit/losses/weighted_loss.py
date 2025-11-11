@@ -176,8 +176,8 @@ class VariableTotalLoss2D(torch.nn.Module):
             var_weights = [
                 value if isinstance(value, list) else [value] for value in conf["loss"]["variable_weights"].values()
             ]
-
-            var_weights = np.array([item for sublist in var_weights for item in sublist])
+            var_weights = np.concatenate([np.array(wt_list) for wt_list in var_weights], axis=0)
+            # var_weights = np.array([item for sublist in var_weights for item in sublist])
 
             self.var_weights = torch.from_numpy(var_weights)
         # ------------------------------------------------------------- #

@@ -1,9 +1,32 @@
 from credit.transforms import BridgescalerScaleState
+from credit.transform import load_transform
 from credit.data import Sample
 import numpy as np
 import xarray as xr
 import os
 import torch
+
+import pytest
+import torch
+import yaml
+from pathlib import Path
+
+
+TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
+CONFIG_FILE_DIR = os.path.join(
+    "/".join(os.path.abspath(__file__).split("/")[:-2]), "config"
+)
+
+
+def test_ERA5StandardTransform():
+    config = os.path.join(CONFIG_FILE_DIR, "goes_era5_forcing_test.yml")
+
+    with open(config) as cf:
+        conf = yaml.load(cf, Loader=yaml.FullLoader)
+
+    transform = load_transform(conf, "ERA5", "cpu")
+        
+    return
 
 
 def test_BridgescalerScaleState():
@@ -69,3 +92,6 @@ def test_BridgescalerScaleState():
     assert np.abs((reverse_tensor - test_trans_tensor).numpy()).max() > 0
 
     return
+
+if __name__ == "__main__":
+    test_ERA5StandardTransform()

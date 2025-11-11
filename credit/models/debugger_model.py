@@ -65,11 +65,15 @@ class DebuggerModel(BaseModel):
             logger.info("using postblock")
             self.postblock = PostBlock(post_conf)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         """
             forward that multiplies self.coef to the input
             used to test postblock and other model parts
         """
+
+        if isinstance(x, dict):
+            x = dict["x"]
+
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()

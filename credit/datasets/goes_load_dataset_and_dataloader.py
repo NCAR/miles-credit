@@ -10,16 +10,16 @@ from credit.samplers import DistributedMultiStepBatchSampler
 import logging
 logger = logging.getLogger(__name__)
 
-def load_era5_forcing(conf, start_datetime, end_datetime):
+def load_era5_forcing(conf, start_datetime, end_datetime, transform=None):
     time_config = {
         "timestep": pd.Timedelta("1h"),
         "num_forecast_steps": 1,
         "start_datetime": start_datetime,
         "end_datetime": end_datetime,
     }
-    return ERA5Dataset(conf, time_config, "ERA5")
+    return ERA5Dataset(conf, time_config, "ERA5", transform=transform)
 
-def load_dataset(conf, rank, world_size, is_train=True):
+def load_dataset(conf, rank, world_size, is_train=True, era5_transform=None):
 
     logger.info("loading a GOES 10km dataset")
 
@@ -40,13 +40,14 @@ def load_dataset(conf, rank, world_size, is_train=True):
         logger.info("loading an era5 dataset for forcing")
         era5dataset = load_era5_forcing(conf,
                                         time_config["start_datetime"],
-                                        time_config["end_datetime"] + pd.Timedelta("1D"))
+                                        time_config["end_datetime"] + pd.Timedelta("1D"),
+                                        transform=era5_transform)
     else:
         era5dataset = None
 
     return GOES10kmDataset(zarr_ds, data_config, time_config, era5dataset=era5dataset)
 
-def load_predict_dataset(conf, rank, world_size, rollout_init_times):
+def load_predict_dataset(conf, rank, world_size, rollout_init_times, era5_transform=None):
     logger.info("loading a GOES 10km dataset for rollout")
 
     data_config = conf["data"]
@@ -71,7 +72,8 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times):
 
         era5dataset = load_era5_forcing(conf,
                                         time_config["start_datetime"].values,
-                                        time_config["end_datetime"].values)
+                                        time_config["end_datetime"].values,
+                                        transform=era5_transform)
     else:
         era5dataset = None
 
@@ -96,6 +98,7 @@ def load_dataloader(conf, train_dataset, rank, world_size, is_train=True, is_pre
     seed = conf["seed"]
     training_type = "train" if is_train else "valid"
     batch_size = conf["trainer"][f"{training_type}_batch_size"]
+    logger.info(f"loading {training_type} dataloader with batch size {batch_size}")
 
     if is_predict: 
         batch_size = conf["predict"]["batch_size"]

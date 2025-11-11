@@ -5,6 +5,8 @@ import os
 import torch.nn.functional as F
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
+import torch
+from torch import nn
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
@@ -192,15 +194,31 @@ class SegmentationModel(BaseModel):
 
         self.model = load_premade_encoder_model(architecture)
         # Additional layers for testing
+        
+        self.input_only_channels = input_only_channels
+        self.film = nn.Linear(1, 2 * (self.input_only_channels))
 
         self.use_post_block = post_conf["activate"]
         if self.use_post_block:
             self.postblock = PostBlock(post_conf)
 
-    def forward(self, x):
+    def forward(self, x, forcing_t_delta):
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
+        
+        x, x_era5 = x[:, :-self.input_only_channels], x[:, -self.input_only_channels:]
+
+        batch_size = x.shape[0]
+
+        # Feature‑wise Linear Modulation for time embedding
+        alpha_beta = self.film(forcing_t_delta.view(batch_size, 1) / 3600.)  # [batch, 2*dim]
+        alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
+        alpha = alpha.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        beta = beta.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        x_era5 = alpha * x_era5 + beta
+
+        x = torch.concat([x, x_era5], dim=1)
 
         x = F.avg_pool3d(x, kernel_size=(2, 1, 1)) if x.shape[2] > 1 else x
         x = x.squeeze(2)  # squeeze time dim
