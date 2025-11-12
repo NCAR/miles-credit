@@ -8,7 +8,7 @@ from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
-from credit.boundary_padding import TensorPadding
+from credit.boundary_padding import TensorPadding, load_padding
 from credit.models.unet_attention_modules import load_unet_attention
 
 logger = logging.getLogger(__name__)
@@ -524,7 +524,7 @@ class RegionalCrossFormer(BaseModel):
             self.layers.append(nn.ModuleList([cross_embed_layer, transformer_layer]))
 
         if self.use_padding:
-            self.padding_opt = TensorPadding(**padding_conf)
+            self.padding_opt = load_padding(padding_conf)
 
         # define embedding layer using adjusted sizes
         # if the original sizes were good, adjusted sizes should == original sizes
@@ -590,12 +590,13 @@ class RegionalCrossFormer(BaseModel):
             logger.info("using postblock")
             self.postblock = PostBlock(post_conf)
 
-    def forward(self, x, forcing_t_delta):
+    def forward(self, x, x_era5, forcing_t_delta):
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
 
-        x, x_era5 = x[:, :-self.input_only_channels], x[:, -self.input_only_channels:]
+        if self.use_padding:
+            x = self.padding_opt.pad(x)
 
         batch_size = x.shape[0]
 
@@ -607,9 +608,6 @@ class RegionalCrossFormer(BaseModel):
         x_era5 = alpha * x_era5 + beta
 
         x = torch.concat([x, x_era5], dim=1)
-
-        if self.use_padding:
-            x = self.padding_opt.pad(x)
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)

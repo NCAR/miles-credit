@@ -79,7 +79,7 @@ class MultiStepBatchSamplerSubset(Sampler):
 
                 sampling_times = batch_init_times + (i * self.dataset.timestep)
 
-                yield [(t, mode) for t in sampling_times.values]
+                yield [(t, mode) for t in sampling_times]
 
             batch = list(itertools.islice(index_iter, self.batch_size))
 

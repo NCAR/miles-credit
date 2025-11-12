@@ -38,6 +38,7 @@ def latitude_weights(conf):
     image_height = conf["model"]["image_height"]
 
     if image_height > len(weights):
+        logger.warning("image dimensions do not match latitude weights, replicating edge weights")
         total_pad = image_height - len(lat)
         pad_l = total_pad // 2
         pad_r = total_pad // 2 + total_pad % 2

@@ -3,6 +3,7 @@ import logging
 import copy
 import os
 import torch.nn.functional as F
+from credit.boundary_padding import load_padding
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
 import torch
@@ -167,6 +168,7 @@ class SegmentationModel(BaseModel):
         rk4_integration=False,
         architecture=None,
         post_conf=None,
+        padding_conf: dict = None,
         **kwargs,
     ):
         if post_conf is None:
@@ -194,6 +196,12 @@ class SegmentationModel(BaseModel):
 
         self.model = load_premade_encoder_model(architecture)
         # Additional layers for testing
+
+        if padding_conf is None:
+            padding_conf = {"activate": False}
+        self.use_padding = padding_conf["activate"]
+        if self.use_padding:
+            self.padding_opt = load_padding(padding_conf)
         
         self.input_only_channels = input_only_channels
         self.film = nn.Linear(1, 2 * (self.input_only_channels))
@@ -202,12 +210,13 @@ class SegmentationModel(BaseModel):
         if self.use_post_block:
             self.postblock = PostBlock(post_conf)
 
-    def forward(self, x, forcing_t_delta):
+    def forward(self, x, x_era5, forcing_t_delta):
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
         
-        x, x_era5 = x[:, :-self.input_only_channels], x[:, -self.input_only_channels:]
+        if self.use_padding:
+            x = self.padding_opt.pad(x)
 
         batch_size = x.shape[0]
 
@@ -224,6 +233,9 @@ class SegmentationModel(BaseModel):
         x = x.squeeze(2)  # squeeze time dim
         x = self.rk4(x) if self.rk4_integration else self.model(x)
 
+        if self.use_padding:
+            x = self.padding_opt.unpad(x)
+            
         x = x.unsqueeze(2)
 
         if self.use_post_block:

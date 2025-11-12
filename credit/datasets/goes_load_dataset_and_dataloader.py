@@ -24,6 +24,11 @@ def load_dataset(conf, rank, world_size, is_train=True, era5_transform=None):
     logger.info("loading a GOES 10km dataset")
 
     data_config = conf["data"]
+    padding_conf = conf["model"].get("padding_conf", {})
+    if padding_conf:
+        padding = not padding_conf["activate"] # opposite of what the model does
+    else:
+        padding = True
 
     zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
 
@@ -45,12 +50,17 @@ def load_dataset(conf, rank, world_size, is_train=True, era5_transform=None):
     else:
         era5dataset = None
 
-    return GOES10kmDataset(zarr_ds, data_config, time_config, era5dataset=era5dataset)
+    return GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
 
 def load_predict_dataset(conf, rank, world_size, rollout_init_times, era5_transform=None):
     logger.info("loading a GOES 10km dataset for rollout")
 
     data_config = conf["data"]
+    padding_conf = conf["model"].get("padding_conf", {})
+    if padding_conf:
+        padding = not padding_conf["activate"] # opposite of what the model does
+    else:
+        padding = True
 
     zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
     # years = [data_config["train_years"][0], data_config["valid_years"][1]] #all years
@@ -77,7 +87,7 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, era5_transf
     else:
         era5dataset = None
 
-    return GOES10kmDataset(zarr_ds, data_config, time_config, era5dataset=era5dataset)
+    return GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding,  era5dataset=era5dataset)
 
 
 def load_dataloader(conf, train_dataset, rank, world_size, is_train=True, is_predict=False):

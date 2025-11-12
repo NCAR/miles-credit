@@ -161,10 +161,12 @@ class Trainer(BaseTrainer):
                     batch_era5 = batch["era5"]
 
                 if mode == "init":
-                    x = batch["x"].to(self.device)
+                    x = batch["x"].to(self.device).float()
 
                     if ensemble_size > 1:
                         x = torch.repeat_interleave(x, ensemble_size, 0)
+                    if flag_clamp:
+                        x = torch.clamp(x, min=clamp_min, max=clamp_max)
                     # --------------------------------------------- #
                     # ensemble x on initialization
                     # copies each sample in the batch ensemble_size number of times.
@@ -174,31 +176,25 @@ class Trainer(BaseTrainer):
                     if "era5" in batch.keys():
                         era5_static = batch_era5["static"].to(self.device)
                 
-                # add era5 forcing to the tensor
+                # load era5 forcing
                 # concat order is prognostic, static, forcing
                 if "era5" in batch.keys():
                     x_era5 = torch.concat([batch_era5["prognostic"].to(self.device),
                                            era5_static,
                                            batch_era5["dynamic_forcing"].to(self.device)],
-                                           dim=1)
+                                           dim=1).float()
+                    forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device).float()
 
                     if ensemble_size > 1:
                         x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
+                    if flag_clamp:
+                        x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
 
-                    x = torch.concat((x, x_era5), dim=1)
-                    forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device)
                 
                 xload_time = time.time()
-                # --------------------------------------------- #
-                # clamp
-                if flag_clamp:
-                    x = torch.clamp(x, min=clamp_min, max=clamp_max)
-
-                # predict with the model
-                x = x.float()
 
                 with torch.autocast(device_type="cuda", enabled=amp):
-                    y_pred = self.model(x, forcing_t_delta=forcing_t_delta) if "era5" in batch.keys() else self.model(x)
+                    y_pred = self.model(x, x_era5, forcing_t_delta) if "era5" in batch.keys() else self.model(x)
 
                 batch = next(dl)
                 mode = batch["mode"][0]
@@ -437,7 +433,7 @@ class Trainer(BaseTrainer):
                         batch_era5 = batch["era5"]
 
                     if mode == "init":
-                        x = batch["x"].to(self.device)
+                        x = batch["x"].to(self.device).float()
 
                         if ensemble_size > 1:
                             x = torch.repeat_interleave(x, ensemble_size, 0)
@@ -457,23 +453,20 @@ class Trainer(BaseTrainer):
                         x_era5 = torch.concat([batch_era5["prognostic"].to(self.device),
                                             era5_static,
                                             batch_era5["dynamic_forcing"].to(self.device)],
-                                            dim=1)
+                                            dim=1).float()
 
                         if ensemble_size > 1:
                             x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
 
-                        x = torch.concat((x, x_era5), dim=1)
-                        forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device)
+                        forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device).float()
                     
-                    # predict with the model
-                    x = x.float()
                     
                     # --------------------------------------------- #
                     # clamp
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-                    y_pred = self.model(x, forcing_t_delta=forcing_t_delta) if "era5" in batch.keys() else self.model(x)
+                    y_pred = self.model(x, x_era5, forcing_t_delta) if "era5" in batch.keys() else self.model(x)
 
                     # ================================================================================== #
                     # scope of reaching the final forecast_len

@@ -19,6 +19,7 @@ class GOES10kmDataset(Dataset):
                  ds: xr.Dataset,
                  data_conf: Dict,
                  time_config: Dict = None,
+                 padding: bool = True,
                  era5dataset: Dataset = None,
                  valid_init_dir = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/valid_init_times",
                  scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats.nc",):
@@ -35,6 +36,8 @@ class GOES10kmDataset(Dataset):
         """
         self.ds = ds.drop_duplicates(dim="t").sortby("t")
         self.era5dataset = era5dataset
+        self.padding = padding
+        logger.info(f"{'' if self.padding else 'NOT '}padding GOES input")
 
         # setup init times        
         self.timestep = time_config["timestep"]
@@ -158,7 +161,8 @@ class GOES10kmDataset(Dataset):
             # da.shape = c, 1003, 923
             data = torch.tensor(da.values).unsqueeze(1)
             # data = torch.nn.functional.pad(data, (0,0,11,10), "replicate")
-            data = torch.nn.functional.pad(data, (19,18,11,10), "constant", 0.0)
+            if self.padding:
+                data = torch.nn.functional.pad(data, (19,18,11,10), "constant", 0.0)
             # coerce to c, t, 1024, 960 to work with wxformer
         
         if self.era5dataset and mode != "stop": # always draw era5 if not stopping
