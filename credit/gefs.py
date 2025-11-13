@@ -163,9 +163,9 @@ def load_member_tiles(path: str, init_date_str: str, member: str, variables: str
                     .rename({"yaxis_1": "lat", "xaxis_1": "lon"})
                     .load()
                 )
-                if "smc" in select_surface_variables:
-                    # Only grab the topmost soil moisture value (0-10 cm) and multiply by 100 to convert to CLM kg m^2.
-                    member_tiles[-1]["smc"] = member_tiles[-1]["smc"][0] * 100
+        if "smc" in select_surface_variables:
+            # Only grab the topmost soil moisture value (0-10 cm) and multiply by 100 to convert to CLM kg m^2.
+            member_tiles[-1]["smc"] = member_tiles[-1]["smc"][0] * 100
         else:
             raise ValueError("You did not request any valid GEFS variables.")
     return member_tiles
