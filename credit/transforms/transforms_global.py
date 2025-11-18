@@ -461,7 +461,6 @@ class ToTensor_ERA5_and_Forcing:
             varname_forcing (list): list of forcing variables.
             varname_static (list): list of static variables.
             flag_static_first (bool): if True, static listed before forcing variables.
-
         """
         self.conf = conf
 
@@ -568,7 +567,8 @@ class ToTensor_ERA5_and_Forcing:
                     for var_name in self.varname_surface:
                         var_value = value[var_name].values
                         list_vars_surface.append(var_value)
-                    numpy_vars_surface = np.array(list_vars_surface) # [num_surf_vars, hist_len, lat, lon]
+
+                    numpy_vars_surface = np.array(list_vars_surface)  # [num_surf_vars, hist_len, lat, lon]
 
                 # organize forcing and static (input only)
                 if self.has_forcing_static or self.flag_dyn_forcing:
@@ -634,7 +634,7 @@ class ToTensor_ERA5_and_Forcing:
                     x_surf = x_surf.unsqueeze(0).unsqueeze(0)
 
             if key == "historical_ERA5_images" or key == "x":
-                
+                # ---------------------------------------------------------------------- #
                 # ToTensor: forcing and static
                 if self.has_forcing_static:
                     # this line produces [forcing_var, time, lat, lon]
