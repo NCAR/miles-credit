@@ -461,6 +461,7 @@ class ToTensor_ERA5_and_Forcing:
             varname_forcing (list): list of forcing variables.
             varname_static (list): list of static variables.
             flag_static_first (bool): if True, static listed before forcing variables.
+
         """
         self.conf = conf
 
@@ -472,13 +473,24 @@ class ToTensor_ERA5_and_Forcing:
         self.for_len = int(conf["data"]["forecast_len"])
 
         # identify the existence of other variables
-        self.flag_surface = ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0)
-        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0)
-        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0)
-        self.flag_forcing = ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0)
-        self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
+        self.flag_surface = ("surface_variables" in conf["data"]) and (
+            len(conf["data"]["surface_variables"]) > 0
+        )
+        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (
+            len(conf["data"]["dynamic_forcing_variables"]) > 0
+        )
+        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (
+            len(conf["data"]["diagnostic_variables"]) > 0
+        )
+        self.flag_forcing = ("forcing_variables" in conf["data"]) and (
+            len(conf["data"]["forcing_variables"]) > 0
+        )
+        self.flag_static = ("static_variables" in conf["data"]) and (
+            len(conf["data"]["static_variables"]) > 0
+        )
 
         self.varname_upper_air = conf["data"]["variables"]
+        self.flag_upper_air = True
 
         # get surface varnames
         if self.flag_surface:
@@ -516,12 +528,23 @@ class ToTensor_ERA5_and_Forcing:
             # ======================================================================================== #
             # forcing variable first (new models) vs. static variable first (some old models)
             # this flag makes sure that the class is compatible with some old CREDIT models
-            self.flag_static_first = ("static_first" in conf["data"]) and (conf["data"]["static_first"])
+            self.flag_static_first = ("static_first" in conf["data"]) and (
+                conf["data"]["static_first"]
+            )
             # ======================================================================================== #
         else:
             self.has_forcing_static = False
 
     def __call__(self, sample: Sample) -> Sample:
+        """Convert variables to input/output torch tensors.
+
+        Args:
+            sample (interator): batch.
+
+        Returns:
+            torch.tensor: converted torch tensor.
+
+        """
         return_dict = {}
 
         for key, value in sample.items():
@@ -533,11 +556,24 @@ class ToTensor_ERA5_and_Forcing:
             elif isinstance(value, xr.Dataset):
                 # organize upper-air vars
                 list_vars_upper_air = []
+                self.flag_upper_air = True
+                # check if upper air in dataset
+                dataset_vars = list(value.data_vars)
 
-                for var_name in self.varname_upper_air:
-                    var_value = value[var_name].values
-                    list_vars_upper_air.append(var_value)
-                numpy_vars_upper_air = np.array(list_vars_upper_air)  # [num_vars, hist_len, num_levels, lat, lon]
+                self.flag_upper_air = all(
+                    [varname in dataset_vars for varname in self.varname_upper_air]
+                )
+                if self.flag_upper_air:
+                    for var_name in self.varname_upper_air:
+                        var_value = value[var_name].values
+                        list_vars_upper_air.append(var_value)
+                    numpy_vars_upper_air = np.array(
+                        list_vars_upper_air
+                    )  # [num_vars, hist_len, num_levels, lat, lon]
+
+                self.flag_surface = all(
+                    [varname in dataset_vars for varname in self.varname_surface]
+                )
 
                 # organize surface vars
                 if self.flag_surface:
@@ -547,15 +583,25 @@ class ToTensor_ERA5_and_Forcing:
                         var_value = value[var_name].values
                         list_vars_surface.append(var_value)
 
-                    numpy_vars_surface = np.array(list_vars_surface)  # [num_surf_vars, hist_len, lat, lon]
+                    numpy_vars_surface = np.array(
+                        list_vars_surface
+                    )  # [num_surf_vars, hist_len, lat, lon]
 
                 # organize forcing and static (input only)
                 if self.has_forcing_static or self.flag_dyn_forcing:
                     # enter this scope if one of the (dyn_forcing, folrcing, static) exists
                     if self.flag_static_first:
-                        varname_forcing_static = self.varname_static + self.varname_dyn_forcing + self.varname_forcing
+                        varname_forcing_static = (
+                            self.varname_static
+                            + self.varname_dyn_forcing
+                            + self.varname_forcing
+                        )
                     else:
-                        varname_forcing_static = self.varname_dyn_forcing + self.varname_forcing + self.varname_static
+                        varname_forcing_static = (
+                            self.varname_dyn_forcing
+                            + self.varname_forcing
+                            + self.varname_static
+                        )
 
                     if key == "historical_ERA5_images" or key == "x":
                         list_vars_forcing_static = []
@@ -583,8 +629,14 @@ class ToTensor_ERA5_and_Forcing:
             # ToTensor: upper-air varialbes
             ## produces [time, upper_var, level, lat, lon]
             ## np.hstack concatenates the second dim (axis=1)
-            x_upper_air = np.hstack([np.expand_dims(var_upper_air, axis=1) for var_upper_air in numpy_vars_upper_air])
-            x_upper_air = torch.as_tensor(x_upper_air)
+            if self.flag_upper_air:
+                x_upper_air = np.hstack(
+                    [
+                        np.expand_dims(var_upper_air, axis=1)
+                        for var_upper_air in numpy_vars_upper_air
+                    ]
+                )
+                x_upper_air = torch.as_tensor(x_upper_air)
 
             # ---------------------------------------------------------------------- #
             # ToTensor: surface variables
@@ -612,7 +664,7 @@ class ToTensor_ERA5_and_Forcing:
                     x_surf = x_surf.unsqueeze(0).unsqueeze(0)
 
             if key == "historical_ERA5_images" or key == "x":
-                # ---------------------------------------------------------------------- #
+                
                 # ToTensor: forcing and static
                 if self.has_forcing_static:
                     # this line produces [forcing_var, time, lat, lon]
@@ -638,8 +690,8 @@ class ToTensor_ERA5_and_Forcing:
 
                 if self.flag_surface:
                     return_dict["x_surf"] = x_surf.type(self.output_dtype)
-
-                return_dict["x"] = x_upper_air.type(self.output_dtype)
+                if self.flag_upper_air:
+                    return_dict["x"] = x_upper_air.type(self.output_dtype)
 
             elif key == "target_ERA5_images" or key == "y":
                 # ---------------------------------------------------------------------- #
@@ -671,6 +723,6 @@ class ToTensor_ERA5_and_Forcing:
 
                 if self.flag_surface:
                     return_dict["y_surf"] = x_surf.type(self.output_dtype)
-
-                return_dict["y"] = x_upper_air.type(self.output_dtype)
+                if self.flag_upper_air:
+                    return_dict["y"] = x_upper_air.type(self.output_dtype)
         return return_dict
