@@ -547,19 +547,18 @@ class ToTensor_ERA5_and_Forcing:
                 # check if upper air in dataset
                 dataset_vars = list(value.data_vars)
 
-                self.flag_upper_air = all(
-                    [varname in dataset_vars for varname in self.varname_upper_air]
-                )
+                # =========================================================================================== #
+                # update flag_upper_air and flag_surface based on the given dataset
+                self.flag_upper_air = all([varname in dataset_vars for varname in self.varname_upper_air])
+                self.flag_surface = all([varname in dataset_vars for varname in self.varname_surface])
+                # =========================================================================================== #
+                
                 if self.flag_upper_air:
                     for var_name in self.varname_upper_air:
                         var_value = value[var_name].values
                         list_vars_upper_air.append(var_value)
                     numpy_vars_upper_air = np.array(list_vars_upper_air)  # [num_vars, hist_len, num_levels, lat, lon]
-
-                self.flag_surface = all(
-                    [varname in dataset_vars for varname in self.varname_surface]
-                )
-
+                    
                 # organize surface vars
                 if self.flag_surface:
                     list_vars_surface = []
