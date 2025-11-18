@@ -473,21 +473,11 @@ class ToTensor_ERA5_and_Forcing:
         self.for_len = int(conf["data"]["forecast_len"])
 
         # identify the existence of other variables
-        self.flag_surface = ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        )
-        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (
-            len(conf["data"]["dynamic_forcing_variables"]) > 0
-        )
-        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (
-            len(conf["data"]["diagnostic_variables"]) > 0
-        )
-        self.flag_forcing = ("forcing_variables" in conf["data"]) and (
-            len(conf["data"]["forcing_variables"]) > 0
-        )
-        self.flag_static = ("static_variables" in conf["data"]) and (
-            len(conf["data"]["static_variables"]) > 0
-        )
+        self.flag_surface = ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0)
+        self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0)
+        self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0)
+        self.flag_forcing = ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0)
+        self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
 
         self.varname_upper_air = conf["data"]["variables"]
         self.flag_upper_air = True
@@ -528,9 +518,7 @@ class ToTensor_ERA5_and_Forcing:
             # ======================================================================================== #
             # forcing variable first (new models) vs. static variable first (some old models)
             # this flag makes sure that the class is compatible with some old CREDIT models
-            self.flag_static_first = ("static_first" in conf["data"]) and (
-                conf["data"]["static_first"]
-            )
+            self.flag_static_first = ("static_first" in conf["data"]) and (conf["data"]["static_first"])
             # ======================================================================================== #
         else:
             self.has_forcing_static = False
@@ -583,25 +571,15 @@ class ToTensor_ERA5_and_Forcing:
                         var_value = value[var_name].values
                         list_vars_surface.append(var_value)
 
-                    numpy_vars_surface = np.array(
-                        list_vars_surface
-                    )  # [num_surf_vars, hist_len, lat, lon]
+                    numpy_vars_surface = np.array(list_vars_surface) # [num_surf_vars, hist_len, lat, lon]
 
                 # organize forcing and static (input only)
                 if self.has_forcing_static or self.flag_dyn_forcing:
                     # enter this scope if one of the (dyn_forcing, folrcing, static) exists
                     if self.flag_static_first:
-                        varname_forcing_static = (
-                            self.varname_static
-                            + self.varname_dyn_forcing
-                            + self.varname_forcing
-                        )
+                        varname_forcing_static = self.varname_static + self.varname_dyn_forcing + self.varname_forcing
                     else:
-                        varname_forcing_static = (
-                            self.varname_dyn_forcing
-                            + self.varname_forcing
-                            + self.varname_static
-                        )
+                        varname_forcing_static = self.varname_dyn_forcing + self.varname_forcing + self.varname_static
 
                     if key == "historical_ERA5_images" or key == "x":
                         list_vars_forcing_static = []
@@ -630,12 +608,7 @@ class ToTensor_ERA5_and_Forcing:
             ## produces [time, upper_var, level, lat, lon]
             ## np.hstack concatenates the second dim (axis=1)
             if self.flag_upper_air:
-                x_upper_air = np.hstack(
-                    [
-                        np.expand_dims(var_upper_air, axis=1)
-                        for var_upper_air in numpy_vars_upper_air
-                    ]
-                )
+                x_upper_air = np.hstack([np.expand_dims(var_upper_air, axis=1) for var_upper_air in numpy_vars_upper_air])
                 x_upper_air = torch.as_tensor(x_upper_air)
 
             # ---------------------------------------------------------------------- #
