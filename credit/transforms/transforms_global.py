@@ -555,9 +555,7 @@ class ToTensor_ERA5_and_Forcing:
                     for var_name in self.varname_upper_air:
                         var_value = value[var_name].values
                         list_vars_upper_air.append(var_value)
-                    numpy_vars_upper_air = np.array(
-                        list_vars_upper_air
-                    )  # [num_vars, hist_len, num_levels, lat, lon]
+                    numpy_vars_upper_air = np.array(list_vars_upper_air)  # [num_vars, hist_len, num_levels, lat, lon]
 
                 self.flag_surface = all(
                     [varname in dataset_vars for varname in self.varname_surface]
@@ -570,7 +568,6 @@ class ToTensor_ERA5_and_Forcing:
                     for var_name in self.varname_surface:
                         var_value = value[var_name].values
                         list_vars_surface.append(var_value)
-
                     numpy_vars_surface = np.array(list_vars_surface) # [num_surf_vars, hist_len, lat, lon]
 
                 # organize forcing and static (input only)
