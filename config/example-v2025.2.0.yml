@@ -24,30 +24,32 @@ data:
     # upper-air variables, must be YEARLY zarr or nc with (time, level, latitude, longitude) dims
     # files must have the listed variable names 
     # upper-air variables will be normalized by the dataloader, users do not need to normalize them
-    variables: ['U','V','T','Q']
-    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL_*'
-    level_ids: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    level_ids: [1., 9., 19.,  29.,  39.,  49.,  59.,  69.,  79.,  89.,  97., 104.,
+           111., 116., 122., 126., 131., 136.]
     # surface variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
     # the time dimension MUST be the same as upper-air variables
     # files must have the listed variable names
     # surface variables will be normalized by the dataloader, users do not need to normalize them
-    surface_variables: ['SP', 't2m', 'Z500', 'T500', 'U500', 'V500', 'Q500']
-    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL_*'
+    surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+    save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
 
     # dynamic forcing variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
     # the time dimension MUST be the same as upper-air variables
     # files must have the listed variable names
     # surface variables will be normalized by the dataloader, users do not need to normalize them
-    dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_nc_6h_0.25deg/*.nc'
+    dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
 
     # diagnostic variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
     # the time dimension MUST be the same as upper-air variables
     # files must have the listed variable names 
     # THESE ARE NOT LOADING CORRECTLY ON X
     # diagnostic variables will be normalized by the dataloader, users do not need to normalize them
-    # diagnostic_variables: ['Z500', 'T500', 'U500', 'V500', 'Q500'] 
-    save_loc_diagnostic: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_y_TOTAL_*'
+    diagnostic_variables: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation', 'surface_latent_heat_flux', 'surface_net_solar_radiation',
+                          'surface_net_thermal_radiation', 'surface_sensible_heat_flux'] 
+    save_loc_diagnostic: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
     
     # periodic forcing variables, forcing variables that are the same year-to-year
     # must be a single zarr or nc with (time, latitude, longitude) dims
@@ -63,21 +65,21 @@ data:
     
     # static variables must be a single zarr or nc with (latitude, longitude) coords
     # static variables must be normalized BY USER 
-    static_variables: ['Z_GDS4_SFC', 'LSM'] 
-    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
+    static_variables: ['z_norm'] 
+    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
 
     # physics file
     # this file provides parameters for the conservation schemes in the post_block section
-    save_loc_physics: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    save_loc_physics: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
     
     # z-score files, they must be zarr or nc with (level,) coords
     # they MUST include all the 
     #     'variables', 'surface_variables', 'dynamic_forcing_variables', 'diagnostic_variables' above
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_6h_1979_2018_16lev_0.25deg.nc'
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_6h_1979_2018_16lev_0.25deg.nc'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
     
     # years to form the training / validation set [first_year, last_yeat (NOT covered)]
-    train_years: [1979, 2014] # 1979 - 2013
+    train_years: [2000, 2014] # 1979 - 2013
     valid_years: [2014, 2018] # 2014 - 2017
     
     # std_new is the new data workflow that works with z-score
@@ -267,15 +269,15 @@ trainer:
   
 model:
     # NCAR WXFormer example
-    type: "debugger"               # use "debugger" with any config to use debugger model type. compatible with basic model args
+    type: "crossformer"               # use "debugger" with any config to use debugger model type. compatible with basic model args
     frames: 1                         # number of input states (default: 1)
-    image_height: 640                 # number of latitude grids (default: 640)
-    image_width: 1280                 # number of longitude grids (default: 1280)
-    levels: 16                        # number of upper-air variable levels (default: 15)
+    image_height: 181                 # number of latitude grids (default: 640)
+    image_width: 360                 # number of longitude grids (default: 1280)
+    levels: 18                        # number of upper-air variable levels (default: 15)
     channels: 4                       # upper-air variable channels
-    surface_channels: 7               # surface variable channels
+    surface_channels: 4               # surface variable channels
     input_only_channels: 3            # dynamic forcing, forcing, static channels
-    output_only_channels: 0           # diagnostic variable channels
+    output_only_channels: 8           # diagnostic variable channels
     
     patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
     patch_height: 1                   # number of longitude grids in each 3D patch (default: 1)
@@ -283,8 +285,8 @@ model:
     
     dim: [32, 64, 128, 256]           # Dimensionality of each layer
     depth: [2, 2, 2, 2]               # Depth of each layer
-    global_window_size: [10, 5, 2, 1] # Global window size for each layer
-    local_window_size: 10             # Local window size
+    global_window_size: [8, 4, 2, 1] # Global window size for each layer
+    local_window_size: 4             # Local window size
     cross_embed_kernel_sizes:         # kernel sizes for cross-embedding
     - [4, 8, 16, 32]
     - [2, 4]
@@ -325,14 +327,14 @@ model:
     decoder_attention_type: "scse"
     
     # use interpolation to match the output size
-    interp: True
+    interp: False
     
     # map boundary padding
     padding_conf:
         activate: True
         mode: earth
-        pad_lat: 80
-        pad_lon: 80
+        pad_lat: [37, 38]
+        pad_lon: [76, 76]
 
     # configuration for postblock processing
     post_conf: 
@@ -340,8 +342,8 @@ model:
         grid: 'equiangular'
 
         skebs:
-            activate: True
-            freeze_base_model_weights: True  # turn off training of the basemodel
+            activate: False
+            freeze_base_model_weights: False  # turn off training of the basemodel
 
             # skebs module training options
             trainable: True # is skebs trainable at all
@@ -522,7 +524,7 @@ loss:
     
     # this file is MANDATORY for the "predict" section below (inference stage)
     # the file must be nc and must contain 1D variables named "latitude" and "longitude"
-    latitude_weights: "/glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc"
+    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
 
     # use latitude weighting
     # if True, the latitude_weights file MUST have a variable named "coslat"
@@ -579,7 +581,7 @@ predict:
                 pad_lon: [112, 112]
 
         bred_vector:
-            enabled: true
+            enabled: False
             num_cycles: *ensemble_size
             hemispheric_rescale: true
             perturb_channel_idx: 69 # Z500. Set to None to do the full tensor
