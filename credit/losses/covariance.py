@@ -26,11 +26,16 @@ class CovarianceWeightedMSELoss(nn.Module):
     """
 
     def __init__(
-        self, reduction: str = "mean", batch_normalize: bool = False, **kwargs
+        self,
+        reduction: str = "mean",
+        batch_normalize: bool = False,
+        off_diagonal_scale: float = 1.0,
+        **kwargs,
     ):
         self.reduction = reduction
         self.reduction_function = reduction_functions[reduction]
         self.batch_normalize = batch_normalize
+        self.off_diagonal_scale = off_diagonal_scale
         super(CovarianceWeightedMSELoss, self).__init__()
 
     def forward(self, y_true, y_pred):
@@ -52,13 +57,20 @@ class CovarianceWeightedMSELoss(nn.Module):
         y_true_2d = torch.reshape(y_true_shuff, new_shape)
         y_pred_2d = torch.reshape(y_pred_shuff, new_shape)
         if self.batch_normalize:
-            yt_mean = torch.unsqueeze(torch.mean(y_true_2d, 1), 0)
-            yt_std = torch.unsqueeze(torch.std(y_true_2d, 1), 0)
+            yt_mean = torch.unsqueeze(torch.mean(y_true_2d, 1), 1)
+            yt_std = torch.unsqueeze(torch.std(y_true_2d, 1), 1)
             y_true_2d = (y_true_2d - yt_mean) / yt_std
             y_pred_2d = (y_pred_2d - yt_mean) / yt_std
         residual = y_true_2d - y_pred_2d
         cov = torch.cov(residual)
         precision = torch.linalg.inv(cov)
+        diag_idx = torch.eye(
+            precision.shape[0], dtype=torch.float32, device=precision.device
+        )
+        off_diag_idx = 1.0 - diag_idx
+        precision = (
+            precision * off_diag_idx * self.off_diagonal_scale + precision * diag_idx
+        )
 
         def point_mse(res_row, prec=precision):
             res_long = torch.unsqueeze(res_row, 1)
