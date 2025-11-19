@@ -202,8 +202,8 @@ trainer:
 
     # define training and validation batch size
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 1
-    valid_batch_size: 1
+    train_batch_size: 4
+    valid_batch_size: 8
     ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
@@ -221,10 +221,10 @@ trainer:
     # the trainer will stop after iterating a given number of epochs
     # this works for any start_epoch and reload_epoch: True
     num_epoch: 10
-    # epcoh is saved in the checkpot.pt, this option reads the last epoch 
+    # epoch is saved in the checkpot.pt, this option reads the last epoch 
     # of the previous job and continue from there
     # useful for epoch-dependent schedulers
-    reload_epoch: True # can also use --> train_one_epoch: True
+    reload_epoch: False # can also use --> train_one_epoch: True
     epochs: &epochs 70
     # if use_scheduler: False
     # reload_epoch: False
@@ -432,7 +432,7 @@ model:
             # Name of variables that needs to be corrected 
             tracer_name: ['specific_total_water', 'total_precipitation']
             # thresholds, values below the threshold will be corrected to the threshold
-            tracer_thres: [0, 0]
+            tracer_thres: [1e-10, 0]
 
         global_mass_fixer:
             activate: True
@@ -507,8 +507,11 @@ loss:
     # the main training loss
     # available options are "mse", "msle", "mae", "huber", "logcosh", "xtanh", "xsigmoid"
     # ensemble training losses: "KCRPS", "almost-fair-crps"
-    training_loss: "mse"
-    training_loss_parameters: {}
+    training_loss: "covmse"
+    training_loss_parameters:
+      batch_normalize: True
+      off_diagonal_scale: 1.0e-8 
+    validation_loss: "mse"
 
     # use power or spectral loss
     # if True, this loss will be added to the training_loss: 
@@ -529,7 +532,7 @@ loss:
     # use latitude weighting
     # if True, the latitude_weights file MUST have a variable named "coslat"
     # coslat is the np.cos(latitude)
-    use_latitude_weights: True
+    use_latitude_weights: False
 
     # variable weighting
     # if True, specify your weights
