@@ -365,7 +365,7 @@ class Transformer(nn.Module):
 # classes
 
 
-class camulator(BaseModel):
+class Camulator(BaseModel):
     def __init__(
         self,
         image_height: int = 640,
@@ -648,7 +648,7 @@ if __name__ == "__main__":
         image_width,
     ).to("cuda")
 
-    model = camulator(
+    model = Camulator(
         image_height=image_height,
         image_width=image_width,
         frames=frames,
