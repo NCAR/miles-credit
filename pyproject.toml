@@ -51,7 +51,8 @@ dependencies = [
     "keras",
     "metpy",
     "setuptools_scm",
-    "setuptools"
+    "setuptools",
+    "numba-progress"
    ]
 
 [tool.setuptools]

@@ -31,3 +31,4 @@ metpy
 keras
 miles-guess
 h5py<=3.14.0
+numba-progress
