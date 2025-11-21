@@ -5,6 +5,8 @@ from numba import njit
 import xarray as xr
 from .physics_constants import RDGAS, GRAVITY
 import os
+from tqdm import tqdm
+from multiprocessing import current_process
 
 
 def full_state_pressure_interpolation(
@@ -86,6 +88,8 @@ def full_state_pressure_interpolation(
         pressure_ds (xr.Dataset): Dataset containing pressure interpolated variables.
 
     """
+    current = current_process()
+    pos = current._identity[0] - 1
     path_to_file = os.path.abspath(os.path.dirname(__file__))
     model_level_file = os.path.join(path_to_file, model_level_file)
     pressure_levels = np.array(pressure_levels)
@@ -179,7 +183,11 @@ def full_state_pressure_interpolation(
         surface_pressure_data = state_dataset[surface_pressure_var][t].values.astype(
             np.float64
         )
-        for (i, j), p in np.ndenumerate(surface_pressure_data):
+        for (i, j), p in tqdm(
+            np.ndenumerate(surface_pressure_data),
+            total=surface_pressure_data.size,
+            position=pos,
+        ):
             interp_full_data = {}
             pressure_grid, half_pressure_grid = create_reduced_pressure_grid(
                 surface_pressure_data[i, j], a_model, b_model
