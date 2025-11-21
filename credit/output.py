@@ -78,12 +78,12 @@ def make_xarray(pred, forecast_datetime, lat, lon, conf):
     """
     Create two xarray.DataArray objects for upper air and surface variables.
 
-    Args
+    Args:
         pred (torch.Tensor or np.ndarray): Prediction tensor containing both upper air and surface variables.
-    forecast_datetime (datetime): The forecast initialization datetime.
-    lat (np.ndarray or list): Latitude values.
-    lon (np.ndarray or list): Longitude values.
-    conf (dict): Configuration dictionary containing details about the data structure
+        forecast_datetime (datetime): The forecast initialization datetime.
+        lat (np.ndarray or list): Latitude values.
+        lon (np.ndarray or list): Longitude values.
+        conf (dict): Configuration dictionary containing details about the data structure
         and variables.
 
     Returns:
@@ -105,7 +105,7 @@ def make_xarray(pred, forecast_datetime, lat, lon, conf):
     # save upper air variables
     varname_upper = conf["data"]["variables"]
 
-    # make xr.DatasArray
+    # make xr.DataArray
     darray_upper_air = xr.DataArray(
         tensor_upper_air,
         dims=["time", "vars", "level", "latitude", "longitude"],
@@ -124,7 +124,7 @@ def make_xarray(pred, forecast_datetime, lat, lon, conf):
     )
 
     if len(varname_single_level) > 0:
-        # make xr.DatasArray
+        # make xr.DataArray
         darray_single_level = xr.DataArray(
             tensor_single_level.squeeze(2),
             dims=["time", "vars", "latitude", "longitude"],
