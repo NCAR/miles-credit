@@ -52,7 +52,6 @@ dependencies = [
     "metpy",
     "setuptools_scm",
     "setuptools",
-    "numba-progress"
    ]
 
 [tool.setuptools]
