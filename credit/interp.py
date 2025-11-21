@@ -5,9 +5,7 @@ from numba import njit
 import xarray as xr
 from .physics_constants import RDGAS, GRAVITY
 import os
-from multiprocessing import current_process
 from numba.typed import Dict
-from numba_progress import ProgressBar
 
 
 def full_state_pressure_interpolation(
@@ -89,11 +87,6 @@ def full_state_pressure_interpolation(
         pressure_ds (xr.Dataset): Dataset containing pressure interpolated variables.
 
     """
-    current = current_process()
-    if len(current._identity) > 0:
-        pos = current._identity[0]
-    else:
-        pos = 1
     path_to_file = os.path.abspath(os.path.dirname(__file__))
     model_level_file = os.path.join(path_to_file, model_level_file)
     pressure_levels = np.array(pressure_levels)
@@ -186,25 +179,23 @@ def full_state_pressure_interpolation(
             state_dict[interp_field] = state_dataset[interp_field][t].values.astype(
                 np.float64
             )
-        with ProgressBar(total=surface_pressure_data.size, position=pos) as prog:
-            pres_dict = fast_state_interp_loop(
-                surface_pressure_data,
-                state_dict,
-                surface_geopotential,
-                temperature_var,
-                q_var,
-                interp_fields,
-                geopotential_var,
-                a_model,
-                b_model,
-                a_half_full,
-                b_half_full,
-                pressure_levels,
-                pres_ending,
-                height_ending,
-                height_levels,
-                prog,
-            )
+        pres_dict = fast_state_interp_loop(
+            surface_pressure_data,
+            state_dict,
+            surface_geopotential,
+            temperature_var,
+            q_var,
+            interp_fields,
+            geopotential_var,
+            a_model,
+            b_model,
+            a_half_full,
+            b_half_full,
+            pressure_levels,
+            pres_ending,
+            height_ending,
+            height_levels,
+        )
         pressure_ds[geopotential_var + pres_ending][t] = pres_dict[
             geopotential_var + pres_ending
         ][:]
@@ -242,7 +233,6 @@ def fast_state_interp_loop(
     pres_ending,
     height_ending,
     height_levels,
-    prog,
 ):
     pressure_ds = dict()
     pressure_ds[geopotential_var + pres_ending] = np.zeros(
@@ -355,7 +345,6 @@ def fast_state_interp_loop(
                         surface_geopotential[i : i + 1, j : j + 1],
                     )
                 )
-        prog.update(1)
     return pressure_ds
 
 
