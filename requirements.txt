@@ -14,6 +14,7 @@ dask
 distributed
 dask-jobqueue
 zarr
+numcodecs<0.16.4
 jupyter
 einops
 echo-opt
