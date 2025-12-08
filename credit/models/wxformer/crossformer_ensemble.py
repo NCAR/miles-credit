@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import logging
 import torch
+from stylistic_decoupling_layer import PixelNoiseInjection
 
 
 class CrossFormerWithNoise(CrossFormer):
@@ -24,6 +25,7 @@ class CrossFormerWithNoise(CrossFormer):
         decoder_noise_factor=0.275,
         encoder_noise=True,
         freeze=True,
+        correlated=False,
         **kwargs,
     ):
         """
@@ -40,6 +42,7 @@ class CrossFormerWithNoise(CrossFormer):
 
         super().__init__(**kwargs)
         self.noise_latent_dim = noise_latent_dim
+        self.correlated = correlated
 
         # Freeze weights if using pre-trained model
         if freeze:
@@ -115,6 +118,9 @@ class CrossFormerWithNoise(CrossFormer):
             Tensor: Output tensor after passing through the model.
         """
 
+        if self.correlated:
+            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+
         x_copy = None
         if self.use_post_block:
             x_copy = x.clone().detach()
@@ -134,22 +140,26 @@ class CrossFormerWithNoise(CrossFormer):
             x = cel(x)
             x = transformer(x)
             if self.encoder_noise and k < len(self.layers) - 1:
-                noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+                if not self.correlated:
+                    noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
                 x = self.encoder_noise_layers[k](x, noise)
             encodings.append(x)
 
         x = self.up_block1(x)
-        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+        if not self.correlated:
+            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
         x = self.noise_inject1(x, noise)
         x = torch.cat([x, encodings[2]], dim=1)
 
         x = self.up_block2(x)
-        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+        if not self.correlated:
+            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
         x = self.noise_inject2(x, noise)
         x = torch.cat([x, encodings[1]], dim=1)
 
         x = self.up_block3(x)
-        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+        if not self.correlated:
+            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
         x = self.noise_inject3(x, noise)
         x = torch.cat([x, encodings[0]], dim=1)
 
@@ -171,106 +181,6 @@ class CrossFormerWithNoise(CrossFormer):
             x = self.postblock(x)
 
         return x
-
-
-# class PixelNoiseInjection(nn.Module):
-#     """
-#     A module that injects noise into feature maps, with a per-pixel and per-channel style modulation.
-#     The noise intensity anneals as the forecast step increases.
-
-#     Attributes:
-#         noise_transform (nn.Linear): A linear transformation to map latent noise to the feature map's channels.
-#         modulation (nn.Parameter): A learnable scaling factor applied to the noise.
-#         initial_noise_factor (float): Initial scaling factor for noise injection.
-#         noise_scheduler (callable): A function that determines noise scaling based on forecast_step.
-#     """
-
-#     def __init__(
-#         self, noise_dim, feature_channels, initial_noise_factor=0.1, decay_rate=0.99
-#     ):
-#         super().__init__()
-#         self.noise_transform = nn.Linear(noise_dim, feature_channels)
-#         self.modulation = nn.Parameter(torch.ones(1, feature_channels, 1, 1))
-#         self.initial_noise_factor = initial_noise_factor
-#         self.decay_rate = decay_rate  # Decay rate for noise annealing
-
-#     def forward(self, feature_map, noise, forecast_step=None):
-#         """
-#         Injects noise into the feature map with an annealing schedule.
-
-#         Args:
-#             feature_map (torch.Tensor): The input feature map (batch, channels, height, width).
-#             noise (torch.Tensor): The latent noise tensor (batch, noise_dim), used for modulating the injected noise.
-#             forecast_step (int, optional): The current forecast step, used to anneal noise over time.
-
-#         Returns:
-#             torch.Tensor: The feature map with injected noise.
-#         """
-#         batch, channels, height, width = feature_map.shape
-
-#         # Compute noise factor with exponential decay
-#         noise_factor = (
-#             self.initial_noise_factor * (self.decay_rate**forecast_step)
-#             if forecast_step is not None
-#             else self.initial_noise_factor
-#         )
-
-#         # Generate per-pixel, per-channel noise
-#         pixel_noise = noise_factor * torch.randn(
-#             batch, channels, height, width, device=feature_map.device
-#         )
-
-#         # Transform latent noise and reshape
-#         style = self.noise_transform(noise).view(batch, channels, 1, 1)
-
-#         # Combine style-modulated per-pixel noise with features
-#         return feature_map + pixel_noise * style * self.modulation
-
-
-class PixelNoiseInjection(nn.Module):
-    """
-    A module that injects noise into feature maps, with a per-pixel and per-channel style modulation.
-
-    Attributes:
-        noise_transform (nn.Linear): A linear transformation to map latent noise to the feature map's channels.
-        modulation (nn.Parameter): A learnable scaling factor applied to the noise.
-        noise_factor (float): A scaling factor for controlling the intensity of the injected noise.
-
-    Methods:
-        forward(feature_map, noise): Adds noise to the feature map, modulated by style and the modulation parameter.
-    """
-
-    def __init__(self, noise_dim, feature_channels, noise_factor=0.1):
-        super().__init__()
-        self.noise_transform = nn.Linear(noise_dim, feature_channels)
-        self.modulation = nn.Parameter(torch.ones(1, feature_channels, 1, 1))
-        # self.noise_factor = noise_factor
-        self.noise_factor = nn.Parameter(
-            torch.tensor([noise_factor]), requires_grad=False
-        )
-
-    def forward(self, feature_map, noise):
-        """
-        Injects noise into the feature map.
-
-        Args:
-            feature_map (torch.Tensor): The input feature map (batch, channels, height, width).
-            noise (torch.Tensor): The latent noise tensor (batch, noise_dim), used for modulating the injected noise.
-
-        Returns:
-            torch.Tensor: The feature map with injected noise.
-        """
-
-        batch, channels, height, width = feature_map.shape
-
-        # Generate per-pixel, per-channel noise
-        pixel_noise = self.noise_factor * torch.randn(batch, channels, height, width, device=feature_map.device)
-
-        # Transform latent noise and reshape
-        style = self.noise_transform(noise).view(batch, channels, 1, 1)
-
-        # Combine style-modulated per-pixel noise with features
-        return feature_map + pixel_noise * style * self.modulation
 
 
 if __name__ == "__main__":
