@@ -1060,7 +1060,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
         if filename.endswith((".nc", ".nc4")):
             dataset = xr.open_dataset(filename, decode_times=False, engine="h5netcdf")
         else:
-            dataset = xr.open_zarr(filename)
+            dataset = xr.open_zarr(filename, chunks=None)
 
         dataset = dataset.drop_vars(list(dataset.data_vars))
         dataset = dataset.isel(time=slice(time_start, time_end))
