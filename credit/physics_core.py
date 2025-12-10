@@ -12,76 +12,9 @@ Reference:
 """
 
 import torch
-import torch.nn as nn
-from typing import Dict, Any, Optional
-from credit.physics_constants import RAD_EARTH, RVGAS, RDGAS, EPSGAS, GRAVITY, RHO_WATER, LH_WATER
+from typing import Dict
+from credit.physics_constants import RAD_EARTH, GRAVITY
 
-
-def compute_density(pressure, temperature, specific_humidity):
-    """
-    compute density given pressure (Pa), temperature (K), and specific humidity (kg/kg)
-    """
-    virtual_temperature = compute_virtual_temperature(temperature, specific_humidity)
-    density = pressure / (RDGAS * virtual_temperature)
-    return density
-
-def compute_virtual_temperature(temperature, specific_humidity):
-    """ref: metpy"""
-    mixing_ratio = specific_humidity / (1 - specific_humidity)
-    temperature_virtual = temperature * (mixing_ratio + EPSGAS) / (EPSGAS * (1 + mixing_ratio))
-    return temperature_virtual
-
-
-class ModelLevelPressures(nn.Module):
-    '''
-    compute pressure levels given SP with (only compatible with torch)
-    SP, a_vals with same units.
-    a_vals, b_vals, with size levels at dimension plev_dim and all other dims with size 1, 
-    e.g. plev_dim = 1; a_vals.shape = (1, levels, 1, 1, 1)
-    matching sp with size 1 at dimension plev_dim e.g. (b, 1, t, lat, lon)
-    '''
-
-    def __init__(self,
-                 a_vals,
-                 b_vals,
-                 plev_dim=1):
-        super().__init__()
-        self.register_buffer('a_vals',
-                                a_vals,
-                                persistent=False)
-        self.register_buffer('b_vals',
-                             b_vals,
-                             persistent=False)
-
-        self.plev_dim = plev_dim
-        self.is_fully_initialized = False
-    def compute_p(self, sp):
-        plevs = (self.a_vals + self.b_vals * sp)
-        return plevs # shape = sp.shape except at plev_dim which is now nlevel
-    
-    def compute_hlevs(self, plevs):
-        # half levels as averages of model level pressures
-        
-        hlevs = torch.log(plevs.unfold(dimension=self.plev_dim, size=2, step=1)).mean(dim=-1)
-        return torch.exp(hlevs) # same shape a plev except plev_dim is 1 less
-    
-    def compute_mlev_thickness(self, sp):
-        plevs = self.compute_p(sp)
-        hlevs = self.compute_hlevs(plevs) 
-
-        if not self.is_fully_initialized: # initialize zeros
-            self.register_buffer('zeros',
-                                 torch.zeros_like(sp),
-                                 persistent=False)
-            self.is_fully_initialized = True
-
-        thicknesses = torch.diff(hlevs, 
-                                 dim=self.plev_dim, 
-                                 prepend=self.zeros, 
-                                 append=sp)
-        return thicknesses #same shape as sp but plev_dim has size levels
-
- 
 
 class physics_pressure_level:
     """

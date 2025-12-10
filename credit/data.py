@@ -1,5 +1,6 @@
-"""Data.py contains modules for processing training data.
-
+"""
+data.py
+-------------------------------------------------------
 Content:
     - generate_datetime(start_time, end_time, interval_hr)
     - hour_to_nanoseconds(input_hr)
@@ -21,8 +22,6 @@ from typing import TypedDict, Union, List
 import datetime
 import numpy as np
 import xarray as xr
-import pandas as pd
-import cftime
 
 # Pytorch utils
 import torch
@@ -35,46 +34,9 @@ Array = Union[np.ndarray, xr.DataArray]
 IMAGE_ATTR_NAMES = ("historical_ERA5_images", "target_ERA5_images")
 
 
-def ensure_numpy_datetime(value):
-    """
-    Converts an input value (or array) to numpy.datetime64.
-    Handles numpy arrays, pandas timestamps, cftime objects, and strings.
-    """
-    # If the value is an array, extract the first element
-    if isinstance(value, np.ndarray):
-        if value.size == 1:
-            value = value.item()  # Extract scalar value
-        else:
-            raise TypeError(f"Cannot convert array with multiple elements: {value}")
-
-    if isinstance(value, np.datetime64):
-        return value  # Already correct
-    elif isinstance(value, pd.Timestamp):
-        return np.datetime64(value)  # Convert from pandas Timestamp
-    elif isinstance(value, str):
-        try:
-            return np.datetime64(value)  # Convert from string
-        except ValueError:
-            pass  # If it fails, let it fall through
-    elif isinstance(value, cftime.datetime):
-        return np.datetime64(value.strftime('%Y-%m-%dT%H:%M:%S'))  # Convert from cftime
-    elif isinstance(value, object):  # Catch-all for potential unexpected object types
-        try:
-            return np.datetime64(pd.to_datetime(value))
-        except Exception:
-            raise TypeError(f"Cannot convert type {type(value)} to numpy.datetime64")
-    else:
-        raise TypeError(f"Unsupported type {type(value)} for datetime conversion")
-
-
 def generate_datetime(start_time, end_time, interval_hr):
-    """Generate a list of datetime.datetime based on stat, end times, and hour interval.
-
-    Args:
-        start_time (datetime.datetime): start time
-        end_time (datetime.datetime): end time
-        interval_hr (int): hour interval
-
+    """
+    Generate a list of datetime.datetime based on stat, end times, and hour interval.
     """
     # Define the time interval (e.g., every hour)
     interval = datetime.timedelta(hours=interval_hr)
@@ -89,31 +51,34 @@ def generate_datetime(start_time, end_time, interval_hr):
 
 
 def hour_to_nanoseconds(input_hr):
-    """Convert hour to nanoseconds."""
+    """
+    Convert hour to nanoseconds
+    """
     # hr * min_per_hr * sec_per_min * nanosec_per_sec
     return input_hr * 60 * 60 * 1000000000
 
 
 def nanoseconds_to_year(nanoseconds_value):
-    """Given datetime info as nanoseconds, compute which year it belongs to."""
-    return (
-        np.datetime64(nanoseconds_value, "ns").astype("datetime64[Y]").astype(int)
-        + 1970
-    )
+    """
+    Given datetime info as nanoseconds, compute which year it belongs to.
+    """
+    return np.datetime64(nanoseconds_value, "ns").astype("datetime64[Y]").astype(int) + 1970
 
 
 def extract_month_day_hour(dates):
-    """Given an 1-d array of np.datatime64[ns], extract their mon, day, hr into a zipped list."""
+    """
+    Given an 1-d array of np.datatime64[ns], extract their mon, day, hr into a zipped list
+    """
     months = dates.astype("datetime64[M]").astype(int) % 12 + 1
-    days = (
-        (dates - dates.astype("datetime64[M]") + 1).astype("timedelta64[D]").astype(int)
-    )
+    days = (dates - dates.astype("datetime64[M]") + 1).astype("timedelta64[D]").astype(int)
     hours = dates.astype("datetime64[h]").astype(int) % 24
     return list(zip(months, days, hours))
 
 
 def find_common_indices(list1, list2):
-    """Find indices of common elements between two lists."""
+    """
+    find indices of common elements between two lists
+    """
     # Find common elements
     common_elements = set(list1).intersection(set(list2))
 
@@ -125,27 +90,28 @@ def find_common_indices(list1, list2):
 
 
 def concat_and_reshape(x1, x2):
-    """Flattening the "level" coordinate of upper-air variables and concatenate it will surface variables."""
-    x1 = x1.view(
-        x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5]
-    )
+    """
+    Flattening the "level" coordinate of upper-air variables and concatenate it will surface variables.
+    """
+    x1 = x1.view(x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5])
     x_concat = torch.cat((x1, x2), dim=2)
     return x_concat.permute(0, 2, 1, 3, 4)
 
 
 def reshape_only(x1):
-    """Flattening the "level" coordinate of upper-air variables.
-
-    As in "concat_and_reshape", but no concat.
     """
-    x1 = x1.view(
-        x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5]
-    )
+    Flattening the "level" coordinate of upper-air variables.
+    As in "concat_and_reshape", but no concat
+    """
+    x1 = x1.view(x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5])
     return x1.permute(0, 2, 1, 3, 4)
 
 
 def get_forward_data(filename) -> xr.Dataset:
-    """Check nc vs. zarr files and open file as xr.Dataset."""
+    """
+    Check nc vs. zarr files
+    open file as xr.Dataset
+    """
     if filename[-3:] == ".nc" or filename[-4:] == ".nc4":
         dataset = xr.open_dataset(filename)
     else:
@@ -175,32 +141,28 @@ class Sample(TypedDict):
 
 
 def flatten_list(list_of_lists):
-    """Flatten a list of lists.
+    """
+    Flatten a list of lists.
 
-    Parameters
-    ----------
+    Parameters:
     - list_of_lists (list): A list containing sublists.
 
-    Returns
-    -------
+    Returns:
     - flattened_list (list): A flattened list containing all elements from sublists.
-
     """
     return [item for sublist in list_of_lists for item in sublist]
 
 
 def generate_integer_list_around(number, spacing=10):
-    """Generate a list of integers on either side of a given number with a specified spacing.
+    """
+    Generate a list of integers on either side of a given number with a specified spacing.
 
-    Parameters
-    ----------
+    Parameters:
     - number (int): The central number around which the list is generated.
     - spacing (int): The spacing between consecutive integers in the list. Default is 10.
 
-    Returns
-    -------
+    Returns:
     - integer_list (list): List of integers on either side of the given number.
-
     """
     lower_limit = number - spacing
     upper_limit = number + spacing + 1  # Adding 1 to include the upper limit
@@ -210,17 +172,15 @@ def generate_integer_list_around(number, spacing=10):
 
 
 def find_key_for_number(input_number, data_dict):
-    """Find the key in the dictionary based on the given number.
+    """
+    Find the key in the dictionary based on the given number.
 
-    Parameters
-    ----------
+    Parameters:
     - input_number (int): The number to search for in the dictionary.
     - data_dict (dict): The dictionary with keys and corresponding value lists.
 
-    Returns
-    -------
+    Returns:
     - key_found (str): The key in the dictionary where the input number falls within the specified range.
-
     """
     for key, value_list in data_dict.items():
         if value_list[1] <= input_number <= value_list[2]:
@@ -231,9 +191,9 @@ def find_key_for_number(input_number, data_dict):
 
 
 def drop_var_from_dataset(xarray_dataset, varname_keep):
-    """Preserve a given set of variables from an xarray.Dataset, and drop the rest.
-
-    It will raise error if `varname_key` is missing from `xarray_dataset`.
+    """
+    Preserve a given set of variables from an xarray.Dataset, and drop the rest.
+    It will raise error if `varname_key` is missing from `xarray_dataset`
     """
     varname_all = list(xarray_dataset.keys())
 
@@ -250,28 +210,28 @@ def drop_var_from_dataset(xarray_dataset, varname_keep):
 
 
 def keep_dataset_vars(xarray_dataset: xr.Dataset, varnames_keep: List[str]):
-    """Return a version of an xarray dataset with only a selected subset of variables.
+    """
+    Return a version of an xarray dataset with only a selected subset of variables.
 
     Args:
         xarray_dataset (xr.Dataset): The xarray dataset.
         varnames_keep (List[str]): a list of variable names to be kept.
 
     Returns:
-        xr.Dataset with only the variables in varnames_keep included.
 
     """
     return xarray_dataset[varnames_keep]
 
 
 class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
-    """A Pytorch Dataset class that works on the following kinds of variables.
-
-    * upper-air variables (time, level, lat, lon)
-    * surface variables (time, lat, lon)
-    * dynamic forcing variables (time, lat, lon)
-    * forcing variables (time, lat, lon)
-    * diagnostic variables (time, lat, lon)
-    * static variables (lat, lon).
+    """
+    A Pytorch Dataset class that works on:
+        - upper-air variables (time, level, lat, lon)
+        - surface variables (time, lat, lon)
+        - dynamic forcing variables (time, lat, lon)
+        - foring variables (time, lat, lon)
+        - diagnostic variables (time, lat, lon)
+        - static variables (lat, lon)
     """
 
     def __init__(
@@ -297,37 +257,38 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         max_forecast_len=None,
         sst_forcing=None,
     ):
-        """Initialize the ERA5_and_Forcing_Dataset.
+        """
+        Initialize the ERA5_and_Forcing_Dataset
 
-        Args:
-            varname_upper_air (list): List of upper air variable names.
-            varname_surface (list): List of surface variable names.
-            varname_dyn_forcing (list): List of dynamic forcing variable names.
-            varname_forcing (list): List of forcing variable names.
-            varname_static (list): List of static variable names.
-            varname_diagnostic (list): List of diagnostic variable names.
-            filenames (list): List of filenames for upper air data.
-            filename_surface (list, optional): List of filenames for surface data.
-            filename_dyn_forcing (list, optional): List of filenames for dynamic forcing data.
-            filename_forcing (str, optional): Filename for forcing data.
-            filename_static (str, optional): Filename for static data.
-            filename_diagnostic (list, optional): List of filenames for diagnostic data.
-            history_len (int, optional): Length of the history sequence. Default is 2.
-            forecast_len (int, optional): Length of the forecast sequence. Default is 0.
-            transform (callable, optional): Transformation function to apply to the data.
-            seed (int, optional): Random seed for reproducibility. Default is 42.
-            skip_periods (int, optional): Number of periods to skip between samples.
-            one_shot(bool, optional): Whether to return all states or just
+        Parameters:
+        - varname_upper_air (list): List of upper air variable names.
+        - varname_surface (list): List of surface variable names.
+        - varname_dyn_forcing (list): List of dynamic forcing variable names.
+        - varname_forcing (list): List of forcing variable names.
+        - varname_static (list): List of static variable names.
+        - varname_diagnostic (list): List of diagnostic variable names.
+        - filenames (list): List of filenames for upper air data.
+        - filename_surface (list, optional): List of filenames for surface data.
+        - filename_dyn_forcing (list, optional): List of filenames for dynamic forcing data.
+        - filename_forcing (str, optional): Filename for forcing data.
+        - filename_static (str, optional): Filename for static data.
+        - filename_diagnostic (list, optional): List of filenames for diagnostic data.
+        - history_len (int, optional): Length of the history sequence. Default is 2.
+        - forecast_len (int, optional): Length of the forecast sequence. Default is 0.
+        - transform (callable, optional): Transformation function to apply to the data.
+        - seed (int, optional): Random seed for reproducibility. Default is 42.
+        - skip_periods (int, optional): Number of periods to skip between samples.
+        - one_shot(bool, optional): Whether to return all states or just
                                     the final state of the training target. Default is None
-            max_forecast_len (int, optional): Maximum length of the forecast sequence.
-            shuffle (bool, optional): Whether to shuffle the data. Default is True.
+        - max_forecast_len (int, optional): Maximum length of the forecast sequence.
+        - shuffle (bool, optional): Whether to shuffle the data. Default is True.
 
         Returns:
-            sample (dict): A dictionary containing historical_ERA5_images,
+        - sample (dict): A dictionary containing historical_ERA5_images,
                                                  target_ERA5_images,
                                                  datetime index, and additional information.
-
         """
+
         self.history_len = history_len
         self.forecast_len = forecast_len
         self.transform = transform
@@ -468,9 +429,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         if self.filename_forcing is not None:
             # drop variables if they are not in the config
             ds = get_forward_data(filename_forcing)
-            ds_forcing = drop_var_from_dataset(
-                ds, varname_forcing
-            ).load()  # <---- load in static
+            ds_forcing = drop_var_from_dataset(ds, varname_forcing).load()  # <---- load in static
 
             self.xarray_forcing = ds_forcing
         else:
@@ -483,21 +442,17 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         if self.filename_static is not None:
             # drop variables if they are not in the config
             ds = get_forward_data(filename_static)
-            ds_static = drop_var_from_dataset(
-                ds, varname_static
-            ).load()  # <---- load in static
+            ds_static = drop_var_from_dataset(ds, varname_static).load()  # <---- load in static
 
             self.xarray_static = ds_static
         else:
             self.xarray_static = False
 
     def __post_init__(self):
-        """Calculate total sequence length after init."""
         # Total sequence length of each sample.
         self.total_seq_len = self.history_len + self.forecast_len
 
     def __len__(self):
-        """Length of Dataset."""
         # compute the total number of length
         total_len = 0
         for ERA5_xarray in self.all_files:
@@ -505,7 +460,6 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         return total_len
 
     def __getitem__(self, index):
-        """Get single item from the dataset."""
         # ========================================================================== #
         # cross-year indices --> the index of the year + indices within that year
 
@@ -517,9 +471,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         ind_start_in_file = index - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(self.all_files[int(ind_file)]["time"]) - (
-            self.history_len + self.forecast_len + 1
-        )
+        ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
 
@@ -543,9 +495,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
             )  # .load() NOT load into memory
 
             ## merge upper-air and surface here:
-            ERA5_subset = ERA5_subset.merge(
-                surface_subset
-            )  # <-- lazy merge, ERA5 and surface both not loaded
+            ERA5_subset = ERA5_subset.merge(surface_subset)  # <-- lazy merge, ERA5 and surface both not loaded
 
         # ==================================================== #
         # split ERA5_subset into training inputs and targets
@@ -583,17 +533,11 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
             # ------------------------------------------------------------------------------- #
             # matching month, day, hour between forcing and upper air [time]
             # this approach handles leap year forcing file and non-leap-year upper air file
-            month_day_forcing = extract_month_day_hour(
-                np.array(self.xarray_forcing["time"])
-            )
-            month_day_inputs = extract_month_day_hour(
-                np.array(historical_ERA5_images["time"])
-            )  # <-- upper air
+            month_day_forcing = extract_month_day_hour(np.array(self.xarray_forcing["time"]))
+            month_day_inputs = extract_month_day_hour(np.array(historical_ERA5_images["time"]))  # <-- upper air
             # indices to subset
             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
-            forcing_subset_input = self.xarray_forcing.isel(
-                time=ind_forcing
-            )  # .load() # <-- loadded in init
+            forcing_subset_input = self.xarray_forcing.isel(time=ind_forcing)  # .load() # <-- loadded in init
             # forcing and upper air have different years but the same mon/day/hour
             # safely replace forcing time with upper air time
             forcing_subset_input["time"] = historical_ERA5_images["time"]
@@ -607,13 +551,9 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         if self.xarray_static:
             # expand static var on time dim
             N_time_dims = len(ERA5_subset["time"])
-            static_subset_input = self.xarray_static.expand_dims(
-                dim={"time": N_time_dims}
-            )
+            static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
             # assign coords 'time'
-            static_subset_input = static_subset_input.assign_coords(
-                {"time": ERA5_subset["time"]}
-            )
+            static_subset_input = static_subset_input.assign_coords({"time": ERA5_subset["time"]})
 
             # slice + load to the GPU
             static_subset_input = static_subset_input.isel(
@@ -632,9 +572,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
 
         if self.one_shot is not None:
             # one_shot is True (on), go straight to the last element
-            target_ERA5_images = ERA5_subset.isel(
-                time=slice(-1, None)
-            ).load()  # <-- load into memory
+            target_ERA5_images = ERA5_subset.isel(time=slice(-1, None)).load()  # <-- load into memory
 
             ## merge diagnoisc input here:
             if self.diagnostic_files:
@@ -642,9 +580,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
                     time=slice(ind_start_in_file, ind_end_in_file + 1)
                 )
 
-                diagnostic_subset = diagnostic_subset.isel(
-                    time=slice(-1, None)
-                ).load()  # <-- load into memory
+                diagnostic_subset = diagnostic_subset.isel(time=slice(-1, None)).load()  # <-- load into memory
 
                 target_ERA5_images = target_ERA5_images.merge(diagnostic_subset)
 
@@ -689,9 +625,9 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
 
             # for multi-input cases, use time=-1 ocean SKT for all times
             if self.history_len > 1:
-                input_skt[: self.history_len - 1] = input_skt[
-                    : self.history_len - 1
-                ].where(~ocean_mask_bool, input_skt.isel(time=-1))
+                input_skt[: self.history_len - 1] = input_skt[: self.history_len - 1].where(
+                    ~ocean_mask_bool, input_skt.isel(time=-1)
+                )
 
             # for target skt, replace ocean values using time=-1 input SKT
             target_skt = target_skt.where(~ocean_mask_bool, input_skt.isel(time=-1))
@@ -720,7 +656,15 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
 
 
 class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
-    """ERA5 Dataset for Distributed training (legacy)."""
+    """
+    A Pytorch Dataset class that works on:
+        - upper-air variables (time, level, lat, lon)
+        - surface variables (time, lat, lon)
+        - dynamic forcing variables (time, lat, lon)
+        - foring variables (time, lat, lon)
+        - diagnostic variables (time, lat, lon)
+        - static variables (lat, lon)
+    """
 
     def __init__(
         self,
@@ -745,37 +689,38 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         max_forecast_len=None,
         sst_forcing=None,
     ):
-        """Initialize the ERA5_and_Forcing_Dataset.
+        """
+        Initialize the ERA5_and_Forcing_Dataset
 
-        Args:
-            varname_upper_air (list): List of upper air variable names.
-            varname_surface (list): List of surface variable names.
-            varname_dyn_forcing (list): List of dynamic forcing variable names.
-            varname_forcing (list): List of forcing variable names.
-            varname_static (list): List of static variable names.
-            varname_diagnostic (list): List of diagnostic variable names.
-            filenames (list): List of filenames for upper air data.
-            filename_surface (list, optional): List of filenames for surface data.
-            filename_dyn_forcing (list, optional): List of filenames for dynamic forcing data.
-            filename_forcing (str, optional): Filename for forcing data.
-            filename_static (str, optional): Filename for static data.
-            filename_diagnostic (list, optional): List of filenames for diagnostic data.
-            history_len (int, optional): Length of the history sequence. Default is 2.
-            forecast_len (int, optional): Length of the forecast sequence. Default is 0.
-            transform (callable, optional): Transformation function to apply to the data.
-            seed (int, optional): Random seed for reproducibility. Default is 42.
-            skip_periods (int, optional): Number of periods to skip between samples.
-            one_shot(bool, optional): Whether to return all states or just
-                the final state of the training target. Default is None
-            max_forecast_len (int, optional): Maximum length of the forecast sequence.
-            shuffle (bool, optional): Whether to shuffle the data. Default is True.
+        Parameters:
+        - varname_upper_air (list): List of upper air variable names.
+        - varname_surface (list): List of surface variable names.
+        - varname_dyn_forcing (list): List of dynamic forcing variable names.
+        - varname_forcing (list): List of forcing variable names.
+        - varname_static (list): List of static variable names.
+        - varname_diagnostic (list): List of diagnostic variable names.
+        - filenames (list): List of filenames for upper air data.
+        - filename_surface (list, optional): List of filenames for surface data.
+        - filename_dyn_forcing (list, optional): List of filenames for dynamic forcing data.
+        - filename_forcing (str, optional): Filename for forcing data.
+        - filename_static (str, optional): Filename for static data.
+        - filename_diagnostic (list, optional): List of filenames for diagnostic data.
+        - history_len (int, optional): Length of the history sequence. Default is 2.
+        - forecast_len (int, optional): Length of the forecast sequence. Default is 0.
+        - transform (callable, optional): Transformation function to apply to the data.
+        - seed (int, optional): Random seed for reproducibility. Default is 42.
+        - skip_periods (int, optional): Number of periods to skip between samples.
+        - one_shot(bool, optional): Whether to return all states or just
+                                    the final state of the training target. Default is None
+        - max_forecast_len (int, optional): Maximum length of the forecast sequence.
+        - shuffle (bool, optional): Whether to shuffle the data. Default is True.
 
         Returns:
-            sample (dict): A dictionary containing historical_ERA5_images,
+        - sample (dict): A dictionary containing historical_ERA5_images,
                                                  target_ERA5_images,
                                                  datetime index, and additional information.
-
         """
+
         self.history_len = history_len
         self.forecast_len = forecast_len
         self.transform = transform
@@ -921,9 +866,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         if self.filename_forcing is not None:
             # drop variables if they are not in the config
             ds = get_forward_data(filename_forcing)
-            ds_forcing = drop_var_from_dataset(
-                ds, varname_forcing
-            ).load()  # <---- load in static
+            ds_forcing = drop_var_from_dataset(ds, varname_forcing).load()  # <---- load in static
 
             self.xarray_forcing = ds_forcing
         else:
@@ -936,21 +879,17 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         if self.filename_static is not None:
             # drop variables if they are not in the config
             ds = get_forward_data(filename_static)
-            ds_static = drop_var_from_dataset(
-                ds, varname_static
-            ).load()  # <---- load in static
+            ds_static = drop_var_from_dataset(ds, varname_static).load()  # <---- load in static
 
             self.xarray_static = ds_static
         else:
             self.xarray_static = False
 
     def __post_init__(self):
-        """Calculate total sequence length."""
         # Total sequence length of each sample.
         self.total_seq_len = self.history_len + self.forecast_len
 
     def __len__(self):
-        """Length of dataset."""
         # compute the total number of length
         total_len = 0
         for ERA5_xarray in self.all_files:
@@ -958,15 +897,6 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         return total_len
 
     def __getitem__(self, index):
-        """Get item.
-
-        Args:
-            index: index of timestep
-
-        Returns:
-            pytorch Tensor containing a full state.
-
-        """
         # ========================================================================== #
         # cross-year indices --> the index of the year + indices within that year
 
@@ -978,9 +908,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         ind_start_in_file = index - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(self.all_files[int(ind_file)]["time"]) - (
-            self.history_len + self.forecast_len + 1
-        )
+        ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
 
@@ -1004,9 +932,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
             )  # .load() NOT load into memory
 
             ## merge upper-air and surface here:
-            ERA5_subset = ERA5_subset.merge(
-                surface_subset
-            )  # <-- lazy merge, ERA5 and surface both not loaded
+            ERA5_subset = ERA5_subset.merge(surface_subset)  # <-- lazy merge, ERA5 and surface both not loaded
 
         # ==================================================== #
         # split ERA5_subset into training inputs and targets
@@ -1044,17 +970,11 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
             # ------------------------------------------------------------------------------- #
             # matching month, day, hour between forcing and upper air [time]
             # this approach handles leap year forcing file and non-leap-year upper air file
-            month_day_forcing = extract_month_day_hour(
-                np.array(self.xarray_forcing["time"])
-            )
-            month_day_inputs = extract_month_day_hour(
-                np.array(historical_ERA5_images["time"])
-            )  # <-- upper air
+            month_day_forcing = extract_month_day_hour(np.array(self.xarray_forcing["time"]))
+            month_day_inputs = extract_month_day_hour(np.array(historical_ERA5_images["time"]))  # <-- upper air
             # indices to subset
             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
-            forcing_subset_input = self.xarray_forcing.isel(
-                time=ind_forcing
-            )  # .load() # <-- loadded in init
+            forcing_subset_input = self.xarray_forcing.isel(time=ind_forcing)  # .load() # <-- loadded in init
             # forcing and upper air have different years but the same mon/day/hour
             # safely replace forcing time with upper air time
             forcing_subset_input["time"] = historical_ERA5_images["time"]
@@ -1068,13 +988,9 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         if self.xarray_static:
             # expand static var on time dim
             N_time_dims = len(ERA5_subset["time"])
-            static_subset_input = self.xarray_static.expand_dims(
-                dim={"time": N_time_dims}
-            )
+            static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
             # assign coords 'time'
-            static_subset_input = static_subset_input.assign_coords(
-                {"time": ERA5_subset["time"]}
-            )
+            static_subset_input = static_subset_input.assign_coords({"time": ERA5_subset["time"]})
 
             # slice + load to the GPU
             static_subset_input = static_subset_input.isel(
@@ -1093,9 +1009,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
 
         if self.one_shot is not None:
             # one_shot is True (on), go straight to the last element
-            target_ERA5_images = ERA5_subset.isel(
-                time=slice(-1, None)
-            ).load()  # <-- load into memory
+            target_ERA5_images = ERA5_subset.isel(time=slice(-1, None)).load()  # <-- load into memory
 
             ## merge diagnoisc input here:
             if self.diagnostic_files:
@@ -1103,9 +1017,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
                     time=slice(ind_start_in_file, ind_end_in_file + 1)
                 )
 
-                diagnostic_subset = diagnostic_subset.isel(
-                    time=slice(-1, None)
-                ).load()  # <-- load into memory
+                diagnostic_subset = diagnostic_subset.isel(time=slice(-1, None)).load()  # <-- load into memory
 
                 target_ERA5_images = target_ERA5_images.merge(diagnostic_subset)
 
@@ -1150,9 +1062,9 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
 
             # for multi-input cases, use time=-1 ocean SKT for all times
             if self.history_len > 1:
-                input_skt[: self.history_len - 1] = input_skt[
-                    : self.history_len - 1
-                ].where(~ocean_mask_bool, input_skt.isel(time=-1))
+                input_skt[: self.history_len - 1] = input_skt[: self.history_len - 1].where(
+                    ~ocean_mask_bool, input_skt.isel(time=-1)
+                )
 
             # for target skt, replace ocean values using time=-1 input SKT
             target_skt = target_skt.where(~ocean_mask_bool, input_skt.isel(time=-1))
@@ -1181,7 +1093,9 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
 
 
 class Predict_Dataset(torch.utils.data.IterableDataset):
-    """Same as ERA5_and_Forcing_Dataset() but work with old rollout_to_netcdf.py."""
+    """
+    Same as ERA5_and_Forcing_Dataset() but work with rollout_to_netcdf_new.py
+    """
 
     def __init__(
         self,
@@ -1206,38 +1120,8 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         rollout_p=0.0,
         which_forecast=None,
     ):
-        """Normalize via quantile bridgescaler.
+        # ------------------------------------------------------------------------------ #
 
-        Normalize via provided scaler file/s.
-
-        Args:
-            conf (str): path to config file.
-            varname_upper_air (list): list of upper air variables.
-            varname_surface (list): list of surface variables.
-            varname_dyn_forcing (list): list of dynamic forcing variables.
-            varname_forcing (list): list of forcing variables.
-            varname_static (list): list of static variables.
-            varname_diagnostic (list): list of diagnostic variables.
-            filenames (str): path to upper air variables file.
-            filename_surface (str): path surface variables file.
-            filename_dyn_forcing (str): path to dynamic forcing variables file.
-            filename_forcing (str): path to forcing variables file.
-            filename_static (str): path to static variables file.
-            filename_diagnostic (str): path to diagnostic variables file.
-            fcst_datetime (str): initial dates for forecasts.
-            hist_len (bool): state-in-state-out.
-            rank (int): Which MPI worker is being used.
-            world_size (int): Number of MPI ranks (processes).
-            transform (function): Function used to normalize and convert to tensors.
-            rollout_p (): Probability of a rollout.
-            which_forecast ():
-
-        Attributes:
-            current_epoch (int): current epoch.
-            lead_time_periods (): .
-            skip_periods (): .
-
-        """
         ## no diagnostics because they are output only
         # varname_diagnostic = None
 
@@ -1247,9 +1131,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         self.history_len = history_len
         self.init_datetime = fcst_datetime
 
-        self.which_forecast = (
-            which_forecast  # <-- got from the old roll-out script. Dont know
-        )
+        self.which_forecast = which_forecast  # <-- got from the old roll-out script. Dont know
 
         # -------------------------------------- #
         # file names
@@ -1275,9 +1157,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         for fn in self.filenames:
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename=fn)
-            xarray_dataset = drop_var_from_dataset(
-                xarray_dataset, self.varname_upper_air
-            )
+            xarray_dataset = drop_var_from_dataset(xarray_dataset, self.varname_upper_air)
             # collect yearly datasets within a list
             all_files.append(xarray_dataset)
         self.all_files = all_files
@@ -1292,40 +1172,17 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         self.skip_periods = conf["data"]["skip_periods"]
 
     def ds_read_and_subset(self, filename, time_start, time_end, varnames):
-        """Read and subset specified dataset.
-
-        Args:
-            filename (str): path to specified dataset file.
-            time_start (int): start time index.
-            time_end (int): end time index.
-            varnames (list): List of variables to be read.
-
-        """
         sliced_x = get_forward_data(filename)
         sliced_x = sliced_x.isel(time=slice(time_start, time_end))
         sliced_x = drop_var_from_dataset(sliced_x, varnames)
         return sliced_x
 
     def load_zarr_as_input(self, i_file, i_init_start, i_init_end, mode="input"):
-        """Load input data from zarr files.
-
-        Args:
-            i_file: index of the file
-            i_init_start: start index of the data being loaded
-            i_init_end: end index of the data being loaded.
-            mode: "input" or "target"
-
-        Returns:
-            xr.Dataset containing all the variables.
-
-        """
         # get the needed file from a list of zarr files
         # open the zarr file as xr.dataset and subset based on the needed time
 
         # sliced_x: the final output, starts with an upper air xr.dataset
-        sliced_x = self.ds_read_and_subset(
-            self.filenames[i_file], i_init_start, i_init_end + 1, self.varname_upper_air
-        )
+        sliced_x = self.ds_read_and_subset(self.filenames[i_file], i_init_start, i_init_end + 1, self.varname_upper_air)
         # surface variables
         if self.filename_surface is not None:
             sliced_surface = self.ds_read_and_subset(
@@ -1354,22 +1211,16 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
             # forcing / static
             if self.filename_forcing is not None:
                 sliced_forcing = get_forward_data(self.filename_forcing)
-                sliced_forcing = drop_var_from_dataset(
-                    sliced_forcing, self.varname_forcing
-                )
+                sliced_forcing = drop_var_from_dataset(sliced_forcing, self.varname_forcing)
 
                 # See also `ERA5_and_Forcing_Dataset`
                 # =============================================================================== #
                 # matching month, day, hour between forcing and upper air [time]
                 # this approach handles leap year forcing file and non-leap-year upper air file
-                month_day_forcing = extract_month_day_hour(
-                    np.array(sliced_forcing["time"])
-                )
+                month_day_forcing = extract_month_day_hour(np.array(sliced_forcing["time"]))
                 month_day_inputs = extract_month_day_hour(np.array(sliced_x["time"]))
                 # indices to subset
-                ind_forcing, _ = find_common_indices(
-                    month_day_forcing, month_day_inputs
-                )
+                ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
                 sliced_forcing = sliced_forcing.isel(time=ind_forcing)
                 # forcing and upper air have different years but the same mon/day/hour
                 # safely replace forcing time with upper air time
@@ -1381,12 +1232,8 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
 
             if self.filename_static is not None:
                 sliced_static = get_forward_data(self.filename_static)
-                sliced_static = drop_var_from_dataset(
-                    sliced_static, self.varname_static
-                )
-                sliced_static = sliced_static.expand_dims(
-                    dim={"time": len(sliced_x["time"])}
-                )
+                sliced_static = drop_var_from_dataset(sliced_static, self.varname_static)
+                sliced_static = sliced_static.expand_dims(dim={"time": len(sliced_x["time"])})
                 sliced_static["time"] = sliced_x["time"]
                 # merge static to sliced_x
                 sliced_x = sliced_x.merge(sliced_static)
@@ -1407,18 +1254,10 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         return sliced_x
 
     def find_start_stop_indices(self, index):
-        """Find start and stop indices for a given yearly data zarr file.
-
-        Args:
-            index: indices of zarr file.
-
-        """
         # ============================================================================ #
         # shift hours for history_len > 1, becuase more than one init times are needed
         # <--- !! it MAY NOT work when self.skip_period != 1
-        shifted_hours = (
-            self.lead_time_periods * self.skip_periods * (self.history_len - 1)
-        )
+        shifted_hours = self.lead_time_periods * self.skip_periods * (self.history_len - 1)
         # ============================================================================ #
         # subtrack shifted_hour form the 1st & last init times
         # convert to datetime object
@@ -1436,29 +1275,20 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
             self.lead_time_periods,
         )
         # convert datetime obj to nanosecondes
-        init_time_list_dt = [
-            np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S"))
-            for date in self.init_datetime[index]
-        ]
+        init_time_list_dt = [np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S")) for date in self.init_datetime[index]]
 
         # init_time_list_np: a list of python datetime objects, each is a forecast step
         # init_time_list_np[0]: the first initialization time
         # init_time_list_np[t]: the forcasted time of the (t-1)th step; the initialization time of the t-th step
         self.init_time_list_np = [
-            np.datetime64(str(dt_obj) + ".000000000").astype(datetime.datetime)
-            for dt_obj in init_time_list_dt
+            np.datetime64(str(dt_obj) + ".000000000").astype(datetime.datetime) for dt_obj in init_time_list_dt
         ]
 
         info = []
         for init_time in self.init_time_list_np:
             for i_file, ds in enumerate(self.all_files):
                 # get the year of the current file
-                #print('Check time values, data.py:' ,ds["time"][0].values)
-                #print('Check time values, data.py:' ,ds["time"][0].values.dtype)
-
-                time_value = ensure_numpy_datetime(ds["time"][0].values)
-                
-                ds_year = int(np.datetime_as_string(time_value, unit="Y"))
+                ds_year = int(np.datetime_as_string(ds["time"][0].values, unit="Y"))
 
                 # get the first and last years of init times
                 init_year0 = nanoseconds_to_year(init_time)
@@ -1466,30 +1296,19 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                 # found the right yearly file
                 if init_year0 == ds_year:
                     N_times = len(ds["time"])
-
-                    # convert ds['time'] to a list of nanoseconds
-                    ds_time_list = [
-                        np.datetime64(ensure_numpy_datetime(ds_time.values)).astype('datetime64[ns]').astype(int)
-                        for ds_time in ds["time"]
-                    ]
-
+                    # convert ds['time'] to a list of nanosecondes
+                    ds_time_list = [np.datetime64(ds_time.values).astype(datetime.datetime) for ds_time in ds["time"]]
                     ds_start_time = ds_time_list[0]
                     ds_end_time = ds_time_list[-1]
 
                     init_time_start = init_time
                     # if initalization time is within this (yearly) xr.Dataset
-                    #print('Check time values, data.py: start time',ds_start_time)
-                    #print('Check time values, data.py: end time' ,ds_end_time)
-                    #print('Check time values, data.py: init time' , init_time_start)
-                    
                     if ds_start_time <= init_time_start <= ds_end_time:
                         # try getting the index of the first initalization time
                         i_init_start = ds_time_list.index(init_time_start)
 
                         # for multiple init time inputs (history_len > 1), init_end is different for init_start
-                        init_time_end = init_time_start + hour_to_nanoseconds(
-                            shifted_hours
-                        )
+                        init_time_end = init_time_start + hour_to_nanoseconds(shifted_hours)
 
                         # see if init_time_end is alos in this file
                         if ds_start_time <= init_time_end <= ds_end_time:
@@ -1505,11 +1324,9 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         return info
 
     def __len__(self):
-        """Length of dataset."""
         return len(self.init_datetime)
 
     def __iter__(self):
-        """Iterate through batch."""
         worker_info = get_worker_info()
         num_workers = worker_info.num_workers if worker_info is not None else 1
         worker_id = worker_info.id if worker_info is not None else 0
@@ -1531,55 +1348,33 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                 output_dict = {}
 
                 # get all inputs in one xr.Dataset
-                sliced_x = self.load_zarr_as_input(
-                    i_file, i_init_start, i_init_end, mode="input"
-                )
+                sliced_x = self.load_zarr_as_input(i_file, i_init_start, i_init_end, mode="input")
 
                 # Check if additional data from the next file is needed
-                if (len(sliced_x["time"]) < self.history_len) or (
-                    i_init_end + 1 >= N_times
-                ):
+                if (len(sliced_x["time"]) < self.history_len) or (i_init_end + 1 >= N_times):
                     # Load excess data from the next file
                     next_file_idx = self.filenames.index(self.filenames[i_file]) + 1
 
                     if next_file_idx >= len(self.filenames):
                         # not enough input data to support this forecast
-                        raise OSError(
-                            "You have reached the end of the available data. Exiting."
-                        )
+                        raise OSError("You have reached the end of the available data. Exiting.")
 
                     else:
-                        sliced_y = self.load_zarr_as_input(
-                            i_file, i_init_end, i_init_end, mode="target"
-                        )
+                        sliced_y = self.load_zarr_as_input(i_file, i_init_end, i_init_end, mode="target")
 
                         # i_init_start = 0 because we need the beginning of the next file only
-                        sliced_x_next = self.load_zarr_as_input(
-                            next_file_idx, 0, self.history_len, mode="input"
-                        )
-                        sliced_y_next = self.load_zarr_as_input(
-                            next_file_idx, 0, 1, mode="target"
-                        )
+                        sliced_x_next = self.load_zarr_as_input(next_file_idx, 0, self.history_len, mode="input")
+                        sliced_y_next = self.load_zarr_as_input(next_file_idx, 0, 1, mode="target")
                         # 1 becuase taregt is one step a time
 
                         # Concatenate excess data from the next file with the current data
-                        sliced_x_combine = xr.concat(
-                            [sliced_x, sliced_x_next], dim="time"
-                        )
-                        sliced_y_combine = xr.concat(
-                            [sliced_y, sliced_y_next], dim="time"
-                        )
+                        sliced_x_combine = xr.concat([sliced_x, sliced_x_next], dim="time")
+                        sliced_y_combine = xr.concat([sliced_y, sliced_y_next], dim="time")
 
-                        sliced_x = sliced_x_combine.isel(
-                            time=slice(0, self.history_len)
-                        )
-                        sliced_y = sliced_y_combine.isel(
-                            time=slice(self.history_len, self.history_len + 1)
-                        )
+                        sliced_x = sliced_x_combine.isel(time=slice(0, self.history_len))
+                        sliced_y = sliced_y_combine.isel(time=slice(self.history_len, self.history_len + 1))
                 else:
-                    sliced_y = self.load_zarr_as_input(
-                        i_file, i_init_end + 1, i_init_end + 1, mode="target"
-                    )
+                    sliced_y = self.load_zarr_as_input(i_file, i_init_end + 1, i_init_end + 1, mode="target")
 
                 sample_x = {
                     "historical_ERA5_images": sliced_x,
@@ -1596,9 +1391,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                 output_dict["forecast_hour"] = k + 1
                 # Adjust stopping condition
                 output_dict["stop_forecast"] = k == (len(self.init_time_list_np) - 1)
-                output_dict["datetime"] = sliced_x.time.values.astype(
-                    "datetime64[s]"
-                ).astype(int)[-1]
+                output_dict["datetime"] = sliced_x.time.values.astype("datetime64[s]").astype(int)[-1]
 
                 # return output_dict
                 yield output_dict

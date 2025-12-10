@@ -1,5 +1,6 @@
 # ---------- #
 # System
+import gc
 import logging
 import multiprocessing as mp
 import os
@@ -20,7 +21,6 @@ import pandas as pd
 import torch
 import xarray as xr
 import yaml
-
 # ---------- #
 # credit
 from credit.data import concat_and_reshape, reshape_only
@@ -61,7 +61,7 @@ def compute_metrics(metrics, y_pred, y, date_time, forecast_step, utc_datetime):
 def predict(rank, world_size, conf, backend=None, p=None):
     # setup rank and world size for GPU-based rollout
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
-        setup(rank, world_size, conf["predict"]["mode"], backend)
+        setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     # infer device id from rank
     if torch.cuda.is_available():
@@ -149,7 +149,6 @@ def predict(rank, world_size, conf, backend=None, p=None):
             f'Number of forecast inits ({len(forecasts)}) given by conf["predict"]["duration"] x len(conf["predict"]["start_hours"]) should be divisible by number of processes/GPUs ({world_size})'
         )
 
-    data_config = setup_data_loading(conf)
     dataset = Predict_Dataset_Batcher(
         varname_upper_air=data_config["varname_upper_air"],
         varname_surface=data_config["varname_surface"],
@@ -189,18 +188,11 @@ def predict(rank, world_size, conf, backend=None, p=None):
         # if conf["trainer"].get("compile", False):
         #     model = torch.compile(model)
         model = distributed_model_wrapper(conf, model, device)
-
-        save_loc = os.path.expandvars(conf["save_loc"])
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-        if conf["predict"]["mode"] in ["ddp", "fsdp"]:
-            load_msg = model.module.load_state_dict(
-                checkpoint["model_state_dict"], strict=False
-            )
-        else:
-            load_msg = model.load_state_dict(
-                checkpoint["model_state_dict"], strict=False
-            )
+        load_msg = model.module.load_state_dict(
+            checkpoint["model_state_dict"], strict=False
+        )
         load_state_dict_error_handler(load_msg)
 
     elif conf["predict"]["mode"] == "fsdp":
@@ -293,7 +285,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             if flag_clamp:
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-            y_pred = model(x.float())
+            y_pred = model(x)
 
             # Post-processing blocks
             if flag_mass_conserve:
@@ -381,6 +373,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
+            torch.cuda.empty_cache()
+            gc.collect()
+
             if batch["stop_forecast"].item():
                 # Wait for processes to finish and collect metrics
                 for batch_idx, result in results:
@@ -401,6 +396,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 # Clear everything
                 results = []
                 y_pred = None
+                gc.collect()
 
                 forecast_count += batch_size
 
@@ -410,7 +406,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
     return 1
 
 
-def main():
+if __name__ == "__main__":
     description = "Rollout AI-NWP forecasts"
     parser = ArgumentParser(description=description)
     parser.add_argument(
@@ -487,11 +483,11 @@ def main():
     config = args_dict.pop("model_config")
     launch = int(args_dict.pop("launch"))
     mode = str(args_dict.pop("mode"))
-    # no_data = 0 if "no-data" not in args_dict else int(args_dict.pop("no-data"))
+    no_data = 0 if "no-data" not in args_dict else int(args_dict.pop("no-data"))
     subset = int(args_dict.pop("subset"))
     number_of_subsets = int(args_dict.pop("no_subset"))
     num_cpus = int(args_dict.pop("num_cpus"))
-    # backend = args_dict.pop("backend")
+    backend = args_dict.pop("backend")
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -512,11 +508,12 @@ def main():
         conf, parse_training=False, parse_predict=True, print_summary=False
     )
     predict_data_check(conf, print_summary=False)
+    data_config = setup_data_loading(conf)
 
     # create a save location for rollout
-    assert (
-        "save_forecast" in conf["predict"]
-    ), "Please specify the output dir through conf['predict']['save_forecast']"
+    assert "save_forecast" in conf["predict"], (
+        "Please specify the output dir through conf['predict']['save_forecast']"
+    )
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
@@ -562,7 +559,7 @@ def main():
 
     with mp.Pool(num_cpus) as p:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:  # multi-gpu inference
-            local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
+            local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
             _ = predict(world_rank, world_size, conf, p=p)
         else:  # single device inference
             _ = predict(0, 1, conf, p=p)
@@ -570,7 +567,3 @@ def main():
     # Ensure all processes are finished
     p.close()
     p.join()
-
-
-if __name__ == "__main__":
-    main()

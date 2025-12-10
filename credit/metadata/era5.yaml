@@ -32,57 +32,36 @@ SP:
     standard_name: "surface_air_pressure"
     short_name: "sp"
     units: "Pa"
+    original_format: "WMO GRIB 1"
     _FillValue: 9.999e+20
-
-mean_sea_level_pressure:
-    long_name: "mean sea level pressure"
-    standard_name: "air_pressure_at_mean_sea_level"
-    short_name: "mslp"
-    units: "Pa"
-    _FillValue: 9.999e+20
-
+    
 time:
     long_name: "time"
     units: "hours since 1900-01-01 00:00:00"
     calendar: "gregorian"
-    axis: "T"
     
 Z:
-    long_name: "Geopotential"
+    long_name: "Geopotential (at the surface)"
     short_name: "z"
-    standard_name: "geopotential"
+    standard_name: "surface_geopotential"
     units: "m**2 s**-2"
-    _FillValue: 9.999e+20
-
-P:
-    long_name: "pressure"
-    short_name: "p"
-    standard_name: "pressure"
-    units: "Pa"
+    original_format: "WMO GRIB 1 with ECMWF local table"
     _FillValue: 9.999e+20
     
 latitude:
     long_name: "latitude"
     short_name: "lat"
-    units: "degree_north"
+    units: "degrees_north"
     qualifier: "Gaussian"
-    axis: "Y"
-
+    
 longitude:
     long_name: "longitude"
     short_name: "lon"
-    units: "degree_east"
+    units: "degrees_east"
     qualifier: "Gaussian"
-    axis: "X"
-
-pressure:
-    long_name: "pressure"
-    short_name: "pres"
-    units: "hPa"
-    axis: "Z"
     
 t2m:
-    long_name: "2 meter temperature"
+    long_name: "2 metre temperature"
     short_name: "2t"
     standard_name: "air_temperature"
     units: "K"

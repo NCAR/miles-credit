@@ -1,4 +1,4 @@
-# Installing CREDIT from source
+# Installing CREDIT from Scratch
 
 If you want to take advantage of the full power of CREDIT,
 which includes scaling training across multiple nodes, you 
@@ -17,7 +17,7 @@ Mac or Linux laptop.
 ### MacOS (Intel or ARM)
 1. First, install either the [Homebrew](https://brew.sh/) or [MacPorts](https://www.macports.org/) package managers 
 so you can easily install all the system-level dependencies and other helpful Linux programs like wget, gcc, etc.
-Further instructions will assume the use of Homebrew, but should also work for MacPorts. Homebrew
+Further instructions will assume the use of homebrew, but should also work for MacPorts. Homebrew
 should also install the XCode Command Line tools, which include git and clang.
 2. Install the following programs with the `brew install <program>`
 command.
@@ -37,14 +37,6 @@ they are installed:
 [libfabric](https://github.com/ofiwg/libfabric) and the [aws-ofi-nccl](https://github.com/aws/aws-ofi-nccl) plugin
 to interface between libfabric and NCCL. If you do not compile PyTorch with Libfabric and aws-ofi-nccl, 
 we have found that inter-node communication speeds on Derecho and other HPE/Cray HPC systems are much slower.
-
-## NSF NCAR Derecho
-The NSF NCAR Derecho system has some special requirements in place to support Cray MPI and the Slingshot
-interconnect. Ben Kirk has created a special [makefile](https://github.com/benkirk/derecho-pytorch-mpi) to
-build PyTorch and Torchvision from source on Derecho with all appropriate environment variables and dependencies.
-Please follow instructions there if you wish to build your own version of PyTorch from source. Otherwise,
-built wheels of PyTorch 2.5.1 and Torchvision 0.20.1 are available on Derecho 
-at `/glade/work/dgagne/credit-pytorch-envs/derecho-pytorch-mpi/wheels/`. 
 
 ## PyTorch Python Dependencies
 1. Install a Python virtual environment manager. My preferred one for now is

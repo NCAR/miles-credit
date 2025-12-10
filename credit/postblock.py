@@ -7,12 +7,12 @@ Content:
     - GlobalMassFixer
     - GlobalWaterFixer
     - GlobalEnergyFixer
+    - SKEBS
 
 """
 
 import torch
 from torch import nn
-
 import numpy as np
 
 from credit.data import get_forward_data
@@ -25,12 +25,9 @@ from credit.physics_constants import (
     CP_DRY,
     CP_VAPOR,
 )
-from credit.skebs import SKEBS
 
 import logging
-from math import pi
 
-PI = pi
 logger = logging.getLogger(__name__)
 
 
@@ -513,7 +510,7 @@ class GlobalWaterFixer(nn.Module):
         self.precip_ind = int(post_conf["global_water_fixer"]["precip_ind"])
         self.evapor_ind = int(post_conf["global_water_fixer"]["evapor_ind"])
         if self.flag_sigma_level:
-            self.sp_ind = int(post_conf["global_water_fixer"]["sp_inds"])
+            self.sp_ind = int(post_conf["global_mass_fixer"]["sp_inds"])
         # ------------------------------------------------------------------------------------ #
         # setup a scaler
         if post_conf["global_water_fixer"]["denorm"]:
@@ -738,7 +735,7 @@ class GlobalEnergyFixer(nn.Module):
         self.surf_LH_ind = int(post_conf["global_energy_fixer"]["surf_flux_inds"][1])
 
         if self.flag_sigma_level:
-            self.sp_ind = int(post_conf["global_energy_fixer"]["sp_inds"])
+            self.sp_ind = int(post_conf["global_mass_fixer"]["sp_inds"])
         # ------------------------------------------------------------------------------------ #
         # setup a scaler
         if post_conf["global_energy_fixer"]["denorm"]:
@@ -910,3 +907,37 @@ def concat_fix(y_pred, q_pred_correct, q_ind_start, q_ind_end, N_vars):
             var_list.append(y_pred[:, q_ind_end:, ...])
 
     return torch.cat(var_list, dim=1)
+
+
+class SKEBS(nn.Module):
+    """
+    post_conf: dictionary with config options for PostBlock.
+                if post_conf is not specified in config,
+                defaults are set in the parser
+
+    This class is currently a placeholder for SKEBS
+    """
+
+    def __init__(self, post_conf):
+        super().__init__()
+        self.image_width = post_conf["model"]["image_width"]
+        final_layer_size = self.image_width
+        self.additional_layer = nn.Linear(
+            final_layer_size, final_layer_size
+        )  # .to(self.device) # Example: another layer
+
+    def forward(self, x):
+        x = x["y_pred"]
+        return self.additional_layer(x)
+
+
+if __name__ == "__main__":
+    image_width = 100
+    conf = {"post_conf": {"use_skebs": True, "image_width": image_width}}
+
+    input_tensor = torch.randn(image_width)
+    postblock = PostBlock(**conf)
+    assert any([isinstance(module, SKEBS) for module in postblock.modules()])
+
+    y_pred = postblock(input_tensor)
+    print("Predicted shape:", y_pred.shape)

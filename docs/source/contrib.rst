@@ -141,6 +141,9 @@ Use the following commands to create a new conda environment to develop
     # Create a new conda environment
     conda create -c conda-forge -n credit python=3.11
 
+    # Use the environment file to populate the environment with the required dependencies
+    conda env update -f environment_gpu.yml
+
     # Activate your new environment
     conda activate credit
 
@@ -155,7 +158,7 @@ unique to the latest commit on your fork.
 
     >>> import credit
     >>> credit.__version__
-    '2025.2.0'
+    '2024.1.0'
 
 
 
@@ -312,6 +315,11 @@ through docstrings.
 
 ``miles-credit`` uses `Google
 <https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings>`__ style docstrings.
+
+To include your docstring documentation in the API reference, you will need to
+add it to either the ``docs/internal_api/index.rst`` or
+``docs/user_api/index.rst`` file, depending on whether the function is intended
+for internal or external use.
 
 Editing other documentation files
 ---------------------------------

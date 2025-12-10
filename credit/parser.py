@@ -345,13 +345,6 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         "global_water_fixer",
         "global_energy_fixer",
     ]
-
-    # if activate is false, set all post modules to false
-    if not conf["model"]["post_conf"]["activate"]:
-        for post_module in post_list:
-            conf["model"]["post_conf"][post_module] = {"activate": False}
-
-    # set defaults for post modules
     for post_module in post_list:
         conf["model"]["post_conf"].setdefault(post_module, {"activate": False})
 
@@ -366,7 +359,6 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         conf["model"]["post_conf"]["model"] = {k: v for k, v in conf["model"].items() if k != "post_conf"}
         # copy data configs to post_conf (for de-normalize variables)
         conf["model"]["post_conf"]["data"] = {k: v for k, v in conf["data"].items()}
-        conf["model"]["post_conf"].setdefault("grid", "legendre-gauss")
 
         # --------------------------------------------------------------------- #
         # get the full list of input / output variables for post_conf
@@ -406,46 +398,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # SKEBS
     if conf["model"]["post_conf"]["skebs"]["activate"]:
-        assert (
-            "freeze_base_model_weights" in conf["model"]["post_conf"]["skebs"]
-        ), "need to specify freeze_base_model_weights in skebs config"
-
-        assert (
-            conf["trainer"]["train_batch_size"] == conf["trainer"]["valid_batch_size"]
-        ), "train and valid batch sizes need to be the same for skebs"
-
-        # setup backscatter writing
-        conf["model"]["post_conf"]["predict"] = {k: v for k, v in conf["predict"].items()}
-
-        conf["model"]["post_conf"]["skebs"].setdefault("lmax", None)
-        conf["model"]["post_conf"]["skebs"].setdefault("mmax", None)
-
-        if conf["model"]["post_conf"]["skebs"]["lmax"] in ["none", "None"]:
-            conf["model"]["post_conf"]["skebs"]["lmax"] = None
-        if conf["model"]["post_conf"]["skebs"]["mmax"] in ["none", "None"]:
-            conf["model"]["post_conf"]["skebs"]["mmax"] = None
-
-        U_inds = [i_var for i_var, var in enumerate(varname_output) if var == "U"]
-
-        V_inds = [i_var for i_var, var in enumerate(varname_output) if var == "V"]
-        T_inds = [i_var for i_var, var in enumerate(varname_output) if var == "T"]
-        Q_inds = [i_var for i_var, var in enumerate(varname_output) if var in ["Q", "Qtot"]]
-
-        conf["model"]["post_conf"]["skebs"]["U_inds"] = U_inds
-        conf["model"]["post_conf"]["skebs"]["V_inds"] = V_inds
-        conf["model"]["post_conf"]["skebs"]["Q_inds"] = Q_inds
-        conf["model"]["post_conf"]["skebs"]["T_inds"] = T_inds
-
-        if "SP" in varname_output:
-            conf["model"]["post_conf"]["skebs"]["SP_ind"] = varname_output.index("SP")
-        else:
-            conf["model"]["post_conf"]["skebs"]["SP_ind"] = varname_output.index("PS")
-
-        static_inds = [i_var for i_var, var in enumerate(varname_input) if var in conf["data"]["static_variables"]]
-        conf["model"]["post_conf"]["skebs"]["static_inds"] = static_inds
-
-        ###### debug mode setup #######
-        conf["model"]["post_conf"]["skebs"]["save_loc"] = conf["save_loc"]
+        pass
 
     # --------------------------------------------------------------------- #
     # tracer fixer
@@ -478,7 +431,6 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # --------------------------------------------------------------------- #
     # global mass fixer
-
     flag_mass = conf["model"]["post_conf"]["activate"] and conf["model"]["post_conf"]["global_mass_fixer"]["activate"]
 
     if flag_mass:
@@ -692,7 +644,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
         if conf["trainer"]["ensemble_size"] > 1:
             assert (
-                conf["loss"]["training_loss"] in ["KCRPS", "almost-fair-crps"]
+                conf["loss"]["training_loss"] in ["KCRPS"]
             ), f"""{conf["loss"]["training_loss"]} loss incompatible with ensemble training. ensemble_size is {conf["trainer"]["ensemble_size"]}"""
 
         if "load_scaler" not in conf["trainer"]:

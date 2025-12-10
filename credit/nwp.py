@@ -179,6 +179,7 @@ def load_gfs_data(full_file_path, variables, pool=None):
     # ds = ds[sub_variables].rename({"grid_xt": "longitude", "grid_yt": "latitude"}).load()
     var_ds_list = pool.map(load_vars, sub_variables)
     full_ds = xr.merge(var_ds_list)
+    print(full_ds.dims)
     full_ds = full_ds.rename({"grid_xt": "longitude", "grid_yt": "latitude"})
     full_ds.attrs = ds.attrs
     return full_ds

@@ -1,0 +1,20 @@
+credit_config: "/glade/work/cbecker/miles-credit/config/subseasonal_KJM_AIWQ_v2.yml" # path to CREDIT config file
+final_ic_path: "/glade/derecho/scratch/cbecker/CREDIT_runs_realtime/AIWQ_init/"  # path to initial conditions
+rollout_path: "/glade/derecho/scratch/cbecker/CREDIT_runs_realtime/AIWQ_rollout/" # path to model predictions
+
+### for gefs_init.py
+raw_GEFS_path: "/glade/derecho/scratch/cbecker/CREDIT_runs_realtime/GEFS/" # Raw GEFS data will be downloaded to
+processed_GEFS_path: "/glade/derecho/scratch/cbecker/CREDIT_runs_realtime/GEFS_CAM/" # Processed GEFS save path
+regrid_weight_path: "/glade/work/dgagne/camulator_gefs_weights.nc" # Path to ESMF_RegridWeightGen regrid weight file.
+n_members: 30 # number of GEFS members to use (max = 30)
+n_processors: 10 # number of processors to use
+meta_file: "/glade/u/home/dgagne/miles-credit/credit/metadata/cam.yaml" # Variable metadata file
+CAM_level_file: "/glade/u/home/dgagne/miles-credit/credit/metadata/CESM_Lev_Info.nc" # CAM vertical level file
+mapping_file: "/glade/u/home/dgagne/miles-credit/credit/metadata/gefs_to_cam.yml" # Variable mapping file
+variables: "ps,t,sphum,liq_wat,ice_wat,rainwat,snowwat,graupel,u_s,v_w,slmsk,tsea,fice,t2m,q2m"
+
+cesm_base_path: "/glade/derecho/scratch/cbecker/CREDIT_runs_realtime/cesm/S2Socnlndatm_MLdata/"
+dynamic_force_path: # might not need (should be final_ic_path/DATE/...)
+
+
+

@@ -17,7 +17,7 @@ from credit.interp import full_state_pressure_interpolation
 from inspect import signature
 
 logger = logging.getLogger(__name__)
-from credit.credit_ptype import CreditPostProcessor
+# from credit.credit_ptype import CreditPostProcessor
 
 def load_metadata(conf):
     """
@@ -146,6 +146,7 @@ def save_netcdf_increment(
     forecast_hour: int,
     meta_data: dict,
     conf: dict,
+    member: str,
 ):
     """
     Save CREDIT model prediction output to netCDF file. Also performs pressure level
@@ -167,16 +168,13 @@ def save_netcdf_increment(
         # Convert DataArrays to Datasets
         ds_upper = darray_upper_air.to_dataset(dim="vars")
         ds_single = darray_single_level.to_dataset(dim="vars")
-
         # Merge datasets
         ds_merged = xr.merge([ds_upper, ds_single])
-
         # Add forecast_hour coordinate
         ds_merged["forecast_hour"] = forecast_hour
 
         # Add CF convention version
         ds_merged.attrs["Conventions"] = "CF-1.11"
-
         sig = signature(full_state_pressure_interpolation)
         pres_end = sig.parameters["pres_ending"].default
         height_end = sig.parameters["height_ending"].default
@@ -194,10 +192,22 @@ def save_netcdf_increment(
 
             with xr.open_dataset(conf["predict"]["static_fields"]) as static_ds:
                 surface_geopotential = static_ds[surface_geopotential_var].values
+            # pressure_interp = full_state_pressure_interpolation(
+            #     ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"]
+            # )
             pressure_interp = full_state_pressure_interpolation(
-                ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"]
+                ds_merged, surface_geopotential,
+                pressure_levels=conf["predict"]["interp_pressure"]["pressure_levels"],
+                interp_fields= conf["predict"]["interp_pressure"]["interp_fields"],
+                q_var = conf["predict"]["interp_pressure"]["q_var"],
+                surface_pressure_var = conf["predict"]["interp_pressure"]["surface_pressure_var"],
+                model_level_file = conf["predict"]["interp_pressure"]["model_level_file"],
+                a_model_name = conf["predict"]["interp_pressure"]["a_model_name"],
+                b_model_name = conf["predict"]["interp_pressure"]["b_model_name"],
+                a_half_name = conf["predict"]["interp_pressure"]["a_half_name"],
+                b_half_name = conf["predict"]["interp_pressure"]["b_half_name"],
             )
-            
+
             # Do ptype here before merging!
             if conf['use_ptype']:
                 credit_processor = CreditPostProcessor()
@@ -229,14 +239,14 @@ def save_netcdf_increment(
                     
                 pressure_interp = xr.merge([pressure_interp, ptype_classification])
         
-        ds_merged = xr.merge([ds_merged, pressure_interp])
+            ds_merged = xr.merge([ds_merged, pressure_interp])
         logger.info(f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
 
         save_location = os.path.join(conf["predict"]["save_forecast"], nc_filename)
         os.makedirs(save_location, exist_ok=True)
 
         unique_filename = os.path.join(
-            save_location, f"pred_{nc_filename}_{forecast_hour:03d}.nc"
+            save_location, f"pred_{member}_{nc_filename}_{forecast_hour:03d}.nc"
         )
         # ---------------------------------------------------- #
         # If conf['predict']['save_vars'] provided --> drop useless vars
@@ -293,7 +303,8 @@ def save_netcdf_increment(
                     "height_var_encoding"
                 ]
         # Use Dask to write the dataset in parallel
-        ds_merged.to_netcdf(unique_filename, mode="w", encoding=encoding_dict)
+        ds_merged.to_netcdf(unique_filename, mode="w")
+        # ds_merged.to_netcdf(unique_filename, mode="w", encoding=encoding_dict)
 
         logger.info(f"Saved forecast hour {forecast_hour} to {unique_filename}")
     except Exception:

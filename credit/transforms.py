@@ -493,7 +493,6 @@ class Normalize_ERA5_and_Forcing:
                                 value[varname] = (
                                     value[varname] - self.mean_ds[varname]
                                 ) / self.std_ds[varname]
-
                         # put transformed xr.Dataset to the output dictionary
                         normalized_sample[key] = value
 

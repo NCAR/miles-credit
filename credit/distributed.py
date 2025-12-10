@@ -256,6 +256,7 @@ def distributed_model_wrapper(conf, neural_network, device):
             model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn
         )
 
+    # attempting to get around the launch issue we are having
     torch.distributed.barrier()
 
     return model

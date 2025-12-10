@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import Module, ModuleList
-from credit.models.crossformer import CrossFormer
+from credit.models.crossformer_camulator import CrossFormer
 from credit.diffusion import GaussianDiffusion
 from credit.diffusion import ModifiedGaussianDiffusion
 

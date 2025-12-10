@@ -116,6 +116,9 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
         for fn in self.filenames:
             # drop variables if they are not in the config
             ds = get_forward_data(filename=fn)
+            # print(fn)
+            # print("VARIABLES:", ds.data_vars)
+            # all_files[ds.data_vars["time"]] = ds
             ds_upper = keep_dataset_vars(ds, varname_upper_air)
             upper_init_time = pd.Timestamp(ds_upper["time"][0].values)
             if flag_share_surf:
@@ -139,6 +142,12 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
             self.xarray_static = static_dataset.load()
         else:
             self.xarray_static = None
+
+        dyn = self.dyn_forcing_files[self.forecast_times[0].year]
+        dyn.to_netcdf("/glade/derecho/scratch/cbecker/dyn_test.nc")
+        years = np.unique(dyn.time.dt.year)
+        for year in years:
+            self.dyn_forcing_files[year] = dyn.sel(time=str(year))
         return
 
     def __len__(self):
@@ -226,5 +235,5 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
             else:
                 batch[key] = torch.cat((batch[key], value), dim=0)
         batch["forecast_step"] = torch.tensor(idx + 1)
-        batch["stop_forecast"] = idx == (self.forecast_times.size - 1)
+        batch["stop_forecast"] = idx == (self.forecast_times.size - 2)
         return batch

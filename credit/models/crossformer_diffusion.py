@@ -4,7 +4,7 @@ from credit.diffusion import ModifiedGaussianDiffusion
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
 from credit.boundary_padding import TensorPadding
-from credit.models.crossformer import (
+from credit.models.crossformer_camulator import (
     Attention,
     FeedForward,
     CrossEmbedLayer,

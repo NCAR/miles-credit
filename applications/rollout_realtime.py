@@ -45,7 +45,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 
 def process_forecast(
-    conf, y_pred, forecast_step, forecast_count, datetimes, save_datetimes
+    conf, y_pred, forecast_step, forecast_count, datetimes, save_datetimes, member
 ):
     # Transform predictions
     try:
@@ -102,6 +102,7 @@ def process_forecast(
                 lead_time_periods * forecast_step,
                 meta_data,
                 conf,
+                member
             )
 
             print_str = f"Forecast: {forecast_count + 1 + j} "
@@ -113,10 +114,12 @@ def process_forecast(
         raise e
 
 
-def predict(rank, world_size, conf, p):
+def predict(rank, world_size, conf, p, member):
     # setup rank and world size for GPU-based rollout
-    if conf["predict"]["mode"] in ["fsdp", "ddp"]:
-        setup(rank, world_size, conf["predict"]["mode"])
+    if member == "001":
+
+        if conf["predict"]["mode"] in ["fsdp", "ddp"]:
+            setup(rank, world_size, conf["predict"]["mode"])
 
     # Set up dataloading
     data_config = setup_data_loading(conf)
@@ -141,7 +144,6 @@ def predict(rank, world_size, conf, p):
     ensemble_size = conf["predict"].get("ensemble_size", 1)
     if ensemble_size > 1:
         logger.info(f"Rolling out with ensemble size {ensemble_size}")
-    print(conf["predict"])
     # Set forecast window and time step
     forecast_start_time = conf["predict"]["realtime"]["forecast_start_time"]
     forecast_end_time = conf["predict"]["realtime"]["forecast_end_time"]
@@ -306,6 +308,10 @@ def predict(rank, world_size, conf, p):
             if flag_clamp:
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
+            # print(x.float().size, "NaNs Found: ", np.isnan(x.float()).sum())
+            # print(x.float().shape)
+            # np.save("/glade/derecho/scratch/cbecker/subCESMulator_array_input.npy", x.cpu().numpy())
+            # break
             # Model inference on the entire batch
             y_pred = model(x.float())
 
@@ -337,6 +343,7 @@ def predict(rank, world_size, conf, p):
                     forecast_count,
                     batch["datetime"],
                     save_datetimes,
+                    member
                 ),
             )
             results.append(result)
@@ -345,10 +352,11 @@ def predict(rank, world_size, conf, p):
             # use previous step y_pred as the next step input
             if history_len == 1:
                 # cut diagnostic vars from y_pred, they are not inputs
-                if "y_diag" in batch:
-                    x = y_pred[:, :-varnum_diag, ...].detach()
-                else:
-                    x = y_pred.detach()
+                # if "y_diag" in batch:
+                #     x = y_pred[:, :-varnum_diag, ...].detach()
+                # else:
+                #     x = y_pred.detach()
+                x = y_pred[:, :-varnum_diag, ...].detach()
 
             # multi-step in
             else:

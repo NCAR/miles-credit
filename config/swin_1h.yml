@@ -10,26 +10,19 @@ seed: 1000
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
-    
+    save_loc: '/glade/derecho/scratch/schreck/STAGING/TOTAL_*'
+
     # surface variables
-    surface_variables: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
+    surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
+    save_loc_surface: '/glade/derecho/scratch/schreck/STAGING/TOTAL_*'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_1h_0.25deg/*.nc'
     
     # static variables
     static_variables: ['Z_GDS4_SFC','LSM'] 
-    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
-    
-    # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
-    # regular z-score version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
-    # residual norm version
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
+    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT/static_norm_old.nc'
     
     # mean / std path
     mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT/ERA5_mean_1h.nc'
@@ -131,26 +124,9 @@ model:
     mlp_ratio: 4
     checkpoint_stages: false
     residual: false
+    pad_lat: 40
+    pad_lon: 40
     use_spectral_norm: true
-
-    # use interpolation to match the output size
-    interp: True
-    
-    # map boundary padding
-    padding_conf:
-        activate: True
-        mode: earth
-        pad_lat: 80
-        pad_lon: 80
-
-    post_conf: 
-        activate: True
-        
-        tracer_fixer:
-            activate: True
-            denorm: True
-            tracer_name: ['Q', 'Q500']
-            tracer_thres: [1e-8, 1e-8]
 
 loss: 
     # the main training loss

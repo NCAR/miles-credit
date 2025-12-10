@@ -4,17 +4,17 @@
 # The model is trained on hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask inputs
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/work/ksha/CREDIT_runs/fuxi_6h/'
+save_loc: '/glade/derecho/scratch/cbecker/CREDIT_runs/wxformer_6h/'
 seed: 1000
 
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/derecho/scratch/wchapman/SixHourly_y_TOTAL*'
+    save_loc: '/glade/derecho/scratch/wchapman/SixHourly_y_ONEdeg_*'
     
     # surface variables
     surface_variables: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/derecho/scratch/wchapman/SixHourly_y_TOTAL*'
+    save_loc_surface: '/glade/derecho/scratch/wchapman/SixHourly_y_ONEdeg_*'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']

@@ -1,8 +1,10 @@
 save_out_path: '/glade/derecho/scratch/cbecker/CREDIT/GFS_INIT_DATA/'
-init_time: "2025-03-25 0600"
-upper_air_variables: ['T', 'U', 'V', 'Q']
-surface_vaariables: ['SP', 't2m', 'Z500', 'T500','U500', 'V500', 'Q500']
-
+init_time: "2025-06-06 0600"
+#upper_air_variables: ['T', 'U', 'V', 'Q']
+upper_air_variables: []
+surface_variables: ['SP']
+level_meta: "/glade/work/cbecker/miles-credit/credit/metadata/ERA5_Lev_Info.nc"
+model_levels: "/glade/work/cbecker/miles-credit/credit/metadata/L137_model_level_indices.csv"
 
 
 

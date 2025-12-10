@@ -1,4 +1,4 @@
-from credit.models.crossformer import CrossFormer
+from credit.models.crossformer_camulator import CrossFormer
 import torch.nn.functional as F
 import torch.nn as nn
 import logging

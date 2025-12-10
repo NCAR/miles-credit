@@ -165,7 +165,6 @@ def setup_data_loading(conf):
                 for file in dyn_forcing_files
                 if any(year in file for year in valid_years)
             ]
-
             # ---------------------------- #
             # check total number of files
             assert (

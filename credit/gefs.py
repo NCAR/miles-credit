@@ -3,7 +3,8 @@ import numpy as np
 import gcsfs
 from tqdm import tqdm
 import pandas as pd
-from os.path import join
+from os.path import join, exists
+import os
 from scipy.sparse import csr_matrix
 import logging
 import yaml
@@ -22,11 +23,28 @@ def download_gefs_run(init_date_str, out_path, n_pert_members=30):
     logging.info(f"Downloading GEFS initialization for {init_date_str}")
     for member in tqdm(members):
         member_path = join(ens_path, member)
-        out_member_path = join(out_path, init_date_path, member)
+        out_member_path = join(out_path, init_date_path, member) + "/"
         if fs.exists(member_path):
-            fs.get(member_path, out_member_path, recursive=True)
+            member_files = fs.ls(member_path)
+            for member_file in member_files:
+                if not exists(join(out_member_path, member_file.split("/")[-1])):
+                    fs.get(member_file, out_member_path)
     return
 
+def download_single_gefs_run(init_date_str, out_path, member):
+
+    init_date = pd.Timestamp(init_date_str)
+    init_date_path = init_date.strftime("gefs.%Y%m%d/%H")
+    bucket = "gs://gfs-ensemble-forecast-system/"
+    ens_path = f"{bucket}{init_date_path}/atmos/init/"
+    member_path = join(ens_path, member)
+    fs = gcsfs.GCSFileSystem(token="anon")
+    out_member_path = join(out_path, init_date_path, member)
+    # if not exists(out_member_path):
+    #     os.makedirs(out_member_path)
+    print(f"Downloading GEFS for member {member} at path: {out_member_path}")
+    fs.get(member_path, out_member_path, recursive=True)
+    return
 
 def load_member_tiles(path: str, init_date_str: str, member: str, variables: str):
     num_tiles = 6
@@ -108,6 +126,7 @@ def load_member_tiles(path: str, init_date_str: str, member: str, variables: str
     ]
     select_ua_variables = np.intersect1d(all_ua_variables, variables)
     select_surface_variables = np.intersect1d(all_surface_variables, variables)
+
     for t in range(1, num_tiles + 1):
         tile_ua_file = join(out_member_path, f"gfs_data.tile{t:d}.nc")
         tile_sfc_file = join(out_member_path, f"sfc_data.tile{t:d}.nc")
@@ -131,9 +150,12 @@ def load_member_tiles(path: str, init_date_str: str, member: str, variables: str
                     .rename({"yaxis_1": "lat", "xaxis_1": "lon"})
                     .load()
                 )
-                if "smc" in select_surface_variables:
-                    # Only grab the topmost soil moisture value (0-10 cm) and multiply by 100 to convert to CLM kg m^2.
-                    member_tiles[-1]["smc"] = member_tiles[-1]["smc"][0] * 100
+
+        if "smc" in select_surface_variables:
+            # Only grab the topmost soil moisture value (0-10 cm) and multiply by 100 to convert to CLM kg m^2.
+            member_tiles[-1]["smc"] = member_tiles[-1]["smc"][0] * 100
+            # Mask out Ocean
+            member_tiles[-1]["smc"] = xr.where(member_tiles[-1]["smc"] > 99.9, x=0, y=member_tiles[-1]["smc"])
         else:
             raise ValueError("You did not request any valid GEFS variables.")
     return member_tiles
@@ -193,13 +215,21 @@ def regrid_member(member_tiles, regrid_weights_file):
         lon = regrid_ds["xc_b"].values.reshape(dst_dims)[0]
         lat = regrid_ds["yc_b"].values.reshape(dst_dims)[:, 0]
         lev = tiles_combined["lev"]
-        regrid_ds = xr.Dataset(coords=dict(lev=lev, lat=lat, lon=lon))
+        coord_dict = dict(lev=lev, lat=lat, lon=lon)
+        if "levp" in tiles_combined.dims:
+            levp = tiles_combined["levp"]
+            coord_dict["levp"] = levp
+            zh_var_dim = (tiles_combined["levp"].size, lat.size, lon.size)
+        else:
+            levp = None
+            zh_var_dim = None
+        regrid_ds = xr.Dataset(coords=coord_dict)
         ua_var_dim = (regrid_ds["lev"].size, regrid_ds["lat"].size, regrid_ds.lon.size)
         sfc_var_dim = (regrid_ds["lat"].size, regrid_ds["lon"].size)
         for variable in tiles_combined.data_vars:
             if "lev" in member_tiles[0][variable].dims:
                 regrid_ds[variable] = xr.DataArray(
-                    np.zeros(ua_var_dim, dtype=np.float32),
+                    np.zeros(ua_var_dim, dtype=np.float64),
                     coords=dict(lev=lev, lat=lat, lon=lon),
                     name=variable,
                 )
@@ -207,6 +237,24 @@ def regrid_member(member_tiles, regrid_weights_file):
                     regrid_ds[variable][lev_index] = (
                         regrid_weights @ tiles_combined[variable][lev_index].values
                     ).reshape(sfc_var_dim)
+            elif "levp" in member_tiles[0][variable].dims and levp is not None:
+                regrid_ds[variable] = xr.DataArray(
+                    np.zeros(zh_var_dim, dtype=np.float64),
+                    coords=dict(levp=levp, lat=lat, lon=lon),
+                    name=variable,
+                )
+                for lev_index in np.arange(tiles_combined["lev"].size):
+                    regrid_ds[variable][lev_index] = (
+                        regrid_weights @ tiles_combined[variable][lev_index].values
+                    ).reshape(sfc_var_dim)
+            elif variable == "ps":
+                regrid_ds[variable] = xr.DataArray(
+                    (
+                        np.exp(regrid_weights @ np.log(tiles_combined[variable].values))
+                    ).reshape(sfc_var_dim),
+                    coords=dict(lat=lat, lon=lon),
+                    name=variable,
+                )
             else:
                 regrid_ds[variable] = xr.DataArray(
                     (regrid_weights @ tiles_combined[variable].values).reshape(
@@ -343,6 +391,8 @@ def process_member(
     print(member + ": Regrid")
     regrid_ds = regrid_member(member_tiles, weight_file)
     regrid_ds = combine_microphysics_terms(regrid_ds)
+    # out_file = f"gefs_cam_grid_native_vert_{member}.nc"
+    # regrid_ds.to_netcdf(join(out_path, out_file))
     print(member + ": Interpolate vertical levels")
     interp_ds = interpolate_vertical_levels(
         regrid_ds, member_path, init_date_str, member, vertical_level_file

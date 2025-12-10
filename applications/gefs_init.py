@@ -1,6 +1,6 @@
 import argparse
 from multiprocessing import Pool
-from credit.gefs import download_gefs_run, process_member
+from credit.gefs import download_gefs_run, process_member, download_single_gefs_run
 from functools import partial
 from os.path import join, exists
 import pandas as pd
@@ -49,7 +49,7 @@ def main():
         "-v",
         "--variables",
         type=str,
-        default="ps,t,sphum,liq_wat,ice_wat,rainwat,snowwat,graupel,u_s,v_w,slmsk,tsea,fice,t2m,q2m",
+        default="ps,t,sphum,liq_wat,ice_wat,rainwat,snowwat,graupel,u_s,v_w,slmsk,tsea,fice,t2m,q2m,zh",
         help="Variables to use separated by commas.",
     )
     parser.add_argument(
@@ -85,27 +85,41 @@ def main():
     vertical_file = args.vertical
     meta_file = args.meta_file
     variables = args.variables.split(",")
-    download_gefs_run(init_date_str, download_path, n_pert_members)
+    # download_gefs_run(init_date_str, download_path, n_pert_members)
     member_names = ["c00"] + [f"p{m:02d}" for m in range(1, n_pert_members + 1)]
     init_date_path = init_date.strftime("gefs.%Y%m%d/%H")
     full_out_path = join(out_path, init_date_path)
-    if not exists(full_out_path):
-        os.makedirs(full_out_path)
+    # if not exists(full_out_path):
+    #     os.makedirs(full_out_path)
     with Pool(args.nprocs) as pool:
-        pool.map(
-            partial(
-                process_member,
-                member_path=download_path,
-                out_path=full_out_path,
-                init_date_str=init_date_str,
-                variables=variables,
-                weight_file=weight_file,
-                rename_dict_file=rename_dict_file,
-                meta_file=meta_file,
-                vertical_level_file=vertical_file,
-            ),
-            member_names,
-        )
+    # for init_date_str in pd.date_range("2022-05-20", "2022-05-31", freq="12h").strftime("%Y-%m-%dT%H00"):
+    #     print(f"Running for {init_date_str}")
+    #     init_date = pd.Timestamp(init_date_str)
+        init_date_path = init_date.strftime("gefs.%Y%m%d/%H")
+        full_out_path = join(out_path, init_date_path)
+        if not exists(full_out_path):
+            os.makedirs(full_out_path)
+            pool.map(
+                partial(download_single_gefs_run,
+                        init_date_str,
+                        download_path,
+                ),
+                member_names,
+            )
+            pool.map(
+                partial(
+                    process_member,
+                    member_path=download_path,
+                    out_path=full_out_path,
+                    init_date_str=init_date_str,
+                    variables=variables,
+                    weight_file=weight_file,
+                    rename_dict_file=rename_dict_file,
+                    meta_file=meta_file,
+                    vertical_level_file=vertical_file,
+                ),
+                member_names,
+            )
     return
 
 

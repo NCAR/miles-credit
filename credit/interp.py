@@ -32,6 +32,8 @@ def full_state_pressure_interpolation(
     a_half_name: str = "a_half",
     b_half_name: str = "b_half",
     P0: float = 1.0,
+    mslp_temp_height: float = 1000.0,
+    use_simple_mslp: bool = False,
 ) -> xr.Dataset:
     """Interpolate the full state of the model to pressure and height coordinates.
 
@@ -78,17 +80,25 @@ def full_state_pressure_interpolation(
         a_half_name (str): Name of A weight at level interfaces in sigma coordinate formula. 'a_half' by default.
         b_half_name (str): Name of B weight at level interfaces in sigma coordinate formula. 'b_half' by default.
         P0 (float): reference pressure if pressure needs to be scaled.
+        mslp_temp_height (float): height above ground level in meters where temperature is sampled for mslp calculation.
+        use_simple_mslp (bool): Whether to use the simple or complex MSLP calculation.
     Returns:
         pressure_ds (xr.Dataset): Dataset containing pressure interpolated variables.
 
     """
     path_to_file = os.path.abspath(os.path.dirname(__file__))
     model_level_file = os.path.join(path_to_file, model_level_file)
+    # print("MODEL_LEVEL FILE: {}".format(model_level_file))
     pressure_levels = np.array(pressure_levels)
+    # print("PRESSURE LEVELS:", pressure_levels)
+    # print("LEVEL VAR:", level_var)
     with xr.open_dataset(model_level_file) as mod_lev_ds:
-        valid_levels = np.isin(
-            mod_lev_ds[level_var].values, state_dataset[level_var].values
-        )
+        # print("MODEL LEVELS:" , mod_lev_ds[level_var].values)
+        # print("STATE LEVELS:", state_dataset[level_var].values)
+        # valid_levels = np.isin(
+        #     mod_lev_ds[level_var].values, state_dataset[level_var].values
+        # )
+        valid_levels = np.array([True]*32)
         if a_model_name == "hyam":
             a_model = mod_lev_ds[a_model_name].values[valid_levels] * P0
             a_half_full = mod_lev_ds[a_half_name].values * P0
@@ -179,7 +189,9 @@ def full_state_pressure_interpolation(
         pressure_grid, half_pressure_grid = create_reduced_pressure_grid(
             surface_pressure_data, a_model, b_model
         )
-
+        # print("PRESSURE GRID: ", pressure_grid)
+        # print("A MODEL:", a_model)
+        # print("B MODEL:", b_model)
         interp_full_data["P"], full_half_pressure_grid = create_pressure_grid(
             surface_pressure_data, a_half_full, b_half_full
         )
@@ -241,13 +253,23 @@ def full_state_pressure_interpolation(
                 interp_full_data[temperature_var],
             )
         )
-        pressure_ds["mean_sea_level_" + pres_var][t] = mean_sea_level_pressure(
-            state_dataset[surface_pressure_var][t].values,
-            interp_full_data[temperature_var],
-            interp_full_data["P"],
-            surface_geopotential,
-            geopotential_full_grid,
-        )
+        if use_simple_mslp:
+            pressure_ds["mean_sea_level_" + pres_var][t] = (
+                mean_sea_level_pressure_simple(
+                    state_dataset[surface_pressure_var][t].values,
+                    state_dataset[temperature_var][t].values,
+                    surface_geopotential,
+                )
+            )
+        else:
+            pressure_ds["mean_sea_level_" + pres_var][t] = mean_sea_level_pressure(
+                state_dataset[surface_pressure_var][t].values,
+                interp_full_data[temperature_var],
+                interp_full_data["P"],
+                surface_geopotential,
+                geopotential_full_grid,
+                temp_height=mslp_temp_height,
+            )
         if height_levels is not None:
             for interp_field in interp_full_data.keys():
                 height_var = interp_field + height_ending
@@ -455,6 +477,9 @@ def interp_hybrid_to_pressure_levels(
         pressure_var (np.ndarray): 3D field on pressure levels with shape (len(interp_pressures), y, x).
 
     """
+    # print("MODEL VAR:", model_var)
+    # print("MODEL PRESSURE:", model_pressure)
+    # print("INTERP_PRESSURES", interp_pressures)
     pressure_var = np.zeros(
         (interp_pressures.shape[0], model_var.shape[1], model_var.shape[2]),
         dtype=model_var.dtype,
@@ -788,10 +813,53 @@ def mean_sea_level_pressure(
             else:
                 gamma = LAPSE_RATE
                 if temp_surface_k < 255:
-                    temp_surface_k = 0.5 * (255.0 + temp_surface_k)
-            beta = surface_geopotential[i, j] / (RDGAS * temp_surface_k)
-            x = gamma * surface_geopotential[i, j] / (GRAVITY * temp_surface_k)
+                    temp_surface_k = 0.5 * (255 + temp_surface_k)
+            x = surface_geopotential[i, j] / (RDGAS * temp_surface_k)
             mslp[i, j] = surface_pressure_pa[i, j] * np.exp(
-                beta * (1.0 - x / 2.0 + x**2 / 3.0)
+                x * (1.0 - 0.5 * gamma * x + (gamma * x) ** 2 / 3.0)
+            )
+    return mslp
+
+
+def mean_sea_level_pressure_simple(
+    surface_pressure_pa, temperature_k, surface_geopotential
+):
+    """
+    Simpler calculation for mean sea level pressure that only requires 2D fields of pressure (Pa), temperature (K),
+    and surface geopotential (m ** 2 s ** -2).
+    Based on Trenberth et al. 1993 calculation but simplified by removing the T* calculation since it seemed to
+    only vary by about 0.2 K and requires a lot more data to compute.
+    Trenberth, K., J. Berry , and L. Buja, 1993: Vertical Interpolation and Truncation of Model-Coordinate,
+    University Corporation for Atmospheric Research, https://doi.org/10.5065/D6HX19NH.
+
+    Args:
+        surface_pressure_pa: surface pressure in Pascals
+        temperature_k: temperature in Kelvin
+        surface_geopotential: surface geopotential in m^2 s^-2. If you have surface height, multiply by g (9.81 m2s-2)
+
+    Returns:
+        mean sea level pressure in Pascals.
+    """
+    LAPSE_RATE = 0.0065  # K / m
+    ALPHA = LAPSE_RATE * RDGAS / GRAVITY
+    mslp = np.zeros(surface_pressure_pa.shape, dtype=surface_pressure_pa.dtype)
+    for (i, j), p in np.ndenumerate(mslp):
+        sgp = surface_geopotential[i, j]
+        if np.abs(sgp / GRAVITY) < 1e-4:
+            mslp[i, j] = surface_pressure_pa[i, j]
+        else:
+            temp = temperature_k[i, j]
+            tto = temp + LAPSE_RATE * sgp
+            alpha_local = ALPHA
+            if (temp <= 290.5) and (tto > 290.5):
+                alpha_local = RDGAS * (290.5 - temp) / sgp
+            elif temp > 290.5:
+                alpha_local = 0
+                temp = 0.5 * (290.5 + temp)
+            elif temp < 255:
+                temp = 0.5 * (255 + temp)
+            x = sgp / (RDGAS * temp)
+            mslp[i, j] = surface_pressure_pa[i, j] * np.exp(
+                x * (1 - 0.5 * alpha_local * x + 1 / 3.0 * (alpha_local * x) ** 2)
             )
     return mslp
