@@ -202,8 +202,8 @@ trainer:
 
     # define training and validation batch size
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 4
-    valid_batch_size: 8
+    train_batch_size: 16
+    valid_batch_size: 16
     ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
@@ -220,7 +220,7 @@ trainer:
     start_epoch: 0
     # the trainer will stop after iterating a given number of epochs
     # this works for any start_epoch and reload_epoch: True
-    num_epoch: 10
+    num_epoch: 5
     # epoch is saved in the checkpot.pt, this option reads the last epoch 
     # of the previous job and continue from there
     # useful for epoch-dependent schedulers
@@ -230,13 +230,13 @@ trainer:
     # reload_epoch: False
     # epochs: 20
 
-    use_scheduler: False
+    use_scheduler: True
     #scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
     scheduler:
       scheduler_type: cosine-annealing-restarts
       first_cycle_steps: 250
       cycle_mult: 6.0  # Multiplier for steps in subsequent cycles
-      max_lr: 1.0e-05
+      max_lr: 1.0e-03
       min_lr: 1.0e-08
       warmup_steps: 249
       gamma: 0.7  # LR reduction factor at each cycle restart
@@ -260,12 +260,12 @@ trainer:
     grad_max_norm: 'dynamic'
     
     # number of CPU workers used in datasets/dataloaders
-    thread_workers: 4
-    valid_thread_workers: 4
+    thread_workers: 20
+    valid_thread_workers: 1
 
     # Number of prefetch workers in the DataLoader
     # This only works with ERA5_MultiStep_Batcher or MultiprocessingBatcherPrefetch
-    prefetch_factor: 4
+    prefetch_factor: 2
   
 model:
     # NCAR WXFormer example
@@ -567,7 +567,7 @@ predict:
 
     # Set the batch_size for the prediction inference mode (default is 1)
     # this batches init_datetimes together so that we are fully utilizing the GPUs 
-    batch_size: 1
+    batch_size: 16
     # set the ensemble size for inference mode (default is 1 if not set)
     ensemble_size: &ensemble_size 5
 

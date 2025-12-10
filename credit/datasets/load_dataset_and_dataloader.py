@@ -8,7 +8,10 @@ from credit.datasets.era5_multistep_batcher import (
     MultiprocessingBatcher,
     MultiprocessingBatcherPrefetch,
 )
-from credit.datasets.om4_multistep_batcher import Ocean_MultiStep_Batcher, Ocean_Tensor_Batcher
+from credit.datasets.om4_multistep_batcher import (
+    Ocean_MultiStep_Batcher,
+    Ocean_Tensor_Batcher,
+)
 from credit.datasets.downscaling_dataset import DownscalingDataset
 from credit.datasets import setup_data_loading
 from torch.utils.data import DataLoader
@@ -200,7 +203,11 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     )
     batch_size = conf["trainer"][f"{training_type}_batch_size"]
     shuffle = is_train
-    num_workers = conf["trainer"]["thread_workers"] if is_train else conf["trainer"]["valid_thread_workers"]
+    num_workers = (
+        conf["trainer"]["thread_workers"]
+        if is_train
+        else conf["trainer"]["valid_thread_workers"]
+    )
     prefetch_factor = conf["trainer"].get(
         "prefetch_factor",
     )
@@ -421,7 +428,7 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     if dataset_type in ("Ocean_MultiStep_Batcher", "Ocean_Tensor_Batcher"):
         forecast_len_actual = conf["data"]["forecast_len"]
     else:
-        forecast_len_actual = data_config['forecast_len'] + 1
+        forecast_len_actual = data_config["forecast_len"] + 1
 
     if is_downscaling:
         logging.info("Loaded downscaling dataset")
@@ -468,7 +475,10 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
         )
     prefetch_factor = conf["trainer"].get("prefetch_factor")
     if prefetch_factor is None:
-        logging.warning("prefetch_factor not found in config. Using default value of 4. " "Please specify prefetch_factor in the 'trainer' section of your config.")
+        logging.warning(
+            "prefetch_factor not found in config. Using default value of 4. "
+            "Please specify prefetch_factor in the 'trainer' section of your config."
+        )
         prefetch_factor = 4
 
     # If loss is CRPS, we need all samplers-dataloaders to return the same (x, y)
@@ -481,7 +491,10 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
     ):
         rank = 0
         world_size = 1
-        logging.info("For CRPS loss, we maintain identical rank and world size across all " "GPUs to ensure proper CDF calculation during synchronous distributed processing.")
+        logging.info(
+            "For CRPS loss, we maintain identical rank and world size across all "
+            "GPUs to ensure proper CDF calculation during synchronous distributed processing."
+        )
 
     if type(dataset) is ERA5_and_Forcing_SingleStep:
         # This is the single-step dataset, original version
@@ -494,7 +507,11 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
                 if torch.is_tensor(items[0]):
                     collated_batch[key] = torch.stack(items)
                 elif isinstance(items[0], (int, float, bool)):
-                    collated_batch[key] = torch.tensor([items[0]] if key in ["forecast_step", "stop_forecast"] else items)
+                    collated_batch[key] = torch.tensor(
+                        [items[0]]
+                        if key in ["forecast_step", "stop_forecast"]
+                        else items
+                    )
                 else:
                     collated_batch[key] = items
             return collated_batch
@@ -540,13 +557,16 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
     elif type(dataset) is ERA5_MultiStep_Batcher:
         dataloader = DataLoader(
             dataset,
-            num_workers=1,  # Must be 1 to use prefetching
+            num_workers=num_workers,  # Must be 1 to use prefetching
             collate_fn=collate_fn,
             prefetch_factor=prefetch_factor,
-            sampler=BatchForecastLenSampler(
-                dataset),  # Ensure len is correct
+            sampler=BatchForecastLenSampler(dataset),  # Ensure len is correct
         )
-    elif type(dataset) in (ERA5_MultiStep_Batcher, Ocean_MultiStep_Batcher, Ocean_Tensor_Batcher):
+    elif type(dataset) in (
+        ERA5_MultiStep_Batcher,
+        Ocean_MultiStep_Batcher,
+        Ocean_Tensor_Batcher,
+    ):
         if type(dataset) in (Ocean_MultiStep_Batcher, Ocean_Tensor_Batcher):
             sampler = BatchForecastLenSamplerSamudra(dataset)
         else:
@@ -554,7 +574,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
 
         dataloader = DataLoader(
             dataset,
-            num_workers=1,  # Must be 1 to use prefetching
+            num_workers=num_workers,  # Must be 1 to use prefetching
             collate_fn=collate_fn,
             prefetch_factor=prefetch_factor,
             sampler=sampler,  # Ensure len is correct
@@ -572,8 +592,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
 
     train_flag = "training" if is_train else "validation"
 
-    logging.info(
-        f"Loaded a {train_flag} DataLoader for the {class_name} ERA dataset.")
+    logging.info(f"Loaded a {train_flag} DataLoader for the {class_name} ERA dataset.")
 
     return dataloader
 
@@ -633,8 +652,7 @@ if __name__ == "__main__":
         dataset = load_dataset(conf, rank=rank, world_size=world_size)
 
         # Load the dataloader
-        dataloader = load_dataloader(
-            conf, dataset, rank=rank, world_size=world_size)
+        dataloader = load_dataloader(conf, dataset, rank=rank, world_size=world_size)
 
         # Must set the epoch before the dataloader will work for some datasets
         if hasattr(dataloader.dataset, "set_epoch"):
@@ -660,8 +678,7 @@ if __name__ == "__main__":
 
         end_time = time.time()
         elapsed_time = end_time - start_time
-        logger.info(
-            f"Elapsed time for fetching 20 batches: {elapsed_time:.2f} seconds")
+        logger.info(f"Elapsed time for fetching 20 batches: {elapsed_time:.2f} seconds")
 
     except ValueError as e:
         print(e)
