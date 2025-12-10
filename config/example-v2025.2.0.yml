@@ -154,7 +154,7 @@ trainer:
     # fsdp: fully sharded data parallel
     # ddp: distributed data parallel
     # none: single-GPU training
-    mode: none
+    mode: ddp
 
     # fsdp-specific GPU optimization
     #
@@ -260,7 +260,7 @@ trainer:
     grad_max_norm: 'dynamic'
     
     # number of CPU workers used in datasets/dataloaders
-    thread_workers: 20
+    thread_workers: 4
     valid_thread_workers: 1
 
     # Number of prefetch workers in the DataLoader
