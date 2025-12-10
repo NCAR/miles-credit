@@ -3,99 +3,89 @@ import pandas as pd
 import numpy as np
 import xarray as xr
 import torch
-from torch.utils.data import Dataset, DataLoader
-from glob import glob
-import cftime
+import itertools
 
 logger = logging.getLogger(__name__)
-
-VALID_FIELD_TYPES = {"prognostic",
-                     "dynamic_forcing",
-                     "static",
-                     "diagnostic"}
 
 
 class ERA5Dataset(Dataset):
     """ Pytorch Dataset for processed ERA5 data. Relies on a configuration dictionary to define:
-
             1) 2D / 3D variables
             2) Start, End and Frequency of Datetimes
             3) path to glob for the data
-
-            Example YAML configuration
-            --------------------------
-            .. code-block:: yaml
+            4) Example YAML Format:
 
                 data:
                   source:
                     ERA5:
-                      prognostic:
-                        vars_3D: ['T', 'U', 'V', 'Q']
-                        vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                        path: "<path to prognostic>"
-                      diagnostic:
-                        vars_3D: ['T', 'U', 'V', 'Q']
-                        vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                        path: "<path to diagnostic>"
-                      static:
-                        vars_3D: ['T', 'U', 'V', 'Q']
-                        vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                        path: "<path to static>"
-                      dynamic_forcing:
-                        vars_3D: ['T', 'U', 'V', 'Q']
-                        vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                        path: "<path to dynamic forcing>"
+                      vars_3D: ['T', 'U', 'V', 'Q']
+                      vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
+                      vars_persist: None
+                      path: "/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/"
 
-                start_datetime: "2017-01-01"
-                end_datetime: "2019-12-31"
-                timestep: "6h"
+                  start_datetime: "2017-01-01"
+                  end_datetime: "2019-12-31"
+                  timestep: "6h"
 
         Assumptions:
-            1) The data MUST be stored in yearly zarr or netCDF files with a unique 4-digit year (YYYY) in the file name
-            2) "time" dimension / coordinate is present
+            1) The data must be stored in yearly zarr files with a unique 4-digit year (YYYY) in the file name
+            2) "time" dimension / coordinate is present with the datetime64[ns] datatype
             3) "level" dimension name representing the vertical level
             4) Dimention order of ('time', level', 'latitude', 'longitude') for 3D vars (remove level for 2D)
-            5) Data should be chunked efficiently for a fast read (recommend small chunks across time dimension).
+            5) Stored Zarr data should be chunked efficiently for a fast read (recommend small chunks across time dimension).
+
             """
 
-    def __init__(self, config, return_target=False):
+    def __init__(self, config, source="ERA5", transform=None):
 
-        self.source_name = "ERA5"
-        self.return_target = return_target
-        self.dt = pd.Timedelta(config['timestep'])
+        self.source_name = source
+
+        # valid sampling modes
+        self.valid_sampling_modes = ["init", "forcing", "y", "stop"]
+
+        # time config
+        self.timestep = pd.Timedelta(config['timestep'])
         self.num_forecast_steps = config["forecast_len"] + 1
         self.start_datetime = pd.Timestamp(config['start_datetime'])
         self.end_datetime = pd.Timestamp(config['end_datetime'])
-        self.datetimes = self._timestamps()
-        self.years = [str(y) for y in self.datetimes.year]
+
+        self.init_times = self._timestamps()
+        self.years = [str(y) for y in self.init_times.year]
+
         self.file_dict = {}
         self.var_dict = {}
 
         for field_type, d in config['source'][self.source_name].items():
-            if field_type not in VALID_FIELD_TYPES:
-                raise KeyError(f"Unknown field_type '{field_type}' in config['source']['{self.source_name}']. "
-                               f"Valid options are: {sorted(VALID_FIELD_TYPES)}")
-
             if isinstance(d, dict):
-                if not d.get("vars_3D") and not d.get("vars_2D"):
-                    raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
-
                 files = sorted(glob(d.get("path", "")))
+                # stores a dict to lookup files from that field
                 self.file_dict[field_type] = self._map_files(files) if files else None
-                self.var_dict[field_type] = {"vars_3D": d.get("vars_3D", []),
-                                             "vars_2D": d.get("vars_2D", [])}
+
+                self.var_dict[field_type] = {
+                    "vars_3D": d.get("vars_3D", []),
+                    "vars_2D": d.get("vars_2D", []),
+                    "levels": d.get("levels", []),  # will return all levels by default
+                }
+                if self.var_dict[field_type]["levels"]:
+                    logger.info(f"subsetting {field_type} to levels {self.var_dict[field_type]['levels']}")
             else:
                 self.file_dict[field_type] = None
 
+        # handle transform: (not yet implimented)
+        if not transform:
+            self.transform_xarray = lambda x: x
+        else:
+            self.transform_xarray = transform.transform_xarray
+        # print("TIMES", self.init_times)
+
     def _timestamps(self):
 
-        """ return total time steps """
-
-        return pd.date_range(self.start_datetime, self.end_datetime - self.num_forecast_steps * self.dt, freq=self.dt)
+        return pd.date_range(self.start_datetime, self.end_datetime - self.num_forecast_steps * self.timestep,
+                             freq=self.timestep)
 
     def __len__(self):
 
-        return len(self.datetimes)
+        return len(self.init_times)
 
     def _map_files(self, file_list):
 
@@ -110,134 +100,96 @@ class ERA5Dataset(Dataset):
 
     def __getitem__(self, args):
         """
-        Returns a sample of data.
-
-        args (tuple): Input_time step from sampler, step index from sampler
+            can return either a dictionary of tensors or an xarray object
         """
+        ts, mode = args
+        ts = pd.Timestamp(ts)
+        extract_fn = self._open_ds_extract_fields
 
-        return_data = {"metadata": {}}
-        t, i = args
-        t = pd.Timestamp(t)
-        t_target = t + self.dt
+        return_data = {"mode": mode,
+                       "stop_forecast": mode == "stop",
+                       "time": int(ts.value)}
 
-        ## always load dynamic forcing
-        self._open_ds_extract_fields("dynamic_forcing", t, return_data)
+        return_data = extract_fn("dynamic_forcing", ts, return_data)
+        if mode == "forcing":
+            return return_data
 
-        # load prognostic and static if first time step
-        if i == 0:
-            self._open_ds_extract_fields("static", t, return_data)
-            self._open_ds_extract_fields("prognostic", t, return_data)
+        # load prognostic for the remaining modes
+        return_data = extract_fn("prognostic", ts, return_data)
+        if mode == "init":
+            # load static
+            return_data = extract_fn("static", ts, return_data)
+            return return_data
 
-        # load t+1 if training
-        if self.return_target:
-            for key in ("prognostic", "diagnostic"):
-                if key in self.file_dict.keys():
-                    self._open_ds_extract_fields(key, t_target, return_data, is_target=True)
-            self._pop_and_merge_targets(return_data)
+        if mode == "y" or mode == "stop":
+            # load diagnostic
+            return_data = extract_fn("diagnostic", ts, return_data)  # not yet implimented
+            return return_data
 
-        self._add_metadata(return_data, t, t_target)
+        raise ValueError(f"{mode} is not a valid sampling mode in {self.valid_sampling_modes}")
+
+    def _open_ds_extract_fields(self, field_type, ts, return_data):
+        """
+        opens the dataset, reshapes and concats the variables into an np array, packs it into the return dict if the data exists
+        assumes both vars_3D and vars_2D are in the same file.
+        """
+        if self.file_dict[field_type]:
+            ds = xr.open_dataset(self.file_dict[field_type][ts.year])
+            if field_type != "static":
+                ds = ds.sel(time=ts)
+
+            ds = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
+            if field_type in ["prognostic", "dynamic_forcing"]:  # not yet implimented
+                ds = self.transform_xarray(ds)
+
+            ds_3D = ds[self.var_dict[field_type]["vars_3D"]]
+            ds_2D = ds[self.var_dict[field_type]["vars_2D"]]
+
+            levels = self.var_dict[field_type]["levels"]
+            if levels:
+                ds_3D = ds_3D.sel(level=levels)
+
+            data_np = self._reshape_and_concat(ds_3D, ds_2D)
+
+            if data_np.size > 0:
+                return_data[field_type] = torch.tensor(data_np).float()
 
         return return_data
-
-    def _open_ds_extract_fields(self, field_type, t, return_data, is_target=False):
-
-        """ opens the dataset, reshapes and concats the variables into an np array, packs it into the return dict if the data exists. """
-
-        if self.file_dict[field_type]:
-            with xr.open_dataset(self.file_dict[field_type][t.year]) as dataset:
-
-                if "time" in dataset.dims:
-                    if isinstance(dataset.time.values[0], cftime.datetime):
-                        t = self._convert_cf_time(t)
-                    ds = dataset.sel(time=t)
-                else:
-                    ds = dataset
-
-                ds_all_vars = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
-
-                ds_3D = ds_all_vars[self.var_dict[field_type]["vars_3D"]]
-                ds_2D = ds_all_vars[self.var_dict[field_type]["vars_2D"]]
-                data_np, meta = self._reshape_and_concat(ds_3D, ds_2D)
-
-                if is_target:
-                    if field_type == "prognostic":
-                        return_data["target_prognostic"] = torch.tensor(data_np).float()
-                    elif field_type == "diagnostic":
-                        return_data["target_diagnostic"] = torch.tensor(data_np).float()
-                else:
-                    return_data[field_type] = torch.tensor(data_np).float()
-
-                return_data["metadata"][f"{field_type}_var_order"] = meta
 
     def _reshape_and_concat(self, ds_3D, ds_2D):
 
         """ Stack 3D variables along level and variable, concatenate with 2D variables, and reorder dimesions. """
 
+        # for 3D, order by variables (according to the order in config file) then levels
         data_list = []
-        meta_3D, meta_2D = [], []
-
         if ds_3D:
-            data_3D = ds_3D.to_array().stack({'level_var': ['variable', 'level']})
-            meta_3D = data_3D.level_var.values.tolist()
-            data_3D = np.expand_dims(data_3D.values.transpose(2, 0, 1), axis=1)
+            data_3D = ds_3D.to_array().stack({'level_var': ['variable', 'level']}).values
+            data_3D = np.expand_dims(data_3D.transpose(2, 0, 1), axis=1)
             data_list.append(data_3D)
-
         if ds_2D:
-            data_2D = ds_2D.to_array()
-            meta_2D = data_2D["variable"].values.tolist()
-            data_2D = np.expand_dims(data_2D, axis=1)
+            data_2D = np.expand_dims(ds_2D.to_array().values, axis=1)
             data_list.append(data_2D)
 
         combined_data = np.concatenate(data_list, axis=0)
-        meta = meta_3D + meta_2D
 
-        return combined_data, meta
-
-    def _add_metadata(self, return_data, t, t_target=None):
-
-        """ Update metadata dictionary """
-
-        return_data["metadata"]["input_datetime"] = int(t.value)
-
-        if self.return_target:
-            return_data["metadata"]['target_datetime'] = int(t_target.value)
-
-    def _convert_cf_time(self, ts):
-
-        """ Convert pandas timestamp to cftime """
-
-        cf_t = cftime.datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, calendar='noleap')
-
-        return cf_t
-
-    def _pop_and_merge_targets(self, return_data, dim=0):
-
-        target_tensors = []
-        for key in ("target_prognostic", "target_diagnostic"):
-
-            if key in return_data:
-                target_tensors.append(return_data.pop(key))
-
-        if not target_tensors:
-            return
-
-        return_data["target"] = target_tensors[0] if len(target_tensors) == 1 else torch.cat(target_tensors, dim=dim)
+        return combined_data
 
 
+    if __name__ == "__main__":
+        import yaml
+        from credit.samplers import DistributedMultiStepBatchSampler
+        path = "../config/era5_new_data_config.yaml"
+        with open(path) as cnfg:
+            config = yaml.safe_load(cnfg)
 
-if __name__ == "__main__":
-    import yaml
-    from credit.samplers import DistributedMultiStepBatchSampler
-    path = "../config/era5_new_data_config.yaml"
-    with open(path) as cnfg:
-        config = yaml.safe_load(cnfg)
+        data_config = config["data"]
 
-    data_config = config["data"]
+        dataset = ERA5Dataset(config['data'])
+        sampler = DistributedMultiStepBatchSampler(dataset=dataset, batch_size=4, sampling_modes=['init'] + ['y'] * 1,
+                                                   rank=0, num_replicas=1, shuffle=True)
+        loader = iter(DataLoader(dataset=dataset, batch_sampler=sampler, num_workers=8, pin_memory=True))
 
-    dataset = ERA5Dataset(config['data'])
-    sampler = DistributedMultiStepBatchSampler(dataset=dataset, batch_size=4, rank=0, num_replicas=1, shuffle=True)
-    loader = iter(DataLoader(dataset=dataset, batch_sampler=sampler, num_workers=8, pin_memory=True))
+        for _ in range(10):
+            batch = next(loader)
+            print(batch.keys())
 
-    for _ in range(10):
-        batch = next(loader)
-        print(batch.keys())
