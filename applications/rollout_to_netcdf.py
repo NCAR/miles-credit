@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import yaml
 import logging
@@ -18,6 +19,7 @@ import torch
 
 # ---------- #
 # credit
+from credit import forecast
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info
@@ -478,6 +480,9 @@ if __name__ == "__main__":
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
+
+    shutil.copy(config, forecast_save_loc)
+    logger.info(f"saved copy of config to {forecast_save_loc}")
 
     logging.info("Save roll-outs to {}".format(forecast_save_loc))
 

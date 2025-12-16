@@ -11,6 +11,7 @@ Content:
 """
 import torch
 from torch import nn
+from torch.amp import custom_fwd
 
 import numpy as np
 
@@ -86,11 +87,12 @@ class PostBlock(nn.Module):
                 logger.info("GlobalEnergyFixer registered")
                 opt = GlobalEnergyFixer(post_conf)
                 self.operations.append(opt)
-
+                
+    @custom_fwd(device_type='cuda', cast_inputs=torch.float32)
     def forward(self, x):
         for op in self.operations:
             x = op(x)
-
+            # TODO: check for isnan
         if isinstance(x, dict):
             # if output is a dict, return y_pred (if it exists), otherwise return x
             return x.get("y_pred", x)

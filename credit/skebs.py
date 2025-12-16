@@ -376,7 +376,9 @@ class SKEBS(nn.Module):
    
         # use ansatz perturbation? default False -> normal skebs
         ansatz_perturb = post_conf["skebs"].get("ansatz_perturb", False)
-        self.get_uv_chi = self.getuv_dk_ansatz if ansatz_perturb else self.getuv
+        self.get_uv_chi = self.getgrad_dk_ansatz if ansatz_perturb else self.getgrad
+        if ansatz_perturb:
+            logger.warning("using Ansatz Perturb")
 
         # coeffs havent been spun up yet (indicates need to init the coeffs)
         self.spec_coef_is_initialized = False
@@ -400,6 +402,9 @@ class SKEBS(nn.Module):
             num_channels = (self.channels * self.levels 
                                 + post_conf["model"]["surface_channels"]
                                 + post_conf["model"]["output_only_channels"])
+            if post_conf["tracer_fixer"].get("activate", False):
+                num_channels -= 1
+
             if self.use_statics:
                 num_channels += len(self.static_inds) + 1 # this one for static vars and coslat
         
@@ -826,7 +831,7 @@ class SKEBS(nn.Module):
         
         return input_dict
     
-    def getuv_dk_ansatz(self, chispec, x):
+    def getgrad_dk_ansatz(self, chispec, x):
         # the wrong skebs perturbation
 
         noise = self.isht(chispec).unsqueeze(1).unsqueeze(1) # (b, 1, 1, lat, lon)
@@ -856,13 +861,13 @@ class SKEBS(nn.Module):
         """
         return self.isht(uspec)
     
-    def getuv(self, vrtdivspec, x):
+    def getuv(self, vrtdivspec):
         """
         compute wind vector from spectral coeffs of vorticity and divergence
         """
         return self.ivsht(self.invlap * vrtdivspec / RAD_EARTH).unsqueeze(1).unsqueeze(1)
     
-    def getgrad(self, chispec):
+    def getgrad(self, chispec, x):
             """ 
             input dims: (batch, lmax, mmax)
             """

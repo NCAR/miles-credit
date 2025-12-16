@@ -191,13 +191,13 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     # pair as the CDF is computed across GPUs. Randomness is handled by adding noise
     # to the input x to create different samples. There are many other ways to do this
     # but using the same rank and world_size is the fastest as far as communication.
-    if conf["loss"]["training_loss"] == "KCRPS":
-        rank = 0
-        world_size = 1
-        logging.info(
-            "For CRPS loss, we maintain identical rank and world size across all "
-            "GPUs to ensure proper CDF calculation during synchronous distributed processing."
-        )
+    # if conf["loss"]["training_loss"] == "KCRPS":
+    #     rank = 0
+    #     world_size = 1
+    #     logging.info(
+    #         "For CRPS loss, we maintain identical rank and world size across all "
+    #         "GPUs to ensure proper CDF calculation during synchronous distributed processing."
+    #     )
 
     # Instantiate the dataset based on the provided class name
     if dataset_type == "ERA5_and_Forcing_SingleStep":  # forecast-len = 0 dataset
@@ -379,13 +379,13 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
     # pair as the CDF is computed across GPUs. Randomness is handled by adding noise
     # to the input x to create different samples. There are many other ways to do this
     # but using the same rank and world_size is the fastest as far as communication.
-    if conf["loss"]["training_loss"] == "KCRPS":
-        rank = 0
-        world_size = 1
-        logging.info(
-            "For CRPS loss, we maintain identical rank and world size across all "
-            "GPUs to ensure proper CDF calculation during synchronous distributed processing."
-        )
+    # if conf["loss"]["training_loss"] == "KCRPS":
+    #     rank = 0
+    #     world_size = 1
+    #     logging.info(
+    #         "For CRPS loss, we maintain identical rank and world size across all "
+    #         "GPUs to ensure proper CDF calculation during synchronous distributed processing."
+    #     )
 
     if type(dataset) is ERA5_and_Forcing_SingleStep:
         # This is the single-step dataset, original version
