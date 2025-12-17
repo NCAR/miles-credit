@@ -8,7 +8,7 @@ from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
-from credit.boundary_padding import TensorPadding
+from credit.boundary_padding import load_padding
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +365,7 @@ class Transformer(nn.Module):
 # classes
 
 
-class CrossFormer(BaseModel):
+class RegionalCrossFormerInvertable(BaseModel):
     def __init__(
         self,
         image_height: int = 640,
@@ -390,6 +390,7 @@ class CrossFormer(BaseModel):
         use_spectral_norm: bool = True,
         interp: bool = True,
         padding_conf: dict = None,
+        padding_all_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
     ):
@@ -445,6 +446,14 @@ class CrossFormer(BaseModel):
         if padding_conf is None:
             padding_conf = {"activate": False}
         self.use_padding = padding_conf["activate"]
+        if padding_all_conf is None:
+            padding_all_conf = {"activate": False}
+        self.pad_all = padding_all_conf["activate"]
+
+        if self.use_padding:
+            self.padding_opt = load_padding(padding_conf)
+        if self.pad_all:
+            self.padding_all = load_padding(padding_all_conf)
 
         if post_conf is None:
             post_conf = {"activate": False}
@@ -513,9 +522,6 @@ class CrossFormer(BaseModel):
             # append everything
             self.layers.append(nn.ModuleList([cross_embed_layer, transformer_layer]))
 
-        if self.use_padding:
-            self.padding_opt = TensorPadding(**padding_conf)
-
         # define embedding layer using adjusted sizes
         # if the original sizes were good, adjusted sizes should == original sizes
         self.cube_embedding = CubeEmbedding(
@@ -550,7 +556,7 @@ class CrossFormer(BaseModel):
             
         )
         self.conv4up = self.up_block4[1]
-
+        self.film = nn.Linear(1, 2 * (self.input_only_channels))
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")
             apply_spectral_norm(self)
@@ -568,13 +574,27 @@ class CrossFormer(BaseModel):
             logger.info("using postblock")
             self.postblock = PostBlock(post_conf)
 
-    def forward(self, x):
+    def forward(self, x, x_era5, forcing_t_delta):
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
 
         if self.use_padding:
             x = self.padding_opt.pad(x)
+
+        batch_size = x.shape[0]
+
+        # Feature‑wise Linear Modulation for time embedding
+        alpha_beta = self.film(forcing_t_delta.view(batch_size, 1) / 3600.)  # [batch, 2*dim]
+        alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
+        alpha = alpha.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        beta = beta.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        x_era5 = alpha * x_era5 + beta
+
+        x = torch.concat([x, x_era5], dim=1)
+
+        if self.pad_all:
+            x = self.padding_all.pad(x)
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
@@ -598,11 +618,10 @@ class CrossFormer(BaseModel):
         
         x = self.up_block4(x)
 
+        if self.pad_all:
+            x = self.padding_all.unpad(x)
         if self.use_padding:
             x = self.padding_opt.unpad(x)
-
-        if self.use_interp:
-            x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
         x = x.unsqueeze(2)
 
@@ -654,7 +673,7 @@ if __name__ == "__main__":
     with profile(
         activities=[ProfilerActivity.CPU], profile_memory=True, record_shapes=True
     ) as prof:
-        model = CrossFormer(
+        model = RegionalCrossFormerInvertable(
             image_height=image_height,
             image_width=image_width,
             frames=frames,

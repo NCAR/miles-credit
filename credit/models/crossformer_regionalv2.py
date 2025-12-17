@@ -8,7 +8,7 @@ from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
-from credit.boundary_padding import TensorPadding
+from credit.boundary_padding import load_padding
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +365,7 @@ class Transformer(nn.Module):
 # classes
 
 
-class CrossFormer(BaseModel):
+class RegionalCrossFormer2(BaseModel):
     def __init__(
         self,
         image_height: int = 640,
@@ -390,6 +390,7 @@ class CrossFormer(BaseModel):
         use_spectral_norm: bool = True,
         interp: bool = True,
         padding_conf: dict = None,
+        padding_all_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
     ):
@@ -445,6 +446,14 @@ class CrossFormer(BaseModel):
         if padding_conf is None:
             padding_conf = {"activate": False}
         self.use_padding = padding_conf["activate"]
+        if padding_all_conf is None:
+            padding_all_conf = {"activate": False}
+        self.pad_all = padding_all_conf["activate"]
+
+        if self.use_padding:
+            self.padding_opt = load_padding(padding_conf)
+        if self.pad_all:
+            self.padding_all = load_padding(padding_all_conf)
 
         if post_conf is None:
             post_conf = {"activate": False}
@@ -513,9 +522,6 @@ class CrossFormer(BaseModel):
             # append everything
             self.layers.append(nn.ModuleList([cross_embed_layer, transformer_layer]))
 
-        if self.use_padding:
-            self.padding_opt = TensorPadding(**padding_conf)
-
         # define embedding layer using adjusted sizes
         # if the original sizes were good, adjusted sizes should == original sizes
         self.cube_embedding = CubeEmbedding(
@@ -526,10 +532,10 @@ class CrossFormer(BaseModel):
         )
 
         # =================================================================================== #
-        smallest_dim = min(dim)
-        self.up_block1 = UpBlockPS(dim[3], dim[2], smallest_dim)
-        self.up_block2 = UpBlockPS(2 * dim[2], dim[1], smallest_dim)
-        self.up_block3 = UpBlockPS(2 * dim[1], dim[0], smallest_dim)
+
+        self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
+        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
+        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
         #self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1)
         # self.up_block4 = nn.Sequential(
         #     nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
@@ -539,18 +545,18 @@ class CrossFormer(BaseModel):
         scale = 4
         self.up_block4 = nn.Sequential(
             nn.Conv2d(
-                2 * dim[0],              # in_channels
+                2 * (last_dim // 8),              # in_channels
                 self.output_channels * (scale**2),# conv_out = target_channels * 4
-                kernel_size=5,
+                kernel_size=3,
                 stride=1,
-                padding=2
+                padding=1
             ),
-            nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*scale, W*scale),
+            nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
             nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1)
             
         )
         self.conv4up = self.up_block4[1]
-
+        self.film = nn.Linear(1, 2 * (self.input_only_channels))
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")
             apply_spectral_norm(self)
@@ -568,13 +574,27 @@ class CrossFormer(BaseModel):
             logger.info("using postblock")
             self.postblock = PostBlock(post_conf)
 
-    def forward(self, x):
+    def forward(self, x, x_era5, forcing_t_delta):
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
 
         if self.use_padding:
             x = self.padding_opt.pad(x)
+
+        batch_size = x.shape[0]
+
+        # Feature‑wise Linear Modulation for time embedding
+        alpha_beta = self.film(forcing_t_delta.view(batch_size, 1) / 3600.)  # [batch, 2*dim]
+        alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
+        alpha = alpha.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        beta = beta.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        x_era5 = alpha * x_era5 + beta
+
+        x = torch.concat([x, x_era5], dim=1)
+
+        if self.pad_all:
+            x = self.padding_all.pad(x)
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
@@ -598,6 +618,8 @@ class CrossFormer(BaseModel):
         
         x = self.up_block4(x)
 
+        if self.pad_all:
+            x = self.padding_all.unpad(x)
         if self.use_padding:
             x = self.padding_opt.unpad(x)
 
@@ -631,18 +653,14 @@ class CrossFormer(BaseModel):
 
 
 if __name__ == "__main__":
-    from torch.profiler import profile, ProfilerActivity
-    import resource
     image_height = 640  # 640, 192
     image_width = 1280  # 1280, 288
     levels = 15
-    frames = 1
+    frames = 2
     channels = 4
     surface_channels = 7
     input_only_channels = 3
-    frame_patch_size = 1
-
-    device = "cpu"
+    frame_patch_size = 2
 
     input_tensor = torch.randn(
         1,
@@ -650,47 +668,29 @@ if __name__ == "__main__":
         frames,
         image_height,
         image_width,
-    ).to(device)
-    with profile(
-        activities=[ProfilerActivity.CPU], profile_memory=True, record_shapes=True
-    ) as prof:
-        model = CrossFormer(
-            image_height=image_height,
-            image_width=image_width,
-            frames=frames,
-            frame_patch_size=frame_patch_size,
-            channels=channels,
-            surface_channels=surface_channels,
-            input_only_channels=input_only_channels,
-            levels=levels,
-            # dim=(32, 64, 128, 256),
-            dim=(256, 128, 64, 32),
-            depth=(2, 2, 18, 2),
-            global_window_size=(8, 4, 2, 1),
-            local_window_size=4,
-            cross_embed_kernel_sizes=((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
-            cross_embed_strides=(4, 2, 2, 2),
-            attn_dropout=0.0,
-            ff_dropout=0.0,
-            interp=False
-        ).to(device)
+    ).to("cuda")
 
-
-    max_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-
-    # Linux: KB, macOS: bytes
-    if max_rss < 10**7:  # heuristic for Linux
-        max_rss_mb = max_rss / 1024
-    else:               # macOS
-        max_rss_mb = max_rss / (1024 ** 2)
-
-    print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
-
-    print(f"Max CPU memory usage: {max_rss_mb:.2f} MB")
-
+    model = RegionalCrossFormer2(
+        image_height=image_height,
+        image_width=image_width,
+        frames=frames,
+        frame_patch_size=frame_patch_size,
+        channels=channels,
+        surface_channels=surface_channels,
+        input_only_channels=input_only_channels,
+        levels=levels,
+        dim=(128, 256, 512, 1024),
+        depth=(2, 2, 18, 2),
+        global_window_size=(8, 4, 2, 1),
+        local_window_size=5,
+        cross_embed_kernel_sizes=((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
+        cross_embed_strides=(4, 2, 2, 2),
+        attn_dropout=0.0,
+        ff_dropout=0.0,
+    ).to("cuda")
 
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Number of parameters in the model: {num_params}")
 
-    y_pred = model(input_tensor.to(device))
+    y_pred = model(input_tensor.to("cuda"))
     print("Predicted shape:", y_pred.shape)

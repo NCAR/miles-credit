@@ -22,7 +22,7 @@ class TensorZeroPadding:
         """
         padded dim must be last two dim lat, lon
         """
-        return x[..., self.pad_lat[0] : -self.pad_lat[1], self.pad_lon[0] : - self.pad_lon[1]]
+        return x[..., self.pad_lat[0] : -self.pad_lat[1] or None, self.pad_lon[0] : - self.pad_lon[1] or None]
 
 class TensorPadding:
     def __init__(self, mode="earth", pad_lat=(40, 40), pad_lon=(40, 40), **kwargs):

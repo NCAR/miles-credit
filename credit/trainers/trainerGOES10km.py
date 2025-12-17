@@ -165,8 +165,6 @@ class Trainer(BaseTrainer):
 
                     if ensemble_size > 1:
                         x = torch.repeat_interleave(x, ensemble_size, 0)
-                    if flag_clamp:
-                        x = torch.clamp(x, min=clamp_min, max=clamp_max)
                     # --------------------------------------------- #
                     # ensemble x on initialization
                     # copies each sample in the batch ensemble_size number of times.
@@ -175,12 +173,15 @@ class Trainer(BaseTrainer):
                 
                     if "era5" in batch.keys():
                         era5_static = batch_era5["static"].to(self.device)
-                
+
+                if flag_clamp:
+                    x = torch.clamp(x, min=clamp_min, max=clamp_max)
+                    
                 # load era5 forcing
                 # concat order is prognostic, static, forcing
                 if "era5" in batch.keys():
                     x_era5 = torch.concat([batch_era5["prognostic"].to(self.device),
-                                           era5_static,
+                                           era5_static.detach().clone(),
                                            batch_era5["dynamic_forcing"].to(self.device)],
                                            dim=1).float()
                     forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device).float()
@@ -275,6 +276,11 @@ class Trainer(BaseTrainer):
                 load_time = xload_time - start
                 fwd_time = end_time - xload_time
                 logger.info(f'''load/fwd time: {load_time:.2f}s/{fwd_time:.2f}s = {load_time/fwd_time:.1}''')
+                
+                allocated_mem = torch.cuda.memory.memory_allocated(self.device) // 1024**3
+                reserved_mem = torch.cuda.memory.memory_reserved(self.device) // 1024**3
+                logger.info(f'''Memory allocated: {allocated_mem:.2f} GB''')
+                logger.info(f'''Memory reserved: {reserved_mem:.2f} GB''')
 
             # Metrics
             metrics_dict = metrics(y_pred, y)

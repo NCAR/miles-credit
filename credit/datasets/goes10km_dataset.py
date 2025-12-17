@@ -38,6 +38,7 @@ class GOES10kmDataset(Dataset):
         self.era5dataset = era5dataset
         self.padding = padding
         logger.info(f"{'' if self.padding else 'NOT '}padding GOES input")
+        logger.info(f"GOES10km Dataset with{'' if self.era5dataset else 'out'} ERA5 forcing")
 
         # setup init times        
         self.timestep = time_config["timestep"]
@@ -48,9 +49,10 @@ class GOES10kmDataset(Dataset):
         
         self.valid_init_dir = valid_init_dir
         self.init_times = self._timestamps() # will generate valid init times if needed
-
+        
+        logger.info(f"initializing GOES10kmDataset with timestep [{self.timestep}] with {self.num_forecast_steps} steps")
         # setup scaler
-
+        
         self.log_normal_scaling = data_conf.get("log_normal_scaling", False)
         if self.log_normal_scaling:
             scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats_logC04.nc"
@@ -102,7 +104,10 @@ class GOES10kmDataset(Dataset):
     def _timestamps(self):
         # grab or compute valid init times across whole dataset, due to missing data
         # this removes need to mess with the samplers
-        filename = f"{self.timestep.seconds // 3600:02d}h_{self.num_forecast_steps:02}step.nc"
+        if self.timestep.seconds >= 3600:
+            filename = f"{self.timestep.seconds // 3600:02d}h_{self.num_forecast_steps:02}step.nc"
+        else:
+            filename = f"{self.timestep.seconds // 60:02d}m_{self.num_forecast_steps:02}step.nc"
         valid_init_filepath = join(self.valid_init_dir, filename)
         
         if os.path.exists(valid_init_filepath):

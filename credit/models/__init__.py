@@ -13,6 +13,8 @@ from credit.models.debugger_model import DebuggerModel
 from credit.models.crossformer_ensemble import CrossFormerWithNoise
 from credit.models.crossformer_downscaling import DownscalingCrossFormer
 from credit.models.crossformer_regional import RegionalCrossFormer
+from credit.models.crossformer_regionalv2 import RegionalCrossFormer2
+from credit.models.crossformer_regional_invertable import RegionalCrossFormerInvertable
 from credit.models.unet_downscaling import DownscalingSegmentationModel
 from credit.models.crossformer_diffusion import CrossFormerDiffusion
 from credit.models.unet_diffusion import UnetDiffusion
@@ -48,6 +50,8 @@ model_types = {
     "debugger": (DebuggerModel, "Loading the debugger model"),
     "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
     "crossformer_regional": (RegionalCrossFormer, "Loading regional crossformer model"),
+    "crossformer_regionalv2": (RegionalCrossFormer2, "Loading regional crossformer v2 model"),
+    "crossformer_regional_invertable": (RegionalCrossFormerInvertable, "Loading regional crossformer invertable model"),
     "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
 }
 

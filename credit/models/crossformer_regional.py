@@ -8,7 +8,7 @@ from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
-from credit.boundary_padding import TensorPadding, load_padding
+from credit.boundary_padding import load_padding
 from credit.models.unet_attention_modules import load_unet_attention
 
 logger = logging.getLogger(__name__)
@@ -395,6 +395,7 @@ class RegionalCrossFormer(BaseModel):
         interp: bool = True,
         upsample_v_conv: bool = False,
         padding_conf: dict = None,
+        padding_all_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
     ):
@@ -451,6 +452,14 @@ class RegionalCrossFormer(BaseModel):
         if padding_conf is None:
             padding_conf = {"activate": False}
         self.use_padding = padding_conf["activate"]
+        if padding_all_conf is None:
+            padding_all_conf = {"activate": False}
+        self.pad_all = padding_all_conf["activate"]
+
+        if self.use_padding:
+            self.padding_opt = load_padding(padding_conf)
+        if self.pad_all:
+            self.padding_all = load_padding(padding_all_conf)
 
         if post_conf is None:
             post_conf = {"activate": False}
@@ -522,9 +531,6 @@ class RegionalCrossFormer(BaseModel):
 
             # append everything
             self.layers.append(nn.ModuleList([cross_embed_layer, transformer_layer]))
-
-        if self.use_padding:
-            self.padding_opt = load_padding(padding_conf)
 
         # define embedding layer using adjusted sizes
         # if the original sizes were good, adjusted sizes should == original sizes
@@ -609,6 +615,9 @@ class RegionalCrossFormer(BaseModel):
 
         x = torch.concat([x, x_era5], dim=1)
 
+        if self.pad_all:
+            x = self.padding_all.pad(x)
+
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
         elif self.frames > 1:
@@ -633,8 +642,10 @@ class RegionalCrossFormer(BaseModel):
 
         x = self.up_block4(x)
 
-        if self.use_padding:
-            x = self.padding_opt.unpad(x)
+        # if self.pad_all:
+        #     x = self.padding_all.unpad(x)
+        # if self.use_padding:
+        #     x = self.padding_opt.unpad(x)
 
         if self.use_interp:
             x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")

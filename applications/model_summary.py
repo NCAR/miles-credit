@@ -10,7 +10,7 @@ from argparse import ArgumentParser
 
 import torch
 import torch.distributed as dist
-from torchsummary import summary
+from torchinfo import summary
 
 from credit.models import load_model
 from credit.pbs import launch_script, launch_script_mpi
@@ -34,42 +34,43 @@ def setup(rank, world_size, mode):
 
 
 def main(rank, world_size, conf, frames=1, height=640, width=1280):
+
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"])
 
-    # Config settings
-    single_level_vars = [
-        "surface_variables",
-        "static_variables",
-        "diagnostic_variables",
-        "dynamic_forcing_variables",
-    ]
-    channels = conf["model"]["levels"] * len(conf["data"]["variables"])
-    channels += sum(len(conf["data"].get(key, [])) for key in single_level_vars)
 
+    model_conf = conf["model"]
+    channels = (model_conf.get("levels", 0) * model_conf.get("channels", 0)
+                + model_conf.get("surface_channels", 0)
+                + model_conf.get("input_only_channels", 0))
+    frames = model_conf["frames"]
+    height = model_conf["image_height"]
+    width = model_conf["image_width"]
+
+    device = torch.device("cpu")
     # Set device
-
-    device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        if torch.cuda.is_available()
-        else torch.device("cpu")
-    )
-    torch.cuda.set_device(rank % torch.cuda.device_count())
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+        torch.cuda.set_device(rank % torch.cuda.device_count())
 
     # Load model
 
-    m = load_model(conf)
+    model = load_model(conf)
 
     # send the module to the correct device first
 
-    m.to(device)
+    model.to(device)
+    print(f"num params {sum(p.numel() for p in model.parameters()):,d}")
+    print(f"num trainable params {sum(p.numel() for p in model.parameters() if p.requires_grad):,d}")
 
     # Wrap if using DDP or FSDP
-
-    model = distributed_model_wrapper(conf, m, device)
+    if conf["trainer"]["mode"] in ['fsdp', 'ddp']:
+        model = distributed_model_wrapper(conf, model, device)
 
     try:
-        summary(model, input_size=(channels, frames, height, width))
+        summary(model, input_size=[(1, 6, frames, height, width), 
+                                   (1,model_conf["input_only_channels"], frames, height, width),
+                                   (1,)] )
     except RuntimeError as e:
         if "CUDA" in str(e):
             logging.warning(f"CUDA out of memory error occurred: {e}.")
@@ -176,6 +177,8 @@ if __name__ == "__main__":
 
     seed = 1000 if "seed" not in conf else conf["seed"]
     seed_everything(seed)
+    
+    conf["trainer"]["mode"] = None
 
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         rank = int(os.environ["RANK"])

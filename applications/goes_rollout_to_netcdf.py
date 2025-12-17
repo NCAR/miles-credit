@@ -38,16 +38,40 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
+import subprocess
+
+def get_num_cpus():
+    if "glade" in os.getcwd():
+        num_cpus = subprocess.run(
+            "qstat -f $PBS_JOBID | grep Resource_List.ncpus",
+            shell=True,
+            capture_output=True,
+            encoding="utf-8",
+        ).stdout.split()[-1]
+    else:
+        num_cpus = os.cpu_count()
+    
+    return int(num_cpus)
+
+
+
 def get_rollout_init_times(conf):
 
     forecast_conf = conf["predict"]["forecasts"]
 
-    if forecast_conf["type"] == "standard":
+    if forecast_conf["type"] in ["standard", "debugger"]:
         # start_dt = pd.Timestamp(year=forecast_conf["start_year"], month=1, day=1, hour=0)
-        start_dt = pd.Timestamp(year=2024, month=1, day=1, hour=0)
+        start_dt = pd.Timestamp(year=2022, month=7, day=1, hour=0)
         ic_interval = pd.Timedelta(2, "w")
-        num_inits = 26
+        num_inits = 13
         rollout_init_times = [start_dt + k * ic_interval for k in range(num_inits)]
+        rollout_init_times += [t + pd.Timedelta("12h") for t in rollout_init_times[-2:]] # 12h to last two SA convection
+        rollout_init_times = ([pd.Timestamp("2022-01-01")] 
+                              + [pd.Timestamp("2022-07-01") + pd.Timedelta("30m")]
+                              + [pd.Timestamp("2022-07-01") +  pd.Timedelta("15h")] # NA convection case
+                              + rollout_init_times)
+        if forecast_conf["type"] == "debugger":
+            return rollout_init_times[:5] + rollout_init_times[-4:]
         return rollout_init_times
     
     elif forecast_conf["type"] == "custom":
@@ -65,23 +89,20 @@ def get_rollout_init_times(conf):
             rollout_init_times += [start + k * ic_interval_days for start in start_dts]
         
         return rollout_init_times
-    
-    elif forecast_conf["type"] == "debugger":
-        start_dt = pd.Timestamp(year=2024, month=1, day=1, hour=0)
-        ic_interval = pd.Timedelta(2, "w")
-        num_inits = 3
-        rollout_init_times = [start_dt + k * ic_interval for k in range(num_inits)]
-        return rollout_init_times
 
-    raise ValueError(f"{forecast_conf['type']} is not a valid type")
+    raise ValueError(f"{forecast_conf['type']} is not a valid rollout type")
 
 
 class ForecastProcessor:
     def __init__(self, conf, device):
         self.conf = conf
         self.device = device
+        padding_conf = conf["model"].get("padding_conf", {})
+        self.pad_output = True if not padding_conf else not padding_conf.get("activate", False)
 
-        self.save_forecast_dir = conf["predict"]["save_forecast"]
+        self.save_forecast_dir = conf["predict"].get("save_forecast", None)
+        if not self.save_forecast_dir:
+            self.save_forecast_dir = os.path.expandvars(join(conf["save_loc"], "forecasts"))
 
         self.batch_size = conf["predict"].get("batch_size", 1)
         self.ensemble_size = conf["predict"].get("ensemble_size", 1)
@@ -109,14 +130,18 @@ class ForecastProcessor:
 
         self.channel = ref_array.channel
 
-        self.padded_lat = np.pad(ref_array.latitude, 
-                            (11,10), 
-                            mode="linear_ramp", 
-                            end_values=(-50.1 - 11* 0.1, 50.1 + 10*.1))
-        self.padded_lon = np.pad(ref_array.longitude, 
-                            (19,18), 
-                            mode="linear_ramp", 
-                            end_values=(-121.1 - 19 * 0.1, -28.9 + 18*.1))
+        self.padded_lat = ref_array.latitude
+        self.padded_lon = ref_array.longitude
+
+        if self.pad_output:
+            self.padded_lat = np.pad(ref_array.latitude, 
+                                (11,10), 
+                                mode="linear_ramp", 
+                                end_values=(-50.1 - 11* 0.1, 50.1 + 10*.1))
+            self.padded_lon = np.pad(ref_array.longitude, 
+                                (19,18), 
+                                mode="linear_ramp", 
+                                end_values=(-121.1 - 19 * 0.1, -28.9 + 18*.1))
         
     def inverse_transform_ABI(self, da):
         unscaled = da * self.scaler_ds["std"] + self.scaler_ds["mean"]
@@ -146,7 +171,8 @@ class ForecastProcessor:
         pred_ds = xr.Dataset({"BT_or_R": pred_da})
         pred_ds.to_netcdf(join(self.save_forecast_dir,
                                init_datetime,
-                               f"{save_datetime}.nc"))
+                               f"{save_datetime}.nc"),
+                               mode="w")
 
     def process(self, y_pred, init_datetimes, save_datetimes):
         try:
@@ -220,7 +246,7 @@ def predict(rank, world_size, conf, p):
             f"number of forecast init times {len(rollout_init_times)} is less than batch_size {batch_size}, will result in under-utilization"
         )
 
-    dataset = load_predict_dataset(conf, 0, 0, rollout_init_times)
+    dataset = load_predict_dataset(conf, 0, 0, rollout_init_times, device)
     dataloader = load_dataloader(conf, dataset, 0, 1, is_predict=True)
 
     # Class for saving in parallel
@@ -273,34 +299,39 @@ def predict(rank, world_size, conf, p):
 
             # init
             batch = next(dl)
-
+            if "era5" in batch.keys():
+                batch_era5 = batch["era5"]
             init_datetimes = batch["datetime"]
             batch_size = len(init_datetimes)
 
             mode = batch["mode"][0]
 
-            x = batch["x"].to(device)
+            x = batch["x"].to(device).float()
             # create ensemble:
             if ensemble_size > 1:
                 x = torch.repeat_interleave(x, ensemble_size, 0)
+            if "era5" in batch.keys():
+                era5_static = batch_era5["static"].to(device)
 
             while mode != "stop":
-                # Add forcing and static variables for the entire batch
-                if "x_forcing_static" in batch:
-                    x_forcing_batch = (
-                        batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
-                    )
-                    if ensemble_size > 1:
-                        x_forcing_batch = torch.repeat_interleave(
-                            x_forcing_batch, ensemble_size, 0
-                        )
-                    x = torch.cat((x, x_forcing_batch), dim=1)   
-                
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
+                if "era5" in batch.keys():
+                    x_era5 = torch.concat([batch_era5["prognostic"].to(device),
+                                           era5_static.detach().clone(),
+                                           batch_era5["dynamic_forcing"].to(device)],
+                                           dim=1).float()
+                    forcing_t_delta = batch_era5["timedelta_seconds"].to(device).float()
+
+                    if ensemble_size > 1:
+                        x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
+                    if flag_clamp:
+                        x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
+                ###############################
+                
                 # Model inference on the entire batch
-                y_pred = model(x.float())
+                y_pred = model(x, x_era5, forcing_t_delta) if "era5" in batch.keys() else model(x)
 
                 batch = next(dl) # load in y timestep for metric computation and forecast timestamp
                 
@@ -309,10 +340,9 @@ def predict(rank, world_size, conf, p):
 
                 result = p.apply_async(
                     result_processor.process,
-                    (
-                        y_pred.cpu(),
-                        init_datetimes,
-                        save_datetimes,
+                    (y_pred.cpu(),
+                     init_datetimes,
+                     save_datetimes,
                     ),
                 )
                 results.append(result)
@@ -344,7 +374,7 @@ def predict(rank, world_size, conf, p):
             torch.distributed.barrier()
 
     end_time = time.time()
-    logger.info(f"total rollout time: {end_time - start_time:02}s for {len(rollout_init_times) * conf['predict']['forecasts']['num_forecast_steps']} forecasts")
+    logger.info(f"total rollout time: {end_time - start_time:02}s for {len(rollout_init_times) * dataset.num_forecast_steps} forecasts")
     return 1
 
 
@@ -359,6 +389,15 @@ def main():
         type=str,
         default=False,
         help="Path to the model configuration (yml) containing your inputs.",
+    )
+
+    parser.add_argument(
+        "-r",
+        "--rollout-config",
+        dest="rollout_config",
+        type=str,
+        default=None,
+        help="rollout config file to override model rollout config",
     )
 
     parser.add_argument(
@@ -426,6 +465,7 @@ def main():
     args = parser.parse_args()
     args_dict = vars(args)
     config = args_dict.pop("model_config")
+    rollout_config = args_dict.pop("rollout_config")
     launch = int(args_dict.pop("launch"))
     mode = str(args_dict.pop("mode"))
     subset = int(args_dict.pop("subset"))
@@ -447,6 +487,11 @@ def main():
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
+    if rollout_config:
+        with open(rollout_config) as cf:
+            rollout_conf = yaml.load(cf, Loader=yaml.FullLoader)
+        conf["predict"] = rollout_conf["predict"]
+
     if debug == 1 or conf["model"]["type"] == "debugger" or conf["predict"]["forecasts"]["type"] == "debugger" or conf.get("debug", False):
         print("setting logging to debug")
         ch.setLevel(logging.DEBUG)
@@ -460,11 +505,10 @@ def main():
     root.addHandler(ch)
 
     # create a save location for rollout
-    assert (
-        "save_forecast" in conf["predict"]
-    ), "Please specify the output dir through conf['predict']['save_forecast']"
-
-    forecast_save_loc = conf["predict"]["save_forecast"]
+    forecast_save_loc = conf["predict"].get("save_forecast", None)
+    if not forecast_save_loc:
+        forecast_save_loc = os.path.expandvars(join(conf["save_loc"], "forecasts"))
+        logger.warning("forecast_save_loc not specified, saving to default location-")
     os.makedirs(forecast_save_loc, exist_ok=True)
 
     logging.info("Save roll-outs to {}".format(forecast_save_loc))
