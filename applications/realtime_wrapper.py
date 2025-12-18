@@ -6,11 +6,7 @@ import multiprocessing as mp
 import pandas as pd
 from os.path import join
 import time
-
-# from applications.realtime_wrapper_old import n_members
-# from credit.attend import exists
 from credit.parser import credit_main_parser
-
 
 start_time = time.time()
 
@@ -28,17 +24,15 @@ conf['predict']['realtime']['forecast_end_time'] = (init_time + pd.Timedelta(day
 print("FORECAST START TIME TIME", conf['predict']['realtime']['forecast_start_time'])
 print("FORECAST END TIME", conf['predict']['realtime']['forecast_end_time'])
 n_members = 341
-# n_members = 10
-# members = [f"{member:03}" for member in range(1, n_members + 1)]
-# conf['predict']['save_forecast'] = join(conf['predict']['save_forecast'], init)
-# os.makedirs(conf['predict']['save_forecast'], exist_ok=True)
+conf['predict']['save_forecast'] = join(conf['predict']['save_forecast'], init)
+os.makedirs(conf['predict']['save_forecast'], exist_ok=True)
 conf['file_configs']['base_path'] = join(conf['file_configs']['base_path'], init_time.strftime('%Y%m%d'))
 perturb = True
 if perturb:
     start = 1
 else:
     start = 0
-# with mp.Pool(24) as pool:
+
 with mp.Pool(12) as pool:
 
     for member in range(start, n_members + 1):
@@ -55,7 +49,6 @@ with mp.Pool(12) as pool:
         conf['data']['save_loc_surface'] = join(conf['file_configs']['base_path'], file_name)
         conf['data']['save_loc_dynamic_forcing'] = join("/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/AIWQ_inits/",
                                                 f'b.e21.CREDIT_climate_branch_allvars_GEFSicefracandsst_{init}.zarr')
-        # conf['data']['save_loc_dynamic_forcing'] = '/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate_branch_allvars_????_SWupdate.zarr'
         conf['data']['save_loc_diagnostic'] = join(conf['file_configs']['base_path'],
                                                    file_name)
         print(conf['file_configs']['base_path'])

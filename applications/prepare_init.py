@@ -75,7 +75,6 @@ ds_dynamic_forcings_forecast['time'] = timestamp_forecastlead
 #                                                      "level": 32, "ilev": 33})
 for var in ds_dynamic_forcings_forecast.data_vars:
     ds_dynamic_forcings_forecast[var].encoding = {}
-    print('refresh')
 ds_dynamic_forcings_forecast = ds_dynamic_forcings_forecast.chunk({"time": 12, "latitude": 192, "longitude": 288})
 print('chunked')
 # Save

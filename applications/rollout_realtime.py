@@ -17,6 +17,7 @@ import numpy as np
 # ---------- #
 import torch
 
+# from applications.AIWQ_realtime.realtime_wrapper import perturb
 # ---------- #
 # credit
 from credit.models import load_model
@@ -116,10 +117,26 @@ def process_forecast(
 
 def predict(rank, world_size, conf, p, member):
     # setup rank and world size for GPU-based rollout
+    print("member:", member)
     if member == "001":
-
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:
             setup(rank, world_size, conf["predict"]["mode"])
+    # init = "2025-10-30"
+    # for member in range(1, 341, 11):
+    #     if perturb:
+    #         member = f"{member:03}"
+    #         file_name = f'GEFS_ICs.{member}.i.{init}-00000.nc'  ## format from "make_ensemble_aiwq.py"
+    #     else:
+    #         if member == 0:
+    #             file_name = f"gefs_cam_grid_c00.nc"
+    #         else:
+    #             file_name = f"gefs_cam_grid_p{member:02}.nc"
+    #     conf['file_configs']["member"] = member
+    #     conf['data']['save_loc'] =  os.path.join(conf['file_configs']['base_path'], file_name)
+    #     conf['data']['save_loc_surface'] = os.path.join(conf['file_configs']['base_path'], file_name)
+    #     conf['data']['save_loc_dynamic_forcing'] = os.path.join("/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/AIWQ_inits/",
+    #                                             f'b.e21.CREDIT_climate_branch_allvars_GEFSicefracandsst_{init}.zarr')
+    #     conf['data']['save_loc_diagnostic'] = os.path.join(conf['file_configs']['base_path'], file_name)
 
     # Set up dataloading
     data_config = setup_data_loading(conf)
@@ -134,7 +151,7 @@ def predict(rank, world_size, conf, p, member):
         device = torch.device("cpu")
 
     # config settings
-    seed_everything(conf["seed"])
+    # seed_everything(conf["seed"])
 
     # number of input time frames
     history_len = conf["data"]["history_len"]
@@ -197,12 +214,16 @@ def predict(rank, world_size, conf, p, member):
         clamp_min = float(conf["data"]["data_clamp"][0])
         clamp_max = float(conf["data"]["data_clamp"][1])
 
-    # Load the forecasts we wish to compute
-    forecasts = load_forecasts(conf)
-    if len(forecasts) < batch_size:
-        logger.warning(
-            f"number of forecast init times {len(forecasts)} is less than batch_size {batch_size}, will result in under-utilization"
-        )
+        logger.info(f"Clamp min: {clamp_min}, max: {clamp_max}")
+
+    # for i in range(1, 11):
+    #     mem = f"{member}_{i:02}"
+    #     # Load the forecasts we wish to compute
+    #     forecasts = load_forecasts(conf)
+    #     if len(forecasts) < batch_size:
+    #         logger.warning(
+    #             f"number of forecast init times {len(forecasts)} is less than batch_size {batch_size}, will result in under-utilization"
+    #         )
 
     dataset = RealtimePredictDataset(
         forecast_start_time,
@@ -221,16 +242,16 @@ def predict(rank, world_size, conf, p, member):
         transform=load_transforms(conf),
         sst_forcing=data_config["sst_forcing"],
         rank=rank,
-        world_size=world_size,
-    )
+        world_size=world_size)
 
-    # Use a custom DataLoader so we get the len correct
+# Use a custom DataLoader so we get the len correct
     data_loader = BatchForecastLenDataLoader(dataset)
 
-    # Warning -- see next line
+# Warning -- see next line
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
 
-    # Load the model
+# Load the model
+#     if mem == "001_01":
     if conf["predict"]["mode"] == "none":
         model = load_model(conf, load_weights=True).to(device)
     elif conf["predict"]["mode"] == "ddp":
@@ -343,7 +364,7 @@ def predict(rank, world_size, conf, p, member):
                     forecast_count,
                     batch["datetime"],
                     save_datetimes,
-                    member
+                    mem
                 ),
             )
             results.append(result)
