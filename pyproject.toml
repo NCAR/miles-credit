@@ -57,7 +57,7 @@ dependencies = [
 
 [tool.setuptools]
 
-packages = ["credit.applications", "credit", "credit.models", "credit.metadata", "credit.datasets", 
+packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets", 
             "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
 
 [tool.setuptools_scm]
