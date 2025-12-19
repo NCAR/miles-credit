@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import logging
 import torch
-from stylistic_decoupling_layer import PixelNoiseInjection
+from .stylistic_decoupling_layer import PixelNoiseInjection
 
 
 class CrossFormerWithNoise(CrossFormer):
