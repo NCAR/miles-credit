@@ -9,8 +9,9 @@ from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
 from credit.postblock import PostBlock
 from typing import Callable, Optional
 from collections import OrderedDict
-import numpy as np 
+import numpy as np
 import xarray as xr
+
 
 class BredVector:
     def __init__(
@@ -74,9 +75,7 @@ class BredVector:
         if self.use_post_block:
             # freeze base model weights before postblock init
             if "skebs" in post_conf.keys():
-                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
-                    "freeze_base_model_weights", False
-                ):
+                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get("freeze_base_model_weights", False):
                     # logger.warning("freezing all base model weights due to skebs config")
                     for param in self.parameters():
                         param.requires_grad = False

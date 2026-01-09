@@ -68,13 +68,9 @@ def variable_weights(conf, channels, frames):
     # surface + diag channels
     N_channels_single = len(varname_surface) + len(varname_diagnostics)
 
-    weights_upper_air = torch.tensor([conf["loss"]["variable_weights"][var] for var in varname_upper_air]).view(
-        1, channels * frames, 1, 1
-    )
+    weights_upper_air = torch.tensor([conf["loss"]["variable_weights"][var] for var in varname_upper_air]).view(1, channels * frames, 1, 1)
 
-    weights_single = torch.tensor(
-        [conf["loss"]["variable_weights"][var] for var in (varname_surface + varname_diagnostics)]
-    ).view(1, N_channels_single, 1, 1)
+    weights_single = torch.tensor([conf["loss"]["variable_weights"][var] for var in (varname_surface + varname_diagnostics)]).view(1, N_channels_single, 1, 1)
 
     # Combine all weights along the color channel
     var_weights = torch.cat([weights_upper_air, weights_single], dim=1)
@@ -163,9 +159,7 @@ class VariableTotalLoss2D(torch.nn.Module):
         if conf["loss"]["use_variable_weights"]:
             logger.info("Using variable weights in loss calculations")
 
-            var_weights = [
-                value if isinstance(value, list) else [value] for value in conf["loss"]["variable_weights"].values()
-            ]
+            var_weights = [value if isinstance(value, list) else [value] for value in conf["loss"]["variable_weights"].values()]
 
             var_weights = np.array([item for sublist in var_weights for item in sublist])
 
@@ -175,9 +169,7 @@ class VariableTotalLoss2D(torch.nn.Module):
         self.use_spectral_loss = conf["loss"]["use_spectral_loss"]
         if self.use_spectral_loss:
             self.spectral_lambda_reg = conf["loss"]["spectral_lambda_reg"]
-            self.spectral_loss_surface = SpectralLoss2D(
-                wavenum_init=conf["loss"]["spectral_wavenum_init"], reduction="none"
-            )
+            self.spectral_loss_surface = SpectralLoss2D(wavenum_init=conf["loss"]["spectral_wavenum_init"], reduction="none")
 
         self.use_power_loss = conf["loss"]["use_power_loss"] if "use_power_loss" in conf["loss"] else False
         if self.use_power_loss:

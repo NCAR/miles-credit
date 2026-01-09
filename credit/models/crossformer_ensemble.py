@@ -245,9 +245,7 @@ class PixelNoiseInjection(nn.Module):
         self.noise_transform = nn.Linear(noise_dim, feature_channels)
         self.modulation = nn.Parameter(torch.ones(1, feature_channels, 1, 1))
         # self.noise_factor = noise_factor
-        self.noise_factor = nn.Parameter(
-            torch.tensor([noise_factor]), requires_grad=False
-        )
+        self.noise_factor = nn.Parameter(torch.tensor([noise_factor]), requires_grad=False)
 
     def forward(self, feature_map, noise):
         """

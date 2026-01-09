@@ -4,7 +4,7 @@ import numpy as np
 # from credit.loss import latitude_weights
 
 
-#class LatWeightedMetrics:
+# class LatWeightedMetrics:
 class UnWeightedMetrics:
     """Metrics calculation for training & validation; takes the place
     of LatWeightedMetrics, which does not apply for regional datasets
@@ -18,8 +18,8 @@ class UnWeightedMetrics:
               output tensor.  Use DownscalingDataset.tnames, which
               constructs it automatically.
     """
-    def __init__(self, conf, varnames):
 
+    def __init__(self, conf, varnames):
         self.vars = varnames
         # self.conf = conf
         # atmos_vars = conf["data"]["variables"]
@@ -35,7 +35,6 @@ class UnWeightedMetrics:
         # self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         # self.vars += surface_vars
         # self.vars += diag_vars
-
 
         # No latitude weighting
         self.w_lat = None
@@ -62,18 +61,9 @@ class UnWeightedMetrics:
             pred = transform(pred)
             y = transform(y)
 
-
         # Get latitude and variable weights
-        w_lat = (
-            self.w_lat.to(dtype=pred.dtype, device=pred.device)
-            if self.w_lat is not None
-            else 1.0
-        )
-        w_var = (
-            self.w_var.to(dtype=pred.dtype, device=pred.device)
-            if self.w_var is not None
-            else 1.0
-        )
+        w_lat = self.w_lat.to(dtype=pred.dtype, device=pred.device) if self.w_lat is not None else 1.0
+        w_var = self.w_var.to(dtype=pred.dtype, device=pred.device) if self.w_var is not None else 1.0
 
         if clim is not None:
             clim = clim.to(device=y.device).unsqueeze(0)
@@ -84,8 +74,8 @@ class UnWeightedMetrics:
         with torch.no_grad():
             # calculate ensemble mean, if ensemble_size=1, does nothing
             if self.ensemble_size > 1:
-                pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:]) #b, ensemble, c, t, lat, lon
-                std_dev = torch.std(pred, dim=1) # std dev of ensemble
+                pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:])  # b, ensemble, c, t, lat, lon
+                std_dev = torch.std(pred, dim=1)  # std dev of ensemble
                 pred = pred.mean(dim=1)
 
             error = pred - y
@@ -99,53 +89,27 @@ class UnWeightedMetrics:
                 denominator = (
                     torch.sqrt(
                         torch.sum(pred_prime**2) * torch.sum(y_prime**2)
-                        #torch.sum(w_var * w_lat * pred_prime**2)
-                        #* torch.sum(w_var * w_lat * y_prime**2)
+                        # torch.sum(w_var * w_lat * pred_prime**2)
+                        # * torch.sum(w_var * w_lat * y_prime**2)
                     )
                     + epsilon
                 )
 
-                loss_dict[f"acc_{var}"] = (
-                    torch.sum(w_var * w_lat * pred_prime * y_prime) / denominator
-                )
-                loss_dict[f"rmse_{var}"] = torch.mean(
-                    torch.sqrt(
-                        torch.mean(error[:, i] ** 2 * w_lat * w_var, dim=(-2, -1))
-                    )
-                )
+                loss_dict[f"acc_{var}"] = torch.sum(w_var * w_lat * pred_prime * y_prime) / denominator
+                loss_dict[f"rmse_{var}"] = torch.mean(torch.sqrt(torch.mean(error[:, i] ** 2 * w_lat * w_var, dim=(-2, -1))))
                 loss_dict[f"mse_{var}"] = (error[:, i] ** 2 * w_lat * w_var).mean()
-                loss_dict[f"mae_{var}"] = (
-                    torch.abs(error[:, i]) * w_lat * w_var
-                ).mean()
+                loss_dict[f"mae_{var}"] = (torch.abs(error[:, i]) * w_lat * w_var).mean()
                 # mean of std across all batches
                 if self.ensemble_size > 1:
-                    loss_dict[f"std_{var}"] = torch.mean(
-                        torch.sqrt(
-                            torch.mean(std_dev[:, i] ** 2 * w_lat * w_var, dim=(-2, -1))
-                        )
-                    )
+                    loss_dict[f"std_{var}"] = torch.mean(torch.sqrt(torch.mean(std_dev[:, i] ** 2 * w_lat * w_var, dim=(-2, -1))))
 
         # Calculate metrics averages
-        loss_dict["acc"] = np.mean(
-            [loss_dict[k].cpu().item() for k in loss_dict.keys() if "acc_" in k]
-        )
-        loss_dict["rmse"] = np.mean(
-            [loss_dict[k].cpu() for k in loss_dict.keys() if "rmse_" in k]
-        )
-        loss_dict["mse"] = np.mean(
-            [
-                loss_dict[k].cpu()
-                for k in loss_dict.keys()
-                if "mse_" in k and "rmse_" not in k
-            ]
-        )
-        loss_dict["mae"] = np.mean(
-            [loss_dict[k].cpu() for k in loss_dict.keys() if "mae_" in k]
-        )
+        loss_dict["acc"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict.keys() if "acc_" in k])
+        loss_dict["rmse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "rmse_" in k])
+        loss_dict["mse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mse_" in k and "rmse_" not in k])
+        loss_dict["mae"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mae_" in k])
         if self.ensemble_size > 1:
-            loss_dict["std"] = np.mean(
-                [loss_dict[k].cpu() for k in loss_dict.keys() if "std_" in k]
-                )
+            loss_dict["std"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "std_" in k])
 
         return loss_dict
 
@@ -437,5 +401,3 @@ class UnWeightedMetrics:
 #     # Display results
 #     for key, value in results.items():
 #         print(f"{key}: {value}")
-
-

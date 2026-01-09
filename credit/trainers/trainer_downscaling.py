@@ -92,10 +92,7 @@ class Trainer(BaseTrainer):
         self.setup(conf)
 
         # update the learning rate if epoch-by-epoch updates don't depend on a metric
-        if (
-            conf["trainer"]["use_scheduler"]
-            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
-        ):
+        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # setup custom tqdm progress meter
@@ -109,15 +106,9 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches_per_epoch = len(trainloader)
             # Use the user-given number if not larger than the dataset
-            self.batches_per_epoch = (
-                self.batches_per_epoch
-                if 0 < self.batches_per_epoch < dataset_batches_per_epoch
-                else dataset_batches_per_epoch
-            )
+            self.batches_per_epoch = self.batches_per_epoch if 0 < self.batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
 
-        batch_group_generator = tqdm.tqdm(
-            range(self.batches_per_epoch), total=self.batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(self.batches_per_epoch), total=self.batches_per_epoch, leave=True)
 
         self.model.train()
 
@@ -160,15 +151,7 @@ class Trainer(BaseTrainer):
             scaler.unscale_(optimizer)
             if self.grad_max_norm == "dynamic":
                 # Compute local L2 norm
-                local_norm = torch.norm(
-                    torch.stack(
-                        [
-                            p.grad.detach().norm(2)
-                            for p in self.model.parameters()
-                            if p.grad is not None
-                        ]
-                    )
-                )
+                local_norm = torch.norm(torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None]))
 
                 # All-reduce to get global norm across ranks
                 if self.distributed:
@@ -176,13 +159,9 @@ class Trainer(BaseTrainer):
                 global_norm = local_norm.sqrt()  # Compute total global norm
 
                 # Clip gradients using the global norm
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=global_norm
-                )
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
             elif self.grad_max_norm > 0.0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=self.grad_max_norm
-                )
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
 
             # Step optimizer
             scaler.step(optimizer)
@@ -233,10 +212,7 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -252,9 +228,7 @@ class Trainer(BaseTrainer):
             if epoch % saveconf["frequency"] == 0:
                 wrangler = OutputWrangler(trainloader.dataset, **saveconf["output"])
                 wrangler.process(batch["y"], batch["dates"], prefix=f"ep{epoch}.target")
-                wrangler.process(
-                    y_pred.cpu().detach(), batch["dates"], prefix=f"ep{epoch}.predicted"
-                )
+                wrangler.process(y_pred.cpu().detach(), batch["dates"], prefix=f"ep{epoch}.predicted")
 
         return results_dict
 
@@ -282,11 +256,7 @@ class Trainer(BaseTrainer):
         varnum_diag = len(conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
-        static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-        )
+        static_dim_size = len(conf["data"]["dynamic_forcing_variables"]) + len(conf["data"]["forcing_variables"]) + len(conf["data"]["static_variables"])
         # ^^
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
@@ -349,15 +319,9 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches_per_epoch = len(valid_loader)
             # Use the user-given number if not larger than the dataset
-            valid_batches_per_epoch = (
-                valid_batches_per_epoch
-                if 0 < valid_batches_per_epoch < dataset_batches_per_epoch
-                else dataset_batches_per_epoch
-            )
+            valid_batches_per_epoch = valid_batches_per_epoch if 0 < valid_batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
 
-        batch_group_generator = tqdm.tqdm(
-            range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
         # end common block 1
 
         stop_forecast = False
@@ -377,9 +341,7 @@ class Trainer(BaseTrainer):
                             # combine x and x_surf
                             # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
                             # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                            x = concat_and_reshape(batch["x"], batch["x_surf"]).to(
-                                self.device
-                            )  # .float()
+                            x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)  # .float()
                         else:
                             # no x_surf
                             x = reshape_only(batch["x"]).to(self.device)  # .float()
@@ -395,17 +357,11 @@ class Trainer(BaseTrainer):
                     # add forcing and static variables (regardless of fcst hours)
                     if "x_forcing_static" in batch:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        x_forcing_batch = (
-                            batch["x_forcing_static"]
-                            .to(self.device)
-                            .permute(0, 2, 1, 3, 4)
-                        )  # .float()
+                        x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
                         # ---------------- ensemble ----------------- #
                         # ensemble x_forcing_batch for concat. see above for explanation of code
                         if ensemble_size > 1:
-                            x_forcing_batch = torch.repeat_interleave(
-                                x_forcing_batch, ensemble_size, 0
-                            )
+                            x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
                         # --------------------------------------------- #
 
                         # concat on var dimension
@@ -451,17 +407,13 @@ class Trainer(BaseTrainer):
                         # ----------------------------------------------------------------------- #
                         # creating `y` tensor for loss compute
                         if "y_surf" in batch:
-                            y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
-                                self.device
-                            )
+                            y = concat_and_reshape(batch["y"], batch["y_surf"]).to(self.device)
                         else:
                             y = reshape_only(batch["y"]).to(self.device)
 
                         if "y_diag" in batch:
                             # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                            y_diag_batch = (
-                                batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                            )  # .float()
+                            y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                             # concat on var dimension
                             y = torch.cat((y, y_diag_batch), dim=1)
@@ -480,14 +432,10 @@ class Trainer(BaseTrainer):
                         metrics_dict = metrics(y_pred.float(), y.float())
 
                         for name, value in metrics_dict.items():
-                            value = torch.Tensor([value]).cuda(
-                                self.device, non_blocking=True
-                            )
+                            value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
 
                             if self.distributed:
-                                dist.all_reduce(
-                                    value, dist.ReduceOp.AVG, async_op=False
-                                )
+                                dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
 
                             results_dict[f"valid_{name}"].append(value[0].item())
 

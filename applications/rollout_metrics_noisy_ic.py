@@ -139,11 +139,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
     varnum_diag = len(conf["data"]["diagnostic_variables"])
 
     # number of dynamic forcing + forcing + static
-    static_dim_size = (
-        len(conf["data"]["dynamic_forcing_variables"])
-        + len(conf["data"]["forcing_variables"])
-        + len(conf["data"]["static_variables"])
-    )
+    static_dim_size = len(conf["data"]["dynamic_forcing_variables"]) + len(conf["data"]["forcing_variables"]) + len(conf["data"]["static_variables"])
 
     # clamp to remove outliers
     if conf["data"]["data_clamp"] is None:
@@ -269,9 +265,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
     elif noise_cfg["type"] == "red":
         noise = ColorNoise(amplitude=noise_cfg["amplitude"], reddening=noise_cfg["reddening"])
     elif noise_cfg["type"] == "spherical":
-        noise = SphericalNoise(
-            amplitude=noise_cfg["amplitude"], smoothness=noise_cfg["smoothness"], length_scale=noise_cfg["length_scale"]
-        )
+        noise = SphericalNoise(amplitude=noise_cfg["amplitude"], smoothness=noise_cfg["smoothness"], length_scale=noise_cfg["length_scale"])
 
     # Bred vector setup
     if use_bred_vectors:
@@ -298,11 +292,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
     if use_temporal_noise:
         temporal_cfg = conf["predict"]["ensemble"]["temporal_noise"]
         temporal_noise = TemporalNoise(
-            noise,
-            temporal_cfg["temporal_correlation"],
-            temporal_cfg["perturbation_std"],
-            temporal_cfg["hemispheric_rescale"],
-            terrain_file=conf["loss"]["latitude_weights"]
+            noise, temporal_cfg["temporal_correlation"], temporal_cfg["perturbation_std"], temporal_cfg["hemispheric_rescale"], terrain_file=conf["loss"]["latitude_weights"]
         )
 
     # Rollout
@@ -352,10 +342,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 crps_dict = [defaultdict(list) for _ in range(batch_size)]
 
                 # Process the entire batch at once
-                init_datetimes = [
-                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime("%Y-%m-%dT%HZ")
-                    for i in range(batch_size)
-                ]
+                init_datetimes = [datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime("%Y-%m-%dT%HZ") for i in range(batch_size)]
                 save_datetimes[forecast_count : forecast_count + batch_size] = init_datetimes
 
                 if "x_surf" in batch:

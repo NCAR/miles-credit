@@ -53,9 +53,7 @@ def main():
             heights = static_ds[args.geo].values / 9.81
             grid_points = np.vstack([lon_grid.ravel(), lat_grid.ravel(), heights.ravel()]).T
             split_indices = np.round(np.linspace(0, grid_points.shape[0], size + 1)).astype(int)
-            grid_points_sub = [
-                grid_points[split_indices[s] : split_indices[s + 1]] for s in range(split_indices.size - 1)
-            ]
+            grid_points_sub = [grid_points[split_indices[s] : split_indices[s + 1]] for s in range(split_indices.size - 1)]
         toa_radiation = get_toa_radiation(args.start, args.end, step_freq=args.step, sub_freq=args.sub)
     toa_radiation = comm.bcast(toa_radiation, root=0)
     rank_points = comm.scatter(grid_points_sub, root=0)

@@ -26,6 +26,8 @@ def apply_spectral_norm(model):
             if "sharp" in name:
                 continue
             nn.utils.spectral_norm(module)
+
+
 # cube embedding
 
 
@@ -77,7 +79,7 @@ class UpBlock(nn.Module):
         nn.init.zeros_(self.sharp.weight)
         nn.init.zeros_(self.sharp.bias)
         self.output_channels = out_chans
-        
+
         blk = []
         for i in range(num_residuals):
             blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
@@ -87,7 +89,6 @@ class UpBlock(nn.Module):
         self.b = nn.Sequential(*blk)
 
     def forward(self, x):
-
         x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False, antialias=False)
         x = self.conv(x)
         x = x + self.sharp(x)
@@ -97,29 +98,31 @@ class UpBlock(nn.Module):
 
         return x + shortcut
 
+
 class UpBlockPS(nn.Module):
     def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2):
         super().__init__()
         # sub-pixel conv at low res
         self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
-        self.ps   = nn.PixelShuffle(scale)
+        self.ps = nn.PixelShuffle(scale)
         # sharpening branch (identity init)
         self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
-        nn.init.zeros_(self.sharp.weight); nn.init.zeros_(self.sharp.bias)
+        nn.init.zeros_(self.sharp.weight)
+        nn.init.zeros_(self.sharp.bias)
         # residual stack
         blk = []
         for _ in range(num_residuals):
-            blk += [nn.Conv2d(out_ch, out_ch, 3, padding=1),
-                    nn.GroupNorm(num_groups, out_ch),
-                    nn.SiLU()]
+            blk += [nn.Conv2d(out_ch, out_ch, 3, padding=1), nn.GroupNorm(num_groups, out_ch), nn.SiLU()]
         self.b = nn.Sequential(*blk)
 
     def forward(self, x):
-        x = self.ps(self.conv(x))    # upsample+conv at low res
-        x = x + self.sharp(x)        # sharpen residual
+        x = self.ps(self.conv(x))  # upsample+conv at low res
+        x = x + self.sharp(x)  # sharpen residual
         sc = x
         x = self.b(x)
         return x + sc
+
+
 # cross embed layer
 
 
@@ -495,9 +498,7 @@ class Camulator(BaseModel):
             cross_embed_strides,
         ):
             # create CrossEmbedLayer
-            cross_embed_layer = CrossEmbedLayer(
-                dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride
-            )
+            cross_embed_layer = CrossEmbedLayer(dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride)
 
             # create Transformer
             transformer_layer = Transformer(
@@ -530,7 +531,7 @@ class Camulator(BaseModel):
         self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
         self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
         self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
-        #self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1)
+        # self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1)
         # self.up_block4 = nn.Sequential(
         #     nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
         #     nn.Conv2d(2 * (last_dim // 8), output_channels, kernel_size=3, stride=1, padding=1),
@@ -539,15 +540,14 @@ class Camulator(BaseModel):
         scale = 2
         self.up_block4 = nn.Sequential(
             nn.Conv2d(
-                2 * (last_dim // 8),              # in_channels
-                self.output_channels * (scale**2),# conv_out = target_channels * 4
+                2 * (last_dim // 8),  # in_channels
+                self.output_channels * (scale**2),  # conv_out = target_channels * 4
                 kernel_size=3,
                 stride=1,
-                padding=1
+                padding=1,
             ),
             nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
-            nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1)
-            
+            nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
         )
         self.conv4up = self.up_block4[1]
 
@@ -558,9 +558,7 @@ class Camulator(BaseModel):
         if self.use_post_block:
             # freeze base model weights before postblock init
             if "skebs" in post_conf.keys():
-                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
-                    "freeze_base_model_weights", False
-                ):
+                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get("freeze_base_model_weights", False):
                     logger.warning("freezing all base model weights due to skebs config")
                     for param in self.parameters():
                         param.requires_grad = False
@@ -595,7 +593,7 @@ class Camulator(BaseModel):
         x = torch.cat([x, encodings[1]], dim=1)
         x = self.up_block3(x)
         x = torch.cat([x, encodings[0]], dim=1)
-        
+
         x = self.up_block4(x)
 
         if self.use_padding:

@@ -22,8 +22,6 @@ def test_full_state_pressure_interpolation():
         lon_var="lon",
     )
     for var in ["U", "V", "T", "Q"]:
-        assert (
-            interp_ds[f"{var}_PRES"].shape[1] == pressure_levels.size
-        ), "Pressure level mismatch"
+        assert interp_ds[f"{var}_PRES"].shape[1] == pressure_levels.size, "Pressure level mismatch"
         assert ~np.any(np.isnan(interp_ds[f"{var}_PRES"])), "NaN found"
     return

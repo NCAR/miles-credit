@@ -82,9 +82,7 @@ def save_netcdf_increment(
 
             with xr.open_dataset(conf["predict"]["static_fields"]) as static_ds:
                 surface_geopotential = static_ds[surface_geopotential_var].values
-            pressure_interp = full_state_pressure_interpolation(
-                ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"]
-            )
+            pressure_interp = full_state_pressure_interpolation(ds_merged, surface_geopotential, **conf["predict"]["interp_pressure"])
             ds_merged = xr.merge([ds_merged, pressure_interp])
 
         # logger.info(f"Trying to save forecast hour {forecast_hour} to {nc_filename}")
@@ -292,11 +290,7 @@ class Trainer(BaseTrainer):
         varnum_diag = len(conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
-        static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-        )
+        static_dim_size = len(conf["data"]["dynamic_forcing_variables"]) + len(conf["data"]["forcing_variables"]) + len(conf["data"]["static_variables"])
 
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
@@ -310,9 +304,7 @@ class Trainer(BaseTrainer):
             # If not specified in config, use the range 1 to forecast_len
             backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
 
-        assert (
-            forecast_length <= backprop_on_timestep[-1]
-        ), f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
+        assert forecast_length <= backprop_on_timestep[-1], f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
         if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
@@ -364,9 +356,7 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches_per_epoch = len(trainloader)
             # Use the user-given number if not larger than the dataset
-            batches_per_epoch = (
-                batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
-            )
+            batches_per_epoch = batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
 
         # batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
         if precision == "float64":
@@ -397,9 +387,7 @@ class Trainer(BaseTrainer):
             x0 = x0.requires_grad_(True)
 
             # Create optimizer for x0 (this is what we're optimizing)
-            optimizer = torch.optim.AdamW(
-                [x0], lr=conf["trainer"]["learning_rate"], weight_decay=conf["trainer"]["weight_decay"]
-            )
+            optimizer = torch.optim.AdamW([x0], lr=conf["trainer"]["learning_rate"], weight_decay=conf["trainer"]["weight_decay"])
 
             init_datetimes = date_time.utcfromtimestamp(batch["datetime"][0].item()).strftime("%Y-%m-%dT%HZ")
             save_datetimes = init_datetimes
@@ -424,9 +412,7 @@ class Trainer(BaseTrainer):
             #     eta_min=1e-3 * conf["trainer"]["learning_rate"],
             # )
 
-            batch_group_generator = tqdm.tqdm(
-                range(num_windows * batch_iterations), total=num_windows * batch_iterations, leave=True
-            )
+            batch_group_generator = tqdm.tqdm(range(num_windows * batch_iterations), total=num_windows * batch_iterations, leave=True)
             datetime = batch["datetime"]
 
             # Optimize for this window size
@@ -471,11 +457,7 @@ class Trainer(BaseTrainer):
 
                         # Predict with the model
                         with torch.autocast(device_type="cuda", enabled=amp):
-                            y_pred = (
-                                self.model(x, forecast_step=forecast_step - 1)
-                                if conf["model"]["type"] == "crossformer-noisy"
-                                else self.model(x)
-                            )
+                            y_pred = self.model(x, forecast_step=forecast_step - 1) if conf["model"]["type"] == "crossformer-noisy" else self.model(x)
 
                         # Apply conservation constraints
                         if flag_mass_conserve:
@@ -681,17 +663,11 @@ class Trainer(BaseTrainer):
         varnum_diag = len(conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
-        static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-        )
+        static_dim_size = len(conf["data"]["dynamic_forcing_variables"]) + len(conf["data"]["forcing_variables"]) + len(conf["data"]["static_variables"])
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
         history_len = conf["data"]["valid_history_len"] if "valid_history_len" in conf["data"] else conf["history_len"]
-        forecast_len = (
-            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
-        )
+        forecast_len = conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
@@ -708,11 +684,7 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches_per_epoch = len(valid_loader)
             # Use the user-given number if not larger than the dataset
-            valid_batches_per_epoch = (
-                valid_batches_per_epoch
-                if 0 < valid_batches_per_epoch < dataset_batches_per_epoch
-                else dataset_batches_per_epoch
-            )
+            valid_batches_per_epoch = valid_batches_per_epoch if 0 < valid_batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
 
         # ------------------------------------------------------- #
         # clamp to remove outliers
@@ -799,11 +771,7 @@ class Trainer(BaseTrainer):
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-                    y_pred = (
-                        self.model(x, forecast_step=forecast_step - 1)
-                        if conf["model"]["type"] == "crossformer-noisy"
-                        else self.model(x)
-                    )
+                    y_pred = self.model(x, forecast_step=forecast_step - 1) if conf["model"]["type"] == "crossformer-noisy" else self.model(x)
 
                     # ============================================= #
                     # postblock opts outside of model

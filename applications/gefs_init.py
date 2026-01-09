@@ -8,9 +8,7 @@ import os
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Initialize CREDIT models with GEFS data"
-    )
+    parser = argparse.ArgumentParser(description="Initialize CREDIT models with GEFS data")
     parser.add_argument(
         "-d",
         "--date",
@@ -42,9 +40,7 @@ def main():
         default=30,
         help="Number of GEFS perturbation members to download.",
     )
-    parser.add_argument(
-        "-n", "--nprocs", type=int, default=1, help="Number of processes to use."
-    )
+    parser.add_argument("-n", "--nprocs", type=int, default=1, help="Number of processes to use.")
     parser.add_argument(
         "-v",
         "--variables",

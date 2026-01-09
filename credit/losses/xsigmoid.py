@@ -27,8 +27,4 @@ class XSigmoidLoss(torch.nn.Module):
             torch.Tensor: X-Sigmoid loss value.
         """
         ey_t = y_t - y_prime_t + 1e-12
-        return (
-            torch.mean(2 * ey_t / (1 + torch.exp(-ey_t)) - ey_t)
-            if self.reduction == "mean"
-            else 2 * ey_t / (1 + torch.exp(-ey_t)) - ey_t
-        )
+        return torch.mean(2 * ey_t / (1 + torch.exp(-ey_t)) - ey_t) if self.reduction == "mean" else 2 * ey_t / (1 + torch.exp(-ey_t)) - ey_t

@@ -28,8 +28,4 @@ class LogCoshLoss(torch.nn.Module):
             torch.Tensor: Log-Cosh loss value.
         """
         ey_t = y_t - y_prime_t
-        return (
-            torch.mean(torch.log(torch.cosh(ey_t + 1e-12)))
-            if self.reduction == "mean"
-            else torch.log(torch.cosh(ey_t + 1e-12))
-        )
+        return torch.mean(torch.log(torch.cosh(ey_t + 1e-12))) if self.reduction == "mean" else torch.log(torch.cosh(ey_t + 1e-12))

@@ -14,9 +14,7 @@ def test_get_solar_radiation_loc():
     sub_freq = "10Min"
     dates = pd.date_range(start=start_date, end=end_date, freq=step_freq)
     toa_radiation = get_toa_radiation(start_date, end_date, step_freq=step_freq, sub_freq=sub_freq)
-    tsi_ds = get_solar_radiation_loc(
-        toa_radiation, lon, lat, altitude, start_date, end_date, step_freq=step_freq, sub_freq=sub_freq
-    )
+    tsi_ds = get_solar_radiation_loc(toa_radiation, lon, lat, altitude, start_date, end_date, step_freq=step_freq, sub_freq=sub_freq)
     assert np.all(tsi_ds["tsi"].values) >= 0, "Negative solar values"
     assert np.all(tsi_ds["coszen"].min() >= 0), "Negative cos zenith values"
     assert np.all(dates == pd.DatetimeIndex(tsi_ds.time)), "Dates do not match"
@@ -32,9 +30,7 @@ def test_get_solar_radiation_loc_6h():
     sub_freq = "10Min"
     dates = pd.date_range(start=start_date, end=end_date, freq=step_freq)
     toa_radiation = get_toa_radiation(start_date, end_date, step_freq=step_freq, sub_freq=sub_freq)
-    tsi_ds = get_solar_radiation_loc(
-        toa_radiation, lon, lat, altitude, start_date, end_date, step_freq=step_freq, sub_freq=sub_freq
-    )
+    tsi_ds = get_solar_radiation_loc(toa_radiation, lon, lat, altitude, start_date, end_date, step_freq=step_freq, sub_freq=sub_freq)
     assert np.all(tsi_ds["tsi"].values) >= 0, "Negative solar values"
     assert np.all(tsi_ds["coszen"].min() >= 0), "Negative cos zenith values"
     assert np.all(dates == pd.DatetimeIndex(tsi_ds.time)), "Dates do not match"

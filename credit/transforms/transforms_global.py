@@ -439,10 +439,7 @@ class Normalize_ERA5_and_Forcing:
 
         return device_compatible_to(transformed_x, device)
 
-    def _align_coords(self, DS: xr.Dataset,
-                  ref_ds: xr.Dataset,
-                  rtol: float = 1e-6,
-                  atol: float = 1e-8) -> xr.Dataset:
+    def _align_coords(self, DS: xr.Dataset, ref_ds: xr.Dataset, rtol: float = 1e-6, atol: float = 1e-8) -> xr.Dataset:
         """
         Ensure DS has the same lat/lon as ref_ds (to within tolerance),
         then re-assign DS.coords to exactly match ref_ds.coords.
@@ -453,48 +450,37 @@ class Normalize_ERA5_and_Forcing:
             if coord not in DS.coords:
                 break
             ref_vals = ref_ds.coords[coord].values
-            ds_vals  = DS.coords[coord].values
+            ds_vals = DS.coords[coord].values
 
             if ref_vals.shape != ds_vals.shape:
-                raise ValueError(
-                    f"Shape mismatch for '{coord}': "
-                    f"{ds_vals.shape} vs {ref_vals.shape}"
-                )
+                raise ValueError(f"Shape mismatch for '{coord}': {ds_vals.shape} vs {ref_vals.shape}")
             DS = DS.assign_coords({coord: ref_ds.coords[coord]})
-        
+
         for coord in ("latitude", "longitude"):
             if coord not in ref_ds.coords:
                 continue
             if coord not in DS.coords:
                 raise ValueError(f"Input dataset missing coordinate '{coord}'")
             ref_vals = ref_ds.coords[coord].values
-            ds_vals  = DS.coords[coord].values
-    
+            ds_vals = DS.coords[coord].values
+
             if ref_vals.shape != ds_vals.shape:
-                raise ValueError(
-                    f"Shape mismatch for '{coord}': "
-                    f"{ds_vals.shape} vs {ref_vals.shape}"
-                )
+                raise ValueError(f"Shape mismatch for '{coord}': {ds_vals.shape} vs {ref_vals.shape}")
             if not np.allclose(ds_vals, ref_vals, rtol=rtol, atol=atol):
-                raise ValueError(
-                    f"Values for '{coord}' differ by more than "
-                    f"rtol={rtol}, atol={atol}"
-                )
-    
+                raise ValueError(f"Values for '{coord}' differ by more than rtol={rtol}, atol={atol}")
+
             DS = DS.assign_coords({coord: ref_ds.coords[coord]})
         return DS
 
-    def inverse_transform_dataset(self, DS: xr.Dataset,
-                              rtol: float = 1e-6,
-                              atol: float = 1e-8) -> xr.Dataset:
+    def inverse_transform_dataset(self, DS: xr.Dataset, rtol: float = 1e-6, atol: float = 1e-8) -> xr.Dataset:
         """
         Inverse‐transform DS by (DS * std_ds) + mean_ds, after
         aligning its coordinates to mean_ds/std_ds.
         """
         DS_aligned = self._align_coords(DS, self.mean_ds, rtol=rtol, atol=atol)
         mean_b = self.mean_ds.broadcast_like(DS)
-        std_b  = self.std_ds.broadcast_like(DS)
-        
+        std_b = self.std_ds.broadcast_like(DS)
+
         return (DS_aligned * self.std_ds) + self.mean_ds
 
 
@@ -610,13 +596,13 @@ class ToTensor_ERA5_and_Forcing:
                 self.flag_upper_air = all([varname in dataset_vars for varname in self.varname_upper_air])
                 self.flag_surface = all([varname in dataset_vars for varname in self.varname_surface])
                 # =========================================================================================== #
-                
+
                 if self.flag_upper_air:
                     for var_name in self.varname_upper_air:
                         var_value = value[var_name].values
                         list_vars_upper_air.append(var_value)
                     numpy_vars_upper_air = np.array(list_vars_upper_air)  # [num_vars, hist_len, num_levels, lat, lon]
-                    
+
                 # organize surface vars
                 if self.flag_surface:
                     list_vars_surface = []
