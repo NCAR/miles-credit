@@ -228,9 +228,11 @@ def distributed_model_wrapper(conf, neural_network, device):
         )
 
         if checkpoint_all_layers:
-            check_fn = lambda submodule: not should_not_checkpoint(submodule)
+            def check_fn(submodule):
+                return not should_not_checkpoint(submodule)
         else:
-            check_fn = lambda submodule: any(isinstance(submodule, cls) for cls in transformer_layers_cls)
+            def check_fn(submodule):
+                return any(isinstance(submodule, cls) for cls in transformer_layers_cls)
 
         apply_activation_checkpointing(model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn)
 
