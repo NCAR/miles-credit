@@ -86,13 +86,18 @@ credit_train_wrf_multi = "credit.applications.train_wrf_multi:primary_main"
 credit_train_les = "credit.applications.train_les:primary_main"
 credit_rollout_wrf = "credit.applications.rollout_wrf:main"
 credit_rollout_les = "credit.applications.rollout_les:main"
+
 [tool.ruff]
-target-version = "py311"
 src = ["credit", "applications", "tests"]
 line-length = 180
+exclude = ["notebooks/**"]
+
+[tool.ruff.lint]
+ignore = ["D417"]
 
 [tool.ruff.lint.per-file-ignores]
 "*.ipynb" = ["E402"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
