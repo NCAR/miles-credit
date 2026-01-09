@@ -93,7 +93,7 @@ line-length = 180
 exclude = ["notebooks/**"]
 
 [tool.ruff.lint]
-ignore = ["D417"]
+ignore = ["D417", "F841"]
 
 [tool.ruff.lint.per-file-ignores]
 "*.ipynb" = ["E402"]
