@@ -198,18 +198,14 @@ class SphericalRandomField(torch.nn.Module):
 
         # Validate smoothness parameter
         if smoothness < 1.0:
-            raise ValueError(f"Smoothness parameter must be > 1.0 for well-defined covariance. " f"Got: {smoothness}")
+            raise ValueError(f"Smoothness parameter must be > 1.0 for well-defined covariance. Got: {smoothness}")
 
         # Set default variance scale if not provided
         if variance_scale is None:
             variance_scale = length_scale ** (0.5 * (2 * smoothness - 2.0))
 
         # Initialize inverse spherical harmonic transform
-        self.inverse_sht = (
-            InverseRealSHT(self.latitude_modes, self.longitude_modes, grid=grid_type, norm="backward")
-            .to(dtype=dtype)
-            .to(device=device)
-        )
+        self.inverse_sht = InverseRealSHT(self.latitude_modes, self.longitude_modes, grid=grid_type, norm="backward").to(dtype=dtype).to(device=device)
 
         # Compute square root of covariance eigenvalues
         # Eigenvalues of spherical Laplacian: λ_j = j(j+1) for j = 0, 1, 2, ...
@@ -219,9 +215,7 @@ class SphericalRandomField(torch.nn.Module):
         laplacian_eigenvals = laplacian_eigenvals.view(self.latitude_modes, 1).repeat(1, self.latitude_modes + 1)
 
         # Compute covariance eigenvalues: σ² * (λ/R² + τ²)^(-α)
-        covariance_eigenvals = variance_scale * (
-            (laplacian_eigenvals / sphere_radius**2 + length_scale**2) ** (-smoothness / 2.0)
-        )
+        covariance_eigenvals = variance_scale * ((laplacian_eigenvals / sphere_radius**2 + length_scale**2) ** (-smoothness / 2.0))
 
         # Apply lower triangular mask (spherical harmonics structure)
         covariance_sqrt = torch.tril(covariance_eigenvals)

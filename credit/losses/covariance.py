@@ -25,9 +25,7 @@ class CovarianceWeightedMSELoss(nn.Module):
         batch_normalize (bool): If true, normalize each variable by the y_true batch means and standard devs.
     """
 
-    def __init__(
-        self, reduction: str = "mean", batch_normalize: bool = False, **kwargs
-    ):
+    def __init__(self, reduction: str = "mean", batch_normalize: bool = False, **kwargs):
         self.reduction = reduction
         self.reduction_function = reduction_functions[reduction]
         self.batch_normalize = batch_normalize
@@ -36,12 +34,8 @@ class CovarianceWeightedMSELoss(nn.Module):
     def forward(self, y_true, y_pred):
         # Assumes an initial shape based on (batch, variable, time, lat, lon)
         # First reorder dimensions to (variable, time, batch, lat, lon)
-        assert (
-            len(y_true.shape) == 5
-        ), "y_true # dimensions does not match 5: (batch, var, time, lat, lon)"
-        assert (
-            len(y_pred.shape) == 5
-        ), "y_pred # dimensions does no  match 5: (batch, var, time, lat, lon)"
+        assert len(y_true.shape) == 5, "y_true # dimensions does not match 5: (batch, var, time, lat, lon)"
+        assert len(y_pred.shape) == 5, "y_pred # dimensions does no  match 5: (batch, var, time, lat, lon)"
         new_order = (1, 2, 0, 3, 4)
         y_true_shuff = torch.permute(y_true, new_order)
         y_pred_shuff = torch.permute(y_pred, new_order)

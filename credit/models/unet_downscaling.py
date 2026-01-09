@@ -173,8 +173,8 @@ class DownscalingSegmentationModel(BaseModel):
         self.channels = channels
         self.rk4_integration = rk4_integration
 
-        self.input_channels  = channels['boundary']   + channels['prognostic']
-        self.output_channels = channels['prognostic'] + channels['diagnostic']
+        self.input_channels = channels["boundary"] + channels["prognostic"]
+        self.output_channels = channels["prognostic"] + channels["diagnostic"]
 
         if architecture["name"] == "unet":
             architecture["decoder_attention_type"] = "scse"

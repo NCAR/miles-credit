@@ -140,9 +140,7 @@ class WindowMultiHeadAttentionNoPos(nn.Module):
         sequential_attn: bool = False,
     ) -> None:
         super(WindowMultiHeadAttentionNoPos, self).__init__()
-        assert (
-            dim % num_heads == 0
-        ), "The number of input features (in_features) are not divisible by the number of heads (num_heads)."
+        assert dim % num_heads == 0, "The number of input features (in_features) are not divisible by the number of heads (num_heads)."
         self.in_features: int = dim
         self.window_size: Tuple[int, int] = window_size
         self.num_heads: int = num_heads
@@ -223,9 +221,7 @@ class WindowMultiHeadAttention(nn.Module):
         sequential_attn: bool = False,
     ) -> None:
         super(WindowMultiHeadAttention, self).__init__()
-        assert (
-            dim % num_heads == 0
-        ), "The number of input features (in_features) are not divisible by the number of heads (num_heads)."
+        assert dim % num_heads == 0, "The number of input features (in_features) are not divisible by the number of heads (num_heads)."
         self.in_features: int = dim
         self.window_size: Tuple[int, int] = window_size
         self.num_heads: int = num_heads
@@ -287,9 +283,7 @@ class WindowMultiHeadAttention(nn.Module):
         """
         window_area = self.window_size[0] * self.window_size[1]
         relative_position_bias = self.meta_mlp(self.relative_coordinates_log)
-        relative_position_bias = relative_position_bias.transpose(1, 0).reshape(
-            self.num_heads, window_area, window_area
-        )
+        relative_position_bias = relative_position_bias.transpose(1, 0).reshape(self.num_heads, window_area, window_area)
         relative_position_bias = relative_position_bias.unsqueeze(0)
         return relative_position_bias
 
@@ -643,9 +637,7 @@ class SwinTransformerV2CrStage(nn.Module):
             new_window_size (int): New window size
             new_feat_size (Tuple[int, int]): New input resolution
         """
-        self.feat_size: Tuple[int, int] = (
-            (new_feat_size[0] // 2, new_feat_size[1] // 2) if self.downscale else new_feat_size
-        )
+        self.feat_size: Tuple[int, int] = (new_feat_size[0] // 2, new_feat_size[1] // 2) if self.downscale else new_feat_size
         for block in self.blocks:
             block.update_input_size(new_window_size=new_window_size, new_feat_size=self.feat_size)
 
@@ -750,9 +742,7 @@ class SwinTransformerV2Cr(BaseModel):
             img_size[1] += int(2 * pad_lon)
 
         img_size = to_2tuple(img_size)
-        window_size = (
-            tuple([s // img_window_ratio for s in img_size]) if window_size is None else to_2tuple(window_size)
-        )
+        window_size = tuple([s // img_window_ratio for s in img_size]) if window_size is None else to_2tuple(window_size)
 
         self.patch_size: int = patch_size
         self.img_size: Tuple[int, int] = img_size
@@ -833,9 +823,7 @@ class SwinTransformerV2Cr(BaseModel):
         if self.use_post_block:
             # freeze base model weights before postblock init
             if "skebs" in post_conf.keys():
-                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
-                    "freeze_base_model_weights", False
-                ):
+                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get("freeze_base_model_weights", False):
                     logger.warning("freezing all base model weights due to skebs config")
                     for param in self.parameters():
                         param.requires_grad = False

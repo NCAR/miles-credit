@@ -2,7 +2,6 @@
 # https://github.com/m2lines/Samudra/blob/dcc253b334672efcd2228b2bcb3eb39ac74f3677/src/constants.py
 
 
-
 import logging
 from typing import Dict, Optional
 
@@ -79,12 +78,8 @@ MASK_VARS = [
 ]
 
 PROG_VARS_MAP = {
-    "thermo_dynamic": [
-        k + str(j) for k in ["uo_", "vo_", "thetao_", "so_"] for j in DEPTH_I_LEVELS
-    ]
-    + ["zos"],
-    "thermo": [k + str(j) for k in ["thetao_", "so_"] for j in DEPTH_I_LEVELS]
-    + ["zos"],
+    "thermo_dynamic": [k + str(j) for k in ["uo_", "vo_", "thetao_", "so_"] for j in DEPTH_I_LEVELS] + ["zos"],
+    "thermo": [k + str(j) for k in ["thetao_", "so_"] for j in DEPTH_I_LEVELS] + ["zos"],
 }
 BOUND_VARS_MAP = {
     "hfds_anom": ["tauuo", "tauvo", "hfds", "hfds_anomalies"],
@@ -124,8 +119,7 @@ default_metadata = {
         "units": "N/m^2",
     },
     "hfds": {
-        "long_name": "Surface ocean heat flux from "
-        "SW+LW+latent+sensible+masstransfer+frazil+seaice_melt_heat",
+        "long_name": "Surface ocean heat flux from SW+LW+latent+sensible+masstransfer+frazil+seaice_melt_heat",
         "units": "W/m^2",
     },
     "hfds_anomalies": {
@@ -163,9 +157,7 @@ class TensorMap:
 
     def __new__(cls, *args, **kwargs) -> "TensorMap":
         # Prevent direct instantiation
-        raise TypeError(
-            "TensorMap cannot be instantiated directly. Use init_instance() instead."
-        )
+        raise TypeError("TensorMap cannot be instantiated directly. Use init_instance() instead.")
 
     @classmethod
     def get_instance(cls) -> "TensorMap":
@@ -174,9 +166,7 @@ class TensorMap:
         return cls._instance
 
     @classmethod
-    def init_instance(
-        cls, prognostic_vars_key: str, boundary_vars_key: str
-    ) -> "TensorMap":
+    def init_instance(cls, prognostic_vars_key: str, boundary_vars_key: str) -> "TensorMap":
         if cls._instance is not None:
             raise ValueError("TensorMap already initialized")
 
@@ -208,9 +198,7 @@ class TensorMap:
                 self.VAR_SET_3D.append(var_split[0])
 
         # Consistent order of variables
-        self.VAR_SET = list(
-            dict.fromkeys(([out.split("_")[0] for out in self.prognostic_vars]))
-        )
+        self.VAR_SET = list(dict.fromkeys(([out.split("_")[0] for out in self.prognostic_vars])))
         self.DEPTH_SET = DEPTH_I_LEVELS
 
         self._populate_var_3d_idx()
@@ -221,9 +209,7 @@ class TensorMap:
             self.VAR_3D_IDX[kt] = torch.tensor([])
             for i, k in enumerate(self.prognostic_vars):
                 if kt in k:
-                    self.VAR_3D_IDX[kt] = torch.cat(
-                        [self.VAR_3D_IDX[kt], torch.tensor([i])]
-                    )
+                    self.VAR_3D_IDX[kt] = torch.cat([self.VAR_3D_IDX[kt], torch.tensor([i])])
             self.VAR_3D_IDX[kt] = self.VAR_3D_IDX[kt].to(torch.int32)
 
     def _populate_dp_3d_idx(self):
@@ -234,9 +220,7 @@ class TensorMap:
                 if len(k_split) == 1:
                     continue
                 elif d == k_split[-1]:
-                    self.DP_3D_IDX[d] = torch.cat(
-                        [self.DP_3D_IDX[d], torch.tensor([i])]
-                    )
+                    self.DP_3D_IDX[d] = torch.cat([self.DP_3D_IDX[d], torch.tensor([i])])
             self.DP_3D_IDX[d] = self.DP_3D_IDX[d].to(torch.int32)
 
         self.DP_3D_IDX[self.DEPTH_SET[0]] = torch.cat(

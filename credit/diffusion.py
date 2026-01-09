@@ -47,9 +47,7 @@ def standard_normal_noise(shape=None, tensor=None, device=None):
         raise ValueError("Either `shape` or `tensor` must be provided.")
 
 
-def log_uniform_noise(
-    shape=None, tensor=None, sigma_min=0.02, sigma_max=200.0, device=None
-):
+def log_uniform_noise(shape=None, tensor=None, sigma_min=0.02, sigma_max=200.0, device=None):
     """
     Sample noise from a log-uniform distribution over standard deviations.
 
@@ -115,9 +113,7 @@ def sigmoid_beta_schedule(timesteps, start=-3, end=3, tau=1, clamp_min=1e-5):
     t = torch.linspace(0, timesteps, steps, dtype=torch.float64) / timesteps
     v_start = torch.tensor(start / tau).sigmoid()
     v_end = torch.tensor(end / tau).sigmoid()
-    alphas_cumprod = (-((t * (end - start) + start) / tau).sigmoid() + v_end) / (
-        v_end - v_start
-    )
+    alphas_cumprod = (-((t * (end - start) + start) / tau).sigmoid() + v_end) / (v_end - v_start)
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
@@ -144,10 +140,7 @@ class GaussianDiffusion(Module):
     ):
         super().__init__()
         assert not (isinstance(GaussianDiffusion) and model.channels != model.out_dim)
-        assert (
-            not hasattr(model, "random_or_learned_sinusoidal_cond")
-            or not model.random_or_learned_sinusoidal_cond
-        )
+        assert not hasattr(model, "random_or_learned_sinusoidal_cond") or not model.random_or_learned_sinusoidal_cond
 
         self.model = model
 
@@ -157,16 +150,14 @@ class GaussianDiffusion(Module):
 
         if isinstance(image_size, int):
             image_size = (image_size, image_size)
-        assert (
-            isinstance(image_size, (tuple, list)) and len(image_size) == 2
-        ), "image size must be a integer or a tuple/list of two integers"
+        assert isinstance(image_size, (tuple, list)) and len(image_size) == 2, "image size must be a integer or a tuple/list of two integers"
         self.image_size = image_size
 
         self.objective = objective
 
-        assert (
-            objective in {"pred_noise", "pred_x0", "pred_v"}
-        ), "objective must be either pred_noise (predict noise) or pred_x0 (predict image start) or pred_v (predict v [v-parameterization as defined in appendix D of progressive distillation paper, used in imagen-video successfully])"
+        assert objective in {"pred_noise", "pred_x0", "pred_v"}, (
+            "objective must be either pred_noise (predict noise) or pred_x0 (predict image start) or pred_v (predict v [v-parameterization as defined in appendix D of progressive distillation paper, used in imagen-video successfully])"
+        )
 
         if noise_type == "normal":
             self.randn_like_fn = standard_normal_noise
@@ -195,9 +186,7 @@ class GaussianDiffusion(Module):
 
         # sampling related parameters
 
-        self.sampling_timesteps = default(
-            sampling_timesteps, timesteps
-        )  # default num sampling timesteps to number of timesteps at training
+        self.sampling_timesteps = default(sampling_timesteps, timesteps)  # default num sampling timesteps to number of timesteps at training
 
         assert self.sampling_timesteps <= timesteps
         self.is_ddim_sampling = self.sampling_timesteps < timesteps
@@ -214,20 +203,14 @@ class GaussianDiffusion(Module):
         # calculations for diffusion q(x_t | x_{t-1}) and others
 
         register_buffer("sqrt_alphas_cumprod", torch.sqrt(alphas_cumprod))
-        register_buffer(
-            "sqrt_one_minus_alphas_cumprod", torch.sqrt(1.0 - alphas_cumprod)
-        )
+        register_buffer("sqrt_one_minus_alphas_cumprod", torch.sqrt(1.0 - alphas_cumprod))
         register_buffer("log_one_minus_alphas_cumprod", torch.log(1.0 - alphas_cumprod))
         register_buffer("sqrt_recip_alphas_cumprod", torch.sqrt(1.0 / alphas_cumprod))
-        register_buffer(
-            "sqrt_recipm1_alphas_cumprod", torch.sqrt(1.0 / alphas_cumprod - 1)
-        )
+        register_buffer("sqrt_recipm1_alphas_cumprod", torch.sqrt(1.0 / alphas_cumprod - 1))
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
 
-        posterior_variance = (
-            betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
-        )
+        posterior_variance = betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
 
         # above: equal to 1. / (1. / (1. - alpha_cumprod_tm1) + alpha_t / beta_t)
 
@@ -284,37 +267,21 @@ class GaussianDiffusion(Module):
         return self.betas.device
 
     def predict_start_from_noise(self, x_t, t, noise):
-        return (
-            extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
-            - extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
-        )
+        return extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
 
     def predict_noise_from_start(self, x_t, t, x0):
-        return (
-            extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - x0
-        ) / extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
+        return (extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - x0) / extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
 
     def predict_v(self, x_start, t, noise):
-        return (
-            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * noise
-            - extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * x_start
-        )
+        return extract(self.sqrt_alphas_cumprod, t, x_start.shape) * noise - extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * x_start
 
     def predict_start_from_v(self, x_t, t, v):
-        return (
-            extract(self.sqrt_alphas_cumprod, t, x_t.shape) * x_t
-            - extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
-        )
+        return extract(self.sqrt_alphas_cumprod, t, x_t.shape) * x_t - extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
 
     def q_posterior(self, x_start, x_t, t):
-        posterior_mean = (
-            extract(self.posterior_mean_coef1, t, x_t.shape) * x_start
-            + extract(self.posterior_mean_coef2, t, x_t.shape) * x_t
-        )
+        posterior_mean = extract(self.posterior_mean_coef1, t, x_t.shape) * x_start + extract(self.posterior_mean_coef2, t, x_t.shape) * x_t
         posterior_variance = extract(self.posterior_variance, t, x_t.shape)
-        posterior_log_variance_clipped = extract(
-            self.posterior_log_variance_clipped, t, x_t.shape
-        )
+        posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def model_predictions(
@@ -327,9 +294,7 @@ class GaussianDiffusion(Module):
         rederive_pred_noise=False,
     ):
         model_output = self.model(x, t, x_self_cond, x_cond)
-        maybe_clip = (
-            partial(torch.clamp, min=-1.0, max=1.0) if clip_x_start else identity
-        )
+        maybe_clip = partial(torch.clamp, min=-1.0, max=1.0) if clip_x_start else identity
 
         if self.objective == "pred_noise":
             pred_noise = model_output
@@ -358,9 +323,7 @@ class GaussianDiffusion(Module):
         if clip_denoised:
             x_start.clamp_(-1.0, 1.0)
 
-        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(
-            x_start=x_start, x_t=x, t=t
-        )
+        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start=x_start, x_t=x, t=t)
         return model_mean, posterior_variance, posterior_log_variance, x_start
 
     @torch.inference_mode()
@@ -410,21 +373,15 @@ class GaussianDiffusion(Module):
             self.objective,
         )
 
-        times = torch.linspace(
-            -1, total_timesteps - 1, steps=sampling_timesteps + 1
-        )  # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
+        times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)  # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = list(reversed(times.int().tolist()))
-        time_pairs = list(
-            zip(times[:-1], times[1:])
-        )  # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
+        time_pairs = list(zip(times[:-1], times[1:]))  # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
         img = self.randn_like_fn(shape=shape, device=device)
         imgs = [img]
 
         x_start = None
-        for time, time_next in tqdm(
-            time_pairs, desc="sampling loop time step", disable=disable_tqdm
-        ):
+        for time, time_next in tqdm(time_pairs, desc="sampling loop time step", disable=disable_tqdm):
             time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
             self_cond = x_start if self.self_condition else None
             pred_noise, x_start, *_ = self.model_predictions(
@@ -444,9 +401,7 @@ class GaussianDiffusion(Module):
             alpha = self.alphas_cumprod[time]
             alpha_next = self.alphas_cumprod[time_next]
 
-            sigma = (
-                eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
-            )
+            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
             c = (1 - alpha_next - sigma**2).sqrt()
 
             noise = self.randn_like_fn(tensor=img)
@@ -480,9 +435,7 @@ class GaussianDiffusion(Module):
             self.model.output_channels,
             self.model.frames,
         )
-        sample_fn = (
-            self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
-        )
+        sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
         return sample_fn(
             (batch_size, channels, f, h, w),
             x_cond,
@@ -503,9 +456,7 @@ class GaussianDiffusion(Module):
 
         x_start = None
 
-        for i in tqdm(
-            reversed(range(0, t)), desc="interpolation sample time step", total=t
-        ):
+        for i in tqdm(reversed(range(0, t)), desc="interpolation sample time step", total=t):
             self_cond = x_start if self.self_condition else None
             x_cond = x_cond if self.condition else None
             img, x_start = self.p_sample(img, i, self_cond, x_cond)
@@ -513,9 +464,7 @@ class GaussianDiffusion(Module):
         return img
 
     def noise_assignment(self, x_start, noise):
-        x_start, noise = tuple(
-            rearrange(t, "b ... -> b (...)") for t in (x_start, noise)
-        )
+        x_start, noise = tuple(rearrange(t, "b ... -> b (...)") for t in (x_start, noise))
         dist = torch.cdist(x_start, noise)
         _, assign = linear_sum_assignment(dist.cpu())
         return torch.from_numpy(assign).to(dist.device)
@@ -527,10 +476,7 @@ class GaussianDiffusion(Module):
         if self.immiscible:
             assign = self.noise_assignment(x_start, noise)
             noise = noise[assign]
-        return (
-            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-            + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
-        )
+        return extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
 
     def p_losses(self, x_start, t, x_cond, noise=None, offset_noise_strength=None):
         b, c, h, w = x_start.shape
@@ -539,9 +485,7 @@ class GaussianDiffusion(Module):
 
         # offset noise - https://www.crosslabs.org/blog/diffusion-with-offset-noise
 
-        offset_noise_strength = default(
-            offset_noise_strength, self.offset_noise_strength
-        )
+        offset_noise_strength = default(offset_noise_strength, self.offset_noise_strength)
 
         if offset_noise_strength > 0.0:
             offset_noise = torch.randn(x_start.shape[:2], device=self.device)
@@ -590,9 +534,7 @@ class GaussianDiffusion(Module):
             device,
             img_size,
         ) = *img.shape, img.device, self.image_size
-        assert (
-            h == img_size[0] and w == img_size[1]
-        ), f"height and width of image must be {img_size}"
+        assert h == img_size[0] and w == img_size[1], f"height and width of image must be {img_size}"
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         # img = self.normalize(img)
@@ -621,9 +563,7 @@ class ModifiedGaussianDiffusion(GaussianDiffusion):
             raise ValueError(f"Unsupported tensor shape {img.shape}")
 
         # Ensure the height and width match the expected image size
-        assert (
-            h == self.image_size[0] and w == self.image_size[1]
-        ), f"height and width of image must be {self.image_size}"
+        assert h == self.image_size[0] and w == self.image_size[1], f"height and width of image must be {self.image_size}"
 
         # Randomly sample timesteps for diffusion
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
@@ -638,9 +578,7 @@ class ModifiedGaussianDiffusion(GaussianDiffusion):
         # Check the dimensions of the input tensor (x_start)
         if x_start.dim() == 4:  # For single frame (batch_size, channels, height, width)
             b, c, h, w = x_start.shape
-        elif (
-            x_start.dim() == 5
-        ):  # For multi-frame input (batch_size, channels, frames, height, width)
+        elif x_start.dim() == 5:  # For multi-frame input (batch_size, channels, frames, height, width)
             b, c, f, h, w = x_start.shape
         else:
             raise ValueError(f"Unsupported tensor shape {x_start.shape}")
@@ -649,9 +587,7 @@ class ModifiedGaussianDiffusion(GaussianDiffusion):
         noise = default(noise, lambda: self.randn_like_fn(tensor=x_start))
 
         # Offset noise - https://www.crosslabs.org/blog/diffusion-with-offset-noise
-        offset_noise_strength = default(
-            offset_noise_strength, self.offset_noise_strength
-        )
+        offset_noise_strength = default(offset_noise_strength, self.offset_noise_strength)
 
         if offset_noise_strength > 0.0:
             offset_noise = torch.randn(x_start.shape[:2], device=self.device)
@@ -689,16 +625,12 @@ class ModifiedGaussianDiffusion(GaussianDiffusion):
 
             # 2. Apply latitude weights
             if self.criterion.lat_weights is not None:
-                lat_weights = self.criterion.lat_weights.to(raw_loss.device).view(
-                    1, 1, 1, H, 1
-                )
+                lat_weights = self.criterion.lat_weights.to(raw_loss.device).view(1, 1, 1, H, 1)
                 raw_loss = raw_loss * lat_weights
 
             # 3. Apply variable weights
             if self.criterion.var_weights is not None:
-                var_weights = self.criterion.var_weights.to(raw_loss.device).view(
-                    1, 1, 1, H, 1
-                )
+                var_weights = self.criterion.var_weights.to(raw_loss.device).view(1, 1, 1, H, 1)
                 raw_loss = raw_loss * var_weights
 
             # 4. Reduce per-sample: mean over V and L
@@ -729,9 +661,7 @@ class ModifiedGaussianDiffusion(GaussianDiffusion):
         rederive_pred_noise=False,
     ):
         model_output = self.model(x, t, x_self_cond, x_cond)
-        maybe_clip = (
-            partial(torch.clamp, min=-1.0, max=1.0) if clip_x_start else identity
-        )
+        maybe_clip = partial(torch.clamp, min=-1.0, max=1.0) if clip_x_start else identity
 
         if self.objective == "pred_noise":
             pred_noise = model_output

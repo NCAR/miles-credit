@@ -49,9 +49,7 @@ class TemporalNoise:
             latlons = xr.open_dataset(terrain_file).load()
             self.latitudes = torch.tensor(latlons.latitude.values)
 
-    def __call__(
-        self, x: torch.Tensor, previous_perturbation: Optional[torch.Tensor] = None, forecast_step: int = 1
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, x: torch.Tensor, previous_perturbation: Optional[torch.Tensor] = None, forecast_step: int = 1) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply temporally correlated perturbation for sequential forecasting.
 
         Parameters

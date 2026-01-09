@@ -151,11 +151,7 @@ class Trainer(BaseTrainer):
         varnum_diag = len(conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
-        static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-        )
+        static_dim_size = len(conf["data"]["dynamic_forcing_variables"]) + len(conf["data"]["forcing_variables"]) + len(conf["data"]["static_variables"])
 
         # [Optional] retain graph for multiple backward passes
         retain_graph = conf["data"].get("retain_graph", False)
@@ -167,9 +163,7 @@ class Trainer(BaseTrainer):
             # If not specified in config, use the range 1 to forecast_len
             backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
 
-        assert (
-            forecast_length <= backprop_on_timestep[-1]
-        ), f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
+        assert forecast_length <= backprop_on_timestep[-1], f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
         if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
@@ -221,9 +215,7 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches_per_epoch = len(trainloader)
             # Use the user-given number if not larger than the dataset
-            batches_per_epoch = (
-                batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
-            )
+            batches_per_epoch = batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
 
         batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
 
@@ -400,9 +392,7 @@ class Trainer(BaseTrainer):
             scaler.unscale_(optimizer)
             if grad_max_norm == "dynamic":
                 # Compute local L2 norm
-                local_norm = torch.norm(
-                    torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
-                )
+                local_norm = torch.norm(torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None]))
 
                 # All-reduce to get global norm across ranks
                 if distributed:
@@ -495,17 +485,11 @@ class Trainer(BaseTrainer):
         varnum_diag = len(conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
-        static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-        )
+        static_dim_size = len(conf["data"]["dynamic_forcing_variables"]) + len(conf["data"]["forcing_variables"]) + len(conf["data"]["static_variables"])
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
         history_len = conf["data"]["valid_history_len"] if "valid_history_len" in conf["data"] else conf["history_len"]
-        forecast_len = (
-            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
-        )
+        forecast_len = conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
@@ -522,11 +506,7 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches_per_epoch = len(valid_loader)
             # Use the user-given number if not larger than the dataset
-            valid_batches_per_epoch = (
-                valid_batches_per_epoch
-                if 0 < valid_batches_per_epoch < dataset_batches_per_epoch
-                else dataset_batches_per_epoch
-            )
+            valid_batches_per_epoch = valid_batches_per_epoch if 0 < valid_batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
 
         # ------------------------------------------------------- #
         # clamp to remove outliers

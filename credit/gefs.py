@@ -149,20 +149,11 @@ def load_member_tiles(path: str, init_date_str: str, member: str, variables: str
             if len(select_surface_variables) > 0:
                 with xr.open_dataset(tile_sfc_file) as sfc_ds:
                     for sfc_var in select_surface_variables:
-                        member_tiles[-1][sfc_var] = (
-                            sfc_ds[sfc_var][0]
-                            .rename({"yaxis_1": "lat", "xaxis_1": "lon"})
-                            .load()
-                        )
+                        member_tiles[-1][sfc_var] = sfc_ds[sfc_var][0].rename({"yaxis_1": "lat", "xaxis_1": "lon"}).load()
 
         elif len(select_surface_variables) > 0:
             with xr.open_dataset(tile_sfc_file) as sfc_ds:
-                member_tiles.append(
-                    sfc_ds[select_surface_variables]
-                    .sel(Time=1)
-                    .rename({"yaxis_1": "lat", "xaxis_1": "lon"})
-                    .load()
-                )
+                member_tiles.append(sfc_ds[select_surface_variables].sel(Time=1).rename({"yaxis_1": "lat", "xaxis_1": "lon"}).load())
         if "smc" in select_surface_variables:
             # Only grab the topmost soil moisture value (0-10 cm) and multiply by 100 to convert to CLM kg m^2.
             member_tiles[-1]["smc"] = member_tiles[-1]["smc"][0] * 100
@@ -202,9 +193,7 @@ def unstagger_winds(ds, u_var="u_s", v_var="v_w", out_u="u_a", out_v="v_a"):
     return ds
 
 
-def combine_tiles(
-    member_tiles, flatten_dim="tile_lat_lon", coord_dims=("tile", "lat", "lon")
-):
+def combine_tiles(member_tiles, flatten_dim="tile_lat_lon", coord_dims=("tile", "lat", "lon")):
     tiles_combined = xr.concat(member_tiles, dim="tile")
     tiles_stacked = tiles_combined.stack(**{flatten_dim: coord_dims})
     return tiles_stacked
@@ -244,9 +233,7 @@ def regrid_member(member_tiles, regrid_weights_file):
                     name=variable,
                 )
                 for lev_index in np.arange(tiles_combined["lev"].size):
-                    regrid_ds[variable][lev_index] = (
-                        regrid_weights @ tiles_combined[variable][lev_index].values
-                    ).reshape(sfc_var_dim)
+                    regrid_ds[variable][lev_index] = (regrid_weights @ tiles_combined[variable][lev_index].values).reshape(sfc_var_dim)
             elif "levp" in member_tiles[0][variable].dims and levp is not None:
                 regrid_ds[variable] = xr.DataArray(
                     np.zeros(zh_var_dim, dtype=np.float64),
@@ -254,22 +241,16 @@ def regrid_member(member_tiles, regrid_weights_file):
                     name=variable,
                 )
                 for lev_index in np.arange(tiles_combined["lev"].size):
-                    regrid_ds[variable][lev_index] = (
-                        regrid_weights @ tiles_combined[variable][lev_index].values
-                    ).reshape(sfc_var_dim)
+                    regrid_ds[variable][lev_index] = (regrid_weights @ tiles_combined[variable][lev_index].values).reshape(sfc_var_dim)
             elif variable == "ps":
                 regrid_ds[variable] = xr.DataArray(
-                    (
-                        np.exp(regrid_weights @ np.log(tiles_combined[variable].values))
-                    ).reshape(sfc_var_dim),
+                    (np.exp(regrid_weights @ np.log(tiles_combined[variable].values))).reshape(sfc_var_dim),
                     coords=dict(lat=lat, lon=lon),
                     name=variable,
                 )
             else:
                 regrid_ds[variable] = xr.DataArray(
-                    (regrid_weights @ tiles_combined[variable].values).reshape(
-                        sfc_var_dim
-                    ),
+                    (regrid_weights @ tiles_combined[variable].values).reshape(sfc_var_dim),
                     coords=dict(lat=lat, lon=lon),
                     name=variable,
                 )
@@ -313,12 +294,8 @@ def interpolate_vertical_levels(
     with xr.open_dataset(vertical_level_file) as dest_vert_ds:
         dest_a = dest_vert_ds[a_name].values
         dest_b = dest_vert_ds[b_name].values
-    gefs_pressure_grid, gefs_pressure_half_grid = create_pressure_grid(
-        regrid_ds[surface_pressure_var].values, gefs_a, gefs_b
-    )
-    dest_pressure_grid, dest_pressure_half_grid = create_pressure_grid(
-        regrid_ds[surface_pressure_var].values, dest_a, dest_b
-    )
+    gefs_pressure_grid, gefs_pressure_half_grid = create_pressure_grid(regrid_ds[surface_pressure_var].values, gefs_a, gefs_b)
+    dest_pressure_grid, dest_pressure_half_grid = create_pressure_grid(regrid_ds[surface_pressure_var].values, dest_a, dest_b)
     interp_ds = xr.Dataset(
         coords=dict(
             levels=np.arange(dest_pressure_grid.shape[0]),
@@ -328,16 +305,12 @@ def interpolate_vertical_levels(
     )
     interp_ds["P"] = xr.DataArray(
         dest_pressure_grid,
-        coords=dict(
-            levels=interp_ds["levels"], lat=interp_ds["lat"], lon=interp_ds["lon"]
-        ),
+        coords=dict(levels=interp_ds["levels"], lat=interp_ds["lat"], lon=interp_ds["lon"]),
     )
     for variable in regrid_ds.data_vars:
         if vert_dim in regrid_ds[variable].dims:
             interp_ds[variable] = xr.DataArray(
-                interp_hybrid_to_hybrid_levels(
-                    regrid_ds[variable].values, gefs_pressure_grid, dest_pressure_grid
-                ),
+                interp_hybrid_to_hybrid_levels(regrid_ds[variable].values, gefs_pressure_grid, dest_pressure_grid),
                 dims=("levels", "lat", "lon"),
                 name=variable,
             )
@@ -415,9 +388,7 @@ def process_member(
     regrid_ds = regrid_member(member_tiles, weight_file)
     regrid_ds = combine_microphysics_terms(regrid_ds)
     print(member + ": Interpolate vertical levels")
-    interp_ds = interpolate_vertical_levels(
-        regrid_ds, member_path, init_date_str, member, vertical_level_file
-    )
+    interp_ds = interpolate_vertical_levels(regrid_ds, member_path, init_date_str, member, vertical_level_file)
     interp_ds = rename_variables(interp_ds, rename_dict_file, meta_file, init_date_str)
     out_file = f"gefs_cam_grid_{member}.nc"
     print(member + ": Save to netcdf")

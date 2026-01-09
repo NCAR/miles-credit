@@ -507,9 +507,7 @@ class CrossFormer(BaseModel):
             cross_embed_strides,
         ):
             # create CrossEmbedLayer
-            cross_embed_layer = CrossEmbedLayer(
-                dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride
-            )
+            cross_embed_layer = CrossEmbedLayer(dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride)
 
             # create Transformer
             transformer_layer = Transformer(
@@ -539,9 +537,7 @@ class CrossFormer(BaseModel):
 
         # =================================================================================== #
 
-        self.up_block1 = UpBlock(
-            1 * last_dim, last_dim // 2, dim[0], upsample_v_conv=self.upsample_v_conv, attention_type=attention_type
-        )
+        self.up_block1 = UpBlock(1 * last_dim, last_dim // 2, dim[0], upsample_v_conv=self.upsample_v_conv, attention_type=attention_type)
         self.up_block2 = UpBlock(
             2 * (last_dim // 2),
             last_dim // 4,
@@ -569,9 +565,7 @@ class CrossFormer(BaseModel):
                 ),
             )
         else:
-            self.up_block4 = nn.ConvTranspose2d(
-                2 * (last_dim // 8), self.output_channels, kernel_size=4, stride=2, padding=1
-            )
+            self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), self.output_channels, kernel_size=4, stride=2, padding=1)
 
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")
@@ -580,9 +574,7 @@ class CrossFormer(BaseModel):
         if self.use_post_block:
             # freeze base model weights before postblock init
             if "skebs" in post_conf.keys():
-                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
-                    "freeze_base_model_weights", False
-                ):
+                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get("freeze_base_model_weights", False):
                     logger.warning("freezing all base model weights due to skebs config")
                     for param in self.parameters():
                         param.requires_grad = False
@@ -600,7 +592,7 @@ class CrossFormer(BaseModel):
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
-        
+
         if self.frames > 1:
             # x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
             b, c, t, h, w = x.shape
@@ -705,7 +697,7 @@ if __name__ == "__main__":
         cross_embed_strides=(2, 2, 2, 2),
         attn_dropout=0.0,
         ff_dropout=0.0,
-        padding_conf=padding_conf
+        padding_conf=padding_conf,
     ).to("cuda")
 
     num_params = sum(p.numel() for p in model.parameters())

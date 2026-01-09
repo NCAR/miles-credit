@@ -276,9 +276,7 @@ class CrossFormerDiffusion(BaseModel):
             cross_embed_strides,
         ):
             # create CrossEmbedLayer
-            cross_embed_layer = CrossEmbedLayer(
-                dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride
-            )
+            cross_embed_layer = CrossEmbedLayer(dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride)
 
             # create Transformer
             transformer_layer = Transformer(
@@ -324,9 +322,7 @@ class CrossFormerDiffusion(BaseModel):
         if self.use_post_block:
             # freeze base model weights before postblock init
             if "skebs" in post_conf.keys():
-                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
-                    "freeze_base_model_weights", False
-                ):
+                if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get("freeze_base_model_weights", False):
                     logger.warning("freezing all base model weights due to skebs config")
                     for param in self.parameters():
                         param.requires_grad = False
@@ -380,9 +376,7 @@ class CrossFormerDiffusion(BaseModel):
 
             # Add time embedding to the transformer
             # The time embedding is added to the transformer layers (through the cross attention mechanism)
-            x = transformer_layer(x) + t_emb_proj.unsqueeze(-1).unsqueeze(
-                -1
-            )  # Broadcast time embedding over spatial dimensions
+            x = transformer_layer(x) + t_emb_proj.unsqueeze(-1).unsqueeze(-1)  # Broadcast time embedding over spatial dimensions
             encodings.append(x)
 
         # Decoder (Upsampling blocks + skip connections), all with t_emb
@@ -572,9 +566,7 @@ if __name__ == "__main__":
 
     conditional_tensor = torch.randn(
         1,
-        crossformer_config["channels"] * crossformer_config["levels"]
-        + crossformer_config["surface_channels"]
-        + crossformer_config["input_only_channels"],
+        crossformer_config["channels"] * crossformer_config["levels"] + crossformer_config["surface_channels"] + crossformer_config["input_only_channels"],
         crossformer_config["frames"],
         crossformer_config["image_height"],
         crossformer_config["image_width"],
@@ -582,9 +574,7 @@ if __name__ == "__main__":
 
     noise_tensor = torch.randn(
         1,
-        crossformer_config["channels"] * crossformer_config["levels"]
-        + crossformer_config["surface_channels"]
-        + crossformer_config["output_only_channels"],
+        crossformer_config["channels"] * crossformer_config["levels"] + crossformer_config["surface_channels"] + crossformer_config["output_only_channels"],
         crossformer_config["frames"],
         crossformer_config["image_height"],
         crossformer_config["image_width"],

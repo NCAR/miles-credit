@@ -100,33 +100,27 @@ __all__ = [
     "StateManager",
     "CAMulatorStepper",
     "WindArtifactFilterConfig",
-
     # Initialization and setup
     "initialize_camulator",
     "load_metadata",
     "load_wind_filter_config",
-
     # Climate integration
     "run_climate_integration",
     "add_init_noise",
     "parse_datetime_from_config",
-
     # Output handling
     "split_and_reshape",
     "make_xarray",
     "save_netcdf_increment",
-
     # Post-processing
     "post_process",
     "rescale_file",
     "extract_time_single",
     "add_hours_noleap",
-
     # Wind processing
     "wind_filter",
     "post_process_wind_artifacts",
     "apply_wind_artifact_filter_to_tensor",
-
     # Submodules
     "Post_Process_Parallel",
     "COUPLING_EXAMPLE",
