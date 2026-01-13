@@ -3,12 +3,16 @@ import pandas as pd
 import numpy as np
 import xarray as xr
 import torch
-import itertools
 from torch.utils.data import Dataset, DataLoader
 from glob import glob
+import cftime
 
 logger = logging.getLogger(__name__)
 
+VALID_FIELD_TYPES = {"prognostic",
+                     "dynamic_forcing",
+                     "static",
+                     "diagnostic"}
 
 class ERA5Dataset(Dataset):
     """ Pytorch Dataset for processed ERA5 data. Relies on a configuration dictionary to define:
@@ -17,7 +21,10 @@ class ERA5Dataset(Dataset):
             2) Start, End and Frequency of Datetimes
             3) path to glob for the data
 
-            4) Example YAML Format:
+            Example YAML configuration
+            --------------------------
+            .. code-block:: yaml
+
                 data:
                   source:
                     ERA5:
@@ -50,7 +57,7 @@ class ERA5Dataset(Dataset):
             5) Data should be chunked efficiently for a fast read (recommend small chunks across time dimension).
             """
 
-    def __init__(self, config, return_target=False, transform=None):
+    def __init__(self, config, return_target=False):
 
         self.source_name = "ERA5"
         self.return_target = return_target
@@ -64,29 +71,20 @@ class ERA5Dataset(Dataset):
         self.var_dict = {}
 
         for field_type, d in config['source'][self.source_name].items():
+            if field_type not in VALID_FIELD_TYPES:
+                raise KeyError(f"Unknown field_type '{field_type}' in config['source']['{self.source_name}']. "
+                               f"Valid options are: {sorted(VALID_FIELD_TYPES)}")
+
             if isinstance(d, dict):
+                if not d.get("vars_3D") and not d.get("vars_2D"):
+                    raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
+
                 files = sorted(glob(d.get("path", "")))
-
-                # stores a dict to lookup files from that field
                 self.file_dict[field_type] = self._map_files(files) if files else None
-
                 self.var_dict[field_type] = {"vars_3D": d.get("vars_3D", []),
                                              "vars_2D": d.get("vars_2D", [])}
-                # "levels": d.get("levels", [])} # not implimented yet
-
-                # if self.var_dict[field_type]["levels"]:
-
-                #     logger.info(f"subsetting {field_type} to levels {self.var_dict[field_type]['levels']}")
             else:
-
                 self.file_dict[field_type] = None
-
-        # handle transform: (not yet implimented)
-        if not transform:
-            self.transform_xarray = lambda x: x
-
-        else:
-            self.transform = transform.transform
 
     def _timestamps(self):
 
@@ -130,9 +128,10 @@ class ERA5Dataset(Dataset):
         # load t+1 if training
         if self.return_target:
             self._open_ds_extract_fields("prognostic", t_target, return_data, is_target=True)
-
+            self._open_ds_extract_fields("diagnostic", t_target, return_data, is_target=True)
+            return_data['target'] = torch.cat((return_data.pop("target_prognostic"),
+                                               return_data.pop("target_diagnostic")), axis=1)
         self._add_metadata(return_data, t, t_target)
-        # print(return_data['metadata'].items())
 
         return return_data
 
@@ -141,22 +140,27 @@ class ERA5Dataset(Dataset):
         """ opens the dataset, reshapes and concats the variables into an np array, packs it into the return dict if the data exists. """
 
         if self.file_dict[field_type]:
-            ds = xr.open_dataset(self.file_dict[field_type][t.year])
-            if isinstance(ds.time[0].item(), cftime.datetime):
-                t = self._convert_cf_time(t)
+            with xr.open_dataset(self.file_dict[field_type][t.year]) as dataset:
 
-            if field_type != "static":
-                ds = ds.sel(time=t)
+                if "time" in dataset.dims:
+                    if isinstance(dataset.time.values[0], cftime.datetime):
+                        t = self._convert_cf_time(t)
+                    ds = dataset.sel(time=t)
+                else:
+                    ds = dataset
 
-            ds = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
+                ds_all_vars = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
 
-            ds_3D = ds[self.var_dict[field_type]["vars_3D"]]
-            ds_2D = ds[self.var_dict[field_type]["vars_2D"]]
-            data_np, meta = self._reshape_and_concat(ds_3D, ds_2D)
+                ds_3D = ds_all_vars[self.var_dict[field_type]["vars_3D"]]
+                ds_2D = ds_all_vars[self.var_dict[field_type]["vars_2D"]]
+                data_np, meta = self._reshape_and_concat(ds_3D, ds_2D)
 
             return_data["metadata"][f"{field_type}_var_order"] = meta
             if is_target:
-                return_data["target"] = torch.tensor(data_np).float()
+                if field_type == "prognostic":
+                    return_data["target_prognostic"] = torch.tensor(data_np).float()
+                if field_type == "diagnostic":
+                    return_data["target_diagnostic"] = torch.tensor(data_np).float()
             else:
                 return_data[field_type] = torch.tensor(data_np).float()
 
@@ -213,8 +217,7 @@ class ERA5Dataset(Dataset):
         data_config = config["data"]
 
         dataset = ERA5Dataset(config['data'])
-        sampler = DistributedMultiStepBatchSampler(dataset=dataset, batch_size=4, sampling_modes=['init'] + ['y'] * 1,
-                                                   rank=0, num_replicas=1, shuffle=True)
+        sampler = DistributedMultiStepBatchSampler(dataset=dataset, batch_size=4, rank=0, num_replicas=1, shuffle=True)
         loader = iter(DataLoader(dataset=dataset, batch_sampler=sampler, num_workers=8, pin_memory=True))
 
         for _ in range(10):
