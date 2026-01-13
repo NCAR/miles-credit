@@ -142,7 +142,7 @@ class ERA5Dataset(Dataset):
 
         if self.file_dict[field_type]:
             ds = xr.open_dataset(self.file_dict[field_type][t.year])
-            if isinstance(z.time[0].item(), cftime.datetime):
+            if isinstance(ds.time[0].item(), cftime.datetime):
                 t = self._convert_cf_time(t)
 
             if field_type != "static":
