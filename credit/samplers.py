@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class MultiStepBatchSamplerSubset(Sampler):
 
-    def __init__(self, dataset: Dataset, batch_size: int) -> None:
+    def __init__(self, dataset: Dataset, batch_size: int, index_subset) -> None:
         """
         The dataset is required to have attributes:
          - init_times of valid init times, each time object compatible with:
@@ -19,6 +19,7 @@ class MultiStepBatchSamplerSubset(Sampler):
         if index_subset=None, it will draw init indices from the entire dataset.
         taking advantage of DistributedSampler class code with this dataset.
         can be used on its own as a non-distributed sampler with index_subset=None
+
         Args:
             data: list of data
         """
@@ -26,7 +27,8 @@ class MultiStepBatchSamplerSubset(Sampler):
         self.dataset = dataset
         self.num_forecast_steps = dataset.num_forecast_steps
         self.init_times = dataset.datetimes
-        self.index_subset = torch.randperm(len(dataset))
+        # self.index_subset = torch.randperm(len(dataset))
+        self.index_subset = index_subset
         self.batch_size = batch_size
         self.num_start_batches = (len(self.index_subset) + self.batch_size - 1) // self.batch_size
 
@@ -71,9 +73,9 @@ class DistributedMultiStepBatchSampler(DistributedSampler):
         self.num_forecast_steps = dataset.num_forecast_steps
 
     def __iter__(self):
-        indices = list(super().__iter__())
-        logger.debug(f"num indices: {len(indices)}")
-        batch_sampler = MultiStepBatchSamplerSubset(self.dataset, batch_size=self.batch_size)
+        index_subset = list(super().__iter__())
+        logger.debug(f"num indices: {len(index_subset)}")
+        batch_sampler = MultiStepBatchSamplerSubset(self.dataset, batch_size=self.batch_size, index_subset=index_subset)
 
         return iter(batch_sampler)
 
