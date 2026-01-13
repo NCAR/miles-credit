@@ -439,6 +439,64 @@ class Normalize_ERA5_and_Forcing:
 
         return device_compatible_to(transformed_x, device)
 
+    def _align_coords(self, DS: xr.Dataset,
+                  ref_ds: xr.Dataset,
+                  rtol: float = 1e-6,
+                  atol: float = 1e-8) -> xr.Dataset:
+        """
+        Ensure DS has the same lat/lon as ref_ds (to within tolerance),
+        then re-assign DS.coords to exactly match ref_ds.coords.
+        """
+        for coord in ("level",):
+            if coord not in ref_ds.coords:
+                continue
+            if coord not in DS.coords:
+                break
+            ref_vals = ref_ds.coords[coord].values
+            ds_vals  = DS.coords[coord].values
+
+            if ref_vals.shape != ds_vals.shape:
+                raise ValueError(
+                    f"Shape mismatch for '{coord}': "
+                    f"{ds_vals.shape} vs {ref_vals.shape}"
+                )
+            DS = DS.assign_coords({coord: ref_ds.coords[coord]})
+        
+        for coord in ("latitude", "longitude"):
+            if coord not in ref_ds.coords:
+                continue
+            if coord not in DS.coords:
+                raise ValueError(f"Input dataset missing coordinate '{coord}'")
+            ref_vals = ref_ds.coords[coord].values
+            ds_vals  = DS.coords[coord].values
+    
+            if ref_vals.shape != ds_vals.shape:
+                raise ValueError(
+                    f"Shape mismatch for '{coord}': "
+                    f"{ds_vals.shape} vs {ref_vals.shape}"
+                )
+            if not np.allclose(ds_vals, ref_vals, rtol=rtol, atol=atol):
+                raise ValueError(
+                    f"Values for '{coord}' differ by more than "
+                    f"rtol={rtol}, atol={atol}"
+                )
+    
+            DS = DS.assign_coords({coord: ref_ds.coords[coord]})
+        return DS
+
+    def inverse_transform_dataset(self, DS: xr.Dataset,
+                              rtol: float = 1e-6,
+                              atol: float = 1e-8) -> xr.Dataset:
+        """
+        Inverse‐transform DS by (DS * std_ds) + mean_ds, after
+        aligning its coordinates to mean_ds/std_ds.
+        """
+        DS_aligned = self._align_coords(DS, self.mean_ds, rtol=rtol, atol=atol)
+        mean_b = self.mean_ds.broadcast_like(DS)
+        std_b  = self.std_ds.broadcast_like(DS)
+        
+        return (DS_aligned * self.std_ds) + self.mean_ds
+
 
 class ToTensor_ERA5_and_Forcing:
     """Class to convert ERA5 and Forcing Datasets to torch tensor."""
@@ -479,6 +537,7 @@ class ToTensor_ERA5_and_Forcing:
         self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
 
         self.varname_upper_air = conf["data"]["variables"]
+        self.flag_upper_air = True
 
         # get surface varnames
         if self.flag_surface:
@@ -522,6 +581,15 @@ class ToTensor_ERA5_and_Forcing:
             self.has_forcing_static = False
 
     def __call__(self, sample: Sample) -> Sample:
+        """Convert variables to input/output torch tensors.
+
+        Args:
+            sample (interator): batch.
+
+        Returns:
+            torch.tensor: converted torch tensor.
+
+        """
         return_dict = {}
 
         for key, value in sample.items():
@@ -533,12 +601,22 @@ class ToTensor_ERA5_and_Forcing:
             elif isinstance(value, xr.Dataset):
                 # organize upper-air vars
                 list_vars_upper_air = []
+                self.flag_upper_air = True
+                # check if upper air in dataset
+                dataset_vars = list(value.data_vars)
 
-                for var_name in self.varname_upper_air:
-                    var_value = value[var_name].values
-                    list_vars_upper_air.append(var_value)
-                numpy_vars_upper_air = np.array(list_vars_upper_air)  # [num_vars, hist_len, num_levels, lat, lon]
-
+                # =========================================================================================== #
+                # update flag_upper_air and flag_surface based on the given dataset
+                self.flag_upper_air = all([varname in dataset_vars for varname in self.varname_upper_air])
+                self.flag_surface = all([varname in dataset_vars for varname in self.varname_surface])
+                # =========================================================================================== #
+                
+                if self.flag_upper_air:
+                    for var_name in self.varname_upper_air:
+                        var_value = value[var_name].values
+                        list_vars_upper_air.append(var_value)
+                    numpy_vars_upper_air = np.array(list_vars_upper_air)  # [num_vars, hist_len, num_levels, lat, lon]
+                    
                 # organize surface vars
                 if self.flag_surface:
                     list_vars_surface = []
@@ -583,8 +661,9 @@ class ToTensor_ERA5_and_Forcing:
             # ToTensor: upper-air varialbes
             ## produces [time, upper_var, level, lat, lon]
             ## np.hstack concatenates the second dim (axis=1)
-            x_upper_air = np.hstack([np.expand_dims(var_upper_air, axis=1) for var_upper_air in numpy_vars_upper_air])
-            x_upper_air = torch.as_tensor(x_upper_air)
+            if self.flag_upper_air:
+                x_upper_air = np.hstack([np.expand_dims(var_upper_air, axis=1) for var_upper_air in numpy_vars_upper_air])
+                x_upper_air = torch.as_tensor(x_upper_air)
 
             # ---------------------------------------------------------------------- #
             # ToTensor: surface variables
@@ -638,8 +717,8 @@ class ToTensor_ERA5_and_Forcing:
 
                 if self.flag_surface:
                     return_dict["x_surf"] = x_surf.type(self.output_dtype)
-
-                return_dict["x"] = x_upper_air.type(self.output_dtype)
+                if self.flag_upper_air:
+                    return_dict["x"] = x_upper_air.type(self.output_dtype)
 
             elif key == "target_ERA5_images" or key == "y":
                 # ---------------------------------------------------------------------- #
@@ -671,6 +750,6 @@ class ToTensor_ERA5_and_Forcing:
 
                 if self.flag_surface:
                     return_dict["y_surf"] = x_surf.type(self.output_dtype)
-
-                return_dict["y"] = x_upper_air.type(self.output_dtype)
+                if self.flag_upper_air:
+                    return_dict["y"] = x_upper_air.type(self.output_dtype)
         return return_dict

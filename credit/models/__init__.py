@@ -5,6 +5,7 @@ import logging
 
 # Import model classes
 from credit.models.crossformer import CrossFormer
+from credit.models.camulator import Camulator
 from credit.models.unet import SegmentationModel
 from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
@@ -28,6 +29,10 @@ model_types = {
     "crossformer": (
         CrossFormer,
         "Loading the CrossFormer model with a conv decoder head and skip connections ...",
+    ),
+    "camulator": (
+        Camulator,
+        "Loading the CAMulator model with a conv decoder head and skip connections ...",
     ),
     "crossformer-diffusion": (
         CrossFormerDiffusion,

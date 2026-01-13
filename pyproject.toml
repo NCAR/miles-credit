@@ -31,6 +31,7 @@ dependencies = [
     "distributed",
     "dask-jobqueue",
     "zarr",
+    "numcodecs<0.16.4",
     "einops",
     "echo-opt",
     "bridgescaler",
@@ -51,7 +52,7 @@ dependencies = [
     "keras",
     "metpy",
     "setuptools_scm",
-    "setuptools"
+    "setuptools",
    ]
 
 [tool.setuptools]
