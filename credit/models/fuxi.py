@@ -8,7 +8,7 @@ import logging
 from credit.postblock import PostBlock
 from credit.models.base_model import BaseModel
 from credit.boundary_padding import TensorPadding
-from credit.models.wxformer.stylistic_decoupling_layer import PixelNoiseInjection
+from credit.models.wxformer.stochastic_decomposition_layer import StochasticDecompositionLayer
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +264,7 @@ class UTransformer(nn.Module):
 
         self.use_noise = use_noise
         if use_noise:
-            self.noise_inject = PixelNoiseInjection(
+            self.noise_inject = StochasticDecompositionLayer(
                 noise_latent_dim,
                 embed_dim,  # because x will be concatenated with shortcut
                 nn.Parameter(torch.tensor([noise_factor], dtype=torch.float32)),

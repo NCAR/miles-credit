@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings('ignore')
 
 
-class StylizationWrapper(nn.Module):
+class SDLWrapper(nn.Module):
     """
     Specialized wrapper for hurricane track stylization with latent vector control.
     
@@ -188,7 +188,7 @@ class StylizationWrapper(nn.Module):
                 delattr(layer, '_original_forward')
         
         # Patch each layer's forward method to capture THE ACTUAL NOISE ADDED
-        wrapper_ref = self  # Capture reference to StylizationWrapper
+        wrapper_ref = self  # Capture reference to SDLWrapper
         
         for idx, layer in enumerate(self._noise_layers):
             # Store original forward
@@ -1095,7 +1095,7 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(os.path.join(filepath, "checkpoint.pt"))['model_state_dict'])
     model = model.eval()
 
-    wrapper = StylizationWrapper(model)
+    wrapper = SDLWrapper(model)
 
     forecast_times = [[args.start_time, args.end_time]]
 

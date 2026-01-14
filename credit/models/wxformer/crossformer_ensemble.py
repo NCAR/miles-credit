@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import logging
 import torch
-from .stylistic_decoupling_layer import PixelNoiseInjection
+from credit.models.wxformer.stochastic_decomposition_layer import StochasticDecompositionLayer
 
 
 class CrossFormerWithNoise(CrossFormer):
@@ -62,17 +62,17 @@ class CrossFormerWithNoise(CrossFormer):
             # Encoder noise injection layers
             self.encoder_noise_layers = nn.ModuleList(
                 [
-                    PixelNoiseInjection(
+                    StochasticDecompositionLayer(
                         self.noise_latent_dim,
                         self.up_block3.output_channels,
                         encoder_noise_factors[0],
                     ),
-                    PixelNoiseInjection(
+                    StochasticDecompositionLayer(
                         self.noise_latent_dim,
                         self.up_block2.output_channels,
                         encoder_noise_factors[1],
                     ),
-                    PixelNoiseInjection(
+                    StochasticDecompositionLayer(
                         self.noise_latent_dim,
                         self.up_block1.output_channels,
                         encoder_noise_factors[2],
@@ -90,17 +90,17 @@ class CrossFormerWithNoise(CrossFormer):
         )
 
         # Decoder noise injection layers
-        self.noise_inject1 = PixelNoiseInjection(
+        self.noise_inject1 = StochasticDecompositionLayer(
             self.noise_latent_dim,
             self.up_block1.output_channels,
             decoder_noise_factors[0],
         )
-        self.noise_inject2 = PixelNoiseInjection(
+        self.noise_inject2 = StochasticDecompositionLayer(
             self.noise_latent_dim,
             self.up_block2.output_channels,
             decoder_noise_factors[1],
         )
-        self.noise_inject3 = PixelNoiseInjection(
+        self.noise_inject3 = StochasticDecompositionLayer(
             self.noise_latent_dim,
             self.up_block3.output_channels,
             decoder_noise_factors[2],

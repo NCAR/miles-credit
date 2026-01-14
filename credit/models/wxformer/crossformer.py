@@ -27,8 +27,6 @@ def apply_spectral_norm(model):
 
 
 # cube embedding
-
-
 class CubeEmbedding(nn.Module):
     """
     Args:
@@ -74,53 +72,68 @@ class UpBlock(nn.Module):
         out_chans,
         num_groups,
         num_residuals=2,
-        upsample_v_conv=False,
         attention_type=None,
         reduction=32,
         spatial_kernel=7,
     ):
         super().__init__()
-        # self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
 
-        self.upsample_v_conv = upsample_v_conv
-
-        if self.upsample_v_conv:
-            self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
-            self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=3, stride=1, padding=1)
-        else:
-            self.upsample = None
-            self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
-
+        # Always use ConvTranspose2d for upsampling
+        self.conv = nn.ConvTranspose2d(
+            in_chans, out_chans, kernel_size=2, stride=2
+        )
         self.output_channels = out_chans
 
+        # Residual stack
         blk = []
-        for i in range(num_residuals):
+        for _ in range(num_residuals):
             blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
-
         self.b = nn.Sequential(*blk)
 
-        # Load attention mechanism using factory function
-        self.attention = load_unet_attention(attention_type, out_chans, reduction, spatial_kernel)
+        # Optional attention
+        self.attention = load_unet_attention(
+            attention_type, out_chans, reduction, spatial_kernel
+        )
 
     def forward(self, x):
-        if self.upsample_v_conv:
-            x = self.upsample(x)
         x = self.conv(x)
-
         shortcut = x
 
         x = self.b(x)
-
         x = x + shortcut
 
-        # Apply attention if specified
         if self.attention is not None:
             x = self.attention(x)
 
         return x
 
+
+class UpBlockPS(nn.Module):
+    def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2):
+        super().__init__()
+        # sub-pixel conv at low res
+        self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
+        self.ps   = nn.PixelShuffle(scale)
+        # sharpening branch (identity init)
+        self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
+        nn.init.zeros_(self.sharp.weight)
+        nn.init.zeros_(self.sharp.bias)
+        # residual stack
+        blk = []
+        for _ in range(num_residuals):
+            blk += [nn.Conv2d(out_ch, out_ch, 3, padding=1),
+                    nn.GroupNorm(num_groups, out_ch),
+                    nn.SiLU()]
+        self.b = nn.Sequential(*blk)
+
+    def forward(self, x):
+        x = self.ps(self.conv(x))    # upsample+conv at low res
+        x = x + self.sharp(x)        # sharpen residual
+        sc = x
+        x = self.b(x)
+        return x + sc
 
 # cross embed layer
 
@@ -394,7 +407,7 @@ class CrossFormer(BaseModel):
         use_spectral_norm: bool = True,
         attention_type: str = None,
         interp: bool = True,
-        upsample_v_conv: bool = False,
+        upsample_with_ps: bool = False,
         padding_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
@@ -442,7 +455,7 @@ class CrossFormer(BaseModel):
         self.image_width = image_width
         self.patch_height = patch_height
         self.patch_width = patch_width
-        self.upsample_v_conv = upsample_v_conv
+        self.upsample_with_ps = upsample_with_ps
         self.frames = frames
         self.output_frames = output_frames
         self.channels = channels
@@ -538,37 +551,38 @@ class CrossFormer(BaseModel):
         )
 
         # =================================================================================== #
-
-        self.up_block1 = UpBlock(
-            1 * last_dim, last_dim // 2, dim[0], upsample_v_conv=self.upsample_v_conv, attention_type=attention_type
-        )
-        self.up_block2 = UpBlock(
-            2 * (last_dim // 2),
-            last_dim // 4,
-            dim[0],
-            upsample_v_conv=self.upsample_v_conv,
-            attention_type=attention_type,
-        )
-        self.up_block3 = UpBlock(
-            2 * (last_dim // 4),
-            last_dim // 8,
-            dim[0],
-            upsample_v_conv=self.upsample_v_conv,
-            attention_type=attention_type,
-        )
-
-        if self.upsample_v_conv:
+        if self.upsample_with_ps:
+            self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
+            self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
+            self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
+            scale = 2
             self.up_block4 = nn.Sequential(
-                nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
                 nn.Conv2d(
-                    2 * (last_dim // 8),
-                    self.output_channels,
+                    2 * (last_dim // 8),              # in_channels
+                    self.output_channels * (scale**2),# conv_out = target_channels * 4
                     kernel_size=3,
                     stride=1,
-                    padding=1,
+                    padding=1
                 ),
+                nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
+                nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1)  
             )
         else:
+            self.up_block1 = UpBlock(
+                1 * last_dim, last_dim // 2, dim[0], attention_type=attention_type
+            )
+            self.up_block2 = UpBlock(
+                2 * (last_dim // 2),
+                last_dim // 4,
+                dim[0],
+                attention_type=attention_type,
+            )
+            self.up_block3 = UpBlock(
+                2 * (last_dim // 4),
+                last_dim // 8,
+                dim[0],
+                attention_type=attention_type,
+            )
             self.up_block4 = nn.ConvTranspose2d(
                 2 * (last_dim // 8), self.output_channels, kernel_size=4, stride=2, padding=1
             )
@@ -668,7 +682,7 @@ if __name__ == "__main__":
     surface_channels = 1
     input_only_channels = 4
     frame_patch_size = 0
-    upsample_v_conv = True
+    upsample_with_ps = True
     # attention_type = "scse_standard"
     padding_conf = {
         "activate": True,
@@ -695,7 +709,7 @@ if __name__ == "__main__":
         surface_channels=surface_channels,
         input_only_channels=input_only_channels,
         levels=levels,
-        upsample_v_conv=upsample_v_conv,
+        upsample_with_ps=upsample_with_ps,
         # attention_type=attention_type,
         dim=(128, 256, 512, 1024),
         depth=(2, 2, 8, 2),
