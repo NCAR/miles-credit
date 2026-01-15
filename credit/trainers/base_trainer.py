@@ -396,7 +396,6 @@ class BaseTrainer(ABC):
                     scheduler.step(results_dict[training_metric][-1])
                 else:
                     scheduler.step()
-
             # Create pandas df
 
             # Find the maximum length among all lists
@@ -503,12 +502,8 @@ class BaseTrainer(ABC):
             if skip_validation:
                 pass
             else:
-                # Stop training if we have not improved after X epochs (stopping patience)
-                best_epoch = [
-                    i
-                    for i, j in enumerate(results_dict[training_metric])
-                    if j == direction(results_dict[training_metric])
-                ][0]
+                # Stop training if we have not improved after X epochs (stopping patience) 
+                best_epoch = results_dict[training_metric].index(direction(results_dict[training_metric]))
                 offset = epoch - best_epoch
 
                 # ==================== #
@@ -552,11 +547,7 @@ class BaseTrainer(ABC):
                 if conf["trainer"]["stop_after_epoch"]:
                     break
 
-        best_epoch = [
-            i
-            for i, j in enumerate(results_dict[training_metric])
-            if j == direction(results_dict[training_metric])
-        ][0]
+        best_epoch = results_dict[training_metric].index(direction(results_dict[training_metric]))
 
         result = {k: v[best_epoch] for k, v in results_dict.items()}
 
