@@ -4,7 +4,6 @@ matplotlib
 cartopy
 scikit-learn
 pyarrow
-pytest
 xarray
 netcdf4
 torch
@@ -14,8 +13,7 @@ dask
 distributed
 dask-jobqueue
 zarr
-numcodecs<0.16.4
-jupyter
+numcodecs
 einops
 echo-opt
 bridgescaler
@@ -25,7 +23,6 @@ pvlib
 pre-commit
 torch-harmonics
 torch_geometric
-ruff
 fsspec
 gcsfs
 metpy
@@ -33,3 +30,4 @@ keras
 miles-guess
 h5py<=3.14.0
 h5netcdf
+torchmetrics
