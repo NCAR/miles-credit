@@ -14,6 +14,7 @@ VALID_FIELD_TYPES = {"prognostic",
                      "static",
                      "diagnostic"}
 
+
 class ERA5Dataset(Dataset):
     """ Pytorch Dataset for processed ERA5 data. Relies on a configuration dictionary to define:
 
@@ -118,6 +119,8 @@ class ERA5Dataset(Dataset):
         t, i = args
         t = pd.Timestamp(t)
         t_target = t + self.dt
+
+        ## always load dynamic forcing
         self._open_ds_extract_fields("dynamic_forcing", t, return_data)
 
         # load prognostic and static if first time step
@@ -127,10 +130,11 @@ class ERA5Dataset(Dataset):
 
         # load t+1 if training
         if self.return_target:
-            self._open_ds_extract_fields("prognostic", t_target, return_data, is_target=True)
-            self._open_ds_extract_fields("diagnostic", t_target, return_data, is_target=True)
-            return_data['target'] = torch.cat((return_data.pop("target_prognostic"),
-                                               return_data.pop("target_diagnostic")), axis=1)
+            for key in ("prognostic", "diagnostic"):
+                if key in self.file_dict.keys():
+                    self._open_ds_extract_fields(key, t_target, return_data, is_target=True)
+            self._pop_and_merge_targets(return_data)
+
         self._add_metadata(return_data, t, t_target)
 
         return return_data
@@ -155,14 +159,15 @@ class ERA5Dataset(Dataset):
                 ds_2D = ds_all_vars[self.var_dict[field_type]["vars_2D"]]
                 data_np, meta = self._reshape_and_concat(ds_3D, ds_2D)
 
-            return_data["metadata"][f"{field_type}_var_order"] = meta
-            if is_target:
-                if field_type == "prognostic":
-                    return_data["target_prognostic"] = torch.tensor(data_np).float()
-                if field_type == "diagnostic":
-                    return_data["target_diagnostic"] = torch.tensor(data_np).float()
-            else:
-                return_data[field_type] = torch.tensor(data_np).float()
+                if is_target:
+                    if field_type == "prognostic":
+                        return_data["target_prognostic"] = torch.tensor(data_np).float()
+                    elif field_type == "diagnostic":
+                        return_data["target_diagnostic"] = torch.tensor(data_np).float()
+                else:
+                    return_data[field_type] = torch.tensor(data_np).float()
+
+                return_data["metadata"][f"{field_type}_var_order"] = meta
 
     def _reshape_and_concat(self, ds_3D, ds_2D):
 
@@ -193,7 +198,6 @@ class ERA5Dataset(Dataset):
         """ Update metadata dictionary """
 
         return_data["metadata"]["input_datetime"] = int(t.value)
-        return_data["metadata"]["dimension_order"] = ["batch", "variable", "time", "latitude", "longitude"]
 
         if self.return_target:
             return_data["metadata"]['target_datetime'] = int(t_target.value)
@@ -206,21 +210,34 @@ class ERA5Dataset(Dataset):
 
         return cf_t
 
+    def _pop_and_merge_targets(self, return_data, dim=0):
 
-    if __name__ == "__main__":
-        import yaml
-        from credit.samplers import DistributedMultiStepBatchSampler
-        path = "../config/era5_new_data_config.yaml"
-        with open(path) as cnfg:
-            config = yaml.safe_load(cnfg)
+        target_tensors = []
+        for key in ("target_prognostic", "target_diagnostic"):
 
-        data_config = config["data"]
+            if key in return_data:
+                target_tensors.append(return_data.pop(key))
 
-        dataset = ERA5Dataset(config['data'])
-        sampler = DistributedMultiStepBatchSampler(dataset=dataset, batch_size=4, rank=0, num_replicas=1, shuffle=True)
-        loader = iter(DataLoader(dataset=dataset, batch_sampler=sampler, num_workers=8, pin_memory=True))
+        if not target_tensors:
+            return
 
-        for _ in range(10):
-            batch = next(loader)
-            print(batch.keys())
+        return_data["target"] = target_tensors[0] if len(target_tensors) == 1 else torch.cat(target_tensors, dim=dim)
 
+
+
+if __name__ == "__main__":
+    import yaml
+    from credit.samplers import DistributedMultiStepBatchSampler
+    path = "../config/era5_new_data_config.yaml"
+    with open(path) as cnfg:
+        config = yaml.safe_load(cnfg)
+
+    data_config = config["data"]
+
+    dataset = ERA5Dataset(config['data'])
+    sampler = DistributedMultiStepBatchSampler(dataset=dataset, batch_size=4, rank=0, num_replicas=1, shuffle=True)
+    loader = iter(DataLoader(dataset=dataset, batch_sampler=sampler, num_workers=8, pin_memory=True))
+
+    for _ in range(10):
+        batch = next(loader)
+        print(batch.keys())
