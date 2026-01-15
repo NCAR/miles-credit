@@ -52,6 +52,7 @@ class Trainer(BaseTrainer):
         super().__init__(model, rank)
         # Add any additional initialization if needed
         logger.info("Loading a multi-step trainer class")
+        
 
     # Training function.
     def train_one_epoch(
@@ -271,16 +272,16 @@ class Trainer(BaseTrainer):
             scaler.update()
             optimizer.zero_grad()
             
-            if  profile_training and self.rank==0:
+            if profile_training and self.rank==0:
                 end_time = time.time()
                 load_time = xload_time - start
                 fwd_time = end_time - xload_time
                 logger.info(f'''load/fwd time: {load_time:.2f}s/{fwd_time:.2f}s = {load_time/fwd_time:.1}''')
                 
-                allocated_mem = torch.cuda.memory.memory_allocated(self.device) // 1024**3
-                reserved_mem = torch.cuda.memory.memory_reserved(self.device) // 1024**3
-                logger.info(f'''Memory allocated: {allocated_mem:.2f} GB''')
-                logger.info(f'''Memory reserved: {reserved_mem:.2f} GB''')
+                allocated_mem = torch.cuda.memory.max_memory_allocated(self.device) / 1024**3
+                reserved_mem = torch.cuda.memory.max_memory_reserved(self.device) / 1024**3
+                logger.info(f'''Memory allocated: {allocated_mem} GB''')
+                logger.info(f'''Memory reserved: {reserved_mem} GB''')
 
             # Metrics
             metrics_dict = metrics(y_pred, y)
@@ -361,6 +362,8 @@ class Trainer(BaseTrainer):
         """
         
         self.model.eval()
+
+        profile_training = conf["trainer"].get("profile_training", False)
 
         # number of diagnostic variables
         # varnum_diag = len(conf["data"]["diagnostic_variables"])
@@ -516,7 +519,12 @@ class Trainer(BaseTrainer):
                         break  # stop after X steps
                     else:
                         x = y_pred.detach()
-
+                if profile_training and self.rank==0:
+                    
+                    allocated_mem = torch.cuda.memory.max_memory_allocated(self.device) / 1024**3
+                    reserved_mem = torch.cuda.memory.max_memory_reserved(self.device) / 1024**3
+                    logger.info(f'''Memory allocated: {allocated_mem} GB''')
+                    logger.info(f'''Memory reserved: {reserved_mem} GB''')
                         
 
                 batch_loss = torch.Tensor([loss.item()]).to(self.device)

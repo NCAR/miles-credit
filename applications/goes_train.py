@@ -74,6 +74,7 @@ def load_model_states_and_optimizer(conf, model, device):
     amp = conf["trainer"]["amp"]
 
     # load weights / states flags
+    
     load_weights = (
         False
         if "load_weights" not in conf["trainer"]
@@ -94,6 +95,23 @@ def load_model_states_and_optimizer(conf, model, device):
         if "load_scheduler" not in conf["trainer"]
         else conf["trainer"]["load_scheduler"]
     )
+
+    # if all loads are true (multi-epoch training), check for checkpoint and set behavior based on existence of checkpoint
+    # otherwise, revert to designated behavior
+    if load_weights and load_optimizer_conf and load_scaler_conf and load_scheduler_conf:
+        if conf["trainer"]["mode"] == "fsdp":
+            checkpoint_path = os.path.join(save_loc, "model_checkpoint.pt")
+        else:
+            checkpoint_path = os.path.join(save_loc, "checkpoint.pt")
+
+        checkpoint_exists = os.path.exists(checkpoint_path)
+        if not checkpoint_exists:
+            logging.warning(f"checkpoint does not exist at {checkpoint_path}, training new model!")
+            load_weights = False
+            load_optimizer_conf = False
+            load_scaler_conf = False
+            load_scheduler_conf = False
+
 
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
     if not load_weights:  # Loaded after loading model weights when reloading

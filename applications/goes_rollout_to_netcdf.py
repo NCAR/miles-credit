@@ -58,20 +58,29 @@ def get_num_cpus():
 def get_rollout_init_times(conf):
 
     forecast_conf = conf["predict"]["forecasts"]
-
-    if forecast_conf["type"] in ["standard", "debugger"]:
-        # start_dt = pd.Timestamp(year=forecast_conf["start_year"], month=1, day=1, hour=0)
+    
+    if forecast_conf["type"] == "debugger":
+        init_times_str = [
+                            "2022-06-30T23:55:06", 
+                            "2022-07-01T14:55:06", # NA convective case
+                            "2022-12-02T11:55:06", 
+                            "2022-12-15T23:55:05", #SA convective case
+                            "2022-12-16T11:55:06", #SA convective case
+                         ]
+        rollout_init_times = ([pd.Timestamp("2022-07-01") + pd.Timedelta("30m")] # check 30min offset case
+                              + [pd.Timestamp(time) for time in init_times_str])
+        return rollout_init_times
+    
+    elif forecast_conf["type"] == "standard":
         start_dt = pd.Timestamp(year=2022, month=7, day=1, hour=0)
         ic_interval = pd.Timedelta(2, "w")
         num_inits = 13
         rollout_init_times = [start_dt + k * ic_interval for k in range(num_inits)]
         rollout_init_times += [t + pd.Timedelta("12h") for t in rollout_init_times[-2:]] # 12h to last two SA convection
         rollout_init_times = ([pd.Timestamp("2022-01-01")] 
-                              + [pd.Timestamp("2022-07-01") + pd.Timedelta("30m")]
+                              + [pd.Timestamp("2022-07-01") + pd.Timedelta("30m")] # check 30m offset case
                               + [pd.Timestamp("2022-07-01") +  pd.Timedelta("15h")] # NA convection case
                               + rollout_init_times)
-        if forecast_conf["type"] == "debugger":
-            return rollout_init_times[:5] + rollout_init_times[-4:]
         return rollout_init_times
     
     elif forecast_conf["type"] == "custom":

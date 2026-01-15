@@ -88,7 +88,7 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
     num_forecast_hours = conf["predict"]["forecasts"].get("num_forecast_hours", None)
 
     if conf["predict"]["forecasts"].get("type", "debugger") in ["debugger", "standard"]:
-        num_forecast_hours = 24
+        num_forecast_hours = conf["predict"]["forecasts"].get("num_forecast_hours", 24)
     
     timestep =  pd.Timedelta(data_config["timestep"])
 
