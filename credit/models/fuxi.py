@@ -8,6 +8,7 @@ import logging
 from credit.postblock import PostBlock
 from credit.models.base_model import BaseModel
 from credit.boundary_padding import TensorPadding
+from credit.models.wxformer.stochastic_decomposition_layer import StochasticDecompositionLayer
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,7 @@ def get_pad3d(input_resolution, window_size):
     Pl, Lat, Lon = input_resolution
     win_pl, win_lat, win_lon = window_size
 
-    padding_left = padding_right = padding_top = padding_bottom = padding_front = (
-        padding_back
-    ) = 0
+    padding_left = padding_right = padding_top = padding_bottom = padding_front = padding_back = 0
     pl_remainder = Pl % win_pl
     lat_remainder = Lat % win_lat
     lon_remainder = Lon % win_lon
@@ -87,9 +86,7 @@ class CubeEmbedding(nn.Module):
         patch_size: T, Lat, Lon
     """
 
-    def __init__(
-        self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm
-    ):
+    def __init__(self, img_size, patch_size, in_chans, embed_dim, norm_layer=nn.LayerNorm):
         super().__init__()
 
         # input size
@@ -107,9 +104,7 @@ class CubeEmbedding(nn.Module):
         self.embed_dim = embed_dim
 
         # Conv3d-based patching
-        self.proj = nn.Conv3d(
-            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
-        )
+        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
         # layer norm
         if norm_layer is not None:
@@ -149,22 +144,16 @@ class CubeEmbedding(nn.Module):
 
 
 class DownBlock(nn.Module):
-    def __init__(
-        self, in_chans: int, out_chans: int, num_groups: int, num_residuals: int = 2
-    ):
+    def __init__(self, in_chans: int, out_chans: int, num_groups: int, num_residuals: int = 2):
         super().__init__()
 
         # down-sampling with Conv2d
-        self.conv = nn.Conv2d(
-            in_chans, out_chans, kernel_size=(3, 3), stride=2, padding=1
-        )
+        self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=(3, 3), stride=2, padding=1)
 
         # blocks of residual path
         blk = []
         for i in range(num_residuals):
-            blk.append(
-                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
-            )
+            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -193,9 +182,7 @@ class UpBlock(nn.Module):
         # blocks of residual path
         blk = []
         for i in range(num_residuals):
-            blk.append(
-                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
-            )
+            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -236,6 +223,10 @@ class UTransformer(nn.Module):
         proj_drop,
         attn_drop,
         drop_path,
+        noise_latent_dim=128,
+        noise_factor=0.2,
+        use_noise=False,
+        noise_scheduler=None,
     ):
         super().__init__()
         num_groups = to_2tuple(num_groups)
@@ -271,7 +262,17 @@ class UTransformer(nn.Module):
         # up-sampling block
         self.up = UpBlock(embed_dim * 2, embed_dim, num_groups[1])
 
-    def forward(self, x):
+        self.use_noise = use_noise
+        if use_noise:
+            self.noise_inject = StochasticDecompositionLayer(
+                noise_latent_dim,
+                embed_dim,  # because x will be concatenated with shortcut
+                nn.Parameter(torch.tensor([noise_factor], dtype=torch.float32)),
+                scheduler=noise_scheduler,
+            )
+            self.noise_latent_dim = noise_latent_dim
+
+    def forward(self, x, noise=None, forecast_step=None):
         B, C, Lat, Lon = x.shape
         padding_left, padding_right, padding_top, padding_bottom = self.padding
         x = self.down(x)
@@ -292,6 +293,11 @@ class UTransformer(nn.Module):
             padding_top : pad_lat - padding_bottom,
             padding_left : pad_lon - padding_right,
         ]
+
+        if self.use_noise:
+            if noise is None:
+                noise = torch.randn(B, self.noise_latent_dim, device=x.device)
+            x = self.noise_inject(x, noise, forecast_step)
 
         # concat
         x = torch.cat([shortcut, x], dim=1)  # B 2*C Lat Lon
@@ -337,6 +343,11 @@ class Fuxi(BaseModel):
         drop_path=0,
         padding_conf=None,
         post_conf=None,
+        use_noise=False,
+        noise_latent_dim=128,
+        noise_factor=0.2,
+        noise_scheduler=None,
+        freeze=False,
         **kwargs,
     ):
         super().__init__()
@@ -386,9 +397,7 @@ class Fuxi(BaseModel):
         self.cube_embedding = CubeEmbedding(img_size, patch_size, in_chans, dim)
 
         # Downsampling --> SwinTransformerV2 stacks --> Upsampling
-        logger.info(
-            f"Define UTransforme with proj_drop={proj_drop}, attn_drop={attn_drop}, drop_path={drop_path}"
-        )
+        logger.info(f"Define UTransforme with proj_drop={proj_drop}, attn_drop={attn_drop}, drop_path={drop_path}")
 
         self.u_transformer = UTransformer(
             dim,
@@ -400,6 +409,10 @@ class Fuxi(BaseModel):
             proj_drop=proj_drop,
             attn_drop=attn_drop,
             drop_path=drop_path,
+            noise_latent_dim=noise_latent_dim,
+            noise_factor=noise_factor,
+            use_noise=use_noise,
+            noise_scheduler=noise_scheduler,
         )
 
         # dense layer applied on channel dmension
@@ -430,7 +443,15 @@ class Fuxi(BaseModel):
         if self.use_post_block:
             self.postblock = PostBlock(post_conf)
 
-    def forward(self, x: torch.Tensor):
+        # Freeze weights if using pre-trained model
+        if freeze:
+            for name, param in self.named_parameters():
+                if "noise_inject" in name:
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+
+    def forward(self, x: torch.Tensor, noise=None, forecast_step=None):
         # copy tensor to feed into postblock later
         x_copy = None
         if self.use_post_block:
@@ -457,13 +478,11 @@ class Fuxi(BaseModel):
 
         # u_transformer stage
         # the size of x does notchange
-        x = self.u_transformer(x)
+        x = self.u_transformer(x, noise=noise, forecast_step=forecast_step)
 
         # recover embeddings to lat/lon grids with dense layer and reshape operation.
         x = self.fc(x.permute(0, 2, 3, 1))  # B Lat Lon C
-        x = x.reshape(B, Lat, Lon, patch_lat, patch_lon, self.out_chans).permute(
-            0, 1, 3, 2, 4, 5
-        )
+        x = x.reshape(B, Lat, Lon, patch_lat, patch_lon, self.out_chans).permute(0, 1, 3, 2, 4, 5)
         # B, lat, patch_lat, lon, patch_lon, C
         x = x.reshape(B, Lat * patch_lat, Lon * patch_lon, self.out_chans)
         x = x.permute(0, 3, 1, 2)  # B C Lat Lon
@@ -512,6 +531,7 @@ if __name__ == "__main__":
     # build the model
     img_size = (frames, image_height, image_width)
     patch_size = (frames, patch_height, patch_width)
+    use_noise = True
 
     model = Fuxi(
         channels=channels,
@@ -527,7 +547,8 @@ if __name__ == "__main__":
         frame_patch_size=frame_patch_size,
         dim=dim,
         use_spectral_norm=use_spectral_norm,
-        post_conf={"use_skebs": False},
+        post_conf={"activate": False},
+        use_noise=use_noise,
     ).to("cuda")
 
     # ============================================================= #
