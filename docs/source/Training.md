@@ -131,7 +131,7 @@ pbs:
 Once again, to launch the job on Casper, run:
 
 ```bash
-credit_train -c config/example-v2025.2.0.yml -l 1
+credit_train -c config/example-v2026.1.0.yml -l 1
 ```
 
 This command generates a **launch script (`launch.sh`)**, which will look like:
@@ -147,7 +147,7 @@ This command generates a **launch script (`launch.sh`)**, which will look like:
 #PBS -k eod
 source ~/.bashrc
 conda activate credit-casper
-torchrun --standalone --nnodes 1 --nproc-per-node=4 applications/train.py -c config/example-v2025.2.0.yml
+torchrun --standalone --nnodes 1 --nproc-per-node=4 applications/train.py -c config/example-v2026.1.0.yml
 ```
 
 and note that the `torchrun` command is used rather than MPI. In order to utilize MPI,

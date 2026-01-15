@@ -10,7 +10,9 @@
 #     - predict
 #     - pbs
 
-# Note: this is NOT a runable YAML. The purposes is to explain how to use each keyword with examples.
+# This file will run on Casper or Derecho to generate an example model. You will need to modify save_loc, metadata,
+# and save_forecast to your own directories if running on Casper or Derecho to match your code and data organization.
+# File paths for data will need to be changed if you want to run a different dataset.
 # --------------------------------------------------------------------------------------------------------------------- #
 
 
@@ -65,7 +67,7 @@ data:
     
     # static variables must be a single zarr or nc with (latitude, longitude) coords
     # static variables must be normalized BY USER 
-    static_variables: ['z_norm'] 
+    static_variables: ["z_norm", "land_sea_mask"]
     save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
 
     # physics file
@@ -154,7 +156,7 @@ trainer:
     # fsdp: fully sharded data parallel
     # ddp: distributed data parallel
     # none: single-GPU training
-    mode: ddp
+    mode: none
 
     # fsdp-specific GPU optimization
     #
@@ -220,7 +222,7 @@ trainer:
     start_epoch: 0
     # the trainer will stop after iterating a given number of epochs
     # this works for any start_epoch and reload_epoch: True
-    num_epoch: 5
+    num_epoch: 1
     # epoch is saved in the checkpot.pt, this option reads the last epoch 
     # of the previous job and continue from there
     # useful for epoch-dependent schedulers
@@ -505,9 +507,9 @@ model:
 
 loss: 
     # the main training loss
-    # available options are "mse", "msle", "mae", "huber", "logcosh", "xtanh", "xsigmoid"
+    # available options are "mse", "msle", "mae", "huber", "logcosh", "xtanh", "xsigmoid", "covmse"
     # ensemble training losses: "KCRPS", "almost-fair-crps"
-    training_loss: "covmse"
+    training_loss: "mse"
     training_loss_parameters:
       batch_normalize: True
       off_diagonal_scale: 1.0e-8 
@@ -631,12 +633,12 @@ predict:
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables
     # remove save_vars from config will save ALL variables
-    metadata: '/glade/work/schreck/repos/credit/miles-credit/metadata/era5.yaml'
+    metadata: '/glade/u/home/$USER/miles-credit/credit/metadata/era5.yaml'
     
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
     # each forecast lead time produces a file.nc
-    save_forecast: '/glade/u/home/schreck/scratch/finetune/wx12/'
+    save_forecast: '/glade/derecho/scratch/$USER/example/'
     
     # this keyword will apply a low-pass filter to all fields and each forecast step
     # it will reduce high-freq noise, but may impact performance
