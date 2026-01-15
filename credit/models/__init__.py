@@ -11,13 +11,12 @@ from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
 from credit.models.graph import GraphResTransfGRU
 from credit.models.debugger_model import DebuggerModel
-from credit.models.crossformer_ensemble import CrossFormerWithNoise
-from credit.models.crossformer_downscaling import DownscalingCrossFormer
+from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
+from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
 from credit.models.unet_downscaling import DownscalingSegmentationModel
-from credit.models.crossformer_diffusion import CrossFormerDiffusion
+from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
 from credit.models.unet_diffusion import UnetDiffusion
 from credit.diffusion import ModifiedGaussianDiffusion
-
 from credit.models.swin_wrf import WRFTransformer
 from credit.models.dscale_wrf import DscaleTransformer
 
