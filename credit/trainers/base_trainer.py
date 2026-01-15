@@ -396,7 +396,7 @@ class BaseTrainer(ABC):
                     scheduler.step(results_dict[training_metric][-1])
                 else:
                     scheduler.step()
-
+            logger.debug(results_dict)
             # Create pandas df
 
             # Find the maximum length among all lists

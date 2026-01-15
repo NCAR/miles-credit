@@ -32,9 +32,9 @@ trainer_types = {
     ),
     "ic-opt": (TrainerIC, "Loading an initial condition optimizer training class"),
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
-    "goes10km": (TrainerGOES10km, "loading a trainer for GOES 10km dataset")
+    "goes10km": (TrainerGOES10km, "loading a trainer for GOES 10km dataset"),
+    "goes10km-distributed-ensemble": (TrainerGOES10km, "loading a distributed CRPS trainer for GOES 10km dataset"), #NOTE: load same trainer, distributed config happens in trainer init
 }
-
 
 def load_trainer(conf, load_weights=False):
     conf = copy.deepcopy(conf)

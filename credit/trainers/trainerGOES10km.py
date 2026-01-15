@@ -21,6 +21,74 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+class Gather(torch.autograd.Function):
+    """Custom autograd function for gathering tensors from all processes while preserving gradients.
+
+    This layer performs an all_gather operation on the provided tensor across all
+    distributed processes and concatenates them along the batch dimension (dim=0).
+    The backward pass correctly routes gradients back to the originating processes.
+
+    This is useful for operations like computng ensembles where you need to compute
+    the CRPS between samples across all GPUs, while still being able to backpropagate
+    through the gathered tensor.
+    """
+
+    @staticmethod
+    def forward(ctx, input):
+        """Gather tensors from all ranks and concatenate them on the batch dimension.
+
+        Args:
+            ctx: Context object to store information for backward pass
+            input: Tensor to be gathered across processes
+
+        Returns:
+            Concatenated tensor from all processes
+        """
+        ctx.world_size = dist.get_world_size()
+        ctx.rank = dist.get_rank()
+
+        gathered = [torch.zeros_like(input) for _ in range(ctx.world_size)]
+        dist.all_gather(gathered, input)
+        return torch.cat(gathered, dim=0)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        """Distribute gradients back to their originating processes.
+
+        Args:
+            ctx: Context object with stored information from forward pass
+            grad_output: Gradient with respect to the forward output
+
+        Returns:
+            Gradient for the input tensor
+        """
+        # Each rank gets its corresponding chunk of grad_output
+        input_grad = grad_output.chunk(ctx.world_size, dim=0)[ctx.rank]
+        return input_grad
+
+
+def gather_tensor(tensor):
+    """Gathers tensors from all ranks and preserves autograd graph.
+
+    This function allows you to gather tensors from all processes in a distributed
+    setting while maintaining the autograd graph for backward passes. This is critical
+    for operations that need to compute losses across all samples in a distributed
+    training environment.
+
+    Args:
+        tensor: The tensor to gather across processes
+
+    Returns:
+        Tensor concatenated from all processes along dimension 0
+
+    Example:
+        >>> # On each GPU
+        >>> local_tensor = torch.randn(8, 128)  # local batch of embeddings
+        >>> # Gather embeddings from all GPUs (total batch_size * world_size)
+        >>> gathered_tensor = gather_tensor(local_tensor)
+        >>> # Now you can compute a loss that depends on all samples
+    """
+    return Gather.apply(tensor)
 
 class Trainer(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int):
@@ -84,6 +152,11 @@ class Trainer(BaseTrainer):
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
         if ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {ensemble_size}")
+        distributed_ensemble_mode = conf["trainer"]["type"] == "goes10km-distributed-ensemble"
+        if distributed_ensemble_mode:
+            logger.info("using distributed ensemble training mode")
+        # in distributed ensemble mode, the effective ensemble size computed by the loss is ensemble_size * num_gpus
+        
         logger.info(f"Using grad-max-norm value: {grad_max_norm}")
 
         # number of diagnostic variables
@@ -152,7 +225,7 @@ class Trainer(BaseTrainer):
 
             start = time.time()
             batch = next(dl)
-
+            logger.debug(batch["datetime"])
             mode = batch["mode"][0]
             while not stop_forecast:
                 logger.debug(f"current mode: {mode}")
@@ -177,7 +250,6 @@ class Trainer(BaseTrainer):
 
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
-                    
                 # load era5 forcing
                 # concat order is prognostic, static, forcing
                 if "era5" in batch.keys():
@@ -189,6 +261,7 @@ class Trainer(BaseTrainer):
 
                     if ensemble_size > 1:
                         x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
+                        forcing_t_delta = torch.repeat_interleave(forcing_t_delta, ensemble_size, 0)
                     if flag_clamp:
                         x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
 
@@ -196,7 +269,7 @@ class Trainer(BaseTrainer):
                 xload_time = time.time()
 
                 with torch.autocast(device_type="cuda", enabled=amp):
-                    y_pred = self.model(x, x_era5, forcing_t_delta) if "era5" in batch.keys() else self.model(x)
+                    y_pred = self.model(x, x_era5=x_era5, forcing_t_delta=forcing_t_delta) if "era5" in batch.keys() else self.model(x)
 
                 batch = next(dl)
                 mode = batch["mode"][0]
@@ -211,14 +284,52 @@ class Trainer(BaseTrainer):
                     if flag_clamp:     
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
+                    # compute loss
                     with torch.autocast(enabled=amp, device_type="cuda"):
-                        loss = criterion(y.to(y_pred.dtype), y_pred).mean()
+                        y = y.to(y_pred.dtype)
+                        if not distributed_ensemble_mode:
+                            total_loss = criterion(y, y_pred).mean()
+                        else: # distributed ensemble mode
+                            lat_size = y.shape[3]
+                            batch_size = y.shape[0] // ensemble_size
+                            world_size = dist.get_world_size()
+
+                            total_loss = 0
+                            total_std = 0
+                            for i in range(lat_size):
+                                # Slice the tensors
+                                y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
+                                y_slice = y[:, :, :, i : i + 1].contiguous()
+
+                                # Gather the tensor
+                                # gather concats on dim=0, so the gathered tensor is
+                                # x1, x1, y1, y1, z1, z1, ..., x2, x2, y2, y2, z2, z2
+                                y_pred_slice = gather_tensor(y_pred_slice)
+                                y_pred_slice = y_pred_slice.view(world_size, batch_size, ensemble_size, *y_pred_slice.shape[1:])
+                                y_pred_slice = y_pred_slice.permute(1,2,0, *range(3, y_pred_slice.ndim))
+                                y_pred_slice = y_pred_slice.reshape(ensemble_size * batch_size * world_size, *y_pred_slice.shape[3:])
+                                # gather ensemble members from across the ranks and reorders them
+                                # Compute loss for this slice
+
+                                loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
+                                total_loss += loss
+
+                                # Compute the std over ensemble dim
+                                std = (y_pred_slice
+                                       .detach()
+                                       .view(batch_size, ensemble_size * world_size, *y_pred_slice.shape[1:])
+                                       .std(dim=1)
+                                       .mean() / lat_size
+                                )
+                                total_std += std
+                            # track std
+                            accum_log(logs, {"std": total_std.item()})
 
                     # track the loss
-                    accum_log(logs, {"loss": loss.item()})
+                    accum_log(logs, {"loss": total_loss.item()})
 
                     # compute gradients
-                    scaler.scale(loss).backward(retain_graph=retain_graph)
+                    scaler.scale(total_loss).backward(retain_graph=retain_graph)
 
                 if distributed:
                     torch.distributed.barrier()
@@ -284,22 +395,30 @@ class Trainer(BaseTrainer):
                 logger.info(f'''Memory reserved: {reserved_mem} GB''')
 
             # Metrics
+            # if distributed_ensemble_mode=False ensemble metrics computed by metrics here
             metrics_dict = metrics(y_pred, y)
             for name, value in metrics_dict.items():
-                value = torch.Tensor([value])
-
-                value = value.to(self.device, non_blocking=True)
-                if distributed:
-                    dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
-                results_dict[f"train_{name}"].append(value[0].item())
+                if name in ["std", "loss"] and distributed_ensemble_mode:
+                    pass
+                else:
+                    value = torch.Tensor([value])
+                    value = value.to(self.device, non_blocking=True)
+                    if distributed:
+                        dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                    results_dict[f"train_{name}"].append(value[0].item())
 
             batch_loss = torch.Tensor([logs["loss"]])
             batch_loss = batch_loss.to(self.device)
-
             if distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
             results_dict["train_forecast_len"].append(forecast_length + 1)
+
+            # TODO: get per channel std and loss for the entire distributed ensemble
+            if distributed_ensemble_mode:
+                batch_std = torch.Tensor([logs["std"]]).to(self.device)
+                dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
+                results_dict["train_std"].append(batch_std[0].item())
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(
@@ -321,10 +440,12 @@ class Trainer(BaseTrainer):
                 np.mean(results_dict["train_mae"]),
                 forecast_length + 1,
             )
-            if ensemble_size > 1:
+            if ensemble_size > 1 or distributed_ensemble_mode:
                 to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
             to_print += " lr: {:.12f}".format(optimizer.param_groups[0]["lr"])
-            if self.rank == 0:
+
+
+            if self.rank == 0: #update tqdm
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
@@ -362,6 +483,7 @@ class Trainer(BaseTrainer):
         """
         
         self.model.eval()
+        amp = conf["trainer"]["amp"]
 
         profile_training = conf["trainer"].get("profile_training", False)
 
@@ -387,6 +509,10 @@ class Trainer(BaseTrainer):
             else conf["forecast_len"]
         )
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
+        distributed_ensemble_mode = conf["trainer"]["type"] == "goes10km-distributed-ensemble"
+        if distributed_ensemble_mode:
+            logger.info("using distributed ensemble training mode")
+        # in distributed ensemble mode, the effective ensemble size computed by the loss is ensemble_size * num_gpus
 
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
@@ -463,11 +589,12 @@ class Trainer(BaseTrainer):
                                             era5_static,
                                             batch_era5["dynamic_forcing"].to(self.device)],
                                             dim=1).float()
+                        forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device).float()
 
                         if ensemble_size > 1:
                             x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
+                            forcing_t_delta = torch.repeat_interleave(forcing_t_delta, ensemble_size, 0)
 
-                        forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device).float()
                     
                     
                     # --------------------------------------------- #
@@ -475,7 +602,8 @@ class Trainer(BaseTrainer):
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-                    y_pred = self.model(x, x_era5, forcing_t_delta) if "era5" in batch.keys() else self.model(x)
+                    with torch.autocast(device_type="cuda", enabled=amp):
+                        y_pred = self.model(x, x_era5=x_era5, forcing_t_delta=forcing_t_delta) if "era5" in batch.keys() else self.model(x)
 
                     # ================================================================================== #
                     # scope of reaching the final forecast_len
@@ -497,7 +625,42 @@ class Trainer(BaseTrainer):
 
                         # ----------------------------------------------------------------------- #
                         # calculate rolling loss
-                        loss = criterion(y.to(dtype=y_pred.dtype), y_pred).mean()
+                        with torch.autocast(enabled=amp, device_type="cuda"):
+                            if not distributed_ensemble_mode:
+                                total_loss = criterion(y, y_pred).mean()
+                            else: # distributed ensemble mode
+                                lat_size = y.shape[3]
+                                batch_size = y.shape[0] // ensemble_size
+                                world_size = dist.get_world_size()
+
+                                total_loss = 0
+                                total_std = 0
+                                for i in range(lat_size):
+                                    # Slice the tensors
+                                    y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
+                                    y_slice = y[:, :, :, i : i + 1].contiguous()
+
+                                    # Gather the tensor
+                                    # gather concats on dim=0, so the gathered tensor is
+                                    # x1, x1, y1, y1, z1, z1, ..., x2, x2, y2, y2, z2, z2
+                                    y_pred_slice = gather_tensor(y_pred_slice)
+                                    y_pred_slice = y_pred_slice.view(world_size, batch_size, ensemble_size, *y_pred_slice.shape[1:])
+                                    y_pred_slice = y_pred_slice.permute(1,2,0, *range(3, y_pred_slice.ndim))
+                                    y_pred_slice = y_pred_slice.reshape(ensemble_size * batch_size * world_size, *y_pred_slice.shape[3:])
+                                    # gather ensemble members from across the ranks and reorders them
+                                    # Compute loss for this slice
+
+                                    loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
+                                    total_loss += loss
+
+                                    # Compute the std over ensemble dim
+                                    std = (y_pred_slice
+                                        .detach()
+                                        .view(batch_size, ensemble_size * world_size, *y_pred_slice.shape[1:])
+                                        .std(dim=1)
+                                        .mean() / lat_size
+                                    )
+                                    total_std += std
 
                         # Metrics
                         # metrics_dict = metrics(y_pred, y.float)
@@ -527,7 +690,7 @@ class Trainer(BaseTrainer):
                     logger.info(f'''Memory reserved: {reserved_mem} GB''')
                         
 
-                batch_loss = torch.Tensor([loss.item()]).to(self.device)
+                batch_loss = torch.Tensor([total_loss.item()]).to(self.device)
 
                 if distributed:
                     torch.distributed.barrier()

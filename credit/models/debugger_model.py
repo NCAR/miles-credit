@@ -3,6 +3,7 @@ import logging
 import torch
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
+import torch.distributed as dist
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class DebuggerModel(BaseModel):
 
 
         # input channels
-        input_channels = channels * levels + surface_channels + input_only_channels
+        input_channels = channels * levels + surface_channels #+ input_only_channels
         # output channels
         output_channels = channels * levels + surface_channels + output_only_channels
 
@@ -77,7 +78,19 @@ class DebuggerModel(BaseModel):
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
+        
+        # #batch=2 test:
+        # if x.shape[0] == 4:
+        #     rand = torch.arange(4).to(x.device)
+        # else:
+        #     rank = dist.get_rank()
+        #     if rank==0:
+        #         rand = torch.tensor([0.0, 2.0]).to(x.device)
+        #     elif rank==1:
+        #         rand = torch.tensor([1.0, 3.0]).to(x.device)
 
+        # x = x + rand.view(rand.shape[0], 1, 1, 1, 1)
+        
         x = x.permute(0, 2, 3, 4, 1)
         x = self.linear(x)
         x = x.permute(0, -1, 1, 2, 3)

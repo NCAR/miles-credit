@@ -25,7 +25,7 @@ def launch_script(config_file, script_path, launch=True):
     pbs_options = config["pbs"]
 
     save_loc = os.path.expandvars(config["save_loc"])
-    config_save_path = os.path.join(save_loc, "model.yml")
+    config_save_path = config_file
 
     # Generate the PBS script
     script = f"""#!/bin/bash -l

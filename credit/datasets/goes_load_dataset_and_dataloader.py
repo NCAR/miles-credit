@@ -141,6 +141,10 @@ def load_dataloader(conf, train_dataset, rank, world_size, is_train=True, is_pre
     """
     logger.info("loading a GOES 10km dataloader")
 
+    if conf["trainer"]["type"] == "goes10km-distributed-ensemble": # want every device to see the same batch
+        world_size = 1
+        rank = 0
+
     if not is_predict:
         sampling_modes = conf["data"]["sampling_modes"]
     else:
