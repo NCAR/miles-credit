@@ -1,6 +1,5 @@
-from typing import Optional, List
+from typing import Optional
 import itertools
-import torch
 from torch.utils.data import Dataset, Sampler, DistributedSampler, DataLoader
 import logging
 
@@ -59,13 +58,8 @@ class MultiStepBatchSamplerSubset(Sampler):
 
 class DistributedMultiStepBatchSampler(DistributedSampler):
 
-    def __init__(self, dataset: Dataset,
-                 batch_size: int,
-                 num_replicas: Optional[int] = None,
-                 rank: Optional[int] = None,
-                 shuffle: bool = True,
-                 seed: int = 0,
-                 drop_last: bool = False) -> None:
+    def __init__(self, dataset: Dataset, batch_size: int, num_replicas: Optional[int] = None,
+                 rank: Optional[int] = None, shuffle: bool = True, seed: int = 0, drop_last: bool = False) -> None:
         super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle, seed=seed,
                          drop_last=drop_last)
 

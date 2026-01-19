@@ -9,10 +9,7 @@ from glob import glob
 
 logger = logging.getLogger(__name__)
 
-VALID_FIELD_TYPES = {"prognostic",
-                     "dynamic_forcing",
-                     "static",
-                     "diagnostic"}
+VALID_FIELD_TYPES = {"prognostic", "dynamic_forcing", "static", "diagnostic"}
 
 
 class ERA5Dataset(Dataset):
@@ -83,8 +80,7 @@ class ERA5Dataset(Dataset):
 
                 files = sorted(glob(d.get("path", "")))
                 self.file_dict[field_type] = self._map_files(files) if files else None
-                self.var_dict[field_type] = {"vars_3D": d.get("vars_3D", []),
-                                             "vars_2D": d.get("vars_2D", [])}
+                self.var_dict[field_type] = {"vars_3D": d.get("vars_3D", []), "vars_2D": d.get("vars_2D", [])}
             else:
                 self.file_dict[field_type] = None
 
@@ -143,116 +139,110 @@ class ERA5Dataset(Dataset):
 
         return return_data
 
+    def _open_ds_extract_fields(self, field_type, t, return_data, is_target=False):
+        """
+        opens the dataset, reshapes and concats the variables into n np array,
+        packs it into the return dict if the data exists.
 
-def _open_ds_extract_fields(self, field_type, t, return_data, is_target=False):
-    """
-    opens the dataset, reshapes and concats the variables into n np array,
-    packs it into the return dict if the data exists.
+        Args:
+             field_type (str): Field type ("prognostic", "diagnostic", etc)
+             t (pd.Timestamp): Current timestamp
+             return_data (dict): Dictionary of data to return
+             is_target (bool): Flag for if data is x or y data
+        """
+        if self.file_dict[field_type]:
+            with xr.open_dataset(self.file_dict[field_type][t.year]) as dataset:
+                if "time" in dataset.dims:
+                    if isinstance(dataset.time.values[0], cftime.datetime):
+                        t = self._convert_cf_time(t)
+                    ds = dataset.sel(time=t)
+                else:
+                    ds = dataset
 
-    Args:
-         field_type (str): Field type ("prognostic", "diagnostic", etc)
-         t (pd.Timestamp): Current timestamp
-         return_data (dict): Dictionary of data to return
-         is_target (bool): Flag for if data is x or y data
-    """
-    if self.file_dict[field_type]:
-        with xr.open_dataset(self.file_dict[field_type][t.year]) as dataset:
+                ds_all_vars = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
 
-            if "time" in dataset.dims:
-                if isinstance(dataset.time.values[0], cftime.datetime):
-                    t = self._convert_cf_time(t)
-                ds = dataset.sel(time=t)
-            else:
-                ds = dataset
+                ds_3D = ds_all_vars[self.var_dict[field_type]["vars_3D"]]
+                ds_2D = ds_all_vars[self.var_dict[field_type]["vars_2D"]]
+                data_np, meta = self._reshape_and_concat(ds_3D, ds_2D)
 
-            ds_all_vars = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
+                if is_target:
+                    if field_type == "prognostic":
+                        return_data["target_prognostic"] = torch.tensor(data_np).float()
+                    elif field_type == "diagnostic":
+                        return_data["target_diagnostic"] = torch.tensor(data_np).float()
+                else:
+                    return_data[field_type] = torch.tensor(data_np).float()
 
-            ds_3D = ds_all_vars[self.var_dict[field_type]["vars_3D"]]
-            ds_2D = ds_all_vars[self.var_dict[field_type]["vars_2D"]]
-            data_np, meta = self._reshape_and_concat(ds_3D, ds_2D)
+                return_data["metadata"][f"{field_type}_var_order"] = meta
 
-            if is_target:
-                if field_type == "prognostic":
-                    return_data["target_prognostic"] = torch.tensor(data_np).float()
-                elif field_type == "diagnostic":
-                    return_data["target_diagnostic"] = torch.tensor(data_np).float()
-            else:
-                return_data[field_type] = torch.tensor(data_np).float()
+    def _reshape_and_concat(self, ds_3D, ds_2D):
+        """
+        Stack 3D variables along level and variable, concatenate with 2D variables, and reorder dimensions.
 
-            return_data["metadata"][f"{field_type}_var_order"] = meta
+        Args:
+            ds_3D (xr.Dataset): Xarray dataset with 3D spatial variables
+            ds_2D (xr.Dataset): Xarray dataset with 2D spatial variables
+        """
+        data_list = []
+        meta_3D, meta_2D = [], []
 
+        if ds_3D:
+            data_3D = ds_3D.to_array().stack({'level_var': ['variable', 'level']})
+            meta_3D = data_3D.level_var.values.tolist()
+            data_3D = np.expand_dims(data_3D.values.transpose(2, 0, 1), axis=1)
+            data_list.append(data_3D)
 
-def _reshape_and_concat(self, ds_3D, ds_2D):
-    """
-    Stack 3D variables along level and variable, concatenate with 2D variables, and reorder dimensions.
+        if ds_2D:
+            data_2D = ds_2D.to_array()
+            meta_2D = data_2D["variable"].values.tolist()
+            data_2D = np.expand_dims(data_2D, axis=1)
+            data_list.append(data_2D)
 
-    Args:
-        ds_3D (xr.Dataset): Xarray dataset with 3D spatial variables
-        ds_2D (xr.Dataset): Xarray dataset with 2D spatial variables
-    """
-    data_list = []
-    meta_3D, meta_2D = [], []
+        combined_data = np.concatenate(data_list, axis=0)
+        meta = meta_3D + meta_2D
 
-    if ds_3D:
-        data_3D = ds_3D.to_array().stack({'level_var': ['variable', 'level']})
-        meta_3D = data_3D.level_var.values.tolist()
-        data_3D = np.expand_dims(data_3D.values.transpose(2, 0, 1), axis=1)
-        data_list.append(data_3D)
+        return combined_data, meta
 
-    if ds_2D:
-        data_2D = ds_2D.to_array()
-        meta_2D = data_2D["variable"].values.tolist()
-        data_2D = np.expand_dims(data_2D, axis=1)
-        data_list.append(data_2D)
+    def _add_metadata(self, return_data, t, t_target=None):
+        """
+        Update metadata dictionary
 
-    combined_data = np.concatenate(data_list, axis=0)
-    meta = meta_3D + meta_2D
+        Args:
+            return_data (dict): Return dictionary
+            t (int): Time step
+            t_target: Target time step or None
+        """
+        return_data["metadata"]["input_datetime"] = int(t.value)
 
-    return combined_data, meta
+        if self.return_target:
+            return_data["metadata"]['target_datetime'] = int(t_target.value)
 
+    def _convert_cf_time(self, ts):
+        """
+        Convert pandas timestamp to cftime
 
-def _add_metadata(self, return_data, t, t_target=None):
-    """
-    Update metadata dictionary
+        Args:
+            ts: pandas timestamp
+        """
+        cf_t = cftime.datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, calendar='noleap')
 
-    Args:
-        return_data (dict): Return dictionary
-        t (int): Time step
-        t_target: Target time step or None
-    """
-    return_data["metadata"]["input_datetime"] = int(t.value)
+        return cf_t
 
-    if self.return_target:
-        return_data["metadata"]['target_datetime'] = int(t_target.value)
+    def _pop_and_merge_targets(self, return_data, dim=0):
+        """
+        Look for target diagnostic and prognostic variables. If both exist, concatenate them along specified dimension.
 
+        Args:
+            return_data: Dictionary of current data to return
+            dim: Concat dimension
+        """
+        target_tensors = []
+        for key in ("target_prognostic", "target_diagnostic"):
 
-def _convert_cf_time(self, ts):
-    """
-    Convert pandas timestamp to cftime
+            if key in return_data:
+                target_tensors.append(return_data.pop(key))
 
-    Args:
-        ts: pandas timestamp
-    """
-    cf_t = cftime.datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, calendar='noleap')
+        if not target_tensors:
+            return
 
-    return cf_t
-
-
-def _pop_and_merge_targets(self, return_data, dim=0):
-    """
-    Look for target diagnostic and prognostic variables. If both exist, concatenate them along specified dimension.
-
-    Args:
-        return_data: Dictionary of current data to return
-        dim: Concat dimension
-    """
-    target_tensors = []
-    for key in ("target_prognostic", "target_diagnostic"):
-
-        if key in return_data:
-            target_tensors.append(return_data.pop(key))
-
-    if not target_tensors:
-        return
-
-    return_data["target"] = target_tensors[0] if len(target_tensors) == 1 else torch.cat(target_tensors, dim=dim)
+        return_data["target"] = target_tensors[0] if len(target_tensors) == 1 else torch.cat(target_tensors, dim=dim)
