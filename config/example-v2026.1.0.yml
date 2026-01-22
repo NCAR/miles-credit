@@ -146,136 +146,13 @@ data:
     # All of these support single or multi-step training (e.g. forecast lengths >= 0)
     dataset_type: ERA5_MultiStep_Batcher
 
-trainer:
-    # Choose the training routine
-    # This is deprecated as of credit-2.0
-    # Options: era5, or conus404
-    type: era5
-
-    # the keyword that controls GPU usage
-    # fsdp: fully sharded data parallel
-    # ddp: distributed data parallel
-    # none: single-GPU training
-    mode: none
-
-    # fsdp-specific GPU optimization
-    #
-    # allow FSDP offloads gradients to CPU and free GPU memory
-    # This can cause CPU out-of-memory if for some large models, do your diligence
-    cpu_offload: False
-    # save forward pass activation to checkpoints and free GPU memory
-    activation_checkpoint: False
-    # Set to True for all layers with activations otherwise use custom (see credit/distributed.py)
-    checkpoint_all_layers: False
-
-    # (optional) use torch.compile: False. May not be compatible with custom models
-    compile: False
-
-    # load existing weights / optimizer / mixed-precision grad scaler / learning rate scheduler state(s)
-    # when starting multi-step training, only use load weights initially, then set all to true
-    load_weights: False
-    load_optimizer: False
-    load_scaler: False 
-    load_scheduler: False
-
-    # CREDIT save checkpoints at the end of every epoch
-    # save_backup_weights will also save checkpoints in the beginning of every epoch
-    save_backup_weights: True
-    # save_best_weights will save the best checkpoint separatly based on validation loss
-    # does not work if skip_validation: True
-    save_best_weights: True
-
-    # Optional for user to control which variable metrics get saved to training_log.csv
-    # Set to True to save metrics for all predicted variables
-    # Set to ["Z500", "Q500", "Q", "T"] for example to save these variables (with levels in the case of Q and T)
-    # Set to [] or None to save only bulk metrics averaged over all variables
-    save_metric_vars: True
-    
-    # update learning rate to optimizer.param_groups
-    # False if a scheduler is used
-    update_learning_rate: False
-    
-    # learning rate
-    learning_rate: 1.0e-03
-
-    # L2 regularization on trained weights
-    # weight_decay: 0 --> turn-off L2 reg
-    weight_decay: 0
-
-    # define training and validation batch size
-    # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 16
-    valid_batch_size: 16
-    ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
-
-    # number of batches per epoch for training and validation
-    # set to 0 to use all available training samples e.g. `len(dataloader)`
-    # if the number is larger than all training samples, all available training samples will be used
-    batches_per_epoch: 1000 
-    valid_batches_per_epoch: 20
-    # early stopping
-    stopping_patience: 50 
-    # True: do not validate, always save weights
-    skip_validation: False
-
-    # total number of epochs
-    start_epoch: 0
-    # the trainer will stop after iterating a given number of epochs
-    # this works for any start_epoch and reload_epoch: True
-    num_epoch: 1
-    # epoch is saved in the checkpot.pt, this option reads the last epoch 
-    # of the previous job and continue from there
-    # useful for epoch-dependent schedulers
-    reload_epoch: False # can also use --> train_one_epoch: True
-    epochs: &epochs 70
-    # if use_scheduler: False
-    # reload_epoch: False
-    # epochs: 20
-
-    use_scheduler: True
-    #scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
-    scheduler:
-      scheduler_type: cosine-annealing-restarts
-      first_cycle_steps: 250
-      cycle_mult: 6.0  # Multiplier for steps in subsequent cycles
-      max_lr: 1.0e-03
-      min_lr: 1.0e-08
-      warmup_steps: 249
-      gamma: 0.7  # LR reduction factor at each cycle restart
-
-    # Pytorch automatic mixed precision (amp). See also 'mixed_precision' below
-    amp: False
-    
-    # This version of mixed precision is supported only with FSDP and gives you more control. Set amp = False.
-    # See https://pytorch.org/docs/stable/fsdp.html#torch.distributed.fsdp.MixedPrecision for details
-    # Many different precision types are supported. See credit.mixed_precision
-    # If commented out, the default is float32.
-    mixed_precision: 
-        param_dtype: "float32"
-        reduce_dtype: "float32"
-        buffer_dtype: "float32"
-
-    # rescale loss as loss = loss / grad_accum_every -- currently is not being used
-    grad_accum_every: 1
-
-    # gradient clipping. Set to 'dynamic' to compute global norm (default). Set to 0 to ignore entirely.
-    grad_max_norm: 'dynamic'
-    
-    # number of CPU workers used in datasets/dataloaders
-    thread_workers: 4
-    valid_thread_workers: 1
-
-    # Number of prefetch workers in the DataLoader
-    # This only works with ERA5_MultiStep_Batcher or MultiprocessingBatcherPrefetch
-    prefetch_factor: 2
-  
 model:
     # NCAR WXFormer example
-    type: "crossformer"               # use "debugger" with any config to use debugger model type. compatible with basic model args
+    type: "wxformer"               # use "debugger" with any config to use debugger model type. compatible with basic model args
     frames: 1                         # number of input states (default: 1)
-    image_height: 181                 # number of latitude grids (default: 640)
-    image_width: 360                 # number of longitude grids (default: 1280)
-    levels: 18                        # number of upper-air variable levels (default: 15)
+    image_height: &height 181                 # number of latitude grids (default: 640)
+    image_width: &width 360                 # number of longitude grids (default: 1280)
+    levels: &levels 18                        # number of upper-air variable levels (default: 15)
     channels: 4                       # upper-air variable channels
     surface_channels: 4               # surface variable channels
     input_only_channels: 3            # dynamic forcing, forcing, static channels
@@ -342,67 +219,6 @@ model:
     post_conf: 
         activate: True
         grid: 'equiangular'
-
-        skebs:
-            activate: False
-            freeze_base_model_weights: False  # turn off training of the basemodel
-
-            # skebs module training options
-            trainable: True # is skebs trainable at all
-            freeze_dissipation_weights: False  # turn off training for dissipation
-            freeze_pattern_weights: True  # turn off training for the spectral pattern
-            lmax: None # lmax, mmax for spectral transforms
-            mmax: None
-
-            # custom initialization of alpha
-            alpha_init: 0.95 
-            train_alpha: False #trains alpha no matter what
-            
-            # dissipation config:
-            zero_out_levels_top_of_model: 3 # zero out backscatter at top k levels of the model
-
-            dissipation_scaling_coefficient: 10.
-            dissipation_type: FCNN 
-            # available types:
-            #    - prescribed: fixed dissipation rate spatially, varies by level starts at sigma_max level (see below)
-            #    - uniform: fixed dissipation rate spatially, varies by level starts at 2.5
-            #    - FCNN: two layer small MLP
-            #    - FCNN_wide: four layer wide MLP
-            #    - unet: user specified arch, default: unet++
-            #    - CNN: single 3x3 convolution with padding for each column
-            
-            # unet - see models/unet.py for examples
-            # architecture:
-            padding: 48
-
-            # prescribed dissipation:
-            sigma_max: 2.0 # what sigma level to set as the max wind. perturbation will be roughly sigma_max * std for wind at each level
-
-            # spectral filters, will anneal to 0 from anneal_start (linspace)
-            max_pattern_wavenum: 60
-            pattern_filter_anneal_start: 40
-
-            max_backscatter_wavenum: 100
-            backscatter_filter_anneal_start: 90
-            
-            # [Optional] default is off
-            train_backscatter_filter: False
-            train_pattern_filter: False
-
-            # data config - does the backscatter model get statics variables?
-    
-            use_statics: False 
-
-            # [Optional] early skebs shutoff on iteration number:
-            iteration_stop: 0 # if 0, skebs is always run
-
-            #### debugging ####
-            # write files during training:
-            write_train_debug_files: False #writing out files while training, if this is False          
-            write_train_every: 999
-
-            # write files during inference
-            write_rollout_debug_files: False # saves only when no_grad 
 
         # =================================================== #
         # The section of conservation schemes
@@ -570,52 +386,6 @@ predict:
     # Set the batch_size for the prediction inference mode (default is 1)
     # this batches init_datetimes together so that we are fully utilizing the GPUs 
     batch_size: 16
-    # set the ensemble size for inference mode (default is 1 if not set)
-    ensemble_size: &ensemble_size 5
-
-    ensemble:
-        noise:
-            type: "spherical"  # "gaussian", "red", "white", "pink"       
-            amplitude: 0.25 
-            smoothness: 2.0
-            length_scale: 3.0
-            padding_conf:
-                activate: True
-                mode: earth
-                pad_lat: [160, 160]
-                pad_lon: [112, 112]
-
-        bred_vector:
-            enabled: False
-            num_cycles: *ensemble_size
-            hemispheric_rescale: true
-            perturb_channel_idx: 69 # Z500. Set to None to do the full tensor
-            integration_steps: 50
-            bred_time_lag: 48
-            amplitude: 0.25
-            weights: [
-                0.4014972 , 0.39774364, 0.3792097 , 0.38236109, 0.40767634,
-                0.39912404, 0.34785054, 0.33406586, 0.33808283, 0.3481379 ,
-                0.35312887, 0.35      , 0.32093613, 0.31208973, 0.31432467,
-                0.31496031, 0.33391616, 0.35594943, 0.34669872, 0.35312887,
-                0.38288379, 0.37536649, 0.31906112, 0.3057777 , 0.30951575,
-                0.31984371, 0.32680269, 0.32649655, 0.30099834, 0.29983329,
-                0.30331502, 0.30397368, 0.40112342, 0.38820098, 0.38431758,
-                0.39051248, 0.40112342, 0.35496479, 0.33045423, 0.32893768,
-                0.31543621, 0.31953091, 0.3254228 , 0.3324154 , 0.32109189,
-                0.29664794, 0.26907248, 0.25845696, 0.23194827, 0.34102786,
-                0.29647934, 0.32848135, 0.43703547, 0.4014972 , 0.40435133,
-                0.41231056, 0.40298883, 0.39987498, 0.39987498, 0.39812058,
-                0.38470768, 0.3748333 , 0.36959437, 0.36864617, 0.28231188,
-                0.24677925, 0.31064449, 0.34029399, 0.31288976, 0.26645825,
-                0.40112342
-            ]
-
-        temporal_noise:
-            enabled: false
-            temporal_correlation: 0.95
-            perturbation_std: 0.15
-            hemispheric_rescale: true
 
     forecasts:
         type: "custom"       # keep it as "custom". See also credit.forecast
@@ -651,27 +421,147 @@ predict:
     # Optional: Interpolate data field from hybrid sigma-pressure vertical coordinates to pressure levels.
     # Used with rollout_to_netcdf.py
 
-    # interp_pressure:
-    #     pressure_levels: [300.0, 500.0, 850.0, 925.0]
+    interp_pressure:
+      pressure_levels: [500.0, 850.0, 925.0]
 
-    # ua_var_encoding:
-    #     zlib: True
-    #     complevel: 1
-    #     shuffle: True
-    #     chunksizes: [1, *levels, *height, *width]
+    ua_var_encoding:
+      zlib: True
+      complevel: 1
+      shuffle: True
+      chunksizes: [1, *levels, *height, *width]
 
-    # pressure_var_encoding:
-    #     zlib: True
-    #     complevel: 1
-    #     shuffle: True
-    #     chunksizes: [ 1, 4, *height, *width]
+    pressure_var_encoding:
+      zlib: True
+      complevel: 1
+      shuffle: True
+      chunksizes: [ 1, 4, *height, *width]
 
-    # surface_var_encoding:
-    #     zlib: true
-    #     complevel: 1
-    #     shuffle: True
-    #     chunksizes: [1, *height, *width]
+    surface_var_encoding:
+      zlib: True
+      complevel: 1
+      shuffle: True
+      chunksizes: [1, *height, *width]
 
+trainer:
+    # Choose the training routine
+    # This is deprecated as of credit-2.0
+    # Options: era5, or conus404
+    type: era5
+
+    # the keyword that controls GPU usage
+    # fsdp: fully sharded data parallel
+    # ddp: distributed data parallel
+    # none: single-GPU training
+    mode: none
+
+    # fsdp-specific GPU optimization
+    #
+    # allow FSDP offloads gradients to CPU and free GPU memory
+    # This can cause CPU out-of-memory if for some large models, do your diligence
+    cpu_offload: False
+    # save forward pass activation to checkpoints and free GPU memory
+    activation_checkpoint: False
+    # Set to True for all layers with activations otherwise use custom (see credit/distributed.py)
+    checkpoint_all_layers: False
+
+    # (optional) use torch.compile: False. May not be compatible with custom models
+    compile: False
+
+    # load existing weights / optimizer / mixed-precision grad scaler / learning rate scheduler state(s)
+    # when starting multi-step training, only use load weights initially, then set all to true
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    # CREDIT save checkpoints at the end of every epoch
+    # save_backup_weights will also save checkpoints in the beginning of every epoch
+    save_backup_weights: True
+    # save_best_weights will save the best checkpoint separatly based on validation loss
+    # does not work if skip_validation: True
+    save_best_weights: True
+
+    # Optional for user to control which variable metrics get saved to training_log.csv
+    # Set to True to save metrics for all predicted variables
+    # Set to ["Z500", "Q500", "Q", "T"] for example to save these variables (with levels in the case of Q and T)
+    # Set to [] or None to save only bulk metrics averaged over all variables
+    save_metric_vars: True
+
+    # update learning rate to optimizer.param_groups
+    # False if a scheduler is used
+    update_learning_rate: False
+
+    # learning rate
+    learning_rate: 1.0e-03
+
+    # L2 regularization on trained weights
+    # weight_decay: 0 --> turn-off L2 reg
+    weight_decay: 0
+
+    # define training and validation batch size
+    # for ddp and fsdp, actual batch size = batch_size * number of GPUs
+    train_batch_size: 16
+    valid_batch_size: 16
+    ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
+
+    # number of batches per epoch for training and validation
+    # set to 0 to use all available training samples e.g. `len(dataloader)`
+    # if the number is larger than all training samples, all available training samples will be used
+    batches_per_epoch: 1000
+    valid_batches_per_epoch: 20
+    # early stopping
+    stopping_patience: 50
+    # True: do not validate, always save weights
+    skip_validation: False
+
+    # total number of epochs
+    start_epoch: 0
+    # the trainer will stop after iterating a given number of epochs
+    # this works for any start_epoch and reload_epoch: True
+    num_epoch: 1
+    # epoch is saved in the checkpot.pt, this option reads the last epoch
+    # of the previous job and continue from there
+    # useful for epoch-dependent schedulers
+    reload_epoch: False # can also use --> train_one_epoch: True
+    epochs: 70
+
+
+    use_scheduler: True
+
+    scheduler:
+      scheduler_type: cosine-annealing-restarts
+      first_cycle_steps: 250
+      cycle_mult: 6.0  # Multiplier for steps in subsequent cycles
+      max_lr: 1.0e-03
+      min_lr: 1.0e-08
+      warmup_steps: 249
+      gamma: 0.7  # LR reduction factor at each cycle restart
+
+    # Pytorch automatic mixed precision (amp). See also 'mixed_precision' below
+    amp: False
+
+    # This version of mixed precision is supported only with FSDP and gives you more control. Set amp = False.
+    # See https://pytorch.org/docs/stable/fsdp.html#torch.distributed.fsdp.MixedPrecision for details
+    # Many different precision types are supported. See credit.mixed_precision
+    # If commented out, the default is float32.
+    mixed_precision:
+        param_dtype: "float32"
+        reduce_dtype: "float32"
+        buffer_dtype: "float32"
+
+    # rescale loss as loss = loss / grad_accum_every -- currently is not being used
+    grad_accum_every: 1
+
+    # gradient clipping. Set to 'dynamic' to compute global norm (default). Set to 0 to ignore entirely.
+    grad_max_norm: 'dynamic'
+
+    # number of CPU workers used in datasets/dataloaders
+    thread_workers: 4
+    valid_thread_workers: 1
+
+    # Number of prefetch workers in the DataLoader
+    # This only works with ERA5_MultiStep_Batcher or MultiprocessingBatcherPrefetch
+    prefetch_factor: 2
 
 # credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
 pbs: 

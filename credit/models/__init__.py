@@ -11,6 +11,7 @@ from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
 from credit.models.graph import GraphResTransfGRU
 from credit.models.debugger_model import DebuggerModel
+from credit.models.wxformer.crossformer import CrossFormer as WXFormer
 from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
 from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
 from credit.models.unet_downscaling import DownscalingSegmentationModel
@@ -35,11 +36,16 @@ model_types = {
     ),
     "crossformer-diffusion": (
         CrossFormerDiffusion,
-        "Loading A DDPM model with CrossFormer Backbone ....",
+        "Loading A DDPM model with CrossFormer Backbone ...",
     ),
     "unet-diffusion": (
         UnetDiffusion,
-        "Loading A DDPM model with UNET Backbone ....",
+        "Loading A DDPM model with UNET Backbone ...",
+    ),
+    "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
+    "crossformer-ensemble": (
+        CrossFormerWithNoise,
+        "Loading the ensemble CrossFormer model with a noise injection scheme ...",
     ),
     "crossformer-style": (
         CrossFormerWithNoise,

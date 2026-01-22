@@ -1,7 +1,6 @@
 # NSF NCAR MILES Community Research Earth Digital Intelligence Twin (CREDIT)
 
 [![DOI](https://zenodo.org/badge/710968229.svg)](https://doi.org/10.5281/zenodo.14361005)
-[![arXiv](https://img.shields.io/badge/arXiv-2411.07814-b31b1b.svg)](https://arxiv.org/abs/2411.07814)
 
 [PyPI](https://pypi.org/project/miles-credit/)
 
@@ -22,8 +21,8 @@ instructions, how to get started training and deploying models, how to interpret
 
 ## Citing CREDIT
 If you are interested in using CREDIT as part of your research, please cite the following paper:
-Schreck, J., Sha, Y., Chapman, W., Kimpara, D., Berner, J., McGinnis, S., Kazadi, A., Sobhani, N., Kirk, B., Gagne, D.J. (2024, November 9). 
-Community Research Earth Digital Intelligence Twin (CREDIT). arXiv [cs.AI]. http://arxiv.org/abs/2411.07814
+Schreck, J.S., Sha, Y., Chapman, W. et al. Community Research Earth Digital Intelligence Twin: a scalable framework 
+for AI-driven Earth System Modeling. npj Clim Atmos Sci 8, 239 (2025). https://doi.org/10.1038/s41612-025-01125-6
 
 # Model Weights and Data
 Model weights for the CREDIT 6-hour WXFormer and FuXi models and the 1-hour WXFormer are available on huggingface.
