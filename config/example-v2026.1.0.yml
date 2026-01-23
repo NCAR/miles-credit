@@ -80,7 +80,7 @@ data:
     mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
     std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
     
-    # years to form the training / validation set [first_year, last_yeat (NOT covered)]
+    # years to form the training / validation set [first_year, last_year (exclusive)]
     train_years: [2000, 2014] # 1979 - 2013
     valid_years: [2014, 2018] # 2014 - 2017
     
@@ -174,6 +174,7 @@ model:
     cross_embed_strides: [2, 2, 2, 2] # Strides for cross-embedding (default: [4, 2, 2, 2])
     attn_dropout: 0.                  # Dropout probability for attention layers (default: 0.0)
     ff_dropout: 0.                    # Dropout probability for feed-forward layers (default: 0.0)
+    upsample_with_ps: True            # Upsample with pixel shuffle
 
     # fuxi example
     # frames: 2               # number of input states
