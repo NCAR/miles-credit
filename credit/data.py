@@ -1,6 +1,6 @@
 """Data.py contains modules for processing training data.
 
-Heper functions:
+Helper functions:
     - generate_datetime(start_time, end_time, interval_hr)
     - hour_to_nanoseconds(input_hr)
     - nanoseconds_to_year(nanoseconds_value)
@@ -49,7 +49,8 @@ IMAGE_ATTR_NAMES = ("historical_ERA5_images", "target_ERA5_images")
 
 def device_compatible_to(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
     """
-    Safely move tensor to device, with float32 casting on MPS (Metal Performance Shaders). Addresses runtime error in OSX about MPS not supporting float64.
+    Safely move tensor to device, with float32 casting on MPS (Metal Performance Shaders).
+    Addresses runtime error in OSX about MPS not supporting float64.
 
     Args:
         tensor (torch.Tensor): Input tensor to move.
@@ -98,13 +99,13 @@ def ensure_numpy_datetime(value):
 
 
 def generate_datetime(start_time, end_time, interval_hr):
-    """Generate a list of datetime.datetime based on stat, end times, and hour interval.
+    """
+    Generate a list of datetime.datetime based on stat, end times, and hour interval.
 
     Args:
         start_time (datetime.datetime): start time
         end_time (datetime.datetime): end time
         interval_hr (int): hour interval
-
     """
     # Define the time interval (e.g., every hour)
     interval = datetime.timedelta(hours=interval_hr)
@@ -188,14 +189,11 @@ def get_forward_data(filename) -> xr.Dataset:
 def flatten_list(list_of_lists):
     """Flatten a list of lists.
 
-    Parameters
-    ----------
-    - list_of_lists (list): A list containing sublists.
+    Args:
+        list_of_lists (list): A list containing sublists.
 
     Returns
-    -------
-    - flattened_list (list): A flattened list containing all elements from sublists.
-
+        flattened_list (list): A flattened list containing all elements from sublists.
     """
     return [item for sublist in list_of_lists for item in sublist]
 
@@ -203,15 +201,12 @@ def flatten_list(list_of_lists):
 def generate_integer_list_around(number, spacing=10):
     """Generate a list of integers on either side of a given number with a specified spacing.
 
-    Parameters
-    ----------
-    - number (int): The central number around which the list is generated.
-    - spacing (int): The spacing between consecutive integers in the list. Default is 10.
+    Args:
+        number (int): The central number around which the list is generated.
+        spacing (int): The spacing between consecutive integers in the list. Default is 10.
 
-    Returns
-    -------
-    - integer_list (list): List of integers on either side of the given number.
-
+    Returns:
+        integer_list (list): List of integers on either side of the given number.
     """
     lower_limit = number - spacing
     upper_limit = number + spacing + 1  # Adding 1 to include the upper limit
@@ -223,14 +218,12 @@ def generate_integer_list_around(number, spacing=10):
 def find_key_for_number(input_number, data_dict):
     """Find the key in the dictionary based on the given number.
 
-    Parameters
-    ----------
-    - input_number (int): The number to search for in the dictionary.
-    - data_dict (dict): The dictionary with keys and corresponding value lists.
+    Args:
+        input_number (int): The number to search for in the dictionary.
+        data_dict (dict): The dictionary with keys and corresponding value lists.
 
-    Returns
-    -------
-    - key_found (str): The key in the dictionary where the input number falls within the specified range.
+    Returns:
+        key_found (str): The key in the dictionary where the input number falls within the specified range.
 
     """
     for key, value_list in data_dict.items():
@@ -243,7 +236,6 @@ def find_key_for_number(input_number, data_dict):
 
 def drop_var_from_dataset(xarray_dataset, varname_keep):
     """Preserve a given set of variables from an xarray.Dataset, and drop the rest.
-
     It will raise error if `varname_key` is missing from `xarray_dataset`.
     """
     varname_all = list(xarray_dataset.keys())
@@ -261,7 +253,8 @@ def drop_var_from_dataset(xarray_dataset, varname_keep):
 
 
 def keep_dataset_vars(xarray_dataset: xr.Dataset, varnames_keep: List[str]):
-    """Return a version of an xarray dataset with only a selected subset of variables.
+    """
+    Return a version of an xarray dataset with only a selected subset of variables.
 
     Args:
         xarray_dataset (xr.Dataset): The xarray dataset.
@@ -269,7 +262,6 @@ def keep_dataset_vars(xarray_dataset: xr.Dataset, varnames_keep: List[str]):
 
     Returns:
         xr.Dataset with only the variables in varnames_keep included.
-
     """
     return xarray_dataset[varnames_keep]
 
@@ -335,12 +327,12 @@ def next_n_hour(dt, period_hours):
     """
     Round dt forward to the next N-hour boundary.
 
-    Parameters:
-    - dt: np.datetime64[ns] or array of such values
-    - period_hours: int, the interval in hours (e.g., 3, 6)
+    Args:
+        dt: np.datetime64[ns] or array of such values
+        period_hours: int, the interval in hours (e.g., 3, 6)
 
     Returns:
-    - np.datetime64[ns] rounded forward to the next period_hours boundary
+        np.datetime64[ns] rounded forward to the next period_hours boundary
     """
     period_ns = int(np.timedelta64(period_hours, "h") / np.timedelta64(1, "ns"))
     ns = dt.astype("int64")
@@ -357,8 +349,8 @@ def previous_hourly_steps(time_pick, hour, step):
 
 def filter_ds(ds: xr.Dataset, varnames_keep: Sequence[str]) -> xr.Dataset:
     """
-    Return a new Dataset containing only the variables in varnames_keep.
-    Raises if any var in varnames_keep is missing.
+    Return a new Dataset containing only the variables in `varnames_keep`.
+    Raises if any var in `varnames_keep` is missing.
     """
     missing = set(varnames_keep) - set(ds.data_vars)
     if missing:
@@ -422,7 +414,9 @@ class Sample_LES(TypedDict):
 
 
 class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
-    """A Pytorch Dataset class that works on the following kinds of variables.
+    """
+    **Deprecated**
+    A Pytorch Dataset class that works on the following kinds of variables.
 
     * upper-air variables (time, level, lat, lon)
     * surface variables (time, lat, lon)
@@ -455,7 +449,8 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         max_forecast_len=None,
         sst_forcing=None,
     ):
-        """Initialize the ERA5_and_Forcing_Dataset.
+        """I
+        nitialize the ERA5_and_Forcing_Dataset.
 
         Args:
             varname_upper_air (list): List of upper air variable names.
@@ -902,7 +897,9 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         max_forecast_len=None,
         sst_forcing=None,
     ):
-        """Initialize the ERA5_and_Forcing_Dataset.
+        """
+        **Deprecated**
+        Initialize the ERA5_and_Forcing_Dataset.
 
         Args:
             varname_upper_air (list): List of upper air variable names.
@@ -1115,14 +1112,14 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         return total_len
 
     def __getitem__(self, index):
-        """Get item.
+        """
+        Get item.
 
         Args:
             index: index of timestep
 
         Returns:
             pytorch Tensor containing a full state.
-
         """
         # ========================================================================== #
         # cross-year indices --> the index of the year + indices within that year

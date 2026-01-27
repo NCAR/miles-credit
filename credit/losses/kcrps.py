@@ -2,21 +2,7 @@ import torch
 
 
 class KCRPSLoss(torch.nn.Module):
-    """Adapted from Nvidia Modulus
-    pred : Tensor
-        Tensor containing the ensemble predictions. The ensemble dimension
-        is assumed to be the leading dimension
-    obs : Union[Tensor, np.ndarray]
-        Tensor or array containing an observation over which the CRPS is computed
-        with respect to.
-    biased :
-        When False, uses the unbiased estimators described in (Zamo and Naveau, 2018)::
-
-            E|X-y|/m - 1/(2m(m-1)) sum_(i,j=1)|x_i - x_j|
-
-        Unlike ``crps`` this is fair for finite ensembles. Non-fair ``crps`` favors less
-        dispersive ensembles since it is biased high by E|X- X'|/ m where m is the
-        ensemble size.
+    """Adapted from Nvidia Modulus.
 
     Estimate the CRPS from a finite ensemble
 
@@ -34,6 +20,18 @@ class KCRPSLoss(torch.nn.Module):
     .. math::
         sum_i=1^m |X_i - y| / m - 1/(2m^2) sum_i,j=1^m |x_i - x_j|
 
+    Args:
+        pred (Tensor): Tensor containing the ensemble predictions. The ensemble dimension
+            is assumed to be the leading dimension
+        obs (Union[Tensor, np.ndarray]): Tensor or array containing an observation over which the CRPS is computed
+            with respect to.
+        biased (bool): When False, uses the unbiased estimators described in (Zamo and Naveau, 2018)::
+
+            E|X-y|/m - 1/(2m(m-1)) sum_(i,j=1)|x_i - x_j|
+
+            Unlike ``crps`` this is fair for finite ensembles. Non-fair ``crps`` favors less
+            dispersive ensembles since it is biased high by E|X- X'|/ m where m is the
+            ensemble size.
     """
 
     def __init__(self, reduction, biased: bool = False):
@@ -43,8 +41,12 @@ class KCRPSLoss(torch.nn.Module):
 
     def forward(self, target, pred):
         # integer division but will error out next op if there is a remainder
-        ensemble_size = pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
-        pred = pred.view(target.shape[0], ensemble_size, *target.shape[1:])  # b, ensemble, c, t, lat, lon
+        ensemble_size = (
+            pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
+        )
+        pred = pred.view(
+            target.shape[0], ensemble_size, *target.shape[1:]
+        )  # b, ensemble, c, t, lat, lon
         # apply single_sample_forward to each dim
         target = target.unsqueeze(1)
         return self.batched_forward(target, pred).squeeze(1)
@@ -63,7 +65,9 @@ class KCRPSLoss(torch.nn.Module):
         pred = torch.movedim(pred, 0, -1)
         return self._kernel_crps_implementation(pred, target, self.biased)
 
-    def _kernel_crps_implementation(self, pred: torch.Tensor, obs: torch.Tensor, biased: bool) -> torch.Tensor:
+    def _kernel_crps_implementation(
+        self, pred: torch.Tensor, obs: torch.Tensor, biased: bool
+    ) -> torch.Tensor:
         """An O(m log m) implementation of the kernel CRPS formulas"""
         skill = torch.abs(pred - obs[..., None]).mean(-1)
         pred, _ = torch.sort(pred)
