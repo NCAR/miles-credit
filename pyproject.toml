@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "miles-credit"
-authors = [{name = "NCAR Machine Integration and Learning for Earth Systems (MILES)", email = "miles@ucar.edu"}]
+authors = [{ name = "NCAR Machine Integration and Learning for Earth Systems (MILES)", email = "miles@ucar.edu" }]
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -18,20 +18,20 @@ dependencies = [
     "scikit-learn",
     "h5py<=3.14.0",
     "pyarrow",
-    "pytest",
     "pysteps",
     "xarray",
     "netcdf4",
     "h5netcdf",
     "torch",
     "torchvision",
+    "einops",
     "pyyaml",
     "cartopy",
     "dask",
     "distributed",
     "dask-jobqueue",
     "zarr",
-    "numcodecs<0.16.4",
+    "numcodecs",
     "einops",
     "echo-opt",
     "bridgescaler",
@@ -40,12 +40,7 @@ dependencies = [
     "pvlib",
     "torch-harmonics",
     "torch_geometric",
-    "pre-commit",
-    "ruff",
-    "sphinx",
-    "sphinx-autoapi",
-    "myst_parser",
-    "sphinx-book-theme",
+    "torchmetrics",
     "fsspec",
     "gcsfs",
     "miles-guess",
@@ -53,12 +48,27 @@ dependencies = [
     "metpy",
     "setuptools_scm",
     "setuptools",
-   ]
+]
+
+[project.optional-dependencies]
+docs = ["sphinx",
+    "sphinx-autoapi",
+    "myst_parser",
+    "sphinx-book-theme"]
+
+develop = ["pre-commit",
+    "sphinx",
+    "sphinx-autoapi",
+    "myst_parser",
+    "sphinx-book-theme",
+    "jupyter",
+    "ruff",
+    "pytest"]
 
 [tool.setuptools]
 
-packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets", 
-            "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
+packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets",
+    "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
 
 [tool.setuptools_scm]
 version_file = "credit/_version.py"

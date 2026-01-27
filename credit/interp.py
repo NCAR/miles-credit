@@ -33,6 +33,7 @@ def full_state_pressure_interpolation(
     a_half_name: str = "a_half",
     b_half_name: str = "b_half",
     P0: float = 1.0,
+    pressure_3d_var: str = "P",
     mslp_temp_height: float = 1000.0,
     use_simple_mslp: bool = False,
 ) -> xr.Dataset:
@@ -81,6 +82,7 @@ def full_state_pressure_interpolation(
         a_half_name (str): Name of A weight at level interfaces in sigma coordinate formula. 'a_half' by default.
         b_half_name (str): Name of B weight at level interfaces in sigma coordinate formula. 'b_half' by default.
         P0 (float): reference pressure if pressure needs to be scaled.
+        pressure_3d_var (str): Name of the 3D pressure field derived on the model grid.
         mslp_temp_height (float): height above ground level in meters where temperature is sampled for mslp calculation.
         use_simple_mslp (bool): Whether to use the simple or complex MSLP calculation.
     Returns:
@@ -105,6 +107,7 @@ def full_state_pressure_interpolation(
         b_half_full = mod_lev_ds[b_half_name].values
 
     pres_dims = (time_var, pres_var, lat_var, lon_var)
+    raw_dims = (time_var, level_var, lat_var, lon_var)
     surface_dims = (time_var, lat_var, lon_var)
     coords = {
         time_var: state_dataset[time_var],
@@ -114,6 +117,12 @@ def full_state_pressure_interpolation(
     }
     coords_surface = {
         time_var: state_dataset[time_var],
+        lat_var: state_dataset[lat_var],
+        lon_var: state_dataset[lon_var],
+    }
+    coords_raw = {
+        time_var: state_dataset[time_var],
+        level_var: state_dataset[level_var],
         lat_var: state_dataset[lat_var],
         lon_var: state_dataset[lon_var],
     }
@@ -132,6 +141,12 @@ def full_state_pressure_interpolation(
     )
     pressure_ds[geopotential_var + pres_ending] = xr.DataArray(
         coords=coords, dims=pres_dims, name=geopotential_var + pres_ending
+    )
+    pressure_ds[geopotential_var] = xr.DataArray(
+        coords=coords_raw, dims=raw_dims, name=geopotential_var
+    )
+    pressure_ds[pressure_3d_var] = xr.DataArray(
+        coords=coords_raw, dims=raw_dims, name=pressure_3d_var
     )
     pressure_ds["mean_sea_level_" + pres_var] = xr.DataArray(
         coords=coords_surface, dims=surface_dims, name="mean_sea_level_" + pres_var
@@ -159,11 +174,11 @@ def full_state_pressure_interpolation(
                 dims=height_dims,
                 name=var + height_ending,
             )
-        pressure_ds["P" + height_ending] = xr.DataArray(
+        pressure_ds[pressure_3d_var + height_ending] = xr.DataArray(
             data=np.zeros(height_shape, dtype=np.float32),
             coords=coords_height,
             dims=height_dims,
-            name="P" + height_ending,
+            name=pressure_3d_var + height_ending,
         )
 
     for t, time in enumerate(state_dataset[time_var]):
@@ -174,6 +189,7 @@ def full_state_pressure_interpolation(
         state_dict[temperature_var] = state_dataset[temperature_var][t].values.astype(
             np.float64
         )
+        levels = state_dataset[level_var].values.astype(np.int64)
         state_dict[q_var] = state_dataset[q_var][t].values.astype(np.float64)
         for interp_field in interp_fields:
             state_dict[interp_field] = state_dataset[interp_field][t].values.astype(
@@ -195,10 +211,15 @@ def full_state_pressure_interpolation(
             pres_ending,
             height_ending,
             height_levels,
+            pressure_3d_var,
+            level_var,
+            levels,
         )
         pressure_ds[geopotential_var + pres_ending][t] = pres_dict[
             geopotential_var + pres_ending
         ][:]
+        pressure_ds[geopotential_var][t] = pres_dict[geopotential_var]
+        pressure_ds[pressure_3d_var][t] = pres_dict[pressure_3d_var]
         for interp_field in interp_fields:
             pressure_ds[interp_field + pres_ending][t] = pres_dict[
                 interp_field + pres_ending
@@ -233,11 +254,30 @@ def fast_state_interp_loop(
     pres_ending,
     height_ending,
     height_levels,
+    pressure_3d_var,
+    level_var,
+    levels,
 ):
     pressure_ds = dict()
     pressure_ds[geopotential_var + pres_ending] = np.zeros(
         (
             pressure_levels.size,
+            surface_pressure_data.shape[0],
+            surface_pressure_data.shape[1],
+        ),
+        dtype=np.float64,
+    )
+    pressure_ds[geopotential_var] = np.zeros(
+        (
+            state_dict[temperature_var].shape[0],
+            surface_pressure_data.shape[0],
+            surface_pressure_data.shape[1],
+        ),
+        dtype=np.float64,
+    )
+    pressure_ds[pressure_3d_var] = np.zeros(
+        (
+            state_dict[temperature_var].shape[0],
             surface_pressure_data.shape[0],
             surface_pressure_data.shape[1],
         ),
@@ -304,6 +344,10 @@ def fast_state_interp_loop(
             interp_full_data[q_var],
             full_half_pressure_grid,
         )
+        pressure_ds[geopotential_var][:, i : i + 1, j : j + 1] = geopotential_full_grid[
+            levels - 1
+        ]
+        pressure_ds[pressure_3d_var][:, i : i + 1, j : j + 1] = pressure_grid
         for interp_field in interp_fields:
             if interp_field == temperature_var:
                 pressure_ds[interp_field + pres_ending][:, i : i + 1, j : j + 1] = (

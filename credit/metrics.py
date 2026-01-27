@@ -395,7 +395,7 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
 
     # Open an example config
-    with open("../config/example-v2025.2.0.yml") as cf:
+    with open("../config/example-v2026.1.0.yml") as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     conf = credit_main_parser(

@@ -96,25 +96,12 @@ pbs:
 #PBS -r n
 
 # Load modules
-module load ncarenv/24.12 gcc/12.4.0 ncarcompilers cray-mpich/8.1.29 cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
+module load conda cuda cudnn mkl
 conda activate credit-derecho
 
 # Export environment variables
 export LSCRATCH=/glade/derecho/scratch/schreck/
 export LOGLEVEL=INFO
-# NCCL environment variables:
-#  default NCCL and LibFabric environment variables are set by
-#  the conda envionment upon activation, we will simply query them here.
-#
-#  It is good practice to make sure NCCL_NET is explicitly set to "AWS Libfabric"
-#  this will cause the application to fail if it cannot locate the requested
-#  network plugin, otherwise it is likely to fall back to a very slow and problematic
-#  communication protocol.
-export NCCL_NET="AWS Libfabric"
-#  increased logging level for NCCL events (optional)
-export NCCL_DEBUG=INFO
-# print any NCCL/LibFabric related environment variables
-env | egrep "NCCL|FI_" | sort -u
 
 # Launch training
 mpiexec --cpu-bind none --no-transfer \
@@ -133,9 +120,9 @@ pbs:
     project: "NAML0001"
     job_name: "train_model"
     nodes: 1
-    ncpus: 8
-    ngpus: 1
-    mem: '128GB'
+    ncpus: 32
+    ngpus: 4
+    mem: '900GB'
     walltime: '4:00:00'
     gpu_type: 'a100'
     queue: 'casper'
@@ -144,7 +131,7 @@ pbs:
 Once again, to launch the job on Casper, run:
 
 ```bash
-credit_train -c config/model.yml -l 1
+credit_train -c config/example-v2026.1.0.yml -l 1
 ```
 
 This command generates a **launch script (`launch.sh`)**, which will look like:
@@ -152,19 +139,23 @@ This command generates a **launch script (`launch.sh`)**, which will look like:
 ```bash
 #!/bin/bash -l
 #PBS -N train_model
-#PBS -l select=1:ncpus=8:ngpus=1:mem=128g
+#PBS -l select=1:ncpus=32:ngpus=4:mem=900g:gpu_type=a100
 #PBS -l walltime=4:00:00
-#PBS -l gpu_type=a100
 #PBS -A NAML0001
 #PBS -q casper
 #PBS -j oe
 #PBS -k eod
 source ~/.bashrc
-conda activate credit
-torchrun applications/train.py -c model.yml
+conda activate credit-casper
+torchrun --standalone --nnodes 1 --nproc-per-node=4 applications/train.py -c config/example-v2026.1.0.yml
 ```
 
-and note that the ```torchrun``` command is used rather than MPIs. For now MPIs are not supported on Casper but that will change in a future release. But to get torch to run in distributed mode (either DDP or FSDP) we use torchrun to faciliate that (rather than setting that up manuanlly in train.py).
+and note that the `torchrun` command is used rather than MPI. In order to utilize MPI,
+PyTorch needs to be compiled from source on your own system against the MPI installation on that system.
+`torchrun` can perform distributed training across all GPUs on a single node with minimal configuration
+and is recommended for use on Casper or other servers focused on single node training.
+It is possible to use `torchrun` for multi-node training orchestration but requires starting torchrun
+instances separately on each node and coordinating communication. 
 
 ### Key Differences
 
@@ -177,4 +168,6 @@ and note that the ```torchrun``` command is used rather than MPIs. For now MPIs 
 | GPU Type        | A100             | V100/A100/H100         |
 | Queue          | `main`            | `casper`      |
 
-Casper is best for **small-scale experiments**, while Derecho is designed for **large-scale, multi-node training**. Derecho only has A100 GPUs with 40 Gb of memory. Casper has both 40 Gb and 80 Gb A100s along with a small number of H100s with 80 Gb of memory.
+Casper is best for **small-scale experiments**, while Derecho is designed for **large-scale, multi-node training**. 
+Derecho only has A100 GPUs with 40 Gb of memory. Casper has both 40 Gb and 80 Gb A100s along with a small 
+number of H100s with 80 Gb of memory.

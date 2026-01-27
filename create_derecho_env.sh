@@ -43,7 +43,7 @@ dependencies:
   - conda-tree
   - mpi4py =*=derecho*
   - pip
-  - pytorch ==2.8.0=derecho*
+  - pytorch ==2.8.0=derecho*2000
   - torchvision =*=derecho*
   - torchmetrics
   - pip:

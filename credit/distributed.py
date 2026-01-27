@@ -54,25 +54,39 @@ def get_rank_info(trainer_mode):
     """
     if trainer_mode in ["fsdp", "ddp"]:
         try:
-            from mpi4py import MPI
+            if "LOCAL_RANK" in os.environ:
+                # Environment variables set by torch.distributed.launch or torchrun
+                LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+                WORLD_SIZE = int(os.environ["WORLD_SIZE"])
+                WORLD_RANK = int(os.environ["RANK"])
+            else:
+                from mpi4py import MPI
 
-            comm = MPI.COMM_WORLD
-            shmem_comm = comm.Split_type(MPI.COMM_TYPE_SHARED)
+                comm = MPI.COMM_WORLD
+                shmem_comm = comm.Split_type(MPI.COMM_TYPE_SHARED)
 
-            LOCAL_RANK = shmem_comm.Get_rank()
-            WORLD_SIZE = comm.Get_size()
-            WORLD_RANK = comm.Get_rank()
+                LOCAL_RANK = shmem_comm.Get_rank()
+                WORLD_SIZE = comm.Get_size()
+                WORLD_RANK = comm.Get_rank()
 
-            # Set MASTER_ADDR and MASTER_PORT if not already set.
-            # (broadcast these from rank 0 - they must be consistent on every node)
-            if "MASTER_ADDR" not in os.environ:
-                os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostbyname(socket.gethostname()), root=0)
-            if "MASTER_PORT" not in os.environ:
-                os.environ["MASTER_PORT"] = comm.bcast(str(np.random.randint(1000, 8000)), root=0)
+                # Set MASTER_ADDR and MASTER_PORT if not already set.
+                # (broadcast these from rank 0 - they must be consistent on every node)
+                if "MASTER_ADDR" not in os.environ:
+                    os.environ["MASTER_ADDR"] = comm.bcast(
+                        socket.gethostbyname(socket.gethostname()), root=0
+                    )
+                if "MASTER_PORT" not in os.environ:
+                    os.environ["MASTER_PORT"] = comm.bcast(
+                        str(np.random.randint(1000, 8000)), root=0
+                    )
 
-            if 0 == WORLD_RANK:
-                logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
-                logging.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
+                if 0 == WORLD_RANK:
+                    logging.info(
+                        "Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"])
+                    )
+                    logging.info(
+                        "Using MASTER_PORT={}".format(os.environ["MASTER_PORT"])
+                    )
 
         except Exception as e:
             logging.info(e)
@@ -253,11 +267,13 @@ def distributed_model_wrapper(conf, neural_network, device):
         )
 
         if checkpoint_all_layers:
-            check_fn = lambda submodule: not should_not_checkpoint(submodule)
+
+            def check_fn(submodule):
+                return not should_not_checkpoint(submodule)
         else:
-            check_fn = lambda submodule: any(
-                isinstance(submodule, cls) for cls in transformer_layers_cls
-            )
+
+            def check_fn(submodule):
+                return any(isinstance(submodule, cls) for cls in transformer_layers_cls)
 
         apply_activation_checkpointing(
             model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn

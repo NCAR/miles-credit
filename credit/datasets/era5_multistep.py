@@ -238,8 +238,7 @@ def worker(
             int(
                 historical_ERA5_images.time[0]
                 .astype("datetime64[s]")
-                .values
-                .astype(int)
+                .values.astype(int)
             ),
             int(target_ERA5_images.time[0].astype("datetime64[s]").values.astype(int)),
         ]
@@ -636,8 +635,7 @@ if __name__ == "__main__":
     from credit.parser import credit_main_parser, training_data_check
     from credit.datasets import setup_data_loading, set_globals
 
-    # filename = "/glade/derecho/scratch/schreck/finetune/arnold/model_xform.yml"
-    filename = "../../config/example-v2025.2.0.yml"
+    filename = "../../config/example-v2026.1.0.yml"
     with open(filename) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 

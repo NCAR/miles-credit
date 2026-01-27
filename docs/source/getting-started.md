@@ -42,7 +42,14 @@ The credit conda environment requires multiple gigabytes of space. Use the `glad
 to verify that you have sufficient space in your home or work directories before installing.
 You can specify where to install your conda environments in a `.condarc` file with the section
 `envs_dirs`.
+
+If you are finding your home directory to be surprisingly full with minimal installation of files,
+check your `~/.cache` directory and delete everything inside it. This directory is where
+python installers tend to download their files. You can shift the .cache directory to a location with
+more space by adding `export XDG_CACHE_HOME="/glade/work/$USER/.cache"` to your `~/.bashrc` file.
 :::
+
+
 
 ## Installation from source
 See <project:installation.md> for detailed instructions on building CREDIT and its

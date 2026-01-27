@@ -15,72 +15,77 @@ VALID_FIELD_TYPES = {"prognostic", "dynamic_forcing", "static", "diagnostic"}
 class ERA5Dataset(Dataset):
     """
     Pytorch Dataset for processed ERA5 data. Relies on a configuration dictionary to define:
+        1) 2D / 3D variables
+        2) Start, End and Frequency of Datetimes
+        3) path to glob for the data
 
-            1) 2D / 3D variables
-            2) Start, End and Frequency of Datetimes
-            3) path to glob for the data
+    Example YAML configuration
+    --------------------------
+    .. code-block:: yaml
 
-            Example YAML configuration
-            --------------------------
-            .. code-block:: yaml
+        data:
+          source:
+            ERA5:
+              prognostic:
+                vars_3D: ['T', 'U', 'V', 'Q']
+                vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
+                path: "<path to prognostic>"
+              diagnostic:
+                vars_3D: ['T', 'U', 'V', 'Q']
+                vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
+                path: "<path to diagnostic>"
+              static:
+                vars_3D: ['T', 'U', 'V', 'Q']
+                vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
+                path: "<path to static>"
+              dynamic_forcing:
+                vars_3D: ['T', 'U', 'V', 'Q']
+                vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
+                path: "<path to dynamic forcing>"
 
-                data:
-                  source:
-                    ERA5:
-                      prognostic:
-                        vars_3D: ['T', 'U', 'V', 'Q']
-                        vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                        path: "<path to prognostic>"
-                      diagnostic:
-                        vars_3D: ['T', 'U', 'V', 'Q']
-                        vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                        path: "<path to diagnostic>"
-                      static:
-                        vars_3D: ['T', 'U', 'V', 'Q']
-                        vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                        path: "<path to static>"
-                      dynamic_forcing:
-                        vars_3D: ['T', 'U', 'V', 'Q']
-                        vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                        path: "<path to dynamic forcing>"
+        start_datetime: "2017-01-01"
+        end_datetime: "2019-12-31"
+        timestep: "6h"
 
-                start_datetime: "2017-01-01"
-                end_datetime: "2019-12-31"
-                timestep: "6h"
-
-        Assumptions:
-            1) The data MUST be stored in yearly zarr or netCDF files with a unique 4-digit year (YYYY) in the file name
-            2) "time" dimension / coordinate is present
-            3) "level" dimension name representing the vertical level
-            4) Dimention order of ('time', level', 'latitude', 'longitude') for 3D vars (remove level for 2D)
-            5) Data should be chunked efficiently for a fast read (recommend small chunks across time dimension).
-            """
+    Assumptions:
+        1) The data MUST be stored in yearly zarr or netCDF files with a unique 4-digit year (YYYY) in the file name
+        2) "time" dimension / coordinate is present
+        3) "level" dimension name representing the vertical level
+        4) Dimension order of ('time', level', 'latitude', 'longitude') for 3D vars (remove level for 2D)
+        5) Data should be chunked efficiently for a fast read (recommend small chunks across time dimension).
+    """
 
     def __init__(self, config, return_target=False):
-
         self.source_name = "ERA5"
         self.return_target = return_target
-        self.dt = pd.Timedelta(config['timestep'])
+        self.dt = pd.Timedelta(config["timestep"])
         self.num_forecast_steps = config["forecast_len"] + 1
-        self.start_datetime = pd.Timestamp(config['start_datetime'])
-        self.end_datetime = pd.Timestamp(config['end_datetime'])
+        self.start_datetime = pd.Timestamp(config["start_datetime"])
+        self.end_datetime = pd.Timestamp(config["end_datetime"])
         self.datetimes = self._timestamps()
         self.years = [str(y) for y in self.datetimes.year]
         self.file_dict = {}
         self.var_dict = {}
 
-        for field_type, d in config['source'][self.source_name].items():
+        for field_type, d in config["source"][self.source_name].items():
             if field_type not in VALID_FIELD_TYPES:
-                raise KeyError(f"Unknown field_type '{field_type}' in config['source']['{self.source_name}']. "
-                               f"Valid options are: {sorted(VALID_FIELD_TYPES)}")
+                raise KeyError(
+                    f"Unknown field_type '{field_type}' in config['source']['{self.source_name}']. "
+                    f"Valid options are: {sorted(VALID_FIELD_TYPES)}"
+                )
 
             if isinstance(d, dict):
                 if not d.get("vars_3D") and not d.get("vars_2D"):
-                    raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
+                    raise ValueError(
+                        f"Field '{field_type}' must define at least one of vars_3D or vars_2D"
+                    )
 
                 files = sorted(glob(d.get("path", "")))
                 self.file_dict[field_type] = self._map_files(files) if files else None
-                self.var_dict[field_type] = {"vars_3D": d.get("vars_3D", []), "vars_2D": d.get("vars_2D", [])}
+                self.var_dict[field_type] = {
+                    "vars_3D": d.get("vars_3D", []),
+                    "vars_2D": d.get("vars_2D", []),
+                }
             else:
                 self.file_dict[field_type] = None
 
@@ -88,10 +93,13 @@ class ERA5Dataset(Dataset):
         """
         return total time steps
         """
-        return pd.date_range(self.start_datetime, self.end_datetime - self.num_forecast_steps * self.dt, freq=self.dt)
+        return pd.date_range(
+            self.start_datetime,
+            self.end_datetime - self.num_forecast_steps * self.dt,
+            freq=self.dt,
+        )
 
     def __len__(self):
-
         return len(self.datetimes)
 
     def _map_files(self, file_list):
@@ -132,7 +140,9 @@ class ERA5Dataset(Dataset):
         if self.return_target:
             for key in ("prognostic", "diagnostic"):
                 if key in self.file_dict.keys():
-                    self._open_ds_extract_fields(key, t_target, return_data, is_target=True)
+                    self._open_ds_extract_fields(
+                        key, t_target, return_data, is_target=True
+                    )
             self._pop_and_merge_targets(return_data)
 
         self._add_metadata(return_data, t, t_target)
@@ -159,7 +169,10 @@ class ERA5Dataset(Dataset):
                 else:
                     ds = dataset
 
-                ds_all_vars = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
+                ds_all_vars = ds[
+                    self.var_dict[field_type]["vars_3D"]
+                    + self.var_dict[field_type]["vars_2D"]
+                ]
 
                 ds_3D = ds_all_vars[self.var_dict[field_type]["vars_3D"]]
                 ds_2D = ds_all_vars[self.var_dict[field_type]["vars_2D"]]
@@ -187,7 +200,7 @@ class ERA5Dataset(Dataset):
         meta_3D, meta_2D = [], []
 
         if ds_3D:
-            data_3D = ds_3D.to_array().stack({'level_var': ['variable', 'level']})
+            data_3D = ds_3D.to_array().stack({"level_var": ["variable", "level"]})
             meta_3D = data_3D.level_var.values.tolist()
             data_3D = np.expand_dims(data_3D.values.transpose(2, 0, 1), axis=1)
             data_list.append(data_3D)
@@ -215,7 +228,7 @@ class ERA5Dataset(Dataset):
         return_data["metadata"]["input_datetime"] = int(t.value)
 
         if self.return_target:
-            return_data["metadata"]['target_datetime'] = int(t_target.value)
+            return_data["metadata"]["target_datetime"] = int(t_target.value)
 
     def _convert_cf_time(self, ts):
         """
@@ -224,7 +237,9 @@ class ERA5Dataset(Dataset):
         Args:
             ts: pandas timestamp
         """
-        cf_t = cftime.datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, calendar='noleap')
+        cf_t = cftime.datetime(
+            ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, calendar="noleap"
+        )
 
         return cf_t
 
@@ -238,11 +253,14 @@ class ERA5Dataset(Dataset):
         """
         target_tensors = []
         for key in ("target_prognostic", "target_diagnostic"):
-
             if key in return_data:
                 target_tensors.append(return_data.pop(key))
 
         if not target_tensors:
             return
 
-        return_data["target"] = target_tensors[0] if len(target_tensors) == 1 else torch.cat(target_tensors, dim=dim)
+        return_data["target"] = (
+            target_tensors[0]
+            if len(target_tensors) == 1
+            else torch.cat(target_tensors, dim=dim)
+        )
