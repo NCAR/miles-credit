@@ -118,7 +118,7 @@ class UpBlockPS(nn.Module):
         self.ps   = nn.PixelShuffle(scale)
         # sharpening branch (identity init)
         self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
-        nn.init.zeros_(self.sharp.weight)
+        nn.init.xavier_normal_(self.sharp.weight)
         nn.init.zeros_(self.sharp.bias)
         # residual stack
         blk = []
