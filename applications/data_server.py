@@ -4,6 +4,7 @@ import base64
 from os.path import exists, join
 import xesmf as xe
 from fastapi.middleware.cors import CORSMiddleware
+from scipy.ndimage import gaussian_filter
 
 app = FastAPI()
 
@@ -38,6 +39,7 @@ async def get_inference_field(
     level: int = 137,
     height: float = 100.0,
     pressure: float = 500.0,
+    smooth: float = 0.0,
 ):
     file_path = join(data_path, run_date, f"pred_{run_date}_{forecast_hour:03d}.nc")
     if not exists(file_path):
@@ -59,6 +61,8 @@ async def get_inference_field(
         else:
             var_data = ds[variable][0][::-1]
         var_data_uniform = regridder(var_data).values.astype("float32")
+        if smooth > 0:
+            var_data_uniform = gaussian_filter(var_data_uniform, smooth)
     b64_var_data = base64.b64encode(var_data_uniform.tobytes()).decode("utf-8")
     out_dict = {
         "status": "ok",
