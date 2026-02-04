@@ -89,7 +89,7 @@ credit_rollout_les = "credit.applications.rollout_les:main"
 
 [tool.ruff]
 src = ["credit", "applications", "tests"]
-line-length = 180
+line-length = 120
 exclude = ["notebooks/**"]
 
 [tool.ruff.lint]
