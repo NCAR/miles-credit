@@ -9,8 +9,9 @@ from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
 from credit.postblock import PostBlock
 from typing import Callable, Optional
 from collections import OrderedDict
-import numpy as np 
+import numpy as np
 import xarray as xr
+
 
 class BredVector:
     def __init__(

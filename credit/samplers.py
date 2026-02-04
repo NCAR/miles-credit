@@ -1,13 +1,12 @@
 from typing import Optional
 import itertools
-from torch.utils.data import Dataset, Sampler, DistributedSampler, DataLoader
+from torch.utils.data import Dataset, Sampler, DistributedSampler
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class MultiStepBatchSamplerSubset(Sampler):
-
     def __init__(self, dataset: Dataset, batch_size: int, index_subset) -> None:
         """
         The dataset is required to have attributes:
@@ -43,7 +42,6 @@ class MultiStepBatchSamplerSubset(Sampler):
         logger.debug(f"batch indices: {batch}")
 
         while batch:
-
             # iterate through batches of valid starting times wrt self.num_forecast_steps
             batch_init_times = self.init_times[batch]
 
@@ -57,11 +55,19 @@ class MultiStepBatchSamplerSubset(Sampler):
 
 
 class DistributedMultiStepBatchSampler(DistributedSampler):
-
-    def __init__(self, dataset: Dataset, batch_size: int, num_replicas: Optional[int] = None,
-                 rank: Optional[int] = None, shuffle: bool = True, seed: int = 0, drop_last: bool = False) -> None:
-        super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle, seed=seed,
-                         drop_last=drop_last)
+    def __init__(
+        self,
+        dataset: Dataset,
+        batch_size: int,
+        num_replicas: Optional[int] = None,
+        rank: Optional[int] = None,
+        shuffle: bool = True,
+        seed: int = 0,
+        drop_last: bool = False,
+    ) -> None:
+        super().__init__(
+            dataset=dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle, seed=seed, drop_last=drop_last
+        )
 
         self.batch_size = batch_size
         self.num_forecast_steps = dataset.num_forecast_steps

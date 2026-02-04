@@ -7,7 +7,8 @@ Content:
 """
 
 import os
-#import yaml
+
+# import yaml
 import logging
 import traceback
 import numpy as np
@@ -24,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class OutputWrangler:
-    dataset:        DownscalingDataset
-    templates:      Dict  # {'dir': path, 'files': {dataset1: file1, dataset2: file2}}
-    output_dir:     str
+    dataset: DownscalingDataset
+    templates: Dict  # {'dir': path, 'files': {dataset1: file1, dataset2: file2}}
+    output_dir: str
     # save_vars: List[str] = None  # todo: allow yaml to subset output vars
 
     def __post_init__(self):
@@ -35,18 +36,15 @@ class OutputWrangler:
         os.makedirs(self.output_dir, exist_ok=True)
 
         self.writers = {}
-        for dset in self.templates['files']:
+        for dset in self.templates["files"]:
             print(dset)
-            dmap = self.dataset.datasets[dset]['datamap']
+            dmap = self.dataset.datasets[dset]["datamap"]
             print(dmap.variables)
 
-            tpath = os.path.join(self.templates['dir'], self.templates['files'][dset])
-            
+            tpath = os.path.join(self.templates["dir"], self.templates["files"][dset])
+
             self.writers[dset] = OutputWriter(
-                template_path = tpath,
-                variables = dmap.variables,
-                dim = dmap.dim,
-                zstride = dmap.zstride
+                template_path=tpath, variables=dmap.variables, dim=dmap.dim, zstride=dmap.zstride
             )
 
     def process(self, y_pred, dates, prefix=None):
@@ -54,26 +52,22 @@ class OutputWrangler:
         # dates is a Sample['dates'] dict
 
         hlen = self.dataset.history_len
-        
+
         datadict = self.dataset.revert(y_pred)
 
         # go with first datetime if forecast_len is > 1
-        datestamp = dates['cf_datetimes'][hlen].replace(" ", "_")
-        
-        outdate = {k: dates[k] for k in ['calendar','units']}
-        outdate['time'] = dates['time'][hlen:]
-                
+        datestamp = dates["cf_datetimes"][hlen].replace(" ", "_")
+
+        outdate = {k: dates[k] for k in ["calendar", "units"]}
+        outdate["time"] = dates["time"][hlen:]
+
         for dset in datadict:
-            #outfile = f"{dset}.{datestamp}.nc"
+            # outfile = f"{dset}.{datestamp}.nc"
             outfile = ".".join(filter(None, (prefix, dset, datestamp, "nc")))
             outpath = os.path.join(self.output_dir, outfile)
             try:
-                self.writers[dset].write(
-                    data = datadict[dset],
-                    newtime = outdate,
-                    output_path = outpath
-                )
-                
+                self.writers[dset].write(data=datadict[dset], newtime=outdate, output_path=outpath)
+
                 logger.info(f"Saved prediction to {outfile}")
             except Exception as e:
                 print(traceback.format_exc())
@@ -82,13 +76,14 @@ class OutputWrangler:
 
 # OutputWriter class
 
+
 @dataclass
 class OutputWriter:
     template_path: str
-    dim:       str = "2D"
+    dim: str = "2D"
     variables: VarDict[str, List] = field(default_factory=list)
-    zstride:   int = 1
-    noop:      bool = False
+    zstride: int = 1
+    noop: bool = False
 
     def __post_init__(self):
         # generate list of output variables
@@ -101,19 +96,19 @@ class OutputWriter:
             self.noop = True
         else:
             self.noop = False
-                        
+
             # create template xarray object
             self.template = xr.open_dataset(self.template_path, decode_times=False)
             self.template.load()
             self.template.close()
-            
+
             for v in self.template.data_vars:
                 if v in self.outvars:
                     if self.dim == "3D" and self.zstride != 0:
-                        #todo: subset z-levels
+                        # todo: subset z-levels
                         pass
                     # this should never matter, but just in case
-                    self.template[v][:] = np.nan                    
+                    self.template[v][:] = np.nan
                 else:
                     self.template = self.template.drop(v)
 
@@ -124,9 +119,8 @@ class OutputWriter:
         else:
             result = self.template.copy(deep=True, data=data)
 
-            result.coords['time'] = newtime['time']
-            result.coords['time'].attrs['units'] = newtime['units']
-            result.coords['time'].attrs['calendar'] = newtime['calendar']
+            result.coords["time"] = newtime["time"]
+            result.coords["time"].attrs["units"] = newtime["units"]
+            result.coords["time"].attrs["calendar"] = newtime["calendar"]
 
             result.to_netcdf(output_path)
-

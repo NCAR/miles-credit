@@ -79,9 +79,7 @@ class UpBlock(nn.Module):
         super().__init__()
 
         # Always use ConvTranspose2d for upsampling
-        self.conv = nn.ConvTranspose2d(
-            in_chans, out_chans, kernel_size=2, stride=2
-        )
+        self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
         self.output_channels = out_chans
 
         # Residual stack
@@ -93,9 +91,7 @@ class UpBlock(nn.Module):
         self.b = nn.Sequential(*blk)
 
         # Optional attention
-        self.attention = load_unet_attention(
-            attention_type, out_chans, reduction, spatial_kernel
-        )
+        self.attention = load_unet_attention(attention_type, out_chans, reduction, spatial_kernel)
 
     def forward(self, x):
         x = self.conv(x)
@@ -115,7 +111,7 @@ class UpBlockPS(nn.Module):
         super().__init__()
         # sub-pixel conv at low res
         self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
-        self.ps   = nn.PixelShuffle(scale)
+        self.ps = nn.PixelShuffle(scale)
         # sharpening branch (identity init)
         self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
         nn.init.xavier_normal_(self.sharp.weight)
@@ -123,17 +119,16 @@ class UpBlockPS(nn.Module):
         # residual stack
         blk = []
         for _ in range(num_residuals):
-            blk += [nn.Conv2d(out_ch, out_ch, 3, padding=1),
-                    nn.GroupNorm(num_groups, out_ch),
-                    nn.SiLU()]
+            blk += [nn.Conv2d(out_ch, out_ch, 3, padding=1), nn.GroupNorm(num_groups, out_ch), nn.SiLU()]
         self.b = nn.Sequential(*blk)
 
     def forward(self, x):
-        x = self.ps(self.conv(x))    # upsample+conv at low res
-        x = x + self.sharp(x)        # sharpen residual
+        x = self.ps(self.conv(x))  # upsample+conv at low res
+        x = x + self.sharp(x)  # sharpen residual
         sc = x
         x = self.b(x)
         return x + sc
+
 
 # cross embed layer
 
@@ -558,19 +553,17 @@ class CrossFormer(BaseModel):
             scale = 2
             self.up_block4 = nn.Sequential(
                 nn.Conv2d(
-                    2 * (last_dim // 8),              # in_channels
-                    self.output_channels * (scale**2),# conv_out = target_channels * 4
+                    2 * (last_dim // 8),  # in_channels
+                    self.output_channels * (scale**2),  # conv_out = target_channels * 4
                     kernel_size=3,
                     stride=1,
-                    padding=1
+                    padding=1,
                 ),
                 nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
-                nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1)  
+                nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
             )
         else:
-            self.up_block1 = UpBlock(
-                1 * last_dim, last_dim // 2, dim[0], attention_type=attention_type
-            )
+            self.up_block1 = UpBlock(1 * last_dim, last_dim // 2, dim[0], attention_type=attention_type)
             self.up_block2 = UpBlock(
                 2 * (last_dim // 2),
                 last_dim // 4,
@@ -614,7 +607,7 @@ class CrossFormer(BaseModel):
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
-        
+
         if self.frames > 1:
             # x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
             b, c, t, h, w = x.shape
@@ -719,7 +712,7 @@ if __name__ == "__main__":
         cross_embed_strides=(2, 2, 2, 2),
         attn_dropout=0.0,
         ff_dropout=0.0,
-        padding_conf=padding_conf
+        padding_conf=padding_conf,
     ).to("cuda")
 
     num_params = sum(p.numel() for p in model.parameters())

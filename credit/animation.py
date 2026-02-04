@@ -127,9 +127,7 @@ def plot_global_animation(
     if contourf_config is None:
         contourf_config = dict(
             variable="Q500",
-            contourf_kwargs=dict(
-                levels=[1, 2, 3, 4, 5], cmap="viridis", vmin=1, vmax=5, extend="max"
-            ),
+            contourf_kwargs=dict(levels=[1, 2, 3, 4, 5], cmap="viridis", vmin=1, vmax=5, extend="max"),
         )
     if contour_config is None:
         contour_config = dict(
@@ -151,9 +149,7 @@ def plot_global_animation(
         save_kwargs = dict(writer="ffmpeg", fps=5, dpi=300)
     with xr.open_mfdataset(os.path.join(forecast_dir, "*.nc")) as f_ds:
         fig = plt.figure(**figure_kwargs)
-        ax = fig.add_axes(
-            axes_rect, projection=projections[projection_type](**projection_config)
-        )
+        ax = fig.add_axes(axes_rect, projection=projections[projection_type](**projection_config))
         lon_g, lat_g = np.meshgrid(f_ds["longitude"], f_ds["latitude"])
         ll_proj = ccrs.PlateCarree()
 
@@ -175,9 +171,7 @@ def plot_global_animation(
                 level = contourf_config["level"]
             if c_var in variable_transforms.keys():
                 if level is not None:
-                    data_var = variable_transforms[c_var](
-                        f_ds[c_var].loc[f_date, level]
-                    )
+                    data_var = variable_transforms[c_var](f_ds[c_var].loc[f_date, level])
                 else:
                     data_var = variable_transforms[c_var](f_ds[c_var].loc[f_date])
             else:
@@ -201,13 +195,9 @@ def plot_global_animation(
                     level = c_var_config["level"]
                 if c_var_name in variable_transforms.keys():
                     if level is not None:
-                        data_var = variable_transforms[c_var_name](
-                            f_ds[c_var_name].loc[f_date, level]
-                        )
+                        data_var = variable_transforms[c_var_name](f_ds[c_var_name].loc[f_date, level])
                     else:
-                        data_var = variable_transforms[c_var_name](
-                            f_ds[c_var_name].loc[f_date]
-                        )
+                        data_var = variable_transforms[c_var_name](f_ds[c_var_name].loc[f_date])
                 reg_cont = ax.contour(
                     lon_g,
                     lat_g,
@@ -255,9 +245,7 @@ def plot_regional_animation(
     if contourf_config is None:
         contourf_config = dict(
             variable="Q500",
-            contourf_kwargs=dict(
-                levels=[1, 2, 3, 4, 5], cmap="viridis", vmin=1, vmax=5, extend="max"
-            ),
+            contourf_kwargs=dict(levels=[1, 2, 3, 4, 5], cmap="viridis", vmin=1, vmax=5, extend="max"),
         )
     if contour_config is None:
         contour_config = dict(
@@ -279,9 +267,7 @@ def plot_regional_animation(
         save_kwargs = dict(writer="ffmpeg", fps=5, dpi=300)
     with xr.open_mfdataset(os.path.join(forecast_dir, "*.nc")) as f_ds:
         fig = plt.figure(**figure_kwargs)
-        ax = fig.add_axes(
-            axes_rect, projection=projections[projection_type](**projection_config)
-        )
+        ax = fig.add_axes(axes_rect, projection=projections[projection_type](**projection_config))
         ax.set_extent(extent, crs=ccrs.PlateCarree())
         lon_g, lat_g = np.meshgrid(f_ds["longitude"], f_ds["latitude"])
         ll_proj = ccrs.PlateCarree()
@@ -304,9 +290,7 @@ def plot_regional_animation(
                 level = contourf_config["level"]
             if c_var in variable_transforms.keys():
                 if level is not None:
-                    data_var = variable_transforms[c_var](
-                        f_ds[c_var].loc[f_date, level]
-                    )
+                    data_var = variable_transforms[c_var](f_ds[c_var].loc[f_date, level])
                 else:
                     data_var = variable_transforms[c_var](f_ds[c_var].loc[f_date])
             else:
@@ -330,13 +314,9 @@ def plot_regional_animation(
                     level = c_var_config["level"]
                 if c_var_name in variable_transforms.keys():
                     if level is not None:
-                        data_var = variable_transforms[c_var_name](
-                            f_ds[c_var_name].loc[f_date, level]
-                        )
+                        data_var = variable_transforms[c_var_name](f_ds[c_var_name].loc[f_date, level])
                     else:
-                        data_var = variable_transforms[c_var_name](
-                            f_ds[c_var_name].loc[f_date]
-                        )
+                        data_var = variable_transforms[c_var_name](f_ds[c_var_name].loc[f_date])
                 reg_cont = ax.contour(
                     lon_g,
                     lat_g,

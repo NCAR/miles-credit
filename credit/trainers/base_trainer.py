@@ -144,9 +144,7 @@ class BaseTrainer(ABC):
         logger.info(f"Saved FSDP model checkpoint to {save_loc}/model_checkpoint.pt")
 
         torch.save(state_dict, os.path.join(save_loc, "checkpoint.pt"))
-        logger.info(
-            f"Saved FSDP scheduler and scaler states to {save_loc}/checkpoint.pt"
-        )
+        logger.info(f"Saved FSDP scheduler and scaler states to {save_loc}/checkpoint.pt")
 
     def fit(
         self,
@@ -188,21 +186,13 @@ class BaseTrainer(ABC):
         # training hyperparameters
         start_epoch = conf["trainer"]["start_epoch"]
         epochs = conf["trainer"]["epochs"]
-        skip_validation = (
-            conf["trainer"]["skip_validation"]
-            if "skip_validation" in conf["trainer"]
-            else False
-        )
+        skip_validation = conf["trainer"]["skip_validation"] if "skip_validation" in conf["trainer"] else False
         flag_load_weights = conf["trainer"]["load_weights"]
 
         # Check if 'training_metric' and 'training_metric_direction' exist in the config
-        training_metric = conf["trainer"].get(
-            "training_metric", "train_loss" if skip_validation else "valid_loss"
-        )
+        training_metric = conf["trainer"].get("training_metric", "train_loss" if skip_validation else "valid_loss")
         direction = conf["trainer"].get("training_metric_direction", "min")
-        logger.info(
-            f"The training metric being used is {training_metric} which has direction {direction}"
-        )
+        logger.info(f"The training metric being used is {training_metric} which has direction {direction}")
         direction = min if direction == "min" else max
 
         # Check if we are saving user-defined variable metrics
@@ -211,11 +201,7 @@ class BaseTrainer(ABC):
         # =========================================== #
         # user can specify to run a fixed number of epochs
         if "num_epoch" in conf["trainer"]:
-            logger.info(
-                "The current job will run {} epochs max".format(
-                    conf["trainer"]["num_epoch"]
-                )
-            )
+            logger.info("The current job will run {} epochs max".format(conf["trainer"]["num_epoch"]))
         else:
             conf["trainer"]["num_epoch"] = 1e8
         # =========================================== #
@@ -225,10 +211,7 @@ class BaseTrainer(ABC):
             results_dict = defaultdict(list)
             # Set start_epoch to the length of the training log and train for one epoch
             # This is a manual override, you must use train_one_epoch = True
-            if (
-                "train_one_epoch" in conf["trainer"]
-                and conf["trainer"]["train_one_epoch"]
-            ):
+            if "train_one_epoch" in conf["trainer"] and conf["trainer"]["train_one_epoch"]:
                 epochs = 1
         else:
             results_dict = defaultdict(list)
@@ -236,10 +219,7 @@ class BaseTrainer(ABC):
 
             # Set start_epoch to the length of the training log and train for one epoch
             # This is a manual override, you must use train_one_epoch = True
-            if (
-                "train_one_epoch" in conf["trainer"]
-                and conf["trainer"]["train_one_epoch"]
-            ):
+            if "train_one_epoch" in conf["trainer"] and conf["trainer"]["train_one_epoch"]:
                 start_epoch = len(saved_results)
                 epochs = start_epoch + 1
 
@@ -251,9 +231,7 @@ class BaseTrainer(ABC):
         count = 0
         for epoch in range(start_epoch, epochs):
             if count >= conf["trainer"]["num_epoch"]:
-                logger.info(
-                    "Completed {} epochs, exiting".format(conf["trainer"]["num_epoch"])
-                )
+                logger.info("Completed {} epochs, exiting".format(conf["trainer"]["num_epoch"]))
                 break
 
             # ========================= #
@@ -282,9 +260,7 @@ class BaseTrainer(ABC):
             logger.info(f"Beginning epoch {epoch}")
 
             # set the epoch in the dataset and sampler to ensure distribured randomness is handled correctly
-            if hasattr(train_loader, "sampler") and hasattr(
-                train_loader.sampler, "set_epoch"
-            ):
+            if hasattr(train_loader, "sampler") and hasattr(train_loader.sampler, "set_epoch"):
                 train_loader.sampler.set_epoch(epoch)  # Start a new forecast
 
             if hasattr(train_loader.dataset, "set_epoch"):
@@ -296,9 +272,7 @@ class BaseTrainer(ABC):
             if not conf["trainer"]["skip_validation"]:
                 with torch.no_grad():
                     # set the epoch in the dataset and sampler to ensure distributed randomness is handled correctly
-                    if hasattr(valid_loader, "sampler") and hasattr(
-                        valid_loader.sampler, "set_epoch"
-                    ):
+                    if hasattr(valid_loader, "sampler") and hasattr(valid_loader.sampler, "set_epoch"):
                         valid_loader.sampler.set_epoch(epoch)
 
                     if hasattr(valid_loader.dataset, "set_epoch"):
@@ -331,9 +305,7 @@ class BaseTrainer(ABC):
                 valid_results = train_results
 
             else:
-                valid_results = self.validate(
-                    epoch, conf, valid_loader, valid_criterion, metrics
-                )
+                valid_results = self.validate(epoch, conf, valid_loader, valid_criterion, metrics)
 
             #################
             #
@@ -363,22 +335,15 @@ class BaseTrainer(ABC):
             names = list(set(names + required_metrics))
 
             for name in names:
-                results_dict[f"train_{name}"].append(
-                    np.mean(train_results[f"train_{name}"])
-                )
+                results_dict[f"train_{name}"].append(np.mean(train_results[f"train_{name}"]))
                 if skip_validation:
                     continue
-                results_dict[f"valid_{name}"].append(
-                    np.mean(valid_results[f"valid_{name}"])
-                )
+                results_dict[f"valid_{name}"].append(np.mean(valid_results[f"valid_{name}"]))
             results_dict["lr"].append(optimizer.param_groups[0]["lr"])
 
             # update the learning rate if epoch-by-epoch updates
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_epoch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_epoch:
                 if conf["trainer"]["scheduler"]["scheduler_type"] == "plateau":
                     scheduler.step(results_dict[training_metric][-1])
                 else:
@@ -471,16 +436,14 @@ class BaseTrainer(ABC):
                     # Still need to save the scheduler and scaler states, just in another file for FSDP
                     state_dict = {
                         "epoch": epoch,
-                        "scheduler_state_dict": scheduler.state_dict()
-                        if conf["trainer"]["use_scheduler"]
-                        else None,
+                        "scheduler_state_dict": scheduler.state_dict() if conf["trainer"]["use_scheduler"] else None,
                         "scaler_state_dict": scaler.state_dict(),
                     }
 
                     torch.save(state_dict, os.path.join(save_loc, "checkpoint.pt"))
 
                     if conf.get("trainer", {}).get("save_every_epoch", False):
-                            copy_checkpoint(os.path.join(save_loc, "model_checkpoint.pt"), epoch)
+                        copy_checkpoint(os.path.join(save_loc, "model_checkpoint.pt"), epoch)
 
             # clear the cached memory from the gpu
             torch.cuda.empty_cache()
@@ -540,9 +503,7 @@ class BaseTrainer(ABC):
                     break
 
         best_epoch = [
-            i
-            for i, j in enumerate(results_dict[training_metric])
-            if j == direction(results_dict[training_metric])
+            i for i, j in enumerate(results_dict[training_metric]) if j == direction(results_dict[training_metric])
         ][0]
 
         result = {k: v[best_epoch] for k, v in results_dict.items()}

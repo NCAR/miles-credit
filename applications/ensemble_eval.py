@@ -4,7 +4,7 @@
 # see config/example_ensemble_eval.yml for an example config for this rollout
 #
 # WARNING: currently only works for CAM data, since the XRSamplerByYear can only handle one data file for all variables
-# 
+#
 
 from argparse import ArgumentParser
 from functools import partial
@@ -27,6 +27,7 @@ from credit.verification.ensemble import binned_spread_skill, rank_histogram_app
 from credit.verification.standard import average_div_rot_spectrum, average_zonal_spectrum
 from credit.xr_sampler import XRSamplerByYear
 
+
 def evaluate(num_files, forecast_save_loc, conf, model_conf, p):
     # break up computations by forecast hour6
     # computations: spread-error, zonal spectrum, binned hist, rank hist, div/vorticity spectrum
@@ -34,10 +35,10 @@ def evaluate(num_files, forecast_save_loc, conf, model_conf, p):
 
     model_timestep = model_conf["data"]["lead_time_periods"]
     forecast_hours = model_timestep * (np.arange(num_files) + 1)
-    
+
     detailed_eval_hours = conf["detailed_eval_hours"]
     standard_eval_hours = [fh for fh in forecast_hours if fh not in detailed_eval_hours]
-    
+
     # parallelize across forecast hours
     # start detailed eval first
     f = partial(do_eval, forecast_save_loc, conf, model_conf)
@@ -45,13 +46,13 @@ def evaluate(num_files, forecast_save_loc, conf, model_conf, p):
 
     # result will be list of dicts eg. {"spread_U10": num, "spectrum_U_24": num, "ranks_": vec, "freq_": vec}
     # pack result into dataframe and save
-    result.sort(key= lambda x: x["forecast_hour"]) # sort of forecast hours are in order
-    
+    result.sort(key=lambda x: x["forecast_hour"])  # sort of forecast hours are in order
+
     # future: use multi-indexing
     df = pd.DataFrame(result)
     eval_save_loc = join(forecast_save_loc, conf["save_filename"])
 
-    df.to_parquet(eval_save_loc) # parquet keeps all the dtypes, don't have to split up np arrays in the entries
+    df.to_parquet(eval_save_loc)  # parquet keeps all the dtypes, don't have to split up np arrays in the entries
     logging.info(f"saved ensemble eval to {eval_save_loc}")
 
 
@@ -61,36 +62,39 @@ def do_eval(forecast_save_loc, conf, model_conf, fh):
     result_dict = {"forecast_hour": fh}
     rollout_files = glob(join(forecast_save_loc, f"*/*_{fh:03}.nc"))
 
-    sampler = XRSamplerByYear(None, conf=model_conf) #load the truth sampler
+    sampler = XRSamplerByYear(None, conf=model_conf)  # load the truth sampler
     # TODO: make this sampler work for ERA5
 
     # get lat wts
     ds = xr.open_dataset(rollout_files[0])
     w_lat = np.cos(np.deg2rad(ds.latitude))
 
-    #xarray does lazy loading so we just iterate through variables/levels
+    # xarray does lazy loading so we just iterate through variables/levels
     for variable in conf["variables"]:
         for level in conf["levels"]:
-            #get ensemble and truth
+            # get ensemble and truth
             da_pred, da_true = get_data(sampler, rollout_files, variable, level)
-            #compute and merge dicts
+            # compute and merge dicts
             result_dict = result_dict | _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level)
-            result_dict = result_dict | _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, level) # returns dict of None if not computed
+            result_dict = result_dict | _do_special_eval_on_variable(
+                w_lat, conf, fh, da_pred, da_true, variable, level
+            )  # returns dict of None if not computed
 
-     
     # eval of U and V combined
     if "U" in conf["variables"] and "V" in conf["variables"]:
         variable = "wind_norm"
         for level in conf["levels"]:
-            #get ensemble and truth
+            # get ensemble and truth
             da_pred_u, da_true_u = get_data(sampler, rollout_files, "U", level)
             da_pred_v, da_true_v = get_data(sampler, rollout_files, "V", level)
 
             # do wind norm
-            da_pred = np.sqrt(da_pred_u ** 2 + da_pred_v ** 2)
-            da_true = np.sqrt(da_true_u ** 2 + da_true_v ** 2)
+            da_pred = np.sqrt(da_pred_u**2 + da_pred_v**2)
+            da_true = np.sqrt(da_true_u**2 + da_true_v**2)
             result_dict = result_dict | _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level)
-            result_dict = result_dict | _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, level) # returns dict of None if not computed
+            result_dict = result_dict | _do_special_eval_on_variable(
+                w_lat, conf, fh, da_pred, da_true, variable, level
+            )  # returns dict of None if not computed
 
             # do vrt, div
             ds_pred = xr.Dataset({"U": da_pred_u, "V": da_pred_v})
@@ -100,14 +104,16 @@ def do_eval(forecast_save_loc, conf, model_conf, fh):
             vrt_true, div_true = average_div_rot_spectrum(ds_true, conf["grid"], wave_spec="n")
 
             result_dict = result_dict | {f"vrt_spectrum_{level}": vrt_pred, f"div_spectrum_{level}": div_pred}
-            result_dict = result_dict | {f"vrt_spectrum_{level}_truth": vrt_true, f"div_spectrum_{level}_truth": div_true}
+            result_dict = result_dict | {
+                f"vrt_spectrum_{level}_truth": vrt_true,
+                f"div_spectrum_{level}_truth": div_true,
+            }
 
     for variable in conf["single_level_variables"]:
         da_pred, da_true = get_data(sampler, rollout_files, variable, None)
-        #compute and merge dicts
+        # compute and merge dicts
         result_dict = result_dict | _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, None)
         result_dict = result_dict | _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, None)
-
 
     return result_dict
 
@@ -117,7 +123,7 @@ def _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level):
     variable_name = f"{variable}"
     if level:
         variable_name += f"_{level}"
-    
+
     # compute spread error
     result_dict = spread_error(da_pred, da_true, w_lat)
 
@@ -126,16 +132,16 @@ def _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level):
 
     return result_dict
 
-    
+
 def _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, level):
     # spectrum, binned spread-error hist, rank hist
     if fh not in conf["detailed_eval_hours"]:
         return {}
-    
+
     variable_name = f"{variable}"
     if level:
         variable_name += f"_{level}"
-        
+
     result_dict = {}
     #### compute ####
 
@@ -154,20 +160,20 @@ def _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, le
     rank_hist = rank_histogram_apply(da_pred, da_true)
     result_dict[f"rank_hist_{variable_name}"] = rank_hist
 
-    #insert other computations below
-        
+    # insert other computations below
+
     return result_dict
 
 
-
 def get_data(sampler, rollout_files, variable, level):
-    """ uses a XRSamplerByYear object to sample the true data"""
+    """uses a XRSamplerByYear object to sample the true data"""
+
     def select_darray(ds_given):
         ds_sel = ds_given[variable]
         if variable in "UVTQtot":
             return ds_sel.isel(level=level)
         return ds_sel
-    
+
     # get pred and true data
     pred_da_list = []
     true_da_list = []
@@ -175,16 +181,17 @@ def get_data(sampler, rollout_files, variable, level):
         ds = xr.open_dataset(file)
         da = select_darray(ds)
         pred_da_list.append(da)
-        
+
         da_true = select_darray(sampler(da.time.values[0]))
         true_da_list.append(da_true)
 
     # there will never be duplicate times
     # if rollout_files are all the same forecast hour (e.g. 3, 6, 24)
-    da_pred = xr.concat(pred_da_list, dim='time')
+    da_pred = xr.concat(pred_da_list, dim="time")
 
-    da_true = xr.concat(true_da_list, dim='time')
+    da_true = xr.concat(true_da_list, dim="time")
     return da_pred, da_true
+
 
 def check_rollout_files(forecast_save_loc):
     """
@@ -198,6 +205,7 @@ def check_rollout_files(forecast_save_loc):
         num_files.append(len(files))
     assert all(num == num_files[0] for num in num_files), "not all rollouts have the same number of files"
     return num_files[0]
+
 
 if __name__ == "__main__":
     description = "evaluate ensemble rollouts"
@@ -263,9 +271,8 @@ if __name__ == "__main__":
         conf["save_filename"] = "ensemble_eval.parquet"
     # check that we are not overwriting an existing eval file
     eval_save_loc = join(forecast_save_loc, conf["save_filename"])
-    assert not os.path.isfile(eval_save_loc), (
-            f'''ensemble_eval results already exists at {eval_save_loc}, aborting. 
-            Move or rename the existing file to run this script''')
+    assert not os.path.isfile(eval_save_loc), f"""ensemble_eval results already exists at {eval_save_loc}, aborting. 
+            Move or rename the existing file to run this script"""
     # rollout file check
     # checks that all ICs have the same forecast hours
     num_files = check_rollout_files(forecast_save_loc)
@@ -273,9 +280,10 @@ if __name__ == "__main__":
     # check all detailed_eval_hours exist:
     model_timestep = model_conf["data"]["lead_time_periods"]
     if max(conf["detailed_eval_hours"]) > num_files * model_timestep:
-        raise RuntimeError(f"You specified {conf['detailed_eval_hours']} detailed hours"
-                           + f"but only up to hour {num_files * model_timestep} exists")
-
+        raise RuntimeError(
+            f"You specified {conf['detailed_eval_hours']} detailed hours"
+            + f"but only up to hour {num_files * model_timestep} exists"
+        )
 
     # Launch PBS jobs
     if launch:
@@ -289,9 +297,9 @@ if __name__ == "__main__":
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    #local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
+    # local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
 
-    num_process = get_num_cpus() - 1 # count the num_cpus
+    num_process = get_num_cpus() - 1  # count the num_cpus
     if "num_process" in conf:
         num_process = conf["num_process"]
 

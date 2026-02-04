@@ -41,12 +41,8 @@ class KCRPSLoss(torch.nn.Module):
 
     def forward(self, target, pred):
         # integer division but will error out next op if there is a remainder
-        ensemble_size = (
-            pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
-        )
-        pred = pred.view(
-            target.shape[0], ensemble_size, *target.shape[1:]
-        )  # b, ensemble, c, t, lat, lon
+        ensemble_size = pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
+        pred = pred.view(target.shape[0], ensemble_size, *target.shape[1:])  # b, ensemble, c, t, lat, lon
         # apply single_sample_forward to each dim
         target = target.unsqueeze(1)
         return self.batched_forward(target, pred).squeeze(1)
@@ -65,9 +61,7 @@ class KCRPSLoss(torch.nn.Module):
         pred = torch.movedim(pred, 0, -1)
         return self._kernel_crps_implementation(pred, target, self.biased)
 
-    def _kernel_crps_implementation(
-        self, pred: torch.Tensor, obs: torch.Tensor, biased: bool
-    ) -> torch.Tensor:
+    def _kernel_crps_implementation(self, pred: torch.Tensor, obs: torch.Tensor, biased: bool) -> torch.Tensor:
         """An O(m log m) implementation of the kernel CRPS formulas"""
         skill = torch.abs(pred - obs[..., None]).mean(-1)
         pred, _ = torch.sort(pred)

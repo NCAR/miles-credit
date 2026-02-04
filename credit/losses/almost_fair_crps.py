@@ -15,12 +15,8 @@ class AlmostFairKCRPSLoss(torch.nn.Module):
 
     def forward(self, target, pred):
         # Compute ensemble size assuming pred shape = (batch * ensemble, ...)
-        ensemble_size = (
-            pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
-        )
-        pred = pred.view(
-            target.shape[0], ensemble_size, *target.shape[1:]
-        )  # b, ensemble, c, t, lat, lon
+        ensemble_size = pred.shape[0] // target.shape[0] + pred.shape[0] % target.shape[0]
+        pred = pred.view(target.shape[0], ensemble_size, *target.shape[1:])  # b, ensemble, c, t, lat, lon
         target = target.unsqueeze(1)  # b, 1, c, t, lat, lon
 
         # Apply single_sample_forward to each batch entry

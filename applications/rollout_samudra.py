@@ -54,17 +54,14 @@ class ForecastProcessor:
 
         # transform and ToTensor class
         self.state_transformer = state_transformer
-    
+
         # get lat/lons from x-array
         self.latlons = xr.open_dataset(conf["loss"]["latitude_weights"]).load()
         # grab ERA5 (etc) metadata
         self.meta_data = load_metadata(conf)
 
         # Set up the diffusion and pole filters
-        if (
-            "use_laplace_filter" in conf["predict"]
-            and conf["predict"]["use_laplace_filter"]
-        ):
+        if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
             self.dpf = Diffusion_and_Pole_Filter(
                 nlat=conf["model"]["image_height"],
                 nlon=conf["model"]["image_width"],
@@ -85,21 +82,12 @@ class ForecastProcessor:
                 raise ValueError(f"Unsupported prediction type: {type(y_pred)}")
 
             # This will fail if not using torch multiprocessing AND using a GPU
-            if (
-                "use_laplace_filter" in conf["predict"]
-                and conf["predict"]["use_laplace_filter"]
-            ):
-                y_pred = (
-                    self.dpf.diff_lap2d_filt(y_pred.to(self.device).squeeze())
-                    .unsqueeze(0)
-                    .unsqueeze(2)
-                    .cpu()
-                )
+            if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
+                y_pred = self.dpf.diff_lap2d_filt(y_pred.to(self.device).squeeze()).unsqueeze(0).unsqueeze(2).cpu()
 
             # Calculate correct datetime for current forecast
             utc_datetimes = [
-                datetime.utcfromtimestamp(datetimes[i].item() / 1e9)
-                + timedelta(hours=self.lead_time_periods)
+                datetime.utcfromtimestamp(datetimes[i].item() / 1e9) + timedelta(hours=self.lead_time_periods)
                 for i in range(self.batch_size)
             ]
 
@@ -109,7 +97,6 @@ class ForecastProcessor:
                 for i in range(
                     self.ensemble_size
                 ):  # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
-
                     darray_upper_air, darray_single_level = make_xarray(
                         y_pred[j + i : j + i + 1],  # Process each ensemble member
                         utc_datetimes[j],
@@ -121,15 +108,9 @@ class ForecastProcessor:
                     single_level_list.append(darray_single_level)
 
                 if self.ensemble_size > 1:
-                    ensemble_index = xr.DataArray(
-                        np.arange(self.ensemble_size), dims="ensemble_member_label"
-                    )
-                    all_upper_air = xr.concat(
-                        upper_air_list, ensemble_index
-                    )  # .transpose("time", ...)
-                    all_single_level = xr.concat(
-                        single_level_list, ensemble_index
-                    )  # .transpose("time", ...)
+                    ensemble_index = xr.DataArray(np.arange(self.ensemble_size), dims="ensemble_member_label")
+                    all_upper_air = xr.concat(upper_air_list, ensemble_index)  # .transpose("time", ...)
+                    all_single_level = xr.concat(single_level_list, ensemble_index)  # .transpose("time", ...)
                 else:
                     all_upper_air = darray_upper_air
                     all_single_level = darray_single_level
@@ -138,9 +119,7 @@ class ForecastProcessor:
                 save_netcdf_increment(
                     all_upper_air,
                     all_single_level,
-                    save_datetimes[
-                        forecast_count + j
-                    ],  # Use correct index for current batch item
+                    save_datetimes[forecast_count + j],  # Use correct index for current batch item
                     self.lead_time_periods * forecast_step,
                     self.meta_data,
                     conf,
@@ -221,7 +200,7 @@ def predict(rank, world_size, conf, p):
                 flag_energy_conserve = True
                 opt_energy = GlobalEnergyFixer(post_conf)
 
-    # Post-block wet mask 
+    # Post-block wet mask
     opt_wet = WetMaskBlock(conf)
 
     # clamp to remove outliers
@@ -240,21 +219,21 @@ def predict(rank, world_size, conf, p):
         )
 
     dataset = Predict_Ocean_Batcher(
-            conf,
-            forecast_windows=forecasts,
-            seed=conf["seed"],
-            rank=rank,
-            world_size=world_size,
-            batch_size=batch_size,
-            shuffle=False,
-        )
+        conf,
+        forecast_windows=forecasts,
+        seed=conf["seed"],
+        rank=rank,
+        world_size=world_size,
+        batch_size=batch_size,
+        shuffle=False,
+    )
 
     # Use a custom sampler so we get the len correct
     sampler = BatchForecastLenSamplerSamudra(dataset)
 
     data_loader = DataLoader(
         dataset,
-        num_workers=0, # Do not try to mix mp as Pool from main is used here for data processing
+        num_workers=0,  # Do not try to mix mp as Pool from main is used here for data processing
         collate_fn=collate_fn,
         sampler=sampler,  # Ensure len is correct
     )
@@ -277,9 +256,7 @@ def predict(rank, world_size, conf, p):
         save_loc = os.path.expandvars(conf["save_loc"])
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-        load_msg = model.module.load_state_dict(
-            checkpoint["model_state_dict"], strict=False
-        )
+        load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
         load_state_dict_error_handler(load_msg)
     elif conf["predict"]["mode"] == "fsdp":
         model = load_model(conf, load_weights=True).to(device)
@@ -314,9 +291,7 @@ def predict(rank, world_size, conf, p):
                     for i in range(batch_size)
                 ]
 
-                save_datetimes[forecast_count : forecast_count + batch_size] = (
-                    init_datetimes
-                )
+                save_datetimes[forecast_count : forecast_count + batch_size] = init_datetimes
 
                 x = batch["input"].to(device)
 
@@ -326,12 +301,10 @@ def predict(rank, world_size, conf, p):
 
             else:
                 # Add forcing and static variables for the entire batch
-                x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]):].to(device)
-                
+                x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]) :].to(device)
+
                 if ensemble_size > 1:
-                    x_forcing_batch = torch.repeat_interleave(
-                        x_forcing_batch, ensemble_size, 0
-                    )
+                    x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
                 x = torch.cat((x, x_forcing_batch), dim=1)
 
             # Clamp if needed
@@ -397,9 +370,7 @@ def predict(rank, world_size, conf, p):
 
                 # cut diagnostic vars from y_pred, they are not inputs
                 if varnum_diag > 0:
-                    x = torch.cat(
-                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
-                    )
+                    x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
@@ -513,14 +484,10 @@ def main():
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     # handling config args
-    conf = credit_main_parser(
-        conf, parse_training=False, parse_predict=False, print_summary=False
-    )
+    conf = credit_main_parser(conf, parse_training=False, parse_predict=False, print_summary=False)
 
     # create a save location for rollout
-    assert (
-        "save_forecast" in conf["predict"]
-    ), "Please specify the output dir through conf['predict']['save_forecast']"
+    assert "save_forecast" in conf["predict"], "Please specify the output dir through conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)

@@ -29,9 +29,7 @@ def compute_density(pressure, temperature, specific_humidity):
 def compute_virtual_temperature(temperature, specific_humidity):
     """ref: metpy"""
     mixing_ratio = specific_humidity / (1 - specific_humidity)
-    temperature_virtual = (
-        temperature * (mixing_ratio + EPSGAS) / (EPSGAS * (1 + mixing_ratio))
-    )
+    temperature_virtual = temperature * (mixing_ratio + EPSGAS) / (EPSGAS * (1 + mixing_ratio))
     return temperature_virtual
 
 
@@ -59,9 +57,7 @@ class ModelLevelPressures(nn.Module):
     def compute_hlevs(self, plevs):
         # half levels as averages of model level pressures
 
-        hlevs = torch.log(plevs.unfold(dimension=self.plev_dim, size=2, step=1)).mean(
-            dim=-1
-        )
+        hlevs = torch.log(plevs.unfold(dimension=self.plev_dim, size=2, step=1)).mean(dim=-1)
         return torch.exp(hlevs)  # same shape a plev except plev_dim is 1 less
 
     def compute_mlev_thickness(self, sp):
@@ -72,9 +68,7 @@ class ModelLevelPressures(nn.Module):
             self.register_buffer("zeros", torch.zeros_like(sp), persistent=False)
             self.is_fully_initialized = True
 
-        thicknesses = torch.diff(
-            hlevs, dim=self.plev_dim, prepend=self.zeros, append=sp
-        )
+        thicknesses = torch.diff(hlevs, dim=self.plev_dim, prepend=self.zeros, append=sp)
         return thicknesses  # same shape as sp but plev_dim has size levels
 
 
@@ -158,9 +152,7 @@ class physics_pressure_level:
             q_area = q_mid * delta_p
             q_trapz = torch.sum(q_area, dim=1)
 
-        elif (
-            num_dims == 4
-        ):  # (batch_size, level, latitude, longitude) or (time, level, latitude, longitude)
+        elif num_dims == 4:  # (batch_size, level, latitude, longitude) or (time, level, latitude, longitude)
             delta_p = delta_p.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
             q_area = q_mid * delta_p
             q_trapz = torch.sum(q_area, dim=1)
@@ -175,9 +167,7 @@ class physics_pressure_level:
 
         return q_trapz
 
-    def pressure_integral_midpoint_sliced(
-        self, q_mid: torch.Tensor, ind_start: int, ind_end: int
-    ) -> torch.Tensor:
+    def pressure_integral_midpoint_sliced(self, q_mid: torch.Tensor, ind_start: int, ind_end: int) -> torch.Tensor:
         """
         As in `pressure_integral_midpoint`, but supports pressure level indexing,
         so it can calculate integrals of a subset of levels
@@ -191,9 +181,7 @@ class physics_pressure_level:
             q_area = q_mid * delta_p
             q_trapz = torch.sum(q_area, dim=1)
 
-        elif (
-            num_dims == 4
-        ):  # (batch_size, level, latitude, longitude) or (time, level, latitude, longitude)
+        elif num_dims == 4:  # (batch_size, level, latitude, longitude) or (time, level, latitude, longitude)
             delta_p = delta_p.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
             q_mid = q_mid[:, ind_start:ind_end, ...]
             q_area = q_mid * delta_p  # Trapezoidal rule
@@ -228,13 +216,9 @@ class physics_pressure_level:
             q_area = 0.5 * (q[:, :-1, :, :, :] + q[:, 1:, :, :, :]) * delta_p
             q_trapz = torch.sum(q_area, dim=1)
 
-        elif (
-            num_dims == 4
-        ):  # (batch_size, level, latitude, longitude) or (time, level, latitude, longitude)
+        elif num_dims == 4:  # (batch_size, level, latitude, longitude) or (time, level, latitude, longitude)
             delta_p = delta_p.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
-            q_area = (
-                0.5 * (q[:, :-1, :, :] + q[:, 1:, :, :]) * delta_p
-            )  # Trapezoidal rule
+            q_area = 0.5 * (q[:, :-1, :, :] + q[:, 1:, :, :]) * delta_p  # Trapezoidal rule
             q_trapz = torch.sum(q_area, dim=1)
 
         elif num_dims == 3:  # (level, latitude, longitude)
@@ -247,9 +231,7 @@ class physics_pressure_level:
 
         return q_trapz
 
-    def pressure_integral_trapz_sliced(
-        self, q: torch.Tensor, ind_start: int, ind_end: int
-    ) -> torch.Tensor:
+    def pressure_integral_trapz_sliced(self, q: torch.Tensor, ind_start: int, ind_end: int) -> torch.Tensor:
         """
         As in `pressure_integral_trapz`, but supports pressure level indexing,
         so it can calculate integrals of a subset of levels
@@ -260,19 +242,13 @@ class physics_pressure_level:
         if num_dims == 5:  # (batch_size, level, time, latitude, longitude)
             delta_p = delta_p.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             q_slice = q[:, ind_start:ind_end, ...]
-            q_area = (
-                0.5 * (q_slice[:, :-1, :, :, :] + q_slice[:, 1:, :, :, :]) * delta_p
-            )
+            q_area = 0.5 * (q_slice[:, :-1, :, :, :] + q_slice[:, 1:, :, :, :]) * delta_p
             q_trapz = torch.sum(q_area, dim=1)
 
-        elif (
-            num_dims == 4
-        ):  # (batch_size, level, latitude, longitude) or (time, level, latitude, longitude)
+        elif num_dims == 4:  # (batch_size, level, latitude, longitude) or (time, level, latitude, longitude)
             delta_p = delta_p.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
             q_slice = q[:, ind_start:ind_end, ...]
-            q_area = (
-                0.5 * (q_slice[:, :-1, :, :] + q_slice[:, 1:, :, :]) * delta_p
-            )  # Trapezoidal rule
+            q_area = 0.5 * (q_slice[:, :-1, :, :] + q_slice[:, 1:, :, :]) * delta_p  # Trapezoidal rule
             q_trapz = torch.sum(q_area, dim=1)
 
         elif num_dims == 3:  # (level, latitude, longitude)
@@ -286,9 +262,7 @@ class physics_pressure_level:
 
         return q_trapz
 
-    def weighted_sum(
-        self, q: torch.Tensor, axis: Dict[tuple, None] = None, keepdims: bool = False
-    ) -> torch.Tensor:
+    def weighted_sum(self, q: torch.Tensor, axis: Dict[tuple, None] = None, keepdims: bool = False) -> torch.Tensor:
         """
         Compute the weighted sum of a given quantity for PyTorch tensors.
 
@@ -412,10 +386,7 @@ class physics_hybrid_sigma_level:
         surface_pressure = surface_pressure.unsqueeze(1)
 
         # (batch, level, lat, lon)
-        pressure = (
-            self.coef_a.to(q_mid.device)
-            + self.coef_b.to(q_mid.device) * surface_pressure
-        )
+        pressure = self.coef_a.to(q_mid.device) + self.coef_b.to(q_mid.device) * surface_pressure
 
         # (batch, level-1, lat, lon)
         delta_p = pressure.diff(dim=1).to(q_mid.device)
@@ -443,10 +414,7 @@ class physics_hybrid_sigma_level:
         surface_pressure = surface_pressure.unsqueeze(1)
 
         # (batch, level, lat, lon)
-        pressure = (
-            self.coef_a.to(q_mid.device)
-            + self.coef_b.to(q_mid.device) * surface_pressure
-        )
+        pressure = self.coef_a.to(q_mid.device) + self.coef_b.to(q_mid.device) * surface_pressure
 
         # (batch, level-1, lat, lon)
         pressure_thickness = pressure.diff(dim=1)
@@ -458,9 +426,7 @@ class physics_hybrid_sigma_level:
         q_integral = torch.sum(q_area, dim=1)
         return q_integral
 
-    def pressure_integral_trapz(
-        self, q: torch.Tensor, surface_pressure: torch.Tensor
-    ) -> torch.Tensor:
+    def pressure_integral_trapz(self, q: torch.Tensor, surface_pressure: torch.Tensor) -> torch.Tensor:
         """
         Compute the pressure level integral of a given quantity using the trapezoidal rule.
 
@@ -474,9 +440,7 @@ class physics_hybrid_sigma_level:
         surface_pressure = surface_pressure.unsqueeze(1)
 
         # (batch, level, lat, lon)
-        pressure = (
-            self.coef_a.to(q.device) + self.coef_b.to(q.device) * surface_pressure
-        )
+        pressure = self.coef_a.to(q.device) + self.coef_b.to(q.device) * surface_pressure
 
         # (batch, level-1, lat, lon)
         delta_p = pressure.diff(dim=1).to(q.device)
@@ -504,9 +468,7 @@ class physics_hybrid_sigma_level:
         surface_pressure = surface_pressure.unsqueeze(1)
 
         # (batch, level, lat, lon)
-        pressure = (
-            self.coef_a.to(q.device) + self.coef_b.to(q.device) * surface_pressure
-        )
+        pressure = self.coef_a.to(q.device) + self.coef_b.to(q.device) * surface_pressure
 
         delta_p = pressure[:, ind_start:ind_end, ...].diff(dim=1).to(q.device)
 
@@ -519,9 +481,7 @@ class physics_hybrid_sigma_level:
 
         return q_trapz
 
-    def weighted_sum(
-        self, q: torch.Tensor, axis: Dict[tuple, None] = None, keepdims: bool = False
-    ) -> torch.Tensor:
+    def weighted_sum(self, q: torch.Tensor, axis: Dict[tuple, None] = None, keepdims: bool = False) -> torch.Tensor:
         """
         Compute the weighted sum of a given quantity for PyTorch tensors.
 
@@ -537,9 +497,7 @@ class physics_hybrid_sigma_level:
         q_sum = torch.sum(q_w, dim=axis, keepdim=keepdims)
         return q_sum
 
-    def total_dry_air_mass(
-        self, q: torch.Tensor, surface_pressure: torch.Tensor
-    ) -> torch.Tensor:
+    def total_dry_air_mass(self, q: torch.Tensor, surface_pressure: torch.Tensor) -> torch.Tensor:
         """
         Compute the total mass of dry air over the entire globe [kg]
         """

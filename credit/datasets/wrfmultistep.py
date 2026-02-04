@@ -53,9 +53,7 @@ def worker(
         ind_start_in_file = ind_start_current_step - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(list_upper_ds[int(ind_file)]["time"]) - (
-            history_len + forecast_len + 1
-        )
+        ind_largest = len(list_upper_ds[int(ind_file)]["time"]) - (history_len + forecast_len + 1)
 
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
@@ -66,23 +64,17 @@ def worker(
         ind_end_in_file = ind_start_in_file + history_len + forecast_len
 
         ## WRF_file_subset: a xarray dataset that contains training input and target (for the current batch)
-        WRF_subset = list_upper_ds[int(ind_file)].isel(
-            time=slice(ind_start_in_file, ind_end_in_file + 1)
-        )
+        WRF_subset = list_upper_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
         # ========================================================================== #
         # merge surface into the dataset
 
         if list_surf_ds:
             ## subset surface variables
-            surface_subset = list_surf_ds[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            surface_subset = list_surf_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
             ## merge upper-air and surface here:
-            WRF_subset = WRF_subset.merge(
-                surface_subset
-            )  # <-- lazy merge, upper and surface both not loaded
+            WRF_subset = WRF_subset.merge(surface_subset)  # <-- lazy merge, upper and surface both not loaded
 
         # ==================================================== #
         # split WRF_subset into training inputs and targets
@@ -106,9 +98,7 @@ def worker(
             dyn_forcing_subset = list_dyn_forcing_ds[int(ind_file)].isel(
                 time=slice(ind_start_in_file, ind_end_in_file + 1)
             )
-            dyn_forcing_subset = dyn_forcing_subset.isel(
-                time=slice(0, history_len, 1)
-            ).load()
+            dyn_forcing_subset = dyn_forcing_subset.isel(time=slice(0, history_len, 1)).load()
 
             WRF_input = WRF_input.merge(dyn_forcing_subset)
 
@@ -138,13 +128,9 @@ def worker(
             N_time_dims = len(WRF_subset["time"])
             static_subset_input = xarray_static.expand_dims(dim={"time": N_time_dims})
             # assign coords 'time'
-            static_subset_input = static_subset_input.assign_coords(
-                {"time": WRF_subset["time"]}
-            )
+            static_subset_input = static_subset_input.assign_coords({"time": WRF_subset["time"]})
             # slice, update time and merge
-            static_subset_input = static_subset_input.isel(
-                time=slice(0, history_len, 1)
-            )
+            static_subset_input = static_subset_input.isel(time=slice(0, history_len, 1))
             static_subset_input["time"] = WRF_input["time"]
             WRF_input = WRF_input.merge(static_subset_input)
 
@@ -157,13 +143,9 @@ def worker(
         ## merge diagnoisc input here:
         if list_diag_ds:
             # subset diagnostic variables
-            diagnostic_subset = list_diag_ds[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            diagnostic_subset = list_diag_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
-            diagnostic_subset = diagnostic_subset.isel(
-                time=slice(history_len, history_len + 1, 1)
-            ).load()
+            diagnostic_subset = diagnostic_subset.isel(time=slice(history_len, history_len + 1, 1)).load()
 
             # merge into the target dataset
             WRF_target = WRF_target.merge(diagnostic_subset)
@@ -171,21 +153,15 @@ def worker(
         # ==================================================== #
         # handle boundary files
         # ==================================================== #
-        time_boundary = WRF_target["time"].values[
-            0
-        ]  # <--- assuming single time value here
+        time_boundary = WRF_target["time"].values[0]  # <--- assuming single time value here
         time_round = next_n_hour(time_boundary, 3)
 
         if history_len_outside == 1:
             time_year = int(np.datetime_as_string(time_round, unit="Y"))
             ind_year = time_year - outside_file_year_range[0]
             ind_date = np.searchsorted(outside_file_indices[str(ind_year)], time_round)
-            ds_upper_outside = list_upper_ds_outside[ind_year].isel(
-                time=slice(ind_date, ind_date + 1)
-            )
-            ds_surf_outside = list_surf_ds_outside[ind_year].isel(
-                time=slice(ind_date, ind_date + 1)
-            )
+            ds_upper_outside = list_upper_ds_outside[ind_year].isel(time=slice(ind_date, ind_date + 1))
+            ds_surf_outside = list_surf_ds_outside[ind_year].isel(time=slice(ind_date, ind_date + 1))
             ds_outside = xr.merge([ds_upper_outside, ds_surf_outside])
 
         else:
@@ -196,18 +172,12 @@ def worker(
                 time_round_loop = previous_hourly_steps(time_round, 3, i_time_backward)
                 time_year = int(np.datetime_as_string(time_round_loop, unit="Y"))
                 ind_year = time_year - outside_file_year_range[0]
-                ind_date = np.searchsorted(
-                    outside_file_indices[str(ind_year)], time_round_loop
-                )
+                ind_date = np.searchsorted(outside_file_indices[str(ind_year)], time_round_loop)
                 list_ds_upper_outside_slice.append(
-                    list_upper_ds_outside[ind_year].isel(
-                        time=slice(ind_date, ind_date + 1)
-                    )
+                    list_upper_ds_outside[ind_year].isel(time=slice(ind_date, ind_date + 1))
                 )
                 list_ds_surf_outside_slice.append(
-                    list_surf_ds_outside[ind_year].isel(
-                        time=slice(ind_date, ind_date + 1)
-                    )
+                    list_surf_ds_outside[ind_year].isel(time=slice(ind_date, ind_date + 1))
                 )
 
             ds_upper_outside = xr.concat(
@@ -270,13 +240,9 @@ class RepeatingIndexSampler(torch.utils.data.Sampler):
         # Compute valid starting indices ensuring full sequences fit
         all_start_indices = list(range(0, len(self.dataset), 1))
 
-        num_indices = len(
-            all_start_indices
-        )  # Trim the number of indices to ensure it's divisible by world_size
+        num_indices = len(all_start_indices)  # Trim the number of indices to ensure it's divisible by world_size
         num_indices_per_rank = num_indices // self.num_replicas
-        all_start_indices = all_start_indices[
-            : num_indices_per_rank * self.num_replicas
-        ]
+        all_start_indices = all_start_indices[: num_indices_per_rank * self.num_replicas]
         self.all_start_indices = all_start_indices
         self.num_indices_per_rank = num_indices_per_rank
 
@@ -431,14 +397,10 @@ class WRFMultiStep(torch.utils.data.Dataset):
         for fn_outside in filenames_outside:
             # drop variables if they are not in the config
             ds_outside = get_forward_data(filename=fn_outside)
-            ds_upper_outside = drop_var_from_dataset(
-                ds_outside, varname_upper_air_outside
-            )
+            ds_upper_outside = drop_var_from_dataset(ds_outside, varname_upper_air_outside)
 
             if filename_surface_outside is not None:
-                ds_surf_outside = drop_var_from_dataset(
-                    ds_outside, varname_surface_outside
-                )
+                ds_surf_outside = drop_var_from_dataset(ds_outside, varname_surface_outside)
                 list_surf_ds_outside.append(ds_surf_outside)
             else:
                 self.list_surf_ds_outside = False
@@ -453,23 +415,13 @@ class WRFMultiStep(torch.utils.data.Dataset):
         # -------------------------------------------------------------------------- #
         # get sample indices from boundary upper-air files:
         self.outside_file_year_range = [
-            int(
-                np.datetime_as_string(
-                    self.list_upper_ds_outside[0]["time"][0].values, unit="Y"
-                )
-            ),
-            int(
-                np.datetime_as_string(
-                    self.list_upper_ds_outside[-1]["time"][0].values, unit="Y"
-                )
-            ),
+            int(np.datetime_as_string(self.list_upper_ds_outside[0]["time"][0].values, unit="Y")),
+            int(np.datetime_as_string(self.list_upper_ds_outside[-1]["time"][0].values, unit="Y")),
         ]
 
         self.outside_file_indices = {}  # <------ change
         for ind_file, outside_file_xarray in enumerate(self.list_upper_ds_outside):
-            self.outside_file_indices[str(ind_file)] = outside_file_xarray[
-                "time"
-            ].values
+            self.outside_file_indices[str(ind_file)] = outside_file_xarray["time"].values
 
         # ========================================================== #
 
@@ -520,9 +472,7 @@ class WRFMultiStep(torch.utils.data.Dataset):
         self.initial_index = None
 
     def __getitem__(self, index):
-        if (self.forecast_step_count == self.forecast_len + 1) or (
-            self.current_index is None
-        ):
+        if (self.forecast_step_count == self.forecast_len + 1) or (self.current_index is None):
             # We've completed the last forecast or we're starting for the first time
             # Start a new forecast using the sampler index
             self.current_index = index  # self._get_random_start_index()

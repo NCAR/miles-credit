@@ -62,16 +62,8 @@ class UnWeightedMetrics:
             y = transform(y)
 
         # Get latitude and variable weights
-        w_lat = (
-            self.w_lat.to(dtype=pred.dtype, device=pred.device)
-            if self.w_lat is not None
-            else 1.0
-        )
-        w_var = (
-            self.w_var.to(dtype=pred.dtype, device=pred.device)
-            if self.w_var is not None
-            else 1.0
-        )
+        w_lat = self.w_lat.to(dtype=pred.dtype, device=pred.device) if self.w_lat is not None else 1.0
+        w_var = self.w_var.to(dtype=pred.dtype, device=pred.device) if self.w_var is not None else 1.0
 
         if clim is not None:
             clim = clim.to(device=y.device).unsqueeze(0)
@@ -82,9 +74,7 @@ class UnWeightedMetrics:
         with torch.no_grad():
             # calculate ensemble mean, if ensemble_size=1, does nothing
             if self.ensemble_size > 1:
-                pred = pred.view(
-                    y.shape[0], self.ensemble_size, *y.shape[1:]
-                )  # b, ensemble, c, t, lat, lon
+                pred = pred.view(y.shape[0], self.ensemble_size, *y.shape[1:])  # b, ensemble, c, t, lat, lon
                 std_dev = torch.std(pred, dim=1)  # std dev of ensemble
                 pred = pred.mean(dim=1)
 
@@ -105,46 +95,24 @@ class UnWeightedMetrics:
                     + epsilon
                 )
 
-                loss_dict[f"acc_{var}"] = (
-                    torch.sum(w_var * w_lat * pred_prime * y_prime) / denominator
-                )
+                loss_dict[f"acc_{var}"] = torch.sum(w_var * w_lat * pred_prime * y_prime) / denominator
                 loss_dict[f"rmse_{var}"] = torch.mean(
-                    torch.sqrt(
-                        torch.mean(error[:, i] ** 2 * w_lat * w_var, dim=(-2, -1))
-                    )
+                    torch.sqrt(torch.mean(error[:, i] ** 2 * w_lat * w_var, dim=(-2, -1)))
                 )
                 loss_dict[f"mse_{var}"] = (error[:, i] ** 2 * w_lat * w_var).mean()
-                loss_dict[f"mae_{var}"] = (
-                    torch.abs(error[:, i]) * w_lat * w_var
-                ).mean()
+                loss_dict[f"mae_{var}"] = (torch.abs(error[:, i]) * w_lat * w_var).mean()
                 # mean of std across all batches
                 if self.ensemble_size > 1:
                     loss_dict[f"std_{var}"] = torch.mean(
-                        torch.sqrt(
-                            torch.mean(std_dev[:, i] ** 2 * w_lat * w_var, dim=(-2, -1))
-                        )
+                        torch.sqrt(torch.mean(std_dev[:, i] ** 2 * w_lat * w_var, dim=(-2, -1)))
                     )
 
         # Calculate metrics averages
-        loss_dict["acc"] = np.mean(
-            [loss_dict[k].cpu().item() for k in loss_dict.keys() if "acc_" in k]
-        )
-        loss_dict["rmse"] = np.mean(
-            [loss_dict[k].cpu() for k in loss_dict.keys() if "rmse_" in k]
-        )
-        loss_dict["mse"] = np.mean(
-            [
-                loss_dict[k].cpu()
-                for k in loss_dict.keys()
-                if "mse_" in k and "rmse_" not in k
-            ]
-        )
-        loss_dict["mae"] = np.mean(
-            [loss_dict[k].cpu() for k in loss_dict.keys() if "mae_" in k]
-        )
+        loss_dict["acc"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict.keys() if "acc_" in k])
+        loss_dict["rmse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "rmse_" in k])
+        loss_dict["mse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mse_" in k and "rmse_" not in k])
+        loss_dict["mae"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mae_" in k])
         if self.ensemble_size > 1:
-            loss_dict["std"] = np.mean(
-                [loss_dict[k].cpu() for k in loss_dict.keys() if "std_" in k]
-            )
+            loss_dict["std"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "std_" in k])
 
         return loss_dict

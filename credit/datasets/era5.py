@@ -76,9 +76,7 @@ class ERA5Dataset(Dataset):
 
             if isinstance(d, dict):
                 if not d.get("vars_3D") and not d.get("vars_2D"):
-                    raise ValueError(
-                        f"Field '{field_type}' must define at least one of vars_3D or vars_2D"
-                    )
+                    raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
 
                 files = sorted(glob(d.get("path", "")))
                 self.file_dict[field_type] = self._map_files(files) if files else None
@@ -140,9 +138,7 @@ class ERA5Dataset(Dataset):
         if self.return_target:
             for key in ("prognostic", "diagnostic"):
                 if key in self.file_dict.keys():
-                    self._open_ds_extract_fields(
-                        key, t_target, return_data, is_target=True
-                    )
+                    self._open_ds_extract_fields(key, t_target, return_data, is_target=True)
             self._pop_and_merge_targets(return_data)
 
         self._add_metadata(return_data, t, t_target)
@@ -169,10 +165,7 @@ class ERA5Dataset(Dataset):
                 else:
                     ds = dataset
 
-                ds_all_vars = ds[
-                    self.var_dict[field_type]["vars_3D"]
-                    + self.var_dict[field_type]["vars_2D"]
-                ]
+                ds_all_vars = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
 
                 ds_3D = ds_all_vars[self.var_dict[field_type]["vars_3D"]]
                 ds_2D = ds_all_vars[self.var_dict[field_type]["vars_2D"]]
@@ -237,9 +230,7 @@ class ERA5Dataset(Dataset):
         Args:
             ts: pandas timestamp
         """
-        cf_t = cftime.datetime(
-            ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, calendar="noleap"
-        )
+        cf_t = cftime.datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, calendar="noleap")
 
         return cf_t
 
@@ -259,8 +250,4 @@ class ERA5Dataset(Dataset):
         if not target_tensors:
             return
 
-        return_data["target"] = (
-            target_tensors[0]
-            if len(target_tensors) == 1
-            else torch.cat(target_tensors, dim=dim)
-        )
+        return_data["target"] = target_tensors[0] if len(target_tensors) == 1 else torch.cat(target_tensors, dim=dim)

@@ -28,9 +28,7 @@ class Trainer(BaseTrainer):
         logger.info("WRF single-step training")
 
     # Training function.
-    def train_one_epoch(
-        self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics
-    ):
+    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         # training hyperparameters
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_accum_every = conf["trainer"]["grad_accum_every"]
@@ -48,10 +46,7 @@ class Trainer(BaseTrainer):
         assert total_time_steps == 0, "This trainer supports `forecast_len=0` only"
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if (
-            conf["trainer"]["use_scheduler"]
-            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
-        ):
+        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # ====================================================== #
@@ -59,11 +54,7 @@ class Trainer(BaseTrainer):
         # set up a custom tqdm
         if not isinstance(trainloader.dataset, IterableDataset):
             # if batches_per_epoch = 0, use all training samples (i.e., full epoch)
-            batches_per_epoch = (
-                batches_per_epoch
-                if 0 < batches_per_epoch < len(trainloader)
-                else len(trainloader)
-            )
+            batches_per_epoch = batches_per_epoch if 0 < batches_per_epoch < len(trainloader) else len(trainloader)
 
         batch_group_generator = tqdm.tqdm(
             range(batches_per_epoch),
@@ -99,9 +90,7 @@ class Trainer(BaseTrainer):
                 # add forcing and static variables
                 if "x_forcing_static" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = (
-                        batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )
+                    x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
 
                     # concat on var dimension
                     x = torch.cat((x, x_forcing_batch), dim=1)
@@ -115,9 +104,7 @@ class Trainer(BaseTrainer):
 
                 if "y_diag" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    y_diag_batch = (
-                        batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )
+                    y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
 
                     # concat on var dimension
                     y = torch.cat((y, y_diag_batch), dim=1)
@@ -125,9 +112,7 @@ class Trainer(BaseTrainer):
                 # --------------------------------------------------------------------------------- #
                 # boundary conditions
                 if "x_surf_boundary" in batch:
-                    x_boundary = concat_and_reshape(
-                        batch["x_boundary"], batch["x_surf_boundary"]
-                    ).to(self.device)
+                    x_boundary = concat_and_reshape(batch["x_boundary"], batch["x_surf_boundary"]).to(self.device)
                 else:
                     x_boundary = reshape_only(batch["x_boundary"]).to(self.device)
 
@@ -165,9 +150,7 @@ class Trainer(BaseTrainer):
 
             if grad_max_norm is not None:
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=grad_max_norm
-                )
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=grad_max_norm)
 
             scaler.step(optimizer)
             scaler.update()
@@ -186,9 +169,7 @@ class Trainer(BaseTrainer):
             if "forecast_hour" in batch:
                 forecast_hour_tensor = batch["forecast_hour"].to(self.device)
                 if distributed:
-                    dist.all_reduce(
-                        forecast_hour_tensor, dist.ReduceOp.AVG, async_op=False
-                    )
+                    dist.all_reduce(forecast_hour_tensor, dist.ReduceOp.AVG, async_op=False)
                     forecast_hour_avg = forecast_hour_tensor[-1].item()
                 else:
                     forecast_hour_avg = batch["forecast_hour"][-1].item()
@@ -199,11 +180,7 @@ class Trainer(BaseTrainer):
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 try:
-                    print(
-                        "Invalid loss value: {}".format(
-                            np.mean(results_dict["train_loss"])
-                        )
-                    )
+                    print("Invalid loss value: {}".format(np.mean(results_dict["train_loss"])))
                     raise optuna.TrialPruned()
 
                 except Exception as E:
@@ -222,10 +199,7 @@ class Trainer(BaseTrainer):
             if self.rank == 0:
                 batch_group_generator.set_description(to_print)
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
                 scheduler.step()
 
             if i >= batches_per_epoch and i > 0:
@@ -248,11 +222,7 @@ class Trainer(BaseTrainer):
         forecast_len = conf["data"]["valid_forecast_len"]
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
-        total_time_steps = (
-            conf["data"]["total_time_steps"]
-            if "total_time_steps" in conf["data"]
-            else forecast_len
-        )
+        total_time_steps = conf["data"]["total_time_steps"] if "total_time_steps" in conf["data"] else forecast_len
 
         assert total_time_steps == 0, "This trainer supports `forecast_len=0` only"
 
@@ -265,9 +235,7 @@ class Trainer(BaseTrainer):
             valid_batches_per_epoch = valid_batches_per_epoch
         else:
             valid_batches_per_epoch = (
-                valid_batches_per_epoch
-                if 0 < valid_batches_per_epoch < len(valid_loader)
-                else len(valid_loader)
+                valid_batches_per_epoch if 0 < valid_batches_per_epoch < len(valid_loader) else len(valid_loader)
             )
 
         batch_group_generator = tqdm.tqdm(
@@ -296,9 +264,7 @@ class Trainer(BaseTrainer):
                 # add forcing and static variables
                 if "x_forcing_static" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = (
-                        batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )
+                    x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
 
                     # concat on var dimension
                     x = torch.cat((x, x_forcing_batch), dim=1)
@@ -312,9 +278,7 @@ class Trainer(BaseTrainer):
 
                 if "y_diag" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    y_diag_batch = (
-                        batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )
+                    y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
 
                     # concat on var dimension
                     y = torch.cat((y, y_diag_batch), dim=1)
@@ -322,9 +286,7 @@ class Trainer(BaseTrainer):
                 # --------------------------------------------------------------------------------- #
                 # boundary conditions
                 if "x_surf_boundary" in batch:
-                    x_boundary = concat_and_reshape(
-                        batch["x_boundary"], batch["x_surf_boundary"]
-                    ).to(self.device)
+                    x_boundary = concat_and_reshape(batch["x_boundary"], batch["x_surf_boundary"]).to(self.device)
                 else:
                     x_boundary = reshape_only(batch["x_boundary"]).to(self.device)
 

@@ -129,9 +129,7 @@ class BackscatterCNN(nn.Module):
 
     def pad(self, x):
         x = self.pad_lat(x)  # reflection padding
-        x[..., [0, -1], :] = torch.roll(
-            x[..., [0, -1], :], self.nlon // 2, -1
-        )  # shift reflection by 180
+        x[..., [0, -1], :] = torch.roll(x[..., [0, -1], :], self.nlon // 2, -1)  # shift reflection by 180
         x = self.pad_lon(x)  # padding across lon
         return x
 
@@ -169,9 +167,7 @@ def load_premade_encoder_model(model_conf):
         logger.info(f"Loading model {name} with settings {model_conf}")
         return supported_models[name](**model_conf)
     else:
-        raise OSError(
-            f"Model name {name} not recognized. Please choose from {supported_models.keys()}"
-        )
+        raise OSError(f"Model name {name} not recognized. Please choose from {supported_models.keys()}")
 
 
 class BackscatterUnet(nn.Module):
@@ -190,9 +186,7 @@ class BackscatterUnet(nn.Module):
         self.pad = padding
         if self.pad:
             logger.info(f"padding size {self.pad} inside unet")
-            self.boundary_padding = TensorPadding(
-                pad_lat=(self.pad, self.pad), pad_lon=(self.pad, self.pad)
-            )
+            self.boundary_padding = TensorPadding(pad_lat=(self.pad, self.pad), pad_lon=(self.pad, self.pad))
 
         self.relu = nn.ReLU()
 
@@ -257,9 +251,7 @@ class BackscatterPrescribed(nn.Module):
         std = xr.open_dataset(std_path)
         std_wind_avg = (std.U.values + std.V.values) / 2.0
         self.backscatter_array = Parameter(
-            torch.tensor(1e-2 * (std_wind_avg * sigma_max) ** 2).reshape(
-                1, levels, 1, 1, 1
-            ),
+            torch.tensor(1e-2 * (std_wind_avg * sigma_max) ** 2).reshape(1, levels, 1, 1, 1),
             requires_grad=True,
         )
         # formula to convert to 1% of sigma * std_wind_avg
@@ -322,40 +314,24 @@ class SKEBS(nn.Module):
         self.static_inds = post_conf["skebs"]["static_inds"]
 
         # setup coslat, gets expanded to ensemble size and to device in first forward pass
-        cos_lat = np.cos(
-            np.deg2rad(
-                xr.open_dataset(post_conf["data"]["save_loc_static"])["latitude"]
-            )
-        ).values
+        cos_lat = np.cos(np.deg2rad(xr.open_dataset(post_conf["data"]["save_loc_static"])["latitude"])).values
         self.cos_lat = (
-            torch.tensor(cos_lat)
-            .reshape(1, 1, 1, cos_lat.shape[0], 1)
-            .expand(1, 1, 1, cos_lat.shape[0], 288)
+            torch.tensor(cos_lat).reshape(1, 1, 1, cos_lat.shape[0], 1).expand(1, 1, 1, cos_lat.shape[0], 288)
         )
 
         self.state_trans = load_transforms(post_conf, scaler_only=True)
         self.eps = 1e-12
 
         # check for contiguous indices, need this for concat operation
-        assert np.all(np.diff(self.U_inds) == 1) and np.all(
-            self.U_inds[:-1] <= self.U_inds[1:]
-        )
-        assert np.all(np.diff(self.V_inds) == 1) and np.all(
-            self.V_inds[:-1] <= self.V_inds[1:]
-        )
+        assert np.all(np.diff(self.U_inds) == 1) and np.all(self.U_inds[:-1] <= self.U_inds[1:])
+        assert np.all(np.diff(self.V_inds) == 1) and np.all(self.V_inds[:-1] <= self.V_inds[1:])
 
         # initialize specific params
         self.alpha_init = post_conf["skebs"].get("alpha_init", 0.125)
-        self.zero_out_levels_top_of_model = post_conf["skebs"].get(
-            "zero_out_levels_top_of_model", 3
-        )
-        logger.info(
-            f"filtering out top {self.zero_out_levels_top_of_model} levels of skebs perturbation"
-        )
+        self.zero_out_levels_top_of_model = post_conf["skebs"].get("zero_out_levels_top_of_model", 3)
+        logger.info(f"filtering out top {self.zero_out_levels_top_of_model} levels of skebs perturbation")
 
-        self.tropics_only_dissipation = post_conf["skebs"].get(
-            "tropics_only_dissipation", False
-        )
+        self.tropics_only_dissipation = post_conf["skebs"].get("tropics_only_dissipation", False)
 
         ### initialize filters, pattern, and spherical harmonic transforms
         self.initialize_sht()
@@ -366,9 +342,7 @@ class SKEBS(nn.Module):
         self.spec_coef_is_initialized = False
 
         # freeze pattern weights before init backscatter
-        self.freeze_pattern_weights = post_conf["skebs"].get(
-            "freeze_pattern_weights", False
-        )
+        self.freeze_pattern_weights = post_conf["skebs"].get("freeze_pattern_weights", False)
         if self.freeze_pattern_weights:
             logger.warning("freezing all skebs pattern weights")
             for param in self.parameters():
@@ -383,9 +357,7 @@ class SKEBS(nn.Module):
             + post_conf["model"]["output_only_channels"]
         )
         if self.use_statics:
-            num_channels += (
-                len(self.static_inds) + 1
-            )  # this one for static vars and coslat
+            num_channels += len(self.static_inds) + 1  # this one for static vars and coslat
 
         self.relu1 = nn.ReLU()  # use this to gaurantee positive backscatter
 
@@ -408,9 +380,7 @@ class SKEBS(nn.Module):
         elif self.dissipation_type == "FCNN_wide":
             self.backscatter_network = BackscatterFCNNWide(num_channels, self.levels)
         elif self.dissipation_type == "CNN":
-            self.backscatter_network = BackscatterCNN(
-                num_channels, self.levels, self.nlat, self.nlon
-            )
+            self.backscatter_network = BackscatterCNN(num_channels, self.levels, self.nlat, self.nlon)
         elif self.dissipation_type == "unet":
             architecture = post_conf["skebs"].get("architecture", None)
             padding = post_conf["skebs"].get("padding", 48)
@@ -418,9 +388,7 @@ class SKEBS(nn.Module):
                 num_channels, self.levels, self.nlat, self.nlon, architecture, padding
             )
         else:
-            raise RuntimeError(
-                f"{self.dissipation_type} is a not a valid dissipation type, please modify config"
-            )
+            raise RuntimeError(f"{self.dissipation_type} is a not a valid dissipation type, please modify config")
 
         logger.info(f"using dissipation type: {self.dissipation_type}")
 
@@ -442,9 +410,7 @@ class SKEBS(nn.Module):
             self.alpha.requires_grad = True
             logger.info("training alpha")
 
-        train_backscatter_filter = post_conf["skebs"].get(
-            "train_backscatter_filter", False
-        )
+        train_backscatter_filter = post_conf["skebs"].get("train_backscatter_filter", False)
         if train_backscatter_filter:
             self.spectral_backscatter_filter.requires_grad = True
             logger.info("training backscatter filter")
@@ -454,21 +420,15 @@ class SKEBS(nn.Module):
             self.spectral_pattern_filter.requires_grad = True
             logger.info("training pattern filter")
 
-        logger.info(
-            f"trainable params{[name for name, param in self.named_parameters() if param.requires_grad]}"
-        )
+        logger.info(f"trainable params{[name for name, param in self.named_parameters() if param.requires_grad]}")
 
         ########### debugging and analysis features #############
         self.is_training = False
         self.iteration = 0
 
-        self.write_rollout_debug_files = post_conf["skebs"].get(
-            "write_rollout_debug_files", True
-        )
+        self.write_rollout_debug_files = post_conf["skebs"].get("write_rollout_debug_files", True)
 
-        self.write_train_debug_files = post_conf["skebs"].get(
-            "write_train_debug_files", False
-        )
+        self.write_train_debug_files = post_conf["skebs"].get("write_train_debug_files", False)
         self.write_every = post_conf["skebs"].get("write_train_every", 999)
 
         save_loc = post_conf["skebs"]["save_loc"]
@@ -489,12 +449,8 @@ class SKEBS(nn.Module):
         for both scalar and vector fields.
         """
         # Initialize spherical harmonics transformation objects
-        self.sht = harmonics.RealSHT(
-            self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False
-        )
-        self.isht = harmonics.InverseRealSHT(
-            self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False
-        )
+        self.sht = harmonics.RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        self.isht = harmonics.InverseRealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
         # self.vsht = harmonics.RealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
         self.ivsht = harmonics.InverseRealVectorSHT(
             self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False
@@ -510,18 +466,12 @@ class SKEBS(nn.Module):
         ## equiangular grid
         cost, w = harmonics.quadrature.clenshaw_curtiss_weights(self.nlat, -1, 1)
         self.lats = -torch.as_tensor(np.arcsin(cost))
-        self.lons = torch.linspace(0, 2 * np.pi, self.nlon + 1, dtype=torch.float64)[
-            : self.nlon
-        ]
+        self.lons = torch.linspace(0, 2 * np.pi, self.nlon + 1, dtype=torch.float64)[: self.nlon]
 
         l_arr = torch.arange(0, self.lmax).reshape(self.lmax, 1).double()
         l_arr = l_arr.expand(self.lmax, self.mmax)
-        self.register_buffer(
-            "lap", -l_arr * (l_arr + 1) / RAD_EARTH**2, persistent=False
-        )
-        self.register_buffer(
-            "invlap", -(RAD_EARTH**2) / l_arr / (l_arr + 1), persistent=False
-        )
+        self.register_buffer("lap", -l_arr * (l_arr + 1) / RAD_EARTH**2, persistent=False)
+        self.register_buffer("invlap", -(RAD_EARTH**2) / l_arr / (l_arr + 1), persistent=False)
         self.invlap[0] = 0.0  # Adjusting the first element to avoid division by zero
 
         logging.info(f"lmax: {self.lmax}, mmax: {self.mmax}")
@@ -541,9 +491,7 @@ class SKEBS(nn.Module):
         if self.tropics_only_dissipation:
             self.register_buffer(
                 "tropics_backscatter_filter",
-                torch.cat([torch.zeros(70), torch.ones(52), torch.zeros(70)]).view(
-                    1, 1, 1, self.nlat, 1
-                ),
+                torch.cat([torch.zeros(70), torch.ones(52), torch.zeros(70)]).view(1, 1, 1, self.nlat, 1),
                 persistent=False,
             )
         else:
@@ -553,9 +501,7 @@ class SKEBS(nn.Module):
                 persistent=False,
             )
 
-        self.register_buffer(
-            "lrange", torch.arange(1, self.lmax + 1).unsqueeze(1), persistent=False
-        )  # (lmax, 1)
+        self.register_buffer("lrange", torch.arange(1, self.lmax + 1).unsqueeze(1), persistent=False)  # (lmax, 1)
         # assume (b, c, t, ,lat,lon)
         # parameters we want to learn: (default init to berner 2009 values)
         if self.multistep:
@@ -568,9 +514,7 @@ class SKEBS(nn.Module):
         self.variance = Parameter(torch.tensor(0.083, requires_grad=True))
         self.p = Parameter(torch.tensor(-1.27, requires_grad=True))
         self.dE = Parameter(torch.tensor(1e-4, requires_grad=True))
-        self.r = Parameter(
-            torch.tensor(0.02, requires_grad=False)
-        )  # see berner 2009, section 4a
+        self.r = Parameter(torch.tensor(0.02, requires_grad=False))  # see berner 2009, section 4a
         self.r.requires_grad = False
         # initialize spectral filters
 
@@ -590,16 +534,12 @@ class SKEBS(nn.Module):
         p_max = self.post_conf["skebs"].get("max_pattern_wavenum", 60)
         p_anneal = self.post_conf["skebs"].get("pattern_filter_anneal_start", 40)
 
-        self.spectral_pattern_filter = Parameter(
-            filter_init(p_max, p_anneal), requires_grad=False
-        )
+        self.spectral_pattern_filter = Parameter(filter_init(p_max, p_anneal), requires_grad=False)
 
         b_max = self.post_conf["skebs"].get("max_backscatter_wavenum", 100)
         b_anneal = self.post_conf["skebs"].get("backscatter_filter_anneal_start", 90)
 
-        self.spectral_backscatter_filter = Parameter(
-            filter_init(b_max, b_anneal), requires_grad=False
-        )
+        self.spectral_backscatter_filter = Parameter(filter_init(b_max, b_anneal), requires_grad=False)
 
     def clip_parameters(self):
         """clip the trainable parameters so that they are always physical"""
@@ -608,12 +548,8 @@ class SKEBS(nn.Module):
         self.p.data = self.p.data.clamp(-10, -self.eps)
         self.dE.data = self.dE.data.clamp(self.eps, 1.0)
         self.r.data = self.r.data.clamp(self.eps, 1.0)
-        self.spectral_pattern_filter.data = self.spectral_pattern_filter.data.clamp(
-            0.0, 1.0
-        )
-        self.spectral_backscatter_filter.data = (
-            self.spectral_backscatter_filter.data.clamp(0.0, 1.0)
-        )
+        self.spectral_pattern_filter.data = self.spectral_pattern_filter.data.clamp(0.0, 1.0)
+        self.spectral_backscatter_filter.data = self.spectral_backscatter_filter.data.clamp(0.0, 1.0)
 
     def initialize_pattern(self, y_pred):
         """
@@ -647,23 +583,14 @@ class SKEBS(nn.Module):
         n is total wavenumber -> lmax
         """
         Gamma = torch.sum(
-            self.lrange
-            * (self.lrange + 1.0)
-            * (2 * self.lrange + 1.0)
-            * self.lrange ** (2.0 * self.p)
+            self.lrange * (self.lrange + 1.0) * (2 * self.lrange + 1.0) * self.lrange ** (2.0 * self.p)
         )  # scalar
-        self.b = torch.sqrt(
-            (4.0 * PI * RAD_EARTH**2.0) / (self.variance * Gamma) * self.alpha * self.dE
-        )  # scalar
+        self.b = torch.sqrt((4.0 * PI * RAD_EARTH**2.0) / (self.variance * Gamma) * self.alpha * self.dE)  # scalar
         self.g_n = self.b * self.lrange**self.p  # (lmax, 1)
 
-        cmplx_noise = torch.view_as_complex(
-            self.multivariateNormal.sample(spec_coef.shape)
-        )
+        cmplx_noise = torch.view_as_complex(self.multivariateNormal.sample(spec_coef.shape))
         noise = self.variance * cmplx_noise
-        new_coef = (1.0 - self.alpha) * spec_coef + self.g_n * torch.sqrt(
-            self.alpha
-        ) * noise  # (lmax, mmax)
+        new_coef = (1.0 - self.alpha) * spec_coef + self.g_n * torch.sqrt(self.alpha) * noise  # (lmax, mmax)
         return new_coef * self.spectral_pattern_filter
 
     @custom_fwd(device_type="cuda", cast_inputs=torch.float32)
@@ -676,20 +603,14 @@ class SKEBS(nn.Module):
             if self.training and self.steps >= self.forecast_len:
                 self.spec_coef_is_initialized = False
                 self.spec_coef = self.spec_coef.detach()
-                logger.debug(
-                    f"pattern is reset after train step {self.steps} total iter {self.iteration}"
-                )
+                logger.debug(f"pattern is reset after train step {self.steps} total iter {self.iteration}")
             elif not self.training and self.steps >= self.valid_forecast_len:
                 self.spec_coef_is_initialized = False
                 self.spec_coef = self.spec_coef.detach()
-                logger.debug(
-                    f"pattern is reset after valid step {self.steps} total iter {self.iteration}"
-                )
+                logger.debug(f"pattern is reset after valid step {self.steps} total iter {self.iteration}")
 
         if not self.is_training and torch.is_grad_enabled():
-            self.is_training = (
-                True  # set and forget to detect if we are in a training script
-            )
+            self.is_training = True  # set and forget to detect if we are in a training script
 
         # shutoff skebs if specified
         if self.iteration_stop > 0 and self.iteration > self.iteration_stop:
@@ -713,14 +634,10 @@ class SKEBS(nn.Module):
             x = x.detach()
 
         if self.iteration == 0:
-            self.cos_lat = self.cos_lat.to(x.device).expand(
-                x.shape[0], *self.cos_lat.shape[1:]
-            )
+            self.cos_lat = self.cos_lat.to(x.device).expand(x.shape[0], *self.cos_lat.shape[1:])
 
         if self.use_statics:  # compatibility with old fcnn
-            x = torch.cat(
-                [x, x_input_statics, self.cos_lat], dim=1
-            )  # add in static vars and coslat
+            x = torch.cat([x, x_input_statics, self.cos_lat], dim=1)  # add in static vars and coslat
 
         # takes in raw (transformed) model output
         # filter out model top and tropics if specified
@@ -754,9 +671,7 @@ class SKEBS(nn.Module):
         logger.debug(f"max backscatter: {torch.max(torch.abs(backscatter_pred))}")
 
         if (
-            (
-                self.write_rollout_debug_files and not self.is_training
-            )  # save out filtered backscatter
+            (self.write_rollout_debug_files and not self.is_training)  # save out filtered backscatter
             or (self.write_train_debug_files and self.iteration % self.write_every == 0)
         ):
             logger.info(f"writing backscatter file for iter {self.iteration}")
@@ -791,9 +706,7 @@ class SKEBS(nn.Module):
         logger.debug(f"max u_chi: {torch.max(torch.abs(u_chi))}")
         logger.debug(f"max v_chi: {torch.max(torch.abs(v_chi))}")
         # compute the dissipation term
-        dissipation_term = torch.sqrt(
-            self.r * backscatter_pred / self.dE
-        )  # shape (b, levels, 1, lat, lon)
+        dissipation_term = torch.sqrt(self.r * backscatter_pred / self.dE)  # shape (b, levels, 1, lat, lon)
         # sqrt(2e-2 * 1e1 * 1e4) * 0.5e-3 (pattern)
         # 1.4e1.5 * 0.5e-3 = 0.7e-1.5 = 0.2
         # pattern: 1e-3
@@ -809,9 +722,7 @@ class SKEBS(nn.Module):
             )
             torch.save(
                 self.spectral_backscatter_filter,
-                join(
-                    self.debug_save_loc, f"spectral_backscatter_filter_{self.iteration}"
-                ),
+                join(self.debug_save_loc, f"spectral_backscatter_filter_{self.iteration}"),
             )
             # add_wind_magnitude = torch.sqrt(dissipation_term ** 2 * (u_chi ** 2 + v_chi ** 2))
             # logger.debug(f"perturb max/min: {add_wind_magnitude.max():.2f}, {add_wind_magnitude.min():.2f}")
@@ -831,12 +742,8 @@ class SKEBS(nn.Module):
             )  # save out raw all backscatter prediction when not training
             or (self.write_train_debug_files and self.iteration % self.write_every == 0)
         ):
-            torch.save(
-                u_perturb, join(self.debug_save_loc, f"u_perturb_{self.iteration}")
-            )
-            torch.save(
-                v_perturb, join(self.debug_save_loc, f"v_perturb_{self.iteration}")
-            )
+            torch.save(u_perturb, join(self.debug_save_loc, f"u_perturb_{self.iteration}"))
+            torch.save(v_perturb, join(self.debug_save_loc, f"v_perturb_{self.iteration}"))
 
         logger.debug(f"max u perturb: {torch.max(torch.abs(u_perturb))}")
         logger.debug(f"max v perturb: {torch.max(torch.abs(v_perturb))}")
@@ -890,17 +797,11 @@ class SKEBS(nn.Module):
         """
         idim = chispec.ndim
 
-        if (
-            len(chispec.shape) != 1
-            and len(chispec.shape) != 2
-            and len(chispec.shape) != 3
-        ):
+        if len(chispec.shape) != 1 and len(chispec.shape) != 2 and len(chispec.shape) != 3:
             msg = "getgrad needs rank one or two arrays!"
             raise ValueError(msg)
 
-        ntrunc = int(
-            -1.5 + 0.5 * torch.sqrt(9.0 - 8.0 * (1.0 - torch.tensor(self.nlat)))
-        )
+        ntrunc = int(-1.5 + 0.5 * torch.sqrt(9.0 - 8.0 * (1.0 - torch.tensor(self.nlat))))
 
         if len(chispec.shape) == 1:
             chispec = torch.view(chispec, ((ntrunc + 1) * (ntrunc + 2) // 2, 1))
@@ -921,9 +822,7 @@ class SKEBS(nn.Module):
             uchi, vchi = self.getuv(
                 torch.stack(
                     (
-                        torch.zeros([divspec2.shape[0], divspec2.shape[1]]).to(
-                            divspec2.device
-                        ),
+                        torch.zeros([divspec2.shape[0], divspec2.shape[1]]).to(divspec2.device),
                         divspec2,
                     )
                 )
@@ -936,9 +835,7 @@ class SKEBS(nn.Module):
             # ).to(divspec2.device)
             # # Copy the original data into the second slice of the new dimension
             # stacked_divspec[:, 1, :, :] = divspec2
-            stacked_divspec = torch.concat(
-                [divspec2.unsqueeze(1), divspec2.unsqueeze(1)], dim=1
-            )
+            stacked_divspec = torch.concat([divspec2.unsqueeze(1), divspec2.unsqueeze(1)], dim=1)
 
             backy = self.getuv(stacked_divspec)
             uchi = backy[:, 0, :, :]

@@ -63,9 +63,7 @@ def worker(
         ind_start_in_file = ind_start_current_step - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(all_files[int(ind_file)]["time"]) - (
-            history_len + forecast_len + 1
-        )
+        ind_largest = len(all_files[int(ind_file)]["time"]) - (history_len + forecast_len + 1)
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
 
@@ -75,15 +73,11 @@ def worker(
         ind_end_in_file = ind_start_in_file + history_len + forecast_len
 
         # ERA5_subset: a xarray dataset that contains training input and target (for the current batch)
-        ERA5_subset = all_files[int(ind_file)].isel(
-            time=slice(ind_start_in_file, ind_end_in_file + 1)
-        )
+        ERA5_subset = all_files[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
         if surface_files:
             # subset surface variables
-            surface_subset = surface_files[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            surface_subset = surface_files[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
             # merge upper-air and surface here:
             ERA5_subset = ERA5_subset.merge(surface_subset)
@@ -125,14 +119,10 @@ def worker(
             # matching month, day, hour between forcing and upper air [time]
             # this approach handles leap year forcing file and non-leap-year upper air file
             month_day_forcing = extract_month_day_hour(np.array(xarray_forcing["time"]))
-            month_day_inputs = extract_month_day_hour(
-                np.array(historical_ERA5_images["time"])
-            )  # <-- upper air
+            month_day_inputs = extract_month_day_hour(np.array(historical_ERA5_images["time"]))  # <-- upper air
             # indices to subset
             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
-            forcing_subset_input = xarray_forcing.isel(
-                time=ind_forcing
-            ).load()  # <-- load into memory
+            forcing_subset_input = xarray_forcing.isel(time=ind_forcing).load()  # <-- load into memory
             # forcing and upper air have different years but the same mon/day/hour
             # safely replace forcing time with upper air time
             forcing_subset_input["time"] = historical_ERA5_images["time"]
@@ -148,9 +138,7 @@ def worker(
             N_time_dims = len(ERA5_subset["time"])
             static_subset_input = xarray_static.expand_dims(dim={"time": N_time_dims})
             # assign coords 'time'
-            static_subset_input = static_subset_input.assign_coords(
-                {"time": ERA5_subset["time"]}
-            )
+            static_subset_input = static_subset_input.assign_coords({"time": ERA5_subset["time"]})
 
             # slice + load to the GPU
             static_subset_input = static_subset_input.isel(
@@ -175,9 +163,7 @@ def worker(
         # merge diagnoisc input here:
         if diagnostic_files:
             # subset diagnostic variables
-            diagnostic_subset = diagnostic_files[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            diagnostic_subset = diagnostic_files[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
             # get the next forecast step
             diagnostic_subset = diagnostic_subset.isel(
@@ -235,11 +221,7 @@ def worker(
         # sample['forecast_step'] = ind_start_current_step - index + 1
         # sample['stop_forecast'] = stop_forecast
         sample["datetime"] = [
-            int(
-                historical_ERA5_images.time[0]
-                .astype("datetime64[s]")
-                .values.astype(int)
-            ),
+            int(historical_ERA5_images.time[0].astype("datetime64[s]").values.astype(int)),
             int(target_ERA5_images.time[0].astype("datetime64[s]").values.astype(int)),
         ]
 
@@ -286,13 +268,9 @@ class RepeatingIndexSampler(torch.utils.data.Sampler):
         # Compute valid starting indices ensuring full sequences fit
         all_start_indices = list(range(0, len(self.dataset), skip_periods))
 
-        num_indices = len(
-            all_start_indices
-        )  # Trim the number of indices to ensure it's divisible by world_size
+        num_indices = len(all_start_indices)  # Trim the number of indices to ensure it's divisible by world_size
         num_indices_per_rank = num_indices // self.num_replicas
-        all_start_indices = all_start_indices[
-            : num_indices_per_rank * self.num_replicas
-        ]
+        all_start_indices = all_start_indices[: num_indices_per_rank * self.num_replicas]
         self.all_start_indices = all_start_indices
         self.num_indices_per_rank = num_indices_per_rank
 
@@ -599,9 +577,7 @@ class ERA5_and_Forcing_MultiStep(torch.utils.data.Dataset):
         self.initial_index = None
 
     def __getitem__(self, index):
-        if (self.forecast_step_count == self.forecast_len + 1) or (
-            self.current_index is None
-        ):
+        if (self.forecast_step_count == self.forecast_len + 1) or (self.current_index is None):
             # We've completed the last forecast or we're starting for the first time
             # Start a new forecast using the sampler index
             self.current_index = index  # self._get_random_start_index()
@@ -639,9 +615,7 @@ if __name__ == "__main__":
     with open(filename) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = credit_main_parser(
-        conf, parse_training=True, parse_predict=False, print_summary=False
-    )
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
     training_data_check(conf, print_summary=False)
 
     data_config = setup_data_loading(conf)

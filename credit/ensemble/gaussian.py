@@ -19,7 +19,6 @@ class GaussianNoise:
             Defaults to 0.05.
     """
 
-
     def __init__(self, amplitude: float = 0.05):
         self.amplitude = amplitude
 

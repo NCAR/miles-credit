@@ -12,7 +12,6 @@ Key improvements:
 """
 
 import os
-import yaml
 import time
 import logging
 import warnings
@@ -20,13 +19,11 @@ from pathlib import Path
 import multiprocessing as mp
 import argparse
 
-from WindPP import post_process_wind_artifacts
-from Model_State import StateVariableAccessor, StateManager, CAMulatorStepper, initialize_camulator
+from Model_State import initialize_camulator
 
 # ---------- #
 # Numerics
 from datetime import datetime
-import xarray as xr
 import numpy as np
 
 # ---------- #
@@ -34,13 +31,7 @@ import torch
 
 # ---------- #
 # credit
-from credit.models import load_model, load_model_name
-from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
-from credit.distributed import distributed_model_wrapper
-from credit.models.checkpoint import load_model_state
-from credit.parser import credit_main_parser
-from credit.output import load_metadata, make_xarray, save_netcdf_increment
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.output import make_xarray, save_netcdf_increment
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -53,6 +44,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 # HELPER FUNCTIONS
 # ============================================================================
 
+
 def add_init_noise(state: torch.Tensor, noise_std: float = 0.05) -> torch.Tensor:
     """
     Add random noise to initial conditions for ensemble generation.
@@ -64,7 +56,7 @@ def add_init_noise(state: torch.Tensor, noise_std: float = 0.05) -> torch.Tensor
     Returns:
         state_with_noise: Perturbed state
     """
-    print(f'Adding initial condition noise (std={noise_std})')
+    print(f"Adding initial condition noise (std={noise_std})")
     noise = torch.randn_like(state) * noise_std
     return state + noise
 
@@ -79,27 +71,26 @@ def parse_datetime_from_config(conf: dict) -> datetime:
     Returns:
         init_dt: Python datetime object
     """
-    raw_dt = conf['predict']['start_datetime']
+    raw_dt = conf["predict"]["start_datetime"]
 
     if isinstance(raw_dt, str):
         # Parse "YYYY-MM-DD HH:MM:SS" format
-        return datetime.strptime(raw_dt, '%Y-%m-%d %H:%M:%S')
+        return datetime.strptime(raw_dt, "%Y-%m-%d %H:%M:%S")
     elif isinstance(raw_dt, datetime):
         # Already a Python datetime
         return raw_dt
     else:
         # Assume it's a cftime object - convert to Python datetime
         # cftime objects have year, month, day, hour, minute, second attributes
-        return datetime(raw_dt.year, raw_dt.month, raw_dt.day,
-                       raw_dt.hour, raw_dt.minute, raw_dt.second)
+        return datetime(raw_dt.year, raw_dt.month, raw_dt.day, raw_dt.hour, raw_dt.minute, raw_dt.second)
 
 
 # ============================================================================
 # INTEGRATION LOOP
 # ============================================================================
 
-def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = None,
-                            init_noise: float = None):
+
+def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = None, init_noise: float = None):
     """
     Run the CAMulator climate integration loop.
 
@@ -116,14 +107,14 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
         flag_energy: Whether energy fixer was active (for diagnostics)
     """
     # Unpack context
-    conf = context['conf']
-    stepper = context['stepper']
-    forcing_ds_norm = context['forcing_dataset']
-    static_forcing = context['static_forcing']
-    state = context['initial_state']
-    latlons = context['latlons']
-    metadata = context['metadata']
-    device = context['device']
+    conf = context["conf"]
+    stepper = context["stepper"]
+    forcing_ds_norm = context["forcing_dataset"]
+    static_forcing = context["static_forcing"]
+    state = context["initial_state"]
+    latlons = context["latlons"]
+    metadata = context["metadata"]
+    device = context["device"]
 
     # Update save location if append specified
     if save_append:
@@ -138,13 +129,13 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
         state = add_init_noise(state, noise_std=init_noise)
 
     # Trace model for performance (optional but recommended)
-    print('Tracing model with torch.jit...')
+    print("Tracing model with torch.jit...")
     # IMPORTANT: Initial state already contains forcing for first timestep
     # So we trace with the initial state shape as-is (DO NOT add forcing channels)
     dummy_input = torch.zeros_like(state)
     traced_model = torch.jit.trace(stepper.model, dummy_input)
     stepper.model = traced_model
-    print(f'Model traced with input shape: {dummy_input.shape}')
+    print(f"Model traced with input shape: {dummy_input.shape}")
 
     # Setup for time-stepping
     df_vars = conf["data"]["dynamic_forcing_variables"]
@@ -157,20 +148,20 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
 
     # IMPORTANT: Use the config's datetime object directly for xarray lookup
     # It might be cftime.DatetimeNoLeap, which xarray expects
-    start_datetime_raw = conf['predict']['start_datetime']
-    loc = dynamic_ds.indexes['time'].get_loc(start_datetime_raw)
+    start_datetime_raw = conf["predict"]["start_datetime"]
+    loc = dynamic_ds.indexes["time"].get_loc(start_datetime_raw)
     start_ix = loc.start if isinstance(loc, slice) else loc
     print(f"Starting integration at time index: {start_ix}")
 
     # Now convert to Python datetime for output formatting (if it's a string or cftime)
     init_dt = parse_datetime_from_config(conf)
-    init_str = init_dt.strftime('%Y-%m-%dT%HZ')
+    init_str = init_dt.strftime("%Y-%m-%dT%HZ")
 
     # ========================================================================
     # MAIN TIME-STEPPING LOOP
     # ========================================================================
 
-    print('Starting time-stepping loop...')
+    print("Starting time-stepping loop...")
     forecast_hour = 1
     timestep_counter = 0
 
@@ -179,7 +170,7 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
 
         # Load chunk of dynamic forcing data
         ds_slice = dynamic_ds.isel(time=slice(block_start, block_end)).load()
-        ds_slice_times = ds_slice['time'].values
+        ds_slice_times = ds_slice["time"].values
 
         # Stack forcing variables into tensor [time, vars, lat, lon]
         arr_list = [ds_slice[var].values for var in dynamic_ds.data_vars]
@@ -195,18 +186,19 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
 
             # Convert to Python datetime for output formatting
             # Handle numpy scalar wrapper
-            if hasattr(time_obj, 'item'):
+            if hasattr(time_obj, "item"):
                 time_obj = time_obj.item()
 
             if isinstance(time_obj, datetime):
                 utc_datetime = time_obj
             else:
                 # cftime object - convert to Python datetime
-                utc_datetime = datetime(time_obj.year, time_obj.month, time_obj.day,
-                                       time_obj.hour, time_obj.minute, time_obj.second)
+                utc_datetime = datetime(
+                    time_obj.year, time_obj.month, time_obj.day, time_obj.hour, time_obj.minute, time_obj.second
+                )
 
             if (timestep_counter + 1) % 20 == 0:
-                print(f'Model step: {timestep_counter+1:05}, time: {utc_datetime}')
+                print(f"Model step: {timestep_counter + 1:05}, time: {utc_datetime}")
 
             dynamic_forcing_t = gpu_forcing_chunk[t].unsqueeze(0)
 
@@ -219,9 +211,7 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
 
             if timestep_counter != 0:
                 # Build forcing from dynamic + static
-                model_input = stepper.state_manager.build_input_with_forcing(
-                    state, dynamic_forcing_t, static_forcing
-                )
+                model_input = stepper.state_manager.build_input_with_forcing(state, dynamic_forcing_t, static_forcing)
             else:
                 # First iteration: initial state already contains forcing
                 model_input = state
@@ -241,18 +231,13 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
 
             # Convert prediction to xarray (fast, on CPU)
             upper_air, single_level = make_xarray(
-                prediction.cpu(),
-                utc_datetime,
-                latlons.latitude.values,
-                latlons.longitude.values,
-                conf
+                prediction.cpu(), utc_datetime, latlons.latitude.values, latlons.longitude.values, conf
             )
 
             # Async save to NetCDF (runs in background pool)
             pool.apply_async(
                 save_netcdf_increment,
-                (upper_air, single_level, init_str, lead_time_periods * forecast_hour,
-                 metadata, conf)
+                (upper_air, single_level, init_str, lead_time_periods * forecast_hour, metadata, conf),
             )
 
             # ================================================================
@@ -262,16 +247,17 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
             state = stepper.state_manager.shift_state_forward(state, prediction)
             forecast_hour += 1
 
-    print('Time-stepping complete. Waiting for I/O to finish...')
+    print("Time-stepping complete. Waiting for I/O to finish...")
     time.sleep(30)  # Allow async writes to complete
 
-    print(f'Integration finished. Energy fixer active: {stepper.flag_energy}')
+    print(f"Integration finished. Energy fixer active: {stepper.flag_energy}")
     return stepper.flag_energy
 
 
 # ============================================================================
 # MAIN ENTRY POINT
 # ============================================================================
+
 
 def main():
     """Command-line interface for running CAMulator climate integrations."""
@@ -286,27 +272,33 @@ Example usage:
         --save_append run_future_00091 \\
         --device cuda \\
         --init_noise 0.05
-        """
+        """,
     )
 
-    parser.add_argument('--config', type=str, required=True,
-                       help='Path to model configuration YAML file')
-    parser.add_argument('--model_name', type=str, default=None,
-                       help='Optional model checkpoint name (e.g., checkpoint.pt00091.pt)')
-    parser.add_argument('--save_append', type=str, default=None,
-                       help='Append subfolder name to output directory')
-    parser.add_argument('--device', type=str, default='cuda',
-                       help='Device to run on (cuda or cpu)')
-    parser.add_argument('--init_noise', type=float, default=None,
-                       help='Add Gaussian noise to initial conditions (for ensembles)')
+    parser.add_argument("--config", type=str, required=True, help="Path to model configuration YAML file")
+    parser.add_argument(
+        "--model_name", type=str, default=None, help="Optional model checkpoint name (e.g., checkpoint.pt00091.pt)"
+    )
+    parser.add_argument("--save_append", type=str, default=None, help="Append subfolder name to output directory")
+    parser.add_argument("--device", type=str, default="cuda", help="Device to run on (cuda or cpu)")
+    parser.add_argument(
+        "--init_noise", type=float, default=None, help="Add Gaussian noise to initial conditions (for ensembles)"
+    )
 
     # Deprecated arguments (kept for backwards compatibility but unused)
-    parser.add_argument('--input_shape', type=int, nargs='+', default=None,
-                       help='[DEPRECATED] Input shape is now derived from config')
-    parser.add_argument('--forcing_shape', type=int, nargs='+', default=None,
-                       help='[DEPRECATED] Forcing shape is now derived from config')
-    parser.add_argument('--output_shape', type=int, nargs='+', default=None,
-                       help='[DEPRECATED] Output shape is now derived from config')
+    parser.add_argument(
+        "--input_shape", type=int, nargs="+", default=None, help="[DEPRECATED] Input shape is now derived from config"
+    )
+    parser.add_argument(
+        "--forcing_shape",
+        type=int,
+        nargs="+",
+        default=None,
+        help="[DEPRECATED] Forcing shape is now derived from config",
+    )
+    parser.add_argument(
+        "--output_shape", type=int, nargs="+", default=None, help="[DEPRECATED] Output shape is now derived from config"
+    )
 
     args = parser.parse_args()
 
@@ -317,30 +309,23 @@ Example usage:
     start_time = time.time()
 
     # Initialize CAMulator
-    context = initialize_camulator(
-        config_path=args.config,
-        model_name=args.model_name,
-        device=args.device
-    )
+    context = initialize_camulator(config_path=args.config, model_name=args.model_name, device=args.device)
 
     # Run integration with parallel I/O
     num_cpus = 8
     with mp.Pool(num_cpus) as pool:
         flag_energy = run_climate_integration(
-            pool=pool,
-            context=context,
-            save_append=args.save_append,
-            init_noise=args.init_noise
+            pool=pool, context=context, save_append=args.save_append, init_noise=args.init_noise
         )
 
     end_time = time.time()
     elapsed_time = end_time - start_time
 
-    print(f"\n{'='*60}")
-    print(f"Run completed successfully!")
-    print(f"Elapsed time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
+    print(f"\n{'=' * 60}")
+    print("Run completed successfully!")
+    print(f"Elapsed time: {elapsed_time:.2f} seconds ({elapsed_time / 60:.2f} minutes)")
     print(f"Outputs saved to: {context['conf']['predict']['save_forecast']}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":
