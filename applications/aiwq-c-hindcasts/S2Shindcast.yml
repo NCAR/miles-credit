@@ -1,0 +1,342 @@
+save_loc: /glade/work/cbecker/AIWQ_models/
+seed: 1000
+file_configs:
+  base_path: /glade/derecho/scratch/negins/DATA/CESMS2S_inits/
+  init: ''
+  member: ''
+data:
+  variables:
+  - U
+  - V
+  - T
+  - Qtot
+  save_loc: ''
+  surface_variables:
+  - PS
+  - TREFHT
+  save_loc_surface: ''
+  dynamic_forcing_variables:
+  - SOLIN
+  - SST
+  - ICEFRAC
+  - co2vmr_3d
+  save_loc_dynamic_forcing: ''
+  diagnostic_variables:
+  - PRECT
+  - TS
+  - CLDHGH
+  - CLDLOW
+  - CLDMED
+  - TAUX
+  - TAUY
+  - U10
+  - QFLX
+  - FSNS
+  - FLNS
+  - FSNT
+  - FLNT
+  - SHFLX
+  - LHFLX
+  save_loc_diagnostic: ''
+  forcing_variables: []
+  static_variables:
+  - z_norm
+  - LANDM_COSLAT
+  save_loc_static: /glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+  save_loc_physics: /glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+  mean_path: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/mean_6h_1980_Coupled_2000_2012_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc
+  std_path: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/std_6h_1980_Coupled_2000_2012_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc
+  train_years:
+  - 2000
+  - 2025
+  valid_years:
+  - 2025
+  - 2030
+  scaler_type: std_new
+  history_len: 1
+  valid_history_len: 1
+  forecast_len: 1
+  valid_forecast_len: 24
+  one_shot: true
+  lead_time_periods: 6
+  skip_periods: null
+  static_first: true
+  dataset_type: ERA5_MultiStep_Batcher
+  data_clamp: null
+trainer:
+  type: era5
+  mode: ddp
+  cpu_offload: false
+  activation_checkpoint: true
+  compile: false
+  load_weights: true
+  load_optimizer: true
+  load_scaler: true
+  load_scheduler: true
+  save_backup_weights: true
+  save_best_weights: true
+  save_every_epoch: true
+  save_metric_vars: true
+  update_learning_rate: false
+  learning_rate: 0.0001
+  weight_decay: 0
+  train_batch_size: 4
+  valid_batch_size: 4
+  batches_per_epoch: 0
+  valid_batches_per_epoch: 70
+  stopping_patience: 5000
+  skip_validation: false
+  start_epoch: 0
+  num_epoch: 5
+  reload_epoch: true
+  epochs: 300
+  use_scheduler: true
+  scheduler:
+    scheduler_type: cosine-annealing-restarts
+    first_cycle_steps: 100
+    cycle_mult: 6.0
+    max_lr: 0.0001
+    min_lr: 1.0e-09
+    warmup_steps: 99
+    gamma: 0.7
+  amp: false
+  mixed_precision:
+    param_dtype: float32
+    reduce_dtype: float32
+    buffer_dtype: float32
+  grad_accum_every: 1
+  grad_max_norm: 1.0
+  thread_workers: 32
+  valid_thread_workers: 0
+  prefetch_factor: 2
+model:
+  type: crossformer
+  frames: 1
+  image_height: 192
+  image_width: 288
+  levels: 32
+  channels: 4
+  surface_channels: 2
+  input_only_channels: 6
+  output_only_channels: 15
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+  dim:
+  - 256
+  - 512
+  - 1024
+  - 2048
+  depth:
+  - 2
+  - 2
+  - 18
+  - 2
+  global_window_size:
+  - 4
+  - 4
+  - 2
+  - 1
+  local_window_size: 3
+  cross_embed_kernel_sizes:
+  - - 4
+    - 8
+    - 16
+    - 32
+  - - 2
+    - 4
+  - - 2
+    - 4
+  - - 2
+    - 4
+  cross_embed_strides:
+  - 2
+  - 2
+  - 2
+  - 2
+  attn_dropout: 0.0
+  ff_dropout: 0.0
+  use_spectral_norm: true
+  interp: true
+  padding_conf:
+    activate: true
+    mode: earth
+    pad_lat: 48
+    pad_lon: 48
+  post_conf:
+    activate: true
+    requires_scaling: false
+    scaling_coefs:
+      tot_precip: 1
+      surf_net_solar: 1
+      surf_net_therm: 1
+      surf_shflx: 1
+      surf_lhflx: 1
+      top_net_solar: 1
+      top_net_therm: 1
+      evap: 1
+      SP: 1
+      U: 1
+      V: 1
+      gph_surf: 1
+      temp: 1
+      Q: 1
+      T: 1
+    skebs:
+      activate: false
+    tracer_fixer:
+      activate: true
+      denorm: true
+      tracer_name:
+      - Qtot
+      - PRECT
+      - U10
+      - CLDHGH
+      - CLDLOW
+      - CLDMED
+      tracer_thres:
+      - 0
+      - 0
+      - 0
+      - 0
+      - 0
+      - 0
+    global_mass_fixer:
+      activate: true
+      activate_outside_model: true
+      simple_demo: false
+      denorm: true
+      grid_type: sigma
+      midpoint: true
+      fix_level_num: 14
+      lon_lat_level_name:
+      - lon2d
+      - lat2d
+      - hyai
+      - hybi
+      surface_pressure_name:
+      - PS
+      specific_total_water_name:
+      - Qtot
+    global_drymass_fixer:
+      activate: true
+      activate_outside_model: true
+      simple_demo: false
+      denorm: true
+      grid_type: sigma
+      midpoint: true
+      fix_level_num: 14
+      lon_lat_level_name:
+      - lon2d
+      - lat2d
+      - hyai
+      - hybi
+      surface_pressure_name:
+      - PS
+      specific_total_water_name:
+      - Qtot
+    global_water_fixer:
+      activate: true
+      activate_outside_model: true
+      simple_demo: false
+      denorm: true
+      grid_type: sigma
+      midpoint: true
+      lon_lat_level_name:
+      - lon2d
+      - lat2d
+      - hyai
+      - hybi
+      surface_pressure_name:
+      - PS
+      specific_total_water_name:
+      - Qtot
+      precipitation_name:
+      - PRECT
+      evaporation_name:
+      - QFLX
+    global_energy_fixer:
+      activate: true
+      activate_outside_model: true
+      simple_demo: false
+      denorm: true
+      grid_type: sigma
+      midpoint: true
+      lon_lat_level_name:
+      - lon2d
+      - lat2d
+      - hyai
+      - hybi
+      surface_pressure_name:
+      - PS
+      air_temperature_name:
+      - T
+      specific_total_water_name:
+      - Qtot
+      u_wind_name:
+      - U
+      v_wind_name:
+      - V
+      surface_geopotential_name:
+      - PHIS
+      TOA_net_radiation_flux_name:
+      - FSNT
+      - FLNT
+      surface_net_radiation_flux_name:
+      - FSNS
+      - FLNS
+      surface_energy_flux_name:
+      - SHFLX
+      - LHFLX
+loss:
+  training_loss: mse
+  use_power_loss: false
+  use_spectral_loss: false
+  spectral_lambda_reg: 0.1
+  spectral_wavenum_init: 20
+  latitude_weights: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+  use_latitude_weights: true
+  use_variable_weights: false
+use_ptype: false
+predict:
+  mode: ddp
+  batch_size: 1
+  forecasts:
+    type: custom
+    start_year: 2003
+    start_month: 1
+    start_day: 2
+    start_hours:
+    - 0
+    duration: 1
+    days: 46
+  realtime:
+    forecast_start_time: ''
+    forecast_end_time: ''
+    forecast_timestep: 6h
+  interp_pressure:
+    surface_geopotential_var: PHIS
+    interp_fields:
+    - U
+    - V
+    - T
+    - Qtot
+    q_var: Qtot
+    surface_pressure_var: PS
+    model_level_file: /glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+    a_model_name: hyam
+    b_model_name: hybm
+    a_half_name: hyai
+    b_half_name: hybi
+    pressure_levels:
+    - 500.0
+    - 700.0
+    - 850.0
+  metadata: /glade/work/kjmayer/research/CESM_Spatial_PS/metadata/cesm.yml
+  save_forecast: /glade/derecho/scratch/negins/CAMulator_Hindcast/
+  static_fields: /glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+  use_laplace_filter: false
+  save_vars:
+  - PRECT
+  - TREFHT
+  - mean_sea_level_pressure
