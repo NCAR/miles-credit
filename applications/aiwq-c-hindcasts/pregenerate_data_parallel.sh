@@ -4,7 +4,7 @@
 #PBS -l walltime=00:25:00
 #PBS -A SCSG0001
 #PBS -q casper@casper-pbs
-#PBS -o logs_step1/pregen_^array_index^.log
+#PBS -o logs/pregen_^array_index^.log
 #PBS -j oe
 
 # ============================================================================
@@ -12,11 +12,11 @@
 # PARALLEL Pre-generation using PBS Job Array
 #
 # To submit all dates (2000-01-01 to 2020-12-31):
-#   mkdir -p logs logs_step1
+#   mkdir -p logs
 #   qsub -J 0-766 pregenerate_data_parallel.sh
 #
 # Monitor: qstat -u $USER
-# Check failures: cat logs_step1/dates.txt
+# Check failures: cat logs/dates.txt
 # Safe to resubmit — already-completed dates are skipped.
 #
 # Splits ~7,670 dates across 767 array jobs (10 dates per job)
@@ -30,14 +30,14 @@
 # ============================================================================
 
 module load conda
-conda activate /glade/work/negins/conda-envs/miles-credit-for-kirsten/
+conda activate /glade/derecho/scratch/negins/conda-envs/miles-credit-for-kirsten
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Configuration
 DATES_PER_JOB=10
 START_DATE="2000-01-01"
-LOG_DIR="${SCRIPT_DIR}/logs_step1"
+LOG_DIR="${SCRIPT_DIR}/logs"
 
 FAILED_DATES="$LOG_DIR/dates.txt"
 
