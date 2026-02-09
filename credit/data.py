@@ -127,18 +127,13 @@ def hour_to_nanoseconds(input_hr):
 
 def nanoseconds_to_year(nanoseconds_value):
     """Given datetime info as nanoseconds, compute which year it belongs to."""
-    return (
-        np.datetime64(nanoseconds_value, "ns").astype("datetime64[Y]").astype(int)
-        + 1970
-    )
+    return np.datetime64(nanoseconds_value, "ns").astype("datetime64[Y]").astype(int) + 1970
 
 
 def extract_month_day_hour(dates):
     """Given an 1-d array of np.datatime64[ns], extract their mon, day, hr into a zipped list."""
     months = dates.astype("datetime64[M]").astype(int) % 12 + 1
-    days = (
-        (dates - dates.astype("datetime64[M]") + 1).astype("timedelta64[D]").astype(int)
-    )
+    days = (dates - dates.astype("datetime64[M]") + 1).astype("timedelta64[D]").astype(int)
     hours = dates.astype("datetime64[h]").astype(int) % 24
     return list(zip(months, days, hours))
 
@@ -159,9 +154,7 @@ def concat_and_reshape(x1, x2):
     """Flattening the "level" coordinate of upper-air variables and concatenate it will surface variables."""
     # print("x1 shape: ", x1.shape)
     # print("x2 shape: ", x2.shape)
-    x1 = x1.view(
-        x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5]
-    )
+    x1 = x1.view(x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5])
     x_concat = torch.cat((x1, x2), dim=2)
     return x_concat.permute(0, 2, 1, 3, 4)
 
@@ -171,9 +164,7 @@ def reshape_only(x1):
 
     As in "concat_and_reshape", but no concat.
     """
-    x1 = x1.view(
-        x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5]
-    )
+    x1 = x1.view(x1.shape[0], x1.shape[1], x1.shape[2] * x1.shape[3], x1.shape[4], x1.shape[5])
     return x1.permute(0, 2, 1, 3, 4)
 
 
@@ -290,9 +281,7 @@ def subset_patch(
     else:
         i0, j0 = start
         if i0 < 0 or j0 < 0 or i0 + h > H or j0 + w > W:
-            raise ValueError(
-                f"Start {(i0, j0)} with size {(h, w)} is out of bounds for {H}x{W}"
-            )
+            raise ValueError(f"Start {(i0, j0)} with size {(h, w)} is out of bounds for {H}x{W}")
 
     i1 = i0 + h
     j1 = j0 + w
@@ -305,9 +294,7 @@ def encode_datetime64(dt_array):
     dt_s = dt_array.astype("datetime64[s]")
 
     # Time components
-    seconds_since_midnight = (
-        (dt_s - dt_s.astype("datetime64[D]")).astype("timedelta64[s]").astype(int)
-    )
+    seconds_since_midnight = (dt_s - dt_s.astype("datetime64[D]")).astype("timedelta64[s]").astype(int)
     hour = seconds_since_midnight / 3600.0
 
     # Day of year
@@ -620,9 +607,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         if self.filename_forcing is not None:
             # drop variables if they are not in the config
             ds = get_forward_data(filename_forcing)
-            ds_forcing = drop_var_from_dataset(
-                ds, varname_forcing
-            ).load()  # <---- load in static
+            ds_forcing = drop_var_from_dataset(ds, varname_forcing).load()  # <---- load in static
 
             self.xarray_forcing = ds_forcing
         else:
@@ -635,9 +620,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         if self.filename_static is not None:
             # drop variables if they are not in the config
             ds = get_forward_data(filename_static)
-            ds_static = drop_var_from_dataset(
-                ds, varname_static
-            ).load()  # <---- load in static
+            ds_static = drop_var_from_dataset(ds, varname_static).load()  # <---- load in static
 
             self.xarray_static = ds_static
         else:
@@ -669,9 +652,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         ind_start_in_file = index - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(self.all_files[int(ind_file)]["time"]) - (
-            self.history_len + self.forecast_len + 1
-        )
+        ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
 
@@ -695,9 +676,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
             )  # .load() NOT load into memory
 
             ## merge upper-air and surface here:
-            ERA5_subset = ERA5_subset.merge(
-                surface_subset
-            )  # <-- lazy merge, ERA5 and surface both not loaded
+            ERA5_subset = ERA5_subset.merge(surface_subset)  # <-- lazy merge, ERA5 and surface both not loaded
 
         # ==================================================== #
         # split ERA5_subset into training inputs and targets
@@ -735,17 +714,11 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
             # ------------------------------------------------------------------------------- #
             # matching month, day, hour between forcing and upper air [time]
             # this approach handles leap year forcing file and non-leap-year upper air file
-            month_day_forcing = extract_month_day_hour(
-                np.array(self.xarray_forcing["time"])
-            )
-            month_day_inputs = extract_month_day_hour(
-                np.array(historical_ERA5_images["time"])
-            )  # <-- upper air
+            month_day_forcing = extract_month_day_hour(np.array(self.xarray_forcing["time"]))
+            month_day_inputs = extract_month_day_hour(np.array(historical_ERA5_images["time"]))  # <-- upper air
             # indices to subset
             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
-            forcing_subset_input = self.xarray_forcing.isel(
-                time=ind_forcing
-            )  # .load() # <-- loadded in init
+            forcing_subset_input = self.xarray_forcing.isel(time=ind_forcing)  # .load() # <-- loadded in init
             # forcing and upper air have different years but the same mon/day/hour
             # safely replace forcing time with upper air time
             forcing_subset_input["time"] = historical_ERA5_images["time"]
@@ -759,13 +732,9 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         if self.xarray_static:
             # expand static var on time dim
             N_time_dims = len(ERA5_subset["time"])
-            static_subset_input = self.xarray_static.expand_dims(
-                dim={"time": N_time_dims}
-            )
+            static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
             # assign coords 'time'
-            static_subset_input = static_subset_input.assign_coords(
-                {"time": ERA5_subset["time"]}
-            )
+            static_subset_input = static_subset_input.assign_coords({"time": ERA5_subset["time"]})
 
             # slice + load to the GPU
             static_subset_input = static_subset_input.isel(
@@ -784,9 +753,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
 
         if self.one_shot is not None:
             # one_shot is True (on), go straight to the last element
-            target_ERA5_images = ERA5_subset.isel(
-                time=slice(-1, None)
-            ).load()  # <-- load into memory
+            target_ERA5_images = ERA5_subset.isel(time=slice(-1, None)).load()  # <-- load into memory
 
             ## merge diagnoisc input here:
             if self.diagnostic_files:
@@ -794,9 +761,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
                     time=slice(ind_start_in_file, ind_end_in_file + 1)
                 )
 
-                diagnostic_subset = diagnostic_subset.isel(
-                    time=slice(-1, None)
-                ).load()  # <-- load into memory
+                diagnostic_subset = diagnostic_subset.isel(time=slice(-1, None)).load()  # <-- load into memory
 
                 target_ERA5_images = target_ERA5_images.merge(diagnostic_subset)
 
@@ -841,9 +806,9 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
 
             # for multi-input cases, use time=-1 ocean SKT for all times
             if self.history_len > 1:
-                input_skt[: self.history_len - 1] = input_skt[
-                    : self.history_len - 1
-                ].where(~ocean_mask_bool, input_skt.isel(time=-1))
+                input_skt[: self.history_len - 1] = input_skt[: self.history_len - 1].where(
+                    ~ocean_mask_bool, input_skt.isel(time=-1)
+                )
 
             # for target skt, replace ocean values using time=-1 input SKT
             target_skt = target_skt.where(~ocean_mask_bool, input_skt.isel(time=-1))
@@ -1075,9 +1040,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         if self.filename_forcing is not None:
             # drop variables if they are not in the config
             ds = get_forward_data(filename_forcing)
-            ds_forcing = drop_var_from_dataset(
-                ds, varname_forcing
-            ).load()  # <---- load in static
+            ds_forcing = drop_var_from_dataset(ds, varname_forcing).load()  # <---- load in static
 
             self.xarray_forcing = ds_forcing
         else:
@@ -1090,9 +1053,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         if self.filename_static is not None:
             # drop variables if they are not in the config
             ds = get_forward_data(filename_static)
-            ds_static = drop_var_from_dataset(
-                ds, varname_static
-            ).load()  # <---- load in static
+            ds_static = drop_var_from_dataset(ds, varname_static).load()  # <---- load in static
 
             self.xarray_static = ds_static
         else:
@@ -1132,9 +1093,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         ind_start_in_file = index - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(self.all_files[int(ind_file)]["time"]) - (
-            self.history_len + self.forecast_len + 1
-        )
+        ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
 
@@ -1158,9 +1117,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
             )  # .load() NOT load into memory
 
             ## merge upper-air and surface here:
-            ERA5_subset = ERA5_subset.merge(
-                surface_subset
-            )  # <-- lazy merge, ERA5 and surface both not loaded
+            ERA5_subset = ERA5_subset.merge(surface_subset)  # <-- lazy merge, ERA5 and surface both not loaded
 
         # ==================================================== #
         # split ERA5_subset into training inputs and targets
@@ -1198,17 +1155,11 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
             # ------------------------------------------------------------------------------- #
             # matching month, day, hour between forcing and upper air [time]
             # this approach handles leap year forcing file and non-leap-year upper air file
-            month_day_forcing = extract_month_day_hour(
-                np.array(self.xarray_forcing["time"])
-            )
-            month_day_inputs = extract_month_day_hour(
-                np.array(historical_ERA5_images["time"])
-            )  # <-- upper air
+            month_day_forcing = extract_month_day_hour(np.array(self.xarray_forcing["time"]))
+            month_day_inputs = extract_month_day_hour(np.array(historical_ERA5_images["time"]))  # <-- upper air
             # indices to subset
             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
-            forcing_subset_input = self.xarray_forcing.isel(
-                time=ind_forcing
-            )  # .load() # <-- loadded in init
+            forcing_subset_input = self.xarray_forcing.isel(time=ind_forcing)  # .load() # <-- loadded in init
             # forcing and upper air have different years but the same mon/day/hour
             # safely replace forcing time with upper air time
             forcing_subset_input["time"] = historical_ERA5_images["time"]
@@ -1222,13 +1173,9 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         if self.xarray_static:
             # expand static var on time dim
             N_time_dims = len(ERA5_subset["time"])
-            static_subset_input = self.xarray_static.expand_dims(
-                dim={"time": N_time_dims}
-            )
+            static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
             # assign coords 'time'
-            static_subset_input = static_subset_input.assign_coords(
-                {"time": ERA5_subset["time"]}
-            )
+            static_subset_input = static_subset_input.assign_coords({"time": ERA5_subset["time"]})
 
             # slice + load to the GPU
             static_subset_input = static_subset_input.isel(
@@ -1247,9 +1194,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
 
         if self.one_shot is not None:
             # one_shot is True (on), go straight to the last element
-            target_ERA5_images = ERA5_subset.isel(
-                time=slice(-1, None)
-            ).load()  # <-- load into memory
+            target_ERA5_images = ERA5_subset.isel(time=slice(-1, None)).load()  # <-- load into memory
 
             ## merge diagnoisc input here:
             if self.diagnostic_files:
@@ -1257,9 +1202,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
                     time=slice(ind_start_in_file, ind_end_in_file + 1)
                 )
 
-                diagnostic_subset = diagnostic_subset.isel(
-                    time=slice(-1, None)
-                ).load()  # <-- load into memory
+                diagnostic_subset = diagnostic_subset.isel(time=slice(-1, None)).load()  # <-- load into memory
 
                 target_ERA5_images = target_ERA5_images.merge(diagnostic_subset)
 
@@ -1304,9 +1247,9 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
 
             # for multi-input cases, use time=-1 ocean SKT for all times
             if self.history_len > 1:
-                input_skt[: self.history_len - 1] = input_skt[
-                    : self.history_len - 1
-                ].where(~ocean_mask_bool, input_skt.isel(time=-1))
+                input_skt[: self.history_len - 1] = input_skt[: self.history_len - 1].where(
+                    ~ocean_mask_bool, input_skt.isel(time=-1)
+                )
 
             # for target skt, replace ocean values using time=-1 input SKT
             target_skt = target_skt.where(~ocean_mask_bool, input_skt.isel(time=-1))
@@ -1401,9 +1344,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         self.history_len = history_len
         self.init_datetime = fcst_datetime
 
-        self.which_forecast = (
-            which_forecast  # <-- got from the old roll-out script. Dont know
-        )
+        self.which_forecast = which_forecast  # <-- got from the old roll-out script. Dont know
 
         # -------------------------------------- #
         # file names
@@ -1429,9 +1370,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         for fn in self.filenames:
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename=fn)
-            xarray_dataset = drop_var_from_dataset(
-                xarray_dataset, self.varname_upper_air
-            )
+            xarray_dataset = drop_var_from_dataset(xarray_dataset, self.varname_upper_air)
             # collect yearly datasets within a list
             all_files.append(xarray_dataset)
         self.all_files = all_files
@@ -1477,9 +1416,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         # open the zarr file as xr.dataset and subset based on the needed time
 
         # sliced_x: the final output, starts with an upper air xr.dataset
-        sliced_x = self.ds_read_and_subset(
-            self.filenames[i_file], i_init_start, i_init_end + 1, self.varname_upper_air
-        )
+        sliced_x = self.ds_read_and_subset(self.filenames[i_file], i_init_start, i_init_end + 1, self.varname_upper_air)
         # surface variables
         if self.filename_surface is not None:
             sliced_surface = self.ds_read_and_subset(
@@ -1508,22 +1445,16 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
             # forcing / static
             if self.filename_forcing is not None:
                 sliced_forcing = get_forward_data(self.filename_forcing)
-                sliced_forcing = drop_var_from_dataset(
-                    sliced_forcing, self.varname_forcing
-                )
+                sliced_forcing = drop_var_from_dataset(sliced_forcing, self.varname_forcing)
 
                 # See also `ERA5_and_Forcing_Dataset`
                 # =============================================================================== #
                 # matching month, day, hour between forcing and upper air [time]
                 # this approach handles leap year forcing file and non-leap-year upper air file
-                month_day_forcing = extract_month_day_hour(
-                    np.array(sliced_forcing["time"])
-                )
+                month_day_forcing = extract_month_day_hour(np.array(sliced_forcing["time"]))
                 month_day_inputs = extract_month_day_hour(np.array(sliced_x["time"]))
                 # indices to subset
-                ind_forcing, _ = find_common_indices(
-                    month_day_forcing, month_day_inputs
-                )
+                ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
                 sliced_forcing = sliced_forcing.isel(time=ind_forcing)
                 # forcing and upper air have different years but the same mon/day/hour
                 # safely replace forcing time with upper air time
@@ -1535,12 +1466,8 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
 
             if self.filename_static is not None:
                 sliced_static = get_forward_data(self.filename_static)
-                sliced_static = drop_var_from_dataset(
-                    sliced_static, self.varname_static
-                )
-                sliced_static = sliced_static.expand_dims(
-                    dim={"time": len(sliced_x["time"])}
-                )
+                sliced_static = drop_var_from_dataset(sliced_static, self.varname_static)
+                sliced_static = sliced_static.expand_dims(dim={"time": len(sliced_x["time"])})
                 sliced_static["time"] = sliced_x["time"]
                 # merge static to sliced_x
                 sliced_x = sliced_x.merge(sliced_static)
@@ -1570,9 +1497,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
         # ============================================================================ #
         # shift hours for history_len > 1, becuase more than one init times are needed
         # <--- !! it MAY NOT work when self.skip_period != 1
-        shifted_hours = (
-            self.lead_time_periods * self.skip_periods * (self.history_len - 1)
-        )
+        shifted_hours = self.lead_time_periods * self.skip_periods * (self.history_len - 1)
         # ============================================================================ #
         # subtrack shifted_hour form the 1st & last init times
         # convert to datetime object
@@ -1590,17 +1515,13 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
             self.lead_time_periods,
         )
         # convert datetime obj to nanosecondes
-        init_time_list_dt = [
-            np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S"))
-            for date in self.init_datetime[index]
-        ]
+        init_time_list_dt = [np.datetime64(date.strftime("%Y-%m-%d %H:%M:%S")) for date in self.init_datetime[index]]
 
         # init_time_list_np: a list of python datetime objects, each is a forecast step
         # init_time_list_np[0]: the first initialization time
         # init_time_list_np[t]: the forcasted time of the (t-1)th step; the initialization time of the t-th step
         self.init_time_list_np = [
-            np.datetime64(str(dt_obj) + ".000000000").astype(datetime.datetime)
-            for dt_obj in init_time_list_dt
+            np.datetime64(str(dt_obj) + ".000000000").astype(datetime.datetime) for dt_obj in init_time_list_dt
         ]
 
         info = []
@@ -1623,9 +1544,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
 
                     # convert ds['time'] to a list of nanoseconds
                     ds_time_list = [
-                        np.datetime64(ensure_numpy_datetime(ds_time.values))
-                        .astype("datetime64[ns]")
-                        .astype(int)
+                        np.datetime64(ensure_numpy_datetime(ds_time.values)).astype("datetime64[ns]").astype(int)
                         for ds_time in ds["time"]
                     ]
 
@@ -1643,9 +1562,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                         i_init_start = ds_time_list.index(init_time_start)
 
                         # for multiple init time inputs (history_len > 1), init_end is different for init_start
-                        init_time_end = init_time_start + hour_to_nanoseconds(
-                            shifted_hours
-                        )
+                        init_time_end = init_time_start + hour_to_nanoseconds(shifted_hours)
 
                         # see if init_time_end is alos in this file
                         if ds_start_time <= init_time_end <= ds_end_time:
@@ -1687,55 +1604,33 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                 output_dict = {}
 
                 # get all inputs in one xr.Dataset
-                sliced_x = self.load_zarr_as_input(
-                    i_file, i_init_start, i_init_end, mode="input"
-                )
+                sliced_x = self.load_zarr_as_input(i_file, i_init_start, i_init_end, mode="input")
 
                 # Check if additional data from the next file is needed
-                if (len(sliced_x["time"]) < self.history_len) or (
-                    i_init_end + 1 >= N_times
-                ):
+                if (len(sliced_x["time"]) < self.history_len) or (i_init_end + 1 >= N_times):
                     # Load excess data from the next file
                     next_file_idx = self.filenames.index(self.filenames[i_file]) + 1
 
                     if next_file_idx >= len(self.filenames):
                         # not enough input data to support this forecast
-                        raise OSError(
-                            "You have reached the end of the available data. Exiting."
-                        )
+                        raise OSError("You have reached the end of the available data. Exiting.")
 
                     else:
-                        sliced_y = self.load_zarr_as_input(
-                            i_file, i_init_end, i_init_end, mode="target"
-                        )
+                        sliced_y = self.load_zarr_as_input(i_file, i_init_end, i_init_end, mode="target")
 
                         # i_init_start = 0 because we need the beginning of the next file only
-                        sliced_x_next = self.load_zarr_as_input(
-                            next_file_idx, 0, self.history_len, mode="input"
-                        )
-                        sliced_y_next = self.load_zarr_as_input(
-                            next_file_idx, 0, 1, mode="target"
-                        )
+                        sliced_x_next = self.load_zarr_as_input(next_file_idx, 0, self.history_len, mode="input")
+                        sliced_y_next = self.load_zarr_as_input(next_file_idx, 0, 1, mode="target")
                         # 1 becuase taregt is one step a time
 
                         # Concatenate excess data from the next file with the current data
-                        sliced_x_combine = xr.concat(
-                            [sliced_x, sliced_x_next], dim="time"
-                        )
-                        sliced_y_combine = xr.concat(
-                            [sliced_y, sliced_y_next], dim="time"
-                        )
+                        sliced_x_combine = xr.concat([sliced_x, sliced_x_next], dim="time")
+                        sliced_y_combine = xr.concat([sliced_y, sliced_y_next], dim="time")
 
-                        sliced_x = sliced_x_combine.isel(
-                            time=slice(0, self.history_len)
-                        )
-                        sliced_y = sliced_y_combine.isel(
-                            time=slice(self.history_len, self.history_len + 1)
-                        )
+                        sliced_x = sliced_x_combine.isel(time=slice(0, self.history_len))
+                        sliced_y = sliced_y_combine.isel(time=slice(self.history_len, self.history_len + 1))
                 else:
-                    sliced_y = self.load_zarr_as_input(
-                        i_file, i_init_end + 1, i_init_end + 1, mode="target"
-                    )
+                    sliced_y = self.load_zarr_as_input(i_file, i_init_end + 1, i_init_end + 1, mode="target")
 
                 sample_x = {
                     "historical_ERA5_images": sliced_x,
@@ -1752,9 +1647,7 @@ class Predict_Dataset(torch.utils.data.IterableDataset):
                 output_dict["forecast_hour"] = k + 1
                 # Adjust stopping condition
                 output_dict["stop_forecast"] = k == (len(self.init_time_list_np) - 1)
-                output_dict["datetime"] = sliced_x.time.values.astype(
-                    "datetime64[s]"
-                ).astype(int)[-1]
+                output_dict["datetime"] = sliced_x.time.values.astype("datetime64[s]").astype(int)[-1]
 
                 # return output_dict
                 yield output_dict

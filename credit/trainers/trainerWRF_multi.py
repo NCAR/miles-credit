@@ -96,7 +96,9 @@ class Trainer(BaseTrainer):
             # If not specified in config, use the range 1 to forecast_len
             backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
 
-        assert forecast_length <= backprop_on_timestep[-1], f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
+        assert forecast_length <= backprop_on_timestep[-1], (
+            f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
+        )
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
         if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
@@ -113,7 +115,9 @@ class Trainer(BaseTrainer):
                 dataset_batches_per_epoch = len(trainloader)
 
             # Use the user-given number if not larger than the dataset
-            batches_per_epoch = batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
+            batches_per_epoch = (
+                batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
+            )
 
         batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
 
@@ -331,7 +335,11 @@ class Trainer(BaseTrainer):
                 dataset_batches_per_epoch = len(valid_loader)
 
             # Use the user-given number if not larger than the dataset
-            valid_batches_per_epoch = valid_batches_per_epoch if 0 < valid_batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
+            valid_batches_per_epoch = (
+                valid_batches_per_epoch
+                if 0 < valid_batches_per_epoch < dataset_batches_per_epoch
+                else dataset_batches_per_epoch
+            )
 
         batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
 

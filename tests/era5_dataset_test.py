@@ -19,20 +19,33 @@ def annual_xr_dataset():
         lat = np.linspace(-90, 90, 21)
         lon = np.linspace(-180, 180, 41)
 
-        return xr.Dataset(data_vars={"T": (("time", "level", "latitude", "longitude"),
-                                           np.random.rand(len(time), len(level), len(lat), len(lon))),
-                                     "U": (("time", "level", "latitude", "longitude"),
-                                           np.random.rand(len(time), len(level), len(lat), len(lon))),
-                                     "SP": (("time", "latitude", "longitude"),
-                                            np.random.rand(len(time), len(lat), len(lon))),
-                                     "tsi": (("time", "latitude", "longitude"),
-                                             np.random.rand(len(time), len(lat), len(lon))),
-                                     "TP": (("time", "latitude", "longitude"),
-                                            np.random.rand(len(time), len(lat), len(lon))),
-                                     "LSM": (("latitude", "longitude"), np.random.rand(len(lat), len(lon))), },
-                          coords={"time": time, "level": level, "latitude": lat, "longitude": lon, }, )
+        return xr.Dataset(
+            data_vars={
+                "T": (
+                    ("time", "level", "latitude", "longitude"),
+                    np.random.rand(len(time), len(level), len(lat), len(lon)),
+                ),
+                "U": (
+                    ("time", "level", "latitude", "longitude"),
+                    np.random.rand(len(time), len(level), len(lat), len(lon)),
+                ),
+                "SP": (("time", "latitude", "longitude"), np.random.rand(len(time), len(lat), len(lon))),
+                "tsi": (("time", "latitude", "longitude"), np.random.rand(len(time), len(lat), len(lon))),
+                "TP": (("time", "latitude", "longitude"), np.random.rand(len(time), len(lat), len(lon))),
+                "LSM": (("latitude", "longitude"), np.random.rand(len(lat), len(lon))),
+            },
+            coords={
+                "time": time,
+                "level": level,
+                "latitude": lat,
+                "longitude": lon,
+            },
+        )
 
-    return {2022: make_ds("2022-12-01", "2022-12-31 18:00"), 2023: make_ds("2023-01-01", "2023-01-31"), }
+    return {
+        2022: make_ds("2022-12-01", "2022-12-31 18:00"),
+        2023: make_ds("2023-01-01", "2023-01-31"),
+    }
 
 
 @pytest.fixture
@@ -60,11 +73,33 @@ def patch_era5_io_multiyear(monkeypatch, annual_xr_dataset):
 
 @pytest.fixture
 def minimal_config():
-    return {"timestep": "6h", "forecast_len": 5, "start_datetime": "2022-12-25", "end_datetime": "2023-01-05",
-            "source": {"ERA5": {"prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["SP"], "path": "/fake/*.zarr", },
-                                "dynamic_forcing": {"vars_2D": ["tsi"], "path": "/fake/*.zarr", },
-                                "static": {"vars_2D": ["LSM"], "path": "/fake/*.zarr", },
-                                "diagnostic": {"vars_2D": ["TP"], "path": "/fake/*.zarr", }, }}, }
+    return {
+        "timestep": "6h",
+        "forecast_len": 5,
+        "start_datetime": "2022-12-25",
+        "end_datetime": "2023-01-05",
+        "source": {
+            "ERA5": {
+                "prognostic": {
+                    "vars_3D": ["T", "U"],
+                    "vars_2D": ["SP"],
+                    "path": "/fake/*.zarr",
+                },
+                "dynamic_forcing": {
+                    "vars_2D": ["tsi"],
+                    "path": "/fake/*.zarr",
+                },
+                "static": {
+                    "vars_2D": ["LSM"],
+                    "path": "/fake/*.zarr",
+                },
+                "diagnostic": {
+                    "vars_2D": ["TP"],
+                    "path": "/fake/*.zarr",
+                },
+            }
+        },
+    }
 
 
 def test_dataset_len(minimal_config, patch_era5_io_multiyear):
@@ -122,8 +157,8 @@ def test_datetimes(minimal_config, patch_era5_io_multiyear):
     x_times, y_times = [], []
     for i, t in enumerate(ds.datetimes):
         sample = ds[(t, 1)]
-        x_times.append(sample['metadata']['input_datetime'])
-        y_times.append(sample['metadata']['target_datetime'])
+        x_times.append(sample["metadata"]["input_datetime"])
+        y_times.append(sample["metadata"]["target_datetime"])
 
     assert (pd.to_datetime(x_times) == pd.to_datetime(ds.datetimes)).all()
     assert (pd.to_datetime(y_times) == (pd.to_datetime(ds.datetimes) + ds.dt)).all()

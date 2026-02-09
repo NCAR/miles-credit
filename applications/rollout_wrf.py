@@ -93,9 +93,7 @@ def predict(rank, world_size, conf, p):
 
     # --------------- #
     # surface files
-    if ("surface_variables" in conf["data"]) and (
-        len(conf["data"]["surface_variables"]) > 0
-    ):
+    if ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0):
         list_surf_ds = sorted(glob(conf["data"]["save_loc_surface"]))
     else:
         list_surf_ds = None
@@ -104,18 +102,14 @@ def predict(rank, world_size, conf, p):
 
     # --------------- #
     # dyn forcing files
-    if ("dynamic_forcing_variables" in conf["data"]) and (
-        len(conf["data"]["dynamic_forcing_variables"]) > 0
-    ):
+    if ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0):
         list_dyn_forcing_ds = sorted(glob(conf["data"]["save_loc_dynamic_forcing"]))
     else:
         list_dyn_forcing_ds = None
 
     # --------------- #
     # diagnostic files
-    if ("diagnostic_variables" in conf["data"]) and (
-        len(conf["data"]["diagnostic_variables"]) > 0
-    ):
+    if ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0):
         list_diag_ds = sorted(glob(conf["data"]["save_loc_diagnostic"]))
     else:
         list_diag_ds = None
@@ -124,39 +118,23 @@ def predict(rank, world_size, conf, p):
     test_years = [str(year) for year in range(test_years_range[0], test_years_range[1])]
 
     # Filter files
-    test_files = [
-        file for file in upper_files if any(year in file for year in test_years)
-    ]
-    test_files_outside = [
-        file for file in upper_files_outside if any(year in file for year in test_years)
-    ]
+    test_files = [file for file in upper_files if any(year in file for year in test_years)]
+    test_files_outside = [file for file in upper_files_outside if any(year in file for year in test_years)]
 
     if list_surf_ds is not None:
-        test_list_surf_ds = [
-            file for file in list_surf_ds if any(year in file for year in test_years)
-        ]
+        test_list_surf_ds = [file for file in list_surf_ds if any(year in file for year in test_years)]
     else:
         test_list_surf_ds = None
 
-    test_list_surf_ds_outside = [
-        file
-        for file in list_surf_ds_outside
-        if any(year in file for year in test_years)
-    ]
+    test_list_surf_ds_outside = [file for file in list_surf_ds_outside if any(year in file for year in test_years)]
 
     if list_dyn_forcing_ds is not None:
-        test_list_dyn_forcing_ds = [
-            file
-            for file in list_dyn_forcing_ds
-            if any(year in file for year in test_years)
-        ]
+        test_list_dyn_forcing_ds = [file for file in list_dyn_forcing_ds if any(year in file for year in test_years)]
     else:
         test_list_dyn_forcing_ds = None
 
     if list_diag_ds is not None:
-        test_list_diag_ds = [
-            file for file in list_diag_ds if any(year in file for year in test_years)
-        ]
+        test_list_diag_ds = [file for file in list_diag_ds if any(year in file for year in test_years)]
     else:
         test_list_diag_ds = None
 
@@ -232,9 +210,7 @@ def predict(rank, world_size, conf, p):
         save_loc = os.path.expandvars(conf["save_loc"])
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-        load_msg = model.module.load_state_dict(
-            checkpoint["model_state_dict"], strict=False
-        )
+        load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
         load_state_dict_error_handler(load_msg)
 
     elif conf["predict"]["mode"] == "fsdp":
@@ -287,9 +263,7 @@ def predict(rank, world_size, conf, p):
             # add forcing and static variables (regardless of fcst hours)
             if "x_forcing_static" in batch:
                 # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                x_forcing_batch = (
-                    batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4)
-                )
+                x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4)
 
                 # concat on var dimension
                 x = torch.cat((x, x_forcing_batch), dim=1)
@@ -312,9 +286,7 @@ def predict(rank, world_size, conf, p):
             # --------------------------------------------------------------------------------- #
             # boundary conditions
             if "x_surf_boundary" in batch:
-                x_boundary = concat_and_reshape(
-                    batch["x_boundary"], batch["x_surf_boundary"]
-                ).to(device)
+                x_boundary = concat_and_reshape(batch["x_boundary"], batch["x_surf_boundary"]).to(device)
             else:
                 x_boundary = reshape_only(batch["x_boundary"]).to(device)
 
@@ -339,9 +311,7 @@ def predict(rank, world_size, conf, p):
             metrics_results["forecast_hour"].append(forecast_hour)
 
             # Save the current forecast hour data in parallel
-            utc_datetime = init_datetime + timedelta(
-                hours=lead_time_periods * forecast_hour
-            )
+            utc_datetime = init_datetime + timedelta(hours=lead_time_periods * forecast_hour)
 
             # convert the current step result as x-array
             darray_upper_air, darray_single_level = make_xarray(
@@ -395,9 +365,7 @@ def predict(rank, world_size, conf, p):
 
                 # cut diagnostic vars from y_pred, they are not inputs
                 if "y_diag" in batch:
-                    x = torch.cat(
-                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
-                    )
+                    x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
             # ============================================================ #
@@ -412,16 +380,10 @@ def predict(rank, world_size, conf, p):
                     result.get()
 
                 # save metrics file
-                save_location = os.path.join(
-                    os.path.expandvars(conf["save_loc"]), "forecasts", "metrics"
-                )
-                os.makedirs(
-                    save_location, exist_ok=True
-                )  # should already be made above
+                save_location = os.path.join(os.path.expandvars(conf["save_loc"]), "forecasts", "metrics")
+                os.makedirs(save_location, exist_ok=True)  # should already be made above
                 df = pd.DataFrame(metrics_results)
-                df.to_csv(
-                    os.path.join(save_location, f"metrics{init_datetime_str}.csv")
-                )
+                df.to_csv(os.path.join(save_location, f"metrics{init_datetime_str}.csv"))
 
                 # forecast count = a constant for each run
                 forecast_count += 1
@@ -533,18 +495,14 @@ def main():
 
     # ======================================================== #
     # handling config args
-    conf = credit_main_parser(
-        conf, parse_training=False, parse_predict=True, print_summary=False
-    )
+    conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
     # predict_data_check(conf, print_summary=False)
 
     # ======================================================== #
 
     # create a save location for rollout
     # ---------------------------------------------------- #
-    assert (
-        "save_forecast" in conf["predict"]
-    ), "Missing conf['predict']['save_forecast']"
+    assert "save_forecast" in conf["predict"], "Missing conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)

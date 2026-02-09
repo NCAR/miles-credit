@@ -600,7 +600,7 @@ class CrossFormer(BaseModel):
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
-        
+
         if self.frames > 1:
             # x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
             b, c, t, h, w = x.shape
@@ -705,7 +705,7 @@ if __name__ == "__main__":
         cross_embed_strides=(2, 2, 2, 2),
         attn_dropout=0.0,
         ff_dropout=0.0,
-        padding_conf=padding_conf
+        padding_conf=padding_conf,
     ).to("cuda")
 
     num_params = sum(p.numel() for p in model.parameters())

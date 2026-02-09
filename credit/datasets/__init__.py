@@ -70,29 +70,21 @@ def setup_data_loading(conf):
     # <------------------------------------------ std_new
     if conf["data"]["scaler_type"] == "std_new":
         # check and glob surface files
-        if ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        ):
+        if ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0):
             surface_files = sorted(glob.glob(conf["data"]["save_loc_surface"]))
 
         else:
             surface_files = None
 
         # check and glob dyn forcing files
-        if ("dynamic_forcing_variables" in conf["data"]) and (
-            len(conf["data"]["dynamic_forcing_variables"]) > 0
-        ):
-            dyn_forcing_files = sorted(
-                glob.glob(conf["data"]["save_loc_dynamic_forcing"])
-            )
+        if ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0):
+            dyn_forcing_files = sorted(glob.glob(conf["data"]["save_loc_dynamic_forcing"]))
 
         else:
             dyn_forcing_files = None
 
         # check and glob diagnostic files
-        if ("diagnostic_variables" in conf["data"]) and (
-            len(conf["data"]["diagnostic_variables"]) > 0
-        ):
+        if ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0):
             diagnostic_files = sorted(glob.glob(conf["data"]["save_loc_diagnostic"]))
 
         else:
@@ -112,93 +104,61 @@ def setup_data_loading(conf):
         valid_years_range = [2014, 2018]
 
     # convert year info to str for file name search
-    train_years = [
-        str(year) for year in range(train_years_range[0], train_years_range[1])
-    ]
-    valid_years = [
-        str(year) for year in range(valid_years_range[0], valid_years_range[1])
-    ]
+    train_years = [str(year) for year in range(train_years_range[0], train_years_range[1])]
+    valid_years = [str(year) for year in range(valid_years_range[0], valid_years_range[1])]
 
     # Filter the files for training / validation
-    train_files = [
-        file for file in all_ERA_files if any(year in file for year in train_years)
-    ]
-    valid_files = [
-        file for file in all_ERA_files if any(year in file for year in valid_years)
-    ]
+    train_files = [file for file in all_ERA_files if any(year in file for year in train_years)]
+    valid_files = [file for file in all_ERA_files if any(year in file for year in valid_years)]
 
     # <----------------------------------- std_new
     if conf["data"]["scaler_type"] == "std_new":
         if surface_files is not None:
-            train_surface_files = [
-                file
-                for file in surface_files
-                if any(year in file for year in train_years)
-            ]
-            valid_surface_files = [
-                file
-                for file in surface_files
-                if any(year in file for year in valid_years)
-            ]
+            train_surface_files = [file for file in surface_files if any(year in file for year in train_years)]
+            valid_surface_files = [file for file in surface_files if any(year in file for year in valid_years)]
 
             # ---------------------------- #
             # check total number of files
-            assert (
-                len(train_surface_files) == len(train_files)
-            ), "Mismatch between the total number of training set [surface files] and [upper-air files]"
-            assert (
-                len(valid_surface_files) == len(valid_files)
-            ), "Mismatch between the total number of validation set [surface files] and [upper-air files]"
+            assert len(train_surface_files) == len(train_files), (
+                "Mismatch between the total number of training set [surface files] and [upper-air files]"
+            )
+            assert len(valid_surface_files) == len(valid_files), (
+                "Mismatch between the total number of validation set [surface files] and [upper-air files]"
+            )
 
         else:
             train_surface_files = None
             valid_surface_files = None
 
         if dyn_forcing_files is not None:
-            train_dyn_forcing_files = [
-                file
-                for file in dyn_forcing_files
-                if any(year in file for year in train_years)
-            ]
-            valid_dyn_forcing_files = [
-                file
-                for file in dyn_forcing_files
-                if any(year in file for year in valid_years)
-            ]
+            train_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in train_years)]
+            valid_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in valid_years)]
 
             # ---------------------------- #
             # check total number of files
-            assert (
-                len(train_dyn_forcing_files) == len(train_files)
-            ), "Mismatch between the total number of training set [dynamic forcing files] and [upper-air files]"
-            assert (
-                len(valid_dyn_forcing_files) == len(valid_files)
-            ), "Mismatch between the total number of validation set [dynamic forcing files] and [upper-air files]"
+            assert len(train_dyn_forcing_files) == len(train_files), (
+                "Mismatch between the total number of training set [dynamic forcing files] and [upper-air files]"
+            )
+            assert len(valid_dyn_forcing_files) == len(valid_files), (
+                "Mismatch between the total number of validation set [dynamic forcing files] and [upper-air files]"
+            )
 
         else:
             train_dyn_forcing_files = None
             valid_dyn_forcing_files = None
 
         if diagnostic_files is not None:
-            train_diagnostic_files = [
-                file
-                for file in diagnostic_files
-                if any(year in file for year in train_years)
-            ]
-            valid_diagnostic_files = [
-                file
-                for file in diagnostic_files
-                if any(year in file for year in valid_years)
-            ]
+            train_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in train_years)]
+            valid_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in valid_years)]
 
             # ---------------------------- #
             # check total number of files
-            assert (
-                len(train_diagnostic_files) == len(train_files)
-            ), "Mismatch between the total number of training set [diagnostic files] and [upper-air files]"
-            assert (
-                len(valid_diagnostic_files) == len(valid_files)
-            ), "Mismatch between the total number of validation set [diagnostic files] and [upper-air files]"
+            assert len(train_diagnostic_files) == len(train_files), (
+                "Mismatch between the total number of training set [diagnostic files] and [upper-air files]"
+            )
+            assert len(valid_diagnostic_files) == len(valid_files), (
+                "Mismatch between the total number of validation set [diagnostic files] and [upper-air files]"
+            )
 
         else:
             train_diagnostic_files = None
@@ -213,18 +173,14 @@ def setup_data_loading(conf):
     # upper air variables
     varname_upper_air = conf["data"]["variables"]
 
-    if ("forcing_variables" in conf["data"]) and (
-        len(conf["data"]["forcing_variables"]) > 0
-    ):
+    if ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0):
         forcing_files = conf["data"]["save_loc_forcing"]
         varname_forcing = conf["data"]["forcing_variables"]
     else:
         forcing_files = None
         varname_forcing = None
 
-    if ("static_variables" in conf["data"]) and (
-        len(conf["data"]["static_variables"]) > 0
-    ):
+    if ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0):
         static_files = conf["data"]["save_loc_static"]
         varname_static = conf["data"]["static_variables"]
     else:

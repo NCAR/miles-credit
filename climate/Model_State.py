@@ -19,7 +19,7 @@ import yaml
 import torch
 import numpy as np
 import xarray as xr
-from typing import Dict, Tuple, Optional, Literal, Union
+from typing import Dict, Optional, Literal
 import logging
 
 # Import CREDIT components
@@ -30,6 +30,7 @@ try:
     from credit.models.checkpoint import load_model_state
     from credit.parser import credit_main_parser
     from credit.output import load_metadata
+
     CREDIT_AVAILABLE = True
 except ImportError:
     CREDIT_AVAILABLE = False
@@ -38,6 +39,7 @@ except ImportError:
 # Import post-processing components
 try:
     from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+
     POSTBLOCK_AVAILABLE = True
 except ImportError:
     POSTBLOCK_AVAILABLE = False
@@ -45,6 +47,7 @@ except ImportError:
 
 try:
     from WindPP import post_process_wind_artifacts
+
     WINDPP_AVAILABLE = True
 except ImportError:
     WINDPP_AVAILABLE = False
@@ -56,6 +59,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # STATE VARIABLE ACCESSOR - GET/SET VARIABLES BY NAME
 # ============================================================================
+
 
 class StateVariableAccessor:
     """
@@ -89,7 +93,7 @@ class StateVariableAccessor:
         'output': [prognostic_vars * levels + surface_vars + diagnostic_vars]
     """
 
-    def __init__(self, conf: dict, tensor_type: Literal['state', 'input', 'output'] = 'state'):
+    def __init__(self, conf: dict, tensor_type: Literal["state", "input", "output"] = "state"):
         """
         Initialize variable accessor.
 
@@ -138,34 +142,28 @@ class StateVariableAccessor:
         # Prognostic variables (3D with levels)
         for var in self.prognostic_vars:
             indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + self.levels,
-                'n_channels': self.levels,
-                'is_3d': True,
-                'available': True
+                "start_idx": idx,
+                "end_idx": idx + self.levels,
+                "n_channels": self.levels,
+                "is_3d": True,
+                "available": True,
             }
             idx += self.levels
 
         # Surface variables (2D)
         for var in self.surface_vars:
-            indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + 1,
-                'n_channels': 1,
-                'is_3d': False,
-                'available': True
-            }
+            indices[var] = {"start_idx": idx, "end_idx": idx + 1, "n_channels": 1, "is_3d": False, "available": True}
             idx += 1
 
         # Mark diagnostics as not available in state
         for var in self.diagnostic_vars:
-            indices[var] = {'available': False, 'reason': 'Diagnostics not in state tensor'}
+            indices[var] = {"available": False, "reason": "Diagnostics not in state tensor"}
 
         # Mark forcing as not available in state
         for var in self.dynamic_forcing_vars + self.forcing_vars + self.static_vars:
-            indices[var] = {'available': False, 'reason': 'Forcing not in state tensor'}
+            indices[var] = {"available": False, "reason": "Forcing not in state tensor"}
 
-        self.var_indices['state'] = indices
+        self.var_indices["state"] = indices
 
     def _build_input_indices(self):
         """Build indices for model input tensor (with forcing).
@@ -179,23 +177,17 @@ class StateVariableAccessor:
         # FIRST: Prognostic variables (3D with levels) - part of state
         for var in self.prognostic_vars:
             indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + self.levels,
-                'n_channels': self.levels,
-                'is_3d': True,
-                'available': True
+                "start_idx": idx,
+                "end_idx": idx + self.levels,
+                "n_channels": self.levels,
+                "is_3d": True,
+                "available": True,
             }
             idx += self.levels
 
         # SECOND: Surface variables (2D) - part of state
         for var in self.surface_vars:
-            indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + 1,
-                'n_channels': 1,
-                'is_3d': False,
-                'available': True
-            }
+            indices[var] = {"start_idx": idx, "end_idx": idx + 1, "n_channels": 1, "is_3d": False, "available": True}
             idx += 1
 
         # THIRD: Forcing variables - appended after state
@@ -207,20 +199,14 @@ class StateVariableAccessor:
 
         # Add all forcing variables (2D)
         for var in forcing_order:
-            indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + 1,
-                'n_channels': 1,
-                'is_3d': False,
-                'available': True
-            }
+            indices[var] = {"start_idx": idx, "end_idx": idx + 1, "n_channels": 1, "is_3d": False, "available": True}
             idx += 1
 
         # Mark diagnostics as not available in input
         for var in self.diagnostic_vars:
-            indices[var] = {'available': False, 'reason': 'Diagnostics not in input tensor'}
+            indices[var] = {"available": False, "reason": "Diagnostics not in input tensor"}
 
-        self.var_indices['input'] = indices
+        self.var_indices["input"] = indices
 
     def _build_output_indices(self):
         """Build indices for model output tensor (with diagnostics)."""
@@ -230,41 +216,29 @@ class StateVariableAccessor:
         # Prognostic variables (3D with levels)
         for var in self.prognostic_vars:
             indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + self.levels,
-                'n_channels': self.levels,
-                'is_3d': True,
-                'available': True
+                "start_idx": idx,
+                "end_idx": idx + self.levels,
+                "n_channels": self.levels,
+                "is_3d": True,
+                "available": True,
             }
             idx += self.levels
 
         # Surface variables (2D)
         for var in self.surface_vars:
-            indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + 1,
-                'n_channels': 1,
-                'is_3d': False,
-                'available': True
-            }
+            indices[var] = {"start_idx": idx, "end_idx": idx + 1, "n_channels": 1, "is_3d": False, "available": True}
             idx += 1
 
         # Diagnostic variables (2D)
         for var in self.diagnostic_vars:
-            indices[var] = {
-                'start_idx': idx,
-                'end_idx': idx + 1,
-                'n_channels': 1,
-                'is_3d': False,
-                'available': True
-            }
+            indices[var] = {"start_idx": idx, "end_idx": idx + 1, "n_channels": 1, "is_3d": False, "available": True}
             idx += 1
 
         # Mark forcing as not available in output
         for var in self.dynamic_forcing_vars + self.forcing_vars + self.static_vars:
-            indices[var] = {'available': False, 'reason': 'Forcing not in output tensor'}
+            indices[var] = {"available": False, "reason": "Forcing not in output tensor"}
 
-        self.var_indices['output'] = indices
+        self.var_indices["output"] = indices
 
     def get_var_info(self, var_name: str) -> Dict:
         """
@@ -285,18 +259,19 @@ class StateVariableAccessor:
         indices = self.var_indices[self.tensor_type]
 
         if var_name not in indices:
-            all_vars = (self.prognostic_vars + self.surface_vars +
-                       self.diagnostic_vars + self.dynamic_forcing_vars +
-                       self.forcing_vars + self.static_vars)
-            raise ValueError(
-                f"Variable '{var_name}' not found in config. "
-                f"Available variables: {all_vars}"
+            all_vars = (
+                self.prognostic_vars
+                + self.surface_vars
+                + self.diagnostic_vars
+                + self.dynamic_forcing_vars
+                + self.forcing_vars
+                + self.static_vars
             )
+            raise ValueError(f"Variable '{var_name}' not found in config. Available variables: {all_vars}")
 
         return indices[var_name]
 
-    def get_state_var(self, state_tensor: torch.Tensor, var_name: str,
-                      time_idx: Optional[int] = None) -> torch.Tensor:
+    def get_state_var(self, state_tensor: torch.Tensor, var_name: str, time_idx: Optional[int] = None) -> torch.Tensor:
         """
         Extract a variable from the state tensor.
 
@@ -316,28 +291,28 @@ class StateVariableAccessor:
         """
         info = self.get_var_info(var_name)
 
-        if not info['available']:
+        if not info["available"]:
             raise ValueError(
                 f"Variable '{var_name}' not available in '{self.tensor_type}' tensor. "
                 f"Reason: {info.get('reason', 'Unknown')}"
             )
 
         # Extract variable slice
-        var_slice = state_tensor[:, info['start_idx']:info['end_idx'], ...]
+        var_slice = state_tensor[:, info["start_idx"] : info["end_idx"], ...]
 
         # Extract specific time if requested
         if time_idx is not None:
             if time_idx >= state_tensor.shape[2]:
                 raise IndexError(
-                    f"Time index {time_idx} out of bounds for tensor with "
-                    f"{state_tensor.shape[2]} time steps"
+                    f"Time index {time_idx} out of bounds for tensor with {state_tensor.shape[2]} time steps"
                 )
             var_slice = var_slice[:, :, time_idx, :, :]
 
         return var_slice
 
-    def set_state_var(self, state_tensor: torch.Tensor, var_name: str,
-                      var_data: torch.Tensor, time_idx: Optional[int] = None) -> None:
+    def set_state_var(
+        self, state_tensor: torch.Tensor, var_name: str, var_data: torch.Tensor, time_idx: Optional[int] = None
+    ) -> None:
         """
         Set a variable in the state tensor (in-place modification).
 
@@ -352,7 +327,7 @@ class StateVariableAccessor:
         """
         info = self.get_var_info(var_name)
 
-        if not info['available']:
+        if not info["available"]:
             raise ValueError(
                 f"Variable '{var_name}' not available in '{self.tensor_type}' tensor. "
                 f"Reason: {info.get('reason', 'Unknown')}"
@@ -362,30 +337,27 @@ class StateVariableAccessor:
         if time_idx is None:
             expected_shape = (
                 state_tensor.shape[0],  # batch
-                info['n_channels'],      # channels (levels or 1)
+                info["n_channels"],  # channels (levels or 1)
                 state_tensor.shape[2],  # time
                 state_tensor.shape[3],  # lat
-                state_tensor.shape[4]   # lon
+                state_tensor.shape[4],  # lon
             )
         else:
             expected_shape = (
                 state_tensor.shape[0],  # batch
-                info['n_channels'],      # channels
+                info["n_channels"],  # channels
                 state_tensor.shape[3],  # lat
-                state_tensor.shape[4]   # lon
+                state_tensor.shape[4],  # lon
             )
 
         if var_data.shape != expected_shape:
-            raise ValueError(
-                f"Shape mismatch for '{var_name}'. Expected {expected_shape}, "
-                f"got {var_data.shape}"
-            )
+            raise ValueError(f"Shape mismatch for '{var_name}'. Expected {expected_shape}, got {var_data.shape}")
 
         # Set variable (in-place)
         if time_idx is None:
-            state_tensor[:, info['start_idx']:info['end_idx'], ...] = var_data
+            state_tensor[:, info["start_idx"] : info["end_idx"], ...] = var_data
         else:
-            state_tensor[:, info['start_idx']:info['end_idx'], time_idx, :, :] = var_data
+            state_tensor[:, info["start_idx"] : info["end_idx"], time_idx, :, :] = var_data
 
     def list_available_vars(self) -> Dict[str, Dict]:
         """
@@ -394,15 +366,13 @@ class StateVariableAccessor:
         Returns:
             Dictionary mapping variable names to their info dicts
         """
-        return {
-            var: info for var, info in self.var_indices[self.tensor_type].items()
-            if info.get('available', False)
-        }
+        return {var: info for var, info in self.var_indices[self.tensor_type].items() if info.get("available", False)}
 
 
 # ============================================================================
 # STATE MANAGER - TRANSFORMATIONS AND TIME-STEPPING
 # ============================================================================
+
 
 class StateManager:
     """
@@ -466,7 +436,7 @@ class StateManager:
         if self.history_len == 1:
             # Single timestep history: just return prediction (excluding diagnostics)
             if self.varnum_diag > 0:
-                return prediction[:, :-self.varnum_diag, ...].detach()
+                return prediction[:, : -self.varnum_diag, ...].detach()
             else:
                 return prediction.detach()
         else:
@@ -476,18 +446,19 @@ class StateManager:
                 state_detach = state[:, :, 1:, ...].detach()
             else:
                 # Static variables stay fixed, only shift dynamic ones
-                state_detach = state[:, :-self.static_dim, 1:, ...].detach()
+                state_detach = state[:, : -self.static_dim, 1:, ...].detach()
 
             # Append new prediction (excluding diagnostic variables)
             if self.varnum_diag > 0:
-                new_pred = prediction[:, :-self.varnum_diag, ...].detach()
+                new_pred = prediction[:, : -self.varnum_diag, ...].detach()
             else:
                 new_pred = prediction.detach()
 
             return torch.cat([state_detach, new_pred], dim=2)
 
-    def build_input_with_forcing(self, state: torch.Tensor, dynamic_forcing: torch.Tensor,
-                                 static_forcing: torch.Tensor) -> torch.Tensor:
+    def build_input_with_forcing(
+        self, state: torch.Tensor, dynamic_forcing: torch.Tensor, static_forcing: torch.Tensor
+    ) -> torch.Tensor:
         """
         Combine state with forcing variables to create model input.
 
@@ -510,6 +481,7 @@ class StateManager:
 # ============================================================================
 # CAMULATOR STEPPER - THE CORE INTERFACE FOR COUPLING
 # ============================================================================
+
 
 class CAMulatorStepper:
     """
@@ -553,9 +525,9 @@ class CAMulatorStepper:
         self.state_manager = StateManager(conf)
 
         # Create variable accessors for convenience
-        self.state_accessor = StateVariableAccessor(conf, tensor_type='state')
-        self.input_accessor = StateVariableAccessor(conf, tensor_type='input')
-        self.output_accessor = StateVariableAccessor(conf, tensor_type='output')
+        self.state_accessor = StateVariableAccessor(conf, tensor_type="state")
+        self.input_accessor = StateVariableAccessor(conf, tensor_type="input")
+        self.output_accessor = StateVariableAccessor(conf, tensor_type="output")
 
         # Setup post-processing components (conservation fixers, wind filtering)
         self._setup_postprocessing()
@@ -573,12 +545,11 @@ class CAMulatorStepper:
         post_conf = self.conf["model"]["post_conf"]
 
         # Check which conservation fixers are enabled
-        self.flag_mass = (POSTBLOCK_AVAILABLE and post_conf["activate"] and
-                         post_conf["global_mass_fixer"]["activate"])
-        self.flag_water = (POSTBLOCK_AVAILABLE and post_conf["activate"] and
-                          post_conf["global_water_fixer"]["activate"])
-        self.flag_energy = (POSTBLOCK_AVAILABLE and post_conf["activate"] and
-                           post_conf["global_energy_fixer"]["activate"])
+        self.flag_mass = POSTBLOCK_AVAILABLE and post_conf["activate"] and post_conf["global_mass_fixer"]["activate"]
+        self.flag_water = POSTBLOCK_AVAILABLE and post_conf["activate"] and post_conf["global_water_fixer"]["activate"]
+        self.flag_energy = (
+            POSTBLOCK_AVAILABLE and post_conf["activate"] and post_conf["global_energy_fixer"]["activate"]
+        )
 
         # Initialize conservation fixers
         if self.flag_mass:
@@ -594,8 +565,7 @@ class CAMulatorStepper:
         # Wind filtering flag
         self.enable_wind_filtering = WINDPP_AVAILABLE
 
-    def step(self, state: torch.Tensor, dynamic_forcing: torch.Tensor,
-             static_forcing: torch.Tensor) -> torch.Tensor:
+    def step(self, state: torch.Tensor, dynamic_forcing: torch.Tensor, static_forcing: torch.Tensor) -> torch.Tensor:
         """
         Advance the atmospheric state by one model timestep.
 
@@ -614,9 +584,7 @@ class CAMulatorStepper:
                        conservation fixers and wind filtering applied
         """
         # Build model input by combining state with forcing
-        model_input = self.state_manager.build_input_with_forcing(
-            state, dynamic_forcing, static_forcing
-        )
+        model_input = self.state_manager.build_input_with_forcing(state, dynamic_forcing, static_forcing)
 
         # Run model inference
         with torch.no_grad():
@@ -627,8 +595,7 @@ class CAMulatorStepper:
 
         return prediction
 
-    def _apply_postprocessing(self, prediction: torch.Tensor,
-                             model_input: torch.Tensor) -> torch.Tensor:
+    def _apply_postprocessing(self, prediction: torch.Tensor, model_input: torch.Tensor) -> torch.Tensor:
         """
         Apply wind artifact filtering and conservation fixers.
 
@@ -661,9 +628,13 @@ class CAMulatorStepper:
 
         return prediction
 
-    def get_state_var(self, tensor: torch.Tensor, var_name: str,
-                     tensor_type: Literal['state', 'input', 'output'] = 'state',
-                     time_idx: Optional[int] = None) -> torch.Tensor:
+    def get_state_var(
+        self,
+        tensor: torch.Tensor,
+        var_name: str,
+        tensor_type: Literal["state", "input", "output"] = "state",
+        time_idx: Optional[int] = None,
+    ) -> torch.Tensor:
         """
         Convenience method to get a variable from any tensor type.
 
@@ -676,17 +647,20 @@ class CAMulatorStepper:
         Returns:
             Variable tensor
         """
-        accessor = {
-            'state': self.state_accessor,
-            'input': self.input_accessor,
-            'output': self.output_accessor
-        }[tensor_type]
+        accessor = {"state": self.state_accessor, "input": self.input_accessor, "output": self.output_accessor}[
+            tensor_type
+        ]
 
         return accessor.get_state_var(tensor, var_name, time_idx)
 
-    def set_state_var(self, tensor: torch.Tensor, var_name: str, var_data: torch.Tensor,
-                     tensor_type: Literal['state', 'input', 'output'] = 'state',
-                     time_idx: Optional[int] = None) -> None:
+    def set_state_var(
+        self,
+        tensor: torch.Tensor,
+        var_name: str,
+        var_data: torch.Tensor,
+        tensor_type: Literal["state", "input", "output"] = "state",
+        time_idx: Optional[int] = None,
+    ) -> None:
         """
         Convenience method to set a variable in any tensor type.
 
@@ -697,11 +671,9 @@ class CAMulatorStepper:
             tensor_type: Type of tensor ('state', 'input', or 'output')
             time_idx: Optional time index
         """
-        accessor = {
-            'state': self.state_accessor,
-            'input': self.input_accessor,
-            'output': self.output_accessor
-        }[tensor_type]
+        accessor = {"state": self.state_accessor, "input": self.input_accessor, "output": self.output_accessor}[
+            tensor_type
+        ]
 
         accessor.set_state_var(tensor, var_name, var_data, time_idx)
 
@@ -710,7 +682,8 @@ class CAMulatorStepper:
 # INITIALIZATION - ONE-TIME SETUP FOR CAMULATOR
 # ============================================================================
 
-def initialize_camulator(config_path: str, model_name: str = None, device: str = 'cuda') -> dict:
+
+def initialize_camulator(config_path: str, model_name: str = None, device: str = "cuda") -> dict:
     """
     One-time initialization of CAMulator model and all supporting components.
 
@@ -759,7 +732,7 @@ def initialize_camulator(config_path: str, model_name: str = None, device: str =
             "Please ensure credit package is installed and importable."
         )
 
-    print(f'Initializing CAMulator from config: {config_path}')
+    print(f"Initializing CAMulator from config: {config_path}")
 
     # Load and parse configuration
     with open(config_path) as cf:
@@ -769,10 +742,10 @@ def initialize_camulator(config_path: str, model_name: str = None, device: str =
     conf["predict"]["mode"] = None  # Override to None for single-GPU inference
 
     device = torch.device(device)
-    print(f'Using device: {device}')
+    print(f"Using device: {device}")
 
     # Load transforms and normalization
-    print('Loading transforms...')
+    print("Loading transforms...")
     transform = load_transforms(conf)
 
     if conf["data"]["scaler_type"] == "std_new":
@@ -781,7 +754,7 @@ def initialize_camulator(config_path: str, model_name: str = None, device: str =
         raise ValueError(f"Unsupported scaler_type: {conf['data']['scaler_type']}")
 
     # Load model
-    print(f'Loading model: {model_name if model_name else "checkpoint.pt (default)"}')
+    print(f"Loading model: {model_name if model_name else 'checkpoint.pt (default)'}")
     if model_name:
         model = load_model_name(conf, model_name, load_weights=True).to(device)
     else:
@@ -796,22 +769,21 @@ def initialize_camulator(config_path: str, model_name: str = None, device: str =
             model = load_model_state(conf, model, device)
 
     model.eval()
-    print('Model loaded and set to eval mode')
+    print("Model loaded and set to eval mode")
 
     # Load initial conditions
-    print('Loading initial conditions...')
-    ic_path = conf['predict']['init_cond_fast_climate']
+    print("Loading initial conditions...")
+    ic_path = conf["predict"]["init_cond_fast_climate"]
     if not os.path.exists(ic_path):
         raise FileNotFoundError(
-            f"Initial condition file not found: {ic_path}\n"
-            f"Please run Make_Climate_Initial_Conditions.py first."
+            f"Initial condition file not found: {ic_path}\nPlease run Make_Climate_Initial_Conditions.py first."
         )
 
     initial_state = torch.load(ic_path, map_location=device).to(device)
-    print(f'Initial state shape: {initial_state.shape}')
+    print(f"Initial state shape: {initial_state.shape}")
 
     # Load forcing data
-    print('Loading forcing data...')
+    print("Loading forcing data...")
     forcing_file = conf["predict"]["forcing_file"]
     if not os.path.exists(forcing_file):
         raise FileNotFoundError(f"Forcing file not found: {forcing_file}")
@@ -820,44 +792,44 @@ def initialize_camulator(config_path: str, model_name: str = None, device: str =
     forcing_ds = xr.open_dataset(forcing_file, chunks={"time": chunk_size})
 
     # Normalize forcing data
-    print('Normalizing forcing data...')
+    print("Normalizing forcing data...")
     forcing_ds_norm = state_transformer.transform_dataset(forcing_ds)
     forcing_ds_norm = forcing_ds_norm.chunk({"time": chunk_size})
 
     # Load static forcing (topography, land-sea mask, etc.)
-    print('Loading static forcing...')
+    print("Loading static forcing...")
     sf_vars = conf["data"]["static_variables"]
     static_arr = np.stack([forcing_ds[s].values for s in sf_vars], axis=0)
     static_forcing = (torch.from_numpy(static_arr).unsqueeze(0)).unsqueeze(2).to(device, non_blocking=True)
-    print(f'Static forcing shape: {static_forcing.shape}')
+    print(f"Static forcing shape: {static_forcing.shape}")
 
     # Load metadata and coordinates
-    print('Loading metadata and coordinates...')
+    print("Loading metadata and coordinates...")
     latlons = xr.open_dataset(conf["loss"]["latitude_weights"])
     metadata = load_metadata(conf)
 
     # Create CAMulatorStepper with full post-processing
-    print('Creating CAMulatorStepper with conservation fixers...')
+    print("Creating CAMulatorStepper with conservation fixers...")
     stepper = CAMulatorStepper(model, conf, device)
 
-    print('=' * 70)
-    print('Initialization complete!')
-    print(f'Model device: {device}')
-    print(f'State shape: {initial_state.shape}')
-    print(f'Static forcing: {len(sf_vars)} variables')
-    print(f'Conservation fixers: Mass={stepper.flag_mass}, Water={stepper.flag_water}, Energy={stepper.flag_energy}')
-    print(f'Wind filtering: {stepper.enable_wind_filtering}')
-    print('=' * 70)
+    print("=" * 70)
+    print("Initialization complete!")
+    print(f"Model device: {device}")
+    print(f"State shape: {initial_state.shape}")
+    print(f"Static forcing: {len(sf_vars)} variables")
+    print(f"Conservation fixers: Mass={stepper.flag_mass}, Water={stepper.flag_water}, Energy={stepper.flag_energy}")
+    print(f"Wind filtering: {stepper.enable_wind_filtering}")
+    print("=" * 70)
 
     return {
-        'model': model,
-        'stepper': stepper,
-        'conf': conf,
-        'state_transformer': state_transformer,
-        'forcing_dataset': forcing_ds_norm,
-        'static_forcing': static_forcing,
-        'initial_state': initial_state,
-        'latlons': latlons,
-        'metadata': metadata,
-        'device': device
+        "model": model,
+        "stepper": stepper,
+        "conf": conf,
+        "state_transformer": state_transformer,
+        "forcing_dataset": forcing_ds_norm,
+        "static_forcing": static_forcing,
+        "initial_state": initial_state,
+        "latlons": latlons,
+        "metadata": metadata,
+        "device": device,
     }

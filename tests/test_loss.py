@@ -6,9 +6,7 @@ from credit.losses.kcrps import KCRPSLoss
 from credit.losses.covariance import CovarianceWeightedMSELoss
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
-CONFIG_FILE_DIR = os.path.join(
-    "/".join(os.path.abspath(__file__).split("/")[:-2]), "config"
-)
+CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
 
 
 def test_KCRPS():

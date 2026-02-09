@@ -62,33 +62,13 @@ def test_TensorPadding():
     x_unpad_earth = opt_earth.unpad(x_pad_earth)
 
     # padding checks (must pass all)
-    assert (
-        x_pad_mirror.shape == output_shape
-    ), "Shape mismatch error found in mirror padding"
-    assert (
-        x_pad_earth.shape == output_shape
-    ), "Shape mismatch error found in earth padding"
-    assert (
-        x[..., -56:] - x_pad_mirror_left
-    ).sum() == 0, "Tensor elements mismatch found in mirror padding"
-    assert (
-        x[..., -56:] - x_pad_earth_left
-    ).sum() == 0, "Tensor elements mismatch found in earth padding"
-    assert (
-        x[..., :78] - x_pad_mirror_right
-    ).sum() == 0, "Tensor elements mismatch found in mirror padding"
-    assert (
-        x[..., :78] - x_pad_earth_right
-    ).sum() == 0, "Tensor elements mismatch found in earth padding"
-    assert (
-        x_unpad_mirror.shape == input_shape
-    ), "Shape mismatch error found in mirror unpad"
-    assert (
-        x_unpad_earth.shape == input_shape
-    ), "Shape mismatch error found in earth unpad"
-    assert (
-        x_unpad_mirror - x
-    ).sum() == 0, "Tensor elements mismatch found in mirror padding"
-    assert (
-        x_unpad_earth - x
-    ).sum() == 0, "Tensor elements mismatch found in earth padding"
+    assert x_pad_mirror.shape == output_shape, "Shape mismatch error found in mirror padding"
+    assert x_pad_earth.shape == output_shape, "Shape mismatch error found in earth padding"
+    assert (x[..., -56:] - x_pad_mirror_left).sum() == 0, "Tensor elements mismatch found in mirror padding"
+    assert (x[..., -56:] - x_pad_earth_left).sum() == 0, "Tensor elements mismatch found in earth padding"
+    assert (x[..., :78] - x_pad_mirror_right).sum() == 0, "Tensor elements mismatch found in mirror padding"
+    assert (x[..., :78] - x_pad_earth_right).sum() == 0, "Tensor elements mismatch found in earth padding"
+    assert x_unpad_mirror.shape == input_shape, "Shape mismatch error found in mirror unpad"
+    assert x_unpad_earth.shape == input_shape, "Shape mismatch error found in earth unpad"
+    assert (x_unpad_mirror - x).sum() == 0, "Tensor elements mismatch found in mirror padding"
+    assert (x_unpad_earth - x).sum() == 0, "Tensor elements mismatch found in earth padding"

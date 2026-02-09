@@ -40,21 +40,15 @@ class NormalizeWRF:
         self.num_upper_air = len(self.varname_upper_air) * self.levels
 
         # Identify the existence of other variables
-        self.flag_surface = ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        )
+        self.flag_surface = ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0)
         self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (
             len(conf["data"]["dynamic_forcing_variables"]) > 0
         )
         self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (
             len(conf["data"]["diagnostic_variables"]) > 0
         )
-        self.flag_forcing = ("forcing_variables" in conf["data"]) and (
-            len(conf["data"]["forcing_variables"]) > 0
-        )
-        self.flag_static = ("static_variables" in conf["data"]) and (
-            len(conf["data"]["static_variables"]) > 0
-        )
+        self.flag_forcing = ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0)
+        self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
 
         # Get surface varnames
         if self.flag_surface:
@@ -98,12 +92,8 @@ class NormalizeWRF:
         # ======================================================================= #
         # boundary condition data handling
         # ======================================================================= #
-        self.mean_ds_outside = xr.open_dataset(
-            conf["data"]["boundary"]["mean_path"]
-        ).load()
-        self.std_ds_outside = xr.open_dataset(
-            conf["data"]["boundary"]["std_path"]
-        ).load()
+        self.mean_ds_outside = xr.open_dataset(conf["data"]["boundary"]["mean_path"]).load()
+        self.std_ds_outside = xr.open_dataset(conf["data"]["boundary"]["std_path"]).load()
 
         varnames_all_outside = conf["data"]["boundary"]["all_varnames"]
 
@@ -120,13 +110,11 @@ class NormalizeWRF:
         # Get levels and upper air variables
         self.levels_outside = conf["data"]["boundary"]["levels"]
         self.varname_upper_air_outside = conf["data"]["boundary"]["variables"]
-        self.num_upper_air_outside = (
-            len(self.varname_upper_air_outside) * self.levels_outside
-        )
+        self.num_upper_air_outside = len(self.varname_upper_air_outside) * self.levels_outside
 
-        self.flag_surface_outside = (
-            "surface_variables" in conf["data"]["boundary"]
-        ) and (len(conf["data"]["boundary"]["surface_variables"]) > 0)
+        self.flag_surface_outside = ("surface_variables" in conf["data"]["boundary"]) and (
+            len(conf["data"]["boundary"]["surface_variables"]) > 0
+        )
 
         # Get surface varnames
         if self.flag_surface:
@@ -156,9 +144,7 @@ class NormalizeWRF:
 
         # Surface variables
         if self.flag_surface:
-            tensor_surface = x[
-                :, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :
-            ]
+            tensor_surface = x[:, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :]
             transformed_surface = tensor_surface.clone()
 
         # y_pred does not have dynamic_forcing, skip this var type
@@ -178,9 +164,7 @@ class NormalizeWRF:
             for level in range(self.levels):
                 var_mean = mean_tensor[level]
                 var_std = std_tensor[level]
-                transformed_upper_air[:, k] = (
-                    tensor_upper_air[:, k] - var_mean
-                ) / var_std
+                transformed_upper_air[:, k] = (tensor_upper_air[:, k] - var_mean) / var_std
                 k += 1
 
         # Standardize surface variables
@@ -195,9 +179,7 @@ class NormalizeWRF:
             for k, name in enumerate(self.varname_diagnostic):
                 var_mean = self.mean_tensors[name].to(device)
                 var_std = self.std_tensors[name].to(device)
-                transformed_diagnostic[:, k] = (
-                    transformed_diagnostic[:, k] - var_mean
-                ) / var_std
+                transformed_diagnostic[:, k] = (transformed_diagnostic[:, k] - var_mean) / var_std
 
         # Concatenate everything
         if self.flag_surface:
@@ -212,14 +194,10 @@ class NormalizeWRF:
                 )
 
             else:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_surface), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_surface), dim=1)
         else:
             if self.flag_diagnostic:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_diagnostic), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_diagnostic), dim=1)
             else:
                 transformed_x = transformed_upper_air
 
@@ -246,9 +224,7 @@ class NormalizeWRF:
                         for varname in varname_inputs:
                             # if forcing and static skip it, otherwise do z-score
                             if (varname in self.varname_forcing_static) is False:
-                                value[varname] = (
-                                    value[varname] - self.mean_ds[varname]
-                                ) / self.std_ds[varname]
+                                value[varname] = (value[varname] - self.mean_ds[varname]) / self.std_ds[varname]
 
                         # put transformed xr.Dataset to the output dictionary
                         normalized_sample[key] = value
@@ -259,9 +235,7 @@ class NormalizeWRF:
 
                     # boundary inputs
                     elif key == "boundary_input":
-                        normalized_sample[key] = (
-                            value - self.mean_ds_outside
-                        ) / self.std_ds_outside
+                        normalized_sample[key] = (value - self.mean_ds_outside) / self.std_ds_outside
                 elif key == "time_encode":
                     normalized_sample[key] = value
 
@@ -275,9 +249,7 @@ class NormalizeWRF:
 
                     # boundary inputs
                     elif key == "boundary_input":
-                        normalized_sample[key] = (
-                            value - self.mean_ds_outside
-                        ) / self.std_ds_outside
+                        normalized_sample[key] = (value - self.mean_ds_outside) / self.std_ds_outside
 
                 elif key == "time_encode":
                     normalized_sample[key] = value
@@ -297,9 +269,7 @@ class NormalizeWRF:
 
         # Surface variables
         if self.flag_surface:
-            tensor_surface = x[
-                :, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :
-            ]
+            tensor_surface = x[:, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :]
             transformed_surface = tensor_surface.clone()
 
         # Diagnostic variables (the very last of the stack)
@@ -344,14 +314,10 @@ class NormalizeWRF:
                     dim=1,
                 )
             else:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_surface), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_surface), dim=1)
         else:
             if self.flag_diagnostic:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_diagnostic), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_diagnostic), dim=1)
             else:
                 transformed_x = transformed_upper_air
 
@@ -370,21 +336,15 @@ class ToTensorWRF:
         self.for_len = int(conf["data"]["forecast_len"])
 
         # identify the existence of other variables
-        self.flag_surface = ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        )
+        self.flag_surface = ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0)
         self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (
             len(conf["data"]["dynamic_forcing_variables"]) > 0
         )
         self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (
             len(conf["data"]["diagnostic_variables"]) > 0
         )
-        self.flag_forcing = ("forcing_variables" in conf["data"]) and (
-            len(conf["data"]["forcing_variables"]) > 0
-        )
-        self.flag_static = ("static_variables" in conf["data"]) and (
-            len(conf["data"]["static_variables"]) > 0
-        )
+        self.flag_forcing = ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0)
+        self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
 
         self.varname_upper_air = conf["data"]["variables"]
 
@@ -424,9 +384,7 @@ class ToTensorWRF:
             # ======================================================================================== #
             # forcing variable first (new models) vs. static variable first (some old models)
             # this flag makes sure that the class is compatible with some old CREDIT models
-            self.flag_static_first = ("static_first" in conf["data"]) and (
-                conf["data"]["static_first"]
-            )
+            self.flag_static_first = ("static_first" in conf["data"]) and (conf["data"]["static_first"])
             # ======================================================================================== #
         else:
             self.has_forcing_static = False
@@ -437,9 +395,9 @@ class ToTensorWRF:
         self.hist_len_outside = int(conf["data"]["boundary"]["history_len"])
         self.for_len_outside = int(conf["data"]["boundary"]["forecast_len"])
 
-        self.flag_surface_outside = (
-            "surface_variables" in conf["data"]["boundary"]
-        ) and (len(conf["data"]["boundary"]["surface_variables"]) > 0)
+        self.flag_surface_outside = ("surface_variables" in conf["data"]["boundary"]) and (
+            len(conf["data"]["boundary"]["surface_variables"]) > 0
+        )
 
         self.varname_upper_air_outside = conf["data"]["boundary"]["variables"]
 
@@ -483,15 +441,11 @@ class ToTensorWRF:
                         # enter this scope if one of the (dyn_forcing, folrcing, static) exists
                         if self.flag_static_first:
                             varname_forcing_static = (
-                                self.varname_static
-                                + self.varname_dyn_forcing
-                                + self.varname_forcing
+                                self.varname_static + self.varname_dyn_forcing + self.varname_forcing
                             )
                         else:
                             varname_forcing_static = (
-                                self.varname_dyn_forcing
-                                + self.varname_forcing
-                                + self.varname_static
+                                self.varname_dyn_forcing + self.varname_forcing + self.varname_static
                             )
 
                         if key == "WRF_input":
@@ -499,9 +453,7 @@ class ToTensorWRF:
                             for var_name in varname_forcing_static:
                                 var_value = value[var_name].values
                                 list_vars_forcing_static.append(var_value)
-                            numpy_vars_forcing_static = np.array(
-                                list_vars_forcing_static
-                            )
+                            numpy_vars_forcing_static = np.array(list_vars_forcing_static)
 
                     # organize diagnostic vars (target only)
                     if self.flag_diagnostic:
@@ -545,10 +497,7 @@ class ToTensorWRF:
                 ## produces [time, upper_var, level, lat, lon]
                 ## np.hstack concatenates the second dim (axis=1)
                 x_upper_air = np.hstack(
-                    [
-                        np.expand_dims(var_upper_air, axis=1)
-                        for var_upper_air in numpy_vars_upper_air
-                    ]
+                    [np.expand_dims(var_upper_air, axis=1) for var_upper_air in numpy_vars_upper_air]
                 )
                 x_upper_air = torch.as_tensor(x_upper_air)
 
@@ -597,9 +546,7 @@ class ToTensorWRF:
                             x_static = x_static.unsqueeze(0).unsqueeze(0)
                             # x_static = x_static.unsqueeze(1)
 
-                        return_dict["x_forcing_static"] = x_static.type(
-                            self.output_dtype
-                        )
+                        return_dict["x_forcing_static"] = x_static.type(self.output_dtype)
 
                     if self.flag_surface:
                         return_dict["x_surf"] = x_surf.type(self.output_dtype)
@@ -657,9 +604,7 @@ class ToTensorWRF:
                 # surface boundary inputs
                 if self.flag_surface_outside:
                     # this line produces [surface_var, time, lat, lon]
-                    x_surf_outside = torch.as_tensor(
-                        numpy_vars_surface_outside
-                    ).squeeze()
+                    x_surf_outside = torch.as_tensor(numpy_vars_surface_outside).squeeze()
 
                     if len(x_surf_outside.shape) == 4:
                         # permute: [surface_var, time, lat, lon] --> [time, surface_var, lat, lon]
@@ -677,13 +622,9 @@ class ToTensorWRF:
                         # num_var=1, time=1, only has lat, lon
                         x_surf_outside = x_surf_outside.unsqueeze(0).unsqueeze(0)
 
-                    return_dict["x_surf_boundary"] = x_surf_outside.type(
-                        self.output_dtype
-                    )
+                    return_dict["x_surf_boundary"] = x_surf_outside.type(self.output_dtype)
 
             elif key == "time_encode":
-                return_dict["x_time_encode"] = torch.as_tensor(value).type(
-                    self.output_dtype
-                )
+                return_dict["x_time_encode"] = torch.as_tensor(value).type(self.output_dtype)
 
         return return_dict

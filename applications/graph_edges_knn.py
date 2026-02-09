@@ -8,9 +8,7 @@ from sklearn.neighbors import BallTree
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-c", "--coord", help="Path to xarray file containing coordinates"
-    )
+    parser.add_argument("-c", "--coord", help="Path to xarray file containing coordinates")
     parser.add_argument("-o", "--out", help="Path to output directory")
     parser.add_argument("-k", "--k_neigh", type=int, help="Number of neighbors")
     # parser.add_argument("-p", "--procs", type=int, help="Number of processes")
@@ -38,9 +36,7 @@ def main():
 
     EARTH_RADIUS = 6_371  # in km
     dist_arr = distances.reshape(-1) * EARTH_RADIUS
-    edge_indices_arr = np.stack(
-        [indices.reshape(-1), node_indices.reshape(-1)], axis=-1
-    )
+    edge_indices_arr = np.stack([indices.reshape(-1), node_indices.reshape(-1)], axis=-1)
 
     output_ds = xr.Dataset(
         {
