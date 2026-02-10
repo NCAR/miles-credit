@@ -234,9 +234,7 @@ class DataMap:
             raise ValueError(f"credit.datamap: unknown dimensionality: {self.dim}")
 
         if self.normalize and self.dim != "static":
-            raise ValueError(
-                "credit.datamap: 'normalize' only applies to dim=='static'"
-            )
+            raise ValueError("credit.datamap: 'normalize' only applies to dim=='static'")
 
         if self.zstride != 1 and self.dim != "3D":
             raise ValueError("credit.datamap: zstride not applicable if dim != '3D'")
@@ -250,21 +248,14 @@ class DataMap:
             if len(glob(self.glob, root_dir=self.rootpath)) != 1:
                 raise ValueError("credit.datamap: dim='static' requires a single file")
 
-            if (
-                len(self.variables["prognostic"]) > 0
-                or len(self.variables["diagnostic"]) > 0
-            ):
+            if len(self.variables["prognostic"]) > 0 or len(self.variables["diagnostic"]) > 0:
                 raise ValueError("credit.datamap: static vars must be boundary vars")
 
             # if static, load data from netcdf
-            staticfile = nc.Dataset(
-                self.rootpath + "/" + self.glob, mask_and_scale=False
-            )
+            staticfile = nc.Dataset(self.rootpath + "/" + self.glob, mask_and_scale=False)
 
             # [:] forces data to load
-            staticdata = [
-                np.array(staticfile[v][:]) for v in self.variables["boundary"]
-            ]
+            staticdata = [np.array(staticfile[v][:]) for v in self.variables["boundary"]]
             self.shape = staticdata[0].shape
             self.data = dict(zip(self.variables["boundary"], staticdata))
 
@@ -444,9 +435,7 @@ class DataMap:
             data[use] = {}
             for var in self.variables[use]:
                 if self.dim == "3D" and self.zstride != 1:
-                    data[use][var] = np.array(
-                        ds[var][start:finish, :: self.zstride, ...]
-                    )
+                    data[use][var] = np.array(ds[var][start:finish, :: self.zstride, ...])
                 else:
                     data[use][var] = np.array(ds[var][start:finish, ...])
         ds.close()

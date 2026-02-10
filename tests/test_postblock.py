@@ -16,9 +16,7 @@ from credit.parser import credit_main_parser
 
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
-CONFIG_FILE_DIR = os.path.join(
-    "/".join(os.path.abspath(__file__).split("/")[:-2]), "config"
-)
+CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
 
 
 def test_SKEBS_backscatter():
@@ -202,9 +200,7 @@ def test_GlobalEnergyFixer_rand():
     postblock = PostBlock(**conf)
 
     # verify that GlobalEnergyFixer is registered in the postblock
-    assert any(
-        [isinstance(module, GlobalEnergyFixer) for module in postblock.modules()]
-    )
+    assert any([isinstance(module, GlobalEnergyFixer) for module in postblock.modules()])
 
     # input tensor
     x = torch.randn((1, 7, 2, 10, 18))

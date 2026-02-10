@@ -53,16 +53,12 @@ def test_sdl_crossformer():
         padding_conf=padding_conf,
         noise_latent_dim=noise_latent_dim,
         encoder_noise_factor=encoder_noise_factor,
-        decoder_noise_factor=decoder_noise_factor
+        decoder_noise_factor=decoder_noise_factor,
     )
 
     num_params = sum(p.numel() for p in model.parameters())
     assert num_params > 0, "Number of parameters is negative"
     y_pred = model(input_tensor)
-    assert (
-        y_pred.shape[1] == input_tensor.shape[1] - input_only_channels
-    ), "Num channels do not match"
-    assert (
-        y_pred.shape[2:] == input_tensor.shape[2:]
-    ), "Output dimensions do not match input dimensions"
+    assert y_pred.shape[1] == input_tensor.shape[1] - input_only_channels, "Num channels do not match"
+    assert y_pred.shape[2:] == input_tensor.shape[2:], "Output dimensions do not match input dimensions"
     assert ~torch.any(torch.isnan(y_pred)), "NaNs in prediction"

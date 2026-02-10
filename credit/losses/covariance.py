@@ -41,12 +41,8 @@ class CovarianceWeightedMSELoss(nn.Module):
     def forward(self, y_true, y_pred):
         # Assumes an initial shape based on (batch, variable, time, lat, lon)
         # First reorder dimensions to (variable, time, batch, lat, lon)
-        assert (
-            len(y_true.shape) == 5
-        ), "y_true # dimensions does not match 5: (batch, var, time, lat, lon)"
-        assert (
-            len(y_pred.shape) == 5
-        ), "y_pred # dimensions does no  match 5: (batch, var, time, lat, lon)"
+        assert len(y_true.shape) == 5, "y_true # dimensions does not match 5: (batch, var, time, lat, lon)"
+        assert len(y_pred.shape) == 5, "y_pred # dimensions does no  match 5: (batch, var, time, lat, lon)"
         new_order = (1, 2, 0, 3, 4)
         y_true_shuff = torch.permute(y_true, new_order)
         y_pred_shuff = torch.permute(y_pred, new_order)
@@ -64,13 +60,9 @@ class CovarianceWeightedMSELoss(nn.Module):
         residual = y_true_2d - y_pred_2d
         cov = torch.cov(residual)
         precision = torch.linalg.inv(cov)
-        diag_idx = torch.eye(
-            precision.shape[0], dtype=torch.float32, device=precision.device
-        )
+        diag_idx = torch.eye(precision.shape[0], dtype=torch.float32, device=precision.device)
         off_diag_idx = 1.0 - diag_idx
-        precision = (
-            precision * off_diag_idx * self.off_diagonal_scale + precision * diag_idx
-        )
+        precision = precision * off_diag_idx * self.off_diagonal_scale + precision * diag_idx
 
         def point_mse(res_row, prec=precision):
             res_long = torch.unsqueeze(res_row, 1)

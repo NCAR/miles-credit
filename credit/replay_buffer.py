@@ -47,11 +47,7 @@ class TOADataLoader:
         doy = datetime_input.dayofyear
         hod = datetime_input.hour
         mask_toa = [doy == time.dayofyear and hod == time.hour for time in self.times_b]
-        return (
-            torch.tensor(((self.TOA["tsi"].sel(time=mask_toa)) / 2540585.74).to_numpy())
-            .unsqueeze(0)
-            .float()
-        )
+        return torch.tensor(((self.TOA["tsi"].sel(time=mask_toa)) / 2540585.74).to_numpy()).unsqueeze(0).float()
 
 
 class WeightedRMSE(torch.nn.Module):
@@ -62,9 +58,7 @@ class WeightedRMSE(torch.nn.Module):
             lat = xr.open_dataset(conf["loss"]["latitude_weights"])["latitude"].values
             w_lat = np.cos(np.deg2rad(lat))
             w_lat = w_lat / w_lat.mean()
-            self.lat_weights = (
-                torch.from_numpy(w_lat).unsqueeze(0).unsqueeze(-1)
-            )  # Shape: (1, lat_dim, 1)
+            self.lat_weights = torch.from_numpy(w_lat).unsqueeze(0).unsqueeze(-1)  # Shape: (1, lat_dim, 1)
 
     def forward(self, predictions, targets):
         if self.lat_weights is not None:
@@ -151,18 +145,14 @@ class ReplayBuffer:
         if lookup_key.item() >= len(self.dataset):
             # If so, replace a random entry
             random_idx = random.randint(0, self.size - 1)
-            file_path = os.path.join(
-                self.numpy_dir, f"buffer_{self.rank}_{random_idx}.npy"
-            )
+            file_path = os.path.join(self.numpy_dir, f"buffer_{self.rank}_{random_idx}.npy")
             np.save(file_path, x.cpu().numpy())
             self.index[random_idx] = lookup_key.item()
             self.forecast_hour[random_idx] = 1  # Reset forecast hour
             self.q_values[random_idx] = 0.0  # Reset Q-value
             self.rmse_scores[random_idx] = 0.0  # Reset RMSE score
         elif self.size < self.buffer_size:
-            file_path = os.path.join(
-                self.numpy_dir, f"buffer_{self.rank}_{self.ptr}.npy"
-            )
+            file_path = os.path.join(self.numpy_dir, f"buffer_{self.rank}_{self.ptr}.npy")
             np.save(file_path, x.cpu().numpy())
             self.index[self.ptr] = lookup_key.item()
             self.forecast_hour[self.ptr] = 1  # Initialize forecast_hour to 1
@@ -173,9 +163,7 @@ class ReplayBuffer:
         else:
             # Replace a random entry if buffer is full
             random_idx = random.randint(0, self.size - 1)
-            file_path = os.path.join(
-                self.numpy_dir, f"buffer_{self.rank}_{random_idx}.npy"
-            )
+            file_path = os.path.join(self.numpy_dir, f"buffer_{self.rank}_{random_idx}.npy")
             np.save(file_path, x.cpu().numpy())
             self.index[random_idx] = lookup_key.item()
             self.forecast_hour[random_idx] = 1  # Reset forecast hour
@@ -215,14 +203,10 @@ class ReplayBuffer:
             indices = np.random.choice(self.size, batch_size, replace=False)
         else:
             # Exploitation: select experiences with probability proportional to Q-values
-            q_values_safe = np.nan_to_num(
-                self.q_values[: self.size], nan=0.0, posinf=0.0, neginf=0.0
-            )
+            q_values_safe = np.nan_to_num(self.q_values[: self.size], nan=0.0, posinf=0.0, neginf=0.0)
             weights = q_values_safe  # Use Q-values directly
             weights -= np.min(weights)  # Shift weights to be non-negative
-            weights /= np.sum(
-                weights
-            )  # Normalize to create a valid probability distribution
+            weights /= np.sum(weights)  # Normalize to create a valid probability distribution
             # Sample indices with lowest RMSEs
             indices = np.random.choice(self.size, batch_size, replace=False, p=weights)
         # else:
@@ -244,9 +228,7 @@ class ReplayBuffer:
     def update_q_values(self, indices, y_predict, y_truth):
         for i, idx in enumerate(indices):
             # Calculate the RMSE for the predicted and true values
-            rmse = self.metric_fn(
-                y_predict[i].detach().cpu().squeeze(1), y_truth[i].cpu().squeeze(1)
-            )
+            rmse = self.metric_fn(y_predict[i].detach().cpu().squeeze(1), y_truth[i].cpu().squeeze(1))
 
             # Use RMSE directly as the reward
             reward = -rmse
@@ -255,9 +237,7 @@ class ReplayBuffer:
             n = self.forecast_hour[idx] - 1
 
             # Update Q-value using the specified formula
-            self.q_values[idx] = self.q_values[idx] + (1 / n) * (
-                reward - self.q_values[idx]
-            )
+            self.q_values[idx] = self.q_values[idx] + (1 / n) * (reward - self.q_values[idx])
 
             # Update RMSE score
             self.rmse_scores[idx] = rmse
@@ -321,23 +301,17 @@ class ReplayBuffer:
     def load_inputs(self, idx):
         sample = self.dataset.__getitem__(idx)
 
-        x = self.concat_and_reshape(
-            sample["x"].unsqueeze(0), sample["x_surf"].unsqueeze(0)
-        )
+        x = self.concat_and_reshape(sample["x"].unsqueeze(0), sample["x_surf"].unsqueeze(0))
 
         if "static" in sample:
-            static = (
-                torch.FloatTensor(sample["static"]).unsqueeze(0).expand(2, -1, -1, -1)
-            )
+            static = torch.FloatTensor(sample["static"]).unsqueeze(0).expand(2, -1, -1, -1)
             x = torch.cat([x, static.unsqueeze(0)], dim=1)
 
         if "TOA" in sample:
             toa = torch.FloatTensor(sample["TOA"]).unsqueeze(0)
             x = torch.cat([x, toa.unsqueeze(1)], dim=1)
 
-        y = self.concat_and_reshape(
-            sample["y"].unsqueeze(0), sample["y_surf"].unsqueeze(0)
-        )
+        y = self.concat_and_reshape(sample["y"].unsqueeze(0), sample["y_surf"].unsqueeze(0))
 
         return x, y
 
@@ -359,15 +333,9 @@ class ReplayBuffer:
             self.forecast_hour,
         )
         np.save(os.path.join(self.numpy_dir, f"index_{self.rank}.npy"), self.index)
-        np.save(
-            os.path.join(self.numpy_dir, f"ptr_{self.rank}.npy"), np.array([self.ptr])
-        )
-        np.save(
-            os.path.join(self.numpy_dir, f"size_{self.rank}.npy"), np.array([self.size])
-        )
-        np.save(
-            os.path.join(self.numpy_dir, f"q_values_{self.rank}.npy"), self.q_values
-        )
+        np.save(os.path.join(self.numpy_dir, f"ptr_{self.rank}.npy"), np.array([self.ptr]))
+        np.save(os.path.join(self.numpy_dir, f"size_{self.rank}.npy"), np.array([self.size]))
+        np.save(os.path.join(self.numpy_dir, f"q_values_{self.rank}.npy"), self.q_values)
         np.save(
             os.path.join(self.numpy_dir, f"rmse_scores_{self.rank}.npy"),
             self.rmse_scores,
@@ -375,9 +343,7 @@ class ReplayBuffer:
 
     def reload(self):
         """Reload the buffer from saved numpy files."""
-        forecast_hour_path = os.path.join(
-            self.numpy_dir, f"forecast_hours_{self.rank}.npy"
-        )
+        forecast_hour_path = os.path.join(self.numpy_dir, f"forecast_hours_{self.rank}.npy")
         index_path = os.path.join(self.numpy_dir, f"index_{self.rank}.npy")
         ptr_path = os.path.join(self.numpy_dir, f"ptr_{self.rank}.npy")
         size_path = os.path.join(self.numpy_dir, f"size_{self.rank}.npy")
@@ -418,31 +384,19 @@ class ReplayBuffer:
 class Trainer(BaseTrainer):
     # Training function.
     @overrides
-    def train_one_epoch(
-        self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics
-    ):
+    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_accum_every = conf["trainer"]["grad_accum_every"]
         amp = conf["trainer"]["amp"]
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
-        rollout_p = (
-            1.0
-            if "stop_rollout" not in conf["trainer"]
-            else conf["trainer"]["stop_rollout"]
-        )
+        rollout_p = 1.0 if "stop_rollout" not in conf["trainer"] else conf["trainer"]["stop_rollout"]
         batch_size = conf["trainer"]["train_batch_size"]
 
-        if (
-            "static_variables" in conf["data"]
-            and "tsi" in conf["data"]["static_variables"]
-        ):
+        if "static_variables" in conf["data"] and "tsi" in conf["data"]["static_variables"]:
             self.toa = TOADataLoader(conf)
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if (
-            conf["trainer"]["use_scheduler"]
-            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
-        ):
+        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # set up a custom tqdm
@@ -450,11 +404,7 @@ class Trainer(BaseTrainer):
             # we sample forecast termination with probability p during training
             trainloader.dataset.set_rollout_prob(rollout_p)
         else:
-            batches_per_epoch = (
-                batches_per_epoch
-                if 0 < batches_per_epoch < len(trainloader)
-                else len(trainloader)
-            )
+            batches_per_epoch = batches_per_epoch if 0 < batches_per_epoch < len(trainloader) else len(trainloader)
 
         batch_group_generator = tqdm.tqdm(
             enumerate(trainloader),
@@ -466,9 +416,7 @@ class Trainer(BaseTrainer):
         static = None
         results_dict = defaultdict(list)
 
-        replay_buffer = ReplayBuffer(
-            conf, device=self.device, rank=self.rank, buffer_size=100
-        )
+        replay_buffer = ReplayBuffer(conf, device=self.device, rank=self.rank, buffer_size=100)
 
         self.model.train()
 
@@ -478,19 +426,11 @@ class Trainer(BaseTrainer):
             commit_loss = 0.0
 
             with autocast(enabled=amp):
-                x = self.model.concat_and_reshape(batch["x"], batch["x_surf"]).to(
-                    self.device
-                )
+                x = self.model.concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)
 
                 if "static" in batch:
                     if static is None:
-                        static = (
-                            batch["static"]
-                            .to(self.device)
-                            .unsqueeze(2)
-                            .expand(-1, -1, x.shape[2], -1, -1)
-                            .float()
-                        )
+                        static = batch["static"].to(self.device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
                     x = torch.cat((x, static.clone()), dim=1)
 
                 if "TOA" in batch:
@@ -504,9 +444,7 @@ class Trainer(BaseTrainer):
                 else:
                     epsilon = 0.2
 
-                y_pred, y, ave_forecast_hour = replay_buffer.update_with_predictions(
-                    self.model, batch_size, epsilon
-                )
+                y_pred, y, ave_forecast_hour = replay_buffer.update_with_predictions(self.model, batch_size, epsilon)
 
                 # sample from the buffer
                 y = y.to(self.device)

@@ -29,17 +29,17 @@ def launch_script(config_file, script_path, launch=True):
 
     # Generate the PBS script
     script = f"""#!/bin/bash -l
-    #PBS -N {pbs_options['job_name']}
-    #PBS -l select=1:ncpus={pbs_options['ncpus']}:ngpus={pbs_options['ngpus']}:mem={pbs_options['mem']}:gpu_type={pbs_options['gpu_type']}  
-    #PBS -l walltime={pbs_options['walltime']}
-    #PBS -A {pbs_options['project']}
-    #PBS -q {pbs_options['queue']}
+    #PBS -N {pbs_options["job_name"]}
+    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={pbs_options["ngpus"]}:mem={pbs_options["mem"]}:gpu_type={pbs_options["gpu_type"]}  
+    #PBS -l walltime={pbs_options["walltime"]}
+    #PBS -A {pbs_options["project"]}
+    #PBS -q {pbs_options["queue"]}
     #PBS -j oe
     #PBS -k eod
 
     source ~/.bashrc
 
-    conda activate {pbs_options['conda']}
+    conda activate {pbs_options["conda"]}
 
     python {script_path} -c {config_save_path}
     """
@@ -110,11 +110,11 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     # Generate the PBS script
     script = f"""#!/bin/bash
-    #PBS -A {pbs_options.get('project', 'default_project')}
-    #PBS -N {pbs_options.get('job_name', 'default_job')}
-    #PBS -l walltime={pbs_options.get('walltime', '00:10:00')}
-    #PBS -l select={num_nodes}:ncpus={pbs_options.get('ncpus', 1)}:ngpus={num_gpus}:mem={pbs_options.get('mem', '4GB')}
-    #PBS -q {pbs_options.get('queue', 'default_queue')}
+    #PBS -A {pbs_options.get("project", "default_project")}
+    #PBS -N {pbs_options.get("job_name", "default_job")}
+    #PBS -l walltime={pbs_options.get("walltime", "00:10:00")}
+    #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 1)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "4GB")}
+    #PBS -q {pbs_options.get("queue", "default_queue")}
     #PBS -j oe
     #PBS -k eod
 
@@ -123,7 +123,7 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     module load ncarenv/24.12
     module reset
     module load gcc craype cray-mpich cuda cudnn/8.9.7.29-12 conda
-    conda activate {pbs_options.get('conda', 'credit')}
+    conda activate {pbs_options.get("conda", "credit")}
 
     # Export environment variables
     export LSCRATCH=/glade/derecho/scratch/{user}/
@@ -200,6 +200,7 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
             logger.info(f"Generated the new script at {destination_path}")
         except shutil.SameFileError:
             pass
+
 
 def get_num_cpus():
     if "glade" in os.getcwd():

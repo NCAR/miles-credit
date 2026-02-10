@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 
+
 class StochasticDecompositionLayer(nn.Module):
     """
     A module that injects noise into feature maps, with a per-pixel and per-channel style modulation.
@@ -18,9 +19,7 @@ class StochasticDecompositionLayer(nn.Module):
         super().__init__()
         self.noise_transform = nn.Linear(noise_dim, feature_channels)
         self.modulation = nn.Parameter(torch.ones(1, feature_channels, 1, 1))
-        self.noise_factor = nn.Parameter(
-            torch.tensor([noise_factor]), requires_grad=False
-        )
+        self.noise_factor = nn.Parameter(torch.tensor([noise_factor]), requires_grad=False)
 
     def forward(self, feature_map, noise):
         """

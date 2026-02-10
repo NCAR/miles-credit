@@ -135,9 +135,7 @@ def load_dataset_and_sampler_zscore_only(
         drop_last=True,
     )
 
-    logging.info(
-        f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len + 1})"
-    )
+    logging.info(f" Loaded a {name} ERA dataset, and a distributed sampler (forecast length = {forecast_len + 1})")
 
     return dataset, sampler
 
@@ -164,26 +162,10 @@ def load_model_states_and_optimizer(conf, model, device):
     amp = conf["trainer"]["amp"]
 
     # load weights / states flags
-    load_weights = (
-        False
-        if "load_weights" not in conf["trainer"]
-        else conf["trainer"]["load_weights"]
-    )
-    load_optimizer_conf = (
-        False
-        if "load_optimizer" not in conf["trainer"]
-        else conf["trainer"]["load_optimizer"]
-    )
-    load_scaler_conf = (
-        False
-        if "load_scaler" not in conf["trainer"]
-        else conf["trainer"]["load_scaler"]
-    )
-    load_scheduler_conf = (
-        False
-        if "load_scheduler" not in conf["trainer"]
-        else conf["trainer"]["load_scheduler"]
-    )
+    load_weights = False if "load_weights" not in conf["trainer"] else conf["trainer"]["load_weights"]
+    load_optimizer_conf = False if "load_optimizer" not in conf["trainer"] else conf["trainer"]["load_optimizer"]
+    load_scaler_conf = False if "load_scaler" not in conf["trainer"] else conf["trainer"]["load_scaler"]
+    load_scheduler_conf = False if "load_scheduler" not in conf["trainer"] else conf["trainer"]["load_scheduler"]
 
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
     if not load_weights:  # Loaded after loading model weights when reloading
@@ -196,16 +178,10 @@ def load_model_states_and_optimizer(conf, model, device):
         if conf["trainer"]["mode"] == "fsdp":
             optimizer = FSDPOptimizerWrapper(optimizer, model)
         scheduler = load_scheduler(optimizer, conf)
-        scaler = (
-            ShardedGradScaler(enabled=amp)
-            if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
-        )
+        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
 
     # Multi-step training case -- when starting, only load the model weights (then after load all states)
-    elif load_weights and not (
-        load_optimizer_conf or load_scaler_conf or load_scheduler_conf
-    ):
+    elif load_weights and not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=learning_rate,
@@ -225,9 +201,7 @@ def load_model_states_and_optimizer(conf, model, device):
             )
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(
-                model, os.path.join(save_loc, "model_checkpoint.pt")
-            )
+            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
         else:
             # DDP settings
             ckpt = os.path.join(save_loc, "checkpoint.pt")
@@ -236,25 +210,17 @@ def load_model_states_and_optimizer(conf, model, device):
                 logging.info(
                     f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                load_msg = model.module.load_state_dict(
-                    checkpoint["model_state_dict"], strict=False
-                )
+                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
                 load_state_dict_error_handler(load_msg)
             else:
                 logging.info(
                     f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
                 )
-                load_msg = model.load_state_dict(
-                    checkpoint["model_state_dict"], strict=False
-                )
+                load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
                 load_state_dict_error_handler(load_msg)
         # Load the learning rate scheduler and mixed precision grad scaler
         scheduler = load_scheduler(optimizer, conf)
-        scaler = (
-            ShardedGradScaler(enabled=amp)
-            if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
-        )
+        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
 
     # load optimizer and grad scaler states
     else:
@@ -274,16 +240,9 @@ def load_model_states_and_optimizer(conf, model, device):
             )
             optimizer = FSDPOptimizerWrapper(optimizer, model)
             checkpoint_io = TorchFSDPCheckpointIO()
-            checkpoint_io.load_unsharded_model(
-                model, os.path.join(save_loc, "model_checkpoint.pt")
-            )
-            if (
-                "load_optimizer" in conf["trainer"]
-                and conf["trainer"]["load_optimizer"]
-            ):
-                checkpoint_io.load_unsharded_optimizer(
-                    optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt")
-                )
+            checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
+            if "load_optimizer" in conf["trainer"] and conf["trainer"]["load_optimizer"]:
+                checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
 
         else:
             # DDP settings
@@ -303,18 +262,11 @@ def load_model_states_and_optimizer(conf, model, device):
                 weight_decay=weight_decay,
                 betas=(0.9, 0.95),
             )
-            if (
-                "load_optimizer" in conf["trainer"]
-                and conf["trainer"]["load_optimizer"]
-            ):
+            if "load_optimizer" in conf["trainer"] and conf["trainer"]["load_optimizer"]:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         scheduler = load_scheduler(optimizer, conf)
-        scaler = (
-            ShardedGradScaler(enabled=amp)
-            if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
-        )
+        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
 
         # Update the config file to the current epoch
         if "reload_epoch" in conf["trainer"] and conf["trainer"]["reload_epoch"]:
@@ -329,11 +281,7 @@ def load_model_states_and_optimizer(conf, model, device):
             scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
     # Enable updating the lr if not using a policy
-    if (
-        conf["trainer"]["update_learning_rate"]
-        if "update_learning_rate" in conf["trainer"]
-        else False
-    ):
+    if conf["trainer"]["update_learning_rate"] if "update_learning_rate" in conf["trainer"] else False:
         for param_group in optimizer.param_groups:
             param_group["lr"] = learning_rate
 
@@ -364,9 +312,7 @@ def main(rank, world_size, conf, backend, trial=False):
     # infer device id from rank
 
     device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        if torch.cuda.is_available()
-        else torch.device("cpu")
+        torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
     )
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
@@ -378,9 +324,7 @@ def main(rank, world_size, conf, backend, trial=False):
     valid_batch_size = conf["trainer"]["valid_batch_size"]
     thread_workers = conf["trainer"]["thread_workers"]
     valid_thread_workers = (
-        conf["trainer"]["valid_thread_workers"]
-        if "valid_thread_workers" in conf["trainer"]
-        else thread_workers
+        conf["trainer"]["valid_thread_workers"] if "valid_thread_workers" in conf["trainer"] else thread_workers
     )
 
     # get file names
@@ -389,27 +333,21 @@ def main(rank, world_size, conf, backend, trial=False):
     # <------------------------------------------ std_new or 'std_cached'
     if conf["data"]["scaler_type"] == "std_new" or "std_cached":
         # check and glob surface files
-        if ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        ):
+        if ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0):
             surface_files = sorted(glob(conf["data"]["save_loc_surface"]))
 
         else:
             surface_files = None
 
         # check and glob dyn forcing files
-        if ("dynamic_forcing_variables" in conf["data"]) and (
-            len(conf["data"]["dynamic_forcing_variables"]) > 0
-        ):
+        if ("dynamic_forcing_variables" in conf["data"]) and (len(conf["data"]["dynamic_forcing_variables"]) > 0):
             dyn_forcing_files = sorted(glob(conf["data"]["save_loc_dynamic_forcing"]))
 
         else:
             dyn_forcing_files = None
 
         # check and glob diagnostic files
-        if ("diagnostic_variables" in conf["data"]) and (
-            len(conf["data"]["diagnostic_variables"]) > 0
-        ):
+        if ("diagnostic_variables" in conf["data"]) and (len(conf["data"]["diagnostic_variables"]) > 0):
             diagnostic_files = sorted(glob(conf["data"]["save_loc_diagnostic"]))
 
         else:
@@ -429,66 +367,34 @@ def main(rank, world_size, conf, backend, trial=False):
         valid_years_range = [2014, 2018]
 
     # convert year info to str for file name search
-    train_years = [
-        str(year) for year in range(train_years_range[0], train_years_range[1])
-    ]
-    valid_years = [
-        str(year) for year in range(valid_years_range[0], valid_years_range[1])
-    ]
+    train_years = [str(year) for year in range(train_years_range[0], train_years_range[1])]
+    valid_years = [str(year) for year in range(valid_years_range[0], valid_years_range[1])]
 
     # Filter the files for training / validation
-    train_files = [
-        file for file in all_ERA_files if any(year in file for year in train_years)
-    ]
-    valid_files = [
-        file for file in all_ERA_files if any(year in file for year in valid_years)
-    ]
+    train_files = [file for file in all_ERA_files if any(year in file for year in train_years)]
+    valid_files = [file for file in all_ERA_files if any(year in file for year in valid_years)]
 
     # <----------------------------------- std_new or 'std_cached'
     if conf["data"]["scaler_type"] == "std_new" or "std_cached":
         if surface_files is not None:
-            train_surface_files = [
-                file
-                for file in surface_files
-                if any(year in file for year in train_years)
-            ]
-            valid_surface_files = [
-                file
-                for file in surface_files
-                if any(year in file for year in valid_years)
-            ]
+            train_surface_files = [file for file in surface_files if any(year in file for year in train_years)]
+            valid_surface_files = [file for file in surface_files if any(year in file for year in valid_years)]
 
         else:
             train_surface_files = None
             valid_surface_files = None
 
         if dyn_forcing_files is not None:
-            train_dyn_forcing_files = [
-                file
-                for file in dyn_forcing_files
-                if any(year in file for year in train_years)
-            ]
-            valid_dyn_forcing_files = [
-                file
-                for file in dyn_forcing_files
-                if any(year in file for year in valid_years)
-            ]
+            train_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in train_years)]
+            valid_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in valid_years)]
 
         else:
             train_dyn_forcing_files = None
             valid_dyn_forcing_files = None
 
         if diagnostic_files is not None:
-            train_diagnostic_files = [
-                file
-                for file in diagnostic_files
-                if any(year in file for year in train_years)
-            ]
-            valid_diagnostic_files = [
-                file
-                for file in diagnostic_files
-                if any(year in file for year in valid_years)
-            ]
+            train_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in train_years)]
+            valid_diagnostic_files = [file for file in diagnostic_files if any(year in file for year in valid_years)]
 
         else:
             train_diagnostic_files = None
@@ -563,9 +469,7 @@ def main(rank, world_size, conf, backend, trial=False):
 
     # Load model weights (if any), an optimizer, scheduler, and gradient scaler
 
-    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(
-        conf, model, device
-    )
+    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
     # Train and validation losses
 
@@ -644,14 +548,10 @@ class Objective(BaseObjective):
 
         except Exception as E:
             if "CUDA" in str(E) or "non-singleton" in str(E):
-                logging.warning(
-                    f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}."
-                )
+                logging.warning(f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}.")
                 raise optuna.TrialPruned()
             elif "non-singleton" in str(E):
-                logging.warning(
-                    f"Pruning trial {trial.number} due to shape mismatch: {str(E)}."
-                )
+                logging.warning(f"Pruning trial {trial.number} due to shape mismatch: {str(E)}.")
                 raise optuna.TrialPruned()
             else:
                 logging.warning(f"Trial {trial.number} failed due to error: {str(E)}.")
@@ -715,9 +615,7 @@ if __name__ == "__main__":
 
     # ======================================================== #
     # handling config args
-    conf = credit_main_parser(
-        conf, parse_training=True, parse_predict=False, print_summary=False
-    )
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
     training_data_check(conf, print_summary=False)
     # ======================================================== #
 

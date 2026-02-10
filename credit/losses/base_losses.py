@@ -26,9 +26,7 @@ def base_losses(conf, reduction="mean", validation=False):
         torch.nn.Module: Instantiated loss function.
     """
     loss_key = "validation_loss" if validation else "training_loss"
-    params_key = (
-        "validation_loss_parameters" if validation else "training_loss_parameters"
-    )
+    params_key = "validation_loss_parameters" if validation else "training_loss_parameters"
 
     loss_type = conf["loss"][loss_key]
     loss_params = conf["loss"].get(params_key, {})

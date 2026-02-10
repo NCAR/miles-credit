@@ -151,25 +151,12 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
         if idx == 0:
             if self.history_len == 1:
                 x_list = []
-                upper_x = (
-                    self.all_files[valid_date]
-                    .sel(time=valid_date)
-                    .expand_dims("time", 0)
-                    .load()
-                )
-                surface_x = (
-                    self.surface_files[valid_date]
-                    .sel(time=valid_date)
-                    .expand_dims("time", 0)
-                    .load()
-                )
+                upper_x = self.all_files[valid_date].sel(time=valid_date).expand_dims("time", 0).load()
+                surface_x = self.surface_files[valid_date].sel(time=valid_date).expand_dims("time", 0).load()
                 x_list.extend([upper_x, surface_x])
                 if self.filename_dyn_forcing is not None:
                     dyn_forcing_x = (
-                        self.dyn_forcing_files[valid_year]
-                        .sel(time=valid_date)
-                        .expand_dims("time", 0)
-                        .load()
+                        self.dyn_forcing_files[valid_year].sel(time=valid_date).expand_dims("time", 0).load()
                     )
                     x_list.append(dyn_forcing_x)
                 if self.filename_static is not None:
@@ -186,10 +173,7 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
                 x_list = []
                 if self.filename_dyn_forcing is not None:
                     dyn_forcing_x = (
-                        self.dyn_forcing_files[valid_year]
-                        .sel(time=valid_date)
-                        .expand_dims("time", 0)
-                        .load()
+                        self.dyn_forcing_files[valid_year].sel(time=valid_date).expand_dims("time", 0).load()
                     )
                     x_list.append(dyn_forcing_x)
                 if self.filename_static is not None:

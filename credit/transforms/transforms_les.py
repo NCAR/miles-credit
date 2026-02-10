@@ -39,21 +39,15 @@ class NormalizeLES:
         self.num_upper_air = len(self.varname_upper_air) * self.levels
 
         # Identify the existence of other variables
-        self.flag_surface = ("surface_variables" in conf["data"]) and (
-            len(conf["data"]["surface_variables"]) > 0
-        )
+        self.flag_surface = ("surface_variables" in conf["data"]) and (len(conf["data"]["surface_variables"]) > 0)
         self.flag_dyn_forcing = ("dynamic_forcing_variables" in conf["data"]) and (
             len(conf["data"]["dynamic_forcing_variables"]) > 0
         )
         self.flag_diagnostic = ("diagnostic_variables" in conf["data"]) and (
             len(conf["data"]["diagnostic_variables"]) > 0
         )
-        self.flag_forcing = ("forcing_variables" in conf["data"]) and (
-            len(conf["data"]["forcing_variables"]) > 0
-        )
-        self.flag_static = ("static_variables" in conf["data"]) and (
-            len(conf["data"]["static_variables"]) > 0
-        )
+        self.flag_forcing = ("forcing_variables" in conf["data"]) and (len(conf["data"]["forcing_variables"]) > 0)
+        self.flag_static = ("static_variables" in conf["data"]) and (len(conf["data"]["static_variables"]) > 0)
 
         # Get surface varnames
         if self.flag_surface:
@@ -92,9 +86,7 @@ class NormalizeLES:
         else:
             self.has_forcing_static = False
 
-        logger.info(
-            "Loading stored mean and std data for z-score-based transform and inverse transform"
-        )
+        logger.info("Loading stored mean and std data for z-score-based transform and inverse transform")
 
     def __call__(self, sample, inverse: bool = False):
         if inverse:
@@ -117,9 +109,7 @@ class NormalizeLES:
 
         # Surface variables
         if self.flag_surface:
-            tensor_surface = x[
-                :, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :
-            ]
+            tensor_surface = x[:, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :]
             transformed_surface = tensor_surface.clone()
 
         # y_pred does not have dynamic_forcing, skip this var type
@@ -138,9 +128,7 @@ class NormalizeLES:
             for level in range(self.levels):
                 var_mean = mean_tensor[level]
                 var_std = std_tensor[level]
-                transformed_upper_air[:, k] = (
-                    tensor_upper_air[:, k] - var_mean
-                ) / var_std
+                transformed_upper_air[:, k] = (tensor_upper_air[:, k] - var_mean) / var_std
                 k += 1
 
         # Standardize surface variables
@@ -167,9 +155,7 @@ class NormalizeLES:
                 for level in range(self.levels):
                     var_mean = mean_tensor[level]
                     var_std = std_tensor[level]
-                    transformed_diagnostic[:, k] = (
-                        transformed_diagnostic[:, k] - var_mean
-                    ) / var_std
+                    transformed_diagnostic[:, k] = (transformed_diagnostic[:, k] - var_mean) / var_std
                     k += 1
 
         # Concatenate everything
@@ -184,14 +170,10 @@ class NormalizeLES:
                     dim=1,
                 )
             else:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_surface), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_surface), dim=1)
         else:
             if self.flag_diagnostic:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_diagnostic), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_diagnostic), dim=1)
             else:
                 transformed_x = transformed_upper_air
 
@@ -218,9 +200,7 @@ class NormalizeLES:
                         for varname in varname_inputs:
                             # if forcing and static skip it, otherwise do z-score
                             if (varname in self.varname_forcing_static) is False:
-                                value[varname] = (
-                                    value[varname] - self.mean_ds[varname]
-                                ) / self.std_ds[varname]
+                                value[varname] = (value[varname] - self.mean_ds[varname]) / self.std_ds[varname]
 
                         # put transformed xr.Dataset to the output dictionary
                         normalized_sample[key] = value
@@ -250,9 +230,7 @@ class NormalizeLES:
 
         # Surface variables
         if self.flag_surface:
-            tensor_surface = x[
-                :, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :
-            ]
+            tensor_surface = x[:, self.num_upper_air : (self.num_upper_air + self.num_surface), :, :]
             transformed_surface = tensor_surface.clone()
 
         # Diagnostic variables (the very last of the stack)
@@ -287,9 +265,7 @@ class NormalizeLES:
                 for level in range(self.levels):
                     mean = mean_tensor[level]
                     std = std_tensor[level]
-                    transformed_diagnostic[:, k] = (
-                        transformed_diagnostic[:, k] * std + mean
-                    )
+                    transformed_diagnostic[:, k] = transformed_diagnostic[:, k] * std + mean
                     k += 1
 
         # Concatenate everything
@@ -304,14 +280,10 @@ class NormalizeLES:
                     dim=1,
                 )
             else:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_surface), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_surface), dim=1)
         else:
             if self.flag_diagnostic:
-                transformed_x = torch.cat(
-                    (transformed_upper_air, transformed_diagnostic), dim=1
-                )
+                transformed_x = torch.cat((transformed_upper_air, transformed_diagnostic), dim=1)
             else:
                 transformed_x = transformed_upper_air
 
@@ -343,9 +315,7 @@ class NormalizeLES:
             if self.static_first:
                 tensor_dyn_forcing = x[
                     :,
-                    idx + self.num_static : idx
-                    + self.num_static
-                    + self.num_dyn_forcing,
+                    idx + self.num_static : idx + self.num_static + self.num_dyn_forcing,
                     :,
                     :,
                 ]
@@ -477,9 +447,7 @@ class ToTensorLES:
             # ======================================================================================== #
             # forcing variable first (new models) vs. static variable first (some old models)
             # this flag makes sure that the class is compatible with some old CREDIT models
-            self.flag_static_first = ("static_first" in conf["data"]) and (
-                conf["data"]["static_first"]
-            )
+            self.flag_static_first = ("static_first" in conf["data"]) and (conf["data"]["static_first"])
             # ======================================================================================== #
         else:
             self.has_forcing_static = False
@@ -519,18 +487,10 @@ class ToTensorLES:
                 if self.has_forcing_static or self.flag_dyn_forcing:
                     # enter this scope if one of the (dyn_forcing, folrcing, static) exists
                     if self.flag_static_first:
-                        varname_forcing_static = (
-                            self.varname_static
-                            + self.varname_dyn_forcing
-                            + self.varname_forcing
-                        )
+                        varname_forcing_static = self.varname_static + self.varname_dyn_forcing + self.varname_forcing
 
                     else:
-                        varname_forcing_static = (
-                            self.varname_dyn_forcing
-                            + self.varname_forcing
-                            + self.varname_static
-                        )
+                        varname_forcing_static = self.varname_dyn_forcing + self.varname_forcing + self.varname_static
 
                     if key == "LES_input":
                         list_vars_forcing_static = []
@@ -558,12 +518,7 @@ class ToTensorLES:
             # ToTensor: upper-air varialbes
             ## produces [time, upper_var, level, lat, lon]
             ## np.hstack concatenates the second dim (axis=1)
-            x_upper_air = np.hstack(
-                [
-                    np.expand_dims(var_upper_air, axis=1)
-                    for var_upper_air in numpy_vars_upper_air
-                ]
-            )
+            x_upper_air = np.hstack([np.expand_dims(var_upper_air, axis=1) for var_upper_air in numpy_vars_upper_air])
             x_upper_air = torch.as_tensor(x_upper_air)
 
             # ---------------------------------------------------------------------- #
@@ -634,15 +589,11 @@ class ToTensorLES:
                         for var_diag in numpy_vars_diagnostic:
                             # (time, level, lat, lon)
                             if len(var_diag.shape) == 4:
-                                list_diag_collect.append(
-                                    np.expand_dims(var_diag, axis=1)
-                                )
+                                list_diag_collect.append(np.expand_dims(var_diag, axis=1))
 
                             # (time, lat, lon)
                             elif len(var_diag.shape) == 3:
-                                list_diag_collect.append(
-                                    np.expand_dims(var_diag, axis=(1, 2))
-                                )
+                                list_diag_collect.append(np.expand_dims(var_diag, axis=(1, 2)))
 
                         y_diag = torch.as_tensor(np.hstack(list_diag_collect))
 
