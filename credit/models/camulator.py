@@ -365,7 +365,7 @@ class Transformer(nn.Module):
 # classes
 
 
-class CrossFormer(BaseModel):
+class Camulator(BaseModel):
     def __init__(
         self,
         image_height: int = 640,
@@ -596,15 +596,7 @@ class CrossFormer(BaseModel):
         x = self.up_block3(x)
         x = torch.cat([x, encodings[0]], dim=1)
         
-        # x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False, antialias=False)
-        # x = self.conv4up(x)
-
         x = self.up_block4(x)
-
-        # self.up_block4 = nn.Sequential(
-        #     nn.functional.interpolate(scale_factor=2, mode="bilinear", align_corners=False, antialias=True),
-        #     nn.Conv2d(2 * (last_dim // 8), output_channels, kernel_size=3, stride=1, padding=1),
-        # )
 
         if self.use_padding:
             x = self.padding_opt.unpad(x)
@@ -656,7 +648,7 @@ if __name__ == "__main__":
         image_width,
     ).to("cuda")
 
-    model = CrossFormer(
+    model = Camulator(
         image_height=image_height,
         image_width=image_width,
         frames=frames,
@@ -680,5 +672,3 @@ if __name__ == "__main__":
 
     y_pred = model(input_tensor.to("cuda"))
     print("Predicted shape:", y_pred.shape)
-
-    # print(model.rk4(input_tensor.to("cpu")).shape)

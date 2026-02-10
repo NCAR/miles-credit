@@ -144,7 +144,6 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
             self.xarray_static = None
 
         dyn = self.dyn_forcing_files[self.forecast_times[0].year]
-        dyn.to_netcdf("/glade/derecho/scratch/cbecker/dyn_test.nc")
         years = np.unique(dyn.time.dt.year)
         for year in years:
             self.dyn_forcing_files[year] = dyn.sel(time=str(year))

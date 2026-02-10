@@ -121,22 +121,6 @@ def predict(rank, world_size, conf, p, member):
     if member == "001":
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:
             setup(rank, world_size, conf["predict"]["mode"])
-    # init = "2025-10-30"
-    # for member in range(1, 341, 11):
-    #     if perturb:
-    #         member = f"{member:03}"
-    #         file_name = f'GEFS_ICs.{member}.i.{init}-00000.nc'  ## format from "make_ensemble_aiwq.py"
-    #     else:
-    #         if member == 0:
-    #             file_name = f"gefs_cam_grid_c00.nc"
-    #         else:
-    #             file_name = f"gefs_cam_grid_p{member:02}.nc"
-    #     conf['file_configs']["member"] = member
-    #     conf['data']['save_loc'] =  os.path.join(conf['file_configs']['base_path'], file_name)
-    #     conf['data']['save_loc_surface'] = os.path.join(conf['file_configs']['base_path'], file_name)
-    #     conf['data']['save_loc_dynamic_forcing'] = os.path.join("/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/AIWQ_inits/",
-    #                                             f'b.e21.CREDIT_climate_branch_allvars_GEFSicefracandsst_{init}.zarr')
-    #     conf['data']['save_loc_diagnostic'] = os.path.join(conf['file_configs']['base_path'], file_name)
 
     # Set up dataloading
     data_config = setup_data_loading(conf)
@@ -218,12 +202,12 @@ def predict(rank, world_size, conf, p, member):
 
     # for i in range(1, 11):
     #     mem = f"{member}_{i:02}"
-    #     # Load the forecasts we wish to compute
-    #     forecasts = load_forecasts(conf)
-    #     if len(forecasts) < batch_size:
-    #         logger.warning(
-    #             f"number of forecast init times {len(forecasts)} is less than batch_size {batch_size}, will result in under-utilization"
-    #         )
+    # Load the forecasts we wish to compute
+    forecasts = load_forecasts(conf)
+    if len(forecasts) < batch_size:
+        logger.warning(
+            f"number of forecast init times {len(forecasts)} is less than batch_size {batch_size}, will result in under-utilization"
+        )
 
     dataset = RealtimePredictDataset(
         forecast_start_time,
@@ -243,13 +227,13 @@ def predict(rank, world_size, conf, p, member):
         sst_forcing=data_config["sst_forcing"],
         rank=rank,
         world_size=world_size)
-
+    
 # Use a custom DataLoader so we get the len correct
     data_loader = BatchForecastLenDataLoader(dataset)
 
 # Warning -- see next line
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
-
+    
 # Load the model
 #     if mem == "001_01":
     if conf["predict"]["mode"] == "none":
@@ -364,7 +348,7 @@ def predict(rank, world_size, conf, p, member):
                     forecast_count,
                     batch["datetime"],
                     save_datetimes,
-                    mem
+                    member
                 ),
             )
             results.append(result)

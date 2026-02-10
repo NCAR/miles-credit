@@ -151,17 +151,13 @@ def load_premade_encoder_model(model_conf):
         raise OSError(f"Model name {name} not recognized. Please choose from {supported_models.keys()}")
 
 
-class SegmentationModel(BaseModel):
+class DownscalingSegmentationModel(BaseModel):
     def __init__(
         self,
+        channels: dict,
         image_height=640,
         image_width=1280,
         frames=2,
-        channels=4,
-        surface_channels=7,
-        input_only_channels=3,
-        output_only_channels=0,
-        levels=16,
         rk4_integration=False,
         architecture=None,
         post_conf=None,
@@ -169,26 +165,21 @@ class SegmentationModel(BaseModel):
     ):
         if post_conf is None:
             post_conf = {"activate": False, "use_skebs": False}
-        super(SegmentationModel, self).__init__()
+        super(DownscalingSegmentationModel, self).__init__()
 
         self.image_height = image_height
         self.image_width = image_width
         self.frames = frames
         self.channels = channels
-        self.surface_channels = surface_channels
-        self.levels = levels
         self.rk4_integration = rk4_integration
 
-        # input channels
-        input_channels = channels * levels + surface_channels + input_only_channels
-
-        # output channels
-        output_channels = channels * levels + surface_channels + output_only_channels
+        self.input_channels  = channels['boundary']   + channels['prognostic']
+        self.output_channels = channels['prognostic'] + channels['diagnostic']
 
         if architecture["name"] == "unet":
             architecture["decoder_attention_type"] = "scse"
-        architecture["in_channels"] = input_channels
-        architecture["classes"] = output_channels
+        architecture["in_channels"] = self.input_channels
+        architecture["classes"] = self.output_channels
 
         self.model = load_premade_encoder_model(architecture)
         # Additional layers for testing
