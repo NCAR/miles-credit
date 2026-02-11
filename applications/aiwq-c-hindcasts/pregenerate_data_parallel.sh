@@ -86,15 +86,9 @@ while [ "$current_sec" -le "$job_end_sec" ]; do
         continue
     fi
 
-    # Skip if final IC files already exist
-    if [ -f "$ENSEMBLE_LAST" ]; then
-        echo "  ${DATE_SHORT}: ICs already exist, skipping..."
-        current_sec=$((current_sec + 86400))
-        continue
-    fi
-
     # --- Step 1: prepare_hindcastinit.py ---
     if [ -f "$STEP1_INIT" ] && [ -f "$STEP1_FORCING" ]; then
+        echo $STEP1_FORCING
         echo "  ${DATE_SHORT}: Step 1 outputs already exist, skipping..."
     else
         echo "  ${DATE_SHORT}: Step 1 prepare_hindcastinit.py..."
