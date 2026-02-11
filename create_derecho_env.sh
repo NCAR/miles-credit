@@ -23,8 +23,8 @@ set -e
 # containing Derecho-specific torch & MPI bits.
 # (install torchmetrics at this point too, installing it later
 # via pip risks an undesirable torch update.)
-ml conda
-
+module load conda
+module list
 topdir=$(git rev-parse --show-toplevel)
 CREDIT_ENV_NAME=${CREDIT_ENV_NAME:-"credit-derecho"}
 yml=$(mktemp --tmpdir=${topdir} credit-derecho-tmp-XXXXXXXXXX.yml)
@@ -37,6 +37,7 @@ cat <<EOF > ${yml}
 name: credit
 channels:
   - file:///glade/work/benkirk/consulting/conda-recipes/output
+  - conda-forge/label/mpi-external
   - conda-forge
 dependencies:
   - python=3.11
@@ -48,7 +49,6 @@ dependencies:
   - torchmetrics
   - pip:
     - pipdeptree
-    - -e .
 EOF
 
 # create the environment
@@ -72,12 +72,23 @@ find ${CONDA_PREFIX} -name "libnccl.*"
 #  (echo-opt -> xgboost -> nvidia-nccl-cu12 -> problem.)
 pip uninstall -y $(pip list | grep nvidia-nccl | awk '{print $1}') || true
 
+#-----------------------------------------------------------
+# install credit (editable) with constraints to prevent pip
+# from overwriting the conda-installed torch/torchvision/torchmetrics.
+constraint_file=$(mktemp --tmpdir=${topdir} credit-constraints-XXXXXXXXXX.txt)
+pip list --format=freeze | grep -iE "^(torch|torchvision|torchmetrics)==" > "${constraint_file}"
+echo "Using pip constraints:"
+cat "${constraint_file}"
+pip install --constraint "${constraint_file}" -e .
+rm -f "${constraint_file}"
+
 conda-tree deptree --small
 pipdeptree --depth 3
 
 echo "NCCLs - after cleanup:"
 find ${CONDA_PREFIX} -name "libnccl.*"
 
+python -c "import torch; print('torch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"
 python -c "import credit"
 
 echo
