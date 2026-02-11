@@ -37,6 +37,7 @@ cat <<EOF > ${yml}
 name: credit
 channels:
   - file:///glade/work/benkirk/consulting/conda-recipes/output
+  - conda-forge/label/mpi-external
   - conda-forge
 dependencies:
   - python=3.11
