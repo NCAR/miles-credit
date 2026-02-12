@@ -15,7 +15,7 @@ def annual_xr_dataset():
 
     def make_ds(start, end):
         time = pd.date_range(start, end, freq="6h")
-        level = [1000, 850, 500, 300]
+        level = [100, 85, 50, 30]
         lat = np.linspace(-90, 90, 21)
         lon = np.linspace(-180, 180, 41)
 
@@ -80,6 +80,8 @@ def minimal_config():
         "end_datetime": "2023-01-05",
         "source": {
             "ERA5": {
+                "level_coord": "level",
+                "levels": [100, 85, 50, 30],
                 "prognostic": {
                     "vars_3D": ["T", "U"],
                     "vars_2D": ["SP"],
