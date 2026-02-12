@@ -82,7 +82,7 @@ def minimal_config():
         "source": {
             "ERA5": {
                 "level_coord": "level",
-                "levels": [100, 85, 50, 30],
+                "levels": [1000, 850, 500, 300],
                 "variables": {
                     "prognostic": {
                         "vars_3D": ["T", "U"],
