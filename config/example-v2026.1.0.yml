@@ -155,7 +155,7 @@ model:
     levels: &levels 18                        # number of upper-air variable levels (default: 15)
     channels: 4                       # upper-air variable channels
     surface_channels: 4               # surface variable channels
-    input_only_channels: 3            # dynamic forcing, forcing, static channels
+    input_only_channels: 4            # dynamic forcing, forcing, static channels
     output_only_channels: 8           # diagnostic variable channels
     
     patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
@@ -327,9 +327,6 @@ loss:
     # available options are "mse", "msle", "mae", "huber", "logcosh", "xtanh", "xsigmoid", "covmse"
     # ensemble training losses: "KCRPS", "almost-fair-crps"
     training_loss: "mse"
-    training_loss_parameters:
-      batch_normalize: True
-      off_diagonal_scale: 1.0e-8 
     validation_loss: "mse"
 
     # use power or spectral loss
