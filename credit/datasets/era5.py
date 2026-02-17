@@ -26,22 +26,20 @@ class ERA5Dataset(Dataset):
         data:
           source:
             ERA5:
-              prognostic:
-                vars_3D: ['T', 'U', 'V', 'Q']
-                vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                path: "<path to prognostic>"
-              diagnostic:
-                vars_3D: ['T', 'U', 'V', 'Q']
-                vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                path: "<path to diagnostic>"
-              static:
-                vars_3D: ['T', 'U', 'V', 'Q']
-                vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                path: "<path to static>"
-              dynamic_forcing:
-                vars_3D: ['T', 'U', 'V', 'Q']
-                vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
-                path: "<path to dynamic forcing>"
+              level_coord: "level"
+              levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+              variables:
+                prognostic:
+                  vars_3D: ['T', 'U', 'V', 'Q']
+                  vars_2D: ['T500', 'U500', 'V500', 'Q500' ,'Z500', 'tsi', 't2m','SP']
+                  path: "<path to prognostic>"
+                diagnostic: null
+                static:
+                  vars_2D: ['Z_GDS4_SFC','LSM']
+                  path: "<path to static>"
+                dynamic_forcing:
+                  vars_2D: ['tsi']
+                  path: "<path to dynamic forcing>"
 
         start_datetime: "2017-01-01"
         end_datetime: "2019-12-31"
@@ -50,13 +48,15 @@ class ERA5Dataset(Dataset):
     Assumptions:
         1) The data MUST be stored in yearly zarr or netCDF files with a unique 4-digit year (YYYY) in the file name
         2) "time" dimension / coordinate is present
-        3) "level" dimension name representing the vertical level
-        4) Dimension order of ('time', level', 'latitude', 'longitude') for 3D vars (remove level for 2D)
+        3) "level" or "pressure" coordinate name representing the vertical level
+        4) Dimension order of ('time', level/pressure', 'latitude', 'longitude') for 3D vars (remove level/pressure for 2D)
         5) Data should be chunked efficiently for a fast read (recommend small chunks across time dimension).
     """
 
     def __init__(self, config, return_target=False):
         self.source_name = "ERA5"
+        self.level_coord = config["source"]["ERA5"]["level_coord"]
+        self.levels = config["source"]["ERA5"]["levels"]
         self.return_target = return_target
         self.dt = pd.Timedelta(config["timestep"])
         self.num_forecast_steps = config["forecast_len"] + 1
@@ -66,8 +66,9 @@ class ERA5Dataset(Dataset):
         self.years = [str(y) for y in self.datetimes.year]
         self.file_dict = {}
         self.var_dict = {}
+        self.variable_meta = self._build_var_metadata(config)
 
-        for field_type, d in config["source"][self.source_name].items():
+        for field_type, d in config["source"][self.source_name]["variables"].items():
             if field_type not in VALID_FIELD_TYPES:
                 raise KeyError(
                     f"Unknown field_type '{field_type}' in config['source']['{self.source_name}']. "
@@ -140,8 +141,9 @@ class ERA5Dataset(Dataset):
                 if key in self.file_dict.keys():
                     self._open_ds_extract_fields(key, t_target, return_data, is_target=True)
             self._pop_and_merge_targets(return_data)
+            return_data["metadata"]["target_datetime"] = int(t_target.value)
 
-        self._add_metadata(return_data, t, t_target)
+        return_data["metadata"]["input_datetime"] = int(t.value)
 
         return return_data
 
@@ -164,22 +166,20 @@ class ERA5Dataset(Dataset):
                     ds = dataset.sel(time=t)
                 else:
                     ds = dataset
-
                 ds_all_vars = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
 
                 ds_3D = ds_all_vars[self.var_dict[field_type]["vars_3D"]]
                 ds_2D = ds_all_vars[self.var_dict[field_type]["vars_2D"]]
-                data_np, meta = self._reshape_and_concat(ds_3D, ds_2D)
+                data_np = self._reshape_and_concat(ds_3D, ds_2D)
 
                 if is_target:
                     if field_type == "prognostic":
                         return_data["target_prognostic"] = torch.tensor(data_np).float()
                     elif field_type == "diagnostic":
                         return_data["target_diagnostic"] = torch.tensor(data_np).float()
+
                 else:
                     return_data[field_type] = torch.tensor(data_np).float()
-
-                return_data["metadata"][f"{field_type}_var_order"] = meta
 
     def _reshape_and_concat(self, ds_3D, ds_2D):
         """
@@ -190,38 +190,49 @@ class ERA5Dataset(Dataset):
             ds_2D (xr.Dataset): Xarray dataset with 2D spatial variables
         """
         data_list = []
-        meta_3D, meta_2D = [], []
 
         if ds_3D:
-            data_3D = ds_3D.to_array().stack({"level_var": ["variable", "level"]})
-            meta_3D = data_3D.level_var.values.tolist()
+            data_3D = (
+                ds_3D.sel({self.level_coord: self.levels})
+                .to_array()
+                .stack({"level_var": ["variable", self.level_coord]})
+            )
             data_3D = np.expand_dims(data_3D.values.transpose(2, 0, 1), axis=1)
             data_list.append(data_3D)
 
         if ds_2D:
             data_2D = ds_2D.to_array()
-            meta_2D = data_2D["variable"].values.tolist()
             data_2D = np.expand_dims(data_2D, axis=1)
             data_list.append(data_2D)
 
         combined_data = np.concatenate(data_list, axis=0)
-        meta = meta_3D + meta_2D
 
-        return combined_data, meta
+        return combined_data
 
-    def _add_metadata(self, return_data, t, t_target=None):
-        """
-        Update metadata dictionary
+    def _build_var_metadata(self, config):
+        """Build variable order metadata"""
 
-        Args:
-            return_data (dict): Return dictionary
-            t (int): Time step
-            t_target: Target time step or None
-        """
-        return_data["metadata"]["input_datetime"] = int(t.value)
+        var_meta = {}
+        source_cfg = config["source"][self.source_name]
+        levels = source_cfg.get("levels", [])
+        variables = source_cfg.get("variables", {}) or {}
 
-        if self.return_target:
-            return_data["metadata"]["target_datetime"] = int(t_target.value)
+        for field_type, spec in variables.items():
+            if spec is None:
+                continue
+
+            var_meta[field_type] = []
+
+            # Expand 3D variables over levels
+            for v in spec.get("vars_3D") or []:
+                for lev in levels:
+                    var_meta[field_type].append(f"{self.source_name}_{v}_{lev}")
+
+            # Add 2D variables directly
+            for v in spec.get("vars_2D") or []:
+                var_meta[field_type].append(f"{self.source_name}_{v}")
+
+        return var_meta
 
     def _convert_cf_time(self, ts):
         """
