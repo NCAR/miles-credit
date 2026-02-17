@@ -80,22 +80,26 @@ def minimal_config():
         "end_datetime": "2023-01-05",
         "source": {
             "ERA5": {
-                "prognostic": {
-                    "vars_3D": ["T", "U"],
-                    "vars_2D": ["SP"],
-                    "path": "/fake/*.zarr",
-                },
-                "dynamic_forcing": {
-                    "vars_2D": ["tsi"],
-                    "path": "/fake/*.zarr",
-                },
-                "static": {
-                    "vars_2D": ["LSM"],
-                    "path": "/fake/*.zarr",
-                },
-                "diagnostic": {
-                    "vars_2D": ["TP"],
-                    "path": "/fake/*.zarr",
+                "level_coord": "level",
+                "levels": [1000, 850, 500, 300],
+                "variables": {
+                    "prognostic": {
+                        "vars_3D": ["T", "U"],
+                        "vars_2D": ["SP"],
+                        "path": "/fake/*.zarr",
+                    },
+                    "dynamic_forcing": {
+                        "vars_2D": ["tsi"],
+                        "path": "/fake/*.zarr",
+                    },
+                    "static": {
+                        "vars_2D": ["LSM"],
+                        "path": "/fake/*.zarr",
+                    },
+                    "diagnostic": {
+                        "vars_2D": ["TP"],
+                        "path": "/fake/*.zarr",
+                    },
                 },
             }
         },
