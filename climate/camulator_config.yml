@@ -497,7 +497,7 @@ predict:
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
     # each forecast lead time produces a file.nc
-    save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/new_pxshf/Post_003steps/'
+    save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/new_pxshf/Get_Coupling/'
     
     # this keyword will apply a low-pass filter to all fields and each forecast step
     # it will reduce high-freq noise, but may impact performance
@@ -515,7 +515,7 @@ predict:
     init_cond_fast_climate: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/init_times/init_be21_condition_tensor_1981-01-01T00Z.pth'
     inds_rmse_fast_climate: ['rmse_PRECT','rmse_TREFHT']
     seasonal_mean_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_Spatial_PS/truth_be21_tensor_2013-01-01T00Z.pth'
-    timesteps_fast_climate: 200
+    timesteps_fast_climate: 50
     
     # deprecated
     # save_format: "nc"
