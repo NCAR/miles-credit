@@ -18,7 +18,7 @@ pip install miles-credit
 
 If you want to install the main development branch
 ```bash
-git clone git@github.com:NCAR/miles-credit.git
+git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 pip install -e .
 ```
@@ -31,7 +31,7 @@ macOS users will need to ensure that the required compilers are present and prop
 If you want to build a conda environment and install a Derecho-compatible version of PyTorch, run
 the `create_derecho_env.sh` script.
 ```bash
-git clone git@github.com:NCAR/miles-credit.git
+git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 ./create_derecho_env.sh
 ```
