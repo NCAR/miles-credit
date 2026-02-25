@@ -1,0 +1,58 @@
+name: test PR
+
+#workflow dispatch adds a button to run on github and is useful to always have there
+on:
+  #workflow_dispatch:
+  pull_request:  # Use this to run the PR's workflow (usually for testing a new workflow)
+    types: [opened, synchronize, reopened]
+jobs: 
+  build: 
+    runs-on: gha-runner-miles-credit1
+    container:
+      image: docker.io/sgpearse/cirrustest:1.3.20.root.1
+      options: --user 0
+    env:
+     GITHUB_TOKEN: ${{ github.token }}
+     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+     AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+     AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+    steps: 
+    - name: Debug permissions...
+      run: |
+        id
+        ls -ld /__w /__w/_temp /__w/_temp/_runner_file_commands || true
+        touch /__w/_temp/testfile || echo "Cannot write"
+    - name: checkout code
+      uses: actions/checkout@v4
+    - name: Fetch and checkout PR head commit
+      run: |
+        git config --global --add safe.directory /__w/CIRRUS-MILES-CREDIT/CIRRUS-MILES-CREDIT
+        git fetch origin ${{ github.event.pull_request.head.sha }}
+        git checkout ${{ github.event.pull_request.head.sha }}
+    - name: Run debug job
+      run: |
+        echo "Running debug job for PR on self-hosted runner"
+        pwd
+        date
+        git log -1
+        chmod -R 777 ./.github/workflows/*
+        #chmod 777 credit.sh
+        #chmod 777 dateChange.sh
+        #./dateChange.sh
+        ./.github/workflows/dateChange.sh /__w/CIRRUS-MILES-CREDIT/CIRRUS-MILES-CREDIT/.github/workflows/model_predict_CI.yml
+        #cat model_predict_old.yml
+        #cat ./.github/workflows/model_predict_CI.yml
+        ./.github/workflows/runModelPredict.sh
+        #./credit.sh
+        du -h /output
+    #- name: Upload the gfs_init.py netCDF output files to CIRRUS storage
+    #  run: |
+    #    wget https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_linux_amd64.deb
+    #    apt install ./s5cmd_2.3.0_linux_amd64.deb
+    #    s5cmd version
+    #    touch "$(date +%H-%M-%S).txt"
+    #    ls -lrth
+    #    s5cmd --endpoint-url https://s3.k8s.ucar.edu:5443 ls s3://model-predict-bucket/
+    #    s5cmd --no-verify-ssl --endpoint-url $AWS_ENDPOINT_URL cp --include '*.txt' . s3://model-predict-bucket
+    #    s5cmd --endpoint-url https://s3.k8s.ucar.edu:5443 ls s3://model-predict-bucket/
