@@ -207,21 +207,13 @@ class GlobalMassFixer(nn.Module):
             lon_demo = torch.from_numpy(lon_demo)
             lat_demo = torch.from_numpy(lat_demo)
 
-            p_level_demo = torch.from_numpy(
-                np.array([100, 30000, 50000, 70000, 80000, 90000, 100000])
-            )
+            p_level_demo = torch.from_numpy(np.array([100, 30000, 50000, 70000, 80000, 90000, 100000]))
             self.flag_sigma_level = False
             self.flag_midpoint = post_conf["global_mass_fixer"]["midpoint"]
-            self.core_compute = physics_pressure_level(
-                lon_demo, lat_demo, p_level_demo, midpoint=self.flag_midpoint
-            )
+            self.core_compute = physics_pressure_level(lon_demo, lat_demo, p_level_demo, midpoint=self.flag_midpoint)
 
             self.N_levels = len(p_level_demo)
-            self.ind_fix = (
-                len(p_level_demo)
-                - int(post_conf["global_mass_fixer"]["fix_level_num"])
-                + 1
-            )
+            self.ind_fix = len(p_level_demo) - int(post_conf["global_mass_fixer"]["fix_level_num"]) + 1
 
         else:
             # the actual setup for model runs
@@ -237,12 +229,8 @@ class GlobalMassFixer(nn.Module):
 
             if post_conf["global_mass_fixer"]["grid_type"] == "sigma":
                 self.flag_sigma_level = True
-                self.coef_a = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[2]].values
-                ).float()
-                self.coef_b = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[3]].values
-                ).float()
+                self.coef_a = torch.from_numpy(ds_physics[lon_lat_level_names[2]].values).float()
+                self.coef_b = torch.from_numpy(ds_physics[lon_lat_level_names[3]].values).float()
 
                 # get total number of levels
                 self.N_levels = len(self.coef_a)
@@ -254,19 +242,13 @@ class GlobalMassFixer(nn.Module):
                 )
             else:
                 self.flag_sigma_level = False
-                p_level = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[2]].values
-                ).float()
+                p_level = torch.from_numpy(ds_physics[lon_lat_level_names[2]].values).float()
                 # get total number of levels
                 self.N_levels = len(p_level)
 
-                self.core_compute = physics_pressure_level(
-                    lon2d, lat2d, p_level, midpoint=self.flag_midpoint
-                )
+                self.core_compute = physics_pressure_level(lon2d, lat2d, p_level, midpoint=self.flag_midpoint)
             # -------------------------------------------------------------------------- #
-            self.ind_fix = (
-                self.N_levels - int(post_conf["global_mass_fixer"]["fix_level_num"]) + 1
-            )
+            self.ind_fix = self.N_levels - int(post_conf["global_mass_fixer"]["fix_level_num"]) + 1
 
         # -------------------------------------------------------------------------- #
         if self.flag_midpoint:
@@ -330,22 +312,16 @@ class GlobalMassFixer(nn.Module):
 
             # total mass from q_pred
             mass_dry_sum_t1_hold = self.core_compute.weighted_sum(
-                self.core_compute.integral_sliced(1 - q_pred, 0, self.ind_fix)
-                / GRAVITY,
+                self.core_compute.integral_sliced(1 - q_pred, 0, self.ind_fix) / GRAVITY,
                 axis=(-2, -1),
             )
 
             mass_dry_sum_t1_fix = self.core_compute.weighted_sum(
-                self.core_compute.integral_sliced(
-                    1 - q_pred, self.ind_fix_start, self.N_levels
-                )
-                / GRAVITY,
+                self.core_compute.integral_sliced(1 - q_pred, self.ind_fix_start, self.N_levels) / GRAVITY,
                 axis=(-2, -1),
             )
 
-            q_correct_ratio = (
-                mass_dry_sum_t0 - mass_dry_sum_t1_hold
-            ) / mass_dry_sum_t1_fix
+            q_correct_ratio = (mass_dry_sum_t0 - mass_dry_sum_t1_hold) / mass_dry_sum_t1_fix
 
             # broadcast: (batch, 1, 1, 1)
             q_correct_ratio = q_correct_ratio.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
@@ -353,9 +329,7 @@ class GlobalMassFixer(nn.Module):
             # ===================================================================== #
             # q fixes based on the ratio
             # fix lower atmosphere
-            q_pred_fix = (
-                1 - (1 - q_pred[:, self.ind_fix_start :, ...]) * q_correct_ratio
-            )
+            q_pred_fix = 1 - (1 - q_pred[:, self.ind_fix_start :, ...]) * q_correct_ratio
             # extract unmodified part from q_pred
             q_pred_hold = q_pred[:, : self.ind_fix_start, ...]
 
@@ -368,9 +342,7 @@ class GlobalMassFixer(nn.Module):
 
             # expand fixed vars to (batch, level, time, lat, lon)
             q_pred = q_pred.unsqueeze(2)
-            y_pred = concat_fix(
-                y_pred, q_pred, self.q_ind_start, self.q_ind_end, N_vars
-            )
+            y_pred = concat_fix(y_pred, q_pred, self.q_ind_start, self.q_ind_end, N_vars)
 
         # ===================================================================== #
         # surface pressure fixes on global dry air mass conservation
@@ -381,20 +353,12 @@ class GlobalMassFixer(nn.Module):
             delta_coef_b = self.coef_b.diff().to(q_pred.device)
 
             if self.flag_midpoint:
-                p_dry_a = (
-                    (delta_coef_a.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_pred)
-                ).sum(1)
-                p_dry_b = (
-                    (delta_coef_b.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_pred)
-                ).sum(1)
+                p_dry_a = ((delta_coef_a.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_pred)).sum(1)
+                p_dry_b = ((delta_coef_b.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_pred)).sum(1)
             else:
                 q_mid = (q_pred[:, :-1, ...] + q_pred[:, 1:, ...]) / 2
-                p_dry_a = (
-                    (delta_coef_a.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_mid)
-                ).sum(1)
-                p_dry_b = (
-                    (delta_coef_b.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_mid)
-                ).sum(1)
+                p_dry_a = ((delta_coef_a.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_mid)).sum(1)
+                p_dry_b = ((delta_coef_b.unsqueeze(0).unsqueeze(2).unsqueeze(3)) * (1 - q_mid)).sum(1)
 
             grid_area = self.core_compute.area.unsqueeze(0).to(q_pred.device)
             mass_dry_a = (p_dry_a * grid_area).sum((-2, -1)) / GRAVITY
@@ -456,14 +420,10 @@ class GlobalWaterFixer(nn.Module):
             lon_demo = torch.from_numpy(lon_demo)
             lat_demo = torch.from_numpy(lat_demo)
 
-            p_level_demo = torch.from_numpy(
-                np.array([100, 30000, 50000, 70000, 80000, 90000, 100000])
-            )
+            p_level_demo = torch.from_numpy(np.array([100, 30000, 50000, 70000, 80000, 90000, 100000]))
             self.flag_sigma_level = False
             self.flag_midpoint = post_conf["global_water_fixer"]["midpoint"]
-            self.core_compute = physics_pressure_level(
-                lon_demo, lat_demo, p_level_demo, midpoint=self.flag_midpoint
-            )
+            self.core_compute = physics_pressure_level(lon_demo, lat_demo, p_level_demo, midpoint=self.flag_midpoint)
             self.N_levels = len(p_level_demo)
             self.N_seconds = int(post_conf["data"]["lead_time_periods"]) * 3600
 
@@ -481,12 +441,8 @@ class GlobalWaterFixer(nn.Module):
 
             if post_conf["global_mass_fixer"]["grid_type"] == "sigma":
                 self.flag_sigma_level = True
-                self.coef_a = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[2]].values
-                ).float()
-                self.coef_b = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[3]].values
-                ).float()
+                self.coef_a = torch.from_numpy(ds_physics[lon_lat_level_names[2]].values).float()
+                self.coef_b = torch.from_numpy(ds_physics[lon_lat_level_names[3]].values).float()
 
                 # get total number of levels
                 self.N_levels = len(self.coef_a)
@@ -499,15 +455,11 @@ class GlobalWaterFixer(nn.Module):
                 )
             else:
                 self.flag_sigma_level = False
-                p_level = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[2]].values
-                ).float()
+                p_level = torch.from_numpy(ds_physics[lon_lat_level_names[2]].values).float()
                 # get total number of levels
                 self.N_levels = len(p_level)
 
-                self.core_compute = physics_pressure_level(
-                    lon2d, lat2d, p_level, midpoint=self.flag_midpoint
-                )
+                self.core_compute = physics_pressure_level(lon2d, lat2d, p_level, midpoint=self.flag_midpoint)
 
             self.N_seconds = int(post_conf["data"]["lead_time_periods"]) * 3600
 
@@ -656,9 +608,7 @@ class GlobalEnergyFixer(nn.Module):
             lon_demo = torch.from_numpy(lon_demo)
             lat_demo = torch.from_numpy(lat_demo)
 
-            p_level_demo = torch.from_numpy(
-                np.array([100, 30000, 50000, 70000, 80000, 90000, 100000])
-            )
+            p_level_demo = torch.from_numpy(np.array([100, 30000, 50000, 70000, 80000, 90000, 100000]))
             self.flag_sigma_level = False
             self.flag_midpoint = post_conf["global_energy_fixer"]["midpoint"]
             self.core_compute = physics_pressure_level(
@@ -686,12 +636,8 @@ class GlobalEnergyFixer(nn.Module):
 
             if post_conf["global_mass_fixer"]["grid_type"] == "sigma":
                 self.flag_sigma_level = True
-                self.coef_a = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[2]].values
-                ).float()
-                self.coef_b = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[3]].values
-                ).float()
+                self.coef_a = torch.from_numpy(ds_physics[lon_lat_level_names[2]].values).float()
+                self.coef_b = torch.from_numpy(ds_physics[lon_lat_level_names[3]].values).float()
 
                 # get total number of levels
                 self.N_levels = len(self.coef_a)
@@ -704,15 +650,11 @@ class GlobalEnergyFixer(nn.Module):
                 )
             else:
                 self.flag_sigma_level = False
-                p_level = torch.from_numpy(
-                    ds_physics[lon_lat_level_names[2]].values
-                ).float()
+                p_level = torch.from_numpy(ds_physics[lon_lat_level_names[2]].values).float()
                 # get total number of levels
                 self.N_levels = len(p_level)
 
-                self.core_compute = physics_pressure_level(
-                    lon2d, lat2d, p_level, midpoint=self.flag_midpoint
-                )
+                self.core_compute = physics_pressure_level(lon2d, lat2d, p_level, midpoint=self.flag_midpoint)
 
             self.N_seconds = int(post_conf["data"]["lead_time_periods"]) * 3600
 
@@ -819,9 +761,7 @@ class GlobalEnergyFixer(nn.Module):
         R_T_sum = self.core_compute.weighted_sum(R_T, axis=(-2, -1))
 
         # surface net energy flux
-        F_S = (
-            surf_solar_pred + surf_LR_pred + surf_SH_pred + surf_LH_pred
-        ) / self.N_seconds
+        F_S = (surf_solar_pred + surf_LR_pred + surf_SH_pred + surf_LH_pred) / self.N_seconds
         F_S_sum = self.core_compute.weighted_sum(F_S, axis=(-2, -1))
 
         # ------------------------------------------------------------------------------ #
@@ -845,9 +785,7 @@ class GlobalEnergyFixer(nn.Module):
         global_TE_t1 = self.core_compute.weighted_sum(TE_t1, axis=(-2, -1))
 
         # total energy correction ratio
-        E_correct_ratio = (
-            self.N_seconds * (R_T_sum - F_S_sum) + global_TE_t0
-        ) / global_TE_t1
+        E_correct_ratio = (self.N_seconds * (R_T_sum - F_S_sum) + global_TE_t0) / global_TE_t1
         # E_correct_ratio = torch.clamp(E_correct_ratio, min=0.9, max=1.1)
         # broadcast: (batch, 1, 1, 1, 1)
         E_correct_ratio = E_correct_ratio.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)

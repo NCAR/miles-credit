@@ -102,11 +102,7 @@ class Block(Module):
 class ResnetBlock(Module):
     def __init__(self, dim, dim_out, *, time_emb_dim=None, dropout=0.0):
         super().__init__()
-        self.mlp = (
-            nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, dim_out * 2))
-            if exists(time_emb_dim)
-            else None
-        )
+        self.mlp = nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, dim_out * 2)) if exists(time_emb_dim) else None
 
         self.block1 = Block(dim, dim_out, dropout=dropout)
         self.block2 = Block(dim_out, dim_out)
@@ -146,9 +142,7 @@ class LinearAttention(Module):
         x = self.norm(x)
 
         qkv = self.to_qkv(x).chunk(3, dim=1)
-        q, k, v = map(
-            lambda t: rearrange(t, "b (h c) x y -> b h c (x y)", h=self.heads), qkv
-        )
+        q, k, v = map(lambda t: rearrange(t, "b (h c) x y -> b h c (x y)", h=self.heads), qkv)
 
         mk, mv = map(lambda t: repeat(t, "h c n -> b h c n", b=b), self.mem_kv)
         k, v = map(partial(torch.cat, dim=-1), ((mk, k), (mv, v)))
@@ -184,9 +178,7 @@ class Attention(Module):
         x = self.norm(x)
 
         qkv = self.to_qkv(x).chunk(3, dim=1)
-        q, k, v = map(
-            lambda t: rearrange(t, "b (h c) x y -> b h (x y) c", h=self.heads), qkv
-        )
+        q, k, v = map(lambda t: rearrange(t, "b (h c) x y -> b h (x y) c", h=self.heads), qkv)
 
         mk, mv = map(lambda t: repeat(t, "h n d -> b h n d", b=b), self.mem_kv)
         k, v = map(partial(torch.cat, dim=-2), ((mk, k), (mv, v)))
@@ -226,9 +218,7 @@ class PeriodicConv2d(nn.Module):
     def __init__(self, dim_in, dim_out, kernel_size, padding=1):
         super(PeriodicConv2d, self).__init__()
         self.padding = padding
-        self.conv = nn.Conv2d(
-            dim_in, dim_out, kernel_size, padding=0
-        )  # Padding is handled manually
+        self.conv = nn.Conv2d(dim_in, dim_out, kernel_size, padding=0)  # Padding is handled manually
 
     def forward(self, x):
         # Apply circular padding (periodic boundary condition) on longitude
@@ -237,9 +227,7 @@ class PeriodicConv2d(nn.Module):
         )  # Apply padding to the last (longitude) dimension
 
         # Reflect padding or zero padding on latitude (2nd-to-last dimension)
-        x = F.pad(
-            x, (0, 0, self.padding, self.padding), mode="reflect"
-        )  # Reflect padding for latitude
+        x = F.pad(x, (0, 0, self.padding, self.padding), mode="reflect")  # Reflect padding for latitude
 
         # Apply convolution
         return self.conv(x)
@@ -334,9 +322,7 @@ class UnetDiffusion(BaseModel):
                 padding="same",
             )
         else:
-            self.init_conv = nn.Conv2d(
-                output_channels, init_dim, kernel_size=7, padding="same"
-            )
+            self.init_conv = nn.Conv2d(output_channels, init_dim, kernel_size=7, padding="same")
 
         dims = [init_dim, *map(lambda m: dim[0] * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -344,14 +330,10 @@ class UnetDiffusion(BaseModel):
         # time embeddings
         time_dim = dim[0] * 4
 
-        self.random_or_learned_sinusoidal_cond = (
-            learned_sinusoidal_cond or random_fourier_features
-        )
+        self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
 
         if self.random_or_learned_sinusoidal_cond:
-            sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(
-                learned_sinusoidal_dim, random_fourier_features
-            )
+            sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(learned_sinusoidal_dim, random_fourier_features)
             fourier_dim = learned_sinusoidal_dim + 1
         else:
             sinu_pos_emb = SinusoidalPosEmb(dim[0], theta=sinusoidal_pos_emb_theta)
@@ -401,21 +383,15 @@ class UnetDiffusion(BaseModel):
                     [
                         resnet_block(dim_in, dim_in),
                         resnet_block(dim_in, dim_in),
-                        attn_klass(
-                            dim_in, dim_head=layer_attn_dim_head, heads=layer_attn_heads
-                        ),
-                        Downsample(dim_in, dim_out)
-                        if not is_last
-                        else PeriodicConv2d(dim_in, dim_out, 3, padding=1),
+                        attn_klass(dim_in, dim_head=layer_attn_dim_head, heads=layer_attn_heads),
+                        Downsample(dim_in, dim_out) if not is_last else PeriodicConv2d(dim_in, dim_out, 3, padding=1),
                     ]
                 )
             )
 
         mid_dim = dims[-1]
         self.mid_block1 = resnet_block(mid_dim, mid_dim)
-        self.mid_attn = FullAttention(
-            mid_dim, heads=attn_heads[-1], dim_head=attn_dim_head[-1]
-        )
+        self.mid_attn = FullAttention(mid_dim, heads=attn_heads[-1], dim_head=attn_dim_head[-1])
         self.mid_block2 = resnet_block(mid_dim, mid_dim)
 
         for ind, (
@@ -423,9 +399,7 @@ class UnetDiffusion(BaseModel):
             layer_full_attn,
             layer_attn_heads,
             layer_attn_dim_head,
-        ) in enumerate(
-            zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))
-        ):
+        ) in enumerate(zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
             is_last = ind == (len(in_out) - 1)
 
             attn_klass = FullAttention if layer_full_attn else LinearAttention
@@ -440,9 +414,7 @@ class UnetDiffusion(BaseModel):
                             dim_head=layer_attn_dim_head,
                             heads=layer_attn_heads,
                         ),
-                        Upsample(dim_out, dim_in)
-                        if not is_last
-                        else PeriodicConv2d(dim_out, dim_in, 3, padding=1),
+                        Upsample(dim_out, dim_in) if not is_last else PeriodicConv2d(dim_out, dim_in, 3, padding=1),
                     ]
                 )
             )
@@ -458,9 +430,9 @@ class UnetDiffusion(BaseModel):
         return 2 ** (len(self.downs) - 1)
 
     def forward(self, x, time, x_self_cond=None, x_cond=None):
-        assert all(
-            [divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]
-        ), f"your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet"
+        assert all([divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]), (
+            f"your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet"
+        )
 
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))

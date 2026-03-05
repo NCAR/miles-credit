@@ -32,7 +32,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install . 
-          pip install flake8 pytest pytest-cov
+          pip install ruff pytest pytest-cov
       - name: Lint with ruff
         run: |
           # stop the build if there are Python syntax errors or undefined names

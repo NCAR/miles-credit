@@ -22,9 +22,7 @@ import glob
 from argparse import ArgumentParser
 
 
-parser = ArgumentParser(
-    description="converts a directory of netcdf files into a zarr store"
-)
+parser = ArgumentParser(description="converts a directory of netcdf files into a zarr store")
 parser.add_argument("indir", help="directory containing one or more .nc files")
 parser.add_argument("zarrfile", help="zarr store to create (must not already exist)")
 

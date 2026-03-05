@@ -50,9 +50,7 @@ def main(rank, world_size, conf, frames=1, height=640, width=1280):
     # Set device
 
     device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        if torch.cuda.is_available()
-        else torch.device("cpu")
+        torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
     )
     torch.cuda.set_device(rank % torch.cuda.device_count())
 

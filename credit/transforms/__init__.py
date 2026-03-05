@@ -58,10 +58,7 @@ def load_transforms(conf, scaler_only=False):
     # ------------------------------------------------------------------- #
     # ToTensor class
 
-    if (
-        conf["data"]["scaler_type"] == "std_new"
-        or conf["data"]["scaler_type"] == "std_cached"
-    ):
+    if conf["data"]["scaler_type"] == "std_new" or conf["data"]["scaler_type"] == "std_cached":
         to_tensor_scaler = ToTensor_ERA5_and_Forcing(conf)
 
     elif conf["data"]["scaler_type"] == "quantile-cached":

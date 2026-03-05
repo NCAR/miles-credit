@@ -140,9 +140,9 @@ class WindowMultiHeadAttentionNoPos(nn.Module):
         sequential_attn: bool = False,
     ) -> None:
         super(WindowMultiHeadAttentionNoPos, self).__init__()
-        assert (
-            dim % num_heads == 0
-        ), "The number of input features (in_features) are not divisible by the number of heads (num_heads)."
+        assert dim % num_heads == 0, (
+            "The number of input features (in_features) are not divisible by the number of heads (num_heads)."
+        )
         self.in_features: int = dim
         self.window_size: Tuple[int, int] = window_size
         self.num_heads: int = num_heads
@@ -223,9 +223,9 @@ class WindowMultiHeadAttention(nn.Module):
         sequential_attn: bool = False,
     ) -> None:
         super(WindowMultiHeadAttention, self).__init__()
-        assert (
-            dim % num_heads == 0
-        ), "The number of input features (in_features) are not divisible by the number of heads (num_heads)."
+        assert dim % num_heads == 0, (
+            "The number of input features (in_features) are not divisible by the number of heads (num_heads)."
+        )
         self.in_features: int = dim
         self.window_size: Tuple[int, int] = window_size
         self.num_heads: int = num_heads
@@ -558,7 +558,7 @@ class PatchEmbed(nn.Module):
 
 
 class SwinTransformerV2CrStage(nn.Module):
-    r"""This class implements a stage of the Swin transformer including multiple layers.
+    """This class implements a stage of the Swin transformer including multiple layers.
 
     Args:
         embed_dim (int): Number of input channels

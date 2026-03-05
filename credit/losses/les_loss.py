@@ -55,13 +55,10 @@ class LESLoss2D(torch.nn.Module):
             logger.info("Using variable weights in loss calculations")
 
             var_weights = [
-                value if isinstance(value, list) else [value]
-                for value in conf["loss"]["variable_weights"].values()
+                value if isinstance(value, list) else [value] for value in conf["loss"]["variable_weights"].values()
             ]
 
-            var_weights = np.array(
-                [item for sublist in var_weights for item in sublist]
-            )
+            var_weights = np.array([item for sublist in var_weights for item in sublist])
 
             self.var_weights = torch.from_numpy(var_weights)
         # ------------------------------------------------------------- #
@@ -73,16 +70,10 @@ class LESLoss2D(torch.nn.Module):
                 wavenum_init=conf["loss"]["spectral_wavenum_init"], reduction="none"
             )
 
-        self.use_power_loss = (
-            conf["loss"]["use_power_loss"]
-            if "use_power_loss" in conf["loss"]
-            else False
-        )
+        self.use_power_loss = conf["loss"]["use_power_loss"] if "use_power_loss" in conf["loss"] else False
         if self.use_power_loss:
             self.power_lambda_reg = conf["loss"]["spectral_lambda_reg"]
-            self.power_loss = PSDLoss(
-                wavenum_init=conf["loss"]["spectral_wavenum_init"]
-            )
+            self.power_loss = PSDLoss(wavenum_init=conf["loss"]["spectral_wavenum_init"])
 
         self.validation = validation
 
@@ -126,16 +117,9 @@ class LESLoss2D(torch.nn.Module):
 
         # Add the spectral loss
         if not self.validation and self.use_power_loss:
-            loss += self.power_lambda_reg * self.power_loss(
-                target, pred, weights=self.lat_weights
-            )
+            loss += self.power_lambda_reg * self.power_loss(target, pred, weights=self.lat_weights)
 
         if not self.validation and self.use_spectral_loss:
-            loss += (
-                self.spectral_lambda_reg
-                * self.spectral_loss_surface(
-                    target, pred, weights=self.lat_weights
-                ).mean()
-            )
+            loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=self.lat_weights).mean()
 
         return loss

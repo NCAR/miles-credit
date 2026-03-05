@@ -229,9 +229,7 @@ class DistributedSequentialDataset(torch.utils.data.IterableDataset):
         self.filename_forcing = filename_forcing
 
         if self.filename_forcing is not None:
-            assert os.path.isfile(
-                filename_forcing
-            ), "Cannot find forcing file [{}]".format(filename_forcing)
+            assert os.path.isfile(filename_forcing), "Cannot find forcing file [{}]".format(filename_forcing)
 
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_forcing)
@@ -247,9 +245,7 @@ class DistributedSequentialDataset(torch.utils.data.IterableDataset):
         self.filename_static = filename_static
 
         if self.filename_static is not None:
-            assert os.path.isfile(
-                filename_static
-            ), "Cannot find static file [{}]".format(filename_static)
+            assert os.path.isfile(filename_static), "Cannot find static file [{}]".format(filename_static)
 
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_static)
@@ -311,9 +307,7 @@ class DistributedSequentialDataset(torch.utils.data.IterableDataset):
         if self.num_workers <= 1:
             for index in iter(sampler):
                 # Explicit inner (time step) loop
-                indices = list(
-                    range(index, index + self.history_len + self.forecast_len)
-                )
+                indices = list(range(index, index + self.history_len + self.forecast_len))
                 for ind_start_current_step in indices:
                     sample = process_index_partial((index, ind_start_current_step))
                     yield sample
@@ -324,17 +318,12 @@ class DistributedSequentialDataset(torch.utils.data.IterableDataset):
             with Pool(self.num_workers) as p:
                 batch_size = 2 * self.num_workers  # limit the size of the "queue"
                 for index in iter(sampler):
-                    indices = list(
-                        range(index, index + self.history_len + self.forecast_len)
-                    )
+                    indices = list(range(index, index + self.history_len + self.forecast_len))
 
                     # Process indices in batches to avoid potential memory problems if indices is very long
                     for i in range(0, len(indices), batch_size):
                         batch_indices = indices[i : i + batch_size]
-                        batch_tasks = [
-                            (index, ind_start_current_step)
-                            for ind_start_current_step in batch_indices
-                        ]
+                        batch_tasks = [(index, ind_start_current_step) for ind_start_current_step in batch_indices]
 
                         # Process the batch
                         batch_results = p.map(process_index_partial, batch_tasks)
@@ -393,9 +382,7 @@ def worker(
         ind_start_in_file = ind_start_current_step - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(all_files[int(ind_file)]["time"]) - (
-            history_len + forecast_len + 1
-        )
+        ind_largest = len(all_files[int(ind_file)]["time"]) - (history_len + forecast_len + 1)
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
 
@@ -405,20 +392,14 @@ def worker(
         ind_end_in_file = ind_start_in_file + history_len + forecast_len
 
         # ERA5_subset: a xarray dataset that contains training input and target (for the current batch)
-        ERA5_subset = all_files[int(ind_file)].isel(
-            time=slice(ind_start_in_file, ind_end_in_file + 1)
-        )
+        ERA5_subset = all_files[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
         if surface_files:
             # subset surface variables
-            surface_subset = surface_files[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            surface_subset = surface_files[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
             # merge upper-air and surface here:
-            ERA5_subset = ERA5_subset.merge(
-                surface_subset
-            )  # <-- lazy merge, ERA5 and surface both not loaded
+            ERA5_subset = ERA5_subset.merge(surface_subset)  # <-- lazy merge, ERA5 and surface both not loaded
 
         # ==================================================== #
         # split ERA5_subset into training inputs and targets
@@ -434,9 +415,7 @@ def worker(
         # xarray dataset as input
         # historical_ERA5_images: the final input
 
-        historical_ERA5_images = ERA5_subset.isel(
-            time=slice(0, history_len, skip_periods)
-        ).load()
+        historical_ERA5_images = ERA5_subset.isel(time=slice(0, history_len, skip_periods)).load()
 
         # ========================================================================== #
         # merge dynamic forcing inputs
@@ -444,9 +423,7 @@ def worker(
             dyn_forcing_subset = dyn_forcing_files[int(ind_file)].isel(
                 time=slice(ind_start_in_file, ind_end_in_file + 1)
             )
-            dyn_forcing_subset = dyn_forcing_subset.isel(
-                time=slice(0, history_len, skip_periods)
-            ).load()
+            dyn_forcing_subset = dyn_forcing_subset.isel(time=slice(0, history_len, skip_periods)).load()
 
             historical_ERA5_images = historical_ERA5_images.merge(dyn_forcing_subset)
 
@@ -457,9 +434,7 @@ def worker(
             # matching month, day, hour between forcing and upper air [time]
             # this approach handles leap year forcing file and non-leap-year upper air file
             month_day_forcing = extract_month_day_hour(np.array(xarray_forcing["time"]))
-            month_day_inputs = extract_month_day_hour(
-                np.array(historical_ERA5_images["time"])
-            )
+            month_day_inputs = extract_month_day_hour(np.array(historical_ERA5_images["time"]))
             # indices to subset
             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
             forcing_subset_input = xarray_forcing.isel(time=ind_forcing).load()
@@ -478,14 +453,10 @@ def worker(
             N_time_dims = len(ERA5_subset["time"])
             static_subset_input = xarray_static.expand_dims(dim={"time": N_time_dims})
             # assign coords 'time'
-            static_subset_input = static_subset_input.assign_coords(
-                {"time": ERA5_subset["time"]}
-            )
+            static_subset_input = static_subset_input.assign_coords({"time": ERA5_subset["time"]})
 
             # slice + load to the GPU
-            static_subset_input = static_subset_input.isel(
-                time=slice(0, history_len, skip_periods)
-            ).load()
+            static_subset_input = static_subset_input.isel(time=slice(0, history_len, skip_periods)).load()
 
             # update
             static_subset_input["time"] = historical_ERA5_images["time"]
@@ -498,16 +469,12 @@ def worker(
         # target_ERA5_images: the final target
 
         # get the next forecast step
-        target_ERA5_images = ERA5_subset.isel(
-            time=slice(history_len, history_len + skip_periods, skip_periods)
-        ).load()
+        target_ERA5_images = ERA5_subset.isel(time=slice(history_len, history_len + skip_periods, skip_periods)).load()
 
         # merge diagnoisc input here:
         if diagnostic_files:
             # subset diagnostic variables
-            diagnostic_subset = diagnostic_files[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            diagnostic_subset = diagnostic_files[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
             # get the next forecast step
             diagnostic_subset = diagnostic_subset.isel(
@@ -534,11 +501,7 @@ def worker(
         sample["index"] = index
         sample["stop_forecast"] = stop_forecast
         sample["datetime"] = [
-            int(
-                historical_ERA5_images.time.values[0]
-                .astype("datetime64[s]")
-                .astype(int)
-            ),
+            int(historical_ERA5_images.time.values[0].astype("datetime64[s]").astype(int)),
             int(target_ERA5_images.time.values[0].astype("datetime64[s]").astype(int)),
         ]
 
@@ -572,31 +535,23 @@ class DistributedSequentialDatasetBasic(DistributedSequentialDataset):
 
             for k, ind_start_current_step in enumerate(indices):
                 # select the ind_file based on the iter index
-                ind_file = find_key_for_number(
-                    ind_start_current_step, self.ERA5_indices
-                )
+                ind_file = find_key_for_number(ind_start_current_step, self.ERA5_indices)
 
                 # get the ind within the current file
                 ind_start = self.ERA5_indices[ind_file][1]
                 ind_start_in_file = ind_start_current_step - ind_start
 
                 # handle out-of-bounds
-                ind_largest = len(self.all_files[int(ind_file)]["time"]) - (
-                    self.history_len + self.forecast_len + 1
-                )
+                ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
                 if ind_start_in_file > ind_largest:
                     ind_start_in_file = ind_largest
                 # ========================================================================== #
                 # subset xarray on time dimension & load it to the memory
 
-                ind_end_in_file = (
-                    ind_start_in_file + self.history_len + self.forecast_len
-                )
+                ind_end_in_file = ind_start_in_file + self.history_len + self.forecast_len
 
                 # ERA5_subset: a xarray dataset that contains training input and target (for the current batch)
-                ERA5_subset = self.all_files[int(ind_file)].isel(
-                    time=slice(ind_start_in_file, ind_end_in_file + 1)
-                )
+                ERA5_subset = self.all_files[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
                 if self.surface_files:
                     # subset surface variables
@@ -614,17 +569,13 @@ class DistributedSequentialDatasetBasic(DistributedSequentialDataset):
                 # ind_end_time = len(ERA5_subset['time'])
 
                 # datetiem information as int number (used in some normalization methods)
-                datetime_as_number = ERA5_subset.time.values.astype(
-                    "datetime64[s]"
-                ).astype(int)
+                datetime_as_number = ERA5_subset.time.values.astype("datetime64[s]").astype(int)
 
                 # ==================================================== #
                 # xarray dataset as input
                 # historical_ERA5_images: the final input
 
-                historical_ERA5_images = ERA5_subset.isel(
-                    time=slice(0, self.history_len, self.skip_periods)
-                ).load()
+                historical_ERA5_images = ERA5_subset.isel(time=slice(0, self.history_len, self.skip_periods)).load()
 
                 # ========================================================================== #
                 # merge dynamic forcing inputs
@@ -636,9 +587,7 @@ class DistributedSequentialDatasetBasic(DistributedSequentialDataset):
                         time=slice(0, self.history_len, self.skip_periods)
                     ).load()
 
-                    historical_ERA5_images = historical_ERA5_images.merge(
-                        dyn_forcing_subset
-                    )
+                    historical_ERA5_images = historical_ERA5_images.merge(dyn_forcing_subset)
 
                 # ========================================================================== #
                 # merge forcing inputs
@@ -646,41 +595,27 @@ class DistributedSequentialDatasetBasic(DistributedSequentialDataset):
                     # =============================================================================== #
                     # matching month, day, hour between forcing and upper air [time]
                     # this approach handles leap year forcing file and non-leap-year upper air file
-                    month_day_forcing = extract_month_day_hour(
-                        np.array(self.xarray_forcing["time"])
-                    )
-                    month_day_inputs = extract_month_day_hour(
-                        np.array(historical_ERA5_images["time"])
-                    )  # <-- upper air
+                    month_day_forcing = extract_month_day_hour(np.array(self.xarray_forcing["time"]))
+                    month_day_inputs = extract_month_day_hour(np.array(historical_ERA5_images["time"]))  # <-- upper air
                     # indices to subset
-                    ind_forcing, _ = find_common_indices(
-                        month_day_forcing, month_day_inputs
-                    )
-                    forcing_subset_input = self.xarray_forcing.isel(
-                        time=ind_forcing
-                    ).load()
+                    ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
+                    forcing_subset_input = self.xarray_forcing.isel(time=ind_forcing).load()
                     # forcing and upper air have different years but the same mon/day/hour
                     # safely replace forcing time with upper air time
                     forcing_subset_input["time"] = historical_ERA5_images["time"]
                     # =============================================================================== #
 
                     # merge
-                    historical_ERA5_images = historical_ERA5_images.merge(
-                        forcing_subset_input
-                    )
+                    historical_ERA5_images = historical_ERA5_images.merge(forcing_subset_input)
 
                 # ========================================================================== #
                 # merge static inputs
                 if self.xarray_static:
                     # expand static var on time dim
                     N_time_dims = len(ERA5_subset["time"])
-                    static_subset_input = self.xarray_static.expand_dims(
-                        dim={"time": N_time_dims}
-                    )
+                    static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
                     # assign coords 'time'
-                    static_subset_input = static_subset_input.assign_coords(
-                        {"time": ERA5_subset["time"]}
-                    )
+                    static_subset_input = static_subset_input.assign_coords({"time": ERA5_subset["time"]})
 
                     # slice + load to the GPU
                     static_subset_input = static_subset_input.isel(
@@ -691,9 +626,7 @@ class DistributedSequentialDatasetBasic(DistributedSequentialDataset):
                     static_subset_input["time"] = historical_ERA5_images["time"]
 
                     # merge
-                    historical_ERA5_images = historical_ERA5_images.merge(
-                        static_subset_input
-                    )
+                    historical_ERA5_images = historical_ERA5_images.merge(static_subset_input)
 
                 # ==================================================== #
                 # xarray dataset as target
@@ -748,16 +681,8 @@ class DistributedSequentialDatasetBasic(DistributedSequentialDataset):
                 sample["index"] = index
                 sample["stop_forecast"] = stop_forecast
                 sample["datetime"] = [
-                    int(
-                        historical_ERA5_images.time.values[0]
-                        .astype("datetime64[s]")
-                        .astype(int)
-                    ),
-                    int(
-                        target_ERA5_images.time.values[0]
-                        .astype("datetime64[s]")
-                        .astype(int)
-                    ),
+                    int(historical_ERA5_images.time.values[0].astype("datetime64[s]").astype(int)),
+                    int(target_ERA5_images.time.values[0].astype("datetime64[s]").astype(int)),
                 ]
 
                 yield sample

@@ -35,6 +35,7 @@ def get_file_extension(file_path):
     _, ext = os.path.splitext(file_path)
     return ext
 
+
 def copy_checkpoint(checkpoint_file_path: str, number) -> None:
     """
     Copy every checkpoint afterit's saved.
@@ -44,11 +45,11 @@ def copy_checkpoint(checkpoint_file_path: str, number) -> None:
         checkpoint_file_path (str): path to the checkpoint file.
         use_safetensors (bool): whether to use safetensors to save the checkpoint.
     """
-    
+
     exty = get_file_extension(checkpoint_file_path)
-    
-    checkpoint_file_path_new = f'{checkpoint_file_path}{number:05}{exty}'
-    
+
+    checkpoint_file_path_new = f"{checkpoint_file_path}{number:05}{exty}"
+
     shutil.copy(checkpoint_file_path, checkpoint_file_path_new)
 
 
@@ -56,13 +57,9 @@ def load_model_state(conf, model, device):
     save_loc = os.path.expandvars(conf["save_loc"])
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
     if conf["trainer"]["mode"] == "fsdp":
-        logging.info(
-            f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
-        )
+        logging.info(f"Loading FSDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
         checkpoint_io = TorchFSDPCheckpointIO()
-        checkpoint_io.load_unsharded_model(
-            model, os.path.join(save_loc, "model_checkpoint.pt")
-        )
+        checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
@@ -70,24 +67,16 @@ def load_model_state(conf, model, device):
             logging.info(
                 f"Loading DDP model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
             )
-            load_msg = model.module.load_state_dict(
-                checkpoint["model_state_dict"], strict=False
-            )
+            load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
             load_state_dict_error_handler(load_msg)
         else:
-            logging.info(
-                f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}"
-            )
-            load_msg = model.load_state_dict(
-                checkpoint["model_state_dict"], strict=False
-            )
+            logging.info(f"Loading model, optimizer, grad scaler, and learning rate scheduler states from {save_loc}")
+            load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
             load_state_dict_error_handler(load_msg)
     return model
 
 
-def save_state_dict(
-    state_dict: dict, checkpoint_file_path: str, use_safetensors: bool
-) -> None:
+def save_state_dict(state_dict: dict, checkpoint_file_path: str, use_safetensors: bool) -> None:
     """
     Save state dict to checkpoint.
 
@@ -97,15 +86,13 @@ def save_state_dict(
         use_safetensors (bool): whether to use safetensors to save the checkpoint.
     """
     # Move all tensors in the state_dict to CPU before saving to avoid serialization issues
-    state_dict_cpu = tree_map(
-        lambda x: x.cpu() if torch.is_tensor(x) else x, state_dict
-    )
+    state_dict_cpu = tree_map(lambda x: x.cpu() if torch.is_tensor(x) else x, state_dict)
 
     if use_safetensors:
         assert is_safetensors_available(), "safetensors is not available."
-        assert checkpoint_file_path.endswith(
-            ".safetensors"
-        ), "safetensors only supports .safetensors suffix for checkpoint file."
+        assert checkpoint_file_path.endswith(".safetensors"), (
+            "safetensors only supports .safetensors suffix for checkpoint file."
+        )
         from safetensors.torch import save_file as safe_save_file
 
         safe_save_file(state_dict_cpu, checkpoint_file_path, metadata={"format": "pt"})
@@ -124,12 +111,14 @@ def load_state_dict(checkpoint_file_path: Path):
         dict: state dict.
     """
 
-    assert not is_dtensor_checkpoint(
-        checkpoint_file_path
-    ), f"Cannot load state dict from dtensor checkpoint {checkpoint_file_path}, you should convert the distributed tensors to gathered tensors with our CLI offline."
+    assert not is_dtensor_checkpoint(checkpoint_file_path), (
+        f"Cannot load state dict from dtensor checkpoint {checkpoint_file_path}, you should convert the distributed tensors to gathered tensors with our CLI offline."
+    )
 
     if is_safetensor_checkpoint(checkpoint_file_path):
-        assert is_safetensors_available(), f"Cannot load state dict from safetensor checkpoint {checkpoint_file_path}, because safetensors is not available. Please install safetensors first with pip install safetensors."
+        assert is_safetensors_available(), (
+            f"Cannot load state dict from safetensor checkpoint {checkpoint_file_path}, because safetensors is not available. Please install safetensors first with pip install safetensors."
+        )
         # load with safetensors
         from safetensors import safe_open
 
@@ -154,9 +143,7 @@ def is_dtensor_checkpoint(checkpoint_file_path: str) -> bool:
     Returns:
         bool: whether the checkpoint file is a dtensor checkpoint.
     """
-    if checkpoint_file_path.endswith(".*.safetensors") or checkpoint_file_path.endswith(
-        ".*.bin"
-    ):
+    if checkpoint_file_path.endswith(".*.safetensors") or checkpoint_file_path.endswith(".*.bin"):
         return True
     else:
         return False
@@ -210,9 +197,7 @@ class TorchFSDPCheckpointIO:
         # sharded_osd = FSDP.scatter_full_optim_state_dict(checkpoint, fsdp_model)
         optimizer.load_state_dict(sharded_osd)
 
-    def save_unsharded_model(
-        self, model, checkpoint, gather_dtensor, use_safetensors, rank
-    ):
+    def save_unsharded_model(self, model, checkpoint, gather_dtensor, use_safetensors, rank):
         """
         Save model to checkpoint but only on master process.
         """
@@ -232,9 +217,7 @@ class TorchFSDPCheckpointIO:
         Save optimizer to checkpoint but only on master process.
         """
         fsdp_model = optimizer.unwrap_model()
-        full_optimizer_state = FSDP.full_optim_state_dict(
-            fsdp_model, optim=optimizer, rank0_only=True
-        )
+        full_optimizer_state = FSDP.full_optim_state_dict(fsdp_model, optim=optimizer, rank0_only=True)
         if rank == 0:
             save_state_dict(
                 full_optimizer_state,
@@ -396,9 +379,7 @@ class OptimizerWrapper:
             In PyTorch 2.0 and above, you can pass in foreach=True as kwargs to `clip_grad_norm_` to use the
             faster implementation. Please refer to the PyTorch documentation for more details.
         """
-        norm = nn.utils.clip_grad_norm_(
-            self.parameters, max_norm, norm_type, error_if_nonfinite, *args, **kwargs
-        )
+        norm = nn.utils.clip_grad_norm_(self.parameters, max_norm, norm_type, error_if_nonfinite, *args, **kwargs)
         return norm
 
     def scale_loss(self, loss: Tensor):
@@ -464,17 +445,11 @@ if __name__ == "__main__":
     checkpoint_io = TorchFSDPCheckpointIO()
 
     # Save model and optimizer checkpoints
-    checkpoint_io.save_unsharded_model(
-        fsdp_model, "model_checkpoint.pth", gather_dtensor=True, use_safetensors=False
-    )
-    checkpoint_io.save_unsharded_optimizer(
-        fsdp_optimizer, "optimizer_checkpoint.pth", gather_dtensor=True
-    )
+    checkpoint_io.save_unsharded_model(fsdp_model, "model_checkpoint.pth", gather_dtensor=True, use_safetensors=False)
+    checkpoint_io.save_unsharded_optimizer(fsdp_optimizer, "optimizer_checkpoint.pth", gather_dtensor=True)
 
     # Load the model and optimizer
-    loaded_model = nn.Sequential(nn.Linear(10, 5), nn.ReLU(), nn.Linear(5, 2)).to(
-        "cuda"
-    )
+    loaded_model = nn.Sequential(nn.Linear(10, 5), nn.ReLU(), nn.Linear(5, 2)).to("cuda")
 
     fsdp_loaded_model = TorchFSDPModel(loaded_model)
 
@@ -482,9 +457,7 @@ if __name__ == "__main__":
     fsdp_loaded_optimizer = FSDPOptimizerWrapper(loaded_optimizer, fsdp_loaded_model)
 
     checkpoint_io.load_unsharded_model(fsdp_loaded_model, "model_checkpoint.pth")
-    checkpoint_io.load_unsharded_optimizer(
-        fsdp_loaded_optimizer, "optimizer_checkpoint.pth"
-    )
+    checkpoint_io.load_unsharded_optimizer(fsdp_loaded_optimizer, "optimizer_checkpoint.pth")
 
     # Load the model outside of FSDP context
 

@@ -51,15 +51,11 @@ def get_inference_steps(time_config, time_delta=5, hist=1):
     """
     start_time_str = time_config.start_time
     start_year, start_month, start_day = start_time_str.split("-")
-    start_time = cftime.DatetimeNoLeap(
-        int(start_year), int(start_month), int(start_day), 0, 0, 0
-    )
+    start_time = cftime.DatetimeNoLeap(int(start_year), int(start_month), int(start_day), 0, 0, 0)
 
     end_time_str = time_config.end_time
     end_year, end_month, end_day = end_time_str.split("-")
-    end_time = cftime.DatetimeNoLeap(
-        int(end_year), int(end_month), int(end_day), 0, 0, 0
-    )
+    end_time = cftime.DatetimeNoLeap(int(end_year), int(end_month), int(end_day), 0, 0, 0)
     num_steps = (end_time - start_time).days // time_delta + 1
     # Might have extra remaining days, so we remove them
     mod = num_steps % (hist + 1)
@@ -106,9 +102,7 @@ def compute_anomalies(data: xr.Dataset, var: str) -> xr.Dataset:
     climatology = data[var].groupby("time.dayofyear").mean("time").compute()
     # Remove the seasonal cycle (climatology) from the detrended data
     day_of_year = data[var]["time"].dt.dayofyear
-    data[var + "_anomalies"] = (
-        data[var] - climatology.sel(dayofyear=day_of_year)
-    ).compute()
+    data[var + "_anomalies"] = (data[var] - climatology.sel(dayofyear=day_of_year)).compute()
     return data
 
 
@@ -159,9 +153,9 @@ def validate_data(
     # We drop them and rename x, y dimensions to lon, lat
     if "lat" not in data.dims:
         # Drop unnecessary coordinates and rename dimensions
-        data = data.drop_vars(
-            ["lat", "lon", "lat_b", "lon_b", "dayofyear"], errors="ignore"
-        ).rename({"x": "lon", "y": "lat"})
+        data = data.drop_vars(["lat", "lon", "lat_b", "lon_b", "dayofyear"], errors="ignore").rename(
+            {"x": "lon", "y": "lat"}
+        )
 
     # Check if anomalies are needed to be computed
     tensor_map = TensorMap.get_instance()
@@ -180,9 +174,7 @@ class Normalize:
 
     def __new__(cls, *args, **kwargs) -> "Normalize":
         # Prevent direct instantiation
-        raise TypeError(
-            "Normalize cannot be instantiated directly. Use init_instance() instead."
-        )
+        raise TypeError("Normalize cannot be instantiated directly. Use init_instance() instead.")
 
     @classmethod
     def get_instance(cls) -> "Normalize":
@@ -204,9 +196,7 @@ class Normalize:
             raise ValueError("Normalize already initialized")
 
         instance = super().__new__(cls)
-        instance._initialize(
-            data_mean, data_std, prognostic_vars, boundary_vars, wet_mask
-        )
+        instance._initialize(data_mean, data_std, prognostic_vars, boundary_vars, wet_mask)
         cls._instance = instance
         return cls._instance
 
@@ -226,9 +216,7 @@ class Normalize:
         self.wet_mask = wet_mask
 
         # Pre-compute numpy arrays for faster access
-        self._prognostic_mean_np = (
-            self.prognostic_mean.to_array().to_numpy().reshape(-1)
-        )
+        self._prognostic_mean_np = self.prognostic_mean.to_array().to_numpy().reshape(-1)
         self._prognostic_std_np = self.prognostic_std.to_array().to_numpy().reshape(-1)
         self._wet_mask_np = self.wet_mask.numpy()
 
@@ -236,18 +224,14 @@ class Normalize:
         """Convert numpy array to tensor on specified device."""
         return torch.from_numpy(array).to(device)
 
-    def normalize_prognostics(
-        self, data: xr.Dataset, fill_nan=True, fill_value=0.0
-    ) -> xr.Dataset:
+    def normalize_prognostics(self, data: xr.Dataset, fill_nan=True, fill_value=0.0) -> xr.Dataset:
         """Normalize input dataset."""
         norm = (data - self.prognostic_mean) / self.prognostic_std
         if fill_nan:
             norm = norm.fillna(fill_value)
         return norm
 
-    def normalize_boundary(
-        self, data: xr.Dataset, fill_nan=True, fill_value=0.0
-    ) -> xr.Dataset:
+    def normalize_boundary(self, data: xr.Dataset, fill_nan=True, fill_value=0.0) -> xr.Dataset:
         """Normalize boundary conditions."""
         norm = (data - self.boundary_mean) / self.boundary_std
         if fill_nan:
@@ -260,9 +244,7 @@ class Normalize:
         data_unnorm = data_unnorm * xr.DataArray(self._wet_mask_np)
         return data_unnorm
 
-    def normalize_tensor_prognostics(
-        self, data: torch.Tensor, fill_nan=True, fill_value=0.0
-    ) -> torch.Tensor:
+    def normalize_tensor_prognostics(self, data: torch.Tensor, fill_nan=True, fill_value=0.0) -> torch.Tensor:
         """Normalize output tensor."""
         tensor_mean = self._to_tensor(self._prognostic_mean_np, data.device)
         tensor_std = self._to_tensor(self._prognostic_std_np, data.device)
@@ -298,16 +280,12 @@ class Normalize:
         unnorm = unnorm * self.wet_mask.to(data.device)
         return unnorm
 
-    def normalize_numpy_prognostics(
-        self, data: np.ndarray, fill_nan=True, fill_value=0.0
-    ) -> np.ndarray:
+    def normalize_numpy_prognostics(self, data: np.ndarray, fill_nan=True, fill_value=0.0) -> np.ndarray:
         """Normalize output numpy array."""
         if data.ndim == 3:
             norm = (data - self._prognostic_mean_np) / self._prognostic_std_np
         elif data.ndim == 4:
-            norm = (
-                data - self._prognostic_mean_np.reshape(1, -1, 1, 1)
-            ) / self._prognostic_std_np.reshape(1, -1, 1, 1)
+            norm = (data - self._prognostic_mean_np.reshape(1, -1, 1, 1)) / self._prognostic_std_np.reshape(1, -1, 1, 1)
         if fill_nan:
             norm = norm.fillna(fill_value)
         return norm

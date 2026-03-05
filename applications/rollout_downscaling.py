@@ -23,7 +23,7 @@ from credit.distributed import distributed_model_wrapper, get_rank_info, setup
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output_downscaling import OutputWrangler
-from credit.parser import credit_main_parser #, predict_data_check
+from credit.parser import credit_main_parser  # , predict_data_check
 from credit.pbs import launch_script, launch_script_mpi
 from credit.seed import seed_everything
 
@@ -55,13 +55,12 @@ def predict(rank, world_size, conf, p):
 
     # this should already have been called
     # # config settings
-    #seed_everything(conf["seed"])
+    # seed_everything(conf["seed"])
 
     # # this should already have been called
     # conf = credit_main_parser(
     #     conf, parse_training=False, parse_predict=True, print_summary=True
     # )
-
 
     # Warning -- see next line   # ? ? ?
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
@@ -74,9 +73,7 @@ def predict(rank, world_size, conf, p):
         model = distributed_model_wrapper(conf, model, device)
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-        load_msg = model.module.load_state_dict(
-            checkpoint["model_state_dict"], strict=False
-        )
+        load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
         load_state_dict_error_handler(load_msg)
     elif conf["predict"]["mode"] == "fsdp":
         model = load_model(conf, load_weights=True).to(device)
@@ -94,10 +91,10 @@ def predict(rank, world_size, conf, p):
     dataset = load_dataset(conf)
 
     # prognostic data initialization
-    if conf['predict']['downscaling']['driver'] == 'test':
-        x0 = dataset[0]['x']
+    if conf["predict"]["downscaling"]["driver"] == "test":
+        x0 = dataset[0]["x"]
     else:
-        raise(ValueError("non-testing prog data init not implemented yet"))
+        raise (ValueError("non-testing prog data init not implemented yet"))
         # when downscaling other datasets, we don't have high-res
         # truth to initialize with.  Options:
         #
@@ -123,18 +120,17 @@ def predict(rank, world_size, conf, p):
     dataset.mode = "infer"
     data_loader = load_dataloader(conf, dataset, is_train=False)
 
-    output_wrangler = OutputWrangler(dataset, **conf['predict']['output'])
+    output_wrangler = OutputWrangler(dataset, **conf["predict"]["output"])
 
     # number of channels by variable type
-    nbound = conf['model']['channels']['boundary']
-    nprog  = conf['model']['channels']['prognostic']
-    ndiag  = conf['model']['channels']['diagnostic']
-    
+    nbound = conf["model"]["channels"]["boundary"]
+    nprog = conf["model"]["channels"]["prognostic"]
+    ndiag = conf["model"]["channels"]["diagnostic"]
+
     # Rollout
     y_pred = None
     first_loop = True
     with torch.no_grad():
-
         # need to collect all the asynchronous output writing promises
         # so we can make sure they all complete before we exit.
         results = []
@@ -142,10 +138,9 @@ def predict(rank, world_size, conf, p):
         # model inference loop
 
         for timestep in data_loader:
-
             if first_loop:
                 x = x0
-                prognostic = x[:,nbound:, ...]
+                prognostic = x[:, nbound:, ...]
                 first_loop = False
                 del x0
             else:
@@ -156,14 +151,14 @@ def predict(rank, world_size, conf, p):
                 new_prog = y_pred[:, :-ndiag, ...].detach()
                 prognostic = torch.cat([old_prog, new_prog], dim=2)
 
-                x = torch.cat([timestep['x'], prognostic], dim=1)
-                
+                x = torch.cat([timestep["x"], prognostic], dim=1)
+
             y_pred = model(x.float())
 
             # (post-processing blocks go here)
-           
-            result = p.apply_async(output_wrangler.process, (y_pred.cpu(), timestep['dates']))
-                 
+
+            result = p.apply_async(output_wrangler.process, (y_pred.cpu(), timestep["dates"]))
+
             results.append(result)
 
             # end of inference loop
@@ -223,7 +218,7 @@ if __name__ == "__main__":
     #     default=0,
     #     help="If set to True, only pandas CSV files will we saved for each forecast",
     # )
-    
+
     parser.add_argument(
         "-cpus",
         "--num_cpus",
@@ -257,9 +252,7 @@ if __name__ == "__main__":
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     # handling config args
-    conf = credit_main_parser(
-        conf, parse_training=False, parse_predict=True, print_summary=False
-    )
+    conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
     ## todo: data check for downscaling mode
     # predict_data_check(conf, print_summary=False)
 
@@ -276,19 +269,17 @@ if __name__ == "__main__":
 
     # filename is {dataset}.{date}.nc
 
-    outdir = os.path.expandvars(conf['predict']['output']['output_dir'])
+    outdir = os.path.expandvars(conf["predict"]["output"]["output_dir"])
     os.makedirs(outdir, exist_ok=True)
     if not os.access(outdir, os.W_OK):
         raise PermissionError(f"Output directory not writeable: {outdir}")
     logging.info("Saving downscaled data to {outdir}")
-
 
     # Run directory for launch.sh, model.yml, logs, etc.
     save_loc = os.path.expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
     if not os.access(outdir, os.W_OK):
         raise PermissionError(f"Run directory not writeable: {save_loc}")
-
 
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:
@@ -306,7 +297,6 @@ if __name__ == "__main__":
             logging.info("Launching to PBS on Derecho")
             launch_script_mpi(config, script_path)
         sys.exit()
-
 
     seed = conf["seed"]
     seed_everything(seed)

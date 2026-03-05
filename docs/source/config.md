@@ -294,10 +294,11 @@ dataset_type: ERA5_MultiStep_Batcher
 - **Options**:  
   - `ERA5_MultiStep_Batcher`  
   - `ERA5_and_Forcing_MultiStep` 
-  - `MultiprocessingBatcherPrefetch` (*experimental*)
-  - `MultiprocessingBatcher`  
+  - `ERA5_and_Forcing_SingleStep`
+  - `Ocean_Tensor_Batcher`
+  - `Ocean_MultiStep_Batcher`
 - The **default (`ERA5_MultiStep_Batcher`) is recommended** for efficient parallel data loading.  
-- `MultiprocessingBatcherPrefetch` is *experimental* and you may run into weird issues.
+
 
 ---
 
@@ -1150,7 +1151,8 @@ training_loss: "mse"
   - `"logcosh"` → **Log-Cosh Loss** (similar to Huber, smooths large errors).  
   - `"xtanh"` → Custom loss using hyperbolic tangent.  
   - `"xsigmoid"` → Custom loss using sigmoid transformation.  
-  - `"KCRPS"` → bias corrected CRPS for ensemble training
+  - `"KCRPS"` → bias corrected CRPS for ensemble training.
+  - `"almost-fair-crps"`→ bias-corrected CRPS for ensemble training with small ensembles.
 
 💡 *`mse` is recommended for smooth loss surfaces, while `huber` or `logcosh` are better for handling outliers.*  
 

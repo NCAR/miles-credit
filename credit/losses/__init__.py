@@ -37,12 +37,12 @@ def load_loss(conf, reduction="none", validation=False):
     """
     loss_conf = conf["loss"]
 
-    is_downscaling = 'datasets' in conf['data']
+    is_downscaling = "datasets" in conf["data"]
     # downscaling could also use_variable_weights, so it needs to come first
     if is_downscaling:
         logger.info("Loaded DownscalingLoss")
-        return(DownscalingLoss(conf, validation=validation))
-    
+        return DownscalingLoss(conf, validation=validation)
+
     use_weighted_loss = loss_conf.get("use_latitude_weights", False) or loss_conf.get("use_variable_weights", False)
 
     if use_weighted_loss:

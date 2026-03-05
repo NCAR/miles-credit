@@ -8,9 +8,7 @@ from credit.models import DebuggerModel
 from credit.models.checkpoint import TorchFSDPModel
 
 
-def reset_model(
-    fsdp_model: FSDP, model: Callable, return_unwrapped=False, return_weights=False
-):
+def reset_model(fsdp_model: FSDP, model: Callable, return_unwrapped=False, return_weights=False):
     """
     Resets a model wrapped with FullyShardedDataParallel (FSDP) and optionally returns the unwrapped model or weights.
 
@@ -36,9 +34,7 @@ def reset_model(
     elif isinstance(fsdp_model, FSDP):
         pass
     else:
-        raise TypeError(
-            f"Expected fsdp_model to be of type FSDP or our custom TorchFSDPModel, got {type(fsdp_model)}"
-        )
+        raise TypeError(f"Expected fsdp_model to be of type FSDP or our custom TorchFSDPModel, got {type(fsdp_model)}")
 
     # Ensure that only rank 0 has a full state dict in memory
     with FSDP.state_dict_type(

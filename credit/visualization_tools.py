@@ -194,9 +194,7 @@ def figure_panel_planner(var_num, proj):
     elif var_num == 5 or var_num == 6:
         return cartopy_panel6(var_num, figsize=(13, 9.75), proj=proj)
     else:
-        logger.info(
-            "Built-in visualization tools cannot plot more than 6 variables at once."
-        )
+        logger.info("Built-in visualization tools cannot plot more than 6 variables at once.")
         raise
 
 
@@ -412,9 +410,7 @@ def draw_variables(pred, level, step, visualization_key, conf=None, save_locatio
 
     # ------------------------------ #
     # Figure
-    fig, AX = figure_panel_planner(
-        var_num, get_projection(conf["visualization"]["map_projection"])
-    )
+    fig, AX = figure_panel_planner(var_num, get_projection(conf["visualization"]["map_projection"]))
 
     # pcolormesh / colorbar / title in loops
     for i_var, var in enumerate(vars):
@@ -463,9 +459,7 @@ def draw_variables(pred, level, step, visualization_key, conf=None, save_locatio
         else:
             level_num = pred.level.values
             title_string = "{}, level: {:02d}\ntime: {}, step: {:03d}"
-            ax.set_title(
-                title_string.format(var_name, level_num, dt_str, step), fontsize=14
-            )
+            ax.set_title(title_string.format(var_name, level_num, dt_str, step), fontsize=14)
 
     # different file names for upper air vs. single levels
     if levels[0] == "none":

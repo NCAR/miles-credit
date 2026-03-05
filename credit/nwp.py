@@ -63,9 +63,7 @@ def build_GFS_init(
         "spfh",
         "hgtsfc",
     ]  # required for calculating pressure and geopotential
-    gfs_variables = list(
-        set([k for k, v in gfs_map.items() if v in variables]).union(required_variables)
-    )
+    gfs_variables = list(set([k for k, v in gfs_map.items() if v in variables]).union(required_variables))
     print(gfs_variables)
     pool = Pool(n_procs)
     atm_full_path = build_file_path(date, gdas_base_path, file_type="atm")
@@ -91,9 +89,7 @@ def build_GFS_init(
     print(f"Elapsed: {dur:0.6f}")
     print("Interpolate to model levels")
     start = time.perf_counter()
-    interpolated_gfs = interpolate_to_model_level(
-        regridded_gfs, output_grid, model_level_indices, variables
-    )
+    interpolated_gfs = interpolate_to_model_level(regridded_gfs, output_grid, model_level_indices, variables)
     end = time.perf_counter()
     dur = end - start
     print(f"Elapsed: {dur:0.6f}")
@@ -247,9 +243,7 @@ def regrid(nwp_data, output_grid, method="conservative", pool=None):
     return ds_regridded.squeeze()
 
 
-def interpolate_to_model_level(
-    regridded_nwp_data, output_grid, model_level_indices, variables
-):
+def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indices, variables):
     """
     Verticallly interpolate GFS model level data to CREDIT model levels
     Args:
@@ -267,9 +261,7 @@ def interpolate_to_model_level(
 
     xp = regridded_nwp_data["P"].values
     fp = regridded_nwp_data
-    output_pressure = (
-        output_grid["a_half"] + output_grid["b_half"] * regridded_nwp_data["SP"]
-    )
+    output_pressure = output_grid["a_half"] + output_grid["b_half"] * regridded_nwp_data["SP"]
     sampled_output_pressure = output_pressure[model_level_indices].values
     ny, nx = regridded_nwp_data.sizes["latitude"], regridded_nwp_data.sizes["longitude"]
     interpolated_data = {}
@@ -279,9 +271,7 @@ def interpolate_to_model_level(
             "dims": ["latitude", "longitude", "level"],
             "data": np.array(
                 [
-                    np.interp(
-                        sampled_output_pressure[:, j, i], xp[:, j, i], fp_data[:, j, i]
-                    )
+                    np.interp(sampled_output_pressure[:, j, i], xp[:, j, i], fp_data[:, j, i])
                     for j in range(ny)
                     for i in range(nx)
                 ]
@@ -293,11 +283,7 @@ def interpolate_to_model_level(
         interpolated_data[var] = {
             "dims": ["latitude", "longitude"],
             "data": np.array(
-                [
-                    np.interp([prs], xp[:, j, i], fp_data[:, j, i])
-                    for j in range(ny)
-                    for i in range(nx)
-                ]
+                [np.interp([prs], xp[:, j, i], fp_data[:, j, i]) for j in range(ny) for i in range(nx)]
             ).reshape(ny, nx),
         }
     for var in surface_vars:
@@ -320,11 +306,7 @@ def format_data(data_dict, regridded_data, model_levels):
     Returns:
         xr.Dataset of GFS initial conditions interpolated to CREDIT grid and model levels
     """
-    data = (
-        xr.Dataset.from_dict(data_dict)
-        .transpose("level", "latitude", "longitude", ...)
-        .expand_dims("time")
-    )
+    data = xr.Dataset.from_dict(data_dict).transpose("level", "latitude", "longitude", ...).expand_dims("time")
     data = data.assign_coords(
         level=model_levels,
         latitude=regridded_data["latitude"].values,

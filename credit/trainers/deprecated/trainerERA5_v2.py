@@ -40,9 +40,7 @@ class Trainer(BaseTrainer):
         logger.info("Loading a batch trainer class")
 
     # Training function.
-    def train_one_epoch(
-        self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics
-    ):
+    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         # training hyperparameters
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_accum_every = conf["trainer"]["grad_accum_every"]
@@ -57,15 +55,12 @@ class Trainer(BaseTrainer):
         else:
             total_time_steps = forecast_len
 
-        assert (
-            total_time_steps == 0
-        ), 'Single-step trainer "trainerERA5_v2" is used. This trainer supports `forecast_len=0` only'
+        assert total_time_steps == 0, (
+            'Single-step trainer "trainerERA5_v2" is used. This trainer supports `forecast_len=0` only'
+        )
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if (
-            conf["trainer"]["use_scheduler"]
-            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
-        ):
+        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # ------------------------------------------------------- #
@@ -106,11 +101,7 @@ class Trainer(BaseTrainer):
 
         # set up a custom tqdm
         if not isinstance(trainloader.dataset, IterableDataset):
-            batches_per_epoch = (
-                batches_per_epoch
-                if 0 < batches_per_epoch < len(trainloader)
-                else len(trainloader)
-            )
+            batches_per_epoch = batches_per_epoch if 0 < batches_per_epoch < len(trainloader) else len(trainloader)
 
         batch_group_generator = tqdm.tqdm(
             range(batches_per_epoch),
@@ -124,7 +115,7 @@ class Trainer(BaseTrainer):
         dl = cycle(trainloader)
         for i in batch_group_generator:
             batch = next(dl)  # Get the next batch from the iterator
-            
+
             # training log
             logs = {}
             # loss
@@ -136,9 +127,7 @@ class Trainer(BaseTrainer):
                     # combine x and x_surf
                     # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
                     # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(
-                        self.device
-                    )  # .float()
+                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)  # .float()
                 else:
                     # no x_surf
                     x = reshape_only(batch["x"]).to(self.device)  # .float()
@@ -147,9 +136,7 @@ class Trainer(BaseTrainer):
                 # add forcing and static variables
                 if "x_forcing_static" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = (
-                        batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )  # .float()
+                    x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                     # concat on var dimension
                     x = torch.cat((x, x_forcing_batch), dim=1)
@@ -163,9 +150,7 @@ class Trainer(BaseTrainer):
 
                 if "y_diag" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    y_diag_batch = (
-                        batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )  # .float()
+                    y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                     # concat on var dimension
                     y = torch.cat((y, y_diag_batch), dim=1)
@@ -175,13 +160,13 @@ class Trainer(BaseTrainer):
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
                     y = torch.clamp(y, min=clamp_min, max=clamp_max)
-                
+
                 # --------------------------------------------- #
                 # ensemble
-                # copies each sample in the batch ensemble_size number of times. 
+                # copies each sample in the batch ensemble_size number of times.
                 # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                 # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
-                if conf["trainer"].get("ensemble_size", 1) > 1: # gets value if set, otherwise is 1
+                if conf["trainer"].get("ensemble_size", 1) > 1:  # gets value if set, otherwise is 1
                     x = torch.repeat_interleave(x, conf["trainer"]["ensemble_size"], 0)
 
                 # single step predict
@@ -276,7 +261,7 @@ class Trainer(BaseTrainer):
 
             if distributed:
                 torch.distributed.barrier()
-                
+
             if grad_max_norm is not None:
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=grad_max_norm)
@@ -295,9 +280,7 @@ class Trainer(BaseTrainer):
             if "forecast_hour" in batch:
                 forecast_hour_tensor = batch["forecast_hour"].to(self.device)
                 if distributed:
-                    dist.all_reduce(
-                        forecast_hour_tensor, dist.ReduceOp.AVG, async_op=False
-                    )
+                    dist.all_reduce(forecast_hour_tensor, dist.ReduceOp.AVG, async_op=False)
                     forecast_hour_avg = forecast_hour_tensor[-1].item()
                 else:
                     forecast_hour_avg = batch["forecast_hour"][-1].item()
@@ -308,11 +291,7 @@ class Trainer(BaseTrainer):
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 try:
-                    print(
-                        "Invalid loss value: {}".format(
-                            np.mean(results_dict["train_loss"])
-                        )
-                    )
+                    print("Invalid loss value: {}".format(np.mean(results_dict["train_loss"])))
                     raise optuna.TrialPruned()
                 except Exception as E:
                     raise E
@@ -330,10 +309,7 @@ class Trainer(BaseTrainer):
             if self.rank == 0:
                 batch_group_generator.set_description(to_print)
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
                 scheduler.step()
 
             if i >= batches_per_epoch and i > 0:
@@ -353,21 +329,15 @@ class Trainer(BaseTrainer):
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
         forecast_len = (
-            conf["data"]["valid_forecast_len"]
-            if "valid_forecast_len" in conf["data"]
-            else conf["forecast_len"]
+            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
         )
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
-        total_time_steps = (
-            conf["data"]["total_time_steps"]
-            if "total_time_steps" in conf["data"]
-            else forecast_len
-        )
+        total_time_steps = conf["data"]["total_time_steps"] if "total_time_steps" in conf["data"] else forecast_len
 
-        assert (
-            total_time_steps == 0
-        ), 'Single-step trainer "trainerERA5_v2" is used. This trainer supports `forecast_len=0` only'
+        assert total_time_steps == 0, (
+            'Single-step trainer "trainerERA5_v2" is used. This trainer supports `forecast_len=0` only'
+        )
 
         results_dict = defaultdict(list)
 
@@ -412,9 +382,7 @@ class Trainer(BaseTrainer):
             valid_batches_per_epoch = valid_batches_per_epoch
         else:
             valid_batches_per_epoch = (
-                valid_batches_per_epoch
-                if 0 < valid_batches_per_epoch < len(valid_loader)
-                else len(valid_loader)
+                valid_batches_per_epoch if 0 < valid_batches_per_epoch < len(valid_loader) else len(valid_loader)
             )
 
         batch_group_generator = tqdm.tqdm(
@@ -432,9 +400,7 @@ class Trainer(BaseTrainer):
                     # combine x and x_surf
                     # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
                     # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(
-                        self.device
-                    )  # .float()
+                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)  # .float()
                 else:
                     # no x_surf
                     x = reshape_only(batch["x"]).to(self.device)  # .float()
@@ -443,9 +409,7 @@ class Trainer(BaseTrainer):
                 # add forcing and static variables
                 if "x_forcing_static" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = (
-                        batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )  # .float()
+                    x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                     # concat on var dimension
                     x = torch.cat((x, x_forcing_batch), dim=1)
@@ -459,9 +423,7 @@ class Trainer(BaseTrainer):
 
                 if "y_diag" in batch:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    y_diag_batch = (
-                        batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                    )  # .float()
+                    y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                     # concat on var dimension
                     y = torch.cat((y, y_diag_batch), dim=1)
@@ -471,13 +433,13 @@ class Trainer(BaseTrainer):
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
                     y = torch.clamp(y, min=clamp_min, max=clamp_max)
-                
+
                 # --------------------------------------------- #
                 # ensemble
-                # copies each sample in the batch ensemble_size number of times. 
+                # copies each sample in the batch ensemble_size number of times.
                 # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                 # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
-                if conf["trainer"].get("ensemble_size", 1) > 1: # gets value if set, otherwise is 1
+                if conf["trainer"].get("ensemble_size", 1) > 1:  # gets value if set, otherwise is 1
                     x = torch.repeat_interleave(x, conf["trainer"]["ensemble_size"], 0)
 
                 y_pred = self.model(x)
@@ -628,11 +590,7 @@ class Trainer(BaseTrainer):
         # training hyperparameters
         start_epoch = conf["trainer"]["start_epoch"]
         epochs = conf["trainer"]["epochs"]
-        skip_validation = (
-            conf["trainer"]["skip_validation"]
-            if "skip_validation" in conf["trainer"]
-            else False
-        )
+        skip_validation = conf["trainer"]["skip_validation"] if "skip_validation" in conf["trainer"] else False
         flag_load_weights = conf["trainer"]["load_weights"]
 
         # Reload the results saved in the training csv if continuing to train
@@ -644,10 +602,7 @@ class Trainer(BaseTrainer):
 
             # Set start_epoch to the length of the training log and train for one epoch
             # This is a manual override, you must use train_one_epoch = True
-            if (
-                "train_one_epoch" in conf["trainer"]
-                and conf["trainer"]["train_one_epoch"]
-            ):
+            if "train_one_epoch" in conf["trainer"] and conf["trainer"]["train_one_epoch"]:
                 start_epoch = len(saved_results)
                 epochs = start_epoch + 1
 
@@ -665,9 +620,7 @@ class Trainer(BaseTrainer):
                 train_loader.dataset.set_epoch(epoch)
                 if rollout_scheduler is not None:
                     conf["trainer"]["stop_rollout"] = rollout_scheduler(epoch, epochs)
-                    train_loader.dataset.set_rollout_prob(
-                        conf["trainer"]["stop_rollout"]
-                    )
+                    train_loader.dataset.set_rollout_prob(conf["trainer"]["stop_rollout"])
 
             ############
             #
@@ -696,9 +649,7 @@ class Trainer(BaseTrainer):
                 valid_results = train_results
 
             else:
-                valid_results = self.validate(
-                    epoch, conf, valid_loader, valid_criterion, metrics
-                )
+                valid_results = self.validate(epoch, conf, valid_loader, valid_criterion, metrics)
 
             #################
             #
@@ -708,10 +659,7 @@ class Trainer(BaseTrainer):
 
             # update the learning rate if epoch-by-epoch updates
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_epoch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_epoch:
                 if conf["trainer"]["scheduler"]["scheduler_type"] == "plateau":
                     scheduler.step(results_dict["valid_acc"][-1])
                 else:
@@ -721,15 +669,9 @@ class Trainer(BaseTrainer):
 
             results_dict["epoch"].append(epoch)
             for name in ["loss", "acc", "mae"]:
-                results_dict[f"train_{name}"].append(
-                    np.mean(train_results[f"train_{name}"])
-                )
-                results_dict[f"valid_{name}"].append(
-                    np.mean(valid_results[f"valid_{name}"])
-                )
-            results_dict["train_forecast_len"].append(
-                np.mean(train_results["train_forecast_len"])
-            )
+                results_dict[f"train_{name}"].append(np.mean(train_results[f"train_{name}"]))
+                results_dict[f"valid_{name}"].append(np.mean(valid_results[f"valid_{name}"]))
+            results_dict["train_forecast_len"].append(np.mean(train_results["train_forecast_len"]))
             results_dict["lr"].append(optimizer.param_groups[0]["lr"])
 
             df = pd.DataFrame.from_dict(results_dict).reset_index()
@@ -803,9 +745,7 @@ class Trainer(BaseTrainer):
 
                     state_dict = {
                         "epoch": epoch,
-                        "scheduler_state_dict": scheduler.state_dict()
-                        if conf["trainer"]["use_scheduler"]
-                        else None,
+                        "scheduler_state_dict": scheduler.state_dict() if conf["trainer"]["use_scheduler"] else None,
                         "scaler_state_dict": scaler.state_dict(),
                     }
 
@@ -832,9 +772,7 @@ class Trainer(BaseTrainer):
 
             # Stop training if we have not improved after X epochs (stopping patience)
             best_epoch = [
-                i
-                for i, j in enumerate(results_dict[training_metric])
-                if j == min(results_dict[training_metric])
+                i for i, j in enumerate(results_dict[training_metric]) if j == min(results_dict[training_metric])
             ][0]
             offset = epoch - best_epoch
             if offset >= conf["trainer"]["stopping_patience"]:
@@ -849,9 +787,7 @@ class Trainer(BaseTrainer):
         training_metric = "train_loss" if skip_validation else "valid_loss"
 
         best_epoch = [
-            i
-            for i, j in enumerate(results_dict[training_metric])
-            if j == min(results_dict[training_metric])
+            i for i, j in enumerate(results_dict[training_metric]) if j == min(results_dict[training_metric])
         ][0]
 
         result = {k: v[best_epoch] for k, v in results_dict.items()}

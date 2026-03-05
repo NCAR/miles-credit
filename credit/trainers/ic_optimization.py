@@ -310,9 +310,9 @@ class Trainer(BaseTrainer):
             # If not specified in config, use the range 1 to forecast_len
             backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
 
-        assert (
-            forecast_length <= backprop_on_timestep[-1]
-        ), f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
+        assert forecast_length <= backprop_on_timestep[-1], (
+            f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
+        )
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
         if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":

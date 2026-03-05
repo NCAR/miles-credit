@@ -7,9 +7,7 @@ import gc
 
 def polfiltT(D, inddo):
     if len(D.shape) == 2:
-        for ii in torch.concatenate(
-            [torch.arange(-inddo, 0), torch.arange(1, inddo + 1)]
-        ):
+        for ii in torch.concatenate([torch.arange(-inddo, 0), torch.arange(1, inddo + 1)]):
             # print(ii)
             ts_Udo = copy.deepcopy(D[ii, :])
             Z = torch.fft.fft(ts_Udo)
@@ -28,9 +26,7 @@ def polfiltT(D, inddo):
 
     if len(D.shape) == 3:
         for jj in range(D.shape[0]):
-            for ii in torch.concatenate(
-                [torch.arange(-inddo, 0), torch.arange(1, inddo + 1)]
-            ):
+            for ii in torch.concatenate([torch.arange(-inddo, 0), torch.arange(1, inddo + 1)]):
                 # print(ii)
                 ts_Udo = copy.deepcopy(D[jj, ii, :])
                 Z = torch.fft.fft(ts_Udo)
@@ -138,9 +134,7 @@ class Diffusion_and_Pole_Filter:
         self.havg = havg
         self.hamp = hamp
         self.indpol = 10
-        self.sigmoid = create_sigmoid_ramp_function(self.nlat, self.indpol).to(
-            self.device
-        )
+        self.sigmoid = create_sigmoid_ramp_function(self.nlat, self.indpol).to(self.device)
 
         self.initialize_sht()
         self.initialize_other_properties()
@@ -154,15 +148,15 @@ class Diffusion_and_Pole_Filter:
         for both scalar and vector fields.
         """
         # Initialize spherical harmonics transformation objects
-        self.sht = harmonics.RealSHT(
-            self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False
-        ).to(self.device)
-        self.isht = harmonics.InverseRealSHT(
-            self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False
-        ).to(self.device)
-        self.vsht = harmonics.RealVectorSHT(
-            self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False
-        ).to(self.device)
+        self.sht = harmonics.RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False).to(
+            self.device
+        )
+        self.isht = harmonics.InverseRealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False).to(
+            self.device
+        )
+        self.vsht = harmonics.RealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False).to(
+            self.device
+        )
         self.ivsht = harmonics.InverseRealVectorSHT(
             self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False
         ).to(self.device)
@@ -175,13 +169,9 @@ class Diffusion_and_Pole_Filter:
         including latitude and longitude arrays, Laplacian operators, and Coriolis effect.
         """
         # Compute quadrature weights and cosine of latitudes for the grid
-        cost, quad_weights = harmonics.quadrature.legendre_gauss_weights(
-            self.nlat, -1, 1
-        )
+        cost, quad_weights = harmonics.quadrature.legendre_gauss_weights(self.nlat, -1, 1)
         self.lats = -torch.as_tensor(np.arcsin(cost))
-        self.lons = torch.linspace(0, 2 * np.pi, self.nlon + 1, dtype=torch.float64)[
-            : self.nlon
-        ]
+        self.lons = torch.linspace(0, 2 * np.pi, self.nlon + 1, dtype=torch.float64)[: self.nlon]
 
         l_arr = torch.arange(0, self.lmax).reshape(self.lmax, 1).double()
         l_arr = l_arr.expand(self.lmax, self.mmax)
@@ -232,21 +222,11 @@ class Diffusion_and_Pole_Filter:
         """
         idim = chispec.ndim
 
-        if (
-            len(chispec.shape) != 1
-            and len(chispec.shape) != 2
-            and len(chispec.shape) != 3
-        ):
+        if len(chispec.shape) != 1 and len(chispec.shape) != 2 and len(chispec.shape) != 3:
             msg = "getgrad needs rank one or two arrays!"
             raise ValueError(msg)
 
-        ntrunc = int(
-            -1.5
-            + 0.5
-            * torch.sqrt(
-                9.0 - 8.0 * (1.0 - torch.tensor(self.spec2grid(chispec).shape[0]))
-            )
-        )
+        ntrunc = int(-1.5 + 0.5 * torch.sqrt(9.0 - 8.0 * (1.0 - torch.tensor(self.spec2grid(chispec).shape[0]))))
 
         if len(chispec.shape) == 1:
             chispec = torch.reshape(chispec, ((ntrunc + 1) * (ntrunc + 2) // 2, 1))
@@ -257,9 +237,7 @@ class Diffusion_and_Pole_Filter:
             uchi, vchi = self.getuv(
                 torch.stack(
                     (
-                        torch.zeros([divspec2.shape[0], divspec2.shape[1]]).to(
-                            self.device
-                        ),
+                        torch.zeros([divspec2.shape[0], divspec2.shape[1]]).to(self.device),
                         divspec2,
                     )
                 )
@@ -269,9 +247,7 @@ class Diffusion_and_Pole_Filter:
             uchi, vchi = self.getuv(
                 torch.stack(
                     (
-                        torch.zeros([divspec2.shape[0], divspec2.shape[1]]).to(
-                            self.device
-                        ),
+                        torch.zeros([divspec2.shape[0], divspec2.shape[1]]).to(self.device),
                         divspec2,
                     )
                 )
@@ -279,9 +255,7 @@ class Diffusion_and_Pole_Filter:
             return uchi, vchi
         elif idim == 3:
             new_shape = (divspec2.shape[0], 2, *divspec2.shape[1:])
-            stacked_divspec = torch.zeros(
-                new_shape, dtype=torch.complex64, device=self.device
-            )
+            stacked_divspec = torch.zeros(new_shape, dtype=torch.complex64, device=self.device)
             # Copy the original data into the second slice of the new dimension
             stacked_divspec[:, 1, :, :] = divspec2
             backy = self.getuv(stacked_divspec)
@@ -413,14 +387,10 @@ class Diffusion_and_Pole_Filter:
 
     def diff_lap2d_filt(self, BB2_tensor):
         # Create a new tensor 'BBfix' as a copy of 'BB2_tensor' but ensure it's only copied once.
-        BBfix = BB2_tensor.clone().to(
-            self.device
-        )  # Ensure it's on the same device as needed
+        BBfix = BB2_tensor.clone().to(self.device)  # Ensure it's on the same device as needed
 
         # Apply filters directly on slices of 'BBfix' without additional unnecessary cloning.
-        BBfix[:16], BBfix[16:32] = self.polefilt_lap2d_V2(
-            BBfix[:16], BBfix[16:32], substeps=6
-        )
+        BBfix[:16], BBfix[16:32] = self.polefilt_lap2d_V2(BBfix[:16], BBfix[16:32], substeps=6)
         BBfix[32:48] = self.polefilt_lap2d_V1(BBfix[32:48], substeps=5)
         BBfix[48:64] = self.polefilt_lap2d_QV1(BBfix[48:64], substeps=8)
 
@@ -435,13 +405,9 @@ class Diffusion_and_Pole_Filter:
             BB2_tensor[66].clone().to(self.device),
             substeps=6,
         )
-        T500 = self.polefilt_lap2d_V1(
-            BB2_tensor[68].clone().to(self.device), substeps=5
-        )
+        T500 = self.polefilt_lap2d_V1(BB2_tensor[68].clone().to(self.device), substeps=5)
         # Assuming Q500 should use BB2_tensor[64] if we're following sequential order
-        Q500 = self.polefilt_lap2d_QV1(
-            BB2_tensor[69].clone().to(self.device), substeps=4
-        )
+        Q500 = self.polefilt_lap2d_QV1(BB2_tensor[69].clone().to(self.device), substeps=4)
 
         # Update BBfix with the results of filtering operations
         BBfix[64] = SP

@@ -47,9 +47,7 @@ class CreditPostProcessor:
             q_3d = dataset.Q_HEIGHT.isel(time=t_idx).values
             pressure_3d = dataset.P_HEIGHT.isel(time=t_idx).values
 
-            dew_point_3d = dewpoint_from_specific_humidity(
-                pressure_3d * units.Pa, q_3d * units.kg / units.kg
-            ).magnitude
+            dew_point_3d = dewpoint_from_specific_humidity(pressure_3d * units.Pa, q_3d * units.kg / units.kg).magnitude
 
             dpt_values[t_idx, ...] = dew_point_3d
 
@@ -90,22 +88,16 @@ class CreditPostProcessor:
                 np.array([lat_min, lat_max], dtype=np.float64),
             )
             subset = (
-                nwp_data.swap_dims(
-                    {"y": "y_projection_coordinate", "x": "x_projection_coordinate"}
-                )
+                nwp_data.swap_dims({"y": "y_projection_coordinate", "x": "x_projection_coordinate"})
                 .sel(
                     y_projection_coordinate=slice(y_coords[0], y_coords[1]),
                     x_projection_coordinate=slice(x_coords[0], x_coords[1]),
                 )
-                .swap_dims(
-                    {"y_projection_coordinate": "y", "x_projection_coordinate": "x"}
-                )
+                .swap_dims({"y_projection_coordinate": "y", "x_projection_coordinate": "x"})
             )
         else:
             subset = nwp_data.sel(
-                longitude=slice(
-                    self.convert_longitude(lon_min), self.convert_longitude(lon_max)
-                ),
+                longitude=slice(self.convert_longitude(lon_min), self.convert_longitude(lon_max)),
                 latitude=slice(lat_max, lat_min),
             )
         return subset
@@ -168,9 +160,7 @@ class CreditPostProcessor:
         Returns:
             Pandas dataframe of transformed input.
         """
-        transformed_data = transformer.transform(
-            pd.DataFrame(input_data, columns=input_features)
-        )
+        transformed_data = transformer.transform(pd.DataFrame(input_data, columns=input_features))
 
         return transformed_data
 
@@ -189,16 +179,9 @@ class CreditPostProcessor:
         if output_uncertainties:
             probabilities = predictions[0].cpu().numpy()  # predictions[0].numpy()
             ptype = probabilities.argmax(axis=1).reshape(-1, 1)
-            u = (
-                predictions[1]
-                .cpu()
-                .numpy()
-                .reshape(data["latitude"].size, data["longitude"].size)
-            )
+            u = predictions[1].cpu().numpy().reshape(data["latitude"].size, data["longitude"].size)
             data["ML_u"] = (["latitude", "longitude"], u.astype("float64"))
-            data["ML_u"].attrs = {
-                "Description": "Evidential Uncertainty (Dempster-Shafer Theory)"
-            }
+            data["ML_u"].attrs = {"Description": "Evidential Uncertainty (Dempster-Shafer Theory)"}
             ale = (
                 predictions[2]
                 .cpu()
@@ -240,9 +223,7 @@ class CreditPostProcessor:
             probabilities = predictions.cpu()
 
         preds = np.hstack([probabilities, ptype])
-        reshaped_preds = preds.reshape(
-            data["latitude"].size, data["longitude"].size, preds.shape[-1]
-        )
+        reshaped_preds = preds.reshape(data["latitude"].size, data["longitude"].size, preds.shape[-1])
         for i, (long_v, v) in enumerate(
             zip(
                 ["rain", "snow", "ice pellets", "freezing rain"],
@@ -253,16 +234,12 @@ class CreditPostProcessor:
                 ["latitude", "longitude"],
                 reshaped_preds[:, :, i].astype("float64"),
             )  # ML probability
-            data[f"ML_{v}"].attrs = {
-                "Description": f"Machine Learned Probability of {long_v}"
-            }
+            data[f"ML_{v}"].attrs = {"Description": f"Machine Learned Probability of {long_v}"}
             data[f"ML_c{v}"] = (
                 ["latitude", "longitude"],
                 np.where(reshaped_preds[:, :, -1] == i, 1, 0).astype("uint8"),
             )  # ML categorical
-            data[f"ML_c{v}"].attrs = {
-                "Description": f"Machine Learned Categorical {long_v}"
-            }
+            data[f"ML_c{v}"].attrs = {"Description": f"Machine Learned Categorical {long_v}"}
 
         for var in ["crain", "csnow", "cicep", "cfrzr"]:
             if var in list(data.data_vars):
@@ -285,7 +262,5 @@ class CreditPostProcessor:
         save_location = os.path.join(conf["predict"]["save_forecast"], nc_filename)
         os.makedirs(save_location, exist_ok=True)
 
-        unique_filename = os.path.join(
-            save_location, f"pred_{nc_filename}_{forecast_hour:03d}.nc"
-        )
+        unique_filename = os.path.join(save_location, f"pred_{nc_filename}_{forecast_hour:03d}.nc")
         dataset.to_netcdf(unique_filename)

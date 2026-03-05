@@ -10,13 +10,9 @@ from os import makedirs
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-c", "--coord", help="Path to xarray file containing coordinates"
-    )
+    parser.add_argument("-c", "--coord", help="Path to xarray file containing coordinates")
     parser.add_argument("-o", "--out", help="Path to output directory")
-    parser.add_argument(
-        "-d", "--dist", type=float, help="Max distance for adjacency (km)"
-    )
+    parser.add_argument("-d", "--dist", type=float, help="Max distance for adjacency (km)")
     parser.add_argument("-p", "--procs", type=int, help="Number of processes")
     args = parser.parse_args()
     coords = xr.open_dataset(args.coord)
@@ -52,16 +48,12 @@ def main():
     if not exists(args.out):
         makedirs(args.out)
     print("Saving to " + args.out)
-    output_ds.to_netcdf(
-        join(args.out, f"grid_edge_pairs_{args.dist:0.0f}_{resolution}.nc")
-    )
+    output_ds.to_netcdf(join(args.out, f"grid_edge_pairs_{args.dist:0.0f}_{resolution}.nc"))
     return
 
 
 def calc_edges(coord, all_coords=None, max_dist=25.0):
-    coord_distances = haversine_vector(
-        coord[1:], all_coords[:, 1:], Unit.KILOMETERS, comb=True
-    )
+    coord_distances = haversine_vector(coord[1:], all_coords[:, 1:], Unit.KILOMETERS, comb=True)
     close_coords = np.where(coord_distances < max_dist)[0]
     edge_distances = coord_distances[close_coords]
     edge_indices = [(int(np.round(coord[0])), c) for c in close_coords]

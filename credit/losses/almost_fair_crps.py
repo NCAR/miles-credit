@@ -2,6 +2,10 @@ import torch
 
 
 class AlmostFairKCRPSLoss(torch.nn.Module):
+    """
+    Calculates CRPS loss that has corrections for very small ensembles.
+    """
+
     def __init__(self, alpha=1.0, reduction="mean", no_autocast=True):
         super().__init__()
         self.alpha = alpha

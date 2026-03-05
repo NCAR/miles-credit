@@ -198,7 +198,7 @@ class SphericalRandomField(torch.nn.Module):
 
         # Validate smoothness parameter
         if smoothness < 1.0:
-            raise ValueError(f"Smoothness parameter must be > 1.0 for well-defined covariance. " f"Got: {smoothness}")
+            raise ValueError(f"Smoothness parameter must be > 1.0 for well-defined covariance. Got: {smoothness}")
 
         # Set default variance scale if not provided
         if variance_scale is None:

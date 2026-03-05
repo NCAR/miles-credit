@@ -108,15 +108,11 @@ class TensorPadding:
         # pad along longitude (west-east)
         if any(p > 0 for p in self.pad_WE):
             pad_lon_left, pad_lon_right = self.pad_WE
-            x = F.pad(
-                x, pad=(self.pad_WE[0], self.pad_WE[1], 0, 0, 0, 0), mode="circular"
-            )
+            x = F.pad(x, pad=(self.pad_WE[0], self.pad_WE[1], 0, 0, 0, 0), mode="circular")
 
         # pad along latitude (north-south)
         if any(p > 0 for p in self.pad_NS):
-            x = F.pad(
-                x, pad=(0, 0, self.pad_NS[0], self.pad_NS[1], 0, 0), mode="reflect"
-            )
+            x = F.pad(x, pad=(0, 0, self.pad_NS[0], self.pad_NS[1], 0, 0), mode="reflect")
 
         return x
 

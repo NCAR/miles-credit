@@ -302,7 +302,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             temporal_cfg["temporal_correlation"],
             temporal_cfg["perturbation_std"],
             temporal_cfg["hemispheric_rescale"],
-            terrain_file=conf["loss"]["latitude_weights"]
+            terrain_file=conf["loss"]["latitude_weights"],
         )
 
     # Rollout
@@ -388,7 +388,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 else:
                     # If not using bred-vectors, need to copy x tensor here then add noise
                     if use_temporal_noise:
-                        ensemble_members, delta_x_members = zip(*[temporal_noise(x, None, 1) for _ in range(ensemble_size)])
+                        ensemble_members, delta_x_members = zip(
+                            *[temporal_noise(x, None, 1) for _ in range(ensemble_size)]
+                        )
                         # Remove static and dynamic forcing channels from delta_x_members
                         # Only keep perturbations for dynamic variables
                         if static_dim_size > 0:

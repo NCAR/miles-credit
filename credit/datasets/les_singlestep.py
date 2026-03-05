@@ -161,9 +161,7 @@ class LESDataset(torch.utils.data.Dataset):
         ind_start_in_file = index - ind_start
 
         # handle out-of-bounds
-        ind_largest = len(self.list_upper_ds[int(ind_file)]["time"]) - (
-            self.history_len + self.forecast_len + 1
-        )
+        ind_largest = len(self.list_upper_ds[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
 
         if ind_start_in_file > ind_largest:
             ind_start_in_file = ind_largest
@@ -173,18 +171,14 @@ class LESDataset(torch.utils.data.Dataset):
         ind_end_in_file = ind_start_in_file + self.history_len + self.forecast_len
 
         ## LES_file_subset: a xarray dataset that contains training input and target (for the current batch)
-        LES_subset = self.list_upper_ds[int(ind_file)].isel(
-            time=slice(ind_start_in_file, ind_end_in_file + 1)
-        )
+        LES_subset = self.list_upper_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
         # ========================================================================== #
         # merge surface into the dataset
 
         if self.list_surf_ds:
             ## subset surface variables
-            surface_subset = self.list_surf_ds[int(ind_file)].isel(
-                time=slice(ind_start_in_file, ind_end_in_file + 1)
-            )
+            surface_subset = self.list_surf_ds[int(ind_file)].isel(time=slice(ind_start_in_file, ind_end_in_file + 1))
 
             ## merge upper-air and surface here:
             LES_subset = LES_subset.merge(surface_subset)
@@ -212,9 +206,7 @@ class LESDataset(torch.utils.data.Dataset):
                 time=slice(ind_start_in_file, ind_end_in_file + 1)
             )
 
-            dyn_forcing_subset = dyn_forcing_subset.isel(
-                time=slice(0, self.history_len, 1)
-            ).load()
+            dyn_forcing_subset = dyn_forcing_subset.isel(time=slice(0, self.history_len, 1)).load()
 
             LES_input = LES_input.merge(dyn_forcing_subset)
 
@@ -224,9 +216,7 @@ class LESDataset(torch.utils.data.Dataset):
             # ------------------------------------------------------------------------------- #
             # matching month, day, hour between forcing and upper air [time]
             # this approach handles leap year forcing file and non-leap-year upper air file
-            month_day_forcing = extract_month_day_hour(
-                np.array(self.xarray_forcing["time"])
-            )
+            month_day_forcing = extract_month_day_hour(np.array(self.xarray_forcing["time"]))
             month_day_inputs = extract_month_day_hour(np.array(LES_input["time"]))
             # indices to subset
             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
@@ -244,17 +234,11 @@ class LESDataset(torch.utils.data.Dataset):
         if self.xarray_static:
             # expand static var on time dim
             N_time_dims = len(LES_subset["time"])
-            static_subset_input = self.xarray_static.expand_dims(
-                dim={"time": N_time_dims}
-            )
+            static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
             # assign coords 'time'
-            static_subset_input = static_subset_input.assign_coords(
-                {"time": LES_subset["time"]}
-            )
+            static_subset_input = static_subset_input.assign_coords({"time": LES_subset["time"]})
             # slice, update time and merge
-            static_subset_input = static_subset_input.isel(
-                time=slice(0, self.history_len, 1)
-            )
+            static_subset_input = static_subset_input.isel(time=slice(0, self.history_len, 1))
             static_subset_input["time"] = LES_input["time"]
             LES_input = LES_input.merge(static_subset_input)
 
@@ -262,9 +246,7 @@ class LESDataset(torch.utils.data.Dataset):
         # xarray dataset as target
         ## LES_target: the final target
 
-        LES_target = LES_subset.isel(
-            time=slice(self.history_len, ind_end_time, 1)
-        ).load()
+        LES_target = LES_subset.isel(time=slice(self.history_len, ind_end_time, 1)).load()
 
         ## merge diagnoisc input here:
         if self.list_diag_ds:
@@ -273,9 +255,7 @@ class LESDataset(torch.utils.data.Dataset):
                 time=slice(ind_start_in_file, ind_end_in_file + 1)
             )
 
-            diagnostic_subset = diagnostic_subset.isel(
-                time=slice(self.history_len, ind_end_time, 1)
-            ).load()
+            diagnostic_subset = diagnostic_subset.isel(time=slice(self.history_len, ind_end_time, 1)).load()
 
             # merge into the target dataset
             LES_target = LES_target.merge(diagnostic_subset)
@@ -297,13 +277,9 @@ class LESDataset(torch.utils.data.Dataset):
         iy_end = iy_start + dy
         ix_end = ix_start + dx
 
-        LES_input = LES_input.isel(
-            yIndex=slice(iy_start, iy_end), xIndex=slice(ix_start, ix_end)
-        )
+        LES_input = LES_input.isel(yIndex=slice(iy_start, iy_end), xIndex=slice(ix_start, ix_end))
 
-        LES_target = LES_target.isel(
-            yIndex=slice(iy_start, iy_end), xIndex=slice(ix_start, ix_end)
-        )
+        LES_target = LES_target.isel(yIndex=slice(iy_start, iy_end), xIndex=slice(ix_start, ix_end))
 
         # pipe xarray datasets to the sampler
         sample = Sample_LES(
@@ -426,46 +402,34 @@ class LESPredict(torch.utils.data.IterableDataset):
 
     def load_zarr_as_input(self, i_file, i_init_start, i_init_end, mode="input"):
         # sliced_x: the final output, starts with an upper air xr.dataset
-        sliced_x = self.list_upper_ds[i_file].isel(
-            time=slice(i_init_start, i_init_end + 1)
-        )
+        sliced_x = self.list_upper_ds[i_file].isel(time=slice(i_init_start, i_init_end + 1))
 
         # surface variables
         if self.filename_surface is not None:
-            sliced_surface = self.list_surf_ds[i_file].isel(
-                time=slice(i_init_start, i_init_end + 1)
-            )
+            sliced_surface = self.list_surf_ds[i_file].isel(time=slice(i_init_start, i_init_end + 1))
             # sliced_surface["time"] = sliced_x["time"]
             sliced_x = sliced_x.merge(sliced_surface)
 
         if mode == "input":
             # dynamic forcing variables
             if self.filename_dyn_forcing is not None:
-                sliced_dyn_forcing = self.list_dyn_forcing_ds[i_file].isel(
-                    time=slice(i_init_start, i_init_end + 1)
-                )
+                sliced_dyn_forcing = self.list_dyn_forcing_ds[i_file].isel(time=slice(i_init_start, i_init_end + 1))
                 # sliced_dyn_forcing["time"] = sliced_x["time"]
                 sliced_x = sliced_x.merge(sliced_dyn_forcing)
 
             if self.filename_forcing is not None:
                 sliced_forcing = self.xarray_forcing.copy()  # <-- shallow copy
-                month_day_forcing = extract_month_day_hour(
-                    np.array(sliced_forcing["time"])
-                )
+                month_day_forcing = extract_month_day_hour(np.array(sliced_forcing["time"]))
                 month_day_inputs = extract_month_day_hour(np.array(sliced_x["time"]))
                 # indices to subset
-                ind_forcing, _ = find_common_indices(
-                    month_day_forcing, month_day_inputs
-                )
+                ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
                 sliced_forcing = sliced_forcing.isel(time=ind_forcing)
                 sliced_forcing["time"] = sliced_x["time"]
                 sliced_x = sliced_x.merge(sliced_forcing)
 
             if self.filename_static is not None:
                 sliced_static = self.xarray_static.copy()  # <-- shallow copy
-                sliced_static = sliced_static.expand_dims(
-                    dim={"time": len(sliced_x["time"])}
-                )
+                sliced_static = sliced_static.expand_dims(dim={"time": len(sliced_x["time"])})
                 sliced_static["time"] = sliced_x["time"]
                 # merge static to sliced_x
                 sliced_x = sliced_x.merge(sliced_static)
@@ -473,9 +437,7 @@ class LESPredict(torch.utils.data.IterableDataset):
         elif mode == "target":
             # diagnostic
             if self.filename_diagnostic is not None:
-                sliced_diagnostic = self.list_diag_ds[i_file].isel(
-                    time=slice(i_init_start, i_init_end + 1)
-                )
+                sliced_diagnostic = self.list_diag_ds[i_file].isel(time=slice(i_init_start, i_init_end + 1))
                 # sliced_diagnostic["time"] = sliced_x["time"]
                 sliced_x = sliced_x.merge(sliced_diagnostic)
 
@@ -511,12 +473,8 @@ class LESPredict(torch.utils.data.IterableDataset):
                 output_dict = {}
 
                 # get all inputs in one xr.Dataset
-                sliced_x = self.load_zarr_as_input(
-                    i_file, i_init_start, i_init_end, mode="input"
-                )
-                sliced_y = self.load_zarr_as_input(
-                    i_file, i_init_end + 1, i_init_end + 1, mode="target"
-                )
+                sliced_x = self.load_zarr_as_input(i_file, i_init_start, i_init_end, mode="input")
+                sliced_y = self.load_zarr_as_input(i_file, i_init_end + 1, i_init_end + 1, mode="target")
 
                 sliced_x = subset_patch(sliced_x, input_size=(256, 256), start=None)
                 sliced_y = subset_patch(sliced_y, input_size=(256, 256), start=None)
@@ -542,9 +500,7 @@ class LESPredict(torch.utils.data.IterableDataset):
 
                 # Adjust stopping condition
                 output_dict["stop_forecast"] = i_init_end == N_times
-                output_dict["datetime"] = sliced_x.time.values.astype(
-                    "datetime64[s]"
-                ).astype(int)[-1]
+                output_dict["datetime"] = sliced_x.time.values.astype("datetime64[s]").astype(int)[-1]
 
                 # return output_dict
                 yield output_dict

@@ -48,9 +48,7 @@ class GraphResTransfGRU(BaseModel):
         self.histroy_len = history_len
         self.n_levels = levels
         self.state_vars = self.n_variables * self.n_levels + self.n_surface_variables
-        self.total_n_vars = (
-            self.state_vars + self.n_static_variables
-        ) * self.histroy_len
+        self.total_n_vars = (self.state_vars + self.n_static_variables) * self.histroy_len
         self.n_blocks = n_blocks
         self.hidden_size = hidden_size
         self.dim_head = dim_head
@@ -89,9 +87,7 @@ class GraphResTransfGRU(BaseModel):
         )
         self.gated_unit = GateCell(self.hidden_size)
 
-        self.graph_norm_layers = nn.ModuleList(
-            LayerNorm(self.hidden_size) for _ in range(self.n_blocks)
-        )
+        self.graph_norm_layers = nn.ModuleList(LayerNorm(self.hidden_size) for _ in range(self.n_blocks))
         self.enc_norm = LayerNorm(self.hidden_size)
         self.dec_norm = LayerNorm(self.hidden_size)
 
@@ -110,9 +106,7 @@ class GraphResTransfGRU(BaseModel):
         lat_lon_shape = x.shape[-2:]
 
         state = x[:, : self.state_vars, 1:]
-        x = x.view(-1, self.total_n_vars, lat_lon_shape[0] * lat_lon_shape[1]).permute(
-            2, 0, 1
-        )
+        x = x.view(-1, self.total_n_vars, lat_lon_shape[0] * lat_lon_shape[1]).permute(2, 0, 1)
         x = self.encoder(x)
         x = self.enc_norm(x)  # Seems to be the most useful
 
@@ -137,17 +131,11 @@ class GraphResTransfGRU(BaseModel):
         self.edge_attr = None
 
         if self.use_edge_attr:
-            self.edge_dist = (
-                torch.from_numpy(xr_dataset.distances.values).unsqueeze(1).float()
-            )
-            self.edge_dist = (self.edge_dist - self.edge_dist.mean()) / (
-                self.edge_dist.std() + 1e-5
-            )  # Normalization
+            self.edge_dist = torch.from_numpy(xr_dataset.distances.values).unsqueeze(1).float()
+            self.edge_dist = (self.edge_dist - self.edge_dist.mean()) / (self.edge_dist.std() + 1e-5)  # Normalization
             # self.edge_dist = torch.exp(-(self.edge_dist) ** 2)
 
-            lat = (
-                torch.from_numpy(xr_dataset.latitude.values).float() + 180.0
-            )  # convert to non-negative values
+            lat = torch.from_numpy(xr_dataset.latitude.values).float() + 180.0  # convert to non-negative values
             lon = torch.from_numpy(xr_dataset.longitude.values).float()
 
             lat = (lat - lat.mean()) / (lat.std() + 1e-5)
@@ -163,9 +151,7 @@ class GraphResTransfGRU(BaseModel):
             )
             self.edge_attr = torch.exp(-((self.edge_attr) ** 2))
             assert self.edge_attr.shape[1] == 3
-            self.edge_index, self.edge_attr = to_undirected(
-                self.edge_index, self.edge_attr
-            )
+            self.edge_index, self.edge_attr = to_undirected(self.edge_index, self.edge_attr)
 
         else:
             self.edge_index = to_undirected(self.edge_index)
@@ -324,9 +310,7 @@ class TransformerConv(MessagePassing):
         key = self.lin_key(x[0]).view(-1, batch_size, H, C)
         value = self.lin_value(x[0]).view(-1, batch_size, H, C)
 
-        out = self.propagate(
-            edge_index, query=query, key=key, value=value, edge_attr=edge_attr
-        )
+        out = self.propagate(edge_index, query=query, key=key, value=value, edge_attr=edge_attr)
 
         alpha = self._alpha
         self._alpha = None
@@ -382,10 +366,7 @@ class TransformerConv(MessagePassing):
         return out
 
     def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}({self.in_channels}, "
-            f"{self.out_channels}, heads={self.heads})"
-        )
+        return f"{self.__class__.__name__}({self.in_channels}, {self.out_channels}, heads={self.heads})"
 
 
 class LayerNorm(nn.Module):
@@ -463,9 +444,7 @@ if __name__ == "__main__":
     image_width = 288  # 1280, 288
 
     # edge_path = "/glade/derecho/scratch/dgagne/credit_scalers/grid_edge_pairs_125.nc"
-    edge_path = (
-        "/glade/derecho/scratch/dgagne/credit_scalers/grid_edge_pairs_125_onedeg.nc"
-    )
+    edge_path = "/glade/derecho/scratch/dgagne/credit_scalers/grid_edge_pairs_125_onedeg.nc"
 
     # edge_index = torch.randint(image_height * image_width, size=(2, image_width * image_width * 4))
     input_tensor = torch.randn(

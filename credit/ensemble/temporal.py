@@ -103,7 +103,9 @@ class TemporalNoise:
             current_perturbation = self.temporal_correlation * previous_perturbation + white_noise
 
         if self.hemispheric_rescale is not None:
-            current_perturbation = self.hemispheric_rescale(current_perturbation, self.latitudes.to(current_perturbation.device))
+            current_perturbation = self.hemispheric_rescale(
+                current_perturbation, self.latitudes.to(current_perturbation.device)
+            )
 
         # Apply perturbation to input
         perturbed_state = x + current_perturbation

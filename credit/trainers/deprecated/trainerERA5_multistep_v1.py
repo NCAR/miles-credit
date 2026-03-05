@@ -46,10 +46,7 @@ class Trainer(BaseTrainer):
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if (
-            conf["trainer"]["use_scheduler"]
-            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
-        ):
+        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # set up a custom tqdm
@@ -58,15 +55,9 @@ class Trainer(BaseTrainer):
             # trainloader.dataset.set_rollout_prob(rollout_p)
             pass
         else:
-            batches_per_epoch = (
-                batches_per_epoch
-                if 0 < batches_per_epoch < len(trainloader)
-                else len(trainloader)
-            )
+            batches_per_epoch = batches_per_epoch if 0 < batches_per_epoch < len(trainloader) else len(trainloader)
 
-        batch_group_generator = tqdm.tqdm(
-            range(batches_per_epoch), total=batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
 
         self.model.train()
 
@@ -86,23 +77,17 @@ class Trainer(BaseTrainer):
                     batch = next(dl)
 
                     for i, forecast_hour in enumerate(batch["forecast_hour"]):
-                        if (
-                            forecast_hour == 0
-                        ):  # use true x -- initial condition time-step
+                        if forecast_hour == 0:  # use true x -- initial condition time-step
                             x_atmo = batch["x"]
                             x_surf = batch["x_surf"]
-                            x = self.model.concat_and_reshape(x_atmo, x_surf).to(
-                                self.device
-                            )
+                            x = self.model.concat_and_reshape(x_atmo, x_surf).to(self.device)
                         else:  # use model's predictions
                             if x.shape[2] > 1:
                                 # discard any statics from x here as they will get added below from batch
                                 print(i, forecast_hour)
                                 x_detach = x[:, :, 1:].detach()
                                 atmos_vars = y_pred.shape[1]
-                                x = torch.cat(
-                                    [x_detach[:, :atmos_vars], y_pred.detach()], dim=2
-                                )
+                                x = torch.cat([x_detach[:, :atmos_vars], y_pred.detach()], dim=2)
                             else:
                                 x = y_pred.detach()
 
@@ -132,9 +117,7 @@ class Trainer(BaseTrainer):
                         y_atmo = batch["y"]
                         y_surf = batch["y_surf"]
 
-                        y = self.model.concat_and_reshape(y_atmo, y_surf).to(
-                            self.device
-                        )
+                        y = self.model.concat_and_reshape(y_atmo, y_surf).to(self.device)
 
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()
 
@@ -194,10 +177,7 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -213,15 +193,9 @@ class Trainer(BaseTrainer):
         self.model.eval()
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
-        history_len = (
-            conf["data"]["valid_history_len"]
-            if "valid_history_len" in conf["data"]
-            else conf["history_len"]
-        )
+        history_len = conf["data"]["valid_history_len"] if "valid_history_len" in conf["data"] else conf["history_len"]
         forecast_len = (
-            conf["data"]["valid_forecast_len"]
-            if "valid_forecast_len" in conf["data"]
-            else conf["forecast_len"]
+            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
         )
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
@@ -232,14 +206,10 @@ class Trainer(BaseTrainer):
             valid_batches_per_epoch = valid_batches_per_epoch
         else:
             valid_batches_per_epoch = (
-                valid_batches_per_epoch
-                if 0 < valid_batches_per_epoch < len(valid_loader)
-                else len(valid_loader)
+                valid_batches_per_epoch if 0 < valid_batches_per_epoch < len(valid_loader) else len(valid_loader)
             )
 
-        batch_group_generator = tqdm.tqdm(
-            range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
 
         static = None
         stop_forecast = False
@@ -250,28 +220,20 @@ class Trainer(BaseTrainer):
                     if i == 0:  # use true x -- initial condition time-step
                         x_atmo = batch["x"]
                         x_surf = batch["x_surf"]
-                        x = self.model.concat_and_reshape(x_atmo, x_surf).to(
-                            self.device
-                        )
+                        x = self.model.concat_and_reshape(x_atmo, x_surf).to(self.device)
                     else:  # use model's predictions
                         if x.shape[2] > 1:
                             # discard any statics from x here as they will get added below from batch
                             x_detach = x[:, :, 1:].detach()
                             atmos_vars = y_pred.shape[1]
-                            x = torch.cat(
-                                [x_detach[:, :atmos_vars], y_pred.detach()], dim=2
-                            )
+                            x = torch.cat([x_detach[:, :atmos_vars], y_pred.detach()], dim=2)
                         else:
                             x = y_pred.detach()
 
                     if "static" in batch:
                         if static is None:
                             static = (
-                                batch["static"]
-                                .to(self.device)
-                                .unsqueeze(2)
-                                .expand(-1, -1, x.shape[2], -1, -1)
-                                .float()
+                                batch["static"].to(self.device).unsqueeze(2).expand(-1, -1, x.shape[2], -1, -1).float()
                             )  # [batch, num_stat_vars, hist_len, lat, lon]
                         x = torch.cat((x, static.clone()), dim=1)
 
@@ -289,22 +251,16 @@ class Trainer(BaseTrainer):
                     if i == forecast_len:
                         y_atmo = batch["y"]
                         y_surf = batch["y_surf"]
-                        y = self.model.concat_and_reshape(y_atmo, y_surf).to(
-                            self.device
-                        )
+                        y = self.model.concat_and_reshape(y_atmo, y_surf).to(self.device)
 
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()
 
                         # Metrics
                         metrics_dict = metrics(y_pred.float(), y.float())
                         for name, value in metrics_dict.items():
-                            value = torch.Tensor([value]).cuda(
-                                self.device, non_blocking=True
-                            )
+                            value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
                             if distributed:
-                                dist.all_reduce(
-                                    value, dist.ReduceOp.AVG, async_op=False
-                                )
+                                dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
                             results_dict[f"valid_{name}"].append(value[0].item())
                         stop_forecast = True
                         break
@@ -362,11 +318,7 @@ class Trainer(BaseTrainer):
         save_loc = conf["save_loc"]
         start_epoch = conf["trainer"]["start_epoch"]
         epochs = conf["trainer"]["epochs"]
-        skip_validation = (
-            conf["trainer"]["skip_validation"]
-            if "skip_validation" in conf["trainer"]
-            else False
-        )
+        skip_validation = conf["trainer"]["skip_validation"] if "skip_validation" in conf["trainer"] else False
 
         # Reload the results saved in the training csv if continuing to train
         if start_epoch == 0:
@@ -418,9 +370,7 @@ class Trainer(BaseTrainer):
                 valid_results = train_results
 
             else:
-                valid_results = self.validate(
-                    epoch, conf, valid_loader, valid_criterion, metrics
-                )
+                valid_results = self.validate(epoch, conf, valid_loader, valid_criterion, metrics)
 
             #################
             #
@@ -430,10 +380,7 @@ class Trainer(BaseTrainer):
 
             # update the learning rate if epoch-by-epoch updates
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_epoch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_epoch:
                 if conf["trainer"]["scheduler"]["scheduler_type"] == "plateau":
                     scheduler.step(results_dict["valid_acc"][-1])
                 else:
@@ -443,15 +390,9 @@ class Trainer(BaseTrainer):
 
             results_dict["epoch"].append(epoch)
             for name in ["loss", "acc", "mae"]:
-                results_dict[f"train_{name}"].append(
-                    np.mean(train_results[f"train_{name}"])
-                )
-                results_dict[f"valid_{name}"].append(
-                    np.mean(valid_results[f"valid_{name}"])
-                )
-            results_dict["train_forecast_len"].append(
-                np.mean(train_results["train_forecast_len"])
-            )
+                results_dict[f"train_{name}"].append(np.mean(train_results[f"train_{name}"]))
+                results_dict[f"valid_{name}"].append(np.mean(valid_results[f"valid_{name}"]))
+            results_dict["train_forecast_len"].append(np.mean(train_results["train_forecast_len"]))
             results_dict["lr"].append(optimizer.param_groups[0]["lr"])
 
             df = pd.DataFrame.from_dict(results_dict).reset_index()
@@ -525,9 +466,7 @@ class Trainer(BaseTrainer):
 
                     state_dict = {
                         "epoch": epoch,
-                        "scheduler_state_dict": scheduler.state_dict()
-                        if conf["trainer"]["use_scheduler"]
-                        else None,
+                        "scheduler_state_dict": scheduler.state_dict() if conf["trainer"]["use_scheduler"] else None,
                         "scaler_state_dict": scaler.state_dict(),
                     }
 
@@ -554,9 +493,7 @@ class Trainer(BaseTrainer):
 
             # Stop training if we have not improved after X epochs (stopping patience)
             best_epoch = [
-                i
-                for i, j in enumerate(results_dict[training_metric])
-                if j == min(results_dict[training_metric])
+                i for i, j in enumerate(results_dict[training_metric]) if j == min(results_dict[training_metric])
             ][0]
             offset = epoch - best_epoch
             if offset >= conf["trainer"]["stopping_patience"]:
@@ -571,9 +508,7 @@ class Trainer(BaseTrainer):
         training_metric = "train_loss" if skip_validation else "valid_loss"
 
         best_epoch = [
-            i
-            for i, j in enumerate(results_dict[training_metric])
-            if j == min(results_dict[training_metric])
+            i for i, j in enumerate(results_dict[training_metric]) if j == min(results_dict[training_metric])
         ][0]
 
         result = {k: v[best_epoch] for k, v in results_dict.items()}

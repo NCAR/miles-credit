@@ -12,9 +12,7 @@ from credit.models.fuxi import Fuxi
 from credit.parser import credit_main_parser
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
-CONFIG_FILE_DIR = os.path.join(
-    "/".join(os.path.abspath(__file__).split("/")[:-2]), "config"
-)
+CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
 
 
 def test_unet():
@@ -35,9 +33,7 @@ def test_unet():
     levels = conf["model"]["levels"]
     frames = conf["model"]["frames"]
     surface_variables = len(conf["data"]["surface_variables"])
-    input_only_variables = len(conf["data"]["static_variables"]) + len(
-        conf["data"]["dynamic_forcing_variables"]
-    )
+    input_only_variables = len(conf["data"]["static_variables"]) + len(conf["data"]["dynamic_forcing_variables"])
     output_only_variables = conf["model"]["output_only_channels"]
 
     in_channels = int(variables * levels + surface_variables + input_only_variables)
@@ -77,9 +73,7 @@ def test_crossformer():
     assert isinstance(model, CrossFormer)
 
     y_pred = model(input_tensor)
-    assert y_pred.shape == torch.Size(
-        [1, in_channels - input_only_channels, 1, image_height, image_width]
-    )
+    assert y_pred.shape == torch.Size([1, in_channels - input_only_channels, 1, image_height, image_width])
     assert not torch.isnan(y_pred).any()
 
 
@@ -132,9 +126,7 @@ def test_fuxi():
     out_channels = channels * levels + surface_channels + output_only_channels
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    input_tensor = torch.randn(1, in_channels, frames, image_height, image_width).to(
-        device
-    )
+    input_tensor = torch.randn(1, in_channels, frames, image_height, image_width).to(device)
 
     model = load_model(conf).to(device)
     assert isinstance(model, Fuxi)

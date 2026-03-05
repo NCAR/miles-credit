@@ -37,9 +37,7 @@ def setup(rank, world_size, mode, backend="nccl"):
         backend (str, optional): The backend to use for distributed training. Defaults to 'nccl'.
     """
 
-    logging.info(
-        f"Running {mode.upper()} on rank {rank} with world_size {world_size} using {backend}."
-    )
+    logging.info(f"Running {mode.upper()} on rank {rank} with world_size {world_size} using {backend}.")
     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
 
@@ -54,25 +52,31 @@ def get_rank_info(trainer_mode):
     """
     if trainer_mode in ["fsdp", "ddp"]:
         try:
-            from mpi4py import MPI
+            if "LOCAL_RANK" in os.environ:
+                # Environment variables set by torch.distributed.launch or torchrun
+                LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+                WORLD_SIZE = int(os.environ["WORLD_SIZE"])
+                WORLD_RANK = int(os.environ["RANK"])
+            else:
+                from mpi4py import MPI
 
-            comm = MPI.COMM_WORLD
-            shmem_comm = comm.Split_type(MPI.COMM_TYPE_SHARED)
+                comm = MPI.COMM_WORLD
+                shmem_comm = comm.Split_type(MPI.COMM_TYPE_SHARED)
 
-            LOCAL_RANK = shmem_comm.Get_rank()
-            WORLD_SIZE = comm.Get_size()
-            WORLD_RANK = comm.Get_rank()
+                LOCAL_RANK = shmem_comm.Get_rank()
+                WORLD_SIZE = comm.Get_size()
+                WORLD_RANK = comm.Get_rank()
 
-            # Set MASTER_ADDR and MASTER_PORT if not already set.
-            # (broadcast these from rank 0 - they must be consistent on every node)
-            if "MASTER_ADDR" not in os.environ:
-                os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostbyname(socket.gethostname()), root=0)
-            if "MASTER_PORT" not in os.environ:
-                os.environ["MASTER_PORT"] = comm.bcast(str(np.random.randint(1000, 8000)), root=0)
+                # Set MASTER_ADDR and MASTER_PORT if not already set.
+                # (broadcast these from rank 0 - they must be consistent on every node)
+                if "MASTER_ADDR" not in os.environ:
+                    os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostbyname(socket.gethostname()), root=0)
+                if "MASTER_PORT" not in os.environ:
+                    os.environ["MASTER_PORT"] = comm.bcast(str(np.random.randint(1000, 8000)), root=0)
 
-            if 0 == WORLD_RANK:
-                logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
-                logging.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
+                if 0 == WORLD_RANK:
+                    logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
+                    logging.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
 
         except Exception as e:
             logging.info(e)
@@ -160,9 +164,7 @@ def distributed_model_wrapper(conf, neural_network, device):
     mode = conf["trainer"]["mode"]
 
     activation_checkpoint = (
-        conf["trainer"]["activation_checkpoint"]
-        if "activation_checkpoint" in conf["trainer"]
-        else False
+        conf["trainer"]["activation_checkpoint"] if "activation_checkpoint" in conf["trainer"] else False
     )
     checkpoint_all_layers = conf["trainer"].get("checkpoint_all_layers", False)
 
@@ -176,9 +178,7 @@ def distributed_model_wrapper(conf, neural_network, device):
         logging.info(f"Activation checkpointing on {mode}: {activation_checkpoint}")
         if checkpoint_all_layers:
             logging.info("Checkpointing all available layers in your model")
-            logging.warning(
-                "This may cause performance degredation -- consider supplying a list to checkpoint"
-            )
+            logging.warning("This may cause performance degredation -- consider supplying a list to checkpoint")
         else:
             logging.info(f"Checkpointing custom layers {transformer_layers_cls}")
 
@@ -189,9 +189,7 @@ def distributed_model_wrapper(conf, neural_network, device):
             transformer_auto_wrap_policy, transformer_layer_cls=transformer_layers_cls
         )
 
-        auto_wrap_policy2 = functools.partial(
-            size_based_auto_wrap_policy, min_num_params=100_000
-        )
+        auto_wrap_policy2 = functools.partial(size_based_auto_wrap_policy, min_num_params=100_000)
 
         def combined_auto_wrap_policy(module, recurse, nonwrapped_numel):
             # Define a new policy that combines policies
@@ -202,9 +200,7 @@ def distributed_model_wrapper(conf, neural_network, device):
         # Mixed precision
 
         use_mixed_precision = (
-            conf["trainer"]["use_mixed_precision"]
-            if "use_mixed_precision" in conf["trainer"]
-            else False
+            conf["trainer"]["use_mixed_precision"] if "use_mixed_precision" in conf["trainer"] else False
         )
 
         logging.info(f"Using mixed_precision: {use_mixed_precision}")
@@ -212,19 +208,13 @@ def distributed_model_wrapper(conf, neural_network, device):
         if use_mixed_precision:
             for key, val in conf["trainer"]["mixed_precision"].items():
                 conf["trainer"]["mixed_precision"][key] = parse_dtype(val)
-            mixed_precision_policy = MixedPrecision(
-                **conf["trainer"]["mixed_precision"]
-            )
+            mixed_precision_policy = MixedPrecision(**conf["trainer"]["mixed_precision"])
         else:
             mixed_precision_policy = None
 
         # CPU offloading
 
-        cpu_offload = (
-            conf["trainer"]["cpu_offload"]
-            if "cpu_offload" in conf["trainer"]
-            else False
-        )
+        cpu_offload = conf["trainer"]["cpu_offload"] if "cpu_offload" in conf["trainer"] else False
 
         logging.info(f"Using CPU offloading: {cpu_offload}")
 
@@ -253,15 +243,15 @@ def distributed_model_wrapper(conf, neural_network, device):
         )
 
         if checkpoint_all_layers:
-            check_fn = lambda submodule: not should_not_checkpoint(submodule)
-        else:
-            check_fn = lambda submodule: any(
-                isinstance(submodule, cls) for cls in transformer_layers_cls
-            )
 
-        apply_activation_checkpointing(
-            model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn
-        )
+            def check_fn(submodule):
+                return not should_not_checkpoint(submodule)
+        else:
+
+            def check_fn(submodule):
+                return any(isinstance(submodule, cls) for cls in transformer_layers_cls)
+
+        apply_activation_checkpointing(model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn)
 
     torch.distributed.barrier()
 

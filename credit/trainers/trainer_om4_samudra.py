@@ -49,9 +49,7 @@ class Trainer(BaseTrainer):
         logger.info("Loading a multi-step trainer class")
 
     # Training function.
-    def train_one_epoch(
-        self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics
-    ):
+    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         """
         Trains the model for one epoch.
 
@@ -101,15 +99,12 @@ class Trainer(BaseTrainer):
             # If not specified in config, use the range 1 to forecast_len
             backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
 
-        assert (
-            forecast_length <= backprop_on_timestep[-1]
-        ), f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
+        assert forecast_length <= backprop_on_timestep[-1], (
+            f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
+        )
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if (
-            conf["trainer"]["use_scheduler"]
-            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
-        ):
+        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # ------------------------------------------------------- #
@@ -165,14 +160,10 @@ class Trainer(BaseTrainer):
                 dataset_batches_per_epoch = len(trainloader)
             # Use the user-given number if not larger than the dataset
             batches_per_epoch = (
-                batches_per_epoch
-                if 0 < batches_per_epoch < dataset_batches_per_epoch
-                else dataset_batches_per_epoch
+                batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
             )
 
-        batch_group_generator = tqdm.tqdm(
-            range(batches_per_epoch), total=batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
 
         self.model.train()
         wet_mask = trainloader.dataset.wet[None, :, None, :, :].to(self.device)
@@ -202,14 +193,14 @@ class Trainer(BaseTrainer):
                 # add forcing and static variables (regardless of fcst hours)
                 if forecast_step > 1:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]):].to(self.device)
+                    x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]) :].to(
+                        self.device
+                    )
 
                     # ---------------- ensemble ----------------- #
                     # ensemble x_forcing_batch for concat. see above for explanation of code
                     if ensemble_size > 1:
-                        x_forcing_batch = torch.repeat_interleave(
-                            x_forcing_batch, ensemble_size, 0
-                        )
+                        x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
                     # --------------------------------------------- #
 
                     # concat on var dimension
@@ -253,15 +244,13 @@ class Trainer(BaseTrainer):
                 # ============================================= #
 
                 # only load y-truth data if we intend to backprop (default is every step gets grads computed
-                if forecast_step in backprop_on_timestep: #steps go from 1 to n
+                if forecast_step in backprop_on_timestep:  # steps go from 1 to n
                     # calculate rolling loss
                     y = batch["target"].to(self.device)
 
                     if "y_diag" in batch:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        y_diag_batch = (
-                            batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                        )  # .float()
+                        y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                         # concat on var dimension
                         y = torch.cat((y, y_diag_batch), dim=1)
@@ -288,11 +277,11 @@ class Trainer(BaseTrainer):
                 if stop_forecast:
                     break
 
-                # Discard current computational graph, which still 
+                # Discard current computational graph, which still
                 # exists (through y_pred reference) if `forecast_step` not in `backprop_on_timestep`
                 if not retain_graph:
                     y_pred = y_pred.detach()
-                
+
                 # single timestep input
                 if x.shape[2] == 1:
                     # cut diagnostic vars from y_pred, they are not inputs
@@ -317,13 +306,7 @@ class Trainer(BaseTrainer):
             if grad_max_norm == "dynamic":
                 # Compute local L2 norm
                 local_norm = torch.norm(
-                    torch.stack(
-                        [
-                            p.grad.detach().norm(2)
-                            for p in self.model.parameters()
-                            if p.grad is not None
-                        ]
-                    )
+                    torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
                 )
 
                 # All-reduce to get global norm across ranks
@@ -332,13 +315,9 @@ class Trainer(BaseTrainer):
                 global_norm = local_norm.sqrt()  # Compute total global norm
 
                 # Clip gradients using the global norm
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=global_norm
-                )
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
             elif grad_max_norm > 0.0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=grad_max_norm
-                )
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=grad_max_norm)
 
             # Step optimizer
             scaler.step(optimizer)
@@ -386,10 +365,7 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if (
-                conf["trainer"]["use_scheduler"]
-                and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
-            ):
+            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -432,9 +408,7 @@ class Trainer(BaseTrainer):
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
         forecast_len = (
-            conf["data"]["valid_forecast_len"]
-            if "valid_forecast_len" in conf["data"]
-            else conf["forecast_len"]
+            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
         )
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
@@ -469,7 +443,7 @@ class Trainer(BaseTrainer):
 
         # ====================================================== #
         # postblock opts outside of model
-        post_conf = conf["model"].get("post_conf", {'activate': False})
+        post_conf = conf["model"].get("post_conf", {"activate": False})
         flag_mass_conserve = False
         flag_water_conserve = False
         flag_energy_conserve = False
@@ -499,9 +473,7 @@ class Trainer(BaseTrainer):
         opt_wet = WetMaskBlock(conf)
         # ====================================================== #
 
-        batch_group_generator = tqdm.tqdm(
-            range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
 
         stop_forecast = False
         dl = cycle(valid_loader)
@@ -531,13 +503,13 @@ class Trainer(BaseTrainer):
                     # add forcing and static variables (regardless of fcst hours)
                     else:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]):].to(self.device)
+                        x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]) :].to(
+                            self.device
+                        )
                         # ---------------- ensemble ----------------- #
                         # ensemble x_forcing_batch for concat. see above for explanation of code
-                        if ensemble_size > 1: 
-                            x_forcing_batch = torch.repeat_interleave(
-                                x_forcing_batch, ensemble_size, 0
-                            )
+                        if ensemble_size > 1:
+                            x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
                         # --------------------------------------------- #
 
                         # concat on var dimension
@@ -589,9 +561,7 @@ class Trainer(BaseTrainer):
 
                         if "y_diag" in batch:
                             # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                            y_diag_batch = (
-                                batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-                            )  # .float()
+                            y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
 
                             # concat on var dimension
                             y = torch.cat((y, y_diag_batch), dim=1)
@@ -610,14 +580,10 @@ class Trainer(BaseTrainer):
                         metrics_dict = metrics(y_pred.float(), y.float())
 
                         for name, value in metrics_dict.items():
-                            value = torch.Tensor([value]).cuda(
-                                self.device, non_blocking=True
-                            )
+                            value = torch.Tensor([value]).cuda(self.device, non_blocking=True)
 
                             if distributed:
-                                dist.all_reduce(
-                                    value, dist.ReduceOp.AVG, async_op=False
-                                )
+                                dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
 
                             results_dict[f"valid_{name}"].append(value[0].item())
 

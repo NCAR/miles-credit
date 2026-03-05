@@ -155,11 +155,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
                     break
             else:
                 # Python for...else executes if loop exits w/o break
-                raise (
-                    ValueError(
-                        "No non-static datasets with boundary vars (needed for output time coords)"
-                    )
-                )
+                raise (ValueError("No non-static datasets with boundary vars (needed for output time coords)"))
 
         self._setup_datasets()
         # Set up self.datasets[dataset]['datamap'|'transforms']
@@ -222,20 +218,12 @@ class DownscalingDataset(torch.utils.data.Dataset):
             self.image_height = self.data_height
 
         if self.data_width > self.image_width or self.data_height > self.image_height:
-            warnings.warn(
-                "model size is smaller than data size; "
-                "auto-shrinking not yet implemented, code may break."
-            )
+            warnings.warn("model size is smaller than data size; auto-shrinking not yet implemented, code may break.")
         # TODO: extend code below to handle this case, using subsampling
         # (inverse of Expand) and cropping (inverse of Pad)
 
-        if (
-            self.image_width // self.data_width > 1
-            or self.image_height // self.data_height > 1
-        ):
-            warnings.warn(
-                "data size is much smaller than model size; data will be mostly padding"
-            )
+        if self.image_width // self.data_width > 1 or self.image_height // self.data_height > 1:
+            warnings.warn("data size is much smaller than model size; data will be mostly padding")
 
         # create DataTransforms
         for dname, dconfig in self.datasets.items():
@@ -338,9 +326,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
         )
 
         # columns have to be Categorical to define a custom (non-alphabetical) sort order
-        rdf["usage"] = pd.Categorical(
-            rdf["usage"], ["boundary", "prognostic", "diagnostic"]
-        )
+        rdf["usage"] = pd.Categorical(rdf["usage"], ["boundary", "prognostic", "diagnostic"])
         rdf["dim"] = pd.Categorical(rdf["dim"], ["static", "2D", "3D"])
         rdf["dataset"] = pd.Categorical(rdf["dataset"], self.datasets)
 
@@ -349,9 +335,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
         # then:  static > 2D > 3D
         # then:  order that datasets are defined in config
         # then:  alphabetical by variable name
-        rdf = rdf.sort_values(by=["usage", "dim", "dataset", "var"]).reset_index(
-            drop=True
-        )
+        rdf = rdf.sort_values(by=["usage", "dim", "dataset", "var"]).reset_index(drop=True)
 
         self.arrangement = rdf
 
@@ -423,9 +407,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
             result = self.to_tensor(result)
 
         # add date to sample for tracking purposes.
-        result["dates"] = self.datasets[self.get_time_from]["datamap"].sindex2dates(
-            index
-        )
+        result["dates"] = self.datasets[self.get_time_from]["datamap"].sindex2dates(index)
 
         return result
         # yield result    # change return to yield to make this lazy
@@ -538,9 +520,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
                 for var, data in sample[s].items():
                     if len(data.shape) == 2:
                         # static data; add time dimension & repeat along it
-                        data = np.repeat(
-                            np.expand_dims(data, axis=0), repeats=nt[s], axis=0
-                        )
+                        data = np.repeat(np.expand_dims(data, axis=0), repeats=nt[s], axis=0)
 
                     if len(data.shape) == 3:
                         # add singleton var/z dimension
@@ -586,9 +566,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
                 else:
                     result[dset][varname].append(prediction[i, ...])
             else:
-                raise ValueError(
-                    f"Tensor index name '{self.tnames[i]}' has no/too many '.' in it"
-                )
+                raise ValueError(f"Tensor index name '{self.tnames[i]}' has no/too many '.' in it")
 
         result2 = {}
         for dset, vardict in result.items():
