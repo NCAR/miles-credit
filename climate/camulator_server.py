@@ -337,6 +337,9 @@ def parse_args():
                    help="Also save daily-mean NetCDF files alongside the 6-hourly output "
                         "(<DIR>/<YYYY>/camulator.h1d.<YYYY-MM-DD>.nc). "
                         "Requires --save_atm_nc.")
+    p.add_argument("--flnsd_diag", action="store_true",
+                   help="Log area-weighted FLNSD decomposition each step (TS / TREFHT / Tbot "
+                        "SB-term comparison). Useful for diagnostics but adds ~2ms per step.")
     return p.parse_args()
 
 
@@ -994,18 +997,19 @@ def main():
         _sb_term   = 0.99 * 5.670374419e-8 * TS_cam**4
         _flns_term = FLNS_cam / DT_SEC
         FLNSD_cam  = _sb_term + _flns_term
-        # Smoke-test: log SB term using TREFHT and T_bot as alternatives to TS.
-        # All means are area-weighted (cos-lat) so they are comparable to ERA5 global-mean diagnostics.
-        _cam_w     = _cam_lat_w if not cam_flip else _cam_lat_w[::-1]   # match field lat order
-        _wmean     = lambda f: np.average(f, weights=np.broadcast_to(_cam_w, f.shape))
-        _sb_trefht = 0.99 * 5.670374419e-8 * TREFHT_cam**4
-        _sb_tbot   = 0.99 * 5.670374419e-8 * T_bot_cam**4
-        logger.info(
-            f"  FLNSD decomp [area-wtd]: FLNS/DT={_wmean(_flns_term):.1f}  "
-            f"using TS: εσTS⁴={_wmean(_sb_term):.1f} (TS={_wmean(TS_cam):.2f}K → FLNSD={_wmean(_sb_term+_flns_term):.1f})  "
-            f"using TREFHT: εσ⁴={_wmean(_sb_trefht):.1f} (T={_wmean(TREFHT_cam):.2f}K → FLNSD={_wmean(_sb_trefht+_flns_term):.1f})  "
-            f"using Tbot: εσ⁴={_wmean(_sb_tbot):.1f} (T={_wmean(T_bot_cam):.2f}K → FLNSD={_wmean(_sb_tbot+_flns_term):.1f})"
-        )
+        # Optional FLNSD diagnostic: area-weighted SB-term comparison across TS/TREFHT/Tbot.
+        # Enable with --flnsd_diag. Validated 2026-03: TS gives ~331 W/m² vs CAM6 ref 336.9 W/m².
+        if args.flnsd_diag:
+            _cam_w     = _cam_lat_w if not cam_flip else _cam_lat_w[::-1]
+            _wmean     = lambda f: np.average(f, weights=np.broadcast_to(_cam_w, f.shape))
+            _sb_trefht = 0.99 * 5.670374419e-8 * TREFHT_cam**4
+            _sb_tbot   = 0.99 * 5.670374419e-8 * T_bot_cam**4
+            logger.info(
+                f"  FLNSD decomp [area-wtd]: FLNS/DT={_wmean(_flns_term):.1f}  "
+                f"using TS: εσTS⁴={_wmean(_sb_term):.1f} (TS={_wmean(TS_cam):.2f}K → FLNSD={_wmean(_sb_term+_flns_term):.1f})  "
+                f"using TREFHT: εσ⁴={_wmean(_sb_trefht):.1f} (T={_wmean(TREFHT_cam):.2f}K → FLNSD={_wmean(_sb_trefht+_flns_term):.1f})  "
+                f"using Tbot: εσ⁴={_wmean(_sb_tbot):.1f} (T={_wmean(T_bot_cam):.2f}K → FLNSD={_wmean(_sb_tbot+_flns_term):.1f})"
+            )
 
         PRECT_cam = accessor_output.get_state_var(prediction_cpu, "PRECT")[0, 0, 0].numpy()
         PRECT_cam = PRECT_cam / DT_SEC              # accumulated mm → m/s liquid-water equivalent
