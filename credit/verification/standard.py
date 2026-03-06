@@ -1,11 +1,96 @@
 import numpy as np
+from scipy import ndimage
 import xarray as xr
 import torch
 from torch_harmonics import RealSHT, RealVectorSHT
 
+
 import logging
 
 logger = logging.getLogger(__name__)
+
+def radial_fft_spectrum(da, dx, dim=('latitude', 'longitude')):
+    """
+    Compute radially averaged 2D FFT power spectrum for each lat-lon slice.
+    
+    Parameters
+    ----------
+    da : xarray.DataArray
+        Input array with shape (..., latitude, longitude)
+    dx : float
+        Grid spacing in km (assumes equal spacing in both dimensions)
+    dim : tuple of str
+        Names of the latitude and longitude dimensions
+        
+    Returns
+    -------
+    spectrum : xarray.DataArray
+        Radially averaged power spectrum with new dimensions 'wavenumber' and 'wavelength'
+    """
+    lat_dim, lon_dim = dim
+    
+    # Get the size of lat-lon grid
+    nlat = da.sizes[lat_dim]
+    nlon = da.sizes[lon_dim]
+    
+    # Compute 2D FFT along lat-lon dimensions
+    fft_2d = xr.apply_ufunc(
+        np.fft.fft2,
+        da,
+        input_core_dims=[[lat_dim, lon_dim]],
+        output_core_dims=[[lat_dim, lon_dim]],
+        vectorize=True,
+    )
+    
+    # Compute power spectrum
+    power = np.abs(fft_2d)**2
+    
+    # Shift zero frequency to center
+    power_shifted = xr.apply_ufunc(
+        np.fft.fftshift,
+        power,
+        input_core_dims=[[lat_dim, lon_dim]],
+        output_core_dims=[[lat_dim, lon_dim]],
+        vectorize=True,
+    )
+    
+    # Radially average the power spectrum
+    def radial_average(power_2d):
+        """Average 2D power spectrum into radial bins"""
+        wc = nlon//2
+        hc = nlat//2
+        min_c = min(wc, hc)
+
+        # create an array of integer radial distances from the center
+        Y, X = np.ogrid[0:nlat, 0:nlon]
+        r    = np.hypot(X - wc, Y - hc).astype(int)
+    
+        # SUM all psd2D pixels with label 'r' for 0<=r<=min_c
+        # NOTE: this will miss power contributions in 'corners' r>min_c
+        psd1D = ndimage.sum(power_2d, r, index=np.arange(0, min_c))
+    
+        return psd1D
+    
+    min_dim = min(nlon, nlat)
+    min_c = min_dim // 2
+    
+    # Apply radial averaging to each slice
+    spectrum = xr.apply_ufunc(
+        radial_average,
+        power_shifted,
+        input_core_dims=[[lat_dim, lon_dim]],
+        output_core_dims=[['wavenumber']],
+        vectorize=True,
+        output_sizes={'wavenumber': min_c}
+    )
+    
+    # Create coordinate for wavenumbers and wavelengths
+    wavenumbers = np.arange(min_c)
+    spectrum = spectrum.assign_coords(wavenumber=wavenumbers)
+    wavelengths = 1 / np.fft.rfftfreq(min_c * 2, d=dx)[:min_c]
+    spectrum = spectrum.assign_coords(wavelength=("wavenumber", wavelengths))
+    
+    return spectrum
 
 def average_zonal_spectrum(da, grid, norm="ortho"):
     """

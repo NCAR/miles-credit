@@ -1,0 +1,32 @@
+# common config for eval.py
+
+config: "/glade/derecho/scratch/dkimpara/goes_10km_train/wx_big/model.yml"
+
+# [Optional] location of forecast data. default: model config's save_forecast location (above)
+save_forecast: "/glade/derecho/scratch/dkimpara/goes_10km_train/baselines/persistence_forecasts/"
+
+# [Optional] filename to save eval results filename default: ensemble_eval.parquet
+# will save to save_forecast, or the default value of save_forecast
+save_filename: "verif.parquet"
+
+verification_type: "goes-10km"
+
+############ custom eval configs ############
+climo_file: "/glade/derecho/scratch/dkimpara/goes_10km_train/baselines/climo/data_stats.nc"
+
+
+#############################################
+
+
+pbs: 
+    # example for casper
+    conda: "~/credit"
+    job_name: 'ensemble_eval'
+    nodes: 1
+    ncpus: 32
+    ngpus: 0
+    mem: '128GB'
+    walltime: '01:00:00'
+    gpu_type: 'none'
+    project: 'NAML0001'
+    queue: 'casper'
