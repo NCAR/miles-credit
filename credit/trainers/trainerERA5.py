@@ -73,7 +73,13 @@ class Trainer(BaseTrainer):
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_max_norm = conf["trainer"].get("grad_max_norm", 0.0)
         amp = conf["trainer"]["amp"]
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"] else False
+
+        # Domain parallelism: detect manager from model
+        domain_manager = getattr(self.model, "_domain_parallel_manager", None)
+        use_domain_parallel = domain_manager is not None and domain_manager.domain_parallel_size > 1
+        if use_domain_parallel:
+            from credit.domain_parallel import shard_tensor
         forecast_length = conf["data"]["forecast_len"]
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
         if ensemble_size > 1:
@@ -211,6 +217,10 @@ class Trainer(BaseTrainer):
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
+                # Domain parallelism: shard input along latitude
+                if use_domain_parallel:
+                    x = shard_tensor(x, dim=-2, manager=domain_manager)
+
                 # predict with the model
                 x = x.float()
                 with torch.autocast(device_type="cuda", enabled=amp):
@@ -262,6 +272,10 @@ class Trainer(BaseTrainer):
                     # clamp
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
+
+                    # Domain parallelism: shard target along latitude to match y_pred
+                    if use_domain_parallel:
+                        y = shard_tensor(y, dim=-2, manager=domain_manager)
 
                     with torch.autocast(enabled=amp, device_type="cuda"):
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()
@@ -424,7 +438,13 @@ class Trainer(BaseTrainer):
         )
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"] else False
+
+        # Domain parallelism: detect manager from model
+        domain_manager = getattr(self.model, "_domain_parallel_manager", None)
+        use_domain_parallel = domain_manager is not None and domain_manager.domain_parallel_size > 1
+        if use_domain_parallel:
+            from credit.domain_parallel import shard_tensor
 
         results_dict = defaultdict(list)
 
@@ -529,6 +549,10 @@ class Trainer(BaseTrainer):
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
+                    # Domain parallelism: shard input along latitude
+                    if use_domain_parallel:
+                        x = shard_tensor(x, dim=-2, manager=domain_manager)
+
                     y_pred = self.model(x.float())
 
                     # ============================================= #
@@ -579,6 +603,10 @@ class Trainer(BaseTrainer):
                         # clamp
                         if flag_clamp:
                             y = torch.clamp(y, min=clamp_min, max=clamp_max)
+
+                        # Domain parallelism: shard target along latitude to match y_pred
+                        if use_domain_parallel:
+                            y = shard_tensor(y, dim=-2, manager=domain_manager)
 
                         # ----------------------------------------------------------------------- #
                         # calculate rolling loss
