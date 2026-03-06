@@ -23,8 +23,8 @@ set -e
 # =============================================================================
 # CONFIGURATION — update these as needed
 # =============================================================================
-CESM_ROOT=/glade/work/wchapman/JE_help_cnn/cesm_FTORCH_FORPY_v8
-CASE_DIR=/glade/work/wchapman/cesm/CREDIT/g.e21.CAMULATOR_GIAF_v09
+CESM_ROOT=/glade/work/wchapman/JE_help_cnn/camulator_sandbox
+CASE_DIR=/glade/work/wchapman/cesm/CREDIT/g.e21.CAMULATOR_SBV01
 PROJECT=P03010039
 MACH=derecho
 COMPILER=intel
@@ -137,12 +137,6 @@ EOF
 # STEP 6 — case.build (optional)
 # =============================================================================
 if [[ "$1" != "nobuild" ]]; then
-    # ForPy links against libpython3 via $CONDA_PREFIX (USE_CONDA=True in Makefile).
-    # The build will error out if CONDA_PREFIX is not set.
-    echo "==> Activating conda env for ForPy/libpython3 linkage..."
-    module load conda
-    conda activate /glade/work/wchapman/miniconda3.2/envs/cesmML3.10gpuPD
-
     echo "==> Running case.build (this takes ~20-40 minutes)..."
     ./case.build
     echo "==> Build complete."

@@ -32,7 +32,6 @@ PROJECT=<YOUR_PROJECT>
 Then run:
 
 ```bash
-conda activate credit-coupling   # needed for libpython3 linkage during build
 bash setup_CAMULATOR_GIAF_case.sh
 ```
 
