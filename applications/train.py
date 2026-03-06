@@ -224,7 +224,7 @@ def main(rank, world_size, conf, backend=None, trial=False):
     # convert $USER to the actual user name
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
-    if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
+    if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
         setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     # infer device id from rank
@@ -255,7 +255,7 @@ def main(rank, world_size, conf, backend=None, trial=False):
         m = torch.compile(m)
 
     # Wrap in DDP or FSDP module, or none
-    if conf["trainer"]["mode"] in ["ddp", "fsdp"]:
+    if conf["trainer"]["mode"] in ["ddp", "fsdp", "domain_parallel", "fsdp+domain_parallel"]:
         model = distributed_model_wrapper(conf, m, device)
     else:
         model = m
