@@ -1,6 +1,80 @@
 # CAMulator ↔ POP Coupling via CESM2/CDEPS
 
-This document is a living log of every step taken to couple CAMulator (the CREDIT AI atmosphere) to POP2 (ocean) inside CESM2.1.5 on Derecho. Update it every time something changes.
+This document covers the coupling of CAMulator (the CREDIT AI atmosphere) to POP2 (ocean) + CICE5 (sea ice) inside CESM 2.1.5 on Derecho/Casper.
+
+---
+
+## Quickstart
+
+### Step 1 — Get CESM
+
+```bash
+git clone -b release-cesm2.1.5-camulator \
+    https://github.com/WillyChap/CESM.git my_camulator_cesm
+cd my_camulator_cesm
+./manage_externals/checkout_externals
+```
+
+This pulls a CESM 2.1.5 tree with the two custom components pre-wired:
+- **CIME** (`Cambridge-ICCS/cime_je:coupled_camulator`) — DATM CAMULATOR datamode + SST=0 fix + FTorch build hooks
+- **CAM** (`WillyChap/CAM:coupled_camulator`) — FTorch-enabled CAM physics
+
+### Step 2 — Create and build the case
+
+Edit the top of `climate/setup_CAMULATOR_GIAF_case.sh` to set your paths:
+
+```bash
+CESM_ROOT=/path/to/my_camulator_cesm
+CASE_DIR=/glade/work/$USER/cesm/CREDIT/g.e21.CAMULATOR_GIAF_v01
+PROJECT=<YOUR_PROJECT>
+```
+
+Then run:
+
+```bash
+conda activate credit-coupling   # needed for libpython3 linkage during build
+bash setup_CAMULATOR_GIAF_case.sh
+```
+
+This runs `create_newcase`, applies all required `xmlchange` commands (CAMULATOR datamode,
+PE layout, MPI GPU env vars, CICE ndtd=2), and builds the model (~20-40 min).
+
+### Step 3 — Configure `camulator_config.yml`
+
+```yaml
+predict:
+  save_forecast: '/glade/derecho/scratch/<USER>/CREDIT/climate_output/'
+  init_cond_fast_climate: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/init_times/init_condition_tensor_2000-01-01T00Z.pth'
+  start_datetime: '2000-01-01 00:00:00'
+  timesteps_fast_climate: 1460   # 6-hr steps = 1 year
+```
+
+### Step 4 — Launch the CAMulator server (GPU node, before CESM)
+
+```bash
+# On a Casper A100 node:
+# qsub -I -A <PROJECT> -l select=1:ncpus=32:ngpus=1:mem=250GB \
+#      -l walltime=12:00:00 -q casper -l gpu_type=a100_80gb
+
+conda activate credit-coupling
+python camulator_server.py \
+    --config ./camulator_config.yml \
+    --model_name checkpoint.pt00091.pt \
+    --rundir /glade/derecho/scratch/$USER/g.e21.CAMULATOR_GIAF_v01/run/ \
+    --save_atm_nc camulator_out \
+    --daily_mean
+```
+
+Or submit as a PBS job: `qsub Start_Cam_Serve.sh`
+
+### Step 5 — Submit CESM
+
+```bash
+cd /glade/work/$USER/cesm/CREDIT/g.e21.CAMULATOR_GIAF_v01
+./case.submit
+```
+
+The server must be running and waiting **before** CESM reaches its first coupling step.
 
 ---
 
@@ -49,12 +123,14 @@ Standard ocean-only runs (G-compset) use **prescribed** CORE2/JRA55 climatologic
 
 This is qualitatively different from AMIP (atmosphere forced by observed SST) or OMIP (ocean forced by prescribed winds): here **both** components are prognostic.
 
-### Current case
+### Current status
 
-- **Case:** `/glade/work/wchapman/cesm/CREDIT/g.e21.CAMULATOR_GIAF_v02/`
-- **Run dir:** `/glade/derecho/scratch/wchapman/g.e21.CAMULATOR_GIAF_v02/run/`
-- **Server script:** `/glade/work/wchapman/Roman_Coupling/credit_feb182026/climate/camulator_server.py`
-- **Status:** First 10-day run confirmed working (2026-02-25), 45 SYPD
+Fully working coupled system as of 2026-03. Performance: ~45 SYPD on Derecho (256 CPU ranks) + 1× Casper A100.
+
+- **CESM fork:** `https://github.com/WillyChap/CESM` branch `release-cesm2.1.5-camulator`
+- **Case setup script:** `climate/setup_CAMULATOR_GIAF_case.sh` (in this repo)
+- **Server script:** `climate/camulator_server.py` (in this repo)
+- **Checkpoint:** `/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/CAMulator_models/checkpoint.pt00091.pt`
 
 ---
 
