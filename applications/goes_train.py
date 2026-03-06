@@ -509,8 +509,9 @@ def main_cli():
     if launch:
         # Where does this script live?
         script_path = Path(__file__).absolute()
-        if conf["pbs"]["queue"] == "casper":
-            logging.info("Launching to PBS on Casper")
+        if (conf["pbs"]["queue"] == "casper" or
+            conf["pbs"]["queue"] == "develop" and conf["pbs"]["ngpus"] == 1):
+            logging.info("Launching to PBS on Casper or Derecho develop")
             launch_script(config, script_path)
         else:
             logging.info("Launching to PBS on Derecho")

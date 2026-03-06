@@ -21,6 +21,7 @@ class GOES10kmDataset(Dataset):
                  time_config: Dict = None,
                  padding: bool = True,
                  era5dataset: Dataset = None,
+                 evaluate: bool = False,
                  valid_init_dir = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/valid_init_times",
                  scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats.nc",):
         """
@@ -34,25 +35,32 @@ class GOES10kmDataset(Dataset):
                 "num_forecast_steps": 1
                  },
         """
+        self.evaluate = evaluate # turns off scaling
+
         self.ds = ds.drop_duplicates(dim="t").sortby("t")
         self.era5dataset = era5dataset
         self.padding = padding
         logger.info(f"{'' if self.padding else 'NOT '}padding GOES input")
         logger.info(f"GOES10km Dataset with{'' if self.era5dataset else 'out'} ERA5 forcing")
+        self.valid_sampling_modes = ["init", "forcing", "y", "stop"] # class attribute
 
-        # setup init times        
-        self.timestep = time_config["timestep"]
-        self.num_forecast_steps = time_config["num_forecast_steps"]
-        self.start_datetime = time_config["start_datetime"]
-        self.end_datetime = time_config["end_datetime"]
-        self.valid_sampling_modes = ["init", "forcing", "y", "stop"]
+        # setup init times
+        if not evaluate: # dont need to specify time_config for evaluate mode
+            self.timestep = time_config["timestep"]
+            self.num_forecast_steps = time_config["num_forecast_steps"]
+            self.start_datetime = time_config["start_datetime"]
+            self.end_datetime = time_config["end_datetime"]
         
         self.valid_init_dir = valid_init_dir
-        self.init_times = self._timestamps() # will generate valid init times if needed
+        if not self.evaluate:
+            self.init_times = self._timestamps() # will generate valid init times if needed
+            logger.info(f"initializing GOES10kmDataset with timestep [{self.timestep}] with {self.num_forecast_steps} steps")
+        else:
+            self.init_times = self.ds.t
+            logger.warning("loading dataset for with 0 forecast steps! only for eval")
         
-        logger.info(f"initializing GOES10kmDataset with timestep [{self.timestep}] with {self.num_forecast_steps} steps")
+
         # setup scaler
-        
         self.log_normal_scaling = data_conf.get("log_normal_scaling", False)
         if self.log_normal_scaling:
             scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats_logC04.nc"
@@ -131,15 +139,19 @@ class GOES10kmDataset(Dataset):
         unscaled = da * self.scaler_ds["std"] + self.scaler_ds["mean"]
 
         if self.log_normal_scaling:
-            da[0] = np.exp(unscaled[0])
+            unscaled[0] = np.exp(unscaled[0])
 
-        return da
+        return unscaled
         
     def _normalize_ABI(self, da):
         return (da - self.scaler_ds["mean"]) / self.scaler_ds["std"]
 
     def _nanfill_ABI(self, da):
-        return da.fillna(0.0)
+        if self.evaluate:
+            nan_fraction = da.isnull().mean()
+            return da.fillna(0.0) if nan_fraction <= 0.1 else da
+        else:
+            return da.fillna(0.0)
 
     def __getitem__(self, args):
         # default: load target state
@@ -156,16 +168,18 @@ class GOES10kmDataset(Dataset):
         
         if mode != "forcing": # draw goes if mode is not forcing
             da = ds["BT_or_R"].copy()
-
             if self.log_normal_scaling: #channels is the first axis
                 da[0] = np.log(da[0])
             
             da = self._normalize_ABI(da)
             da = self._nanfill_ABI(da)
             
-            # da.shape = c, 1003, 923
-            data = torch.tensor(da.values).unsqueeze(1)
-            # data = torch.nn.functional.pad(data, (0,0,11,10), "replicate")
+            if not self.evaluate:
+                # da.shape = c, 1003, 923
+                data = torch.tensor(da.values).unsqueeze(1)
+            else: # return a dataset after nanfilling
+                data = self.inverse_transform_ABI(da)
+
             if self.padding:
                 data = torch.nn.functional.pad(data, (19,18,11,10), "constant", 0.0)
             # coerce to c, t, 1024, 960 to work with wxformer
@@ -185,8 +199,6 @@ class GOES10kmDataset(Dataset):
             raise ValueError(f"{mode} is not a valid sampling mode")
         
     def get_era5(self, ds):
-        # TODO: how to sample era5 forcing? next hour?
-
         ts = pd.Timestamp(ds.t.values)
         era5_ts = ts.round("h") # round to the nearest hour
         
