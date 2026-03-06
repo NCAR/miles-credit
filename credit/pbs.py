@@ -1,12 +1,20 @@
+from pathlib import Path
 import re
 import os
 import yaml
 import shutil
 import logging
 import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
+def safe_copy(source, destination):
+    try:
+        shutil.copy(source, destination)
+        logger.info(f"Copied the {source} to {destination}")
+    except shutil.SameFileError:
+        pass
 
 def launch_script(config_file, script_path, launch=True):
     """Generates and optionally launches a PBS script for a single-node job.
@@ -16,7 +24,21 @@ def launch_script(config_file, script_path, launch=True):
         script_path (str): Path to the script that will be executed by the PBS job.
         launch (bool, optional): If True, the PBS job will be submitted to the queue. Defaults to True.
     """
+    launch_main(config_file, script_path, "single", launch=True)
 
+def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
+    """Generates and optionally launches a PBS script for a multi-node MPI job.
+
+    Args:
+        config_file (str): Path to the YAML configuration file.
+        script_path (str): Path to the script that will be executed by the MPI job.
+        launch (bool, optional): If True, the PBS job will be submitted to the queue. Defaults to True.
+        backend (str, optional): Backend to be used for distributed training (e.g., 'nccl'). Defaults to 'nccl'.
+    """
+    launch_main(config_file, script_path, "mpi", launch=launch, backend=backend)
+
+
+def launch_main(config_file, script_path, script, mode, launch=True, backend=None):
     # Load the configuration file
     with open(config_file, "r") as file:
         config = yaml.safe_load(file)
@@ -24,9 +46,70 @@ def launch_script(config_file, script_path, launch=True):
     # Extract PBS options from the config
     pbs_options = config["pbs"]
 
+    # handle copying config file to save_loc
+    source_path = config_file
     save_loc = os.path.expandvars(config["save_loc"])
-    config_save_path = config_file
+    destination_path = Path(os.path.join(save_loc, "model.yml"))
 
+    if destination_path.exists(): #prompt user if config file already exists in save_loc
+        while True:
+            answer = input(f"{destination_path} already exists. Overwrite? [Y/n] ").strip()
+            if answer == "Y":
+                safe_copy(source_path, destination_path)
+                break
+            elif answer == "n":
+                print("Not overwriting. Exiting program")
+                sys.exit()
+            else:
+                print("Please enter exactly 'Y' or 'n'.")
+    else:
+        safe_copy(source_path, destination_path)
+
+    # generate the launch script
+    if mode == "single":
+        script = generate_script_single_node(pbs_options, destination_path)
+    elif mode == "mpi":
+        script = generate_script_mpi(pbs_options, destination_path, backend)
+    script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)
+
+    # Save the script to a local temp file
+    with open("launch.sh", "w") as script_file:
+        script_file.write(script)
+
+    # check if launch.sh exists in save_loc
+    # ensures only one file generated either in save_loc or locally
+    script_path = Path(os.path.join(save_loc, "launch.sh"))
+    if script_path.exists():
+        while True:
+            answer = input(f"{script_path} already exists. Overwrite? [Y/n]").strip()
+            if answer == "Y":
+                shutil.move("launch.sh", script_path)
+                launch_script_path = script_path
+                break
+            elif answer == "n":
+                print("Not overwriting. Generated launch.sh in the currect directory")
+                launch_script_path = "launch.sh"
+                break
+            else:
+                print("Please enter exactly 'Y' or 'n'.")
+    else: # save_loc empty, continuing with launch.sh move
+        shutil.move("launch.sh", script_path)
+        launch_script_path = script_path
+    
+    print(f"generated {launch_script_path}")
+
+    if launch:
+        print(f"Launching {launch_script_path}")
+        jobid = subprocess.Popen(
+            f"qsub {launch_script_path}",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).communicate()[0]
+        jobid = jobid.decode("utf-8").strip("\n")
+        logger.info(jobid)
+
+def generate_script_single_node(pbs_options, config_save_path):
     # Generate the PBS script
     script = f"""#!/bin/bash -l
     #PBS -N {pbs_options['job_name']}
@@ -43,72 +126,16 @@ def launch_script(config_file, script_path, launch=True):
 
     python {script_path} -c {config_save_path}
     """
+    return script
 
-    script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)
-
-    # Save the script to a file
-    with open("launch.sh", "w") as script_file:
-        script_file.write(script)
-
-    if launch:
-        jobid = subprocess.Popen(
-            "qsub launch.sh",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        ).communicate()[0]
-        jobid = jobid.decode("utf-8").strip("\n")
-        logger.info(jobid)
-        save_loc = os.path.expandvars(config["save_loc"])
-        if not os.path.exists(os.path.join(save_loc, "launch.sh")):
-            shutil.copy("launch.sh", os.path.join(save_loc, "launch.sh"))
-        os.remove("launch.sh")
-
-
-def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
-    """Generates and optionally launches a PBS script for a multi-node MPI job.
-
-    Args:
-        config_file (str): Path to the YAML configuration file.
-        script_path (str): Path to the script that will be executed by the MPI job.
-        launch (bool, optional): If True, the PBS job will be submitted to the queue. Defaults to True.
-        backend (str, optional): Backend to be used for distributed training (e.g., 'nccl'). Defaults to 'nccl'.
-    """
-
-    with open(config_file) as cf:
-        config = yaml.load(cf, Loader=yaml.FullLoader)
-
-    # Extract PBS options from the config
-    pbs_options = config.get("pbs", {})
-
+def generate_script_mpi(pbs_options, config_save_path, backend):
     user = os.environ.get("USER")
     num_nodes = pbs_options.get("nodes", 1)
     num_gpus = pbs_options.get("ngpus", 1)
     total_gpus = num_nodes * num_gpus
     total_ranks = total_gpus
-
-    # Create the CUDA_VISIBLE_DEVICES string
     cuda_devices = ",".join(str(i) for i in range(num_gpus))
-    save_loc = os.path.expandvars(config["save_loc"])
 
-    config_save_path = os.path.join(save_loc, "model.yml")
-
-    # Define the source and destination paths
-    source_path = config_file
-    destination_path = config_save_path
-
-    # Only delete the original if the source and destination paths are different
-    if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
-        os.remove(destination_path)
-        logger.info(f"Removed the old model.yml at {destination_path}")
-
-    try:
-        shutil.copy(source_path, destination_path)
-        logger.info(f"Copied the new {source_path} to {destination_path}")
-    except shutil.SameFileError:
-        pass
-
-    # Generate the PBS script
     script = f"""#!/bin/bash
     #PBS -A {pbs_options.get('project', 'default_project')}
     #PBS -N {pbs_options.get('job_name', 'default_job')}
@@ -169,46 +196,19 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     MASTER_ADDR=$head_node_ip MASTER_PORT=1234 mpiexec -n {total_ranks} --ppn 4 --cpu-bind none python {script_path} -c {config_save_path} --backend {backend}
     """
 
-    script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)
-
-    # Save the script to a file
-    with open("launch.sh", "w") as script_file:
-        script_file.write(script)
-
-    if launch:
-        jobid = subprocess.Popen(
-            "qsub launch.sh",
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        ).communicate()[0]
-        jobid = jobid.decode("utf-8").strip("\n")
-        logger.info(jobid)
-
-        # Copy launch.sh to the design location
-        # Define the source and destination paths
-        source_path = "launch.sh"
-        destination_path = os.path.join(save_loc, "launch.sh")
-
-        # Only delete the original if the source and destination paths are different
-        if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
-            os.remove(destination_path)
-            logger.info(f"Removed the old launch.sh at {destination_path}")
-
-        try:
-            shutil.copy(source_path, destination_path)
-            logger.info(f"Generated the new script at {destination_path}")
-        except shutil.SameFileError:
-            pass
+    return script
 
 def get_num_cpus():
     if "glade" in os.getcwd():
-        num_cpus = subprocess.run(
-            "qstat -f $PBS_JOBID | grep Resource_List.ncpus",
-            shell=True,
-            capture_output=True,
-            encoding="utf-8",
-        ).stdout.split()[-1]
+        if "PBS_JOBID" in os.environ:
+            num_cpus = subprocess.run(
+                "qstat -f $PBS_JOBID | grep Resource_List.ncpus",
+                shell=True,
+                capture_output=True,
+                encoding="utf-8",
+            ).stdout.split()[-1]
+        else: # login node
+            num_cpus = 1
     else:
         num_cpus = os.cpu_count()
     return int(num_cpus)
