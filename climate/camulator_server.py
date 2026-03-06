@@ -340,6 +340,12 @@ def parse_args():
     p.add_argument("--flnsd_diag", action="store_true",
                    help="Log area-weighted FLNSD decomposition each step (TS / TREFHT / Tbot "
                         "SB-term comparison). Useful for diagnostics but adds ~2ms per step.")
+    p.add_argument("--save_vars", nargs="+", default=None, metavar="VAR",
+                   help="Subset of variables to write to --save_atm_nc output. "
+                        "Names must match entries in conf[data][variables], "
+                        "surface_variables, or diagnostic_variables. "
+                        "Example: --save_vars U V T PS PRECT TREFHT TS "
+                        "Default: all variables.")
     return p.parse_args()
 
 
@@ -1103,6 +1109,13 @@ def main():
             upper_air, single_level = make_xarray(
                 prediction_cpu, _real_dt, _cam_lat, _cam_lon, conf
             )
+            if args.save_vars is not None:
+                _keep_ua = [v for v in args.save_vars if v in upper_air.coords["vars"].values]
+                _keep_sl = [v for v in args.save_vars if v in single_level.coords["vars"].values]
+                if _keep_ua:
+                    upper_air   = upper_air.sel(vars=_keep_ua)
+                if _keep_sl:
+                    single_level = single_level.sel(vars=_keep_sl)
             _cesm_yr  = ymd // 10000
             _year_dir = _save_nc_dir / f"{_cesm_yr:04d}"
             _date_str = (f"{_cesm_yr:04d}-{(ymd % 10000) // 100:02d}"
