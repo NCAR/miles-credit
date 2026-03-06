@@ -50,7 +50,7 @@ def get_rank_info(trainer_mode):
     Returns:
         tuple: A tuple containing LOCAL_RANK (int), WORLD_RANK (int), and WORLD_SIZE (int).
     """
-    if trainer_mode in ["fsdp", "ddp"]:
+    if trainer_mode in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
         try:
             if "LOCAL_RANK" in os.environ:
                 # Environment variables set by torch.distributed.launch or torchrun
@@ -149,6 +149,13 @@ def should_not_checkpoint(module):
 def distributed_model_wrapper(conf, neural_network, device):
     """Wraps the neural network model for distributed training.
 
+    Supports modes: 'fsdp', 'ddp', 'domain_parallel', 'fsdp+domain_parallel'.
+
+    For domain_parallel modes, the model's Conv2d/Conv3d/ConvTranspose2d/GroupNorm
+    layers are replaced with domain-parallel equivalents that handle halo exchange
+    and distributed normalization. For fsdp+domain_parallel, domain-parallel
+    conversion is done first, then FSDP wrapping uses the data-parallel subgroup.
+
     Args:
         conf (dict): The configuration dictionary containing training settings.
         neural_network (torch.nn.Module): The neural network model to be wrapped.
@@ -168,9 +175,40 @@ def distributed_model_wrapper(conf, neural_network, device):
     )
     checkpoint_all_layers = conf["trainer"].get("checkpoint_all_layers", False)
 
-    # Configure FSDP layers for paralle policies AND/OR activation checkpointing
-    # in either DDP or FSDP
-    if mode == "fsdp" or activation_checkpoint:
+    # ── Domain parallelism setup ──────────────────────────────────────────
+    domain_parallel_size = conf["trainer"].get("domain_parallel_size", 1)
+    use_domain_parallel = mode in ["domain_parallel", "fsdp+domain_parallel"] or domain_parallel_size > 1
+    domain_manager = None
+
+    if use_domain_parallel and domain_parallel_size > 1:
+        from credit.domain_parallel import (
+            initialize_domain_parallel,
+            convert_to_domain_parallel,
+        )
+
+        world_size = dist.get_world_size()
+        domain_manager = initialize_domain_parallel(
+            world_size=world_size,
+            domain_parallel_size=domain_parallel_size,
+            shard_dim=-2,  # latitude (H) in BCHW
+        )
+
+        # Convert model layers to domain-parallel versions
+        neural_network = convert_to_domain_parallel(neural_network, domain_manager)
+
+        # Store manager on the model for access by trainer
+        neural_network._domain_parallel_manager = domain_manager
+
+        logging.info(
+            f"Domain parallelism enabled: {domain_parallel_size} domain shards, "
+            f"{world_size // domain_parallel_size} data-parallel replicas"
+        )
+
+    # ── FSDP / DDP wrapping ───────────────────────────────────────────────
+
+    # Configure FSDP layers for parallel policies AND/OR activation checkpointing
+    fsdp_mode = mode in ["fsdp", "fsdp+domain_parallel"]
+    if fsdp_mode or activation_checkpoint:
         transformer_layers_cls = load_fsdp_or_checkpoint_policy(conf)
 
     # logger announcement
@@ -182,8 +220,8 @@ def distributed_model_wrapper(conf, neural_network, device):
         else:
             logging.info(f"Checkpointing custom layers {transformer_layers_cls}")
 
-    # FSDP polices
-    if conf["trainer"]["mode"] == "fsdp":
+    # FSDP policies
+    if fsdp_mode:
         # Define the sharding policies
         auto_wrap_policy1 = functools.partial(
             transformer_auto_wrap_policy, transformer_layer_cls=transformer_layers_cls
@@ -218,18 +256,29 @@ def distributed_model_wrapper(conf, neural_network, device):
 
         logging.info(f"Using CPU offloading: {cpu_offload}")
 
-        # FSDP module
-
-        model = TorchFSDPModel(
-            neural_network,
+        # FSDP module — for fsdp+domain_parallel, use data-parallel process group
+        fsdp_kwargs = dict(
             use_orig_params=True,
             auto_wrap_policy=combined_auto_wrap_policy,
             mixed_precision=mixed_precision_policy,
             cpu_offload=CPUOffload(offload_params=cpu_offload),
         )
 
-    elif conf["trainer"]["mode"] == "ddp":
+        if domain_manager is not None:
+            fsdp_kwargs["process_group"] = domain_manager.data_parallel_group
+
+        model = TorchFSDPModel(neural_network, **fsdp_kwargs)
+
+        # Preserve domain manager reference after FSDP wrapping
+        if domain_manager is not None:
+            model._domain_parallel_manager = domain_manager
+
+    elif mode == "ddp":
         model = DDP(neural_network, device_ids=[device], find_unused_parameters=True)
+
+    elif mode == "domain_parallel":
+        # Domain parallel only (no FSDP/DDP)
+        model = neural_network
 
     else:
         model = neural_network
