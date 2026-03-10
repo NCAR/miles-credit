@@ -27,7 +27,7 @@ jobs:
     - name: Fetch and checkout PR head commit
       run: |
         echo "skip manual checkout"
-        #git config --global --add safe.directory /__w/miles-credit/miles-credit
+        git config --global --add safe.directory /__w/miles-credit/miles-credit
         #git fetch origin ${{ github.event.pull_request.head.sha }}
         #git checkout ${{ github.event.pull_request.head.sha }}
     - name: Run debug job
