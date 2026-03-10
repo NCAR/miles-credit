@@ -18,9 +18,10 @@ jobs:
     steps: 
     - name: Debug permissions...
       run: |
-        id
-        ls -ld /__w /__w/_temp /__w/_temp/_runner_file_commands || true
-        touch /__w/_temp/testfile || echo "Cannot write"
+        echo "skip test"
+        #id
+        #ls -ld /__w /__w/_temp /__w/_temp/_runner_file_commands || true
+        #touch /__w/_temp/testfile || echo "Cannot write"
     - name: checkout code
       uses: actions/checkout@v4
     - name: Fetch and checkout PR head commit
