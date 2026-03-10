@@ -26,9 +26,10 @@ jobs:
       uses: actions/checkout@v4
     - name: Fetch and checkout PR head commit
       run: |
-        git config --global --add safe.directory /__w/miles-credit/miles-credit
-        git fetch origin ${{ github.event.pull_request.head.sha }}
-        git checkout ${{ github.event.pull_request.head.sha }}
+        echo "skip manual checkout"
+        #git config --global --add safe.directory /__w/miles-credit/miles-credit
+        #git fetch origin ${{ github.event.pull_request.head.sha }}
+        #git checkout ${{ github.event.pull_request.head.sha }}
     - name: Run debug job
       run: |
         echo "Running debug job for PR on self-hosted runner"
