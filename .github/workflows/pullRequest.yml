@@ -16,20 +16,11 @@ jobs:
      AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
     steps: 
-    - name: Debug permissions...
-      run: |
-        id
-        ls -ld /__w /__w/_temp /__w/_temp/_runner_file_commands || true
-        touch /__w/_temp/testfile || echo "Cannot write"
     - name: checkout code
       uses: actions/checkout@v4
-    - name: Fetch and checkout PR head commit
-      run: |
-        git config --global --add safe.directory /__w/miles-credit/miles-credit
-        git fetch origin ${{ github.event.pull_request.head.sha }}
-        git checkout ${{ github.event.pull_request.head.sha }}
     - name: Run debug job
       run: |
+        git config --global --add safe.directory /__w/miles-credit/miles-credit
         echo "Running debug job for PR on self-hosted runner"
         git log -1
         chmod -R 777 ./.github/workflows/*
