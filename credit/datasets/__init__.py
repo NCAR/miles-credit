@@ -3,6 +3,12 @@ import sys
 import glob
 import logging
 
+from credit.datasets.multi_source import MultiSourceDataset
+from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.MRMS import MRMSDataset
+
+__all__ = ["MultiSourceDataset", "ERA5Dataset", "MRMSDataset"]
+
 
 logger = logging.getLogger(__name__)
 
