@@ -1,30 +1,19 @@
-import xarray as xr
-import numpy as np
 import torch
 import torch.nn as nn
-
-
-class Scaler(nn.Module):
-    """
-    Scaling layer using a bridgescaler object. Supports transform and its inverse.
-    """
-    def __init__(self, scaler, inverse=False):
-        super().__init__()
-        self.scaler = scaler
-        self.inverse = inverse
-
-    def forward(self, x):
-        if self.inverse:
-            return self.scaler.inverse_transform(x)
-        else:
-            return self.scaler.transform(x)
+import numpy as np
+import xarray as xr
 
 
 class Regrid(nn.Module):
     """
     Regridding layer using weights file provide by the ESMF library.
+    Args:
+        weight_file: path to weights file
+        reshape_to_xy: whether to reshape the flattened array back to xy coordinates
+        flip_axis (list, tuple, or None): whether to flip any axis of the input data. If flipping is desired set a list
+                                          of axis to flip (e.g. [-1, -2])
     """
-    def __init__(self, weight_file):
+    def __init__(self, weight_file, reshape_to_xy=True, flip_axis=None):
 
         super().__init__()
         with xr.open_dataset(weight_file) as grid_weights:
@@ -35,6 +24,8 @@ class Regrid(nn.Module):
             n_b = grid_weights.sizes["n_b"]
             dst_shape = grid_weights['dst_grid_dims'].values[::-1] ## should probably chek to see if this is necessary
 
+        self.reshape_to_xy = reshape_to_xy
+        self.flip_axis = flip_axis
         # store as buffers (CPU tensors)
         self.register_buffer("row", torch.from_numpy(rows.astype(np.int64)), persistent=True)
         self.register_buffer("col", torch.from_numpy(cols.astype(np.int64)), persistent=True)
@@ -64,11 +55,14 @@ class Regrid(nn.Module):
 
         device = x.device
         W = self._get_W(device)
-        x = torch.flip(x, dims=[-2])
+        if self.flip_axis is not None:
+            x = torch.flip(x, dims=self.flip_axis)
         lead_shape = x.shape[:-2]
         x_flat = x.reshape(-1, self.n_a).T
         y_flat = torch.sparse.mm(W, x_flat).T
 
         ny, nx = self.dst_shape
-
-        return y_flat.reshape(*lead_shape, ny, nx)
+        if self.reshape_to_xy:
+            return y_flat.reshape(*lead_shape, ny, nx)
+        else:
+            return y_flat
