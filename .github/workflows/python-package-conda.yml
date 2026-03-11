@@ -8,11 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
-  checks: write
   contents: read
-  pull-requests: write
-  statuses: write
 
 jobs:
   build-linux:
@@ -21,7 +17,8 @@ jobs:
       max-parallel: 5
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - name: Setup Python
