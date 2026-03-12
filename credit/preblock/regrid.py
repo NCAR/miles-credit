@@ -44,7 +44,7 @@ class Regrid(nn.Module):
             return self._W
 
         idx = torch.stack([self.row, self.col], dim=0).to(device)
-        val = self.val.to(device=device)
+        val = self.weights.to(device=device)
 
         W = torch.sparse_coo_tensor(idx, val, size=(self.n_b, self.n_a), device=device).coalesce()
 
