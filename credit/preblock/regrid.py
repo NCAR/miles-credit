@@ -13,16 +13,17 @@ class Regrid(nn.Module):
         flip_axis (list, tuple, or None): whether to flip any axis of the input data. If flipping is desired set a list
                                           of axis to flip (e.g. [-1, -2])
     """
+
     def __init__(self, weight_file, reshape_to_xy=True, flip_axis=None):
 
         super().__init__()
         with xr.open_dataset(weight_file) as grid_weights:
-            rows = grid_weights['row'].values - 1  # ESMF indices are 1-based
-            cols = grid_weights['col'].values - 1  # ESMF indices are 1-based
-            weights = grid_weights['S'].values
+            rows = grid_weights["row"].values - 1  # ESMF indices are 1-based
+            cols = grid_weights["col"].values - 1  # ESMF indices are 1-based
+            weights = grid_weights["S"].values
             n_a = grid_weights.sizes["n_a"]
             n_b = grid_weights.sizes["n_b"]
-            dst_shape = grid_weights['dst_grid_dims'].values[::-1] ## should probably chek to see if this is necessary
+            dst_shape = grid_weights["dst_grid_dims"].values[::-1]  ## should probably chek to see if this is necessary
 
         self.reshape_to_xy = reshape_to_xy
         self.flip_axis = flip_axis
