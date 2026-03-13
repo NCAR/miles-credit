@@ -23,7 +23,18 @@ class Regrid(nn.Module):
             weights = grid_weights["S"].values
             n_a = grid_weights.sizes["n_a"]
             n_b = grid_weights.sizes["n_b"]
-            dst_shape = grid_weights["dst_grid_dims"].values[::-1]  ## should probably chek to see if this is necessary
+            raw_dst = grid_weights["dst_grid_dims"].values
+            if len(raw_dst) == 2:
+                # Structured weight file: dst_grid_dims = [nlon, nlat]; reverse to [nlat, nlon]
+                dst_shape = raw_dst[::-1]
+            elif reshape_to_xy:
+                # Regular unstructured: infer 2D shape from unique destination center coords
+                n_lat = np.unique(grid_weights["yc_b"].values).size
+                n_lon = np.unique(grid_weights["xc_b"].values).size
+                dst_shape = np.array([n_lat, n_lon])
+            else:
+                # Irregular unstructured: output stays flat, no 2D shape needed
+                dst_shape = None
 
         self.reshape_to_xy = reshape_to_xy
         self.flip_axis = flip_axis
@@ -62,8 +73,8 @@ class Regrid(nn.Module):
         x_flat = x.reshape(-1, self.n_a).T
         y_flat = torch.sparse.mm(W, x_flat).T
 
-        ny, nx = self.dst_shape
-        if self.reshape_to_xy:
+        if self.reshape_to_xy and self.dst_shape is not None:
+            ny, nx = self.dst_shape
             return y_flat.reshape(*lead_shape, ny, nx)
         else:
             return y_flat
