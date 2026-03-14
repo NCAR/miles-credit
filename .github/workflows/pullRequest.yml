@@ -1,0 +1,41 @@
+name: Run inference with Pull Request
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs: 
+  build: 
+    runs-on: gha-runner-miles-credit1
+    container:
+      image: docker.io/sgpearse/cirrustest:1.3.20.root.1
+      options: --user 0
+    env:
+     GITHUB_TOKEN: ${{ github.token }}
+     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+     AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+     AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+    steps: 
+    - name: checkout code
+      uses: actions/checkout@v4
+    - name: Run debug job
+      run: |
+        git config --global --add safe.directory /__w/miles-credit/miles-credit
+        echo "Running debug job for PR on self-hosted runner"
+        git log -1
+        chmod -R 777 ./.github/workflows/*
+        ./.github/workflows/dateChange.sh /__w/miles-credit/miles-credit/.github/workflows/model_predict_CI.yml
+        export PATH=/home/ubuntu/.local/bin:$PATH
+        conda run -n credit python -u /__w/miles-credit/miles-credit/applications/gfs_init.py -c /__w/miles-credit/miles-credit/.github/workflows/model_predict_CI.yml
+        conda run -n credit python -u /__w/miles-credit/miles-credit/applications/rollout_realtime.py -c /__w/miles-credit/miles-credit/.github/workflows/model_predict_CI.yml
+        du -h /output
+    #- name: Upload the gfs_init.py netCDF output files to CIRRUS storage
+    #  run: |
+    #    wget https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_linux_amd64.deb
+    #    apt install ./s5cmd_2.3.0_linux_amd64.deb
+    #    s5cmd version
+    #    touch "$(date +%H-%M-%S).txt"
+    #    ls -lrth
+    #    s5cmd --endpoint-url https://s3.k8s.ucar.edu:5443 ls s3://model-predict-bucket/
+    #    s5cmd --no-verify-ssl --endpoint-url $AWS_ENDPOINT_URL cp --include '*.txt' . s3://model-predict-bucket
+    #    s5cmd --endpoint-url https://s3.k8s.ucar.edu:5443 ls s3://model-predict-bucket/
