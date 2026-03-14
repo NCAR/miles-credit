@@ -10,19 +10,14 @@ weather prediction models built on the CrossFormer attention backbone.
 | File | Status | Description |
 |---|---|---|
 | `crossformer.py` | **Active (v1 baseline)** | Original CrossFormer. Reference point for all ablations. |
-| `wxformer_v3.py` | **Active (current best)** | v1 + 2D-DPB + PixelShuffle + SwiGLU + shifted/grid attention + SDPA. Being promoted to `wxformer_v2.py`. |
-| `wxformer_v2.py` | **Deprecated** | MoE + TemporalAgg + GlobalRegister + DecoderAttn experiment. All components underperformed v1 in ablations; MoE diverged. Will be removed. |
-| `wxformer_v2.md` | Historical | Architecture reference for the deprecated v2 experiment. |
-| `wxformer_moe.py` | Archive | Standalone MoE prototype. |
+| `wxformer_v2.py` | **Active (current best)** | v1 + 2D-DPB + PixelShuffle + SwiGLU + shifted/grid attention + SDPA. |
+| `wxformer_moe.py` | Archive | Standalone MoE prototype — all components underperformed v1 in ablations. |
 | `crossformer_diffusion.py` | Active | Diffusion/score-network variant of v1. |
 | `crossformer_ensemble.py` | Active | SDL-noise ensemble variant of v1. |
 
-**Planned rename:** `wxformer_v3.py` → `wxformer_v2.py` once the decoder residual
-sweep is complete.
-
 ---
 
-## Architecture Overview (wxformer_v3 / current best)
+## Architecture Overview (wxformer_v2 / current best)
 
 The model follows a U-Net-style hierarchical encoder-decoder. The hierarchical
 structure is intentional and load-bearing: it enables multi-scale noise injection
@@ -139,7 +134,7 @@ x → Conv2d(in_ch, out_ch * scale², 3)  →  PixelShuffle(scale)  →  sharp_r
   → [num_residuals × (Conv2d + GroupNorm + SiLU)]  →  + shortcut
 ```
 
-`num_residuals` controls decoder capacity (2 = default, sweep in progress for 3, 4).
+`num_residuals=4` is the ablation-validated default.
 
 ---
 
@@ -149,9 +144,9 @@ x → Conv2d(in_ch, out_ch * scale², 3)  →  PixelShuffle(scale)  →  sharp_r
 CrossFormer(
     # Decoder
     upsample_with_ps     = True,   # ALWAYS use this — resolves checkerboard
-    num_residuals        = 2,      # residual blocks per decoder UpBlock
+    num_residuals        = 4,      # residual blocks per decoder UpBlock
 
-    # Encoder attention (all False = OG wxformer behaviour)
+    # Encoder attention (all False = OG wxformer + PS behaviour)
     use_swiglu           = False,  # SwiGLU feedforward instead of GELU MLP
     use_shifted_windows  = False,  # Swin-style cyclic-shift second attention pass
     use_grid             = False,  # MaxViT-style dilated grid attention
@@ -170,11 +165,12 @@ CrossFormer(
 model = CrossFormer(upsample_with_ps=True)
 ```
 
-**Current best configuration** (v3+shift+grid):
+**Best configuration (−11.8% vs v1 at 5000 steps):**
 
 ```python
 model = CrossFormer(
     upsample_with_ps     = True,
+    num_residuals        = 4,
     use_swiglu           = True,
     use_shifted_windows  = True,
     use_grid             = True,
@@ -211,7 +207,7 @@ Early test establishing PixelShuffle as the decoder baseline.
 | Decoder | loss |
 |---|---|
 | ConvTranspose2d (v1 original) | 0.129 |
-| PixelShuffle (v3 baseline) | 0.129 |
+| PixelShuffle | 0.129 |
 | CrossExpandLayer + Transformer | 0.211 |
 | PixelShuffle + cross-attention skip | 0.408 |
 
@@ -224,11 +220,11 @@ at 200 steps and eliminates checkerboard at inference.
 | Variant | loss | vs v1 |
 |---|---|---|
 | v1 baseline | 0.129 | — |
-| v3 + SwiGLU only | 0.138 | worse |
-| v3 + shifted only | 0.134 | worse |
-| v3 + SwiGLU + shifted | 0.128 | **-0.8%** |
-| v3 + SwiGLU + grid | 0.137 | neutral |
-| v3 + SwiGLU + axial | 0.137 | neutral |
+| SwiGLU only | 0.138 | worse |
+| shifted only | 0.134 | worse |
+| SwiGLU + shifted | 0.128 | **-0.8%** |
+| SwiGLU + grid | 0.137 | neutral |
+| SwiGLU + axial | 0.137 | neutral |
 
 Synergy between SwiGLU and shifted windows is consistent with Swin-v2 design
 rationale. Short 200-step proxy is too noisy (~±0.018) to discriminate marginal
@@ -239,9 +235,9 @@ improvements; longer runs needed.
 | Variant | loss | vs v1 |
 |---|---|---|
 | v1 baseline | 0.05523 | — |
-| v3 (swiglu+shifted) | 0.05356 | -3.0% |
-| **v3+grid** | **0.05267** | **-4.6%** |
-| v3+shift+grid | 0.05363 | -2.9% |
+| SwiGLU + shifted | 0.05356 | -3.0% |
+| **SwiGLU + grid** | **0.05267** | **-4.6%** |
+| SwiGLU + shifted + grid | 0.05363 | -2.9% |
 
 At 1000 steps grid alone beat the combined variant — shift+grid synergy requires
 longer training to emerge (analogous to swiglu+shift at 200 steps).
@@ -251,63 +247,24 @@ longer training to emerge (analogous to swiglu+shift at 200 steps).
 | Variant | loss (last 10) | vs v1 |
 |---|---|---|
 | v1 baseline | 0.01891 | — |
-| v3 (swiglu+shifted) | 0.01750 | -7.5% |
-| v3+grid | 0.01741 | -7.9% |
-| **v3+shift+grid** | **0.01711** | **-9.5%** |
+| SwiGLU + shifted | 0.01750 | -7.5% |
+| SwiGLU + grid | 0.01741 | -7.9% |
+| **SwiGLU + shifted + grid** | **0.01711** | **-9.5%** |
 
 Shift+grid synergy is confirmed at 5000 steps. The 6-sublayer pattern
-(local → shifted → grid → FF each) is the strongest single-encoder configuration
-tested. This is the new recommended default.
+(local → shifted → grid) is the strongest single-encoder configuration tested.
 
-### v2 component ablation (5000 steps, full dims) — COMPLETED
+### Decoder residual depth sweep (5000 steps)
 
-Tests of the wxformer_v2.py components (MoE, TemporalAgg, GlobalRegister,
-DecoderAttn) run alongside the v3 sweep.
+Fixing encoder to SwiGLU + shifted + grid, sweeping decoder residual depth.
 
-| Variant | final loss | vs v1 | notes |
+| num_residuals | loss (last 10) | vs res2 | vs v1 |
 |---|---|---|---|
-| v1 baseline | 0.01891 | — | reference |
-| v2_full (all on) | 0.04077 | +115% | MoE routing unstable; loss peaked >600 before partial recovery |
-| v2_no_moe | 0.02023 | +7.0% | all other v2 features, no MoE |
-| v2_no_register | 0.02137 | +13.0% | MoE + all except GlobalRegister |
-| v2_no_decoder_attn | 0.02177 | +15.1% | MoE + all except DecoderAttn |
+| 2 | 0.01708 | — | -9.7% |
+| 3 | 0.01685 | -1.3% | -10.9% |
+| **4** | **0.01668** | **-2.3%** | **-11.8%** |
 
-All v2 variants are worse than v1 at 5000 steps. Removing MoE (`v2_no_moe`) is
-the least bad at 0.02023 — still 7% above v1 and far behind v3+shift+grid (0.01711).
-The MoE routing noise combined with the Switch Transformer aux loss destabilizes
-training; removing other components makes it worse, not better, indicating they
-add optimization difficulty without corresponding benefit at this training length.
-
-**Conclusion: wxformer_v2.py will be retired. Its components do not benefit the
-5000-step proxy and the MoE diverges in the fully-enabled configuration.**
-
-### Decoder residual depth sweep (5000 steps) — COMPLETED
-
-Fixing encoder to v3+shift+grid+swiglu (confirmed best), sweeping decoder
-residual depth.
-
-| Variant | num_residuals | loss (last 10) | vs res2 | vs v1 |
-|---|---|---|---|---|
-| v3+sg+res2 | 2 | 0.01708 | — | -9.7% |
-| v3+sg+res3 | 3 | 0.01685 | -1.3% | -10.9% |
-| **v3+sg+res4** | **4** | **0.01668** | **-2.3%** | **-11.8%** |
-
-Monotonically improving. Each extra residual block adds ~49K params and
-consistently reduces loss. **`num_residuals=4` is the new default.**
-
----
-
-## Refactor — COMPLETED
-
-1. `wxformer_v2.py` — overwritten with promoted v3 content (deprecated MoE version gone)
-2. `wxformer_v3.py` — kept as identical copy (backward-compatible alias)
-3. `credit/models/__init__.py` — added `"wxformer_v2"` key; `"wxformer_v3"` kept as alias
-4. New defaults in `CrossFormer.__init__`:
-   - `upsample_with_ps=True` (always on)
-   - `use_swiglu=False`, `use_shifted_windows=False`, `use_grid=False` (user opts in)
-   - `num_residuals=4` (ablation best)
-5. OG + PS baseline: `CrossFormer()` with all flags at defaults
-6. Best config: `CrossFormer(use_swiglu=True, use_shifted_windows=True, use_grid=True)`
+Monotonically improving. **`num_residuals=4` is the new default.**
 
 ---
 
@@ -315,22 +272,17 @@ consistently reduces loss. **`num_residuals=4` is the new default.**
 
 The ablation runner lives at `applications/wxformer_v2_ablation.py`.
 
-**Single variant:**
+**Submit a single variant:**
 
 ```bash
-qsub -v VARIANT=v3+shift+grid,STEPS=5000,BATCH_SIZE=4 \
+qsub -v VARIANT=v2,STEPS=5000,BATCH_SIZE=4 \
      scripts/wxf_ablation_casper.sh
 ```
 
-**All variants in parallel (one A100 80GB job each):**
+**Submit all variants in parallel (one A100 80GB job each):**
 
 ```bash
 bash scripts/submit_wxf_ablation.sh [STEPS] [BATCH_SIZE]
 ```
 
 Logs write to `/glade/derecho/scratch/schreck/WXF2/ablation_logs/`.
-
-Available `--variant` choices:
-`v1`, `v3`, `v3+grid`, `v3+shift+grid`,
-`v2_full`, `v2_no_moe`, `v2_no_register`, `v2_no_decoder_attn`,
-`v3+sg+res2`, `v3+sg+res3`, `v3+sg+res4`
