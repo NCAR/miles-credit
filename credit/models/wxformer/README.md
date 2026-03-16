@@ -11,7 +11,6 @@ weather prediction models built on the CrossFormer attention backbone.
 |---|---|---|
 | `crossformer.py` | **Active (v1 baseline)** | Original CrossFormer. Reference point for all ablations. |
 | `wxformer_v2.py` | **Active (current best)** | v1 + 2D-DPB + PixelShuffle + SwiGLU + shifted/grid attention + SDPA. |
-| `wxformer_moe.py` | Archive | Standalone MoE prototype. |
 | `crossformer_diffusion.py` | Active | Diffusion/score-network variant of v1. |
 | `crossformer_ensemble.py` | Active | SDL-noise ensemble variant of v1. |
 
