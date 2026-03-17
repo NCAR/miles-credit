@@ -1190,6 +1190,7 @@ class CrossFormer(BaseModel):
         else:
             # ── Conv decoder (UpBlock / UpBlockPS) ────────────────────────────
             dec_dims = [last_dim // (2 ** i) for i in range(num_levels + 1)]
+            self.dec_dims = dec_dims  # exposed for ensemble subclass
 
             self.up_blocks = nn.ModuleList()
             for i in range(num_levels - 1):
