@@ -10,7 +10,7 @@ weather prediction models built on the CrossFormer attention backbone.
 | File | Status | Description |
 |---|---|---|
 | `crossformer.py` | **Active (v1 baseline)** | Original CrossFormer. Reference point for all ablations. |
-| `wxformer_v2.py` | **Active (current best)** | v1 + 2D-DPB + PixelShuffle + SwiGLU + shifted/grid attention + SDPA. |
+| `wxformer_v2.py` | **Active (current best)** | v1 + 2D-DPB + PixelShuffle + SwiGLU + shifted/deformable attention + SDPA. |
 | `crossformer_diffusion.py` | Active | Diffusion/score-network variant of v1. |
 | `crossformer_ensemble.py` | Active | SDL-noise ensemble variant of v1. |
 
@@ -139,41 +139,36 @@ x → Conv2d(in_ch, out_ch * scale², 3)  →  PixelShuffle(scale)  →  sharp_r
 
 ## User Flags
 
+**The defaults ARE the best configuration.** Just instantiate `CrossFormer()` — no flags needed.
+
 ```python
 CrossFormer(
-    # Decoder
-    upsample_with_ps     = True,   # ALWAYS use this — resolves checkerboard
-    num_residuals        = 4,      # residual blocks per decoder UpBlock
+    # Decoder — defaults are ablation-validated best
+    upsample_with_ps     = True,   # DEFAULT: PixelShuffle decoder — eliminates checkerboard artifacts
+    num_residuals        = 4,      # DEFAULT: 4 residual conv blocks per decoder UpBlock
 
-    # Encoder attention (all False = OG wxformer + PS behaviour)
-    use_swiglu           = False,  # SwiGLU feedforward instead of GELU MLP
-    use_shifted_windows  = False,  # Swin-style cyclic-shift second attention pass
-    use_grid             = False,  # MaxViT-style dilated grid attention
+    # Encoder attention — defaults are ablation-validated best
+    use_swiglu           = True,   # DEFAULT: SwiGLU feedforward
+    use_shifted_windows  = True,   # DEFAULT: Swin-style cyclic-shift second attention pass
+    use_deformable       = True,   # DEFAULT: deformable attention over H/4 × W/4 K/V grid (−12.6% vs v1)
+
+    # Off by default — opt-in only
+    use_grid             = False,  # MaxViT-style dilated grid attention (prior best, now superseded)
+    use_rope             = False,  # 2D RoPE for window attention (promising, needs more testing)
     use_axial            = False,  # full-row (lon) + full-col (lat) axial attention
+    use_attn_res         = False,  # inter-block attention residuals (Moonshot AI, 2025; under evaluation)
 
-    # Experimental / deprecated
-    upsample_with_transformer = False,  # CrossExpandLayer + Transformer decoder (worse)
-    upsample_with_cross_attn  = False,  # PixelShuffle + cross-attn skip fusion (worse)
-    lat_file             = None,        # path to NetCDF for sin/cos lat embedding
+    # Deprecated — always worse
+    upsample_with_transformer = False,
+    upsample_with_cross_attn  = False,
+    lat_file             = None,
 )
 ```
 
-**Recovery of OG wxformer + PixelShuffle** (all optional flags off):
+**To recover OG wxformer + PixelShuffle** (no ablation improvements):
 
 ```python
-model = CrossFormer(upsample_with_ps=True)
-```
-
-**Best configuration (−11.8% vs v1 at 5000 steps):**
-
-```python
-model = CrossFormer(
-    upsample_with_ps     = True,
-    num_residuals        = 4,
-    use_swiglu           = True,
-    use_shifted_windows  = True,
-    use_grid             = True,
-)
+model = CrossFormer(use_shifted_windows=False, use_swiglu=False, use_deformable=False)
 ```
 
 ---
@@ -185,7 +180,9 @@ All three attention classes use `F.scaled_dot_product_attention`:
 | Class | attn_mask | Backend |
 |---|---|---|
 | `Attention` (local/shifted) | DPB bias tensor | Memory-efficient |
+| `Attention` with `use_rope=True` | none (RoPE instead) | FlashAttention |
 | `GridAttention` | none | FlashAttention |
+| `DeformableAttention` | none | FlashAttention |
 | `AxialAttention` | none | FlashAttention |
 | `CrossAttention` (deprecated decoder) | none | FlashAttention |
 
@@ -243,15 +240,14 @@ longer training to emerge (analogous to swiglu+shift at 200 steps).
 
 ### Full-scale run (5000 steps, full dims, batch 4, A100 80GB)
 
-| Variant | loss (last 10) | vs v1 |
+| Architecture | loss (last 10) | vs v1 |
 |---|---|---|
 | v1 baseline | 0.01891 | — |
 | SwiGLU + shifted | 0.01750 | -7.5% |
 | SwiGLU + grid | 0.01741 | -7.9% |
-| **SwiGLU + shifted + grid** | **0.01711** | **-9.5%** |
+| SwiGLU + shifted + grid | 0.01711 | -9.5% |
 
-Shift+grid synergy is confirmed at 5000 steps. The 6-sublayer pattern
-(local → shifted → grid) is the strongest single-encoder configuration tested.
+Shift+grid synergy confirmed at 5000 steps; synergy requires >1000 steps to emerge.
 
 ### Decoder residual depth sweep (5000 steps)
 
@@ -264,6 +260,28 @@ Fixing encoder to SwiGLU + shifted + grid, sweeping decoder residual depth.
 | **4** | **0.01668** | **-2.3%** | **-11.8%** |
 
 Monotonically improving. **`num_residuals=4` is the new default.**
+
+### Deformable attention + RoPE sweep (5000 steps, num_residuals=4)
+
+| Architecture | loss (last 10) | vs v1 |
+|---|---|---|
+| **SwiGLU + shifted + deformable** | **0.01653** | **-12.6%** |
+| SwiGLU + shifted + grid (prior best) | 0.01668 | -11.8% |
+| SwiGLU + deformable only | 0.01696 | -10.3% |
+| SwiGLU + shifted + grid + RoPE | 0.01687 | -10.8% |
+
+`use_deformable=True` paired with shifted windows is the new best encoder configuration and **is now the default**.
+
+**RoPE note:** `use_rope=True` replaces DPB with 2D rotary position encoding — no
+additive mask, enabling FlashAttention for all window attention. RoPE reached
+competitive loss (~10.8% improvement) at 5000 steps and may continue to improve
+with longer training. Promising but needs more testing before becoming the default.
+
+**Attention Residuals (`use_attn_res`):** Inter-block gating mechanism from Moonshot AI (2025). Before each sublayer, a learned C-dim vector gates over all previous depth-block representations plus the current feature map (softmax-weighted sum). Adds ~18K params per encoder level. Ablation pending.
+
+**DeformableAttention details:** K/V sampled at H/4 × W/4 learned offset positions
+via `F.grid_sample`. Longitude boundary handled with periodic wrap
+`(vgrid_x + 1) % 2 - 1`. Latitude clamped. No attention mask → FlashAttention.
 
 ---
 
