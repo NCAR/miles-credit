@@ -1,22 +1,21 @@
 """
 era5_dataset_test.py
 --------------------
-Tests for both the original ERA5Dataset (credit.datasets.era5) and the
-refactored version (credit.datasets.era5_refactor).
+Tests for the ERA5Dataset (credit.datasets.era5)
 
-Refactored dataset output format
+Dataset output format
 ---------------------------------
 Samples are nested dicts::
 
     {
-        "input":  {"era5/{field_type}/{dim}/{varname}": tensor, ...},
+        "input": {"era5/{field_type}/{dim}/{varname}": tensor, ...},
         "target": {"era5/{field_type}/{dim}/{varname}": tensor, ...},  # return_target only
         "metadata": {"input_datetime": int, "target_datetime": int},
     }
 
 Tensor shapes (single sample, no batch dim):
-    3D variable : (n_levels, 1, lat, lon)
-    2D variable : (1, 1, lat, lon)
+    3D variable: (n_levels, 1, lat, lon)
+    2D variable: (1, 1, lat, lon)
 """
 
 import numpy as np
@@ -26,14 +25,14 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from credit.datasets.era5_old import ERA5Dataset
-from credit.datasets.era5 import ERA5Dataset as ERA5DatasetRefactored
+from credit.datasets.era5 import ERA5Dataset as ERA5Dataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def annual_xr_dataset():
@@ -157,6 +156,7 @@ def minimal_config():
 # Original ERA5Dataset tests (unchanged behaviour)
 # ---------------------------------------------------------------------------
 
+
 def test_dataset_len(minimal_config, patch_era5_io_multiyear):
     ds = ERA5Dataset(minimal_config)
     assert len(ds) > 0
@@ -223,14 +223,15 @@ def test_datetimes(minimal_config, patch_era5_io_multiyear):
 # Refactored ERA5Dataset tests
 # ---------------------------------------------------------------------------
 
+
 def test_refactor_dataset_len(minimal_config, patch_refactor_io_multiyear):
-    ds = ERA5DatasetRefactored(minimal_config)
+    ds = ERA5Dataset(minimal_config)
     assert len(ds) > 0
 
 
 def test_refactor_key_format_step0(minimal_config, patch_refactor_io_multiyear):
     """Step 0 input should contain per-variable keys for prognostic, static, and dynamic_forcing."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=False)
+    ds = ERA5Dataset(minimal_config, return_target=False)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
@@ -245,7 +246,7 @@ def test_refactor_key_format_step0(minimal_config, patch_refactor_io_multiyear):
 
 def test_refactor_key_format_step1(minimal_config, patch_refactor_io_multiyear):
     """Step > 0 input should only contain dynamic_forcing keys (no prognostic/static)."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=False)
+    ds = ERA5Dataset(minimal_config, return_target=False)
     t = ds.datetimes[0]
     sample = ds[(t, 1)]
 
@@ -259,7 +260,7 @@ def test_refactor_key_format_step1(minimal_config, patch_refactor_io_multiyear):
 
 def test_refactor_3d_tensor_shape(minimal_config, patch_refactor_io_multiyear):
     """3D variables should have shape (n_levels, 1, lat, lon)."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=False)
+    ds = ERA5Dataset(minimal_config, return_target=False)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
@@ -267,15 +268,13 @@ def test_refactor_3d_tensor_shape(minimal_config, patch_refactor_io_multiyear):
     lat, lon = 21, 41
 
     t_tensor = sample["input"]["era5/prognostic/3d/T"]
-    assert t_tensor.shape == (n_levels, 1, lat, lon), (
-        f"Expected ({n_levels}, 1, {lat}, {lon}), got {t_tensor.shape}"
-    )
+    assert t_tensor.shape == (n_levels, 1, lat, lon), f"Expected ({n_levels}, 1, {lat}, {lon}), got {t_tensor.shape}"
     assert t_tensor.dtype == torch.float32
 
 
 def test_refactor_2d_tensor_shape(minimal_config, patch_refactor_io_multiyear):
     """2D variables should have shape (1, 1, lat, lon) — singleton level dim."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=False)
+    ds = ERA5Dataset(minimal_config, return_target=False)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
@@ -284,15 +283,13 @@ def test_refactor_2d_tensor_shape(minimal_config, patch_refactor_io_multiyear):
     for key in ("era5/prognostic/2d/SP", "era5/dynamic_forcing/2d/tsi", "era5/static/2d/LSM"):
         assert key in sample["input"]
         tensor = sample["input"][key]
-        assert tensor.shape == (1, 1, lat, lon), (
-            f"{key}: expected (1, 1, {lat}, {lon}), got {tensor.shape}"
-        )
+        assert tensor.shape == (1, 1, lat, lon), f"{key}: expected (1, 1, {lat}, {lon}), got {tensor.shape}"
         assert tensor.dtype == torch.float32
 
 
 def test_refactor_all_tensors_same_ndim(minimal_config, patch_refactor_io_multiyear):
     """All variable tensors in input must have exactly 4 dimensions."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=False)
+    ds = ERA5Dataset(minimal_config, return_target=False)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
@@ -302,7 +299,7 @@ def test_refactor_all_tensors_same_ndim(minimal_config, patch_refactor_io_multiy
 
 def test_refactor_target_is_dict(minimal_config, patch_refactor_io_multiyear):
     """Target should be a dict of per-variable tensors, not a concatenated tensor."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=True)
+    ds = ERA5Dataset(minimal_config, return_target=True)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
@@ -312,7 +309,7 @@ def test_refactor_target_is_dict(minimal_config, patch_refactor_io_multiyear):
 
 def test_refactor_target_keys(minimal_config, patch_refactor_io_multiyear):
     """Target should contain prognostic + diagnostic keys (T, U, SP, TP)."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=True)
+    ds = ERA5Dataset(minimal_config, return_target=True)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
@@ -328,7 +325,7 @@ def test_refactor_target_keys(minimal_config, patch_refactor_io_multiyear):
 
 def test_refactor_target_tensor_shapes(minimal_config, patch_refactor_io_multiyear):
     """Each tensor in target should have correct shape."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=True)
+    ds = ERA5Dataset(minimal_config, return_target=True)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
@@ -343,7 +340,7 @@ def test_refactor_target_tensor_shapes(minimal_config, patch_refactor_io_multiye
 
 def test_refactor_metadata_datetimes(minimal_config, patch_refactor_io_multiyear):
     """metadata['input_datetime'] should match the timestamp passed to __getitem__."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=True)
+    ds = ERA5Dataset(minimal_config, return_target=True)
     x_times, y_times = [], []
     for t in ds.datetimes:
         sample = ds[(t, 1)]
@@ -356,7 +353,7 @@ def test_refactor_metadata_datetimes(minimal_config, patch_refactor_io_multiyear
 
 def test_refactor_static_metadata(minimal_config, patch_refactor_io_multiyear):
     """static_metadata should contain levels and datetime_fmt."""
-    ds = ERA5DatasetRefactored(minimal_config, return_target=False)
+    ds = ERA5Dataset(minimal_config, return_target=False)
 
     assert hasattr(ds, "static_metadata")
     assert ds.static_metadata["levels"] == minimal_config["source"]["ERA5"]["levels"]
@@ -371,7 +368,7 @@ def test_refactor_null_diagnostic(minimal_config, patch_refactor_io_multiyear):
     cfg["source"]["ERA5"]["variables"] = dict(minimal_config["source"]["ERA5"]["variables"])
     cfg["source"]["ERA5"]["variables"]["diagnostic"] = None
 
-    ds = ERA5DatasetRefactored(cfg, return_target=True)
+    ds = ERA5Dataset(cfg, return_target=True)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
@@ -384,7 +381,7 @@ def test_refactor_dataloader_default_collate(minimal_config, patch_refactor_io_m
     without a custom collate_fn.
     Validates that tensors for the same key are stacked correctly under input/target.
     """
-    ds = ERA5DatasetRefactored(minimal_config, return_target=True)
+    ds = ERA5Dataset(minimal_config, return_target=True)
     sampler = DistributedMultiStepBatchSampler(
         ds,
         batch_size=2,
