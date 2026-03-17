@@ -105,15 +105,10 @@ class MultiSourceDataset(Dataset):
                 self.datasets[key.lower()] = cls(config, return_target)
                 logger.info("MultiSourceDataset: registered source '%s'", key.lower())
             else:
-                logger.debug(
-                    "MultiSourceDataset: source '%s' not in config, skipping", key
-                )
+                logger.debug("MultiSourceDataset: source '%s' not in config, skipping", key)
 
         self.datetimes: pd.DatetimeIndex = self._intersect_timestamps()
-        self.static_metadata: dict[str, dict] = {
-            name: ds.static_metadata
-            for name, ds in self.datasets.items()
-        }
+        self.static_metadata: dict[str, dict] = {name: ds.static_metadata for name, ds in self.datasets.items()}
 
     # ------------------------------------------------------------------
     # Dataset interface

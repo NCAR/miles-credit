@@ -35,6 +35,7 @@ from credit.samplers import DistributedMultiStepBatchSampler
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def annual_xr_dataset():
     """
@@ -157,6 +158,7 @@ def minimal_config():
 # Original ERA5Dataset tests (unchanged behaviour)
 # ---------------------------------------------------------------------------
 
+
 def test_dataset_len(minimal_config, patch_era5_io_multiyear):
     ds = ERA5Dataset(minimal_config)
     assert len(ds) > 0
@@ -223,6 +225,7 @@ def test_datetimes(minimal_config, patch_era5_io_multiyear):
 # Refactored ERA5Dataset tests
 # ---------------------------------------------------------------------------
 
+
 def test_refactor_dataset_len(minimal_config, patch_refactor_io_multiyear):
     ds = ERA5DatasetRefactored(minimal_config)
     assert len(ds) > 0
@@ -267,9 +270,7 @@ def test_refactor_3d_tensor_shape(minimal_config, patch_refactor_io_multiyear):
     lat, lon = 21, 41
 
     t_tensor = sample["input"]["era5/prognostic/3d/T"]
-    assert t_tensor.shape == (n_levels, 1, lat, lon), (
-        f"Expected ({n_levels}, 1, {lat}, {lon}), got {t_tensor.shape}"
-    )
+    assert t_tensor.shape == (n_levels, 1, lat, lon), f"Expected ({n_levels}, 1, {lat}, {lon}), got {t_tensor.shape}"
     assert t_tensor.dtype == torch.float32
 
 
@@ -284,9 +285,7 @@ def test_refactor_2d_tensor_shape(minimal_config, patch_refactor_io_multiyear):
     for key in ("era5/prognostic/2d/SP", "era5/dynamic_forcing/2d/tsi", "era5/static/2d/LSM"):
         assert key in sample["input"]
         tensor = sample["input"][key]
-        assert tensor.shape == (1, 1, lat, lon), (
-            f"{key}: expected (1, 1, {lat}, {lon}), got {tensor.shape}"
-        )
+        assert tensor.shape == (1, 1, lat, lon), f"{key}: expected (1, 1, {lat}, {lon}), got {tensor.shape}"
         assert tensor.dtype == torch.float32
 
 

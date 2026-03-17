@@ -29,13 +29,14 @@ from credit.samplers import DistributedMultiStepBatchSampler
 DATETIMES = pd.date_range("2024-06-01", "2024-06-02", freq="6h")
 ERA5_KEY = "era5/prognostic/3d/T"
 MRMS_KEY = "mrms/prognostic/2d/QPE"
-ERA5_SHAPE = (4, 1, 8, 8)   # (n_levels, 1, lat, lon)
+ERA5_SHAPE = (4, 1, 8, 8)  # (n_levels, 1, lat, lon)
 MRMS_SHAPE = (1, 1, 50, 100)
 
 
 # ---------------------------------------------------------------------------
 # Fake sub-datasets
 # ---------------------------------------------------------------------------
+
 
 class _FakeERA5:
     """Minimal ERA5Dataset stand-in."""
@@ -110,10 +111,12 @@ class _FakeMRMSSubset:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def patch_sources(monkeypatch):
     """Replace _SOURCE_REGISTRY with lightweight fakes."""
     import credit.datasets.multi_source as ms
+
     monkeypatch.setattr(ms, "_SOURCE_REGISTRY", {"ERA5": _FakeERA5, "MRMS": _FakeMRMS})
 
 
@@ -121,6 +124,7 @@ def patch_sources(monkeypatch):
 def patch_sources_subset(monkeypatch):
     """MRMS has a strict subset of ERA5 timestamps — tests intersection."""
     import credit.datasets.multi_source as ms
+
     monkeypatch.setattr(ms, "_SOURCE_REGISTRY", {"ERA5": _FakeERA5, "MRMS": _FakeMRMSSubset})
 
 
@@ -160,6 +164,7 @@ def mrms_only_config():
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_multi_source_len(patch_sources, both_config):
     ds = MultiSourceDataset(both_config)

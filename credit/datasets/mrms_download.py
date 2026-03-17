@@ -157,8 +157,8 @@ def download_mrms(
                 .to_dict()
             )
 
-            lats = raw.latitudes[::raw.Nx][::-1]   # ascending south -> north
-            lons = raw.longitudes[:raw.Nx]          # 0-360
+            lats = raw.latitudes[:: raw.Nx][::-1]  # ascending south -> north
+            lons = raw.longitudes[: raw.Nx]  # 0-360
 
             da = xr.DataArray(
                 np.expand_dims(raw.values, axis=0),  # (time, lat, lon)
