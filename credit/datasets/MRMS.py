@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing"}
 
 # S3 URI template for MRMS GRIB2 files
-_S3_URI = ("s3://noaa-mrms-pds/{region}/{varname}/{date_str}/MRMS_{varname}_{datetime_str}.grib2.gz")
+_S3_URI = "s3://noaa-mrms-pds/{region}/{varname}/{date_str}/MRMS_{varname}_{datetime_str}.grib2.gz"
 
 
 def _apply_extent(da: xr.DataArray, extent: list[float] | None) -> xr.DataArray:
@@ -328,8 +328,7 @@ class MRMSDataset(Dataset):
         file_intervals = self.file_dict.get(field_type)
         if not file_intervals:
             raise KeyError(
-                f"No files registered for field_type '{field_type}'. "
-                "Check that the path glob matches files on disk."
+                f"No files registered for field_type '{field_type}'. Check that the path glob matches files on disk."
             )
 
         path = _find_file(file_intervals, t)
@@ -370,8 +369,8 @@ class MRMSDataset(Dataset):
         with s3fs.S3FileSystem(anon=True).open(s3_path, "rb") as f:
             raw = pygrib.fromstring(gzip.decompress(f.read()))
 
-        lats = raw.latitudes[::raw.Nx][::-1]   # ascending south -> north
-        lons = raw.longitudes[:raw.Nx]          # 0-360
+        lats = raw.latitudes[:: raw.Nx][::-1]  # ascending south -> north
+        lons = raw.longitudes[: raw.Nx]  # 0-360
 
         da = xr.DataArray(
             raw.values,

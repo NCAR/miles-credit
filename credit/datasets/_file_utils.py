@@ -139,7 +139,4 @@ def _find_file(
     idx = bisect.bisect_right(starts, t) - 1
     if idx >= 0 and t <= intervals[idx][1]:
         return intervals[idx][2]
-    raise KeyError(
-        f"No file found covering timestamp {t}. "
-        "Check that your data files span the requested time range."
-    )
+    raise KeyError(f"No file found covering timestamp {t}. Check that your data files span the requested time range.")

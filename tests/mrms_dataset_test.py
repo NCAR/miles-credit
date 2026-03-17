@@ -40,6 +40,7 @@ QPE_6H = "MultiSensor_QPE_06H_Pass2_00.00"
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mrms_xr_dataset():
     """Single xr.Dataset covering the full test date range."""
@@ -129,6 +130,7 @@ def config_with_forcing():
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_mrms_dataset_len(minimal_config, patch_mrms_io):
     ds = MRMSDataset(minimal_config)
     assert len(ds) > 0
@@ -196,9 +198,7 @@ def test_mrms_tensor_shape(minimal_config, patch_mrms_io):
     lat, lon = 50, 100
 
     for key, tensor in sample["input"].items():
-        assert tensor.shape == (1, 1, lat, lon), (
-            f"{key}: expected (1, 1, {lat}, {lon}), got {tensor.shape}"
-        )
+        assert tensor.shape == (1, 1, lat, lon), f"{key}: expected (1, 1, {lat}, {lon}), got {tensor.shape}"
         assert tensor.dtype == torch.float32
 
 
@@ -271,9 +271,7 @@ def test_mrms_extent_applied(minimal_config, patch_mrms_io):
     tensor = sample["input"][key]
 
     # Full lon span is 100 points (230-300); subset (230-265) should be fewer
-    assert tensor.shape[-1] < 100, (
-        f"Expected lon dim < 100 after extent subsetting, got {tensor.shape[-1]}"
-    )
+    assert tensor.shape[-1] < 100, f"Expected lon dim < 100 after extent subsetting, got {tensor.shape[-1]}"
 
 
 def test_mrms_dataloader_default_collate(minimal_config, patch_mrms_io):
