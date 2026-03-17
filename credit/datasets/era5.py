@@ -222,9 +222,7 @@ class ERA5Dataset(Dataset):
             return
 
         if not d.get("vars_3D") and not d.get("vars_2D"):
-            raise ValueError(
-                f"Field '{field_type}' must define at least one of vars_3D or vars_2D"
-            )
+            raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
 
         files = sorted(glob(d.get("path", "")))
         time_fmt: str = d.get("filename_time_format", "%Y")
@@ -313,7 +311,11 @@ class ERA5Dataset(Dataset):
             cftime.datetime with the specified calendar.
         """
         return cftime.datetime(
-            ts.year, ts.month, ts.day,
-            ts.hour, ts.minute, ts.second,
+            ts.year,
+            ts.month,
+            ts.day,
+            ts.hour,
+            ts.minute,
+            ts.second,
             calendar=calendar,
         )
