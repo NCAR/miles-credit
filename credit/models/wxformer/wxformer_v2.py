@@ -342,6 +342,52 @@ class DynamicPositionBias(nn.Module):
         return self.layers(x)
 
 
+# ── 2D RoPE helpers ──────────────────────────────────────────────────────────
+
+def _precompute_window_rope(wsz_h, wsz_w, dim_head, device, dtype, base=10000):
+    """Within-window 2D RoPE.  Returns (cos, sin) each of shape (wsz_h*wsz_w, dim_head).
+
+    The head dimension is split in half: the first half encodes the row index (lat),
+    the second half encodes the column index (lon).  Each half uses dim_head//4
+    frequency bands.  Tokens within the window therefore carry relative (row, col)
+    positional information without any learned parameters.
+    """
+    quarter = dim_head // 4
+    freq    = 1.0 / (base ** (torch.arange(quarter, device=device, dtype=dtype) / quarter))
+
+    pos_h   = torch.arange(wsz_h, device=device, dtype=dtype)
+    pos_w   = torch.arange(wsz_w, device=device, dtype=dtype)
+    theta_h = torch.outer(pos_h, freq)                          # (wsz_h, quarter)
+    theta_w = torch.outer(pos_w, freq)                          # (wsz_w, quarter)
+
+    # Expand to (wsz_h, wsz_w, quarter) then flatten to (L, quarter)
+    theta_h = theta_h[:, None, :].expand(wsz_h, wsz_w, quarter).reshape(wsz_h * wsz_w, quarter)
+    theta_w = theta_w[None, :, :].expand(wsz_h, wsz_w, quarter).reshape(wsz_h * wsz_w, quarter)
+
+    # Concatenate lat + lon frequencies → (L, dim_head//2)
+    theta = torch.cat([theta_h, theta_w], dim=-1)               # (L, dim_head//2)
+
+    # Build (L, dim_head) cos/sin for the rotate_half convention
+    # cat([θ.cos(), θ.cos()]) so that pair (x[k], x[k+half]) rotates by θ[k]
+    cos = torch.cat([theta.cos(), theta.cos()], dim=-1)          # (L, dim_head)
+    sin = torch.cat([theta.sin(), theta.sin()], dim=-1)
+    return cos, sin
+
+
+def _rotate_half(x):
+    x1, x2 = x.chunk(2, dim=-1)
+    return torch.cat([-x2, x1], dim=-1)
+
+
+def _apply_rope(q, k, cos, sin):
+    """Apply 2D RoPE to Q and K.  cos/sin: (L, d) → broadcast over (B, heads, L, d)."""
+    cos = cos.unsqueeze(0).unsqueeze(0)   # (1, 1, L, d)
+    sin = sin.unsqueeze(0).unsqueeze(0)
+    q   = q * cos + _rotate_half(q) * sin
+    k   = k * cos + _rotate_half(k) * sin
+    return q, k
+
+
 # transformer classes
 
 
@@ -397,37 +443,45 @@ class FeedForwardSwiGLU(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0):
+    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0, use_rope=False):
         super().__init__()
         assert attn_type in {"short", "long", "shifted"}
         heads = dim // dim_head
-        self.heads = heads
-        self.scale = dim_head ** -0.5
-        inner_dim = dim_head * heads
+        self.heads     = heads
+        self.dim_head  = dim_head
+        inner_dim      = dim_head * heads
         self.attn_type = attn_type
-        # window_size is a (H, W) pair — anisotropic
+        self.use_rope  = use_rope
         self.window_size = (window_size, window_size) if isinstance(window_size, int) else tuple(window_size)
-        self.norm = LayerNorm(dim)
-        self.dropout = nn.Dropout(dropout)
-        self.to_qkv = nn.Conv2d(dim, inner_dim * 3, 1, bias=False)
-        self.to_out = nn.Conv2d(inner_dim, dim, 1)
-        self.dpb = DynamicPositionBias(dim // 4)
-        self._dpb_cache = None  # cleared on train(), populated on first eval forward
+        self.norm      = LayerNorm(dim)
+        self.dropout   = nn.Dropout(dropout)
+        self.to_qkv    = nn.Conv2d(dim, inner_dim * 3, 1, bias=False)
+        self.to_out    = nn.Conv2d(inner_dim, dim, 1)
 
-        wsz_h, wsz_w = self.window_size
-        pos_h = torch.arange(wsz_h)
-        pos_w = torch.arange(wsz_w)
-        grid = torch.stack(torch.meshgrid(pos_h, pos_w, indexing="ij"))  # (2, H, W)
-        grid = rearrange(grid, "c i j -> (i j) c")                        # (H*W, 2)
-        rel_pos = grid[:, None] - grid[None, :]                            # (H*W, H*W, 2)
-        rel_pos[..., 0] += wsz_h - 1
-        rel_pos[..., 1] += wsz_w - 1
-        rel_pos_indices = rel_pos[..., 0] * (2 * wsz_w - 1) + rel_pos[..., 1]
-        self.register_buffer("rel_pos_indices", rel_pos_indices, persistent=False)
+        if use_rope:
+            # RoPE: parameter-free, cached at eval time
+            self._rope_cache = None   # (cos, sin) each (L, dim_head)
+        else:
+            # 2D Dynamic Position Bias (MLP over relative offsets)
+            self.dpb         = DynamicPositionBias(dim // 4)
+            self._dpb_cache  = None
+            wsz_h, wsz_w     = self.window_size
+            pos_h = torch.arange(wsz_h)
+            pos_w = torch.arange(wsz_w)
+            grid      = torch.stack(torch.meshgrid(pos_h, pos_w, indexing="ij"))
+            grid      = rearrange(grid, "c i j -> (i j) c")
+            rel_pos   = grid[:, None] - grid[None, :]
+            rel_pos[..., 0] += wsz_h - 1
+            rel_pos[..., 1] += wsz_w - 1
+            rel_pos_indices = rel_pos[..., 0] * (2 * wsz_w - 1) + rel_pos[..., 1]
+            self.register_buffer("rel_pos_indices", rel_pos_indices, persistent=False)
 
     def train(self, mode=True):
         if mode:
-            self._dpb_cache = None
+            if self.use_rope:
+                self._rope_cache = None
+            else:
+                self._dpb_cache = None
         return super().train(mode)
 
     def forward(self, x):
@@ -436,36 +490,45 @@ class Attention(nn.Module):
         x = self.norm(x)
 
         if self.attn_type == "shifted":
-            # Cyclic shift before partitioning; unshift after.
-            # Lon-axis roll is physically correct (periodic boundary).
-            # Lat-axis roll has no masking — acceptable given TensorPadding handles poles.
             shift_h, shift_w = wsz_h // 2, wsz_w // 2
             x = torch.roll(x, shifts=(-shift_h, -shift_w), dims=(-2, -1))
 
         if self.attn_type in {"short", "shifted"}:
             x = rearrange(x, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz_h, s2=wsz_w)
-        else:  # "long"
+        else:
             x = rearrange(x, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz_h, l2=wsz_w)
 
         q, k, v = self.to_qkv(x).chunk(3, dim=1)
         q, k, v = map(lambda t: rearrange(t, "b (h d) x y -> b h (x y) d", h=heads), (q, k, v))
 
-        # Compute DPB as additive attention bias (SDPA adds it before softmax)
-        if self.training or self._dpb_cache is None:
-            pos_h = torch.arange(-wsz_h, wsz_h + 1, device=device)
-            pos_w = torch.arange(-wsz_w, wsz_w + 1, device=device)
-            grid = torch.stack(torch.meshgrid(pos_h, pos_w, indexing="ij"))
-            rel_pos = rearrange(grid, "c i j -> (i j) c").to(q.dtype)
-            dpb_bias = self.dpb(rel_pos)[self.rel_pos_indices]
-            if not self.training:
-                self._dpb_cache = dpb_bias.detach()
-        else:
-            dpb_bias = self._dpb_cache.to(q.dtype)
-
-        # SDPA handles scale (1/sqrt(dim_head)) and fuses softmax+dropout internally.
-        # attn_mask shape (L, L) broadcasts over batch and head dims.
         dropout_p = self.dropout.p if self.training else 0.0
-        out = F.scaled_dot_product_attention(q, k, v, attn_mask=dpb_bias, dropout_p=dropout_p)
+
+        if self.use_rope:
+            # 2D RoPE: parameter-free, encodes within-window (row, col) position
+            # No attn_mask → FlashAttention backend
+            if self.training or self._rope_cache is None:
+                cos, sin = _precompute_window_rope(wsz_h, wsz_w, self.dim_head, device, q.dtype)
+                if not self.training:
+                    self._rope_cache = (cos.detach(), sin.detach())
+            else:
+                cos, sin = self._rope_cache
+                cos, sin = cos.to(q.dtype), sin.to(q.dtype)
+            q, k = _apply_rope(q, k, cos, sin)
+            out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
+        else:
+            # 2D Dynamic Position Bias — additive bias → memory-efficient backend
+            if self.training or self._dpb_cache is None:
+                pos_h   = torch.arange(-wsz_h, wsz_h + 1, device=device)
+                pos_w   = torch.arange(-wsz_w, wsz_w + 1, device=device)
+                grid    = torch.stack(torch.meshgrid(pos_h, pos_w, indexing="ij"))
+                rel_pos = rearrange(grid, "c i j -> (i j) c").to(q.dtype)
+                dpb_bias = self.dpb(rel_pos)[self.rel_pos_indices]
+                if not self.training:
+                    self._dpb_cache = dpb_bias.detach()
+            else:
+                dpb_bias = self._dpb_cache.to(q.dtype)
+            out = F.scaled_dot_product_attention(q, k, v, attn_mask=dpb_bias, dropout_p=dropout_p)
+
         out = rearrange(out, "b h (x y) d -> b (h d) x y", x=wsz_h, y=wsz_w)
         out = self.to_out(out)
 
@@ -474,7 +537,7 @@ class Attention(nn.Module):
                             h=height // wsz_h, w=width // wsz_w)
             if self.attn_type == "shifted":
                 out = torch.roll(out, shifts=(shift_h, shift_w), dims=(-2, -1))
-        else:  # "long"
+        else:
             out = rearrange(out, "(b h w) d l1 l2 -> b d (l1 h) (l2 w)",
                             h=height // wsz_h, w=width // wsz_w)
         return out
@@ -627,22 +690,147 @@ class GridAttention(nn.Module):
                          b=B, sh=wsz_h, sw=wsz_w, nh=nh, nw=nw)
 
 
+class DeformableAttention(nn.Module):
+    """Global deformable attention (Xia et al. 2022, adapted for weather models).
+
+    Q attends over the full H×W grid; K/V are sampled at H/r × W/r positions
+    learned via a lightweight offset network — giving each position a global
+    but adaptive receptive field at O(H*W * H/r*W/r) cost.
+
+    Periodic longitude boundary: the x-coordinate of the sampling grid is
+    wrapped modulo 2 (in normalised [-1,1] space) so offsets can freely cross
+    the antimeridian.  Latitude uses border clamping (poles are hard boundaries).
+
+    downsample_factor : r — controls K/V resolution; larger → cheaper, coarser.
+    offset_scale      : max offset in offset-grid pixels (default = r).
+    """
+
+    def __init__(self, dim, downsample_factor=4, offset_scale=None,
+                 dim_head=32, dropout=0.0):
+        super().__init__()
+        r = downsample_factor
+        offset_scale = offset_scale if offset_scale is not None else r
+        # kernel >= stride and (kernel-stride) even for symmetric padding
+        offset_kernel_size = r + 2
+        offset_padding     = (offset_kernel_size - r) // 2
+
+        heads     = dim // dim_head
+        inner_dim = dim_head * heads
+        self.heads            = heads
+        self.downsample_factor = r
+        self.norm = LayerNorm(dim)
+
+        # Lightweight offset network: input features → (2,) offset map at 1/r res
+        self.to_offsets = nn.Sequential(
+            nn.Conv2d(dim, dim, offset_kernel_size,
+                      groups=dim, stride=r, padding=offset_padding),
+            nn.GELU(),
+            nn.Conv2d(dim, 2, 1, bias=False),
+            nn.Tanh(),
+        )
+        self.offset_scale = offset_scale
+
+        self.to_q   = nn.Conv2d(dim, inner_dim, 1, bias=False)
+        self.to_k   = nn.Conv2d(dim, inner_dim, 1, bias=False)
+        self.to_v   = nn.Conv2d(dim, inner_dim, 1, bias=False)
+        self.to_out = nn.Conv2d(inner_dim, dim, 1)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        r  = self.downsample_factor
+        xn = self.norm(x)
+
+        # ── Compute sampling offsets ─────────────────────────────────────────
+        offsets = self.to_offsets(xn) * self.offset_scale   # (B, 2, Hd, Wd)
+        Hd, Wd  = offsets.shape[-2:]
+
+        # Base grid: uniformly covers [-1,1]×[-1,1] in normalised coords
+        # (x/lon axis first, then y/lat axis — matches grid_sample convention)
+        gy = torch.linspace(-1, 1, Hd, device=x.device, dtype=x.dtype)
+        gx = torch.linspace(-1, 1, Wd, device=x.device, dtype=x.dtype)
+        grid_y, grid_x = torch.meshgrid(gy, gx, indexing="ij")   # (Hd, Wd)
+        base = torch.stack([grid_x, grid_y], dim=0).unsqueeze(0)  # (1,2,Hd,Wd)
+
+        # Offsets are in offset-grid pixels; convert to normalised coords
+        off_norm_x = offsets[:, 0] / max(Wd - 1, 1) * 2   # (B, Hd, Wd)
+        off_norm_y = offsets[:, 1] / max(Hd - 1, 1) * 2
+
+        vgrid_x = base[:, 0] + off_norm_x   # (B, Hd, Wd)
+        vgrid_y = base[:, 1] + off_norm_y
+
+        # Periodic lon (x) — wrap to [-1,1]; clamped lat (y)
+        vgrid_x = (vgrid_x + 1) % 2 - 1
+        vgrid_y = vgrid_y.clamp(-1.0, 1.0)
+
+        vgrid = torch.stack([vgrid_x, vgrid_y], dim=-1)  # (B, Hd, Wd, 2)
+
+        # ── Sample K/V features at learned positions ─────────────────────────
+        kv_feats = F.grid_sample(
+            xn, vgrid, mode="bilinear", padding_mode="border", align_corners=True
+        )   # (B, C, Hd, Wd)
+
+        # ── Q/K/V projections ────────────────────────────────────────────────
+        q = self.to_q(xn)       # (B, inner_dim, H,  W)
+        k = self.to_k(kv_feats) # (B, inner_dim, Hd, Wd)
+        v = self.to_v(kv_feats)
+
+        n = self.heads
+        q = rearrange(q, "b (n d) h w -> b n (h w) d", n=n)
+        k = rearrange(k, "b (n d) h w -> b n (h w) d", n=n)
+        v = rearrange(v, "b (n d) h w -> b n (h w) d", n=n)
+
+        dropout_p = self.dropout.p if self.training else 0.0
+        out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
+
+        out = rearrange(out, "b n (h w) d -> b (n d) h w", h=H, w=W)
+        return self.to_out(out)
+
+
+class BlockAttentionResidual(nn.Module):
+    """Inter-block attention residual (Moonshot AI, Attention Residuals, 2025).
+
+    Before each sublayer, gates over all previous depth-block representations
+    plus the current feature map to form the sublayer input. Adapted from the
+    original sequence formulation to (B, C, H, W) spatial features.
+
+    When blocks list is empty (first depth iteration) returns x unchanged.
+    """
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.w = nn.Parameter(torch.randn(dim) * 0.02)
+        self.norm = nn.GroupNorm(1, dim)
+
+    def forward(self, blocks: list, x: torch.Tensor) -> torch.Tensor:
+        if not blocks:
+            return x
+        V = torch.stack(blocks + [x])               # (N+1, B, C, H, W)
+        N1, B, C, H, W = V.shape
+        K = self.norm(V.reshape(N1 * B, C, H, W)).reshape(N1, B, C, H, W)
+        logits = torch.einsum("c,nbchw->nbhw", self.w, K)  # (N+1, B, H, W)
+        h = torch.einsum("nbhw,nbchw->bchw", logits.softmax(0), V)
+        return h
+
+
 class Transformer(nn.Module):
     def __init__(self, dim, *, local_window_size, global_window_size,
                  depth=4, dim_head=32, attn_dropout=0.0, ff_dropout=0.0,
                  use_shifted_windows=False, use_swiglu=False, use_axial=False,
-                 use_grid=False):
+                 use_grid=False, use_deformable=False, use_rope=False,
+                 use_attn_res=False):
         super().__init__()
         FF = FeedForwardSwiGLU if use_swiglu else FeedForward
-        self.use_axial = use_axial
-        self.use_grid  = use_grid
+        self.use_axial       = use_axial
+        self.use_grid        = use_grid
+        self.use_deformable  = use_deformable
+
+        A = lambda t, w: Attention(dim, t, w, dim_head, attn_dropout, use_rope=use_rope)
 
         if use_axial:
-            # Axial design: local → FF → lon-axial → FF → lat-axial → FF
-            # Replaces the shifted/global second attention with full-sequence axial ops.
             self.layers = nn.ModuleList([
                 nn.ModuleList([
-                    Attention(dim, "short", local_window_size, dim_head, attn_dropout),
+                    A("short", local_window_size),
                     FF(dim, dropout=ff_dropout),
                     AxialAttention(dim, "lon", dim_head, attn_dropout),
                     FF(dim, dropout=ff_dropout),
@@ -651,15 +839,34 @@ class Transformer(nn.Module):
                 ])
                 for _ in range(depth)
             ])
-        elif use_grid and use_shifted_windows:
-            # Combined: local → FF → shifted → FF → grid → FF
-            # Shifted windows handle cross-boundary local structure;
-            # grid attention handles global cross-window aggregation.
+        elif use_deformable and use_shifted_windows:
             self.layers = nn.ModuleList([
                 nn.ModuleList([
-                    Attention(dim, "short",   local_window_size, dim_head, attn_dropout),
+                    A("short",   local_window_size),
                     FF(dim, dropout=ff_dropout),
-                    Attention(dim, "shifted", local_window_size, dim_head, attn_dropout),
+                    A("shifted", local_window_size),
+                    FF(dim, dropout=ff_dropout),
+                    DeformableAttention(dim, dim_head=dim_head, dropout=attn_dropout),
+                    FF(dim, dropout=ff_dropout),
+                ])
+                for _ in range(depth)
+            ])
+        elif use_deformable:
+            self.layers = nn.ModuleList([
+                nn.ModuleList([
+                    A("short", local_window_size),
+                    FF(dim, dropout=ff_dropout),
+                    DeformableAttention(dim, dim_head=dim_head, dropout=attn_dropout),
+                    FF(dim, dropout=ff_dropout),
+                ])
+                for _ in range(depth)
+            ])
+        elif use_grid and use_shifted_windows:
+            self.layers = nn.ModuleList([
+                nn.ModuleList([
+                    A("short",   local_window_size),
+                    FF(dim, dropout=ff_dropout),
+                    A("shifted", local_window_size),
                     FF(dim, dropout=ff_dropout),
                     GridAttention(dim, local_window_size, dim_head, attn_dropout),
                     FF(dim, dropout=ff_dropout),
@@ -667,10 +874,9 @@ class Transformer(nn.Module):
                 for _ in range(depth)
             ])
         elif use_grid:
-            # MaxViT-style: local window → FF → dilated grid → FF
             self.layers = nn.ModuleList([
                 nn.ModuleList([
-                    Attention(dim, "short", local_window_size, dim_head, attn_dropout),
+                    A("short", local_window_size),
                     FF(dim, dropout=ff_dropout),
                     GridAttention(dim, local_window_size, dim_head, attn_dropout),
                     FF(dim, dropout=ff_dropout),
@@ -682,39 +888,58 @@ class Transformer(nn.Module):
             second_window    = local_window_size if use_shifted_windows else global_window_size
             self.layers = nn.ModuleList([
                 nn.ModuleList([
-                    Attention(dim, "short",          local_window_size, dim_head, attn_dropout),
+                    A("short",          local_window_size),
                     FF(dim, dropout=ff_dropout),
-                    Attention(dim, second_attn_type, second_window,     dim_head, attn_dropout),
+                    A(second_attn_type, second_window),
                     FF(dim, dropout=ff_dropout),
                 ])
                 for _ in range(depth)
             ])
-        self.use_grid_and_shift = use_grid and use_shifted_windows
+        self.use_grid_and_shift       = use_grid and use_shifted_windows
+        self.use_deformable_and_shift = use_deformable and use_shifted_windows
+        self.use_attn_res = use_attn_res
+        six_sublayer = use_axial or (use_grid and use_shifted_windows) or (use_deformable and use_shifted_windows)
+        n_sublayers = 6 if six_sublayer else 4
+        if use_attn_res:
+            self.attn_res = nn.ModuleList(
+                [BlockAttentionResidual(dim) for _ in range(n_sublayers)]
+            )
 
     def forward(self, x):
-        if self.use_axial:
-            for local_attn, local_ff, lon_attn, lon_ff, lat_attn, lat_ff in self.layers:
-                x = local_attn(x) + x
-                x = local_ff(x) + x
-                x = lon_attn(x) + x
-                x = lon_ff(x) + x
-                x = lat_attn(x) + x
-                x = lat_ff(x) + x
-        elif self.use_grid_and_shift:
-            for local_attn, local_ff, shift_attn, shift_ff, grid_attn, grid_ff in self.layers:
-                x = local_attn(x) + x
-                x = local_ff(x) + x
-                x = shift_attn(x) + x
-                x = shift_ff(x) + x
-                x = grid_attn(x) + x
-                x = grid_ff(x) + x
+        six = self.use_axial or self.use_grid_and_shift or self.use_deformable_and_shift
+        if self.use_attn_res:
+            blocks = []
+            rs = self.attn_res
+            if six:
+                for a, fa, b, fb, c, fc in self.layers:
+                    x = a(rs[0](blocks, x)) + x
+                    x = fa(rs[1](blocks, x)) + x
+                    x = b(rs[2](blocks, x)) + x
+                    x = fb(rs[3](blocks, x)) + x
+                    x = c(rs[4](blocks, x)) + x
+                    x = fc(rs[5](blocks, x)) + x
+                    blocks.append(x)
+            else:
+                for a, fa, b, fb in self.layers:
+                    x = a(rs[0](blocks, x)) + x
+                    x = fa(rs[1](blocks, x)) + x
+                    x = b(rs[2](blocks, x)) + x
+                    x = fb(rs[3](blocks, x)) + x
+                    blocks.append(x)
+        elif six:
+            for a, fa, b, fb, c, fc in self.layers:
+                x = a(x) + x
+                x = fa(x) + x
+                x = b(x) + x
+                x = fb(x) + x
+                x = c(x) + x
+                x = fc(x) + x
         else:
-            # handles use_grid (GridAttention) or shifted/long (Attention) as second pass
-            for short_attn, short_ff, long_attn, long_ff in self.layers:
-                x = short_attn(x) + x
-                x = short_ff(x) + x
-                x = long_attn(x) + x
-                x = long_ff(x) + x
+            for a, fa, b, fb in self.layers:
+                x = a(x) + x
+                x = fa(x) + x
+                x = b(x) + x
+                x = fb(x) + x
         return x
 
 
@@ -750,10 +975,13 @@ class CrossFormer(BaseModel):
         upsample_with_ps: bool = True,
         upsample_with_transformer: bool = False,
         upsample_with_cross_attn: bool = False,
-        use_shifted_windows: bool = False,
-        use_swiglu: bool = False,
+        use_shifted_windows: bool = True,
+        use_swiglu: bool = True,
         use_axial: bool = False,
         use_grid: bool = False,
+        use_deformable: bool = True,
+        use_rope: bool = False,
+        use_attn_res: bool = False,
         num_residuals: int = 4,
         lat_file: str = None,
         padding_conf: dict = None,
@@ -763,16 +991,15 @@ class CrossFormer(BaseModel):
         """
         WXFormer v2 (promoted from v3) — CrossFormer with ablation-validated improvements.
 
-        Defaults recover OG wxformer + PixelShuffle when all flags are False:
-          upsample_with_ps=True   : PixelShuffle decoder (eliminates checkerboard artifacts)
-          num_residuals=4         : residual conv blocks per decoder UpBlock (ablation best)
-          use_swiglu=False        : opt-in SwiGLU feedforward
-          use_shifted_windows=False: opt-in Swin-style cyclic-shift attention
-          use_grid=False          : opt-in MaxViT-style grid attention
-          use_axial=False         : opt-in axial (lon/lat) attention
+        Defaults are the ablation-validated best configuration (-12.6% vs v1 at 5000 steps):
+          upsample_with_ps=True        : PixelShuffle decoder (eliminates checkerboard artifacts)
+          num_residuals=4              : residual conv blocks per decoder UpBlock
+          use_swiglu=True              : SwiGLU feedforward
+          use_shifted_windows=True     : Swin-style cyclic-shift attention
+          use_deformable=True          : deformable attention over H/4 x W/4 K/V grid (new best)
 
-        Best configuration from ablations (9.5% improvement over v1 at 5000 steps):
-          use_swiglu=True, use_shifted_windows=True, use_grid=True
+        To recover OG wxformer + PixelShuffle behaviour, set all flags to False:
+          CrossFormer(use_shifted_windows=False, use_swiglu=False, use_deformable=False)
         """
         super().__init__()
 
@@ -881,6 +1108,9 @@ class CrossFormer(BaseModel):
                 use_swiglu=use_swiglu,
                 use_axial=use_axial,
                 use_grid=use_grid,
+                use_deformable=use_deformable,
+                use_rope=use_rope,
+                use_attn_res=use_attn_res,
             )
             self.layers.append(nn.ModuleList([cross_embed_layer, transformer_layer]))
 
