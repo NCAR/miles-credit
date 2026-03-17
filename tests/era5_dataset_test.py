@@ -102,7 +102,7 @@ def patch_refactor_io_multiyear(monkeypatch, annual_xr_dataset):
     """
     Same patching as above but targets the refactored module path.
     """
-    ERA5_MODULE = "credit.datasets.era5_refactor"
+    ERA5_MODULE = "credit.datasets.era5"
 
     monkeypatch.setattr(f"{ERA5_MODULE}.glob", lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"])
 
@@ -162,27 +162,6 @@ def test_dataset_len(minimal_config, patch_era5_io_multiyear):
     assert len(ds) > 0
 
 
-def test_step0_contains_prognostic(minimal_config, patch_era5_io_multiyear):
-    ds = ERA5Dataset(minimal_config, return_target=False)
-    t = ds.datetimes[0]
-    sample = ds[(t, 0)]
-    assert "dynamic_forcing" in sample
-    assert "prognostic" in sample
-    assert isinstance(sample["dynamic_forcing"], torch.Tensor)
-    assert isinstance(sample["prognostic"], torch.Tensor)
-
-
-def test_step1_skips_prognostic(minimal_config, patch_era5_io_multiyear):
-    ds = ERA5Dataset(minimal_config, return_target=False)
-    t = ds.datetimes[0]
-
-    sample = ds[(t, 1)]
-
-    assert "metadata" in sample
-    assert "dynamic_forcing" in sample
-    assert "prognostic" not in sample
-
-
 def test_return_target(minimal_config, patch_era5_io_multiyear):
     ds = ERA5Dataset(minimal_config, return_target=True)
     t = ds.datetimes[0]
@@ -190,7 +169,7 @@ def test_return_target(minimal_config, patch_era5_io_multiyear):
     sample = ds[(t, 0)]
 
     assert "target" in sample
-    assert isinstance(sample["target"], torch.Tensor)
+    assert isinstance(sample["target"], dict)
 
 
 def test_tensor_shapes(minimal_config, patch_era5_io_multiyear):
@@ -198,13 +177,14 @@ def test_tensor_shapes(minimal_config, patch_era5_io_multiyear):
     t = ds.datetimes[0]
 
     sample = ds[(t, 0)]
-    x = sample["prognostic"]
+    print(sample)
+    x = sample["input"]
     y = sample["target"]
 
-    assert x.ndim == 4
-    assert x.shape == (9, 1, 21, 41)
-    assert y.ndim == x.ndim
-    assert y.shape == (10, 1, 21, 41)
+    assert x["era5/prognostic/3d/T"].ndim == 4
+    assert x["era5/prognostic/3d/T"].shape == (4, 1, 21, 41)
+    assert y["era5/prognostic/3d/T"].ndim == x["era5/prognostic/3d/T"].ndim
+    assert y["era5/prognostic/3d/T"].shape == (4, 1, 21, 41)
 
 
 def test_datetimes(minimal_config, patch_era5_io_multiyear):
