@@ -5,6 +5,8 @@ Refactored ERA5Dataset with nested input/target structure.
 
 Sample structure returned by __getitem__:
 
+.. code-block:: python
+
     {
         "input": {
             "era5/prognostic/3d/T":        tensor,  # (n_levels, 1, lat, lon)
@@ -64,6 +66,8 @@ from glob import glob
 import pandas as pd
 import torch
 import xarray as xr
+from gcsfs import GCSFileSystem
+import zarr
 from torch.utils.data import Dataset
 
 from credit.datasets._file_utils import _find_file, _map_files
@@ -102,9 +106,9 @@ class ERA5Dataset(Dataset):
                 diagnostic: null
 
           start_datetime: "2017-01-01"
-          end_datetime:   "2019-12-31"
-          timestep:       "6h"
-          forecast_len:   0
+          end_datetime: "2019-12-31"
+          timestep: "6h"
+          forecast_len: 1
 
     Assumptions:
         1. A "time" dimension / coordinate is present for non-static fields.
@@ -169,12 +173,15 @@ class ERA5Dataset(Dataset):
         input_data: dict = {}
 
         # Dynamic forcing is loaded at every step
-        self._extract_field("dynamic_forcing", t, input_data)
+        if "dynamic_forcing" in self.var_dict:
+            self._extract_field("dynamic_forcing", t, input_data)
 
         # Prognostic + static are only needed at the initial step
         if i == 0:
-            self._extract_field("static", t, input_data)
-            self._extract_field("prognostic", t, input_data)
+            if "static" in self.var_dict:
+                self._extract_field("static", t, input_data)
+            if "prognostic" in self.var_dict:
+                self._extract_field("prognostic", t, input_data)
 
         sample: dict = {
             "input": input_data,
@@ -297,6 +304,323 @@ class ERA5Dataset(Dataset):
                 arr = ds_t[vname].values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
                 sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
+
+    @staticmethod
+    def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:
+        """Convert a pandas Timestamp to a cftime.datetime.
+
+        Args:
+            ts: Pandas Timestamp to convert.
+            calendar: cftime calendar string read from the dataset
+                (e.g. ``"noleap"``, ``"gregorian"``, ``"proleptic_gregorian"``).
+
+        Returns:
+            cftime.datetime with the specified calendar.
+        """
+        return cftime.datetime(
+            ts.year,
+            ts.month,
+            ts.day,
+            ts.hour,
+            ts.minute,
+            ts.second,
+            calendar=calendar,
+        )
+
+
+class ARCOERA5Dataset(Dataset):
+    """PyTorch Dataset for Google Cloud ARCO ERA5 data with nested input/target structure.
+
+    See module docstring for full description of output format and file naming.
+
+    Example YAML configuration::
+
+        data:
+          source:
+            ARCO_ERA5:
+              level_coord: "hybrid"
+              levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+              variables:
+                prognostic:
+                  vars_3D: ["temperature", "u_component_of_wind", "v_component_of_wind", "specific_humidity"]
+                  vars_2D: ["surface_pressure"]
+                dynamic_forcing:
+                  vars_2D: ["toa_incident_solar_radiation"]
+                static:
+                  vars_2D: ["land_sea_mask"]
+                diagnostic:
+                  vars_2D: ["total_precipitation"]
+
+          start_datetime: "2017-01-01"
+          end_datetime: "2019-12-31"
+          timestep: "6h"
+          forecast_len: 1
+
+    Assumptions:
+        1. A "time" dimension / coordinate is present for non-static fields.
+        2. A level coordinate (name given by ``level_coord``) represents the
+           vertical axis of 3D variables.
+        3. Dimension order: (time, level, latitude, longitude) for 3D;
+           (time, latitude, longitude) for 2D; (latitude, longitude) for static.
+    """
+
+    def __init__(self, data_config: dict, return_target: bool = False) -> None:
+        source_cfg = data_config["source"]["ARCO_ERA5"]
+        self.pressure_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+        self.model_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/model-level-1h-0p25deg.zarr-v1"
+        self.model_lev_vars = [
+            "divergence",
+            "fraction_of_cloud_cover",
+            "geopotential",
+            "ozone_mass_mixing_ratio",
+            "specific_cloud_ice_water_content",
+            "specific_cloud_liquid_water_content",
+            "specific_humidity",
+            "specific_rain_water_content",
+            "specific_snow_water_content",
+            "temperature",
+            "u_component_of_wind",
+            "v_component_of_wind",
+            "vertical_velocity",
+            "vorticity",
+        ]
+        self.source_name: str = "arco_era5"
+        self.level_coord: str = source_cfg["level_coord"]  # hybrid for model levels and level for pressure levels
+        if "levels" not in source_cfg:
+            # Assume all levels are being requested
+            if self.level_coord == "hybrid":
+                self.levels: list[int] = list(range(1, 138))
+            else:
+                self.levels: list[int] = [1, 2, 3, 5, 7, 10, 20, 30, 50, 70] + list(range(100, 1025, 25))
+        else:
+            self.levels: list[int] = source_cfg["levels"]
+        self.return_target: bool = return_target
+        self.static_metadata: dict = {
+            "levels": self.levels,
+            "datetime_fmt": "unix_ns",
+        }
+
+        self.dt = pd.Timedelta(data_config["timestep"])
+        self.num_forecast_steps: int = data_config["forecast_len"]
+
+        self.start_datetime = pd.Timestamp(data_config["start_datetime"])
+        self.end_datetime = pd.Timestamp(data_config["end_datetime"])
+        self.datetimes: pd.DatetimeIndex = self._build_timestamps()
+
+        # file_dict maps field_type → sorted list of (start, end, path) intervals
+        self.var_dict: dict[str, dict[str, list[str]]] = {}
+
+        for field_type, d in source_cfg["variables"].items():
+            self._register_field(field_type, d)
+        # Initialize on first call to __getitem__
+        self.fs = None
+        self.mod_level_store = None
+        self.pres_level_store = None
+
+    # ------------------------------------------------------------------
+    # Dataset interface
+    # ------------------------------------------------------------------
+
+    def __len__(self) -> int:
+        return len(self.datetimes)
+
+    def __getitem__(self, args: tuple) -> dict:
+        """
+        Return a nested input/target sample dict.
+
+        Args:
+            args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
+                or pd.Timestamp) and *i* is the within-sequence step index
+                produced by the sampler. When ``i == 0`` prognostic and static
+                fields are loaded in addition to dynamic forcing.
+
+        Returns:
+            Dict with keys ``"input"``, ``"metadata"``, and optionally
+            ``"target"`` (when ``return_target=True``). Both ``"input"`` and
+            ``"target"`` are dicts of per-variable tensors keyed by
+            ``"arco_era5/{field_type}/{dim}/{varname}"``.
+        """
+        t, i = args
+        t = pd.Timestamp(t)
+        t_target = t + self.dt
+        if self.fs is None:
+            self._init_fs()
+
+        input_data: dict = {}
+
+        # Dynamic forcing is loaded at every step
+        if "dynamic_forcing" in self.var_dict:
+            self._extract_field("dynamic_forcing", t, input_data)
+
+        # Prognostic + static are only needed at the initial step
+        if i == 0:
+            if "static" in self.var_dict:
+                self._extract_field("static", t, input_data)
+            if "prognostic" in self.var_dict:
+                self._extract_field("prognostic", t, input_data)
+
+        sample: dict = {
+            "input": input_data,
+            "metadata": {"input_datetime": int(t.value)},
+        }
+
+        # Optionally load t+1 as the supervised target
+        if self.return_target:
+            target_data: dict = {}
+            for field_type in ("prognostic", "diagnostic"):
+                if field_type in self.var_dict:
+                    self._extract_field(field_type, t_target, target_data)
+
+            sample["target"] = target_data
+            sample["metadata"]["target_datetime"] = int(t_target.value)
+
+        return sample
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+    def _init_fs(self):
+        fs_config = {
+            "cache_timeout": -1,
+            "token": "anon",  # noqa: S106 # nosec B106
+            "access": "read_only",
+            "block_size": 8**20,
+            "asynchronous": True,
+            "skip_instance_cache": True,
+        }
+        self.fs = GCSFileSystem(**fs_config)
+        self.pres_level_store = zarr.storage.FsspecStore(fs=self.fs, path=self.pressure_lev_era5_path)
+        self.mod_level_store = zarr.storage.FsspecStore(fs=self.fs, path=self.model_lev_era5_path)
+
+    def _register_field(self, field_type: str, d: dict | None) -> None:
+        """
+        Validate and register one field type from the config variables block.
+
+        Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
+
+        Args:
+            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            d: Field-type config dict, or ``None`` / null to disable the field.
+
+        Raises:
+            KeyError: If *field_type* is not a recognised field type.
+            ValueError: If *d* defines neither ``vars_3D`` nor ``vars_2D``.
+        """
+        if not isinstance(d, dict):
+            return
+
+        if field_type not in VALID_FIELD_TYPES:
+            raise KeyError(
+                f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
+                f"Valid options are: {sorted(VALID_FIELD_TYPES)}"
+            )
+
+        if not d.get("vars_3D") and not d.get("vars_2D"):
+            raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
+
+        self.var_dict[field_type] = {
+            "vars_3D": d.get("vars_3D") or [],
+            "vars_2D": d.get("vars_2D") or [],
+        }
+
+    def _build_timestamps(self) -> pd.DatetimeIndex:
+        """Return valid initialisation timestamps for the dataset.
+
+        Returns:
+            DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
+            the forecast horizon, at the configured timestep frequency.
+        """
+        return pd.date_range(
+            self.start_datetime,
+            self.end_datetime - self.num_forecast_steps * self.dt,
+            freq=self.dt,
+        )
+
+    def _extract_field(
+        self,
+        field_type: str,
+        t: pd.Timestamp,
+        sample: dict,
+    ) -> None:
+        """
+        Open the dataset for *field_type* at time *t* and populate *sample*.
+
+        Keys written are ``"era5/{field_type}/3d/{varname}"`` for 3D variables
+        and ``"era5/{field_type}/2d/{varname}"`` for 2D variables.
+
+        Args:
+            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            t: Timestamp to select.
+            sample: Dict to write variable tensors into (modified in place).
+                Tensor shapes (no batch dimension):
+
+                - 3D variable: ``(n_levels, 1, lat, lon)``
+                - 2D variable: ``(1, 1, lat, lon)``
+        """
+        vd = self.var_dict[field_type]
+        vars_3D: list[str] = vd["vars_3D"]
+        vars_2D: list[str] = vd["vars_2D"]
+        if self.level_coord == "level":
+            with xr.open_zarr(self.pres_level_store, chunks=None) as ds:
+                # Select the time step; static fields have no time dim
+                if "time" in ds.dims:
+                    if isinstance(ds.time.values[0], cftime.datetime):
+                        calendar = ds.time.values[0].calendar
+                        t_sel = self._to_cftime(t, calendar)
+                    else:
+                        t_sel = t
+                    ds_t = ds.sel(time=t_sel)
+                else:
+                    ds_t = ds
+
+                # 3D variables: (n_levels, lat, lon) → (n_levels, 1, lat, lon)
+                for vname in vars_3D:
+                    arr = ds_t[vname].sel({self.level_coord: self.levels}).values
+                    tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
+                    sample[f"{self.source_name}/{field_type}/3d/{vname}"] = tensor
+
+                # 2D variables: (lat, lon) → (1, 1, lat, lon)
+                for vname in vars_2D:
+                    arr = ds_t[vname].values
+                    tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+                    sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
+        else:
+            with xr.open_zarr(self.mod_level_store, chunks=None) as ds:
+                # Select the time step; static fields have no time dim
+                if "time" in ds.dims:
+                    if isinstance(ds.time.values[0], cftime.datetime):
+                        calendar = ds.time.values[0].calendar
+                        t_sel = self._to_cftime(t, calendar)
+                    else:
+                        t_sel = t
+                    ds_t = ds.sel(time=t_sel)
+                else:
+                    ds_t = ds
+
+                # 3D variables: (n_levels, lat, lon) → (n_levels, 1, lat, lon)
+                for vname in vars_3D:
+                    arr = ds_t[vname].sel({self.level_coord: self.levels}).values
+                    tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
+                    sample[f"{self.source_name}/{field_type}/3d/{vname}"] = tensor
+
+            with xr.open_zarr(self.pres_level_store, chunks=None) as ds:
+                # Select the time step; static fields have no time dim
+                if "time" in ds.dims:
+                    if isinstance(ds.time.values[0], cftime.datetime):
+                        calendar = ds.time.values[0].calendar
+                        t_sel = self._to_cftime(t, calendar)
+                    else:
+                        t_sel = t
+                    ds_t = ds.sel(time=t_sel)
+                else:
+                    ds_t = ds
+                # 2D variables: (lat, lon) → (1, 1, lat, lon)
+                for vname in vars_2D:
+                    arr = ds_t[vname].values
+                    tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+                    sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
 
     @staticmethod
     def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:

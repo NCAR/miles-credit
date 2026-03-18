@@ -25,7 +25,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from credit.datasets.era5 import ERA5Dataset as ERA5Dataset
+from credit.datasets.era5 import ERA5Dataset, ARCOERA5Dataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 
@@ -145,6 +145,37 @@ def minimal_config():
                     "diagnostic": {
                         "vars_2D": ["TP"],
                         "path": "/fake/*.zarr",
+                    },
+                },
+            }
+        },
+    }
+
+
+@pytest.fixture
+def minimal_arco_era5_config():
+    return {
+        "timestep": "6h",
+        "forecast_len": 6,
+        "start_datetime": "2022-12-25",
+        "end_datetime": "2023-01-05",
+        "source": {
+            "ARCO_ERA5": {
+                "level_coord": "level",
+                "levels": [1000, 850],
+                "variables": {
+                    "prognostic": {
+                        "vars_3D": ["temperature"],
+                        "vars_2D": ["surface_pressure"],
+                    },
+                    "dynamic_forcing": {
+                        "vars_2D": ["toa_incident_solar_radiation"],
+                    },
+                    "static": {
+                        "vars_2D": ["land_sea_mask"],
+                    },
+                    "diagnostic": {
+                        "vars_2D": ["total_precipitation"],
                     },
                 },
             }
@@ -389,3 +420,20 @@ def test_refactor_dataloader_default_collate(minimal_config, patch_refactor_io_m
         assert batch["input"]["era5/dynamic_forcing/2d/tsi"].shape == (2, 1, 1, lat, lon)
     if "era5/prognostic/3d/T" in batch["target"]:
         assert batch["target"]["era5/prognostic/3d/T"].shape == (2, n_levels, 1, lat, lon)
+
+
+def test_arco_era5_single_load(minimal_arco_era5_config):
+    arco_ds = ARCOERA5Dataset(minimal_arco_era5_config, return_target=True)
+    sample = arco_ds[("2022-12-31 00:00", 0)]
+    assert isinstance(sample, dict)
+    assert "input" in sample
+    assert "metadata" in sample
+    assert "target" in sample
+    assert sample["input"]["arco_era5/prognostic/3d/temperature"].shape == (
+        len(minimal_arco_era5_config["source"]["ARCO_ERA5"]["levels"]),
+        1,
+        721,
+        1440,
+    )
+    assert sample["target"]["arco_era5/prognostic/3d/temperature"].min() > 200
+    assert ~torch.any(torch.isnan(sample["target"]["arco_era5/prognostic/3d/temperature"]))
