@@ -31,18 +31,12 @@ import xarray as xr
 import os
 
 # ── Defaults ───────────────────────────────────────────────────────────────
-SRC_DEFAULT = (
-    "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/"
-    "b.e21.CREDIT_climate_branch_1980_2014.nc"
-)
-OUT_DEFAULT = (
-    "/glade/derecho/scratch/wchapman/CAMULATOR_FORCING/"
-    "b.e21.CREDIT_climate_cyclic_1yr.nc"
-)
-SRC_START_YEAR = 1980   # first year in the source file
-NSTEPS_YR      = 1460   # 365 days × 4 steps/day  (noleap)
-CLIM_LABEL_YR  = 2000   # year label written into the output time coordinate
-CO2_YEAR_DEF   = 2000   # source year used for the CO2 constant
+SRC_DEFAULT = "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate_branch_1980_2014.nc"
+OUT_DEFAULT = "/glade/derecho/scratch/wchapman/CAMULATOR_FORCING/b.e21.CREDIT_climate_cyclic_1yr.nc"
+SRC_START_YEAR = 1980  # first year in the source file
+NSTEPS_YR = 1460  # 365 days × 4 steps/day  (noleap)
+CLIM_LABEL_YR = 2000  # year label written into the output time coordinate
+CO2_YEAR_DEF = 2000  # source year used for the CO2 constant
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
@@ -54,15 +48,14 @@ def main(src: str, out: str, co2_year: int) -> None:
 
     # Open source file lazily (chunks keep memory manageable for 35 yr × 1° grid)
     ds = xr.open_dataset(src, chunks={"time": NSTEPS_YR})
-    ntot   = ds.sizes["time"]
+    ntot = ds.sizes["time"]
     nyears = ntot // NSTEPS_YR
     print(f"Source: {ntot} steps  →  {nyears} years of {NSTEPS_YR} steps each")
     assert ntot == nyears * NSTEPS_YR, (
-        f"Time dimension {ntot} is not a multiple of {NSTEPS_YR}. "
-        "Check calendar / step count."
+        f"Time dimension {ntot} is not a multiple of {NSTEPS_YR}. Check calendar / step count."
     )
 
-    lat = ds["latitude"].values   # (192,)
+    lat = ds["latitude"].values  # (192,)
     lon = ds["longitude"].values  # (288,)
     nlat, nlon = len(lat), len(lon)
 
@@ -71,17 +64,16 @@ def main(src: str, out: str, co2_year: int) -> None:
     clim = {}
     for var in clim_vars:
         print(f"  Computing climatology for {var} …", end="", flush=True)
-        arr = ds[var].values                                   # (ntot, nlat, nlon)
-        arr_r = arr.reshape(nyears, NSTEPS_YR, nlat, nlon)    # (nyears, 1460, nlat, nlon)
-        clim[var] = arr_r.mean(axis=0).astype(np.float32)     # (1460, nlat, nlon)
+        arr = ds[var].values  # (ntot, nlat, nlon)
+        arr_r = arr.reshape(nyears, NSTEPS_YR, nlat, nlon)  # (nyears, 1460, nlat, nlon)
+        clim[var] = arr_r.mean(axis=0).astype(np.float32)  # (1460, nlat, nlon)
         print(f"  range [{clim[var].min():.4g}, {clim[var].max():.4g}]")
 
     # ── 2. Fixed CO2 constant ─────────────────────────────────────────────
     co2_offset = (co2_year - SRC_START_YEAR) * NSTEPS_YR
     if co2_offset < 0 or co2_offset + NSTEPS_YR > ntot:
         raise ValueError(
-            f"co2_year={co2_year} is outside the source file range "
-            f"{SRC_START_YEAR}–{SRC_START_YEAR + nyears - 1}."
+            f"co2_year={co2_year} is outside the source file range {SRC_START_YEAR}–{SRC_START_YEAR + nyears - 1}."
         )
     co2_slice = ds["co2vmr_3d"].isel(time=slice(co2_offset, co2_offset + NSTEPS_YR)).values
     co2_const = float(np.nanmean(co2_slice))
@@ -101,17 +93,21 @@ def main(src: str, out: str, co2_year: int) -> None:
     # (/glade/campaign).  NETCDF3_64BIT_OFFSET is the most portable format
     # on GLADE; use format='NETCDF4' if you prefer compression.
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    print(f"\nBuilding xarray Dataset …")
+    print("\nBuilding xarray Dataset …")
 
     coords = {
-        "time":      time_index,
-        "latitude":  lat,
+        "time": time_index,
+        "latitude": lat,
         "longitude": lon,
     }
 
     data_vars = {}
-    for var, data in [("SOLIN", clim["SOLIN"]), ("SST", clim["SST"]),
-                      ("ICEFRAC", clim["ICEFRAC"]), ("co2vmr_3d", co2_field)]:
+    for var, data in [
+        ("SOLIN", clim["SOLIN"]),
+        ("SST", clim["SST"]),
+        ("ICEFRAC", clim["ICEFRAC"]),
+        ("co2vmr_3d", co2_field),
+    ]:
         da = xr.DataArray(
             data,
             dims=["time", "latitude", "longitude"],
@@ -149,10 +145,11 @@ def main(src: str, out: str, co2_year: int) -> None:
     ds_out.to_netcdf(
         out,
         format="NETCDF3_64BIT",
-        encoding={v: {"dtype": "float32"} for v in ["SOLIN", "SST", "ICEFRAC",
-                                                      "co2vmr_3d", "LANDFRAC",
-                                                      "LANDM_COSLAT", "PHIS", "z_norm"]
-                  if v in ds_out},
+        encoding={
+            v: {"dtype": "float32"}
+            for v in ["SOLIN", "SST", "ICEFRAC", "co2vmr_3d", "LANDFRAC", "LANDM_COSLAT", "PHIS", "z_norm"]
+            if v in ds_out
+        },
     )
 
     ds.close()
@@ -160,21 +157,22 @@ def main(src: str, out: str, co2_year: int) -> None:
     print(f"Done  →  {out}  ({sz_mb:.0f} MB)")
     print()
     print("Next steps:")
-    print(f"  1. Update camulator_config.yml:")
+    print("  1. Update camulator_config.yml:")
     print(f"       forcing_file: '{out}'")
-    print(f"  2. The server's cesm_to_forcing_ix will auto-detect the single-year")
+    print("  2. The server's cesm_to_forcing_ix will auto-detect the single-year")
     print(f"     file and wrap every model year back to {CLIM_LABEL_YR}.")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--src",      default=SRC_DEFAULT,
-                        help="Source 35-year forcing NC file")
-    parser.add_argument("--out",      default=OUT_DEFAULT,
-                        help="Output climatological NC file")
-    parser.add_argument("--co2_year", type=int, default=CO2_YEAR_DEF,
-                        help=f"Year from which to take the CO2 constant (default {CO2_YEAR_DEF})")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--src", default=SRC_DEFAULT, help="Source 35-year forcing NC file")
+    parser.add_argument("--out", default=OUT_DEFAULT, help="Output climatological NC file")
+    parser.add_argument(
+        "--co2_year",
+        type=int,
+        default=CO2_YEAR_DEF,
+        help=f"Year from which to take the CO2 constant (default {CO2_YEAR_DEF})",
+    )
     args = parser.parse_args()
     main(args.src, args.out, args.co2_year)

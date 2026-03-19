@@ -33,7 +33,6 @@ import torch
 # ---------- #
 # credit
 from credit.output import make_xarray, save_netcdf_increment
-from credit.data import get_forward_data
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -150,12 +149,11 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
 
     ds_physics = xr.open_dataset(conf["data"]["save_loc_physics"])
 
-    P0 = 100000.
-    hyai = torch.tensor(ds_physics['hyai'].values/P0).to(device)[None, :, None, None]
-    hyam = torch.tensor(ds_physics['hyam'].values).to(device)[None, :, None, None]
-    hybi = torch.tensor(ds_physics['hybi'].values).to(device)[None, :, None, None]
-    hybm = torch.tensor(ds_physics['hybm'].values).to(device)[None, :, None, None]
-    
+    P0 = 100000.0
+    hyai = torch.tensor(ds_physics["hyai"].values / P0).to(device)[None, :, None, None]
+    hyam = torch.tensor(ds_physics["hyam"].values).to(device)[None, :, None, None]
+    hybi = torch.tensor(ds_physics["hybi"].values).to(device)[None, :, None, None]
+    hybm = torch.tensor(ds_physics["hybm"].values).to(device)[None, :, None, None]
 
     # Get forcing data subset
     dynamic_ds = forcing_ds_norm[df_vars]
@@ -171,9 +169,9 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
     init_dt = parse_datetime_from_config(conf)
     init_str = init_dt.strftime("%Y-%m-%dT%HZ")
 
-    accessor_state = StateVariableAccessor(conf, tensor_type='state')
-    accessor_input = StateVariableAccessor(conf, tensor_type='input')
-    accessor_output = StateVariableAccessor(conf, tensor_type='output')
+    accessor_state = StateVariableAccessor(conf, tensor_type="state")
+    accessor_input = StateVariableAccessor(conf, tensor_type="input")
+    accessor_output = StateVariableAccessor(conf, tensor_type="output")
 
     # ========================================================================
     # MAIN TIME-STEPPING LOOP
@@ -234,7 +232,7 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
                 # First iteration: initial state already contains forcing
                 model_input = state
 
-            sst = accessor_input.get_state_var(model_input, 'SST')
+            sst = accessor_input.get_state_var(model_input, "SST")
             # torch.save(sst, './sst.pt')
 
             ## once the coupler has run, set the variable: NOTE this needs to be rescaled for our ML model.
@@ -245,7 +243,7 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
             ##  NOTE this needs to be rescaled for our ML model.
             ##  NOTE this needs to be rescaled for our ML model.
             ##  NOTE this needs to be rescaled for our ML model.
-            #accessor_input.set_state_var(model_input, 'SST', new_sst_values)
+            # accessor_input.set_state_var(model_input, 'SST', new_sst_values)
 
             # Run model
             with torch.no_grad():
@@ -254,23 +252,25 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
             # Apply post-processing
             prediction = stepper._apply_postprocessing(prediction, model_input)
 
-            # get all of the variables for coupling: 
+            # get all of the variables for coupling:
             prediction_out = state_transformer.inverse_transform(prediction)
-            Ut = accessor_output.get_state_var(prediction_out, 'U') # U 
-            Vt = accessor_output.get_state_var(prediction_out, 'V') # V
-            Qtot = accessor_output.get_state_var(prediction_out, 'Qtot') # specific humidty
-            Tt = accessor_output.get_state_var(prediction_out, 'TS') # surface temp
-            FSNS = accessor_output.get_state_var(prediction_out, 'FSNS')
-            FSNS /=21600 # back in CAM units [W/m2]
-            FLNS = accessor_output.get_state_var(prediction_out, 'FLNS')  # FLDS≈εσTs{^4}−FLNS  # will have to approximate it. where emissivity in CAM = 1
-            FLNS /=-21600 # back in CAM units [W/m2]
+            Ut = accessor_output.get_state_var(prediction_out, "U")  # U
+            Vt = accessor_output.get_state_var(prediction_out, "V")  # V
+            Qtot = accessor_output.get_state_var(prediction_out, "Qtot")  # specific humidty
+            Tt = accessor_output.get_state_var(prediction_out, "TS")  # surface temp
+            FSNS = accessor_output.get_state_var(prediction_out, "FSNS")
+            FSNS /= 21600  # back in CAM units [W/m2]
+            FLNS = accessor_output.get_state_var(
+                prediction_out, "FLNS"
+            )  # FLDS≈εσTs{^4}−FLNS  # will have to approximate it. where emissivity in CAM = 1
+            FLNS /= -21600  # back in CAM units [W/m2]
 
-            #Pressure model levels:
-            PS = accessor_output.get_state_var(prediction_out, 'PS') #surface pressure 
-            Pmid = hyam*P0 + hybm*PS    #pi(k)=Ai(k)P0+Bi(k)PS
-            Pint = hyai*P0 + hybi*PS    #pi(k)=Ai(k)P0+Bi(k)PS
-            #model levels 
-            
+            # Pressure model levels:
+            PS = accessor_output.get_state_var(prediction_out, "PS")  # surface pressure
+            Pmid = hyam * P0 + hybm * PS  # pi(k)=Ai(k)P0+Bi(k)PS
+            Pint = hyai * P0 + hybi * PS  # pi(k)=Ai(k)P0+Bi(k)PS
+            # model levels
+
             #### save out? ####
             # torch.save(FLNS, './FLNS.pt')
             # torch.save(Ut, './Ut.pt')
@@ -282,7 +282,7 @@ def run_climate_integration(pool: mp.Pool, context: dict, save_append: str = Non
 
             # you can then run the coupler and update the state:
 
-            #accessor_output.set_state_var(state_tensor, 'U', new_u_values)
+            # accessor_output.set_state_var(state_tensor, 'U', new_u_values)
 
             timestep_counter += 1
 
