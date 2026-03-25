@@ -63,18 +63,15 @@ def get_rollout_init_times(conf):
 
     if forecast_conf["type"] == "debugger":
         init_times_str = [
-            "2022-06-30T23:55:06",
-            "2022-07-01T14:55:06",  # NA convective case
-            "2022-12-02T11:55:06",
-            "2022-12-15T23:55:05",  # SA convective case
-            "2022-12-16T11:55:06",  # SA convective case
-        ]
-        rollout_init_times = (
-            [
-                pd.Timestamp("2022-07-01") + pd.Timedelta("30m")
-            ]  # check 30min offset case
-            + [pd.Timestamp(time) for time in init_times_str]
-        )
+                            "2022-05-21T17:55:06", # NA spring case
+                            "2022-06-30T23:55:06", 
+                            "2022-07-01T14:55:06", # NA convective case
+                            "2022-12-02T11:55:06", 
+                            "2022-12-15T23:55:05", #SA convective case
+                            "2022-12-16T11:55:06", #SA convective case
+                         ]
+        rollout_init_times = ([pd.Timestamp("2022-07-01") + pd.Timedelta("30m")] # check 30min offset case
+                              + [pd.Timestamp(time) for time in init_times_str])
         return rollout_init_times
 
     elif forecast_conf["type"] == "standard":
