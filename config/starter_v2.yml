@@ -139,6 +139,7 @@ trainer:
     num_epoch: 5            # epochs per qsub job (checkpoint after each)
     epochs: &epochs 70      # total training target
 
+    use_tensorboard: True
     use_ema: True           # exponential moving average of weights for validation
     ema_decay: 0.9999
 

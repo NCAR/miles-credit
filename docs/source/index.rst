@@ -41,6 +41,7 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    :caption: Training and Inference
 
    Training a Model <Training.md>
+   Monitoring with TensorBoard <tensorboard.md>
    Running Inference <Inference.md>
    Evaluation and Metrics <Evaluation.md>
    Ensemble Training <Ensembles.md>

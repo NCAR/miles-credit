@@ -30,6 +30,11 @@ from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
 from credit.trainers.utils import cleanup
 
+try:
+    from torch.utils.tensorboard import SummaryWriter as _SummaryWriter
+except ImportError:
+    _SummaryWriter = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -174,6 +179,23 @@ class BaseTrainer(ABC):
                 logger.info(f"EMA enabled (decay={ema_decay})")
         else:
             self.ema = None
+
+        # ---- TensorBoard setup ----
+        use_tb = trainer_conf.get("use_tensorboard", False)
+        if use_tb and self.rank == 0:
+            if _SummaryWriter is None:
+                logger.warning(
+                    "use_tensorboard=True but torch.utils.tensorboard is not available. "
+                    "Install tensorboard: pip install tensorboard"
+                )
+                self.tb_writer = None
+            else:
+                tb_dir = os.path.join(self.save_loc, "tensorboard")
+                self.tb_writer = _SummaryWriter(log_dir=tb_dir)
+                logger.info(f"TensorBoard log dir: {tb_dir}")
+                logger.info(f"  View with: tensorboard --logdir {tb_dir}")
+        else:
+            self.tb_writer = None
 
     # ------------------------------------------------------------------
     # Helpers
@@ -423,6 +445,22 @@ class BaseTrainer(ABC):
             else:
                 df.to_csv(log_path, index=False)
 
+            # ---- TensorBoard logging ----
+            if self.tb_writer is not None:
+                for key, vals in results_dict.items():
+                    if key == "epoch" or not vals:
+                        continue
+                    val = vals[-1]
+                    if np.isfinite(val):
+                        # Group train_*/valid_* under "Loss/", "Acc/", etc.; others under "train/"
+                        if key.startswith("train_") or key.startswith("valid_"):
+                            prefix, metric = key.split("_", 1)
+                            tag = f"{metric}/{prefix}"
+                        else:
+                            tag = f"train/{key}"
+                        self.tb_writer.add_scalar(tag, val, epoch)
+                self.tb_writer.flush()
+
             # ---- Save checkpoint ----
             if not trial:
                 self._save_checkpoint(epoch, optimizer, scheduler, scaler)
@@ -458,6 +496,10 @@ class BaseTrainer(ABC):
 
             if self.stop_after_epoch:
                 break
+
+        # Close TensorBoard writer
+        if self.tb_writer is not None:
+            self.tb_writer.close()
 
         # Return best epoch results
         if self.training_metric in results_dict and results_dict[self.training_metric]:

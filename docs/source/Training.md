@@ -174,38 +174,48 @@ number of H100s with 80 Gb of memory.
 
 ---
 
-## Training with the v2 Data Schema (`train_v2.py`)
+## Training with the v2 Data Schema
 
-CREDIT supports a newer nested data schema that separates variables into explicit categories
+CREDIT v2 uses a cleaner nested data schema that separates variables into explicit categories
 (`prognostic`, `diagnostic`, `dynamic_forcing`, `static`) under a named source (e.g., `ERA5`).
-This schema uses a dedicated entry point and trainer type.
+It is the recommended path for new experiments.
+
+### 30-second quickstart
+
+```bash
+# 1. Generate a config from a built-in template
+credit init --grid 0.25deg -o my_experiment.yml   # or --grid 1deg
+
+# 2. Edit save_loc and verify data paths, then train
+credit train -c my_experiment.yml
+
+# 3. Submit to Casper or Derecho instead of running locally
+credit submit --cluster casper  -c my_experiment.yml --gpus 1
+credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 2
+```
+
+`credit submit` generates a PBS script and calls `qsub` automatically.
+Use `--dry-run` to preview the script before submitting.
+
+### Available configs
+
+| Grid | File | Notes |
+|------|------|-------|
+| 0.25° | `config/wxformer_025deg_6hr_v2.yml` | Full-res ERA5 pressure-level, 13 levels |
+| 1° | `config/wxformer_1dg_6hr_v2.yml` | ERA5 model-level, good for development |
+| starter | `config/starter_v2.yml` | Minimal template with `USER SETTINGS` comments |
 
 ### Key differences from v1
 
 | Feature | v1 (`train.py`) | v2 (`train_v2.py`) |
 |---|---|---|
-| Entry point | `applications/train.py` | `applications/train_v2.py` |
+| CLI | `credit_train -c config.yml` | `credit train -c config.yml` |
 | Trainer type | `era5` | `era5-v2` |
 | Data config key | flat `variables`, `surface_variables`, etc. | nested `data.source.ERA5.variables.{prognostic,...}` |
 | `forecast_len` semantics | `0` means 1 step | `1` means 1 step |
 | Batch sampler | legacy `ERA5Dataset` | `MultiSourceDataset` + `DistributedMultiStepBatchSampler` |
 
-### Quick start
-
-Use the provided starter config as a template:
-
-```bash
-cp config/starter_v2.yml config/my_experiment.yml
-# Edit save_loc and date ranges, then:
-torchrun --standalone --nnodes=1 --nproc-per-node=1 \
-    applications/train_v2.py -c config/my_experiment.yml
-```
-
-The starter config (`config/starter_v2.yml`) is pre-filled for 1-degree ERA5 model-level data
-with a CrossFormer architecture. The sections users typically need to change are marked
-with `USER SETTINGS` comments.
-
-### Trainer configuration for v2
+### Trainer configuration
 
 Set `trainer.type: era5-v2` in your config. The `mode` field works the same as v1:
 
@@ -216,6 +226,7 @@ trainer:
     train_batch_size: 8     # per-GPU; total = batch_size × n_gpus
     num_epoch: 5            # epochs per job submission
     epochs: &epochs 70      # total training target
+    use_tensorboard: True   # write TensorBoard logs to save_loc/tensorboard/
     use_ema: True           # recommended: EMA shadow weights for checkpointing
     ema_decay: 0.9999
     use_scheduler: True
@@ -226,21 +237,35 @@ trainer:
         min_lr: 1.0e-5
 ```
 
-### Submitting to Casper (PBS)
-
-Use `scripts/casper_v2.sh` for single-node Casper jobs. It uses `torchrun` internally
-and supports an optional `NGPUS` override (defaults to 1):
+When `use_tensorboard: True`, metrics are written to `<save_loc>/tensorboard/` after each epoch.
+Launch the viewer from any machine with access to the filesystem:
 
 ```bash
-# Single GPU
-CONFIG=config/starter_v2.yml qsub scripts/casper_v2.sh
-
-# Four GPUs on one node
-NGPUS=4 CONFIG=config/starter_v2.yml qsub scripts/casper_v2.sh
+tensorboard --logdir /glade/derecho/scratch/$USER/my_run/tensorboard
 ```
 
-The script requests one A100 80 GB node by default (`gpu_type=a100_80gb`). Edit the
-`#PBS -l select=...` line if you need a different GPU type or more CPUs.
+See [Monitoring with TensorBoard](tensorboard.md) for port-forwarding instructions for Casper and Derecho.
+
+### Job submission
+
+The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`:
+
+```bash
+# Casper: single A100 80 GB, 4 GPUs, 12 hour wall time
+credit submit --cluster casper -c config.yml --gpus 4 --walltime 12:00:00
+
+# Derecho: 2 nodes × 4 GPUs = 8 GPUs total
+credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2
+
+# Preview the script without submitting
+credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2 --dry-run
+
+# Override account and queue
+credit submit --cluster derecho -c config.yml --account NAML0001 --queue preempt --gpus 4
+```
+
+All resource defaults (CPUs, memory, GPU type, queue) are pre-set per cluster and can be
+overridden individually. See `credit submit --help` for the full option list.
 
 ### Resuming training
 

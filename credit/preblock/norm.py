@@ -12,9 +12,13 @@ Variables absent from the mean/std file (e.g. static masks, land_sea_CI_mask)
 are passed through unchanged.
 """
 
+import logging
+
 import torch
 import torch.nn as nn
 import xarray as xr
+
+logger = logging.getLogger(__name__)
 
 
 class ERA5Normalizer(nn.Module):
@@ -38,12 +42,20 @@ class ERA5Normalizer(nn.Module):
 
         self.mean_ds = xr.open_dataset(data_conf["mean_path"]).load()
         self.std_ds = xr.open_dataset(data_conf["std_path"]).load()
+        self._warned: set = set()  # suppress repeated per-variable warnings
 
     def _stats(
         self, varname: str, dim: str, device: torch.device, dtype: torch.dtype
     ):
-        """Return (mean, std) broadcast-ready tensors, or (None, None) if variable not in file."""
-        if varname not in self.mean_ds:
+        """Return (mean, std) broadcast-ready tensors, or (None, None) if variable not in both files."""
+        if varname not in self.mean_ds or varname not in self.std_ds:
+            if varname in self.mean_ds and varname not in self.std_ds and varname not in self._warned:
+                logger.warning(
+                    "Variable '%s' found in mean file but missing from std file — "
+                    "skipping normalization for this variable.",
+                    varname,
+                )
+                self._warned.add(varname)
             return None, None
 
         if dim == "3d":

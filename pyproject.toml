@@ -48,7 +48,8 @@ dependencies = [
     "metpy",
     "setuptools_scm",
     "setuptools",
-    "s3fs"
+    "s3fs",
+    "tensorboard"
 ]
 
 [project.optional-dependencies]
@@ -75,6 +76,15 @@ packages = ["credit.applications", "credit", "credit.models", "credit.models.wxf
 version_file = "credit/_version.py"
 
 [project.scripts]
+# Unified CLI (recommended)
+credit = "credit.cli:main"
+
+# V2 entry points
+credit_train_v2 = "credit.applications.train_v2:main_cli"
+credit_rollout_realtime_v2 = "credit.applications.rollout_realtime_v2:main"
+credit_rollout_to_netcdf_v2 = "credit.applications.rollout_to_netcdf_v2:main"
+
+# Legacy v1 entry points
 credit_train = "credit.applications.train:main_cli"
 credit_rollout_realtime = "credit.applications.rollout_realtime:main_cli"
 credit_gfs_init = "credit.applications.gfs_init:main"

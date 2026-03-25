@@ -203,6 +203,35 @@ def main(rank, world_size, conf, backend=None, trial=False):
         # denorm requires v1 inverse-transform which doesn't apply to v2 normalized tensors
         conf["model"]["post_conf"]["tracer_fixer"]["denorm"] = False
 
+    # If tracer_fixer is active, inject channel indices for the v2 output layout.
+    # The v1 parser normally computes this; train_v2.py skips the parser.
+    # v2 output order: prognostic/3d (each var × n_levels), prognostic/2d, diagnostic/2d
+    post_conf = conf.get("model", {}).get("post_conf", {})
+    if post_conf.get("activate") and post_conf.get("tracer_fixer", {}).get("activate"):
+        src = conf["data"]["source"]["ERA5"]
+        n_levels = len(src.get("levels", []))
+        prog = src["variables"].get("prognostic") or {}
+        diag = src["variables"].get("diagnostic") or {}
+        vars_3d = prog.get("vars_3D", [])
+        vars_2d = prog.get("vars_2D", [])
+        diag_2d = diag.get("vars_2D", [])
+        output_vars = []
+        for v in vars_3d:
+            output_vars.extend([v] * n_levels)
+        output_vars.extend(vars_2d)
+        output_vars.extend(diag_2d)
+        tracer_names = post_conf["tracer_fixer"].get("tracer_name", [])
+        tracer_thres = post_conf["tracer_fixer"].get("tracer_thres", [])
+        thres_dict = dict(zip(tracer_names, tracer_thres))
+        inds, matched_thres = [], []
+        for i, v in enumerate(output_vars):
+            if v in thres_dict:
+                inds.append(i)
+                matched_thres.append(thres_dict[v])
+        conf["model"]["post_conf"]["tracer_fixer"]["tracer_inds"] = inds
+        conf["model"]["post_conf"]["tracer_fixer"]["tracer_thres"] = matched_thres
+        conf["model"]["post_conf"]["tracer_fixer"]["denorm"] = False  # inverse transform uses v1 schema
+
     # Model
     m = load_model(conf)
     m.to(device)

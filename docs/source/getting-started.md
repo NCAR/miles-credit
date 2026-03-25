@@ -55,5 +55,29 @@ more space by adding `export XDG_CACHE_HOME="/glade/work/$USER/.cache"` to your 
 See <project:installation.md> for detailed instructions on building CREDIT and its
 dependencies from source or for building CREDIT on the Derecho supercomputer.
 
+## Quick start with the `credit` CLI
+
+After installation, the `credit` command is your single entrypoint for everything:
+
+```bash
+# Generate a ready-to-use config (0.25° or 1° ERA5)
+credit init --grid 0.25deg -o my_experiment.yml
+
+# Train on the current node (single GPU)
+credit train -c my_experiment.yml
+
+# Submit a batch job to Casper or Derecho
+credit submit --cluster casper  -c my_experiment.yml --gpus 1
+credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 2
+
+# Run a realtime forecast
+credit realtime -c my_experiment.yml --init-time 2024-01-15T00 --steps 40
+
+# See all commands
+credit --help
+```
+
+Use `--dry-run` with `credit submit` to preview the PBS script before submitting.
+
 ## Running a pretrained model
 See <project:Inference.md> for more details on how to run one of the pretrained CREDIT models.
