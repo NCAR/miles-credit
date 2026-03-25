@@ -99,7 +99,8 @@ def minimal_config():
                     "diagnostic": {
                         "vars_2D": ["TP"],
                         "path": "/fake/*.zarr",
-                }},
+                    },
+                },
             }
         },
     }

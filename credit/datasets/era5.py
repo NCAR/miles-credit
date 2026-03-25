@@ -68,7 +68,7 @@ class ERA5Dataset(Dataset):
         self.var_dict = {}
         self.variable_meta = self._build_var_metadata(config)
 
-        for field_type, d in config["source"][self.source_name]['variables'].items():
+        for field_type, d in config["source"][self.source_name]["variables"].items():
             if field_type not in VALID_FIELD_TYPES:
                 raise KeyError(
                     f"Unknown field_type '{field_type}' in config['source']['{self.source_name}']. "
@@ -126,8 +126,7 @@ class ERA5Dataset(Dataset):
         t, i = args
         t = pd.Timestamp(t)
         t_target = t + self.dt
-        
-        
+
         # always load dynamic forcing
         self._open_ds_extract_fields("dynamic_forcing", t, return_data)
 
@@ -135,7 +134,7 @@ class ERA5Dataset(Dataset):
         if i == 0:
             self._open_ds_extract_fields("static", t, return_data)
             self._open_ds_extract_fields("prognostic", t, return_data)
-        
+
         # load t+1 if training
         if self.return_target:
             for key in ("prognostic", "diagnostic"):
@@ -143,9 +142,9 @@ class ERA5Dataset(Dataset):
                     self._open_ds_extract_fields(key, t_target, return_data, is_target=True)
             self._pop_and_merge_targets(return_data)
             return_data["metadata"]["target_datetime"] = int(t_target.value)
-            
+
         return_data["metadata"]["input_datetime"] = int(t.value)
-        
+
         return return_data
 
     def _open_ds_extract_fields(self, field_type, t, return_data, is_target=False):
@@ -178,9 +177,9 @@ class ERA5Dataset(Dataset):
                         return_data["target_prognostic"] = torch.tensor(data_np).float()
                     elif field_type == "diagnostic":
                         return_data["target_diagnostic"] = torch.tensor(data_np).float()
-                    
+
                 else:
-                    return_data[field_type] = torch.tensor(data_np).float()                
+                    return_data[field_type] = torch.tensor(data_np).float()
 
     def _reshape_and_concat(self, ds_3D, ds_2D):
         """
@@ -193,7 +192,11 @@ class ERA5Dataset(Dataset):
         data_list = []
 
         if ds_3D:
-            data_3D = ds_3D.sel({self.level_coord: self.levels}).to_array().stack({"level_var": ["variable", self.level_coord]})
+            data_3D = (
+                ds_3D.sel({self.level_coord: self.levels})
+                .to_array()
+                .stack({"level_var": ["variable", self.level_coord]})
+            )
             data_3D = np.expand_dims(data_3D.values.transpose(2, 0, 1), axis=1)
             data_list.append(data_3D)
 
@@ -203,32 +206,32 @@ class ERA5Dataset(Dataset):
             data_list.append(data_2D)
 
         combined_data = np.concatenate(data_list, axis=0)
-        
+
         return combined_data
 
     def _build_var_metadata(self, config):
-        """ Build variable order metadata """
-        
+        """Build variable order metadata"""
+
         var_meta = {}
-        source_cfg = config['source'][self.source_name]
+        source_cfg = config["source"][self.source_name]
         levels = source_cfg.get("levels", [])
         variables = source_cfg.get("variables", {}) or {}
-    
+
         for field_type, spec in variables.items():
             if spec is None:
                 continue
-    
+
             var_meta[field_type] = []
-    
+
             # Expand 3D variables over levels
-            for v in (spec.get("vars_3D") or []):
+            for v in spec.get("vars_3D") or []:
                 for lev in levels:
                     var_meta[field_type].append(f"{self.source_name}_{v}_{lev}")
-    
+
             # Add 2D variables directly
-            for v in (spec.get("vars_2D") or []):
+            for v in spec.get("vars_2D") or []:
                 var_meta[field_type].append(f"{self.source_name}_{v}")
-    
+
         return var_meta
 
     def _convert_cf_time(self, ts):
