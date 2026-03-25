@@ -5,6 +5,7 @@ import logging
 import torch
 from credit.models.stochastic_decomposition_layer import StochasticDecompositionLayer
 
+
 class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
     """
     CrossFormer variant with pixel-wise noise injection in both encoder and decoder stages.
@@ -23,9 +24,9 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
         noise_latent_dim=128,
         encoder_noise_factor=0.235,
         decoder_noise_factor=0.235,
-        encoder_noise=False, # Set False by default to match paper's decoder-only focus
-        freeze=False,        # False for joint fine-tuning transfer learning
-        correlated=False,    # Added correlated toggle
+        encoder_noise=False,  # Set False by default to match paper's decoder-only focus
+        freeze=False,  # False for joint fine-tuning transfer learning
+        correlated=False,  # Added correlated toggle
         enable_sdl=True,
         **kwargs,
     ):
@@ -35,10 +36,10 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
         super().__init__(**kwargs)
         self.noise_latent_dim = noise_latent_dim
         self.enable_sdl = enable_sdl
-        self.correlated = correlated # Save the flag
+        self.correlated = correlated  # Save the flag
 
         # Extract the channel dimensions from the config (defaults to standard sizes)
-        dims = kwargs.get('dim', [32, 64, 128, 256])
+        dims = kwargs.get("dim", [32, 64, 128, 256])
 
         # Freeze weights if using pre-trained model
         if freeze:
@@ -46,7 +47,7 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
                 param.requires_grad = False
 
         self.encoder_noise = encoder_noise
-        
+
         # If SDL is disabled, force noise factors to 0.0
         if not self.enable_sdl:
             encoder_noise_factor = 0.0
@@ -56,16 +57,28 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
             # Encoder noise injection layers
             self.encoder_noise_layers = nn.ModuleList(
                 [
-                    StochasticDecompositionLayer(self.noise_latent_dim, dims[0], encoder_noise_factor),
-                    StochasticDecompositionLayer(self.noise_latent_dim, dims[1], encoder_noise_factor),
-                    StochasticDecompositionLayer(self.noise_latent_dim, dims[2], encoder_noise_factor),
+                    StochasticDecompositionLayer(
+                        self.noise_latent_dim, dims[0], encoder_noise_factor
+                    ),
+                    StochasticDecompositionLayer(
+                        self.noise_latent_dim, dims[1], encoder_noise_factor
+                    ),
+                    StochasticDecompositionLayer(
+                        self.noise_latent_dim, dims[2], encoder_noise_factor
+                    ),
                 ]
             )
 
         # Decoder noise injection layers (reverse order: 2, 1, 0)
-        self.noise_inject1 = StochasticDecompositionLayer(self.noise_latent_dim, dims[2], decoder_noise_factor)
-        self.noise_inject2 = StochasticDecompositionLayer(self.noise_latent_dim, dims[1], decoder_noise_factor)
-        self.noise_inject3 = StochasticDecompositionLayer(self.noise_latent_dim, dims[0], decoder_noise_factor)
+        self.noise_inject1 = StochasticDecompositionLayer(
+            self.noise_latent_dim, dims[2], decoder_noise_factor
+        )
+        self.noise_inject2 = StochasticDecompositionLayer(
+            self.noise_latent_dim, dims[1], decoder_noise_factor
+        )
+        self.noise_inject3 = StochasticDecompositionLayer(
+            self.noise_latent_dim, dims[0], decoder_noise_factor
+        )
 
         # --- THE FIX: FREEZE NOISE LAYERS IF NOT USING THEM ---
         # If SDL is disabled, freeze all noise parameters so DDP ignores them
@@ -86,7 +99,9 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
 
         # If correlated, sample ONCE for the whole network
         if self.correlated:
-            shared_noise = torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+            shared_noise = torch.randn(
+                batch_size, self.noise_latent_dim, device=x.device
+            )
 
         x_copy = None
         if self.use_post_block:
@@ -95,12 +110,17 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
         if self.use_padding:
             x = self.padding_opt.pad(x)
 
-
         # Feature-wise Linear Modulation for time embedding
-        alpha_beta = self.film(forcing_t_delta.view(-1, 1).expand(batch_size, 1) / 3600.)  # [batch, 2*dim]
+        alpha_beta = self.film(
+            forcing_t_delta.view(-1, 1).expand(batch_size, 1) / 3600.0
+        )  # [batch, 2*dim]
         alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
-        alpha = alpha.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
-        beta = beta.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        alpha = alpha.view(
+            batch_size, self.input_only_channels, 1, 1, 1
+        )  # [batch, dim, 1, 1, 1]
+        beta = beta.view(
+            batch_size, self.input_only_channels, 1, 1, 1
+        )  # [batch, dim, 1, 1, 1]
         x_era5 = alpha * x_era5 + beta
 
         x = torch.concat([x, x_era5], dim=1)
@@ -121,25 +141,41 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
             x = transformer(x)
             if self.encoder_noise and k < len(self.layers) - 1:
                 # Use shared_noise if correlated, else sample fresh
-                current_noise = shared_noise if self.correlated else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+                current_noise = (
+                    shared_noise
+                    if self.correlated
+                    else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+                )
                 x = self.encoder_noise_layers[k](x, current_noise)
             encodings.append(x)
 
         x = self.up_block1(x)
         # Use shared_noise if correlated, else sample fresh
-        current_noise = shared_noise if self.correlated else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        current_noise = (
+            shared_noise
+            if self.correlated
+            else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        )
         x = self.noise_inject1(x, current_noise)
         x = torch.cat([x, encodings[2]], dim=1)
 
         x = self.up_block2(x)
         # Use shared_noise if correlated, else sample fresh
-        current_noise = shared_noise if self.correlated else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        current_noise = (
+            shared_noise
+            if self.correlated
+            else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        )
         x = self.noise_inject2(x, current_noise)
         x = torch.cat([x, encodings[1]], dim=1)
 
         x = self.up_block3(x)
         # Use shared_noise if correlated, else sample fresh
-        current_noise = shared_noise if self.correlated else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        current_noise = (
+            shared_noise
+            if self.correlated
+            else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        )
         x = self.noise_inject3(x, current_noise)
         x = torch.cat([x, encodings[0]], dim=1)
 
@@ -160,6 +196,7 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
             x = self.postblock(x)
 
         return x
+
 
 if __name__ == "__main__":
     # Set up the logger
@@ -210,17 +247,17 @@ if __name__ == "__main__":
     crossformer_config["noise_latent_dim"] = 128
     crossformer_config["encoder_noise_factor"] = 0.235
     crossformer_config["decoder_noise_factor"] = 0.235
-    crossformer_config["encoder_noise"] = False # Defaulting to paper implementation
-    crossformer_config["freeze"] = False  
+    crossformer_config["encoder_noise"] = False  # Defaulting to paper implementation
+    crossformer_config["freeze"] = False
     crossformer_config["correlated"] = False  # Added flag to test block
 
     logger.info("Testing the regional ensemble model with noise injection")
 
     ensemble_model = RegionalCrossFormerWithNoise(**crossformer_config).to("cuda")
 
-    x = torch.randn(5, 71, 1, 192, 288).to("cuda")  
-    x_era5 = torch.randn(5, 3, 1, 192, 288).to("cuda")  
-    forcing_t_delta = torch.randn(5).to("cuda")  
+    x = torch.randn(5, 71, 1, 192, 288).to("cuda")
+    x_era5 = torch.randn(5, 3, 1, 192, 288).to("cuda")
+    forcing_t_delta = torch.randn(5).to("cuda")
 
     output = ensemble_model(x, x_era5, forcing_t_delta)
     print("Output shape:", output.shape)

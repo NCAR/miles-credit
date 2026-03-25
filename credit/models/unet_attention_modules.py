@@ -44,8 +44,18 @@ def load_unet_attention(attention_type, out_chans, reduction=32, spatial_kernel=
     elif attention_type == "mixed":
         return EfficientMixedAttention(out_chans, reduction, spatial_kernel)
     else:
-        available_types = ["coordinate", "eca", "spatial", "scse_optimized", "scse_standard", "mixed", "none"]
-        raise ValueError(f"Unknown attention_type '{attention_type}'. Available options: {available_types}")
+        available_types = [
+            "coordinate",
+            "eca",
+            "spatial",
+            "scse_optimized",
+            "scse_standard",
+            "mixed",
+            "none",
+        ]
+        raise ValueError(
+            f"Unknown attention_type '{attention_type}'. Available options: {available_types}"
+        )
 
 
 # Efficient Channel Attention (ECA) - Lightweight and effective for high channels
@@ -53,7 +63,9 @@ class ECABlock(nn.Module):
     def __init__(self, channels, gamma=2, b=1):
         super().__init__()
         # Adaptive kernel size based on channel dimension
-        k = int(abs((torch.log2(torch.tensor(channels, dtype=torch.float32)) + b) / gamma))
+        k = int(
+            abs((torch.log2(torch.tensor(channels, dtype=torch.float32)) + b) / gamma)
+        )
         k = k if k % 2 else k + 1
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.conv = nn.Conv1d(1, 1, kernel_size=k, padding=k // 2, bias=False)
@@ -111,7 +123,9 @@ class CoordinateAttention(nn.Module):
 class LightSpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
         super().__init__()
-        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2, bias=False)
+        self.conv = nn.Conv2d(
+            2, 1, kernel_size=kernel_size, padding=kernel_size // 2, bias=False
+        )
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -142,13 +156,17 @@ class SCSEAttention(nn.Module):
         if use_depthwise:
             # Use depthwise separable convolution for efficiency
             self.sse = nn.Sequential(
-                nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),  # Depthwise
+                nn.Conv2d(
+                    channels, channels, kernel_size=1, groups=channels, bias=False
+                ),  # Depthwise
                 nn.Conv2d(channels, 1, kernel_size=1, bias=False),  # Pointwise
                 nn.Sigmoid(),
             )
         else:
             # Standard spatial attention but with efficiency improvements
-            self.sse = nn.Sequential(nn.Conv2d(channels, 1, kernel_size=1, bias=False), nn.Sigmoid())
+            self.sse = nn.Sequential(
+                nn.Conv2d(channels, 1, kernel_size=1, bias=False), nn.Sigmoid()
+            )
 
     def forward(self, x):
         # Channel attention

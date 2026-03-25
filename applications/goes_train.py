@@ -25,8 +25,10 @@ from credit.losses import load_loss
 
 from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
-from credit.parser import credit_main_parser, training_data_check
-from credit.datasets.goes_load_dataset_and_dataloader import load_dataset, load_dataloader
+from credit.datasets.goes_load_dataset_and_dataloader import (
+    load_dataset,
+    load_dataloader,
+)
 
 from credit.metrics import LatWeightedMetrics
 from credit.metrics_downscaling import UnWeightedMetrics
@@ -74,7 +76,7 @@ def load_model_states_and_optimizer(conf, model, device):
     amp = conf["trainer"]["amp"]
 
     # load weights / states flags
-    
+
     load_weights = (
         False
         if "load_weights" not in conf["trainer"]
@@ -98,7 +100,12 @@ def load_model_states_and_optimizer(conf, model, device):
 
     # if all loads are true (multi-epoch training), check for checkpoint and set behavior based on existence of checkpoint
     # otherwise, revert to designated behavior
-    if load_weights and load_optimizer_conf and load_scaler_conf and load_scheduler_conf:
+    if (
+        load_weights
+        and load_optimizer_conf
+        and load_scaler_conf
+        and load_scheduler_conf
+    ):
         if conf["trainer"]["mode"] == "fsdp":
             checkpoint_path = os.path.join(save_loc, "model_checkpoint.pt")
         else:
@@ -106,12 +113,13 @@ def load_model_states_and_optimizer(conf, model, device):
 
         checkpoint_exists = os.path.exists(checkpoint_path)
         if not checkpoint_exists:
-            logging.warning(f"checkpoint does not exist at {checkpoint_path}, training new model!")
+            logging.warning(
+                f"checkpoint does not exist at {checkpoint_path}, training new model!"
+            )
             load_weights = False
             load_optimizer_conf = False
             load_scaler_conf = False
             load_scheduler_conf = False
-
 
     #  Load an optimizer, gradient scaler, and learning rate scheduler, the optimizer must come after wrapping model using FSDP
     if not load_weights:  # Loaded after loading model weights when reloading
@@ -309,10 +317,13 @@ def main(rank, world_size, conf, backend=None, trial=False):
     if torch.cuda.is_available():
         torch.cuda.set_device(rank % torch.cuda.device_count())
 
-
     # Load the dataset using the provided dataset_type
-    train_dataset = load_dataset(conf, rank=rank, world_size=world_size, device=device, is_train=True)
-    valid_dataset = load_dataset(conf, rank=rank, world_size=world_size, device=device, is_train=False)
+    train_dataset = load_dataset(
+        conf, rank=rank, world_size=world_size, device=device, is_train=True
+    )
+    valid_dataset = load_dataset(
+        conf, rank=rank, world_size=world_size, device=device, is_train=False
+    )
 
     # Load the dataloader
     train_loader = load_dataloader(
@@ -484,7 +495,7 @@ def main_cli():
     # Load the configuration and get the relevant variables
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
-    
+
     if debug or conf["model"]["type"] == "debugger" or conf.get("debug", False):
         print("setting logging to debug")
         ch.setLevel(logging.DEBUG)
@@ -509,8 +520,11 @@ def main_cli():
     if launch:
         # Where does this script live?
         script_path = Path(__file__).absolute()
-        if (conf["pbs"]["queue"] == "casper" or
-            conf["pbs"]["queue"] == "develop" and conf["pbs"]["ngpus"] == 1):
+        if (
+            conf["pbs"]["queue"] == "casper"
+            or conf["pbs"]["queue"] == "develop"
+            and conf["pbs"]["ngpus"] == 1
+        ):
             logging.info("Launching to PBS on Casper or Derecho develop")
             launch_script(config, script_path)
         else:

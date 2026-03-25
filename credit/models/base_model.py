@@ -65,7 +65,9 @@ class BaseModel(nn.Module):
             ckpt = os.path.join(save_loc, "checkpoint.pt")
 
         if not os.path.isfile(ckpt):
-            raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
+            raise ValueError(
+                "No saved checkpoint exists. You must train a model first. Exiting."
+            )
 
         logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
@@ -79,7 +81,9 @@ class BaseModel(nn.Module):
 
         model_class = cls(**conf["model"])
         if "model_state_dict" in checkpoint.keys():
-            load_msg = model_class.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            load_msg = model_class.load_state_dict(
+                checkpoint["model_state_dict"], strict=False
+            )
         else:
             load_msg = model_class.load_state_dict(checkpoint, strict=False)
         load_state_dict_error_handler(load_msg)
@@ -91,14 +95,13 @@ class BaseModel(nn.Module):
         conf = copy.deepcopy(conf)
         save_loc = os.path.expandvars(conf["save_loc"])
 
-
-        if conf['trainer']['mode'] == 'fsdp':
-            fsdp = True 
-        else: 
+        if conf["trainer"]["mode"] == "fsdp":
+            fsdp = True
+        else:
             fsdp = False
 
         ckpt = os.path.join(save_loc, model_name)
-        
+
         if not os.path.isfile(ckpt):
             raise ValueError(
                 f"No saved checkpoint {ckpt} exists. You must train a model first. Exiting."
@@ -117,8 +120,7 @@ class BaseModel(nn.Module):
         model_class = cls(**conf["model"])
 
         load_msg = model_class.load_state_dict(
-            checkpoint if fsdp else checkpoint["model_state_dict"],
-            strict=False
+            checkpoint if fsdp else checkpoint["model_state_dict"], strict=False
         )
         load_state_dict_error_handler(load_msg)
 

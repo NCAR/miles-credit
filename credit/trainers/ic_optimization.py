@@ -72,7 +72,9 @@ def save_netcdf_increment(
         height_end = sig.parameters["height_ending"].default
         if "interp_pressure" in conf["predict"].keys():
             if "surface_geopotential_var" in conf["predict"]["interp_pressure"].keys():
-                surface_geopotential_var = conf["predict"]["interp_pressure"]["surface_geopotential_var"]
+                surface_geopotential_var = conf["predict"]["interp_pressure"][
+                    "surface_geopotential_var"
+                ]
             else:
                 surface_geopotential_var = "Z_GDS4_SFC"
             if "pres_ending" in conf["predict"]["interp_pressure"]:
@@ -97,7 +99,9 @@ def save_netcdf_increment(
         # If conf['predict']['save_vars'] provided --> drop useless vars
         if "save_vars" in conf["predict"]:
             if len(conf["predict"]["save_vars"]) > 0:
-                ds_merged = drop_var_from_dataset(ds_merged, conf["predict"]["save_vars"])
+                ds_merged = drop_var_from_dataset(
+                    ds_merged, conf["predict"]["save_vars"]
+                )
 
         # when there's no metafile --> meta_data = False
         if meta_data is not False:
@@ -110,18 +114,24 @@ def save_netcdf_increment(
                     else:
                         # use time.encoding for datetime variables/coords
                         for metadata_time in meta_data["time"]:
-                            ds_merged.time.encoding[metadata_time] = meta_data["time"][metadata_time]
+                            ds_merged.time.encoding[metadata_time] = meta_data["time"][
+                                metadata_time
+                            ]
                 if "interp_pressure" in conf["predict"].keys():
                     if pres_end in var:
                         var_short = var.strip(pres_end)
                         if var_short in meta_data.keys():
                             ds_merged[var].attrs.update(meta_data[var_short])
-                            ds_merged[var].attrs["long_name"] += " (interpolated to isobaric levels)"
+                            ds_merged[var].attrs["long_name"] += (
+                                " (interpolated to isobaric levels)"
+                            )
                     elif height_end in var:
                         var_short = var.strip(height_end)
                         if var_short in meta_data.keys():
                             ds_merged[var].attrs.update(meta_data[var_short])
-                            ds_merged[var].attrs["long_name"] += " (interpolated to constant height AGL levels)"
+                            ds_merged[var].attrs["long_name"] += (
+                                " (interpolated to constant height AGL levels)"
+                            )
         encoding_dict = {}
         if "ua_var_encoding" in conf["predict"].keys():
             for ua_var in conf["data"]["variables"]:
@@ -131,10 +141,14 @@ def save_netcdf_increment(
                 encoding_dict[surface_var] = conf["predict"]["surface_var_encoding"]
         if "pressure_var_encoding" in conf["predict"].keys():
             for pres_var in conf["data"]["variables"]:
-                encoding_dict[pres_var + pres_end] = conf["predict"]["pressure_var_encoding"]
+                encoding_dict[pres_var + pres_end] = conf["predict"][
+                    "pressure_var_encoding"
+                ]
         if "height_var_encoding" in conf["predict"].keys():
             for height_var in conf["data"]["variables"]:
-                encoding_dict[height_var + height_end] = conf["predict"]["height_var_encoding"]
+                encoding_dict[height_var + height_end] = conf["predict"][
+                    "height_var_encoding"
+                ]
         # Use Dask to write the dataset in parallel
         ds_merged.to_netcdf(unique_filename, mode="w", encoding=encoding_dict)
 
@@ -171,7 +185,9 @@ class ForecastProcessor:
             y_pred = self.state_transformer.inverse_transform(y_pred)
 
             # Calculate correct datetime for current forecast
-            utc_datetimes = date_time.utcfromtimestamp(datetimes) + timedelta(hours=self.lead_time_periods)
+            utc_datetimes = date_time.utcfromtimestamp(datetimes) + timedelta(
+                hours=self.lead_time_periods
+            )
 
             # Convert to xarray and handle results
             upper_air_list, single_level_list = [], []
@@ -220,7 +236,10 @@ class TimeStepper:
 
     def __next__(self):
         """Advance forecast steps until forecast_len + 1."""
-        if not self._active or self.dataset.forecast_step_counts[0] > self.dataset.forecast_len:
+        if (
+            not self._active
+            or self.dataset.forecast_step_counts[0] > self.dataset.forecast_len
+        ):
             raise StopIteration
 
         return self.dataset[0]  # __getitem__ uses forecast_step_counts[0] internally
@@ -258,7 +277,9 @@ class Trainer(BaseTrainer):
         logger.info("Loading a multi-step trainer class")
 
     # Training function.
-    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
+    def train_one_epoch(
+        self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics
+    ):
         """
         Trains the model for one epoch.
 
@@ -315,7 +336,10 @@ class Trainer(BaseTrainer):
         ), f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
+        if (
+            conf["trainer"]["use_scheduler"]
+            and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda"
+        ):
             scheduler.step()
 
         # ------------------------------------------------------- #
@@ -365,7 +389,9 @@ class Trainer(BaseTrainer):
                 dataset_batches_per_epoch = len(trainloader)
             # Use the user-given number if not larger than the dataset
             batches_per_epoch = (
-                batches_per_epoch if 0 < batches_per_epoch < dataset_batches_per_epoch else dataset_batches_per_epoch
+                batches_per_epoch
+                if 0 < batches_per_epoch < dataset_batches_per_epoch
+                else dataset_batches_per_epoch
             )
 
         # batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
@@ -398,14 +424,20 @@ class Trainer(BaseTrainer):
 
             # Create optimizer for x0 (this is what we're optimizing)
             optimizer = torch.optim.AdamW(
-                [x0], lr=conf["trainer"]["learning_rate"], weight_decay=conf["trainer"]["weight_decay"]
+                [x0],
+                lr=conf["trainer"]["learning_rate"],
+                weight_decay=conf["trainer"]["weight_decay"],
             )
 
-            init_datetimes = date_time.utcfromtimestamp(batch["datetime"][0].item()).strftime("%Y-%m-%dT%HZ")
+            init_datetimes = date_time.utcfromtimestamp(
+                batch["datetime"][0].item()
+            ).strftime("%Y-%m-%dT%HZ")
             save_datetimes = init_datetimes
 
             # Progressive window optimization
-            current_window_size = conf["trainer"]["starting_window_size"]  # Start with 2 days as per paper
+            current_window_size = conf["trainer"][
+                "starting_window_size"
+            ]  # Start with 2 days as per paper
             max_window_size = conf["data"]["forecast_len"] + 1
             batch_iterations = conf["trainer"]["batch_iterations"]
             window_size = conf["trainer"]["window_size"]
@@ -425,7 +457,9 @@ class Trainer(BaseTrainer):
             # )
 
             batch_group_generator = tqdm.tqdm(
-                range(num_windows * batch_iterations), total=num_windows * batch_iterations, leave=True
+                range(num_windows * batch_iterations),
+                total=num_windows * batch_iterations,
+                leave=True,
             )
             datetime = batch["datetime"]
 
@@ -458,9 +492,15 @@ class Trainer(BaseTrainer):
 
                         # Add forcing and static variables
                         if "x_forcing_static" in batch:
-                            x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
+                            x_forcing_batch = (
+                                batch["x_forcing_static"]
+                                .to(self.device)
+                                .permute(0, 2, 1, 3, 4)
+                            )
                             if ensemble_size > 1:
-                                x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                                x_forcing_batch = torch.repeat_interleave(
+                                    x_forcing_batch, ensemble_size, 0
+                                )
                             if precision == "float64":
                                 x_forcing_batch = x_forcing_batch.double()
                             x = torch.cat((x, x_forcing_batch), dim=1)
@@ -499,12 +539,18 @@ class Trainer(BaseTrainer):
                         if forecast_step <= current_window_size:
                             # Load target data
                             if "y_surf" in batch:
-                                y = concat_and_reshape(batch["y"], batch["y_surf"]).to(self.device)
+                                y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
+                                    self.device
+                                )
                             else:
                                 y = reshape_only(batch["y"]).to(self.device)
 
                             if "y_diag" in batch:
-                                y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
+                                y_diag_batch = (
+                                    batch["y_diag"]
+                                    .to(self.device)
+                                    .permute(0, 2, 1, 3, 4)
+                                )
                                 y = torch.cat((y, y_diag_batch), dim=1)
 
                             if flag_clamp:
@@ -527,7 +573,10 @@ class Trainer(BaseTrainer):
                             accum_log(logs, {"loss": loss.item()})
 
                         # Check if we should stop
-                        stop_forecast = batch["stop_forecast"].item() or forecast_step >= current_window_size
+                        stop_forecast = (
+                            batch["stop_forecast"].item()
+                            or forecast_step >= current_window_size
+                        )
                         if stop_forecast:
                             break
 
@@ -546,7 +595,9 @@ class Trainer(BaseTrainer):
                                 x_detach = x[:, :-static_dim_size, 1:, ...]  # .detach()
 
                             if "y_diag" in batch:
-                                x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...]], dim=2)
+                                x = torch.cat(
+                                    [x_detach, y_pred[:, :-varnum_diag, ...]], dim=2
+                                )
                             else:
                                 x = torch.cat([x_detach, y_pred], dim=2)
 
@@ -626,7 +677,12 @@ class Trainer(BaseTrainer):
                     scheduler.step()
 
                     # Save the metrics df
-                    df.to_csv(os.path.join(f"{save_loc}", f"training_log_{datetime[0].item()}.csv"), index=False)
+                    df.to_csv(
+                        os.path.join(
+                            f"{save_loc}", f"training_log_{datetime[0].item()}.csv"
+                        ),
+                        index=False,
+                    )
 
                 # Expand window size (following paper's X-day (3-day) increments)
                 current_window_size += window_size
@@ -638,7 +694,9 @@ class Trainer(BaseTrainer):
                         param_group["lr"] *= 0.5  # Reduce learning rate as in paper
 
             # Save x optimized first
-            _ = result_processor.process(x0.detach().cpu(), datetime[0], save_datetimes, "optimized")
+            _ = result_processor.process(
+                x0.detach().cpu(), datetime[0], save_datetimes, "optimized"
+            )
 
             # Now save the original state for convenience
             dl.reset(idx=idx)
@@ -649,7 +707,9 @@ class Trainer(BaseTrainer):
             else:
                 x0 = reshape_only(batch["x"]).to(self.device)
 
-            _ = result_processor.process(x0.cpu(), datetime[0], save_datetimes, "initial")
+            _ = result_processor.process(
+                x0.cpu(), datetime[0], save_datetimes, "initial"
+            )
 
         #  Shutdown the progbar
         batch_group_generator.close()
@@ -688,9 +748,15 @@ class Trainer(BaseTrainer):
         )
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
-        history_len = conf["data"]["valid_history_len"] if "valid_history_len" in conf["data"] else conf["history_len"]
+        history_len = (
+            conf["data"]["valid_history_len"]
+            if "valid_history_len" in conf["data"]
+            else conf["history_len"]
+        )
         forecast_len = (
-            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
+            conf["data"]["valid_forecast_len"]
+            if "valid_forecast_len" in conf["data"]
+            else conf["forecast_len"]
         )
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
@@ -750,7 +816,9 @@ class Trainer(BaseTrainer):
                     opt_energy = GlobalEnergyFixer(post_conf)
         # ====================================================== #
 
-        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
+        batch_group_generator = tqdm.tqdm(
+            range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True
+        )
 
         stop_forecast = False
         dl = cycle(valid_loader)
@@ -769,7 +837,9 @@ class Trainer(BaseTrainer):
                             # combine x and x_surf
                             # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
                             # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                            x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)  # .float()
+                            x = concat_and_reshape(batch["x"], batch["x_surf"]).to(
+                                self.device
+                            )  # .float()
                         else:
                             # no x_surf
                             x = reshape_only(batch["x"]).to(self.device)  # .float()
@@ -784,11 +854,17 @@ class Trainer(BaseTrainer):
                     # add forcing and static variables (regardless of fcst hours)
                     if "x_forcing_static" in batch:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
+                        x_forcing_batch = (
+                            batch["x_forcing_static"]
+                            .to(self.device)
+                            .permute(0, 2, 1, 3, 4)
+                        )  # .float()
                         # ---------------- ensemble ----------------- #
                         # ensemble x_forcing_batch for concat. see above for explanation of code
                         if ensemble_size > 1:
-                            x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
+                            x_forcing_batch = torch.repeat_interleave(
+                                x_forcing_batch, ensemble_size, 0
+                            )
                         # --------------------------------------------- #
 
                         # concat on var dimension
@@ -838,13 +914,17 @@ class Trainer(BaseTrainer):
                         # ----------------------------------------------------------------------- #
                         # creating `y` tensor for loss compute
                         if "y_surf" in batch:
-                            y = concat_and_reshape(batch["y"], batch["y_surf"]).to(self.device)
+                            y = concat_and_reshape(batch["y"], batch["y_surf"]).to(
+                                self.device
+                            )
                         else:
                             y = reshape_only(batch["y"]).to(self.device)
 
                         if "y_diag" in batch:
                             # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                            y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)  # .float()
+                            y_diag_batch = (
+                                batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
+                            )  # .float()
 
                             # concat on var dimension
                             y = torch.cat((y, y_diag_batch), dim=1)
@@ -863,10 +943,14 @@ class Trainer(BaseTrainer):
                         metrics_dict = metrics(y_pred.float(), y.float())
 
                         for name, value in metrics_dict.items():
-                            value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                            value = torch.Tensor([value]).to(
+                                self.device, non_blocking=True
+                            )
 
                             if distributed:
-                                dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                                dist.all_reduce(
+                                    value, dist.ReduceOp.AVG, async_op=False
+                                )
 
                             results_dict[f"valid_{name}"].append(value[0].item())
 

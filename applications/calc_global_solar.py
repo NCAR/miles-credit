@@ -12,8 +12,12 @@ def main():
     rank = comm.Get_rank()
     size = comm.Get_size()
     parser = argparse.ArgumentParser(description="Calculate global solar radiation")
-    parser.add_argument("-s", "--start", type=str, default="2000-01-01", help="Start date (inclusive)")
-    parser.add_argument("-e", "--end", type=str, default="2000-12-31 23:00", help="End date (inclusive")
+    parser.add_argument(
+        "-s", "--start", type=str, default="2000-01-01", help="Start date (inclusive)"
+    )
+    parser.add_argument(
+        "-e", "--end", type=str, default="2000-12-31 23:00", help="End date (inclusive"
+    )
     parser.add_argument("-t", "--step", type=str, default="1h", help="Step frequency")
     parser.add_argument("-u", "--sub", type=str, default="10Min", help="Sub Frequency")
     parser.add_argument(
@@ -30,8 +34,12 @@ def main():
         default="Z_GDS4_SFC",
         help="Geopotential height variable.",
     )
-    parser.add_argument("-o", "--output", type=str, required=True, help="Output directory")
-    parser.add_argument("-z", "--zarr", action="store_true", help="Output as zarr files.")
+    parser.add_argument(
+        "-o", "--output", type=str, required=True, help="Output directory"
+    )
+    parser.add_argument(
+        "-z", "--zarr", action="store_true", help="Output as zarr files."
+    )
     args = parser.parse_args()
     grid_points_sub = None
     start_date_ts = pd.Timestamp(args.start)
@@ -51,12 +59,19 @@ def main():
                 attrs={"long_name": "total solar irradiance", "units": "J m-2"},
             )
             heights = static_ds[args.geo].values / 9.81
-            grid_points = np.vstack([lon_grid.ravel(), lat_grid.ravel(), heights.ravel()]).T
-            split_indices = np.round(np.linspace(0, grid_points.shape[0], size + 1)).astype(int)
+            grid_points = np.vstack(
+                [lon_grid.ravel(), lat_grid.ravel(), heights.ravel()]
+            ).T
+            split_indices = np.round(
+                np.linspace(0, grid_points.shape[0], size + 1)
+            ).astype(int)
             grid_points_sub = [
-                grid_points[split_indices[s] : split_indices[s + 1]] for s in range(split_indices.size - 1)
+                grid_points[split_indices[s] : split_indices[s + 1]]
+                for s in range(split_indices.size - 1)
             ]
-        toa_radiation = get_toa_radiation(args.start, args.end, step_freq=args.step, sub_freq=args.sub)
+        toa_radiation = get_toa_radiation(
+            args.start, args.end, step_freq=args.step, sub_freq=args.sub
+        )
     toa_radiation = comm.bcast(toa_radiation, root=0)
     rank_points = comm.scatter(grid_points_sub, root=0)
     print(rank_points.shape)
@@ -86,9 +101,13 @@ def main():
                 tag=rank,
             )
         else:
-            solar_grid.loc[:, solar_point["latitude"], solar_point["longitude"]] = solar_point["tsi"].values
+            solar_grid.loc[:, solar_point["latitude"], solar_point["longitude"]] = (
+                solar_point["tsi"].values
+            )
             for sr in range(1, size):
-                other_point = np.empty(2 + solar_grid.shape[0], dtype=solar_point["tsi"].dtype)
+                other_point = np.empty(
+                    2 + solar_grid.shape[0], dtype=solar_point["tsi"].dtype
+                )
                 comm.Recv(other_point, source=sr, tag=sr)
                 solar_grid.loc[:, other_point[0], other_point[1]] = other_point[2:]
 

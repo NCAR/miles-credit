@@ -22,14 +22,13 @@ from credit.datasets.goes_load_dataset_and_dataloader import load_verification_d
 
 
 def check_forecast_dir(forecast_save_loc):
-    """ simple check to ensure only directories with timestamps as names are in the save_loc """
-    lengths = [
-            len(p.name)
-            for p in Path(forecast_save_loc).iterdir()
-            if p.is_dir()
-    ]
+    """simple check to ensure only directories with timestamps as names are in the save_loc"""
+    lengths = [len(p.name) for p in Path(forecast_save_loc).iterdir() if p.is_dir()]
     if not all([l == lengths[0] for l in lengths]):
-        raise ValueError(f"subdirectories of {forecast_save_loc} may not be named correctly (need to all be time strings)")
+        raise ValueError(
+            f"subdirectories of {forecast_save_loc} may not be named correctly (need to all be time strings)"
+        )
+
 
 if __name__ == "__main__":
     description = "evaluate ensemble rollouts"
@@ -85,20 +84,25 @@ if __name__ == "__main__":
 
     # get save location for rollout
     forecast_save_loc = conf.get("save_forecast", None)
-    if not forecast_save_loc: # save_loc not specified by config
-        logging.warning("save_forecast not specified in eval config, using forecast_save_loc in model config")
+    if not forecast_save_loc:  # save_loc not specified by config
+        logging.warning(
+            "save_forecast not specified in eval config, using forecast_save_loc in model config"
+        )
         forecast_save_loc = model_conf["predict"].get("save_forecast", None)
-        if not forecast_save_loc: # save_loc not specified by model config, use default
+        if not forecast_save_loc:  # save_loc not specified by model config, use default
             forecast_save_loc = os.path.expandvars(join(conf["save_loc"], "forecasts"))
-            logging.warning("save_forecast not specified in model config, using default location- defined by model save_loc")
+            logging.warning(
+                "save_forecast not specified in model config, using default location- defined by model save_loc"
+            )
     logging.info(f"evaluating forecast at {forecast_save_loc}")
-    
+
     conf["save_filename"] = conf.get("save_filename", "verif.parquet")
     # check that we are not overwriting an existing eval file
     eval_save_loc = join(forecast_save_loc, conf["save_filename"])
-    assert not os.path.isfile(eval_save_loc), (
-            f'''{conf["save_filename"]} results already exists at {eval_save_loc}, aborting. 
-            Move or rename the existing file to run this script''')
+    assert not os.path.isfile(
+        eval_save_loc
+    ), f"""{conf["save_filename"]} results already exists at {eval_save_loc}, aborting. 
+            Move or rename the existing file to run this script"""
     check_forecast_dir(forecast_save_loc)
 
     # load the verification
@@ -128,24 +132,34 @@ if __name__ == "__main__":
         for dir in dirs:
             # run evaluation, needs to output a result dict. all entries need to be a type with addition
             result = verification(dir, p, conf, model_conf, dataset, climo)
- 
+
             # reformat, save in memory, and save to parquet
-            result.sort(key= lambda x: x["forecast_step"]) # sort of forecast steps are in order
+            result.sort(
+                key=lambda x: x["forecast_step"]
+            )  # sort of forecast steps are in order
             df = pd.DataFrame(result)
             df.attrs["init_times"] = dir.name
             df_dict[dir.name] = df
 
             # save to forecast_save_loc with a timestamp in the name
-            intermediate_eval_save_loc = join(forecast_save_loc, f"verif_{dir.name}.parquet")
-            df.to_parquet(intermediate_eval_save_loc) # parquet keeps all the dtypes, don't have to split up np arrays in the entries
-            logging.info(f"saved verification of {dir.name} to {intermediate_eval_save_loc}")
+            intermediate_eval_save_loc = join(
+                forecast_save_loc, f"verif_{dir.name}.parquet"
+            )
+            df.to_parquet(
+                intermediate_eval_save_loc
+            )  # parquet keeps all the dtypes, don't have to split up np arrays in the entries
+            logging.info(
+                f"saved verification of {dir.name} to {intermediate_eval_save_loc}"
+            )
 
     # take average of all verifications and save
     df = sum(df_dict.values()) / len(df_dict.values())
     df.attrs["init_times"] = list(df_dict.keys())
 
-    result.sort(key= lambda x: x["forecast_step"]) # sort of forecast hours are in order
-    df.to_parquet(eval_save_loc) # parquet keeps all the dtypes, don't have to split up np arrays in the entries
+    result.sort(key=lambda x: x["forecast_step"])  # sort of forecast hours are in order
+    df.to_parquet(
+        eval_save_loc
+    )  # parquet keeps all the dtypes, don't have to split up np arrays in the entries
     logging.info(f"saved verification to {eval_save_loc}")
 
     # Ensure all processes are finished

@@ -34,15 +34,15 @@ def setup(rank, world_size, mode):
 
 
 def main(rank, world_size, conf, frames=1, height=640, width=1280):
-
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"])
 
-
     model_conf = conf["model"]
-    channels = (model_conf.get("levels", 0) * model_conf.get("channels", 0)
-                + model_conf.get("surface_channels", 0)
-                + model_conf.get("input_only_channels", 0))
+    channels = (
+        model_conf.get("levels", 0) * model_conf.get("channels", 0)
+        + model_conf.get("surface_channels", 0)
+        + model_conf.get("input_only_channels", 0)
+    )
     frames = model_conf["frames"]
     height = model_conf["image_height"]
     width = model_conf["image_width"]
@@ -61,16 +61,23 @@ def main(rank, world_size, conf, frames=1, height=640, width=1280):
 
     model.to(device)
     print(f"num params {sum(p.numel() for p in model.parameters()):,d}")
-    print(f"num trainable params {sum(p.numel() for p in model.parameters() if p.requires_grad):,d}")
+    print(
+        f"num trainable params {sum(p.numel() for p in model.parameters() if p.requires_grad):,d}"
+    )
 
     # Wrap if using DDP or FSDP
-    if conf["trainer"]["mode"] in ['fsdp', 'ddp']:
+    if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         model = distributed_model_wrapper(conf, model, device)
 
     try:
-        summary(model, input_size=[(1, 6, frames, height, width), 
-                                   (1,model_conf["input_only_channels"], frames, height, width),
-                                   (1,)] )
+        summary(
+            model,
+            input_size=[
+                (1, 6, frames, height, width),
+                (1, model_conf["input_only_channels"], frames, height, width),
+                (1,),
+            ],
+        )
     except RuntimeError as e:
         if "CUDA" in str(e):
             logging.warning(f"CUDA out of memory error occurred: {e}.")
@@ -177,7 +184,7 @@ if __name__ == "__main__":
 
     seed = 1000 if "seed" not in conf else conf["seed"]
     seed_everything(seed)
-    
+
     conf["trainer"]["mode"] = None
 
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:

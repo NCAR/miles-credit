@@ -71,6 +71,9 @@ class SpectralLoss2D(torch.nn.Module):
             target_fft_mean = torch.mean(target_fft_abs, dim=(fft_dim - 1))
 
         # Compute MSE, no sqrt according to FouRKS paper/ repo
-        loss = torch.square(out_fft_mean[..., self.wavenum_init :] - target_fft_mean[..., self.wavenum_init :])
+        loss = torch.square(
+            out_fft_mean[..., self.wavenum_init :]
+            - target_fft_mean[..., self.wavenum_init :]
+        )
         loss = loss.mean()
         return loss.to(device=device, dtype=dtype)

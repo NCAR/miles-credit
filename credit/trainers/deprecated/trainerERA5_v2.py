@@ -124,7 +124,7 @@ class Trainer(BaseTrainer):
         dl = cycle(trainloader)
         for i in batch_group_generator:
             batch = next(dl)  # Get the next batch from the iterator
-            
+
             # training log
             logs = {}
             # loss
@@ -175,13 +175,15 @@ class Trainer(BaseTrainer):
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
                     y = torch.clamp(y, min=clamp_min, max=clamp_max)
-                
+
                 # --------------------------------------------- #
                 # ensemble
-                # copies each sample in the batch ensemble_size number of times. 
+                # copies each sample in the batch ensemble_size number of times.
                 # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                 # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
-                if conf["trainer"].get("ensemble_size", 1) > 1: # gets value if set, otherwise is 1
+                if (
+                    conf["trainer"].get("ensemble_size", 1) > 1
+                ):  # gets value if set, otherwise is 1
                     x = torch.repeat_interleave(x, conf["trainer"]["ensemble_size"], 0)
 
                 # single step predict
@@ -276,10 +278,12 @@ class Trainer(BaseTrainer):
 
             if distributed:
                 torch.distributed.barrier()
-                
+
             if grad_max_norm is not None:
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=grad_max_norm)
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=grad_max_norm
+                )
 
             scaler.step(optimizer)
             scaler.update()
@@ -471,13 +475,15 @@ class Trainer(BaseTrainer):
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
                     y = torch.clamp(y, min=clamp_min, max=clamp_max)
-                
+
                 # --------------------------------------------- #
                 # ensemble
-                # copies each sample in the batch ensemble_size number of times. 
+                # copies each sample in the batch ensemble_size number of times.
                 # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                 # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
-                if conf["trainer"].get("ensemble_size", 1) > 1: # gets value if set, otherwise is 1
+                if (
+                    conf["trainer"].get("ensemble_size", 1) > 1
+                ):  # gets value if set, otherwise is 1
                     x = torch.repeat_interleave(x, conf["trainer"]["ensemble_size"], 0)
 
                 y_pred = self.model(x)

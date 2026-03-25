@@ -238,8 +238,7 @@ def worker(
             int(
                 historical_ERA5_images.time[0]
                 .astype("datetime64[s]")
-                .values
-                .astype(int)
+                .values.astype(int)
             ),
             int(target_ERA5_images.time[0].astype("datetime64[s]").values.astype(int)),
         ]

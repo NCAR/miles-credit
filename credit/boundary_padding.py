@@ -5,11 +5,12 @@ import torch.nn.functional as F
 def load_padding(padding_conf):
     if padding_conf["mode"] == "zeros":
         return TensorZeroPadding(**padding_conf)
-    
+
     return TensorPadding(**padding_conf)
 
+
 class TensorZeroPadding:
-    def __init__(self, pad_lat=(20,20), pad_lon=(20,20), **kwargs):
+    def __init__(self, pad_lat=(20, 20), pad_lon=(20, 20), **kwargs):
         self.pad_lat = pad_lat
         self.pad_lon = pad_lon
         self.padding = pad_lon + pad_lat
@@ -17,12 +18,17 @@ class TensorZeroPadding:
     def pad(self, x):
         x = torch.nn.functional.pad(x, self.padding, "constant", 0.0)
         return x
-    
+
     def unpad(self, x):
         """
         padded dim must be last two dim lat, lon
         """
-        return x[..., self.pad_lat[0] : -self.pad_lat[1] or None, self.pad_lon[0] : - self.pad_lon[1] or None]
+        return x[
+            ...,
+            self.pad_lat[0] : -self.pad_lat[1] or None,
+            self.pad_lon[0] : -self.pad_lon[1] or None,
+        ]
+
 
 class TensorPadding:
     def __init__(self, mode="earth", pad_lat=(40, 40), pad_lon=(40, 40), **kwargs):

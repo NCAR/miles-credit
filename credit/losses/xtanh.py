@@ -28,4 +28,8 @@ class XTanhLoss(torch.nn.Module):
             torch.Tensor: X-Tanh loss value.
         """
         ey_t = y_t - y_prime_t + 1e-12
-        return torch.mean(ey_t * torch.tanh(ey_t)) if self.reduction == "mean" else ey_t * torch.tanh(ey_t)
+        return (
+            torch.mean(ey_t * torch.tanh(ey_t))
+            if self.reduction == "mean"
+            else ey_t * torch.tanh(ey_t)
+        )

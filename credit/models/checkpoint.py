@@ -35,6 +35,7 @@ def get_file_extension(file_path):
     _, ext = os.path.splitext(file_path)
     return ext
 
+
 def copy_checkpoint(checkpoint_file_path: str, number) -> None:
     """
     Copy every checkpoint afterit's saved.
@@ -44,11 +45,11 @@ def copy_checkpoint(checkpoint_file_path: str, number) -> None:
         checkpoint_file_path (str): path to the checkpoint file.
         use_safetensors (bool): whether to use safetensors to save the checkpoint.
     """
-    
+
     exty = get_file_extension(checkpoint_file_path)
-    
-    checkpoint_file_path_new = f'{checkpoint_file_path}{number:05}{exty}'
-    
+
+    checkpoint_file_path_new = f"{checkpoint_file_path}{number:05}{exty}"
+
     shutil.copy(checkpoint_file_path, checkpoint_file_path_new)
 
 
