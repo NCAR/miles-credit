@@ -212,7 +212,7 @@ model:
     # map boundary padding
     padding_conf:
         activate: True
-        mode: earth
+        mode: "earth"
         pad_lat: [37, 38]
         pad_lon: [76, 76]
 
