@@ -1,0 +1,45 @@
+data:
+    source:
+        ERA5:
+            level_coord: "level"
+            levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+            variables:
+                prognostic:
+                    vars_3D: ['U','V','T','Q']
+                    vars_2D: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
+                    path: '/glade/derecho/scratch/cbecker/test_CREDIT_data/era5_local_testing_data_onedeg_2021.nc'
+                    filename_time_format: "%Y"
+
+                diagnostic: null
+
+                dynamic_forcing:
+                    vars_2D: ['tsi']
+                    path: '/glade/derecho/scratch/cbecker/test_CREDIT_data/era5_local_testing_data_onedeg_2021.nc'
+                    filename_time_format: "%Y"
+
+                static:
+#                    vars_2D: ['Z_GDS4_SFC','LSM']
+                    vars_2D: ['LSM']
+                    path: '/glade/derecho/scratch/cbecker/test_CREDIT_data/LSM_static_variables_ERA5_zhght_ONEDEG.nc'
+                    # single file — filename_time_format not needed
+
+        MRMS:
+            mode: "local" # Supports "local" or "remote" for streaming
+            region: "CONUS"
+            variables:
+                prognostic:                         # input at step 0 + target
+                    vars_2D:
+                        - "MultiSensor_QPE_01H_Pass2_00.00"
+                        - "MultiSensor_QPE_06H_Pass2_00.00"
+                    path: "/glade/derecho/scratch/cbecker/test_CREDIT_data/MRMS_*.nc"
+                    filename_time_format: "%Y%m%d-%H%M%S"
+                diagnostic: null
+                dynamic_forcing: null
+            extent: [ -130, -60, 20, 55 ]
+
+    start_datetime: "2021-06-01"
+    end_datetime: "2021-06-04"
+    timestep: "6h"
+    forecast_len: 1
+
+

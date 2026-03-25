@@ -48,6 +48,7 @@ dependencies = [
     "metpy",
     "setuptools_scm",
     "setuptools",
+    "s3fs"
 ]
 
 [project.optional-dependencies]
