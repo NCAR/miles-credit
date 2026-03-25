@@ -4,7 +4,7 @@ import numpy as np
 import xarray as xr
 
 
-class Regrid(nn.Module):
+class Regridder(nn.Module):
     """
     Regridding layer using weights file provide by the ESMF library.
     Args:

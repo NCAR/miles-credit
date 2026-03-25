@@ -2,7 +2,7 @@ import torch.nn as nn
 from bridgescaler import load_scaler
 
 
-class Scaler(nn.Module):
+class BridgeScaleTransformer(nn.Module):
     """
     Scaling layer using a bridgescaler object. Supports transform and its inverse.
     """
