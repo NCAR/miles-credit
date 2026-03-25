@@ -1,11 +1,11 @@
-from credit.models.crossformer_regional_invertable import CrossFormer
+from credit.models.crossformer_regional_invertable import RegionalCrossFormerInvertable
 import torch.nn.functional as F
 import torch.nn as nn
 import logging
 import torch
+from credit.models.stochastic_decomposition_layer import StochasticDecompositionLayer
 
-
-class CrossFormerWithNoise(CrossFormer):
+class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
     """
     CrossFormer variant with pixel-wise noise injection in both encoder and decoder stages.
 
@@ -15,31 +15,30 @@ class CrossFormerWithNoise(CrossFormer):
         decoder_noise_factor (float): Initial scaling factor for decoder noise injection.
         encoder_noise (bool): Whether to apply noise injection in the encoder.
         freeze (bool): Whether to freeze pre-trained model weights.
+        correlated (bool): Whether to use the same latent vector for all injection layers.
     """
 
     def __init__(
         self,
         noise_latent_dim=128,
-        encoder_noise_factor=0.05,
-        decoder_noise_factor=0.275,
-        encoder_noise=True,
-        freeze=True,
+        encoder_noise_factor=0.235,
+        decoder_noise_factor=0.235,
+        encoder_noise=False, # Set False by default to match paper's decoder-only focus
+        freeze=False,        # False for joint fine-tuning transfer learning
+        correlated=False,    # Added correlated toggle
+        enable_sdl=True,
         **kwargs,
     ):
         """
-        Initializes the CrossFormerWithNoise model.
-
-        Args:
-            noise_latent_dim (int, optional): Dimensionality of the noise latent space. Defaults to 128.
-            encoder_noise_factor (float, optional): Scaling factor for encoder noise injection. Defaults to 0.05.
-            decoder_noise_factor (float, optional): Scaling factor for decoder noise injection. Defaults to 0.275.
-            encoder_noise (bool, optional): Whether to inject noise into encoder layers. Defaults to True.
-            freeze (bool, optional): Whether to freeze pre-trained model weights. Defaults to True.
-            **kwargs: Additional arguments passed to the CrossFormer base class.
+        Initializes the RegionalCrossFormerWithNoise model.
         """
-
         super().__init__(**kwargs)
         self.noise_latent_dim = noise_latent_dim
+        self.enable_sdl = enable_sdl
+        self.correlated = correlated # Save the flag
+
+        # Extract the channel dimensions from the config (defaults to standard sizes)
+        dims = kwargs.get('dim', [32, 64, 128, 256])
 
         # Freeze weights if using pre-trained model
         if freeze:
@@ -47,76 +46,47 @@ class CrossFormerWithNoise(CrossFormer):
                 param.requires_grad = False
 
         self.encoder_noise = encoder_noise
+        
+        # If SDL is disabled, force noise factors to 0.0
+        if not self.enable_sdl:
+            encoder_noise_factor = 0.0
+            decoder_noise_factor = 0.0
+
         if encoder_noise:
-            # Define separate learnable noise factors for encoder noise layers
-            encoder_noise_factors = nn.ParameterList(
-                [
-                    nn.Parameter(torch.tensor(encoder_noise_factor, dtype=torch.float32)),
-                    nn.Parameter(torch.tensor(encoder_noise_factor, dtype=torch.float32)),
-                    nn.Parameter(torch.tensor(encoder_noise_factor, dtype=torch.float32)),
-                ]
-            )
             # Encoder noise injection layers
             self.encoder_noise_layers = nn.ModuleList(
                 [
-                    PixelNoiseInjection(
-                        self.noise_latent_dim,
-                        self.up_block3.output_channels,
-                        encoder_noise_factors[0],
-                    ),
-                    PixelNoiseInjection(
-                        self.noise_latent_dim,
-                        self.up_block2.output_channels,
-                        encoder_noise_factors[1],
-                    ),
-                    PixelNoiseInjection(
-                        self.noise_latent_dim,
-                        self.up_block1.output_channels,
-                        encoder_noise_factors[2],
-                    ),
+                    StochasticDecompositionLayer(self.noise_latent_dim, dims[0], encoder_noise_factor),
+                    StochasticDecompositionLayer(self.noise_latent_dim, dims[1], encoder_noise_factor),
+                    StochasticDecompositionLayer(self.noise_latent_dim, dims[2], encoder_noise_factor),
                 ]
             )
 
-        # Define separate learnable noise factors for decoder noise layers
-        decoder_noise_factors = nn.ParameterList(
-            [
-                nn.Parameter(torch.tensor(decoder_noise_factor, dtype=torch.float32)),
-                nn.Parameter(torch.tensor(decoder_noise_factor, dtype=torch.float32)),
-                nn.Parameter(torch.tensor(decoder_noise_factor, dtype=torch.float32)),
-            ]
-        )
+        # Decoder noise injection layers (reverse order: 2, 1, 0)
+        self.noise_inject1 = StochasticDecompositionLayer(self.noise_latent_dim, dims[2], decoder_noise_factor)
+        self.noise_inject2 = StochasticDecompositionLayer(self.noise_latent_dim, dims[1], decoder_noise_factor)
+        self.noise_inject3 = StochasticDecompositionLayer(self.noise_latent_dim, dims[0], decoder_noise_factor)
 
-        # Decoder noise injection layers
-        self.noise_inject1 = PixelNoiseInjection(
-            self.noise_latent_dim,
-            self.up_block1.output_channels,
-            decoder_noise_factors[0],
-        )
-        self.noise_inject2 = PixelNoiseInjection(
-            self.noise_latent_dim,
-            self.up_block2.output_channels,
-            decoder_noise_factors[1],
-        )
-        self.noise_inject3 = PixelNoiseInjection(
-            self.noise_latent_dim,
-            self.up_block3.output_channels,
-            decoder_noise_factors[2],
-        )
+        # --- THE FIX: FREEZE NOISE LAYERS IF NOT USING THEM ---
+        # If SDL is disabled, freeze all noise parameters so DDP ignores them
+        if not self.enable_sdl:
+            for name, param in self.named_parameters():
+                if "noise" in name or "modulation" in name:
+                    param.requires_grad = False
+        # ------------------------------------------------------
 
     def forward(self, x, x_era5, forcing_t_delta, noise=None, forecast_step=None):
         """
         Forward pass through the CrossFormer with noise injection.
-
-        Args:
-            x (Tensor): Input tensor of shape (batch_size, channels, time, height, width).
-            x_era5 (Tensor): ERA5 forcing tensor.
-            forcing_t_delta (Tensor): Time delta for forcing variables.
-            noise (Tensor, optional): External noise tensor. If None, noise is sampled internally. Defaults to None.
-            forecast_step (int, optional): Current forecast step (for potential noise annealing). Defaults to None.
-
-        Returns:
-            Tensor: Output tensor after passing through the model.
+        Note: The forward pass remains identical regardless of enable_sdl.
+        If enable_sdl=False, the injected noise is scaled by 0.0.
         """
+
+        batch_size = x.shape[0]
+
+        # If correlated, sample ONCE for the whole network
+        if self.correlated:
+            shared_noise = torch.randn(batch_size, self.noise_latent_dim, device=x.device)
 
         x_copy = None
         if self.use_post_block:
@@ -125,10 +95,9 @@ class CrossFormerWithNoise(CrossFormer):
         if self.use_padding:
             x = self.padding_opt.pad(x)
 
-        batch_size = x.shape[0]
 
         # Feature-wise Linear Modulation for time embedding
-        alpha_beta = self.film(forcing_t_delta.view(batch_size, 1) / 3600.)  # [batch, 2*dim]
+        alpha_beta = self.film(forcing_t_delta.view(-1, 1).expand(batch_size, 1) / 3600.)  # [batch, 2*dim]
         alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
         alpha = alpha.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
         beta = beta.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
@@ -151,23 +120,27 @@ class CrossFormerWithNoise(CrossFormer):
             x = cel(x)
             x = transformer(x)
             if self.encoder_noise and k < len(self.layers) - 1:
-                noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
-                x = self.encoder_noise_layers[k](x, noise)
+                # Use shared_noise if correlated, else sample fresh
+                current_noise = shared_noise if self.correlated else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+                x = self.encoder_noise_layers[k](x, current_noise)
             encodings.append(x)
 
         x = self.up_block1(x)
-        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
-        x = self.noise_inject1(x, noise)
+        # Use shared_noise if correlated, else sample fresh
+        current_noise = shared_noise if self.correlated else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        x = self.noise_inject1(x, current_noise)
         x = torch.cat([x, encodings[2]], dim=1)
 
         x = self.up_block2(x)
-        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
-        x = self.noise_inject2(x, noise)
+        # Use shared_noise if correlated, else sample fresh
+        current_noise = shared_noise if self.correlated else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        x = self.noise_inject2(x, current_noise)
         x = torch.cat([x, encodings[1]], dim=1)
 
         x = self.up_block3(x)
-        noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
-        x = self.noise_inject3(x, noise)
+        # Use shared_noise if correlated, else sample fresh
+        current_noise = shared_noise if self.correlated else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
+        x = self.noise_inject3(x, current_noise)
         x = torch.cat([x, encodings[0]], dim=1)
 
         x = self.up_block4(x)
@@ -188,52 +161,6 @@ class CrossFormerWithNoise(CrossFormer):
 
         return x
 
-
-class PixelNoiseInjection(nn.Module):
-    """
-    A module that injects noise into feature maps, with a per-pixel and per-channel style modulation.
-
-    Attributes:
-        noise_transform (nn.Linear): A linear transformation to map latent noise to the feature map's channels.
-        modulation (nn.Parameter): A learnable scaling factor applied to the noise.
-        noise_factor (nn.Parameter): A scaling factor for controlling the intensity of the injected noise.
-
-    Methods:
-        forward(feature_map, noise): Adds noise to the feature map, modulated by style and the modulation parameter.
-    """
-
-    def __init__(self, noise_dim, feature_channels, noise_factor=0.1):
-        super().__init__()
-        self.noise_transform = nn.Linear(noise_dim, feature_channels)
-        self.modulation = nn.Parameter(torch.ones(1, feature_channels, 1, 1))
-        self.noise_factor = nn.Parameter(
-            torch.tensor([noise_factor]), requires_grad=False
-        )
-
-    def forward(self, feature_map, noise):
-        """
-        Injects noise into the feature map.
-
-        Args:
-            feature_map (torch.Tensor): The input feature map (batch, channels, height, width).
-            noise (torch.Tensor): The latent noise tensor (batch, noise_dim), used for modulating the injected noise.
-
-        Returns:
-            torch.Tensor: The feature map with injected noise.
-        """
-
-        batch, channels, height, width = feature_map.shape
-
-        # Generate per-pixel, per-channel noise
-        pixel_noise = self.noise_factor * torch.randn(batch, channels, height, width, device=feature_map.device)
-
-        # Transform latent noise and reshape
-        style = self.noise_transform(noise).view(batch, channels, 1, 1)
-
-        # Combine style-modulated per-pixel noise with features
-        return feature_map + pixel_noise * style * self.modulation
-
-
 if __name__ == "__main__":
     # Set up the logger
     logging.basicConfig(
@@ -244,31 +171,31 @@ if __name__ == "__main__":
 
     crossformer_config = {
         "type": "crossformer",
-        "frames": 1,  # Number of input states
-        "image_height": 192,  # Number of latitude grids
-        "image_width": 288,  # Number of longitude grids
-        "levels": 16,  # Number of upper-air variable levels
-        "channels": 4,  # Upper-air variable channels
-        "surface_channels": 7,  # Surface variable channels
-        "input_only_channels": 3,  # Dynamic forcing, forcing, static channels
-        "output_only_channels": 0,  # Diagnostic variable channels
-        "patch_width": 1,  # Number of latitude grids in each 3D patch
-        "patch_height": 1,  # Number of longitude grids in each 3D patch
-        "frame_patch_size": 1,  # Number of input states in each 3D patch
-        "dim": [32, 64, 128, 256],  # Dimensionality of each layer
-        "depth": [2, 2, 2, 2],  # Depth of each layer
-        "global_window_size": [8, 4, 2, 1],  # Global window size for each layer
-        "local_window_size": 8,  # Local window size
-        "cross_embed_kernel_sizes": [  # Kernel sizes for cross-embedding
+        "frames": 1,
+        "image_height": 192,
+        "image_width": 288,
+        "levels": 16,
+        "channels": 4,
+        "surface_channels": 7,
+        "input_only_channels": 3,
+        "output_only_channels": 0,
+        "patch_width": 1,
+        "patch_height": 1,
+        "frame_patch_size": 1,
+        "dim": [32, 64, 128, 256],
+        "depth": [2, 2, 2, 2],
+        "global_window_size": [8, 4, 2, 1],
+        "local_window_size": 8,
+        "cross_embed_kernel_sizes": [
             [4, 8, 16, 32],
             [2, 4],
             [2, 4],
             [2, 4],
         ],
-        "cross_embed_strides": [2, 2, 2, 2],  # Strides for cross-embedding
-        "attn_dropout": 0.0,  # Dropout probability for attention layers
-        "ff_dropout": 0.0,  # Dropout probability for feed-forward layers
-        "use_spectral_norm": True,  # Whether to use spectral normalization
+        "cross_embed_strides": [2, 2, 2, 2],
+        "attn_dropout": 0.0,
+        "ff_dropout": 0.0,
+        "use_spectral_norm": True,
         "padding_conf": {
             "activate": True,
             "mode": "regional",
@@ -281,26 +208,21 @@ if __name__ == "__main__":
     }
 
     crossformer_config["noise_latent_dim"] = 128
-    crossformer_config["encoder_noise_factor"] = 0.05
-    crossformer_config["decoder_noise_factor"] = 0.275
-    crossformer_config["encoder_noise"] = True
-    crossformer_config["freeze"] = False  # Set to False for testing
+    crossformer_config["encoder_noise_factor"] = 0.235
+    crossformer_config["decoder_noise_factor"] = 0.235
+    crossformer_config["encoder_noise"] = False # Defaulting to paper implementation
+    crossformer_config["freeze"] = False  
+    crossformer_config["correlated"] = False  # Added flag to test block
 
     logger.info("Testing the regional ensemble model with noise injection")
 
-    # Initialize the ensemble model
-    ensemble_model = CrossFormerWithNoise(**crossformer_config).to("cuda")
+    ensemble_model = RegionalCrossFormerWithNoise(**crossformer_config).to("cuda")
 
-    # Create sample inputs
-    x = torch.randn(5, 71, 1, 192, 288).to("cuda")  # (batch, channels*levels + surface, time, height, width)
-    x_era5 = torch.randn(5, 3, 1, 192, 288).to("cuda")  # (batch, input_only_channels, time, height, width)
-    forcing_t_delta = torch.randn(5).to("cuda")  # (batch,)
+    x = torch.randn(5, 71, 1, 192, 288).to("cuda")  
+    x_era5 = torch.randn(5, 3, 1, 192, 288).to("cuda")  
+    forcing_t_delta = torch.randn(5).to("cuda")  
 
     output = ensemble_model(x, x_era5, forcing_t_delta)
-
     print("Output shape:", output.shape)
-
-    # Compute the variance across ensemble members
     variance = torch.var(output)
-
     print("Variance:", variance.item())
