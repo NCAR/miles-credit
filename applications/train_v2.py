@@ -178,6 +178,31 @@ def main(rank, world_size, conf, backend=None, trial=False):
     train_loader = _load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
     valid_loader = _load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
 
+    # Inject tracer_inds into post_conf so TracerFixer can initialize.
+    # train_v2.py bypasses the v1 parser, so we compute channel indices here
+    # from the v2 variable layout: prognostic/3d (each var × n_levels), prognostic/2d, diagnostic/2d.
+    tracer_conf = conf.get("model", {}).get("post_conf", {}).get("tracer_fixer", {})
+    if tracer_conf.get("activate", False) and "tracer_inds" not in tracer_conf:
+        era5_src = conf["data"]["source"]["ERA5"]
+        n_levels = len(era5_src.get("levels", []))
+        v = era5_src["variables"]
+        vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
+        vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
+        diag_2d = (v.get("diagnostic") or {}).get("vars_2D", [])
+        output_vars = [vn for vn in vars_3d for _ in range(n_levels)] + vars_2d + diag_2d
+        tracer_names = tracer_conf.get("tracer_name", [])
+        tracer_thres_cfg = tracer_conf.get("tracer_thres", [])
+        thres_map = dict(zip(tracer_names, tracer_thres_cfg))
+        tracer_inds, tracer_thres = [], []
+        for i, vn in enumerate(output_vars):
+            if vn in thres_map:
+                tracer_inds.append(i)
+                tracer_thres.append(thres_map[vn])
+        conf["model"]["post_conf"]["tracer_fixer"]["tracer_inds"] = tracer_inds
+        conf["model"]["post_conf"]["tracer_fixer"]["tracer_thres"] = tracer_thres
+        # denorm requires v1 inverse-transform which doesn't apply to v2 normalized tensors
+        conf["model"]["post_conf"]["tracer_fixer"]["denorm"] = False
+
     # Model
     m = load_model(conf)
     m.to(device)

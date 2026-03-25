@@ -1,10 +1,11 @@
 import torch.nn as nn
 
 from credit.preblock.concat import ConcatPreblock
+from credit.preblock.norm import ERA5Normalizer
 from credit.preblock.regrid import Regrid
 from credit.preblock.scaler import Scaler
 
-__all__ = ["ConcatPreblock", "apply_preblocks", "Regrid", "Scaler"]
+__all__ = ["ConcatPreblock", "ERA5Normalizer", "apply_preblocks", "Regrid", "Scaler"]
 
 
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict) -> dict:

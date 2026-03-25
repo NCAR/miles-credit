@@ -11,7 +11,7 @@ import tqdm
 import optuna
 
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-from credit.preblock import ConcatPreblock, apply_preblocks  # apply_preblocks lives in credit/preblock/__init__.py
+from credit.preblock import ConcatPreblock, ERA5Normalizer, apply_preblocks
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
@@ -40,8 +40,12 @@ class Trainer(BaseTrainer):
         super().__init__(model, rank, conf)
         logger.info("Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)")
 
-        # ---- Preblock: assembles batch field tensors into x and y ----
-        self.preblocks = nn.ModuleDict({"concat": ConcatPreblock()})
+        # ---- Preblock: normalize then assemble batch field tensors into x and y ----
+        preblocks = {}
+        if conf.get("data", {}).get("scaler_type") == "std_new":
+            preblocks["norm"] = ERA5Normalizer(conf)
+        preblocks["concat"] = ConcatPreblock()
+        self.preblocks = nn.ModuleDict(preblocks)
 
         # ---- Postblock conservation fixers ----
         post_conf = conf.get("model", {}).get("post_conf", {})

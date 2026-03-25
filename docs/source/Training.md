@@ -168,6 +168,92 @@ instances separately on each node and coordinating communication.
 | GPU Type        | A100             | V100/A100/H100         |
 | Queue          | `main`            | `casper`      |
 
-Casper is best for **small-scale experiments**, while Derecho is designed for **large-scale, multi-node training**. 
-Derecho only has A100 GPUs with 40 Gb of memory. Casper has both 40 Gb and 80 Gb A100s along with a small 
+Casper is best for **small-scale experiments**, while Derecho is designed for **large-scale, multi-node training**.
+Derecho only has A100 GPUs with 40 Gb of memory. Casper has both 40 Gb and 80 Gb A100s along with a small
 number of H100s with 80 Gb of memory.
+
+---
+
+## Training with the v2 Data Schema (`train_v2.py`)
+
+CREDIT supports a newer nested data schema that separates variables into explicit categories
+(`prognostic`, `diagnostic`, `dynamic_forcing`, `static`) under a named source (e.g., `ERA5`).
+This schema uses a dedicated entry point and trainer type.
+
+### Key differences from v1
+
+| Feature | v1 (`train.py`) | v2 (`train_v2.py`) |
+|---|---|---|
+| Entry point | `applications/train.py` | `applications/train_v2.py` |
+| Trainer type | `era5` | `era5-v2` |
+| Data config key | flat `variables`, `surface_variables`, etc. | nested `data.source.ERA5.variables.{prognostic,...}` |
+| `forecast_len` semantics | `0` means 1 step | `1` means 1 step |
+| Batch sampler | legacy `ERA5Dataset` | `MultiSourceDataset` + `DistributedMultiStepBatchSampler` |
+
+### Quick start
+
+Use the provided starter config as a template:
+
+```bash
+cp config/starter_v2.yml config/my_experiment.yml
+# Edit save_loc and date ranges, then:
+torchrun --standalone --nnodes=1 --nproc-per-node=1 \
+    applications/train_v2.py -c config/my_experiment.yml
+```
+
+The starter config (`config/starter_v2.yml`) is pre-filled for 1-degree ERA5 model-level data
+with a CrossFormer architecture. The sections users typically need to change are marked
+with `USER SETTINGS` comments.
+
+### Trainer configuration for v2
+
+Set `trainer.type: era5-v2` in your config. The `mode` field works the same as v1:
+
+```yaml
+trainer:
+    type: era5-v2
+    mode: ddp               # none | ddp | fsdp
+    train_batch_size: 8     # per-GPU; total = batch_size × n_gpus
+    num_epoch: 5            # epochs per job submission
+    epochs: &epochs 70      # total training target
+    use_ema: True           # recommended: EMA shadow weights for checkpointing
+    ema_decay: 0.9999
+    use_scheduler: True
+    scheduler:
+        scheduler_type: linear-warmup-cosine
+        warmup_steps: 1000
+        total_steps: 500000
+        min_lr: 1.0e-5
+```
+
+### Submitting to Casper (PBS)
+
+Use `scripts/casper_v2.sh` for single-node Casper jobs. It uses `torchrun` internally
+and supports an optional `NGPUS` override (defaults to 1):
+
+```bash
+# Single GPU
+CONFIG=config/starter_v2.yml qsub scripts/casper_v2.sh
+
+# Four GPUs on one node
+NGPUS=4 CONFIG=config/starter_v2.yml qsub scripts/casper_v2.sh
+```
+
+The script requests one A100 80 GB node by default (`gpu_type=a100_80gb`). Edit the
+`#PBS -l select=...` line if you need a different GPU type or more CPUs.
+
+### Resuming training
+
+After the first job completes (e.g., epoch 5 of 70), set the following in your config
+and resubmit:
+
+```yaml
+trainer:
+    load_weights: True
+    load_optimizer: True
+    load_scaler: True
+    load_scheduler: True
+    reload_epoch: True
+```
+
+CREDIT will automatically detect the latest checkpoint in `save_loc` and resume from it.
