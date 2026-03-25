@@ -35,7 +35,9 @@ def add_spatially_correlated_noise(x, correlation_scale=10):
     noise_out = torch.zeros_like(noise)
     for t in range(T):
         for c in range(C):  # Process each channel separately
-            slice_noise = noise[:, c : c + 1, t, :, :].contiguous()  # Shape: (B, 1, H, W)
+            slice_noise = noise[
+                :, c : c + 1, t, :, :
+            ].contiguous()  # Shape: (B, 1, H, W)
             smoothed = F.conv2d(slice_noise, kernel, padding=size // 2)
             noise_out[:, c, t, :, :] = smoothed.squeeze(1)
 

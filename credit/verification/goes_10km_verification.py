@@ -4,11 +4,9 @@ import os
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import xarray as xr
 
 from credit.verification.standard import radial_fft_spectrum
-
 
 
 logger = logging.getLogger(__name__)
@@ -23,10 +21,11 @@ latitude_slices = {
     "n_extratropics": slice(24.5, 91),
 }
 
+
 def verification(forecast_save_loc, p, conf, model_conf, dataset, climo, **kwargs):
     """
     Verification for goes cloud prediction. returns a list of dicts
-    
+
     :param forecast_save_loc: Description
     :param conf: Description
     :param model_conf: Description
@@ -35,7 +34,9 @@ def verification(forecast_save_loc, p, conf, model_conf, dataset, climo, **kwarg
 
     """
 
-    forecast_files = sorted([f for f in Path(forecast_save_loc).iterdir() if '.nc' in f.name])
+    forecast_files = sorted(
+        [f for f in Path(forecast_save_loc).iterdir() if ".nc" in f.name]
+    )
     step_file_tuples = enumerate(forecast_files, start=1)
 
     f = partial(verification_per_timestep, dataset, climo)
@@ -43,22 +44,23 @@ def verification(forecast_save_loc, p, conf, model_conf, dataset, climo, **kwarg
 
     return result
 
+
 def verification_per_timestep(dataset, climo, step_file_tuple):
     """
     Compute verification metrics for a single forecast hour.
-    
-    Calculates standard forecast verification scores comparing predictions to 
+
+    Calculates standard forecast verification scores comparing predictions to
     observations, including error metrics, spectral analysis, and skill scores
     relative to climatology.
-    
+
     Parameters
     ----------
     dataset : xarray.Dataset
-        Ground truth/observation dataset containing the "y" variable with 
-        dimensions (time, ..., latitude, longitude). Must be indexed by time 
+        Ground truth/observation dataset containing the "y" variable with
+        dimensions (time, ..., latitude, longitude). Must be indexed by time
         and contain variable "y".
     climo : xarray.DataArray
-        Climatological reference forecast with dimensions (channel, latitude, 
+        Climatological reference forecast with dimensions (channel, latitude,
         longitude). Used to compute skill scores.
     step_file_tuple : tuple of (int, str)
         Tuple containing:
@@ -67,7 +69,7 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
         - file : str
             Path to forecast file containing "BT_or_R" variable with dimensions
             (t, channel, latitude, longitude)
-    
+
     Returns
     -------
     result_dict : dict
@@ -87,7 +89,7 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
         - "MAESS_{channel}" : float
             Mean Absolute Error Skill Score relative to climatology
             (positive values indicate skill above climatology)
-    
+
     Notes
     -----
     - All spatial means are computed over latitude and longitude dimensions
@@ -95,7 +97,7 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
     - MAESS is calculated as: (MAE_climo - MAE_forecast) / MAE_climo
       where positive values indicate improvement over climatology
     - Metrics are unpacked per channel using the unpack_da_to_dict helper function
-    
+
     Examples
     --------
     >>> results = verification_per_timestep(
@@ -111,8 +113,8 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
 
     step, file = step_file_tuple
     result_dict = {"forecast_step": step}
-    
-    pred_da = xr.open_dataset(file)["BT_or_R"] # BT_or_R with t channel lat lon
+
+    pred_da = xr.open_dataset(file)["BT_or_R"]  # BT_or_R with t channel lat lon
     true_da = dataset[pred_da.t[0], "y"]["y"]
 
     w_lat = np.cos(np.deg2rad(pred_da.latitude))
@@ -128,7 +130,7 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
     result_dict = result_dict | unpack_da_to_dict(mae, "MAE")
 
     # MSE (mean then sqrt)
-    mse = np.sqrt((diff ** 2).mean(dim=["t", "latitude", "longitude"]))
+    mse = np.sqrt((diff**2).mean(dim=["t", "latitude", "longitude"]))
     result_dict = result_dict | unpack_da_to_dict(mse, "MSE")
 
     # 2D FFT
@@ -149,11 +151,10 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
 
 
 def unpack_da_to_dict(da, metric_prefix):
-
     results_dict = {}
     for channel in da.channel:
-        results_dict[f"{metric_prefix}_C{channel:02}"] = da.sel(channel=[channel]).values.flatten()
-    
+        results_dict[f"{metric_prefix}_C{channel:02}"] = da.sel(
+            channel=[channel]
+        ).values.flatten()
+
     return results_dict
-
-

@@ -1,4 +1,4 @@
-#TODO: review module docstring (template from https://github.com/numpy/numpy/blob/main/numpy/__init__.py)
+# TODO: review module docstring (template from https://github.com/numpy/numpy/blob/main/numpy/__init__.py)
 """credit is an open software platform to train and deploy AI atmospheric prediction models.
 
 =====

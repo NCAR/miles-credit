@@ -151,7 +151,9 @@ def load_premade_encoder_model(model_conf):
         logger.info(f"Loading model {name} with settings {model_conf}")
         return supported_models[name](**model_conf)
     else:
-        raise OSError(f"Model name {name} not recognized. Please choose from {supported_models.keys()}")
+        raise OSError(
+            f"Model name {name} not recognized. Please choose from {supported_models.keys()}"
+        )
 
 
 class SegmentationModel(BaseModel):
@@ -202,7 +204,7 @@ class SegmentationModel(BaseModel):
         self.use_padding = padding_conf["activate"]
         if self.use_padding:
             self.padding_opt = load_padding(padding_conf)
-        
+
         self.input_only_channels = input_only_channels
         self.film = nn.Linear(1, 2 * (self.input_only_channels))
 
@@ -214,17 +216,23 @@ class SegmentationModel(BaseModel):
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
-        
+
         if self.use_padding:
             x = self.padding_opt.pad(x)
 
         batch_size = x.shape[0]
 
         # Feature‑wise Linear Modulation for time embedding
-        alpha_beta = self.film(forcing_t_delta.view(batch_size, 1) / 3600.)  # [batch, 2*dim]
+        alpha_beta = self.film(
+            forcing_t_delta.view(batch_size, 1) / 3600.0
+        )  # [batch, 2*dim]
         alpha, beta = alpha_beta.chunk(2, dim=1)  # each is [batch, dim]
-        alpha = alpha.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
-        beta = beta.view(batch_size, self.input_only_channels, 1, 1, 1)  # [batch, dim, 1, 1, 1]
+        alpha = alpha.view(
+            batch_size, self.input_only_channels, 1, 1, 1
+        )  # [batch, dim, 1, 1, 1]
+        beta = beta.view(
+            batch_size, self.input_only_channels, 1, 1, 1
+        )  # [batch, dim, 1, 1, 1]
         x_era5 = alpha * x_era5 + beta
 
         x = torch.concat([x, x_era5], dim=1)
@@ -235,7 +243,7 @@ class SegmentationModel(BaseModel):
 
         if self.use_padding:
             x = self.padding_opt.unpad(x)
-            
+
         x = x.unsqueeze(2)
 
         if self.use_post_block:

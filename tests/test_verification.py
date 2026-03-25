@@ -17,31 +17,33 @@ def test_spread_error():
     longitude = 3
     times = 2
 
-    mu, sigma = 0, 1. # mean and standard deviation
+    mu, sigma = 0, 1.0  # mean and standard deviation
     rng = np.random.default_rng()
 
     data = rng.normal(mu, sigma, (ensemble_size, times, latitude, longitude))
 
-    da_true = xr.DataArray(np.zeros((times, latitude, longitude)),
-                           coords={
-                               "time": np.arange(times),
-                               "latitude": np.linspace(-90, 90, latitude),
-                               "longitude": np.linspace(0, 360, longitude)
-                           }
-                          )   
-    da_pred = xr.DataArray(data,
-                           coords={
-                               "ensemble_member_label": np.arange(ensemble_size),
-                               "time": np.arange(times),
-                               "latitude": np.linspace(-90, 90, latitude),
-                               "longitude": np.linspace(0, 360, longitude)
-                           }
-                          )
-    
+    da_true = xr.DataArray(
+        np.zeros((times, latitude, longitude)),
+        coords={
+            "time": np.arange(times),
+            "latitude": np.linspace(-90, 90, latitude),
+            "longitude": np.linspace(0, 360, longitude),
+        },
+    )
+    da_pred = xr.DataArray(
+        data,
+        coords={
+            "ensemble_member_label": np.arange(ensemble_size),
+            "time": np.arange(times),
+            "latitude": np.linspace(-90, 90, latitude),
+            "longitude": np.linspace(0, 360, longitude),
+        },
+    )
+
     result_dict = spread_error(da_pred, da_true)
-    
-    assert(np.isclose(result_dict["rmse_global"], 0.0, atol=1e-2) )
-    assert(np.isclose(result_dict["std_global"], 1.0, atol=1e-2) )
+
+    assert np.isclose(result_dict["rmse_global"], 0.0, atol=1e-2)
+    assert np.isclose(result_dict["std_global"], 1.0, atol=1e-2)
 
 
 if __name__ == "__main__":

@@ -20,5 +20,3 @@ def test_KCRPS():
 
     loss = loss_fn(target, pred)
     assert not torch.isnan(loss).any()
-
-    

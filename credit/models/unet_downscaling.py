@@ -148,7 +148,9 @@ def load_premade_encoder_model(model_conf):
         logger.info(f"Loading model {name} with settings {model_conf}")
         return supported_models[name](**model_conf)
     else:
-        raise OSError(f"Model name {name} not recognized. Please choose from {supported_models.keys()}")
+        raise OSError(
+            f"Model name {name} not recognized. Please choose from {supported_models.keys()}"
+        )
 
 
 class DownscalingSegmentationModel(BaseModel):
@@ -173,8 +175,8 @@ class DownscalingSegmentationModel(BaseModel):
         self.channels = channels
         self.rk4_integration = rk4_integration
 
-        self.input_channels  = channels['boundary']   + channels['prognostic']
-        self.output_channels = channels['prognostic'] + channels['diagnostic']
+        self.input_channels = channels["boundary"] + channels["prognostic"]
+        self.output_channels = channels["prognostic"] + channels["diagnostic"]
 
         if architecture["name"] == "unet":
             architecture["decoder_attention_type"] = "scse"

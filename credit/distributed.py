@@ -66,9 +66,13 @@ def get_rank_info(trainer_mode):
             # Set MASTER_ADDR and MASTER_PORT if not already set.
             # (broadcast these from rank 0 - they must be consistent on every node)
             if "MASTER_ADDR" not in os.environ:
-                os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostbyname(socket.gethostname()), root=0)
+                os.environ["MASTER_ADDR"] = comm.bcast(
+                    socket.gethostbyname(socket.gethostname()), root=0
+                )
             if "MASTER_PORT" not in os.environ:
-                os.environ["MASTER_PORT"] = comm.bcast(str(np.random.randint(1000, 8000)), root=0)
+                os.environ["MASTER_PORT"] = comm.bcast(
+                    str(np.random.randint(1000, 8000)), root=0
+                )
 
             if 0 == WORLD_RANK:
                 logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))

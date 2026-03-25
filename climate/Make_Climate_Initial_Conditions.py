@@ -1,5 +1,4 @@
 import os
-import gc
 import sys
 import yaml
 import logging
@@ -12,11 +11,9 @@ from collections import defaultdict
 
 # ---------- #
 # Numerics
-from datetime import datetime, timedelta
+from datetime import datetime
 import xarray as xr
 import numpy as np
-import pandas as pd
-import cftime
 
 # ---------- #
 import torch
@@ -41,7 +38,7 @@ from credit.forecast import load_forecasts
 from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.parser import credit_main_parser, predict_data_check
-from credit.output import load_metadata, make_xarray, save_netcdf_increment
+from credit.output import load_metadata
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
 logger = logging.getLogger(__name__)
@@ -307,13 +304,16 @@ def predict(rank, world_size, conf, p):
                 y = torch.cat((y, y_diag_batch), dim=1).to(device).float()
 
             save_location = os.path.join(
-                    os.path.expandvars(conf["save_loc"]), "init_times"
-                )
-            os.makedirs(
-                    save_location, exist_ok=True
-                )
-            torch.save(x, f'{save_location}/init_condition_tensor_{init_datetime_str}.pth')
-            print('init cond saved to:' f'{save_location}/init_condition_tensor_{init_datetime_str}.pth') 
+                os.path.expandvars(conf["save_loc"]), "init_times"
+            )
+            os.makedirs(save_location, exist_ok=True)
+            torch.save(
+                x, f"{save_location}/init_condition_tensor_{init_datetime_str}.pth"
+            )
+            print(
+                "init cond saved to:"
+                f"{save_location}/init_condition_tensor_{init_datetime_str}.pth"
+            )
             break
     return 1
 
@@ -449,7 +449,6 @@ if __name__ == "__main__":
             logging.info("Launching to PBS on Derecho")
             launch_script_mpi(config, script_path)
         sys.exit()
-
 
     if number_of_subsets > 0:
         forecasts = load_forecasts(conf)
