@@ -61,6 +61,7 @@ def get_rollout_init_times(conf):
     
     if forecast_conf["type"] == "debugger":
         init_times_str = [
+                            "2022-05-21T17:55:06", # NA spring case
                             "2022-06-30T23:55:06", 
                             "2022-07-01T14:55:06", # NA convective case
                             "2022-12-02T11:55:06", 
