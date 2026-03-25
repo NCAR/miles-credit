@@ -189,5 +189,25 @@ def generate_default_sampling_modes(dataset):
 def generate_rollout_sampling_modes(dataset, compute_metrics=False):
     if compute_metrics:
         return generate_default_sampling_modes(dataset)
+    
     num_forecast_steps = dataset.num_forecast_steps
     return ["init"] + ["forcing"] * (num_forecast_steps - 1) + ["stop"]
+
+
+def load_verification_dataset(conf):
+    logger.info("loading a GOES 10km dataset for evaluation")
+
+    data_config = conf["data"]
+    padding_conf = conf["model"].get("padding_conf", {})
+    
+    if padding_conf:
+        padding = not padding_conf["activate"] # opposite of what the model does
+    else:
+        padding = True
+
+    zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
+
+    # Note: time_config is empty here as per the incoming change
+    dataset = GOES10kmDataset(zarr_ds, data_config, time_config={}, padding=padding, evaluate=True, era5dataset=None)
+    
+    return dataset
