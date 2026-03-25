@@ -3,6 +3,7 @@ import logging
 
 # Import trainer classes
 from credit.trainers.trainerERA5 import Trainer as TrainerERA5
+from credit.trainers.trainerERA5v2 import Trainer as TrainerERA5v2
 from credit.trainers.trainerERA5_Diffusion import Trainer as TrainerERA5_Diffusion
 from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
 from credit.trainers.trainer_downscaling import Trainer as Trainer404
@@ -21,6 +22,10 @@ trainer_types = {
     "era5": (
         TrainerERA5,
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
+    ),
+    "era5-v2": (
+        TrainerERA5v2,
+        "ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.",
     ),
     "era5-diffusion": (
         TrainerERA5_Diffusion,

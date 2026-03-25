@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(BaseTrainer):
-    def __init__(self, model: torch.nn.Module, rank: int):
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer class for handling the training, validation, and checkpointing of models.
 
@@ -44,12 +44,12 @@ class Trainer(BaseTrainer):
                 Perform the full training loop across multiple epochs, including validation
                 and checkpointing.
         """
-        super().__init__(model, rank)
+        super().__init__(model, rank, conf)
         # Add any additional initialization if needed
         logger.info("Loading a multi-step trainer class")
 
     # Training function.
-    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
+    def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         """
         Trains the model for one epoch.
 
@@ -67,77 +67,77 @@ class Trainer(BaseTrainer):
             dict: Dictionary containing training metrics and loss for the epoch.
         """
 
-        batches_per_epoch = conf["trainer"]["batches_per_epoch"]
-        grad_max_norm = conf["trainer"].get("grad_max_norm", 0.0)
-        amp = conf["trainer"]["amp"]
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
-        forecast_length = conf["data"]["forecast_len"]
-        ensemble_size = conf["trainer"].get("ensemble_size", 1)
+        batches_per_epoch = self.conf["trainer"]["batches_per_epoch"]
+        grad_max_norm = self.conf["trainer"].get("grad_max_norm", 0.0)
+        amp = self.conf["trainer"]["amp"]
+        distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        forecast_length = self.conf["data"]["forecast_len"]
+        ensemble_size = self.conf["trainer"].get("ensemble_size", 1)
         if ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {ensemble_size}")
         logger.info(f"Using grad-max-norm value: {grad_max_norm}")
 
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
+        varnum_diag = len(self.conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
         # static_dim_size = (
-        #     len(conf["data"]["dynamic_forcing_variables"])
-        #     + len(conf["data"]["forcing_variables"])
-        #     + len(conf["data"]["static_variables"])
+        #     len(self.conf["data"]["dynamic_forcing_variables"])
+        #     + len(self.conf["data"]["forcing_variables"])
+        #     + len(self.conf["data"]["static_variables"])
         # )
 
-        ensemble_size = conf["trainer"].get("ensemble_size", 1)
+        ensemble_size = self.conf["trainer"].get("ensemble_size", 1)
 
         # [Optional] retain graph for multiple backward passes
-        retain_graph = conf["data"].get("retain_graph", False)
+        retain_graph = self.conf["data"].get("retain_graph", False)
 
         # [Optional] Use the config option to set when to backprop
-        if "backprop_on_timestep" in conf["data"]:
-            backprop_on_timestep = conf["data"]["backprop_on_timestep"]
+        if "backprop_on_timestep" in self.conf["data"]:
+            backprop_on_timestep = self.conf["data"]["backprop_on_timestep"]
         else:
             # If not specified in config, use the range 1 to forecast_len
-            backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
+            backprop_on_timestep = list(range(0, self.conf["data"]["forecast_len"] + 1 + 1))
 
         assert forecast_length <= backprop_on_timestep[-1], (
             f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
         )
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
+        if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # ------------------------------------------------------- #
         # clamp to remove outliers
-        if conf["data"].get("data_clamp", None) is None:
+        if self.conf["data"].get("data_clamp", None) is None:
             flag_clamp = False
         else:
             flag_clamp = True
-            clamp_min = float(conf["data"]["data_clamp"][0])
-            clamp_max = float(conf["data"]["data_clamp"][1])
+            clamp_min = float(self.conf["data"]["data_clamp"][0])
+            clamp_max = float(self.conf["data"]["data_clamp"][1])
 
         # ====================================================== #
         # postblock opts outside of model
-        post_conf = conf["model"].get("post_conf", {"activate": False})
+        post_conf = self.conf["model"].get("post_conf", {"activate": False})
         flag_mass_conserve = False
         flag_water_conserve = False
         flag_energy_conserve = False
 
-        if post_conf["activate"]:
-            if post_conf["global_mass_fixer"]["activate"]:
-                if post_conf["global_mass_fixer"]["activate_outside_model"]:
+        if post_self.conf["activate"]:
+            if post_self.conf["global_mass_fixer"]["activate"]:
+                if post_self.conf["global_mass_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalMassFixer outside of model")
                     flag_mass_conserve = True
                     opt_mass = GlobalMassFixer(post_conf)
 
-            if post_conf["global_water_fixer"]["activate"]:
-                if post_conf["global_water_fixer"]["activate_outside_model"]:
+            if post_self.conf["global_water_fixer"]["activate"]:
+                if post_self.conf["global_water_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalWaterFixer outside of model")
                     flag_water_conserve = True
                     opt_water = GlobalWaterFixer(post_conf)
 
-            if post_conf["global_energy_fixer"]["activate"]:
-                if post_conf["global_energy_fixer"]["activate_outside_model"]:
+            if post_self.conf["global_energy_fixer"]["activate"]:
+                if post_self.conf["global_energy_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalEnergyFixer outside of model")
                     flag_energy_conserve = True
                     opt_energy = GlobalEnergyFixer(post_conf)
@@ -193,7 +193,7 @@ class Trainer(BaseTrainer):
                 # add forcing and static variables (regardless of fcst hours)
                 if forecast_step > 1:
                     # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]) :].to(
+                    x_forcing_batch = batch["input"][:, -len(self.conf["data"]["dynamic_forcing_variables"]) :].to(
                         self.device
                     )
 
@@ -365,7 +365,7 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -377,7 +377,7 @@ class Trainer(BaseTrainer):
 
         return results_dict
 
-    def validate(self, epoch, conf, valid_loader, criterion, metrics):
+    def validate(self, epoch, valid_loader, criterion, metrics):
         """
         Validates the model on the validation dataset.
 
@@ -395,24 +395,24 @@ class Trainer(BaseTrainer):
         self.model.eval()
 
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
-        input_length = conf["data"]["input_length"]
-        output_length = conf["data"]["output_length"]
+        varnum_diag = len(self.conf["data"]["diagnostic_variables"])
+        input_length = self.conf["data"]["input_length"]
+        output_length = self.conf["data"]["output_length"]
 
         # number of dynamic forcing + forcing + static
         # static_dim_size = (
-        #     len(conf["data"]["dynamic_forcing_variables"])
-        #     + len(conf["data"]["forcing_variables"])
-        #     + len(conf["data"]["static_variables"])
+        #     len(self.conf["data"]["dynamic_forcing_variables"])
+        #     + len(self.conf["data"]["forcing_variables"])
+        #     + len(self.conf["data"]["static_variables"])
         # )
 
-        valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
+        valid_batches_per_epoch = self.conf["trainer"]["valid_batches_per_epoch"]
         forecast_len = (
-            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
+            self.conf["data"]["valid_forecast_len"] if "valid_forecast_len" in self.conf["data"] else self.conf["forecast_len"]
         )
-        ensemble_size = conf["trainer"].get("ensemble_size", 1)
+        ensemble_size = self.conf["trainer"].get("ensemble_size", 1)
 
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         results_dict = defaultdict(list)
 
@@ -434,35 +434,35 @@ class Trainer(BaseTrainer):
 
         # ------------------------------------------------------- #
         # clamp to remove outliers
-        if conf["data"].get("data_clamp", None) is None:
+        if self.conf["data"].get("data_clamp", None) is None:
             flag_clamp = False
         else:
             flag_clamp = True
-            clamp_min = float(conf["data"]["data_clamp"][0])
-            clamp_max = float(conf["data"]["data_clamp"][1])
+            clamp_min = float(self.conf["data"]["data_clamp"][0])
+            clamp_max = float(self.conf["data"]["data_clamp"][1])
 
         # ====================================================== #
         # postblock opts outside of model
-        post_conf = conf["model"].get("post_conf", {"activate": False})
+        post_conf = self.conf["model"].get("post_conf", {"activate": False})
         flag_mass_conserve = False
         flag_water_conserve = False
         flag_energy_conserve = False
 
-        if post_conf["activate"]:
-            if post_conf["global_mass_fixer"]["activate"]:
-                if post_conf["global_mass_fixer"]["activate_outside_model"]:
+        if post_self.conf["activate"]:
+            if post_self.conf["global_mass_fixer"]["activate"]:
+                if post_self.conf["global_mass_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalMassFixer outside of model")
                     flag_mass_conserve = True
                     opt_mass = GlobalMassFixer(post_conf)
 
-            if post_conf["global_water_fixer"]["activate"]:
-                if post_conf["global_water_fixer"]["activate_outside_model"]:
+            if post_self.conf["global_water_fixer"]["activate"]:
+                if post_self.conf["global_water_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalWaterFixer outside of model")
                     flag_water_conserve = True
                     opt_water = GlobalWaterFixer(post_conf)
 
-            if post_conf["global_energy_fixer"]["activate"]:
-                if post_conf["global_energy_fixer"]["activate_outside_model"]:
+            if post_self.conf["global_energy_fixer"]["activate"]:
+                if post_self.conf["global_energy_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalEnergyFixer outside of model")
                     flag_energy_conserve = True
                     opt_energy = GlobalEnergyFixer(post_conf)
@@ -503,7 +503,7 @@ class Trainer(BaseTrainer):
                     # add forcing and static variables (regardless of fcst hours)
                     else:
                         # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                        x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]) :].to(
+                        x_forcing_batch = batch["input"][:, -len(self.conf["data"]["dynamic_forcing_variables"]) :].to(
                             self.device
                         )
                         # ---------------- ensemble ----------------- #
@@ -627,7 +627,7 @@ class Trainer(BaseTrainer):
                     np.mean(results_dict["valid_acc"]),
                     np.mean(results_dict["valid_mae"]),
                 )
-                ensemble_size = conf["trainer"].get("ensemble_size", 0)
+                ensemble_size = self.conf["trainer"].get("ensemble_size", 0)
                 if ensemble_size > 1:
                     to_print += f" std: {np.mean(results_dict['valid_std']):.6f}"
                 if self.rank == 0:

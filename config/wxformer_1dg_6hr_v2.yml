@@ -1,0 +1,237 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# This yaml file implements 6 hourly state-in-state-out wxformer model (v2 data schema)
+# on NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
+# New nested data schema: source.ERA5.variables.{prognostic, diagnostic, dynamic_forcing, static}
+# NOTE: forecast_len semantics changed — 1 means 1 step (not 0 = 1 step as in v1)
+# --------------------------------------------------------------------------------------------------------------------- #
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_1dg_6hr_v2'
+seed: 1000
+
+# Training data block
+data:
+    source:
+        ERA5:
+            level_coord: "level"
+            levels: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+            variables:
+                prognostic:
+                    vars_3D: ['u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water']
+                    vars_2D: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+                diagnostic:
+                    vars_2D: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
+                              'surface_latent_heat_flux', 'surface_net_solar_radiation',
+                              'surface_net_thermal_radiation', 'surface_sensible_heat_flux']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+                dynamic_forcing:
+                    vars_2D: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+                static:
+                    vars_2D: ['z_norm', 'land_sea_mask']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    start_datetime: "1979-01-01"
+    end_datetime: "2018-12-31"
+    timestep: "6h"
+
+    # forecast_len: 1 = 1 autoregressive step (new semantics; v1 used 0 to mean 1 step)
+    history_len: 1
+    forecast_len: 1
+
+    one_shot: True
+    lead_time_periods: 6
+    skip_periods: null
+    static_first: True
+    scaler_type: 'std_new'
+
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2018_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2018_1deg.nc'
+
+# Validation data block (same schema, different date range)
+data_valid:
+    source:
+        ERA5:
+            level_coord: "level"
+            levels: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+            variables:
+                prognostic:
+                    vars_3D: ['u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water']
+                    vars_2D: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+                diagnostic:
+                    vars_2D: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
+                              'surface_latent_heat_flux', 'surface_net_solar_radiation',
+                              'surface_net_thermal_radiation', 'surface_sensible_heat_flux']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+                dynamic_forcing:
+                    vars_2D: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+                static:
+                    vars_2D: ['z_norm', 'land_sea_mask']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    start_datetime: "2018-01-01"
+    end_datetime: "2019-12-31"
+    timestep: "6h"
+
+    history_len: 1
+    forecast_len: 1
+
+    one_shot: True
+    lead_time_periods: 6
+    skip_periods: null
+    static_first: True
+    scaler_type: 'std_new'
+
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2018_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2018_1deg.nc'
+
+trainer:
+    type: era5-v2
+
+    mode: ddp
+    cpu_offload: False
+    activation_checkpoint: True
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    skip_validation: False
+    update_learning_rate: False
+
+    save_backup_weights: True
+    save_best_weights: True
+
+    learning_rate: 1.0e-03
+    weight_decay: 0
+
+    train_batch_size: 8
+    valid_batch_size: 8
+
+    batches_per_epoch: 0
+    valid_batches_per_epoch: 100
+    stopping_patience: 999
+
+    start_epoch: 0
+    num_epoch: 5
+    reload_epoch: False
+    epochs: &epochs 70
+
+    # EMA: maintain shadow weights for validation/checkpointing
+    use_ema: True
+    ema_decay: 0.9999
+
+    use_scheduler: True
+    # linear-warmup-cosine updates per batch (not per epoch)
+    # total_steps ~ batches/epoch * epochs; warmup_steps ~ first ~1k steps
+    scheduler:
+        scheduler_type: linear-warmup-cosine
+        warmup_steps: 1000
+        total_steps: 500000
+        min_lr: 1.0e-5
+
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 'dynamic'
+
+    thread_workers: 4
+    valid_thread_workers: 4
+
+    prefetch_factor: 4
+
+
+model:
+    type: "crossformer"
+    frames: 1                         # number of input states
+    image_height: 181                 # latitude grids (1-degree ERA5: 181)
+    image_width: 360                  # longitude grids (1-degree ERA5: 360)
+    levels: 18                        # number of upper-air variable levels
+    channels: 4                       # 3D prognostic variable channels (u,v,T,q)
+    surface_channels: 4               # 2D prognostic variable channels (SP,VAR_2T,VAR_10U,VAR_10V)
+    input_only_channels: 4            # dynamic forcing (2) + static (2)
+    output_only_channels: 8           # diagnostic variable channels
+
+    patch_width: 1
+    patch_height: 1
+    frame_patch_size: 1
+
+    dim: [256, 512, 1024, 2048]
+    depth: [2, 2, 8, 2]
+    # 181+60=241 -> floor/2 -> 120 (=8×15, 3×40), 360+24=384 -> /2 -> 192 (=8×24, 3×64)
+    # window sizes must divide [120,192], [60,96], [30,48], [15,24]
+    # local_window_size=3 also divides all: 120/3=40, 192/3=64, etc. ✓
+    global_window_size: [8, 4, 2, 1]
+    local_window_size: 3
+    cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+    cross_embed_strides: [2, 2, 2, 2]
+    attn_dropout: 0.
+    ff_dropout: 0.
+
+    interp: True
+    use_spectral_norm: True
+
+    padding_conf:
+        activate: True
+        mode: earth
+        pad_lat: [30, 30]
+        pad_lon: [12, 12]
+
+    post_conf:
+        activate: True
+        tracer_fixer:
+            activate: True
+            denorm: True
+            tracer_name: ['specific_total_water', 'Q500']
+            tracer_thres: [1e-8, 1e-8]
+
+loss:
+    training_loss: "mse"
+
+    use_power_loss: False
+    use_spectral_loss: False
+
+    use_latitude_weights: True
+    latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    use_variable_weights: False
+
+predict:
+    mode: ddp
+    batch_size: 8
+    ensemble_size: 1
+    forecasts:
+        type: "custom"
+        start_year: 2020
+        start_month: 1
+        start_day: 1
+        start_hours: [0, 12]
+        duration: 1
+        days: 1
+
+    metadata: '/glade/u/home/akn7/miles-credit/credit/metadata/era5.yaml'
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_1dg_6hr_v2'
+
+    use_laplace_filter: False
+
+pbs: #derecho
+    conda: "/glade/work/akn7/conda-envs/credit-derecho"
+    project: "NAML0001"
+    job_name: "wxformer_1dg_6hr_v2"
+    walltime: "12:00:00"
+    nodes: 8
+    ncpus: 64
+    ngpus: 4
+    mem: '480GB'
+    queue: 'main'
