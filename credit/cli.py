@@ -74,6 +74,36 @@ def _realtime(args: argparse.Namespace) -> None:
     main()
 
 
+def _write_reload_config(config_path: str) -> str:
+    """Patch trainer reload fields and write a reload config next to the checkpoint.
+
+    Reads the YAML at *config_path*, sets the five fields required for a clean
+    resume, and writes the result to ``<save_loc>/config_reload.yml``.
+
+    Returns the path to the written reload config.
+    """
+    import yaml
+
+    with open(config_path) as f:
+        conf = yaml.safe_load(f)
+
+    trainer = conf.setdefault("trainer", {})
+    trainer["load_weights"] = True
+    trainer["load_optimizer"] = True
+    trainer["load_scaler"] = True
+    trainer["load_scheduler"] = True
+    trainer["reload_epoch"] = True
+
+    save_loc = os.path.expandvars(conf.get("save_loc", "."))
+    os.makedirs(save_loc, exist_ok=True)
+    reload_path = os.path.join(save_loc, "config_reload.yml")
+
+    with open(reload_path, "w") as f:
+        yaml.dump(conf, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    return reload_path
+
+
 def _submit(args: argparse.Namespace) -> None:
     """Generate and optionally submit a PBS batch script."""
     import subprocess
@@ -81,6 +111,11 @@ def _submit(args: argparse.Namespace) -> None:
 
     repo = _repo_root()
     config = os.path.abspath(args.config)
+
+    if args.reload:
+        config = _write_reload_config(config)
+        logger.info(f"Reload config written: {config}")
+
     account = args.account or os.environ.get("PBS_ACCOUNT", "NAML0001")
 
     if args.cluster == "casper":
@@ -327,10 +362,12 @@ def _build_parser() -> argparse.ArgumentParser:
         description=textwrap.dedent("""\
             Generate a PBS batch script and optionally submit it via qsub.
             Use --dry-run to inspect the script before submitting.
+            Use --reload to resume from the latest checkpoint automatically.
 
             Examples:
               credit submit --cluster casper  -c config.yml --gpus 1 --walltime 04:00:00
               credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2 --dry-run
+              credit submit --cluster casper  -c config.yml --gpus 4 --reload
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG")
@@ -358,6 +395,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Conda environment path for derecho (default: credit-derecho-torch28-nccl221)")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the PBS script without submitting")
+    p.add_argument("--reload", action="store_true",
+                   help="Resume from checkpoint: patch load_weights/optimizer/scaler/"
+                        "scheduler/reload_epoch in the config and submit the reload job")
 
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")
