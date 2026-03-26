@@ -9,22 +9,32 @@ comes back with a concrete, specific answer grounded in your real data.
 
 ## Quick start
 
+**NCAR users on Casper or Derecho** — shared Anthropic credits are available now.
+No personal API key or billing required:
+
 ```bash
-# 1. Install
+# Add to ~/.bashrc so it persists across sessions
+module use /glade/work/bdobbins/llms/modules
+module load llms
+
 pip install "miles-credit[agent]"
 
-# 2. Set your Anthropic API key (add to ~/.bashrc)
-export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com → API keys
-
-# 3. Ask anything
 credit agent "why did my last training run crash?"
 credit agent -c config.yml "is my learning rate too high for 0.25 degree?"
 ```
 
-> **Requires Anthropic API credits.**  A Claude.ai Pro subscription does *not* include API
-> access — billing is separate at
-> [console.anthropic.com/settings/billing](https://console.anthropic.com/settings/billing).
-> A typical agent session costs **$0.01–0.05**.  See [Cost](#cost) for details.
+**Everyone else:**
+
+```bash
+pip install "miles-credit[agent]"
+export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com → API keys
+
+credit agent "why did my last training run crash?"
+```
+
+> **Note:** A Claude.ai Pro subscription does *not* include API access — billing is
+> separate at [console.anthropic.com/settings/billing](https://console.anthropic.com/settings/billing).
+> A typical session costs **$0.01–0.05**. See [Cost](#cost) for details.
 
 ---
 
@@ -76,6 +86,19 @@ If you already installed CREDIT without extras, this adds only `anthropic` — n
 
 ### 2. Get an API key
 
+**NCAR users (Casper / Derecho):** shared Anthropic credits are available for all NCAR staff.
+Add these two lines to your `~/.bashrc`:
+
+```bash
+module use /glade/work/bdobbins/llms/modules
+module load llms
+```
+
+Then `source ~/.bashrc` (or log in again).  `credit agent` will pick up the key automatically.
+Contact [milescore@ucar.edu](mailto:milescore@ucar.edu) if you expect heavy usage.
+
+**Everyone else:**
+
 1. Sign up or log in at [console.anthropic.com](https://console.anthropic.com)
 2. Go to **API Keys** → **Create Key**
 3. Add credits at **Settings → Billing** (pay-as-you-go, no subscription required)
@@ -86,9 +109,6 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # Persist across sessions
 echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> ~/.bashrc
 ```
-
-> **NCAR users:** Check whether your group has a shared API key before creating your own.
-> Contact [milescore@ucar.edu](mailto:milescore@ucar.edu).
 
 ---
 

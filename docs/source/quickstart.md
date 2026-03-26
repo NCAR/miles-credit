@@ -222,76 +222,85 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 
 ## 6. Get help from the AI assistant
 
-`credit ask` answers questions about your run, automatically injecting your
-config, training log, and recent PBS output as context.
+CREDIT has two AI tools: `credit ask` (quick Q&A) and `credit agent` (reads your files
+and diagnoses problems).  Both need an API key — **NCAR users already have one.**
 
-It supports four providers — set whichever key you have and it's used automatically.
-Use `--provider` to override:
+:::{note}
+**NCAR users on Casper or Derecho — shared Anthropic credits are available now:**
 
-| Provider | Env var | Model | Cost | Notes |
-|----------|---------|-------|------|-------|
-| Anthropic | `ANTHROPIC_API_KEY` | Claude Haiku | Pay-per-use | `https://console.anthropic.com` |
-| OpenAI | `OPENAI_API_KEY` | GPT-4o | Pay-per-use | `https://platform.openai.com` |
-| Google | `GOOGLE_API_KEY` | Gemini 1.5 Pro | **Free for NCAR** | `https://aistudio.google.com` |
-| Groq | `GROQ_API_KEY` | Llama 3 Instant | **Free tier** | `https://console.groq.com` |
+```bash
+# Add to ~/.bashrc so it persists across sessions
+module use /glade/work/bdobbins/llms/modules
+module load llms
+
+# That's it — credit ask and credit agent will pick up the key automatically
+credit ask "how do I resume a failed Derecho job?"
+credit agent -c my_run.yml "why did my training run crash?"
+```
+
+Access is open to all NCAR staff while credits are available.
+Contact [milescore@ucar.edu](mailto:milescore@ucar.edu) if you expect heavy usage.
+:::
+
+### `credit ask` — quick Q&A
+
+Answers questions in one shot, automatically injecting your config, training log, and recent
+PBS output as context.  Works with four providers — set whichever key you have:
+
+| Provider | Env var | Model | Cost |
+|----------|---------|-------|------|
+| **Anthropic** | `ANTHROPIC_API_KEY` | Claude Haiku | Pay-per-use (NCAR: shared) |
+| OpenAI | `OPENAI_API_KEY` | GPT-4o | Pay-per-use |
+| Google | `GOOGLE_API_KEY` | Gemini 1.5 Pro | Free for NCAR via AI Studio |
+| Groq | `GROQ_API_KEY` | Llama 3 Instant | Free tier (no card needed) |
 
 Priority when multiple keys are set: Anthropic → OpenAI → Google → Groq.
 
 ```bash
-# Set whichever key(s) you have — add to ~/.bashrc to persist
-export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com
-export OPENAI_API_KEY=sk-...          # https://platform.openai.com
-export GOOGLE_API_KEY=AIza...         # https://aistudio.google.com  (free for NCAR users)
-export GROQ_API_KEY=gsk_...           # https://console.groq.com     (free, no card needed)
+pip install "miles-credit[ask]"
 
-# Install the package(s) for the provider(s) you want
-pip install anthropic                  # or: openai  /  google-generativeai  /  groq
-# All at once: pip install miles-credit[ask]
-```
-
-```bash
-# Ask without context
 credit ask "how do I resume a failed Derecho job?"
-
-# Ask with your run's context injected automatically
 credit ask -c my_run.yml "my loss stopped decreasing at epoch 12, what should I check?"
 credit ask -c my_run.yml "is my batch size too large for 0.25 degree?"
 ```
 
-::::{note}
-If `credit ask` fails with a `400 Bad Request` or `insufficient credits` error,
-your API account is out of credits. Switch to the free Groq provider:
-
-```bash
-pip install groq
-export GROQ_API_KEY=gsk_...   # console.groq.com — free, no card needed
-credit ask "your question here"
-```
-::::
-
 ---
 
-## 7. Go deeper with the AI agent
+## 7. `credit agent` — agentic AI that reads your files
 
-`credit ask` is great for quick questions.  When you need to actually diagnose a crash or
-audit a config, use `credit agent` — it reads your files and runs shell commands before answering.
+When you need to actually *diagnose* a crash rather than just ask about it, use
+`credit agent`.  It reads your PBS logs, inspects your config, and runs shell commands
+before answering — no copy-pasting tracebacks required.
+
+:::{note}
+**NCAR users:** load the shared key first (see section 6 above), then:
 
 ```bash
 pip install "miles-credit[agent]"
-export ANTHROPIC_API_KEY=sk-ant-...   # requires API credits (not Claude.ai Pro)
 
-# Agent reads your PBS log, finds the traceback, explains the fix
+credit agent -c my_run.yml "why did my training run crash?"
+```
+:::
+
+```bash
+# For non-NCAR users — requires Anthropic API key with credits
+pip install "miles-credit[agent]"
+export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com (~$0.01–0.02 per session)
+
+# Diagnose a crash — reads PBS log, finds traceback, explains the fix
 credit agent -c config.yml "why did my training run crash?"
 
-# Audit your config before a long run
+# Audit a config before a long run
 credit agent -c config.yml "review this config before I start a 200-epoch run on 8 H100s"
 
-# Check your job queue
+# Check job queue with real data
 credit agent "what PBS jobs are running and how much walltime do they have left?"
+
+# Understand the codebase
+credit agent "how does ConcatPreblock assemble the batch tensor?"
 ```
 
-A typical debugging session (3–6 turns, reading a log + config) costs **~$0.01–0.02**.
-See the full [AI Agent documentation](agent.md) for all examples and options.
+See the full [AI Agent documentation](agent.md) for all examples, options, and cost details.
 
 ---
 

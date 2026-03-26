@@ -20,12 +20,18 @@ to be under active development. Please contact [the MILES group](mailto:milescor
 
 ## AI assistant
 
-CREDIT ships with two built-in AI tools for getting help and diagnosing problems:
+CREDIT ships with two built-in AI tools for getting help and diagnosing problems.
+
+**NCAR users on Casper or Derecho:** shared Anthropic credits are available for all NCAR staff.
+Add these lines to `~/.bashrc` — no personal API key required:
+```bash
+module use /glade/work/bdobbins/llms/modules
+module load llms
+```
 
 **`credit ask`** — one-shot Q&A, works with Anthropic, OpenAI, Google Gemini, or Groq (free tier):
 ```bash
 pip install "miles-credit[ask]"
-export GROQ_API_KEY=gsk_...        # free at console.groq.com
 credit ask -c my_run.yml "why is my loss not decreasing?"
 ```
 
@@ -33,10 +39,10 @@ credit ask -c my_run.yml "why is my loss not decreasing?"
 Point it at a crashed run and it finds the traceback, reads the config, and tells you exactly what to fix:
 ```bash
 pip install "miles-credit[agent]"
-export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com — ~$0.01 per session
 credit agent -c my_run.yml "why did my training run crash?"
 ```
 
+Non-NCAR users: `credit agent` requires an Anthropic API key (~$0.01 per session).
 See the [AI Agent documentation](https://miles-credit.readthedocs.io/en/latest/agent.html) for the full reference.
 
 MILES CREDIT also provides more detailed [documentation](https://miles-credit.readthedocs.io/en/latest/) with installation

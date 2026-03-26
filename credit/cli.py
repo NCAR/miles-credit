@@ -776,17 +776,25 @@ def _ask(args: argparse.Namespace) -> None:
                 provider = name
                 break
         if provider is None:
-            print(
-                "No API key found.  Set one of:\n\n"
+            _ncar = _is_ncar_system()
+            msg = "No API key found."
+            if _ncar:
+                msg += (
+                    "\n\nOn NCAR systems (Casper/Derecho) you can use the shared Anthropic credits:\n\n"
+                    "  module use /glade/work/bdobbins/llms/modules\n"
+                    "  module load llms\n\n"
+                    "Add those two lines to ~/.bashrc to persist across sessions."
+                )
+            msg += (
+                "\n\nOr set your own key:\n\n"
                 "  export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com\n"
                 "  export OPENAI_API_KEY=sk-...           # https://platform.openai.com\n"
                 "  export GOOGLE_API_KEY=AIza...          # https://aistudio.google.com  (free for NCAR)\n"
                 "  export GROQ_API_KEY=gsk_...            # https://console.groq.com     (free tier)\n\n"
-                "Add to ~/.bashrc to persist.\n"
                 "See: https://miles-credit.readthedocs.io/en/latest/quickstart.html"
-                "#get-help-from-the-ai-assistant",
-                file=sys.stderr,
+                "#get-help-from-the-ai-assistant"
             )
+            print(msg, file=sys.stderr)
             sys.exit(1)
 
     # ---- Check package is installed ----
@@ -841,6 +849,14 @@ def _ask(args: argparse.Namespace) -> None:
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _is_ncar_system() -> bool:
+    """Return True if running on a known NCAR HPC system (Casper or Derecho)."""
+    import socket
+
+    host = socket.gethostname()
+    return any(name in host for name in ("casper", "crhtc", "derecho", "dec", "crlogin"))
 
 
 # ---------------------------------------------------------------------------
@@ -1019,13 +1035,21 @@ def _agent(args: argparse.Namespace) -> None:
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        print(
-            "ANTHROPIC_API_KEY is not set.\n"
-            "credit agent requires an Anthropic API key with active credits.\n"
-            "  export ANTHROPIC_API_KEY=sk-ant-...\n"
-            "  → https://console.anthropic.com",
-            file=sys.stderr,
-        )
+        msg = "ANTHROPIC_API_KEY is not set.\n"
+        if _is_ncar_system():
+            msg += (
+                "\nOn NCAR systems (Casper/Derecho) you can use the shared Anthropic credits:\n\n"
+                "  module use /glade/work/bdobbins/llms/modules\n"
+                "  module load llms\n\n"
+                "Add those two lines to ~/.bashrc to persist across sessions."
+            )
+        else:
+            msg += (
+                "\ncredit agent requires an Anthropic API key with active credits.\n"
+                "  export ANTHROPIC_API_KEY=sk-ant-...\n"
+                "  → https://console.anthropic.com"
+            )
+        print(msg, file=sys.stderr)
         sys.exit(1)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
