@@ -44,9 +44,7 @@ class ERA5Normalizer(nn.Module):
         self.std_ds = xr.open_dataset(data_conf["std_path"]).load()
         self._warned: set = set()  # suppress repeated per-variable warnings
 
-    def _stats(
-        self, varname: str, dim: str, device: torch.device, dtype: torch.dtype
-    ):
+    def _stats(self, varname: str, dim: str, device: torch.device, dtype: torch.dtype):
         """Return (mean, std) broadcast-ready tensors, or (None, None) if variable not in both files."""
         if varname not in self.mean_ds or varname not in self.std_ds:
             if varname in self.mean_ds and varname not in self.std_ds and varname not in self._warned:

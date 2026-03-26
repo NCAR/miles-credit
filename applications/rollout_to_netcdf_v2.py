@@ -29,7 +29,6 @@ import multiprocessing as mp
 from datetime import datetime, timedelta
 
 import pandas as pd
-import numpy as np
 import torch
 import torch.nn as nn
 import xarray as xr
@@ -56,6 +55,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 # Config helpers
 # ---------------------------------------------------------------------------
 
+
 def _inject_flat_schema(conf):
     """Inject v1-style flat keys into conf['data'] so output.py utilities work."""
     if "variables" in conf["data"]:
@@ -67,7 +67,7 @@ def _inject_flat_schema(conf):
     conf["data"]["variables"] = prog.get("vars_3D", [])
     conf["data"]["surface_variables"] = prog.get("vars_2D", [])
     # diagnostic_variables is the list of names shown in xarray output
-    conf["data"]["diagnostic_variables"] = (diag.get("vars_2D", []) if diag else [])
+    conf["data"]["diagnostic_variables"] = diag.get("vars_2D", []) if diag else []
     # level_ids: actual pressure/model-level values for xarray coordinate
     conf["data"]["level_ids"] = src.get("levels", list(range(conf["model"]["levels"])))
     # scaler_type needed by save_netcdf_increment
@@ -158,20 +158,19 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
 
 def _sample_to_batch(sample):
     """Wrap a single ERA5Dataset sample (no batch dim) into preblock-compatible dict."""
-    return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()},
-                     "metadata": sample["metadata"]}}
+    return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()}, "metadata": sample["metadata"]}}
 
 
 # ---------------------------------------------------------------------------
 # Async save worker
 # ---------------------------------------------------------------------------
 
+
 def _save_worker(y_pred_np, init_datetime_str, forecast_step, lead_time_periods, lat, lon, meta_data, conf):
     """Called via pool.apply_async — converts numpy array to xarray and saves."""
     try:
-        utc_dt = (
-            datetime.strptime(init_datetime_str, "%Y-%m-%dT%HZ")
-            + timedelta(hours=lead_time_periods * forecast_step)
+        utc_dt = datetime.strptime(init_datetime_str, "%Y-%m-%dT%HZ") + timedelta(
+            hours=lead_time_periods * forecast_step
         )
         y_pred_t = torch.from_numpy(y_pred_np)
         darray_upper_air, darray_single_level = make_xarray(y_pred_t, utc_dt, lat, lon, conf)
@@ -190,6 +189,7 @@ def _save_worker(y_pred_np, init_datetime_str, forecast_step, lead_time_periods,
 # ---------------------------------------------------------------------------
 # Main predict function
 # ---------------------------------------------------------------------------
+
 
 def predict(rank, world_size, conf, p):
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
@@ -357,16 +357,13 @@ def _load_model(conf, device):
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = ArgumentParser(description="Rollout AI-NWP forecasts (v2 data schema)")
-    parser.add_argument("-c", dest="model_config", type=str, required=True,
-                        help="Path to v2 model configuration YAML.")
-    parser.add_argument("-l", dest="launch", type=int, default=0,
-                        help="Submit to PBS if 1.")
-    parser.add_argument("-m", "--mode", type=str, default="none",
-                        help="Override predict mode: none | ddp | fsdp")
-    parser.add_argument("-cpus", "--num_cpus", type=int, default=4,
-                        help="Number of CPU workers for async save pool.")
+    parser.add_argument("-c", dest="model_config", type=str, required=True, help="Path to v2 model configuration YAML.")
+    parser.add_argument("-l", dest="launch", type=int, default=0, help="Submit to PBS if 1.")
+    parser.add_argument("-m", "--mode", type=str, default="none", help="Override predict mode: none | ddp | fsdp")
+    parser.add_argument("-cpus", "--num_cpus", type=int, default=4, help="Number of CPU workers for async save pool.")
     args = parser.parse_args()
 
     root = logging.getLogger()

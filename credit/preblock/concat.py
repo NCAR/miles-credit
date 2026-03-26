@@ -91,5 +91,3 @@ class ConcatPreblock(nn.Module):
             batch["y"] = torch.cat(y_parts, dim=1) if len(y_parts) > 1 else y_parts[0]
 
         return batch
-
-

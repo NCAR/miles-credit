@@ -57,25 +57,22 @@ class Trainer(BaseTrainer):
         self.opt_energy = None
 
         if post_conf.get("activate", False):
-            if (
-                post_conf.get("global_mass_fixer", {}).get("activate", False)
-                and post_conf["global_mass_fixer"].get("activate_outside_model", False)
+            if post_conf.get("global_mass_fixer", {}).get("activate", False) and post_conf["global_mass_fixer"].get(
+                "activate_outside_model", False
             ):
                 logger.info("Activate GlobalMassFixer outside of model")
                 self.flag_mass_conserve = True
                 self.opt_mass = GlobalMassFixer(post_conf)
 
-            if (
-                post_conf.get("global_water_fixer", {}).get("activate", False)
-                and post_conf["global_water_fixer"].get("activate_outside_model", False)
+            if post_conf.get("global_water_fixer", {}).get("activate", False) and post_conf["global_water_fixer"].get(
+                "activate_outside_model", False
             ):
                 logger.info("Activate GlobalWaterFixer outside of model")
                 self.flag_water_conserve = True
                 self.opt_water = GlobalWaterFixer(post_conf)
 
-            if (
-                post_conf.get("global_energy_fixer", {}).get("activate", False)
-                and post_conf["global_energy_fixer"].get("activate_outside_model", False)
+            if post_conf.get("global_energy_fixer", {}).get("activate", False) and post_conf["global_energy_fixer"].get(
+                "activate_outside_model", False
             ):
                 logger.info("Activate GlobalEnergyFixer outside of model")
                 self.flag_energy_conserve = True
@@ -93,14 +90,10 @@ class Trainer(BaseTrainer):
 
         # Diagnostic output channel count (excluded from autoregressive x update)
         # ERA5Dataset already flattens 3D: varnum_diag = vars_3D*levels + vars_2D
-        self.varnum_diag = (
-            len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))
-        ) if diag else 0
+        self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
 
         # Forcing+static input channel count (last channels of x, not predicted by model)
-        self.static_dim_size = (
-            len(dyn.get("vars_2D", [])) + len(static_v.get("vars_2D", []))
-        )
+        self.static_dim_size = len(dyn.get("vars_2D", [])) + len(static_v.get("vars_2D", []))
 
         self.retain_graph = data_conf.get("retain_graph", False)
 
@@ -155,6 +148,7 @@ class Trainer(BaseTrainer):
 
         # resolve effective batches_per_epoch
         from torch.utils.data import IterableDataset
+
         batches_per_epoch = self.batches_per_epoch
         if not isinstance(trainloader.dataset, IterableDataset):
             if hasattr(trainloader.dataset, "batches_per_epoch"):
@@ -164,9 +158,7 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches = len(trainloader)
             batches_per_epoch = (
-                self.batches_per_epoch
-                if 0 < self.batches_per_epoch < dataset_batches
-                else dataset_batches
+                self.batches_per_epoch if 0 < self.batches_per_epoch < dataset_batches else dataset_batches
             )
 
         batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
@@ -321,6 +313,7 @@ class Trainer(BaseTrainer):
         self.model.eval()
 
         from torch.utils.data import IterableDataset
+
         valid_batches_per_epoch = self.valid_batches_per_epoch
         if not isinstance(valid_loader.dataset, IterableDataset):
             if hasattr(valid_loader.dataset, "batches_per_epoch"):
@@ -330,15 +323,11 @@ class Trainer(BaseTrainer):
             else:
                 dataset_batches = len(valid_loader)
             valid_batches_per_epoch = (
-                self.valid_batches_per_epoch
-                if 0 < self.valid_batches_per_epoch < dataset_batches
-                else dataset_batches
+                self.valid_batches_per_epoch if 0 < self.valid_batches_per_epoch < dataset_batches else dataset_batches
             )
 
         results_dict = defaultdict(list)
-        batch_group_generator = tqdm.tqdm(
-            range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True
-        )
+        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
 
         dl = cycle(valid_loader)
         with torch.no_grad():

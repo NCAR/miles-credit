@@ -6,14 +6,11 @@ Uses MultiSourceDataset + DistributedMultiStepBatchSampler directly.
 No credit_main_parser / training_data_check — those are for the old schema.
 """
 
-import gc
 import logging
 import os
 import shutil
-import sys
 import warnings
 from argparse import ArgumentParser
-from pathlib import Path
 
 import optuna
 import torch
@@ -253,9 +250,7 @@ def main(rank, world_size, conf, backend=None, trial=False):
         diag = era5_vars.get("diagnostic") or {}
         conf["data"]["variables"] = prog.get("vars_3D", [])
         conf["data"]["surface_variables"] = prog.get("vars_2D", [])
-        conf["data"]["diagnostic_variables"] = (
-            diag.get("vars_3D", []) + diag.get("vars_2D", []) if diag else []
-        )
+        conf["data"]["diagnostic_variables"] = diag.get("vars_3D", []) + diag.get("vars_2D", []) if diag else []
 
     metrics = LatWeightedMetrics(conf)
 

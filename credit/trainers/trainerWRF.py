@@ -199,7 +199,10 @@ class Trainer(BaseTrainer):
             if self.rank == 0:
                 batch_group_generator.set_description(to_print)
 
-            if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if (
+                self.conf["trainer"]["use_scheduler"]
+                and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
                 scheduler.step()
 
             if i >= batches_per_epoch and i > 0:
@@ -222,7 +225,9 @@ class Trainer(BaseTrainer):
         forecast_len = self.conf["data"]["valid_forecast_len"]
         distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
-        total_time_steps = self.conf["data"]["total_time_steps"] if "total_time_steps" in self.conf["data"] else forecast_len
+        total_time_steps = (
+            self.conf["data"]["total_time_steps"] if "total_time_steps" in self.conf["data"] else forecast_len
+        )
 
         assert total_time_steps == 0, "This trainer supports `forecast_len=0` only"
 

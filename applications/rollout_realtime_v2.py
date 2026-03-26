@@ -23,13 +23,12 @@ Output: one NetCDF file per forecast step saved to
 """
 
 import os
-import sys
 import yaml
 import logging
 import warnings
 import traceback
 from argparse import ArgumentParser
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from multiprocessing.shared_memory import SharedMemory
 
 import pandas as pd
@@ -58,6 +57,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 # ---------------------------------------------------------------------------
 # Config helpers (shared with rollout_to_netcdf_v2)
 # ---------------------------------------------------------------------------
+
 
 def _inject_flat_schema(conf):
     """Inject v1-style flat keys into conf['data'] so output.py utilities work."""
@@ -146,13 +146,13 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
 
 def _sample_to_batch(sample):
     """Add batch dim and wrap ERA5Dataset sample for preblock input."""
-    return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()},
-                     "metadata": sample["metadata"]}}
+    return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()}, "metadata": sample["metadata"]}}
 
 
 # ---------------------------------------------------------------------------
 # Async save worker (uses SharedMemory to avoid pickling large tensors)
 # ---------------------------------------------------------------------------
+
 
 def _save_worker(shm_name, arr_shape, arr_dtype, init_str, step, lead_time_periods, lat, lon, meta_data, conf):
     try:
@@ -160,15 +160,16 @@ def _save_worker(shm_name, arr_shape, arr_dtype, init_str, step, lead_time_perio
         y_np = np.ndarray(arr_shape, dtype=arr_dtype, buffer=shm.buf).copy()
         shm.unlink()
 
-        utc_dt = (
-            datetime.strptime(init_str, "%Y-%m-%dT%HZ")
-            + timedelta(hours=lead_time_periods * step)
-        )
+        utc_dt = datetime.strptime(init_str, "%Y-%m-%dT%HZ") + timedelta(hours=lead_time_periods * step)
         y_t = torch.from_numpy(y_np)
         darray_upper_air, darray_single_level = make_xarray(y_t, utc_dt, lat, lon, conf)
         save_netcdf_increment(
-            darray_upper_air, darray_single_level,
-            init_str, lead_time_periods * step, meta_data, conf,
+            darray_upper_air,
+            darray_single_level,
+            init_str,
+            lead_time_periods * step,
+            meta_data,
+            conf,
         )
         print(f"  step={step:3d}  valid={utc_dt.strftime('%Y-%m-%d %HZ')}  fhr={lead_time_periods * step:3d}h")
     except Exception:
@@ -178,6 +179,7 @@ def _save_worker(shm_name, arr_shape, arr_dtype, init_str, step, lead_time_perio
 # ---------------------------------------------------------------------------
 # Core rollout
 # ---------------------------------------------------------------------------
+
 
 def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, pool, rank=0, world_size=1):
     """
@@ -305,8 +307,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
             shm_arr[:] = y_phys
             result = pool.apply_async(
                 _save_worker,
-                (shm.name, y_phys.shape, y_phys.dtype, init_str, step,
-                 lead_time_periods, lat, lon, meta_data, conf),
+                (shm.name, y_phys.shape, y_phys.dtype, init_str, step, lead_time_periods, lat, lon, meta_data, conf),
             )
             results.append(result)
 
@@ -335,6 +336,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = ArgumentParser(
         description="CREDIT v2 realtime/operational forecast rollout.",
@@ -350,18 +352,30 @@ Examples:
     torchrun --standalone --nnodes=1 --nproc-per-node=4 rollout_realtime_v2.py -c config.yml --init-time 2024-01-15T00
         """,
     )
-    parser.add_argument("-c", "--config", dest="model_config", type=str, required=True,
-                        help="Path to v2 model configuration YAML.")
-    parser.add_argument("--init-time", type=str, required=True,
-                        help="Forecast initialization time. ISO format: YYYY-MM-DDTHH (e.g. 2024-01-15T00)")
-    parser.add_argument("--steps", type=int, default=None,
-                        help="Number of autoregressive steps. Default: conf['predict']['days'] × steps_per_day.")
-    parser.add_argument("--save-dir", type=str, default=None,
-                        help="Output directory. Default: conf['predict']['save_forecast'].")
-    parser.add_argument("-m", "--mode", type=str, default=None,
-                        help="Override predict mode: none | ddp | fsdp. Default: from config.")
-    parser.add_argument("-p", "--procs", dest="num_cpus", type=int, default=4,
-                        help="CPU workers for async NetCDF saves.")
+    parser.add_argument(
+        "-c", "--config", dest="model_config", type=str, required=True, help="Path to v2 model configuration YAML."
+    )
+    parser.add_argument(
+        "--init-time",
+        type=str,
+        required=True,
+        help="Forecast initialization time. ISO format: YYYY-MM-DDTHH (e.g. 2024-01-15T00)",
+    )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="Number of autoregressive steps. Default: conf['predict']['days'] × steps_per_day.",
+    )
+    parser.add_argument(
+        "--save-dir", type=str, default=None, help="Output directory. Default: conf['predict']['save_forecast']."
+    )
+    parser.add_argument(
+        "-m", "--mode", type=str, default=None, help="Override predict mode: none | ddp | fsdp. Default: from config."
+    )
+    parser.add_argument(
+        "-p", "--procs", dest="num_cpus", type=int, default=4, help="CPU workers for async NetCDF saves."
+    )
 
     args = parser.parse_args()
 
@@ -378,8 +392,7 @@ Examples:
         conf = yaml.load(f, Loader=yaml.FullLoader)
 
     assert "source" in conf["data"], (
-        "rollout_realtime_v2.py requires the v2 nested data schema. "
-        "For v1 configs use rollout_realtime.py."
+        "rollout_realtime_v2.py requires the v2 nested data schema. For v1 configs use rollout_realtime.py."
     )
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
@@ -421,6 +434,7 @@ Examples:
     local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
 
     import multiprocessing as mp
+
     with mp.Pool(args.num_cpus) as pool:
         if conf["predict"]["mode"] in ["fsdp", "ddp"]:
             setup(world_rank, world_size, conf["predict"]["mode"])

@@ -14,6 +14,7 @@ from credit.models.debugger_model import DebuggerModel
 from credit.models.wxformer.crossformer import CrossFormer as WXFormer
 from credit.models.wxformer.wxformer_v2 import CrossFormer as WXFormerV2
 from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
+
 try:
     from credit.models.wxformer.wxformer_v2_ensemble import CrossFormerV2WithNoise
 except ImportError:
@@ -50,9 +51,14 @@ model_types = {
     "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
     "wxformer_v2": (WXFormerV2, "Loading the WXFormer v2 model (PixelShuffle + SwiGLU + shifted/grid attention) ..."),
     **(
-        {"wxformer_v2_ensemble": (CrossFormerV2WithNoise,
-                                  "Loading the WXFormer v2 ensemble model with SDL noise injection ...")}
-        if CrossFormerV2WithNoise is not None else {}
+        {
+            "wxformer_v2_ensemble": (
+                CrossFormerV2WithNoise,
+                "Loading the WXFormer v2 ensemble model with SDL noise injection ...",
+            )
+        }
+        if CrossFormerV2WithNoise is not None
+        else {}
     ),
     "crossformer-ensemble": (
         CrossFormerWithNoise,

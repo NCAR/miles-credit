@@ -275,7 +275,10 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if (
+                self.conf["trainer"]["use_scheduler"]
+                and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
                 scheduler.step()
 
         #  Shutdown the progbar
