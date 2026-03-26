@@ -258,7 +258,10 @@ Check progress at any time:
 # Quick check: tail the CSV log
 tail -5 /glade/derecho/scratch/$USER/CREDIT_runs/my_run/training_log.csv
 
-# Visual: TensorBoard (see Monitoring with TensorBoard for SSH forwarding)
+# Global map: truth vs prediction in physical units (saves to <save_loc>/plots/)
+credit plot -c my_experiment.yml --field VAR_2T --denorm
+
+# Visual dashboard: TensorBoard (see Monitoring with TensorBoard for SSH forwarding)
 tensorboard --logdir /glade/derecho/scratch/$USER/CREDIT_runs/my_run/tensorboard
 ```
 

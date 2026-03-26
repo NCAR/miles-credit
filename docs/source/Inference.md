@@ -231,19 +231,37 @@ credit realtime -c config.yml --init-time 2024-06-01T12 --steps 40 \
 The fastest way to verify a freshly trained model produces sensible output:
 
 ```bash
-# Plot a global map of temperature at the first model level
-credit plot -c config/wxformer_1dg_6hr_v2.yml --field temperature
+# Plot 2m temperature in physical units (Kelvin) — recommended starting point
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T --denorm
 
-# Multiple fields, specific level
-credit plot -c config/wxformer_1dg_6hr_v2.yml --field temperature SP --level 5
+# Multiple fields at once
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T SP --denorm
 
-# Use a specific checkpoint
-credit plot -c config/wxformer_1dg_6hr_v2.yml --field SP \
-    --checkpoint /glade/derecho/scratch/$USER/CREDIT_runs/my_run/checkpoint.pt
+# 3D variable: temperature at level index 5 (pressure-level ordering)
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field temperature --level 5 --denorm
+
+# Point at a specific checkpoint or date
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T \
+    --checkpoint /glade/derecho/scratch/$USER/CREDIT_runs/my_run/checkpoint.pt \
+    --sample-date 2020-06-15T00 --denorm
 ```
 
-The plot is saved to `<save_loc>/plots/` as a PNG showing truth, prediction, and difference
-side by side for each requested field.
+Each PNG is saved to `<save_loc>/plots/` and shows **truth | prediction | difference**
+as a global map.
+
+`--denorm` converts outputs from normalised (σ) units to physical units using the
+mean and std files from your config — e.g. Kelvin for temperature, Pascals for surface
+pressure. Without `--denorm` the colourbar is in standard-deviation units, which is
+useful for diagnosing normalisation issues but harder to interpret at a glance.
+
+**What to look for:**
+
+| Symptom | Likely cause |
+|---------|-------------|
+| Loss > 100 or NaN | Normalisation broken — check mean/std paths |
+| Prediction is uniform (no structure) | Too few epochs or learning rate too high |
+| Tiling / grid artefacts in prediction | Normal at early epochs for window-based models; disappears with training |
+| Difference panel is smooth and small | Training is going well |
 
 ### NCAR data paths
 

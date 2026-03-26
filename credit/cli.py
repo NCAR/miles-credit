@@ -364,6 +364,53 @@ def _build_channel_map(conf):
     return channel_map
 
 
+def _build_denorm_stats(conf):
+    """Return (mean_arr, std_arr) aligned with ConcatPreblock TARGET_FIELD_ORDER output channels.
+
+    Channel order: prognostic/3D (each var × n_levels), prognostic/2D, diagnostic/2D.
+    Variables missing from the stat files get mean=0, std=1 (pass-through).
+
+    Returns:
+        mean_arr: np.ndarray of shape (C_out,)
+        std_arr:  np.ndarray of shape (C_out,)
+    """
+    import numpy as np
+    import xarray as xr
+
+    src = conf["data"]["source"]["ERA5"]
+    levels = src["levels"]
+    level_coord = src["level_coord"]
+    n_levels = len(levels)
+    v = src["variables"]
+    prog = v.get("prognostic") or {}
+    diag = v.get("diagnostic") or {}
+
+    mean_ds = xr.open_dataset(conf["data"]["mean_path"]).load()
+    std_ds  = xr.open_dataset(conf["data"]["std_path"]).load()
+
+    def _stats(varname, is_3d):
+        if varname not in mean_ds or varname not in std_ds:
+            n = n_levels if is_3d else 1
+            return np.zeros(n, dtype=np.float32), np.ones(n, dtype=np.float32)
+        if is_3d:
+            m = mean_ds[varname].sel({level_coord: levels}).values.astype(np.float32)
+            s = std_ds[varname].sel({level_coord: levels}).values.astype(np.float32)
+        else:
+            m = np.array([float(mean_ds[varname].values)], dtype=np.float32)
+            s = np.array([float(std_ds[varname].values)], dtype=np.float32)
+        return m, s
+
+    means, stds = [], []
+    for vn in prog.get("vars_3D", []):
+        m, s = _stats(vn, True);  means.append(m); stds.append(s)
+    for vn in prog.get("vars_2D", []):
+        m, s = _stats(vn, False); means.append(m); stds.append(s)
+    for vn in diag.get("vars_2D", []):
+        m, s = _stats(vn, False); means.append(m); stds.append(s)
+
+    return np.concatenate(means), np.concatenate(stds)
+
+
 def _plot(args: argparse.Namespace) -> None:
     """Load checkpoint, run one forward pass, produce global maps."""
     import yaml
@@ -470,6 +517,17 @@ def _plot(args: argparse.Namespace) -> None:
     y_true_np  = _squeeze(y).numpy()   # (C_out, H, W)
     y_pred_np  = _squeeze(y_pred).numpy()
 
+    # ---- Inverse-normalise to physical units (optional) ----
+    unit_label = "normalised"
+    if args.denorm:
+        mean_arr, std_arr = _build_denorm_stats(conf)
+        mean_arr = mean_arr[:, None, None]   # broadcast over H, W
+        std_arr  = std_arr[:, None, None]
+        y_true_np = y_true_np * std_arr + mean_arr
+        y_pred_np = y_pred_np * std_arr + mean_arr
+        unit_label = "physical units"
+        logger.info("Inverse-normalised outputs to physical units")
+
     # ---- Channel map ----
     channel_map = _build_channel_map(conf)
 
@@ -497,9 +555,9 @@ def _plot(args: argparse.Namespace) -> None:
         vmax = float(np.percentile(truth, 98))
         dabs = float(np.percentile(np.abs(diff), 98))
 
-        title_suffix = f"  |  level_idx={level_idx}" if len(chans) > 1 else ""
+        title_suffix = f"  level {level_idx}" if len(chans) > 1 else ""
         ckpt_epoch = ckpt.get("epoch", "?")
-        fig_title = f"{field}{title_suffix}  |  epoch {ckpt_epoch}"
+        fig_title = f"{field}{title_suffix}  |  epoch {ckpt_epoch}  |  {unit_label}"
 
         if _HAS_CARTOPY:
             proj = ccrs.PlateCarree()
@@ -663,10 +721,10 @@ def _build_parser() -> argparse.ArgumentParser:
             requested field. Saved to <save_loc>/plots/.
 
             Examples:
-              credit plot -c config.yml --field temperature
-              credit plot -c config.yml --field temperature SP --level 5
-              credit plot -c config.yml --field SP --checkpoint /path/to/checkpoint.pt
-              credit plot -c config.yml --field temperature --sample-date 2020-06-01T00
+              credit plot -c config.yml --field VAR_2T --denorm
+              credit plot -c config.yml --field VAR_2T SP --level 5 --denorm
+              credit plot -c config.yml --field SP --checkpoint /path/to/checkpoint.pt --denorm
+              credit plot -c config.yml --field VAR_2T --sample-date 2020-06-01T00 --denorm
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG",
@@ -682,6 +740,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Validation sample init time (default: first sample in valid set)")
     p.add_argument("--output-dir", default=None, metavar="DIR", dest="output_dir",
                    help="Where to save plots (default: <save_loc>/plots/)")
+    p.add_argument("--denorm", action="store_true",
+                   help="Inverse-normalise output to physical units using mean/std files"
+                        " from the config (e.g. K for temperature, Pa for surface pressure)")
 
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")
