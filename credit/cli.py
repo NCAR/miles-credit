@@ -156,7 +156,7 @@ def _build_pbs_script(args: argparse.Namespace, config: str, repo: str,
         queue = args.queue or "main"
         conda_env = args.conda_env or "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221"
 
-        return textwrap.dedent(f"""\
+        header = textwrap.dedent(f"""\
             #!/bin/bash
             #PBS -A {account}
             #PBS -N credit_v2
@@ -193,28 +193,42 @@ def _build_pbs_script(args: argparse.Namespace, config: str, repo: str,
             export FI_MR_CACHE_MONITOR=userfaultfd
             export FI_CXI_DEFAULT_CQ_SIZE=131072
 
-            nodes=( $( cat $PBS_NODEFILE ) )
-            head_node="${{nodes[0]}}"
-            head_node_ip=$(ssh "${{head_node}}" hostname -i | awk '{{print $1}}')
             total_gpus=$(( {nodes} * {args.gpus} ))
-
             echo "Nodes     : {nodes}"
             echo "GPUs/node : {args.gpus}"
             echo "Total GPUs: ${{total_gpus}}"
             echo "Config    : ${{CONFIG}}"
-            echo "Head node : ${{head_node_ip}}"
-
             cd ${{REPO}}
-            RDZV_PORT=$(( RANDOM % 10000 + 20000 ))
-
-            mpiexec -n "${{total_gpus}}" --ppn {args.gpus} --cpu-bind none \\
-                torchrun \\
-                    --nnodes={nodes} \\
-                    --nproc-per-node={args.gpus} \\
-                    --rdzv-backend=c10d \\
-                    --rdzv-endpoint="${{head_node_ip}}:${{RDZV_PORT}}" \\
-                ${{REPO}}/applications/train_v2.py -c ${{CONFIG}}
         """)
+
+        if nodes == 1:
+            # Single-node: torchrun --standalone, no MPI or rendezvous endpoint needed
+            launch = textwrap.dedent(f"""\
+                torchrun \\
+                    --standalone \\
+                    --nnodes=1 \\
+                    --nproc-per-node={args.gpus} \\
+                    ${{REPO}}/applications/train_v2.py -c ${{CONFIG}}
+            """)
+        else:
+            # Multi-node: MPI + c10d rendezvous via head-node IP
+            launch = textwrap.dedent(f"""\
+                nodes_arr=( $( cat $PBS_NODEFILE ) )
+                head_node="${{nodes_arr[0]}}"
+                head_node_ip=$(ssh "${{head_node}}" hostname -i | awk '{{print $1}}')
+                echo "Head node : ${{head_node_ip}}"
+                RDZV_PORT=$(( RANDOM % 10000 + 20000 ))
+
+                mpiexec -n "${{total_gpus}}" --ppn {args.gpus} --cpu-bind none \\
+                    torchrun \\
+                        --nnodes={nodes} \\
+                        --nproc-per-node={args.gpus} \\
+                        --rdzv-backend=c10d \\
+                        --rdzv-endpoint="${{head_node_ip}}:${{RDZV_PORT}}" \\
+                    ${{REPO}}/applications/train_v2.py -c ${{CONFIG}}
+            """)
+
+        return header + launch
 
 
 def _qsub(script: str) -> str:
