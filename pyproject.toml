@@ -67,7 +67,7 @@ develop = ["pre-commit",
     "ruff",
     "pytest"]
 
-ask    = ["anthropic>=0.40"]
+ask    = ["anthropic>=0.40", "groq>=0.9"]
 serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 
 [tool.setuptools]

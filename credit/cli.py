@@ -625,38 +625,10 @@ def _collect_run_context(args: argparse.Namespace) -> str:
     return "\n\n".join(parts)
 
 
-def _ask(args: argparse.Namespace) -> None:
-    """Ask the CREDIT AI assistant a question about your run."""
-    try:
-        import anthropic
-    except ImportError:
-        print(
-            "The 'anthropic' package is required for 'credit ask'.\n"
-            "Install it with:\n\n"
-            "  pip install anthropic\n",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        print(
-            "ANTHROPIC_API_KEY is not set.\n\n"
-            "Get a free API key at https://console.anthropic.com/\n"
-            "then run:\n\n"
-            "  export ANTHROPIC_API_KEY=sk-ant-...\n\n"
-            "or add that line to your ~/.bashrc.\n",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    question = " ".join(args.question)
-    context  = _collect_run_context(args)
-    user_msg = f"{context}\n\n## Question\n{question}" if context else question
-
-    client = anthropic.Anthropic(api_key=api_key)
-
-    print()  # breathing room
+def _ask_anthropic(user_msg: str) -> None:
+    """Stream a response via the Anthropic API (claude-haiku)."""
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     with client.messages.stream(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,
@@ -665,7 +637,72 @@ def _ask(args: argparse.Namespace) -> None:
     ) as stream:
         for text in stream.text_stream:
             print(text, end="", flush=True)
-    print("\n")  # final newline
+
+
+def _ask_groq(user_msg: str) -> None:
+    """Stream a response via the Groq API (llama3 — free tier)."""
+    import groq
+    client = groq.Groq(api_key=os.environ["GROQ_API_KEY"])
+    stream = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        max_tokens=1024,
+        messages=[
+            {"role": "system", "content": _CREDIT_SYSTEM_PROMPT},
+            {"role": "user",   "content": user_msg},
+        ],
+        stream=True,
+    )
+    for chunk in stream:
+        print(chunk.choices[0].delta.content or "", end="", flush=True)
+
+
+def _ask(args: argparse.Namespace) -> None:
+    """Ask the CREDIT AI assistant a question about your run.
+
+    Provider auto-detection (first match wins):
+      1. ANTHROPIC_API_KEY  → claude-haiku   (pip install anthropic)
+      2. GROQ_API_KEY       → llama3-instant  (pip install groq  — free tier)
+    """
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    groq_key      = os.environ.get("GROQ_API_KEY", "")
+
+    if anthropic_key:
+        try:
+            import anthropic  # noqa: F401
+        except ImportError:
+            print("pip install anthropic  (or set GROQ_API_KEY for the free Groq fallback)",
+                  file=sys.stderr)
+            sys.exit(1)
+        provider = "anthropic"
+    elif groq_key:
+        try:
+            import groq  # noqa: F401
+        except ImportError:
+            print("pip install groq", file=sys.stderr)
+            sys.exit(1)
+        provider = "groq"
+    else:
+        print(
+            "No API key found.  Set one of:\n\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com  (pay-per-use)\n"
+            "  export GROQ_API_KEY=gsk_...            # https://console.groq.com      (free tier)\n\n"
+            "Add to ~/.bashrc to persist.\n"
+            "See: https://miles-credit.readthedocs.io/en/latest/quickstart.html#get-help-from-the-ai-assistant",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    question = " ".join(args.question)
+    context  = _collect_run_context(args)
+    user_msg = f"{context}\n\n## Question\n{question}" if context else question
+
+    print()
+    if provider == "anthropic":
+        _ask_anthropic(user_msg)
+    else:
+        print("(using Groq / llama3 — free tier)\n")
+        _ask_groq(user_msg)
+    print("\n")
 
 
 def _plot(args: argparse.Namespace) -> None:

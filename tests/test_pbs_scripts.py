@@ -476,57 +476,51 @@ class TestPrintJobPlan:
 # ---------------------------------------------------------------------------
 
 class TestCreditAsk:
-    """Test _ask error branches without a real API key or anthropic package."""
+    """Test _ask error branches — no real API key or network call needed."""
 
     def _ask_args(self, question="test question", config=None):
         import argparse
         return argparse.Namespace(question=[question], config=config)
 
-    def test_missing_api_key_exits_1(self, monkeypatch):
-        """_ask exits with code 1 when ANTHROPIC_API_KEY is not set."""
-        import pytest
+    def test_no_keys_exits_1(self, monkeypatch):
+        """Exits 1 when neither ANTHROPIC_API_KEY nor GROQ_API_KEY is set."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        # anthropic is importable in CI; key check happens after import
-        try:
-            import anthropic  # noqa: F401
-        except ImportError:
-            pytest.skip("anthropic not installed")
-
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
         from credit.cli import _ask
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
 
-    def test_missing_api_key_message(self, monkeypatch, capsys):
-        """Error message tells the user exactly what to do."""
-        import pytest
+    def test_no_keys_message_mentions_both_providers(self, monkeypatch, capsys):
+        """Error message tells user about both Anthropic and Groq."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        try:
-            import anthropic  # noqa: F401
-        except ImportError:
-            pytest.skip("anthropic not installed")
-
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
         from credit.cli import _ask
         with pytest.raises(SystemExit):
             _ask(self._ask_args())
         err = capsys.readouterr().err
         assert "ANTHROPIC_API_KEY" in err
-        assert "console.anthropic.com" in err
+        assert "GROQ_API_KEY" in err
+        assert "console.groq.com" in err
 
-    def test_missing_anthropic_package_exits_1(self, monkeypatch):
-        """_ask exits with code 1 when the anthropic package is not installed."""
-        import pytest, sys
+    def test_anthropic_key_set_but_package_missing_exits_1(self, monkeypatch):
+        """Exits 1 with helpful message when anthropic package not installed."""
+        import sys
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
         monkeypatch.setitem(sys.modules, "anthropic", None)
         from credit.cli import _ask
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
 
-    def test_missing_anthropic_package_message(self, monkeypatch, capsys):
+    def test_groq_key_set_but_package_missing_exits_1(self, monkeypatch):
+        """Exits 1 with helpful message when groq package not installed."""
         import sys
-        monkeypatch.setitem(sys.modules, "anthropic", None)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("GROQ_API_KEY", "gsk_fake")
+        monkeypatch.setitem(sys.modules, "groq", None)
         from credit.cli import _ask
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
-        err = capsys.readouterr().err
-        assert "pip install anthropic" in err
+        assert exc_info.value.code == 1

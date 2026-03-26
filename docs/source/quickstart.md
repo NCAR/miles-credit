@@ -222,14 +222,32 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 
 ## 6. Get help from the AI assistant
 
-`credit ask` connects to Claude (Haiku) and answers questions about your run.
-It automatically reads your config, training log, and recent PBS output as context.
+`credit ask` answers questions about your run, automatically injecting your
+config, training log, and recent PBS output as context.
+
+It supports two providers — use whichever you have access to:
+
+| Provider | Key | Model | Cost |
+|----------|-----|-------|------|
+| Anthropic | `ANTHROPIC_API_KEY` | Claude Haiku | Pay-per-use |
+| Groq | `GROQ_API_KEY` | Llama 3 Instant | **Free tier** |
+
+`credit ask` detects whichever key is set and uses that provider automatically.
+If you have both set, Anthropic is preferred.
 
 ```bash
-# One-time setup: get a free API key at https://console.anthropic.com
+# --- Option 1: Anthropic (Claude Haiku) ---
 pip install anthropic
-export ANTHROPIC_API_KEY=sk-ant-...    # add to ~/.bashrc to persist
+export ANTHROPIC_API_KEY=sk-ant-...    # https://console.anthropic.com
 
+# --- Option 2: Groq (free tier, no credit card required) ---
+pip install groq
+export GROQ_API_KEY=gsk_...            # https://console.groq.com
+
+# Add either export to ~/.bashrc to persist across sessions.
+```
+
+```bash
 # Ask without context
 credit ask "how do I resume a failed Derecho job?"
 
@@ -237,6 +255,17 @@ credit ask "how do I resume a failed Derecho job?"
 credit ask -c my_run.yml "my loss stopped decreasing at epoch 12, what should I check?"
 credit ask -c my_run.yml "is my batch size too large for 0.25 degree?"
 ```
+
+::::{note}
+If `credit ask` fails with a `400 Bad Request` or `insufficient credits` error,
+your API account is out of credits. Switch to the free Groq provider:
+
+```bash
+pip install groq
+export GROQ_API_KEY=gsk_...   # console.groq.com — free, no card needed
+credit ask "your question here"
+```
+::::
 
 ---
 

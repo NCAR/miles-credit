@@ -109,10 +109,21 @@ Plots are saved to `<save_loc>/plots/`. No GPU required.
 
 ## 6. Get help
 
-```bash
-pip install anthropic
-export ANTHROPIC_API_KEY=sk-ant-...   # add to ~/.bashrc
+`credit ask` supports two providers — set whichever key you have:
 
+```bash
+# Anthropic (Claude Haiku) — pay-per-use
+pip install anthropic
+export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com
+
+# Groq (Llama 3) — free tier, no credit card required
+pip install groq
+export GROQ_API_KEY=gsk_...           # https://console.groq.com
+```
+
+The provider is detected automatically. If you get a `400` / "insufficient credits" error, switch to Groq.
+
+```bash
 credit ask "my loss is stuck at 2.5 after 15 epochs, what should I check?"
 credit ask -c my_run.yml "is my batch size too large for 0.25 degree?"
 ```
