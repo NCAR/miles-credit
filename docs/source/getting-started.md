@@ -6,7 +6,28 @@ the standard Python install process will install both CREDIT and all necessary d
 the right versions of PyTorch and CUDA, for you. If you are running CREDIT on the Casper system, then
  the following instructions should work for you.
 
-Create a minimal conda or virtual environment.
+:::{note}
+**NCAR users on Casper or Derecho**: pre-built conda environments are already available —
+you do not need to create a new environment from scratch.
+
+```bash
+# Casper
+conda activate /glade/u/home/schreck/.conda/envs/credit-casper
+
+# Derecho
+conda activate /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221
+```
+
+Then clone the repo and install the current branch in editable mode:
+
+```bash
+git clone https://github.com/NCAR/miles-credit.git
+cd miles-credit
+pip install -e . --no-deps   # dependencies already satisfied in the shared env
+```
+:::
+
+For non-NCAR systems, create a minimal conda or virtual environment.
 ```bash
 conda create -n credit python=3.11
 conda activate credit

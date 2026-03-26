@@ -1,5 +1,11 @@
 # Training a Model
 
+:::{note}
+**New to CREDIT?** Jump straight to [Training with the v2 Data Schema](#training-with-the-v2-data-schema) —
+it is the recommended path for all new experiments and uses a single `credit` command for everything.
+The sections below document the legacy v1 workflow.
+:::
+
 CREDIT supports three modes for training a model. In your configuration file (`model.yml`), under the `trainer` field, you can set `mode` to one of the following:
 
 - `None`: Trains on a single GPU without any special distributed settings.
@@ -176,50 +182,89 @@ number of H100s with 80 Gb of memory.
 
 ## Training with the v2 Data Schema
 
-CREDIT v2 uses a cleaner nested data schema that separates variables into explicit categories
-(`prognostic`, `diagnostic`, `dynamic_forcing`, `static`) under a named source (e.g., `ERA5`).
-It is the recommended path for new experiments.
+CREDIT v2 is the recommended path for all new experiments. It uses a cleaner nested
+data schema with explicit variable categories (`prognostic`, `diagnostic`,
+`dynamic_forcing`, `static`) and a unified `credit` command for everything.
 
-### 30-second quickstart
+### Quickstart on Casper or Derecho
 
 ```bash
-# 1. Generate a config from a built-in template
-credit init --grid 0.25deg -o my_experiment.yml   # or --grid 1deg
+# 1. Activate the pre-built environment (NCAR users)
+#    Casper:
+conda activate /glade/u/home/schreck/.conda/envs/credit-casper
+#    Derecho:
+#    conda activate /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221
 
-# 2. Edit save_loc and verify data paths, then submit
-credit submit --cluster casper  -c my_experiment.yml --gpus 4
-credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1
+# 2. Clone the repo and install
+git clone https://github.com/NCAR/miles-credit.git
+cd miles-credit
+pip install -e . --no-deps
 
-# 3. Resubmit from checkpoint when the job hits wall time (repeat as needed)
-credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1 --reload
+# 3. Generate a config from a built-in template
+credit init --grid 1deg -o my_experiment.yml      # or --grid 0.25deg for full-res
+
+# 4. Submit a chain of jobs that covers your full training run
+#    (adjust --chain based on epochs-per-job, see below)
+credit submit --cluster casper  -c my_experiment.yml --gpus 4 --chain 10
+credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1 --chain 10
 ```
 
-`credit submit` generates a PBS script and calls `qsub` automatically.
-`--reload` patches the resume fields and writes `<save_loc>/config_reload.yml` — no
-config editing required between job restarts.
-Use `--dry-run` to preview before submitting.
+That's it. `--chain 10` submits 10 back-to-back jobs via PBS `afterok` dependencies —
+no manual resubmission needed.
+
+:::{note}
+**NCAR users**: data paths in the built-in configs point to
+`/glade/campaign/cisl/aiml/ksha/CREDIT_data/` which is readable by all NCAR staff.
+`save_loc` defaults to `/glade/derecho/scratch/$USER/CREDIT_runs/...` — no config
+edits required to get started.
+:::
+
+### How many jobs do I need?
+
+Rule of thumb: `--chain = ceil(total_epochs / epochs_per_job)`.
+
+`num_epoch` in the trainer config controls how many epochs run per job submission
+(default 5). `epochs` is the total training target (default 70).
+
+| total epochs | epochs/job (`num_epoch`) | `--chain` |
+|---|---|---|
+| 70 | 5 | 14 |
+| 70 | 10 | 7 |
+| 100 | 10 | 10 |
+
+Use `--dry-run` to inspect the PBS scripts before submitting:
+
+```bash
+credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1 --chain 10 --dry-run
+```
 
 ### Available configs
 
 | Grid | File | Notes |
 |------|------|-------|
-| 0.25° | `config/wxformer_025deg_6hr_v2.yml` | Full-res ERA5 pressure-level, 13 levels |
-| 1° | `config/wxformer_1dg_6hr_v2.yml` | ERA5 model-level, good for development |
+| 1° | `config/wxformer_1dg_6hr_v2.yml` | ERA5 model-level — good starting point |
+| 0.25° | `config/wxformer_025deg_6hr_v2.yml` | Full-res pressure-level, 13 levels |
 | starter | `config/starter_v2.yml` | Minimal template with `USER SETTINGS` comments |
 
-### Key differences from v1
+### What does a healthy training run look like?
 
-| Feature | v1 (`train.py`) | v2 (`train_v2.py`) |
-|---|---|---|
-| CLI | `credit_train -c config.yml` | `credit train -c config.yml` |
-| Trainer type | `era5` | `era5-v2` |
-| Data config key | flat `variables`, `surface_variables`, etc. | nested `data.source.ERA5.variables.{prognostic,...}` |
-| `forecast_len` semantics | `0` means 1 step | `1` means 1 step |
-| Batch sampler | legacy `ERA5Dataset` | `MultiSourceDataset` + `DistributedMultiStepBatchSampler` |
+After the first epoch, `train_loss` should be **O(1)** (roughly 1–3). It should
+decrease steadily across epochs. If losses are > 100 or growing, something is wrong
+with normalization or the data paths.
+
+Check progress at any time:
+
+```bash
+# Quick check: tail the CSV log
+tail -5 /glade/derecho/scratch/$USER/CREDIT_runs/my_run/training_log.csv
+
+# Visual: TensorBoard (see Monitoring with TensorBoard for SSH forwarding)
+tensorboard --logdir /glade/derecho/scratch/$USER/CREDIT_runs/my_run/tensorboard
+```
 
 ### Trainer configuration
 
-Set `trainer.type: era5-v2` in your config. The `mode` field works the same as v1:
+Set `trainer.type: era5-v2` in your config. Key fields:
 
 ```yaml
 trainer:
@@ -307,6 +352,21 @@ credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1
 # Every subsequent job
 credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --reload
 ```
+
+#### Restarting a failed chain
+
+If the cluster kills a job mid-run (preemption, node failure, etc.), the remaining
+`afterok` jobs in the chain are automatically cancelled by PBS. To restart from the
+last good checkpoint, combine `--reload` and `--chain`:
+
+```bash
+# Resume and re-queue 5 more jobs from the latest checkpoint
+credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --reload --chain 5
+```
+
+Job 1 picks up from the checkpoint; jobs 2–5 are chained behind it with `afterok`.
+The epoch counter stays continuous because `reload_epoch: True` always reads the
+next epoch from the checkpoint file.
 
 Both options write `<save_loc>/config_reload.yml` with these five fields patched
 automatically — no manual config editing required:

@@ -327,9 +327,11 @@ def _init(args: argparse.Namespace) -> None:
     print(f"Template : {template_rel}")
     print()
     print("Next steps:")
-    print("  1. Edit 'save_loc' to your scratch directory")
+    print("  1. Check 'save_loc' — defaults to /glade/derecho/scratch/$USER/CREDIT_runs/...")
+    print("     (NCAR users: no edits needed; others: update to a writable path)")
     print("  2. Verify data paths under 'data.source'")
-    print(f"  3. credit train -c {output}")
+    print("     (NCAR users: paths point to /glade/campaign/cisl/aiml/ksha/CREDIT_data/ — readable by all staff)")
+    print(f"  3. credit submit --cluster casper -c {output} --gpus 4 --chain 14")
 
 
 # ---------------------------------------------------------------------------
