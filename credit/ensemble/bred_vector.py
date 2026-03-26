@@ -9,8 +9,9 @@ from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
 from credit.postblock import PostBlock
 from typing import Callable, Optional
 from collections import OrderedDict
-import numpy as np 
+import numpy as np
 import xarray as xr
+
 
 class BredVector:
     def __init__(
@@ -19,8 +20,12 @@ class BredVector:
         noise_amplitude: float = 0.15,
         num_cycles: int = 5,
         integration_steps: int = 1,
-        perturbation_method: Optional[Callable[[torch.Tensor, OrderedDict[str, np.ndarray]], torch.Tensor]] = None,
-        hemispheric_rescale: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
+        perturbation_method: Optional[
+            Callable[[torch.Tensor, OrderedDict[str, np.ndarray]], torch.Tensor]
+        ] = None,
+        hemispheric_rescale: Optional[
+            Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+        ] = None,
         terrain_file: str = None,
         perturb_channel_idx: int = None,
         ensemble_perturb: bool = False,
@@ -96,10 +101,16 @@ class BredVector:
 
         if hasattr(self.noise_amplitude, "__len__"):
             # Vector case: create full tensor with 1s for static channels
-            static_ones = torch.ones(self.input_static_dim, device=device, dtype=x.dtype)
-            dynamic_amp = torch.tensor(self.noise_amplitude, device=device, dtype=x.dtype)
+            static_ones = torch.ones(
+                self.input_static_dim, device=device, dtype=x.dtype
+            )
+            dynamic_amp = torch.tensor(
+                self.noise_amplitude, device=device, dtype=x.dtype
+            )
             noise_amp_full = torch.cat([static_ones, dynamic_amp]).view(1, -1, 1, 1)
-            noise_amp_dynamic = dynamic_amp.view(1, -1, 1, 1, 1)  # Same length as dynamic channels
+            noise_amp_dynamic = dynamic_amp.view(
+                1, -1, 1, 1, 1
+            )  # Same length as dynamic channels
         else:
             # Scalar case
             noise_amp_full = self.noise_amplitude
@@ -135,9 +146,13 @@ class BredVector:
             # Dynamic channels are first, static channels are last in input
             x_perturbed_dyn = x_current[:, : -self.input_static_dim, ...] + dx
             if self.clamp:
-                x_perturbed_dyn = torch.clamp(x_perturbed_dyn, self.clamp_min, self.clamp_max)
+                x_perturbed_dyn = torch.clamp(
+                    x_perturbed_dyn, self.clamp_min, self.clamp_max
+                )
             # Reconstruct full state (dynamic first, then static channels unchanged)
-            x1 = torch.cat([x_perturbed_dyn, x_current[:, -self.input_static_dim :, ...]], dim=1)
+            x1 = torch.cat(
+                [x_perturbed_dyn, x_current[:, -self.input_static_dim :, ...]], dim=1
+            )
 
             # x2, _ = self.model(x1, coords)
             # Model outputs ONLY dynamic channels (no static channels)
@@ -183,7 +198,9 @@ class BredVector:
 
             # Update x for next iteration - but x_current needs to keep static channels
             # So we reconstruct it from the model prediction + static channels
-            x_current = torch.cat([xd, x_current[:, -self.input_static_dim :, ...]], dim=1)
+            x_current = torch.cat(
+                [xd, x_current[:, -self.input_static_dim :, ...]], dim=1
+            )
 
         # Apply NVIDIA's final gamma scaling and return the final perturbation
         if forecast_step == 1 and self.perturb_channel_idx is not None:
@@ -197,12 +214,19 @@ class BredVector:
             # Create full perturbation tensor in model output space (only dynamic channels)
             delta_x_final = torch.zeros_like(dx)
 
-            if isinstance(noise_amp_dynamic, torch.Tensor) and noise_amp_dynamic.ndim > 0:
+            if (
+                isinstance(noise_amp_dynamic, torch.Tensor)
+                and noise_amp_dynamic.ndim > 0
+            ):
                 scale = noise_amp_dynamic[0, z500_idx, 0, 0, 0]
             else:
-                scale = noise_amp_dynamic  # assumed to be a scalar (float or 0-dim tensor)
+                scale = (
+                    noise_amp_dynamic  # assumed to be a scalar (float or 0-dim tensor)
+                )
 
-            delta_x_final[:, z500_idx : z500_idx + 1, ...] = dx_z500 * scale * gamma_final
+            delta_x_final[:, z500_idx : z500_idx + 1, ...] = (
+                dx_z500 * scale * gamma_final
+            )
 
             return delta_x_final.detach()
         else:
@@ -212,7 +236,9 @@ class BredVector:
             gamma_final = torch.norm(x_final) / (torch.norm(x_plus_dx) + 1e-8)
             return (dx * noise_amp_dynamic * gamma_final).detach()
 
-    def __call__(self, initial_condition: torch.Tensor, dataset, return_delta_x=False) -> list[torch.Tensor]:
+    def __call__(
+        self, initial_condition: torch.Tensor, dataset, return_delta_x=False
+    ) -> list[torch.Tensor]:
         device = initial_condition.device
 
         bred_vectors, delta_x_vectors = [], []
@@ -229,13 +255,22 @@ class BredVector:
                     # Initial input processing
                     if forecast_step == 1:
                         if "x_surf" in batch:
-                            x = concat_and_reshape(batch["x"], batch["x_surf"]).to(device).float()
+                            x = (
+                                concat_and_reshape(batch["x"], batch["x_surf"])
+                                .to(device)
+                                .float()
+                            )
                         else:
                             x = reshape_only(batch["x"]).to(device).float()
 
                         # Add forcing and static variables
                         if "x_forcing_static" in batch:
-                            x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                            x_forcing_batch = (
+                                batch["x_forcing_static"]
+                                .to(device)
+                                .permute(0, 2, 1, 3, 4)
+                                .float()
+                            )
                             x = torch.cat((x, x_forcing_batch), dim=1)
 
                         # Clamp if needed
@@ -245,7 +280,12 @@ class BredVector:
                     else:
                         # Add current forcing and static variables
                         if "x_forcing_static" in batch:
-                            x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                            x_forcing_batch = (
+                                batch["x_forcing_static"]
+                                .to(device)
+                                .permute(0, 2, 1, 3, 4)
+                                .float()
+                            )
                             x = torch.cat((x, x_forcing_batch), dim=1)
 
                         # Clamp if needed
@@ -254,7 +294,11 @@ class BredVector:
 
                     # Load y-truth
                     if "y_surf" in batch:
-                        y = concat_and_reshape(batch["y"], batch["y_surf"]).to(device).float()
+                        y = (
+                            concat_and_reshape(batch["y"], batch["y_surf"])
+                            .to(device)
+                            .float()
+                        )
                     else:
                         y = reshape_only(batch["y"]).to(device).float()
 
@@ -310,7 +354,13 @@ class BredVector:
                             x_detach = x[:, : -self.static_dim_size, 1:, ...].detach()
 
                         if "y_diag" in batch:
-                            x = torch.cat([x_detach, y_pred[:, : -self.varnum_diag, ...].detach()], dim=2)
+                            x = torch.cat(
+                                [
+                                    x_detach,
+                                    y_pred[:, : -self.varnum_diag, ...].detach(),
+                                ],
+                                dim=2,
+                            )
                         else:
                             x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
@@ -398,7 +448,9 @@ def generate_bred_vectors(
         ## But here we need the next step forcing not the current step
         delta_x = x_perturbed_pred - x_unperturbed_pred
         # Calculate norm across time, latitude, and longitude dimensions (dim=(2, 3, 4))
-        norm = torch.norm(delta_x, p=2, dim=(2, 3, 4), keepdim=True)  # Only spatial and temporal dimensions
+        norm = torch.norm(
+            delta_x, p=2, dim=(2, 3, 4), keepdim=True
+        )  # Only spatial and temporal dimensions
         delta_x_rescaled = epsilon * delta_x / (1e-8 + norm)
         bred_vectors.append(delta_x_rescaled)
 
@@ -491,13 +543,22 @@ def generate_bred_vectors_cycle(
             # Initial input processing
             if forecast_step == 1:
                 if "x_surf" in batch:
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(device).float()
+                    x = (
+                        concat_and_reshape(batch["x"], batch["x_surf"])
+                        .to(device)
+                        .float()
+                    )
                 else:
                     x = reshape_only(batch["x"]).to(device).float()
 
                 # Add forcing and static variables
                 if "x_forcing_static" in batch:
-                    x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                    x_forcing_batch = (
+                        batch["x_forcing_static"]
+                        .to(device)
+                        .permute(0, 2, 1, 3, 4)
+                        .float()
+                    )
                     x = torch.cat((x, x_forcing_batch), dim=1)
 
                 # Clamp if needed
@@ -507,7 +568,12 @@ def generate_bred_vectors_cycle(
             else:
                 # Add current forcing and static variables
                 if "x_forcing_static" in batch:
-                    x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                    x_forcing_batch = (
+                        batch["x_forcing_static"]
+                        .to(device)
+                        .permute(0, 2, 1, 3, 4)
+                        .float()
+                    )
                     x = torch.cat((x, x_forcing_batch), dim=1)
 
                 # Clamp if needed
@@ -576,9 +642,13 @@ def generate_bred_vectors_cycle(
             # delta_x_rescaled = epsilon * delta_x  # / (1e-8 + norm)
 
             # Rescale bred vectors
-            norm_delta_x0 = torch.norm(delta_x0[:, : delta_x.shape[1]], p=2, dim=(2, 3), keepdim=True)
+            norm_delta_x0 = torch.norm(
+                delta_x0[:, : delta_x.shape[1]], p=2, dim=(2, 3), keepdim=True
+            )
             norm_delta_x = torch.norm(delta_x, p=2, dim=(2, 3), keepdim=True)
-            delta_x_rescaled = epsilon * (norm_delta_x0 / (norm_delta_x + 1e-8)) * delta_x
+            delta_x_rescaled = (
+                epsilon * (norm_delta_x0 / (norm_delta_x + 1e-8)) * delta_x
+            )
 
             # Perform hemispheric rescaling -- need the latlon file so we use the right grid spacing, removing for now also this function is unused.
             # latitudes = torch.linspace(90, -90, delta_x.shape[3], device=delta_x.device)
@@ -605,7 +675,9 @@ def generate_bred_vectors_cycle(
                     x_detach = x[:, :-static_dim_size, 1:, ...].detach()
 
                 if "y_diag" in batch:
-                    x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
+                    x = torch.cat(
+                        [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
+                    )
                 else:
                     x = torch.cat([x_detach, y_pred.detach()], dim=2)
 

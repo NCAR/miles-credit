@@ -11,7 +11,9 @@ from credit.samplers import DistributedMultiStepBatchSampler
 import logging
 
 from credit.transform import load_transform
+
 logger = logging.getLogger(__name__)
+
 
 def load_era5_forcing(conf, start_datetime, end_datetime, transform=None):
     if not transform:
@@ -25,14 +27,14 @@ def load_era5_forcing(conf, start_datetime, end_datetime, transform=None):
     }
     return ERA5Dataset(conf, time_config, "ERA5", transform=transform)
 
-def load_dataset(conf, rank, world_size, device, is_train=True):
 
+def load_dataset(conf, rank, world_size, device, is_train=True):
     logger.info("loading a GOES 10km dataset")
 
     data_config = conf["data"]
     padding_conf = conf["model"].get("padding_conf", {})
     if padding_conf:
-        padding = not padding_conf["activate"] # opposite of what the model does
+        padding = not padding_conf["activate"]  # opposite of what the model does
     else:
         padding = True
 
@@ -51,32 +53,50 @@ def load_dataset(conf, rank, world_size, device, is_train=True):
         logger.info("loading an era5 dataset for forcing")
 
         era5_transform = load_transform(conf, "ERA5", device=device)
-        era5dataset = load_era5_forcing(conf,
-                                        time_config["start_datetime"],
-                                        time_config["end_datetime"] + pd.Timedelta("1D"),
-                                        transform=era5_transform)
+        era5dataset = load_era5_forcing(
+            conf,
+            time_config["start_datetime"],
+            time_config["end_datetime"] + pd.Timedelta("1D"),
+            transform=era5_transform,
+        )
     else:
         era5dataset = None
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
-        if rank == 0: # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
-            dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
+        if (
+            rank == 0
+        ):  # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
+            dataset = GOES10kmDataset(
+                zarr_ds,
+                data_config,
+                time_config,
+                padding=padding,
+                era5dataset=era5dataset,
+            )
             torch.distributed.barrier()
         else:
             torch.distributed.barrier()
-            dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
+            dataset = GOES10kmDataset(
+                zarr_ds,
+                data_config,
+                time_config,
+                padding=padding,
+                era5dataset=era5dataset,
+            )
     else:
-        dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
-
+        dataset = GOES10kmDataset(
+            zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset
+        )
 
     return dataset
 
+
 def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
     logger.info("loading a GOES 10km dataset for rollout")
-        
+
     data_config = conf["data"]
     padding_conf = conf["model"].get("padding_conf", {})
     if padding_conf:
-        padding = not padding_conf["activate"] # opposite of what the model does
+        padding = not padding_conf["activate"]  # opposite of what the model does
     else:
         padding = True
 
@@ -89,14 +109,14 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
 
     if conf["predict"]["forecasts"].get("type", "debugger") in ["debugger", "standard"]:
         num_forecast_hours = conf["predict"]["forecasts"].get("num_forecast_hours", 24)
-    
-    timestep =  pd.Timedelta(data_config["timestep"])
+
+    timestep = pd.Timedelta(data_config["timestep"])
 
     # forecast hours overrides forecast_steps
     if num_forecast_hours:
-        remainder = num_forecast_hours * 3600 % timestep.seconds 
+        remainder = num_forecast_hours * 3600 % timestep.seconds
         num_forecast_steps = num_forecast_hours * 3600 // timestep.seconds
-        if remainder: 
+        if remainder:
             num_forecast_steps += 1
 
     time_tol = conf["predict"]["forecasts"].get("time_tol", (1, "d"))
@@ -109,48 +129,70 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
         "rollout_init_times": rollout_init_times,
         "time_tol": time_tol,
     }
-    
+
     if "ERA5" in data_config.get("source", {}).keys():
         logger.info("loading an era5 dataset for forcing")
         era5_transform = load_transform(conf, "ERA5", device=device)
 
-        era5dataset = load_era5_forcing(conf,
-                                        time_config["start_datetime"].values,
-                                        time_config["end_datetime"].values,
-                                        transform=era5_transform)
+        era5dataset = load_era5_forcing(
+            conf,
+            time_config["start_datetime"].values,
+            time_config["end_datetime"].values,
+            transform=era5_transform,
+        )
     else:
         era5dataset = None
 
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
-        if rank == 0: # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
-            dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
+        if (
+            rank == 0
+        ):  # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
+            dataset = GOES10kmDataset(
+                zarr_ds,
+                data_config,
+                time_config,
+                padding=padding,
+                era5dataset=era5dataset,
+            )
             torch.distributed.barrier()
         else:
             torch.distributed.barrier()
-            dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
+            dataset = GOES10kmDataset(
+                zarr_ds,
+                data_config,
+                time_config,
+                padding=padding,
+                era5dataset=era5dataset,
+            )
     else:
-        dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
-        
+        dataset = GOES10kmDataset(
+            zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset
+        )
+
     return dataset
 
 
-
-def load_dataloader(conf, train_dataset, rank, world_size, is_train=True, is_predict=False):
+def load_dataloader(
+    conf, train_dataset, rank, world_size, is_train=True, is_predict=False
+):
     """
-    is_predict will override is_train no matter what is_train is. 
+    is_predict will override is_train no matter what is_train is.
     It will grab num_workers from validation config as the rollout times should be the same
     """
     logger.info("loading a GOES 10km dataloader")
 
-    if conf["trainer"]["type"] == "goes10km-distributed-ensemble": # want every device to see the same batch
+    if (
+        conf["trainer"]["type"] == "goes10km-distributed-ensemble"
+    ):  # want every device to see the same batch
         world_size = 1
         rank = 0
 
     if not is_predict:
         sampling_modes = conf["data"]["sampling_modes"]
     else:
-        sampling_modes = generate_rollout_sampling_modes(train_dataset,
-                                                         conf["predict"].get("compute_metrics", False))
+        sampling_modes = generate_rollout_sampling_modes(
+            train_dataset, conf["predict"].get("compute_metrics", False)
+        )
     if not sampling_modes:
         sampling_modes = generate_default_sampling_modes(train_dataset)
 
@@ -159,7 +201,7 @@ def load_dataloader(conf, train_dataset, rank, world_size, is_train=True, is_pre
     batch_size = conf["trainer"][f"{training_type}_batch_size"]
     logger.info(f"loading {training_type} dataloader with batch size {batch_size}")
 
-    if is_predict: 
+    if is_predict:
         batch_size = conf["predict"]["batch_size"]
         is_train = False
         num_workers = conf["predict"].get("thread_workers", 0)
@@ -179,53 +221,66 @@ def load_dataloader(conf, train_dataset, rank, world_size, is_train=True, is_pre
         )
         prefetch_factor = 4
 
+    sampler = DistributedMultiStepBatchSampler(
+        train_dataset,
+        batch_size,
+        sampling_modes,
+        num_replicas=world_size,
+        rank=rank,
+        seed=seed,
+        shuffle=(not is_predict),
+    )
 
-    sampler = DistributedMultiStepBatchSampler(train_dataset,
-                                                  batch_size,
-                                                  sampling_modes,
-                                                  num_replicas=world_size,
-                                                  rank=rank,
-                                                  seed=seed,
-                                                  shuffle=(not is_predict),
-                                                  )
-    
-    dataloader = DataLoader(train_dataset,
-                            batch_sampler=sampler,
-                            pin_memory=True,
-                            persistent_workers=True if num_workers > 0 else False,
-                            num_workers=num_workers,
-                            prefetch_factor=prefetch_factor if num_workers > 0 else None,
-                            )
-    logger.info(f"dataloader workers: {dataloader.num_workers},  prefetch factor: {dataloader.prefetch_factor}")
-    
+    dataloader = DataLoader(
+        train_dataset,
+        batch_sampler=sampler,
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
+    )
+    logger.info(
+        f"dataloader workers: {dataloader.num_workers},  prefetch factor: {dataloader.prefetch_factor}"
+    )
+
     return dataloader
+
 
 def generate_default_sampling_modes(dataset):
     num_forecast_steps = dataset.num_forecast_steps
 
     return ["init"] + ["y"] * (num_forecast_steps - 1) + ["stop"]
 
+
 def generate_rollout_sampling_modes(dataset, compute_metrics=False):
     if compute_metrics:
         return generate_default_sampling_modes(dataset)
-        
+
     num_forecast_steps = dataset.num_forecast_steps
 
     return ["init"] + ["forcing"] * (num_forecast_steps - 1) + ["stop"]
 
 
-def load_verification_dataset(conf,):
-
+def load_verification_dataset(
+    conf,
+):
     logger.info("loading a GOES 10km dataset for evaluation")
 
     data_config = conf["data"]
     padding_conf = conf["model"].get("padding_conf", {})
     if padding_conf:
-        padding = not padding_conf["activate"] # opposite of what the model does
+        padding = not padding_conf["activate"]  # opposite of what the model does
     else:
         padding = True
 
     zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
 
-    dataset = GOES10kmDataset(zarr_ds, data_config, time_config={}, padding=padding, evaluate=True, era5dataset=None)
+    dataset = GOES10kmDataset(
+        zarr_ds,
+        data_config,
+        time_config={},
+        padding=padding,
+        evaluate=True,
+        era5dataset=None,
+    )
     return dataset

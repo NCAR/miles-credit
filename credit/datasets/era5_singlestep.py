@@ -9,7 +9,6 @@ from credit.data import (
 
 
 class ERA5_and_Forcing_SingleStep(ERA5_and_Forcing_Dataset):
-
     def __getitem__(self, index):
         # cross-year indices --> the index of the year + indices within that year
 
@@ -45,9 +44,7 @@ class ERA5_and_Forcing_SingleStep(ERA5_and_Forcing_Dataset):
             )
 
             # merge upper-air and surface here:
-            ERA5_subset = ERA5_subset.merge(
-                surface_subset
-            )
+            ERA5_subset = ERA5_subset.merge(surface_subset)
 
         # split ERA5_subset into training inputs and targets
         #   + merge with dynamic forcing, forcing, and static
@@ -87,9 +84,7 @@ class ERA5_and_Forcing_SingleStep(ERA5_and_Forcing_Dataset):
             )  # <-- upper air
             # indices to subset
             ind_forcing, _ = find_common_indices(month_day_forcing, month_day_inputs)
-            forcing_subset_input = self.xarray_forcing.isel(
-                time=ind_forcing
-            )
+            forcing_subset_input = self.xarray_forcing.isel(time=ind_forcing)
             # forcing and upper air have different years but the same mon/day/hour
             # safely replace forcing time with upper air time
             forcing_subset_input["time"] = historical_ERA5_images["time"]
@@ -125,9 +120,7 @@ class ERA5_and_Forcing_SingleStep(ERA5_and_Forcing_Dataset):
 
         if self.one_shot is not None:
             # one_shot is True (on), go straight to the last element
-            target_ERA5_images = ERA5_subset.isel(
-                time=slice(-1, None)
-            ).load()
+            target_ERA5_images = ERA5_subset.isel(time=slice(-1, None)).load()
 
             # merge diagnoisc input here:
             if self.diagnostic_files:
@@ -135,9 +128,7 @@ class ERA5_and_Forcing_SingleStep(ERA5_and_Forcing_Dataset):
                     time=slice(ind_start_in_file, ind_end_in_file + 1)
                 )
 
-                diagnostic_subset = diagnostic_subset.isel(
-                    time=slice(-1, None)
-                ).load()
+                diagnostic_subset = diagnostic_subset.isel(time=slice(-1, None)).load()
 
                 target_ERA5_images = target_ERA5_images.merge(diagnostic_subset)
 
@@ -225,7 +216,6 @@ class ERA5_and_Forcing_SingleStep(ERA5_and_Forcing_Dataset):
 
 
 if __name__ == "__main__":
-
     import yaml
     from torch.utils.data import DataLoader
     from credit.transforms import load_transforms
@@ -249,37 +239,45 @@ if __name__ == "__main__":
     set_globals(data_config, namespace=globals())
 
     dataset_multi = ERA5_and_Forcing_SingleStep(
-        varname_upper_air=data_config['varname_upper_air'],
-        varname_surface=data_config['varname_surface'],
-        varname_dyn_forcing=data_config['varname_dyn_forcing'],
-        varname_forcing=data_config['varname_forcing'],
-        varname_static=data_config['varname_static'],
-        varname_diagnostic=data_config['varname_diagnostic'],
-        filenames=data_config['all_ERA_files'],
-        filename_surface=data_config['surface_files'],
-        filename_dyn_forcing=data_config['dyn_forcing_files'],
-        filename_forcing=data_config['forcing_files'],
-        filename_static=data_config['static_files'],
-        filename_diagnostic=data_config['diagnostic_files'],
-        history_len=data_config['history_len'],
-        forecast_len=data_config['forecast_len'],
-        skip_periods=data_config['skip_periods'],
+        varname_upper_air=data_config["varname_upper_air"],
+        varname_surface=data_config["varname_surface"],
+        varname_dyn_forcing=data_config["varname_dyn_forcing"],
+        varname_forcing=data_config["varname_forcing"],
+        varname_static=data_config["varname_static"],
+        varname_diagnostic=data_config["varname_diagnostic"],
+        filenames=data_config["all_ERA_files"],
+        filename_surface=data_config["surface_files"],
+        filename_dyn_forcing=data_config["dyn_forcing_files"],
+        filename_forcing=data_config["forcing_files"],
+        filename_static=data_config["static_files"],
+        filename_diagnostic=data_config["diagnostic_files"],
+        history_len=data_config["history_len"],
+        forecast_len=data_config["forecast_len"],
+        skip_periods=data_config["skip_periods"],
         one_shot=False,
-        max_forecast_len=data_config['max_forecast_len'],
-        sst_forcing=data_config['sst_forcing'],
-        transform=load_transforms(conf)
+        max_forecast_len=data_config["max_forecast_len"],
+        sst_forcing=data_config["sst_forcing"],
+        transform=load_transforms(conf),
     )
 
     dataloader = DataLoader(
         dataset_multi,
         batch_size=2,  # Adjust the batch size as needed
-        shuffle=True,   # Shuffle the dataset if needed
+        shuffle=True,  # Shuffle the dataset if needed
         num_workers=4,  # Number of subprocesses to use for data loading (adjust as needed)
         drop_last=True,  # Drop the last incomplete batch if not divisible by batch_size,
-        prefetch_factor=4
+        prefetch_factor=4,
     )
 
-    for (k, sample) in enumerate(dataloader):
-        print(k, sample['index'], sample['datetime'], sample['forecast_step'], sample['stop_forecast'], sample["x"].shape, sample["x_surf"].shape)
+    for k, sample in enumerate(dataloader):
+        print(
+            k,
+            sample["index"],
+            sample["datetime"],
+            sample["forecast_step"],
+            sample["stop_forecast"],
+            sample["x"].shape,
+            sample["x_surf"].shape,
+        )
         if k == 20:
             break

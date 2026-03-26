@@ -45,7 +45,9 @@ class ColorNoise:
         correlated_noise = self._create_correlated_noise(x.shape, x.device)
         return self.amplitude * correlated_noise
 
-    def _create_correlated_noise(self, shape: tuple[int, ...], device: torch.device) -> torch.Tensor:
+    def _create_correlated_noise(
+        self, shape: tuple[int, ...], device: torch.device
+    ) -> torch.Tensor:
         """Generate spatially correlated noise using frequency domain filtering.
 
         Creates colored noise by:

@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from functools import partial
 from queue import Queue
 from threading import Thread
-import cftime
 
 import numpy as np
 import xarray as xr
@@ -24,7 +23,7 @@ from credit.data import (
     get_forward_data,
     hour_to_nanoseconds,
     nanoseconds_to_year,
-    ensure_numpy_datetime
+    ensure_numpy_datetime,
 )
 from credit.datasets.era5_multistep import worker
 
@@ -1227,10 +1226,12 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
                     N_times = len(ds["time"])
                     # convert ds['time'] to a list of nanosecondes
                     ds_time_list = ds["time"].values.tolist()
-                    ds_dttime_list = [ensure_numpy_datetime(timeval) for timeval in ds_time_list]
+                    ds_dttime_list = [
+                        ensure_numpy_datetime(timeval) for timeval in ds_time_list
+                    ]
                     # ds_time_list = ds["time"].values.astype(datetime).tolist()
                     # ds_time_list = [ds_time.astype("datetime64[ns]").values.astype(datetime) for ds_time in ds["time"]]
-                    
+
                     ds_start_time = ensure_numpy_datetime(ds_time_list[0])
                     ds_end_time = ensure_numpy_datetime(ds_time_list[-1])
 

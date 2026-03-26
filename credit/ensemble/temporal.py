@@ -50,7 +50,10 @@ class TemporalNoise:
             self.latitudes = torch.tensor(latlons.latitude.values)
 
     def __call__(
-        self, x: torch.Tensor, previous_perturbation: Optional[torch.Tensor] = None, forecast_step: int = 1
+        self,
+        x: torch.Tensor,
+        previous_perturbation: Optional[torch.Tensor] = None,
+        forecast_step: int = 1,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply temporally correlated perturbation for sequential forecasting.
 
@@ -100,10 +103,14 @@ class TemporalNoise:
             current_perturbation = white_noise
         else:
             # AR(1) process: δ_t = ρ * δ_{t-1} + ε_t
-            current_perturbation = self.temporal_correlation * previous_perturbation + white_noise
+            current_perturbation = (
+                self.temporal_correlation * previous_perturbation + white_noise
+            )
 
         if self.hemispheric_rescale is not None:
-            current_perturbation = self.hemispheric_rescale(current_perturbation, self.latitudes.to(current_perturbation.device))
+            current_perturbation = self.hemispheric_rescale(
+                current_perturbation, self.latitudes.to(current_perturbation.device)
+            )
 
         # Apply perturbation to input
         perturbed_state = x + current_perturbation

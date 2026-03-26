@@ -1,64 +1,35 @@
 import os
-import gc
-import sys
-from sklearn import ensemble
 import yaml
 import time
 import logging
 import warnings
-import copy
-from glob import glob
-from pathlib import Path
-from argparse import ArgumentParser
 import multiprocessing as mp
-from collections import defaultdict
-import cftime
 from cftime import DatetimeNoLeap
-import json
 import pickle
 import argparse
 
 
 # ---------- #
 # Numerics
-from datetime import datetime, timedelta
+from datetime import datetime
 import xarray as xr
 import numpy as np
-import pandas as pd
-import csv
 import matplotlib.pyplot as plt
 
 # ---------- #
 import torch
-from torch.utils.data import get_worker_info
-from torch.profiler import profile, record_function, ProfilerActivity
 
 
 # ---------- #
 # credit
 from credit.models import load_model
-from credit.seed import seed_everything
 
-from credit.data import (
-    concat_and_reshape,
-    reshape_only,
-    drop_var_from_dataset,
-    generate_datetime,
-    nanoseconds_to_year,
-    hour_to_nanoseconds,
-    get_forward_data,
-    extract_month_day_hour,
-    find_common_indices,
-)
 
 from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
-from credit.pbs import launch_script, launch_script_mpi
-from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
 from credit.metrics import LatWeightedMetrics
-from credit.forecast import load_forecasts
-from credit.distributed import distributed_model_wrapper, setup
+from credit.distributed import distributed_model_wrapper
 from credit.models.checkpoint import load_model_state
-from credit.parser import credit_main_parser, predict_data_check
+from credit.parser import credit_main_parser
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
@@ -71,7 +42,13 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 def save_task(data, meta_data, conf):
     """Wrapper function for saving data in parallel."""
-    darray_upper_air, darray_single_level, init_datetime_str, lead_time, forecast_hour = data
+    (
+        darray_upper_air,
+        darray_single_level,
+        init_datetime_str,
+        lead_time,
+        forecast_hour,
+    ) = data
     save_netcdf_increment(
         darray_upper_air,
         darray_single_level,
@@ -82,7 +59,16 @@ def save_task(data, meta_data, conf):
     )
 
 
-def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, model_name=None, init_noise=None):
+def run_year_rmse(
+    p,
+    config,
+    input_shape,
+    forcing_shape,
+    output_shape,
+    device,
+    model_name=None,
+    init_noise=None,
+):
     """
     Function to compute RMSE for a year-long climate model prediction.
 
@@ -113,7 +99,9 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     # Parse and preprocess the configuration for prediction
-    conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
+    conf = credit_main_parser(
+        conf, parse_training=False, parse_predict=True, print_summary=False
+    )
     conf["predict"]["mode"] = None
 
     # Extract the history length for the data
@@ -153,13 +141,22 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     # Extract conservation flags from the configuration
     flag_mass_conserve, flag_water_conserve, flag_energy_conserve = False, False, False
     if post_conf["activate"]:
-        if post_conf["global_mass_fixer"]["activate"] and post_conf["global_mass_fixer"]["activate_outside_model"]:
+        if (
+            post_conf["global_mass_fixer"]["activate"]
+            and post_conf["global_mass_fixer"]["activate_outside_model"]
+        ):
             flag_mass_conserve = True
             opt_mass = GlobalMassFixer(post_conf)
-        if post_conf["global_water_fixer"]["activate"] and post_conf["global_water_fixer"]["activate_outside_model"]:
+        if (
+            post_conf["global_water_fixer"]["activate"]
+            and post_conf["global_water_fixer"]["activate_outside_model"]
+        ):
             flag_water_conserve = True
             opt_water = GlobalWaterFixer(post_conf)
-        if post_conf["global_energy_fixer"]["activate"] and post_conf["global_energy_fixer"]["activate_outside_model"]:
+        if (
+            post_conf["global_energy_fixer"]["activate"]
+            and post_conf["global_energy_fixer"]["activate_outside_model"]
+        ):
             flag_energy_conserve = True
             opt_energy = GlobalEnergyFixer(post_conf)
 
@@ -170,7 +167,9 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     lead_time_periods = conf["data"]["lead_time_periods"]
 
     # Load initial condition and forcing dataset
-    x = torch.load(conf["predict"]["init_cond_fast_climate"], map_location=torch.device(device)).to(device)
+    x = torch.load(
+        conf["predict"]["init_cond_fast_climate"], map_location=torch.device(device)
+    ).to(device)
     DSforc = xr.open_dataset(conf["predict"]["forcing_file"])
 
     ensemble_size = conf["predict"].get("ensemble_size", 1)
@@ -187,7 +186,9 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
 
     # Extract indices for RMSE computation and load the truth field
     inds_to_rmse = conf["predict"]["inds_rmse_fast_climate"]
-    truth_field = torch.load(conf["predict"]["seasonal_mean_fast_climate"], map_location=torch.device(device))
+    truth_field = torch.load(
+        conf["predict"]["seasonal_mean_fast_climate"], map_location=torch.device(device)
+    )
     print(f'torch loaded truth: {conf["predict"]["seasonal_mean_fast_climate"]}')
 
     # Load metadata and set up static and dynamic forcing variables
@@ -196,9 +197,13 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     num_ts = conf["predict"]["timesteps_fast_climate"]
 
     if conf["data"]["static_first"]:
-        df_sf_variables = conf["data"]["static_variables"] + conf["data"]["dynamic_forcing_variables"]
+        df_sf_variables = (
+            conf["data"]["static_variables"] + conf["data"]["dynamic_forcing_variables"]
+        )
     else:
-        df_sf_variables = conf["data"]["dynamic_forcing_variables"] + conf["data"]["static_variables"]
+        df_sf_variables = (
+            conf["data"]["dynamic_forcing_variables"] + conf["data"]["static_variables"]
+        )
 
     y_diag_present = len(conf["data"]["diagnostic_variables"]) > 0
 
@@ -230,7 +235,11 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     print(f"Index of start time: {indx_start}")
 
     # Select dynamic forcing data for prediction window
-    DS_forcx_dynamic = DSforc_norm[df_variables].isel(time=slice(indx_start, indx_start + num_ts + 10)).load()
+    DS_forcx_dynamic = (
+        DSforc_norm[df_variables]
+        .isel(time=slice(indx_start, indx_start + num_ts + 10))
+        .load()
+    )
     DS_forcx_dynamic_time = DS_forcx_dynamic["time"].values
 
     if init_noise is not None:
@@ -253,8 +262,16 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     x_forcing_batch = torch.zeros(forcing_shape).to(device)
 
     # Prepare forcing dictionary for input tensors
-    forcing_dict = {sfv: torch.tensor(DS_forcx_static[sfv].values).to(device) for sfv in sf_variables}
-    forcing_dict.update({dfv: torch.tensor(DS_forcx_dynamic[dfv].values).to(device) for dfv in df_variables})
+    forcing_dict = {
+        sfv: torch.tensor(DS_forcx_static[sfv].values).to(device)
+        for sfv in sf_variables
+    }
+    forcing_dict.update(
+        {
+            dfv: torch.tensor(DS_forcx_dynamic[dfv].values).to(device)
+            for dfv in df_variables
+        }
+    )
 
     forecast_hour = 1
     add_it = 0
@@ -268,7 +285,9 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total parameters: {total_params}")
 
-    model_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024**2)
+    model_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (
+        1024**2
+    )
     print(f"Model size: {model_size:.2f} MB")
 
     for k in range(num_ts):
@@ -282,12 +301,16 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
                 for bb, sfv in enumerate(sf_variables):
                     x_forcing_batch[:, bb, :, :, :] = forcing_dict[sfv]
                 for bb, dfv in enumerate(df_variables):
-                    x_forcing_batch[:, len(sf_variables) + bb, :, :, :] = forcing_dict[dfv][k, :, :]
+                    x_forcing_batch[:, len(sf_variables) + bb, :, :, :] = forcing_dict[
+                        dfv
+                    ][k, :, :]
             else:
                 for bb, dfv in enumerate(df_variables):
                     x_forcing_batch[:, bb, :, :, :] = forcing_dict[dfv][k, :, :]
                 for bb, sfv in enumerate(sf_variables):
-                    x_forcing_batch[:, len(df_variables) + bb, :, :, :] = forcing_dict[sfv]
+                    x_forcing_batch[:, len(df_variables) + bb, :, :, :] = forcing_dict[
+                        sfv
+                    ]
 
             x = torch.cat((x, x_forcing_batch), dim=1)
 
@@ -343,9 +366,15 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
             single_level_list.append(darray_single_level)
 
         if ensemble_size > 1:
-            ensemble_index = xr.DataArray(np.arange(ensemble_size), dims="ensemble_member_label")
-            all_upper_air = xr.concat(upper_air_list, ensemble_index)  # .transpose("time", ...)
-            all_single_level = xr.concat(single_level_list, ensemble_index)  # .transpose("time", ...)
+            ensemble_index = xr.DataArray(
+                np.arange(ensemble_size), dims="ensemble_member_label"
+            )
+            all_upper_air = xr.concat(
+                upper_air_list, ensemble_index
+            )  # .transpose("time", ...)
+            all_single_level = xr.concat(
+                single_level_list, ensemble_index
+            )  # .transpose("time", ...)
         else:
             all_upper_air = darray_upper_air
             all_single_level = darray_single_level
@@ -412,20 +441,31 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     with open(f'{conf["save_loc"]}/{fsout}_quick_climate_METS.pkl', "wb") as f:
         pickle.dump(METS, f)
 
-    torch.save(test_tensor_rmse.cpu() / add_it, f'{conf["save_loc"]}/{fsout}_quick_climate_avg_tensor.pt')
+    torch.save(
+        test_tensor_rmse.cpu() / add_it,
+        f'{conf["save_loc"]}/{fsout}_quick_climate_avg_tensor.pt',
+    )
 
     fig, axes = plt.subplots(2, 3, figsize=(25, 15))
 
-    p1 = axes[0, 0].pcolor(test_tensor_rmse.squeeze()[-16, :, :].cpu() / add_it, vmin=-2, vmax=2, cmap="RdBu_r")
+    p1 = axes[0, 0].pcolor(
+        test_tensor_rmse.squeeze()[-16, :, :].cpu() / add_it,
+        vmin=-2,
+        vmax=2,
+        cmap="RdBu_r",
+    )
     fig.colorbar(p1, ax=axes[0, 0])
     axes[0, 0].set_title("Test Tensor RMSE")
 
-    p2 = axes[0, 1].pcolor(truth_field.squeeze()[-16, :, :].cpu(), vmin=-2, vmax=2, cmap="RdBu_r")
+    p2 = axes[0, 1].pcolor(
+        truth_field.squeeze()[-16, :, :].cpu(), vmin=-2, vmax=2, cmap="RdBu_r"
+    )
     fig.colorbar(p2, ax=axes[0, 1])
     axes[0, 1].set_title("Truth Field")
 
     p3 = axes[0, 2].pcolor(
-        (test_tensor_rmse.squeeze()[-16, :, :].cpu() / add_it) - truth_field.squeeze()[-16, :, :].cpu(),
+        (test_tensor_rmse.squeeze()[-16, :, :].cpu() / add_it)
+        - truth_field.squeeze()[-16, :, :].cpu(),
         vmin=-0.1,
         vmax=0.1,
         cmap="RdBu_r",
@@ -433,16 +473,24 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     fig.colorbar(p3, ax=axes[0, 2])
     axes[0, 2].set_title("Difference (RMSE - Truth)")
 
-    p1 = axes[1, 0].pcolor(test_tensor_rmse.squeeze()[-15, :, :].cpu() / add_it, vmin=-2, vmax=2, cmap="RdBu_r")
+    p1 = axes[1, 0].pcolor(
+        test_tensor_rmse.squeeze()[-15, :, :].cpu() / add_it,
+        vmin=-2,
+        vmax=2,
+        cmap="RdBu_r",
+    )
     fig.colorbar(p1, ax=axes[1, 0])
     axes[1, 0].set_title("Test Tensor RMSE")
 
-    p2 = axes[1, 1].pcolor(truth_field.squeeze()[-15, :, :].cpu(), vmin=-2, vmax=2, cmap="RdBu_r")
+    p2 = axes[1, 1].pcolor(
+        truth_field.squeeze()[-15, :, :].cpu(), vmin=-2, vmax=2, cmap="RdBu_r"
+    )
     fig.colorbar(p2, ax=axes[1, 1])
     axes[1, 1].set_title("Truth Field")
 
     p3 = axes[1, 2].pcolor(
-        (test_tensor_rmse.squeeze()[-15, :, :].cpu() / add_it) - truth_field.squeeze()[-15, :, :].cpu(),
+        (test_tensor_rmse.squeeze()[-15, :, :].cpu() / add_it)
+        - truth_field.squeeze()[-15, :, :].cpu(),
         vmin=-0.5,
         vmax=0.5,
         cmap="RdBu_r",
@@ -451,7 +499,9 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
     axes[1, 2].set_title("Difference (RMSE - Truth)")
 
     plt.tight_layout()
-    plt.savefig(f'{conf["save_loc"]}/{fsout}_quick_climate_plot_slow.png', bbox_inches="tight")
+    plt.savefig(
+        f'{conf["save_loc"]}/{fsout}_quick_climate_plot_slow.png', bbox_inches="tight"
+    )
     plt.show()
 
     return test_tensor_rmse, truth_field, inds_to_rmse, metrics, conf, METS
@@ -459,16 +509,42 @@ def run_year_rmse(p, config, input_shape, forcing_shape, output_shape, device, m
 
 def main():
     parser = argparse.ArgumentParser(description="Run year RMSE for WxFormer model.")
-    parser.add_argument("--config", type=str, required=True, help="Path to the model configuration YAML file.")
-    parser.add_argument("--input_shape", type=int, nargs="+", required=True, help="Input shape as a list of integers.")
     parser.add_argument(
-        "--forcing_shape", type=int, nargs="+", required=True, help="Forcing shape as a list of integers."
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the model configuration YAML file.",
     )
     parser.add_argument(
-        "--output_shape", type=int, nargs="+", required=True, help="Output shape as a list of integers."
+        "--input_shape",
+        type=int,
+        nargs="+",
+        required=True,
+        help="Input shape as a list of integers.",
     )
-    parser.add_argument("--device", type=str, default="cuda", help="Device to run the model on (cuda or cpu).")
-    parser.add_argument("--model_name", type=str, default=None, help="Optional model checkpoint name.")
+    parser.add_argument(
+        "--forcing_shape",
+        type=int,
+        nargs="+",
+        required=True,
+        help="Forcing shape as a list of integers.",
+    )
+    parser.add_argument(
+        "--output_shape",
+        type=int,
+        nargs="+",
+        required=True,
+        help="Output shape as a list of integers.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="Device to run the model on (cuda or cpu).",
+    )
+    parser.add_argument(
+        "--model_name", type=str, default=None, help="Optional model checkpoint name."
+    )
     parser.add_argument("--init_noise", type=int, default=None, help="init model noise")
 
     args = parser.parse_args()
@@ -502,8 +578,12 @@ def main():
     elapsed_time = end_time - start_time
     # How to run:
     # python Quick_Climate_Year.py --config /path/to/config.yml --input_shape 1 138 1 192 288 --forcing_shape 1 4 1 192 288 --output_shape 1 145 1 192 288 --device cuda --model_name checkpoint.pt
-    print(f"Run completed. Results saved to configured location. Elapsed time: {elapsed_time:.2f} seconds")
-    print(f"Run completed. Results saved to configured location. Elapsed time: {elapsed_time/60:.2f} minutes")
+    print(
+        f"Run completed. Results saved to configured location. Elapsed time: {elapsed_time:.2f} seconds"
+    )
+    print(
+        f"Run completed. Results saved to configured location. Elapsed time: {elapsed_time/60:.2f} minutes"
+    )
 
 
 if __name__ == "__main__":

@@ -19,7 +19,9 @@ class StochasticDecompositionLayer(nn.Module):
         super().__init__()
         self.noise_transform = nn.Linear(noise_dim, feature_channels)
         self.modulation = nn.Parameter(torch.ones(1, feature_channels, 1, 1))
-        self.noise_factor = nn.Parameter(torch.tensor([noise_factor]), requires_grad=False)
+        self.noise_factor = nn.Parameter(
+            torch.tensor([noise_factor]), requires_grad=False
+        )
 
     def forward(self, feature_map, noise):
         """
@@ -36,7 +38,9 @@ class StochasticDecompositionLayer(nn.Module):
         batch, channels, height, width = feature_map.shape
 
         # Generate per-pixel, per-channel noise
-        pixel_noise = self.noise_factor * torch.randn(batch, channels, height, width, device=feature_map.device)
+        pixel_noise = self.noise_factor * torch.randn(
+            batch, channels, height, width, device=feature_map.device
+        )
 
         # Transform latent noise and reshape
         style = self.noise_transform(noise).view(batch, channels, 1, 1)

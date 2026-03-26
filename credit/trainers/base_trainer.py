@@ -456,7 +456,9 @@ class BaseTrainer(ABC):
                         torch.save(state_dict, f"{save_loc}/checkpoint.pt")
 
                         if conf.get("trainer", {}).get("save_every_epoch", False):
-                            copy_checkpoint(os.path.join(save_loc, "checkpoint.pt"), epoch)
+                            copy_checkpoint(
+                                os.path.join(save_loc, "checkpoint.pt"), epoch
+                            )
 
                 else:
                     logger.info(
@@ -493,7 +495,9 @@ class BaseTrainer(ABC):
                     torch.save(state_dict, os.path.join(save_loc, "checkpoint.pt"))
 
                     if conf.get("trainer", {}).get("save_every_epoch", False):
-                            copy_checkpoint(os.path.join(save_loc, "model_checkpoint.pt"), epoch)
+                        copy_checkpoint(
+                            os.path.join(save_loc, "model_checkpoint.pt"), epoch
+                        )
 
             # clear the cached memory from the gpu
             torch.cuda.empty_cache()
@@ -503,8 +507,10 @@ class BaseTrainer(ABC):
             if skip_validation:
                 pass
             else:
-                # Stop training if we have not improved after X epochs (stopping patience) 
-                best_epoch = results_dict[training_metric].index(direction(results_dict[training_metric]))
+                # Stop training if we have not improved after X epochs (stopping patience)
+                best_epoch = results_dict[training_metric].index(
+                    direction(results_dict[training_metric])
+                )
                 offset = epoch - best_epoch
 
                 # ==================== #
@@ -548,7 +554,9 @@ class BaseTrainer(ABC):
                 if conf["trainer"]["stop_after_epoch"]:
                     break
 
-        best_epoch = results_dict[training_metric].index(direction(results_dict[training_metric]))
+        best_epoch = results_dict[training_metric].index(
+            direction(results_dict[training_metric])
+        )
 
         result = {k: v[best_epoch] for k, v in results_dict.items()}
 

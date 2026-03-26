@@ -6,10 +6,7 @@ import xarray as xr
 import os
 import torch
 
-import pytest
-import torch
 import yaml
-from pathlib import Path
 
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
@@ -25,7 +22,7 @@ def test_ERA5StandardTransform():
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     transform = load_transform(conf, "ERA5", "cpu")
-        
+
     return
 
 
@@ -92,6 +89,7 @@ def test_BridgescalerScaleState():
     assert np.abs((reverse_tensor - test_trans_tensor).numpy()).max() > 0
 
     return
+
 
 if __name__ == "__main__":
     test_ERA5StandardTransform()

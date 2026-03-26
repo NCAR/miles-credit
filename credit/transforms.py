@@ -30,9 +30,10 @@ from bridgescaler import read_scaler
 
 logger = logging.getLogger(__name__)
 
+
 def device_compatible_to(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
     """
-    Safely move tensor to device, with float32 casting on MPS (Metal Performance Shaders). Addresses runtime error in OSX about MPS not supporting float64. 
+    Safely move tensor to device, with float32 casting on MPS (Metal Performance Shaders). Addresses runtime error in OSX about MPS not supporting float64.
 
     Args:
         tensor (torch.Tensor): Input tensor to move.
@@ -45,7 +46,7 @@ def device_compatible_to(tensor: torch.Tensor, device: torch.device) -> torch.Te
     if device.type == "mps":
         return tensor.to(dtype=torch.float32, device=device)
     else:
-        return tensor.to(device) 
+        return tensor.to(device)
 
 
 def load_transforms(conf, scaler_only=False):
@@ -150,7 +151,7 @@ class NormalizeState:
             return self.transform(sample)
 
     def transform_dataset(self, DS: xr.Dataset) -> xr.Dataset:
-        DS = (DS - self.mean_ds)/self.std_ds
+        DS = (DS - self.mean_ds) / self.std_ds
         return DS
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
@@ -189,7 +190,7 @@ class NormalizeState:
             (transformed_tensor, transformed_surface_tensor), dim=1
         )
 
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Transform from unscaled to scaled values.
@@ -245,7 +246,7 @@ class NormalizeState:
             (transformed_tensor, transformed_surface_tensor), dim=1
         )
 
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
 
 class Normalize_ERA5_and_Forcing:
@@ -369,7 +370,7 @@ class Normalize_ERA5_and_Forcing:
             return self.transform(sample)
 
     def transform_dataset(self, DS: xr.Dataset) -> xr.Dataset:
-        DS = (DS - self.mean_ds)/self.std_ds
+        DS = (DS - self.mean_ds) / self.std_ds
         return DS
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
@@ -410,8 +411,8 @@ class Normalize_ERA5_and_Forcing:
         # Upper air variable structure: var 1 [all levels] --> var 2 [all levels]
         k = 0
         for name in self.varname_upper_air:
-            mean_tensor = device_compatible_to(self.mean_tensors[name],device)
-            std_tensor = device_compatible_to(self.std_tensors[name],device)
+            mean_tensor = device_compatible_to(self.mean_tensors[name], device)
+            std_tensor = device_compatible_to(self.std_tensors[name], device)
             for level in range(self.levels):
                 var_mean = mean_tensor[level]
                 var_std = std_tensor[level]
@@ -423,15 +424,15 @@ class Normalize_ERA5_and_Forcing:
         # Standardize surface variables
         if self.flag_surface:
             for k, name in enumerate(self.varname_surface):
-                var_mean = device_compatible_to(self.mean_tensors[name],device)
-                var_std = device_compatible_to(self.std_tensors[name],device)
+                var_mean = device_compatible_to(self.mean_tensors[name], device)
+                var_std = device_compatible_to(self.std_tensors[name], device)
                 transformed_surface[:, k] = (tensor_surface[:, k] - var_mean) / var_std
 
         # Standardize diagnostic variables
         if self.flag_diagnostic:
             for k, name in enumerate(self.varname_diagnostic):
-                var_mean = device_compatible_to(self.mean_tensors[name],device)
-                var_std = device_compatible_to(self.std_tensors[name],device)
+                var_mean = device_compatible_to(self.mean_tensors[name], device)
+                var_std = device_compatible_to(self.std_tensors[name], device)
                 transformed_diagnostic[:, k] = (
                     transformed_diagnostic[:, k] - var_mean
                 ) / var_std
@@ -459,7 +460,7 @@ class Normalize_ERA5_and_Forcing:
             else:
                 transformed_x = transformed_upper_air
 
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Transform training batches.
@@ -544,8 +545,8 @@ class Normalize_ERA5_and_Forcing:
         # Reverse upper air variables
         k = 0
         for name in self.varname_upper_air:
-            mean_tensor = device_compatible_to(self.mean_tensors[name],device)
-            std_tensor = device_compatible_to(self.std_tensors[name],device)
+            mean_tensor = device_compatible_to(self.mean_tensors[name], device)
+            std_tensor = device_compatible_to(self.std_tensors[name], device)
             for level in range(self.levels):
                 mean = mean_tensor[level]
                 std = std_tensor[level]
@@ -555,15 +556,15 @@ class Normalize_ERA5_and_Forcing:
         # Reverse surface variables
         if self.flag_surface:
             for k, name in enumerate(self.varname_surface):
-                mean = device_compatible_to(self.mean_tensors[name],device)
-                std = device_compatible_to(self.std_tensors[name],device)
+                mean = device_compatible_to(self.mean_tensors[name], device)
+                std = device_compatible_to(self.std_tensors[name], device)
                 transformed_surface[:, k] = tensor_surface[:, k] * std + mean
 
         # Reverse diagnostic variables
         if self.flag_diagnostic:
             for k, name in enumerate(self.varname_diagnostic):
-                mean = device_compatible_to(self.mean_tensors[name],device)
-                std = device_compatible_to(self.std_tensors[name],device)
+                mean = device_compatible_to(self.mean_tensors[name], device)
+                std = device_compatible_to(self.std_tensors[name], device)
                 transformed_diagnostic[:, k] = transformed_diagnostic[:, k] * std + mean
 
         # Concatenate everything
@@ -589,7 +590,7 @@ class Normalize_ERA5_and_Forcing:
             else:
                 transformed_x = transformed_upper_air
 
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
     def inverse_transform_input(self, x: torch.Tensor) -> torch.Tensor:
         """Inverse transform for input x.
@@ -648,8 +649,8 @@ class Normalize_ERA5_and_Forcing:
         # Inverse transform upper air variables
         k = 0
         for name in self.varname_upper_air:
-            mean_tensor = device_compatible_to(self.mean_tensors[name],device)
-            std_tensor = device_compatible_to(self.std_tensors[name],device)
+            mean_tensor = device_compatible_to(self.mean_tensors[name], device)
+            std_tensor = device_compatible_to(self.std_tensors[name], device)
             for level in range(self.levels):
                 mean = mean_tensor[level]
                 std = std_tensor[level]
@@ -659,15 +660,15 @@ class Normalize_ERA5_and_Forcing:
         # Inverse transform surface variables
         if self.flag_surface:
             for k, name in enumerate(self.varname_surface):
-                mean = device_compatible_to(self.mean_tensors[name],device)
-                std = device_compatible_to(self.std_tensors[name],device)
+                mean = device_compatible_to(self.mean_tensors[name], device)
+                std = device_compatible_to(self.std_tensors[name], device)
                 transformed_surface[:, k] = tensor_surface[:, k] * std + mean
 
         # Inverse transform dynamic forcing variables
         if self.flag_dyn_forcing:
             for k, name in enumerate(self.varname_dyn_forcing):
-                mean = device_compatible_to(self.mean_tensors[name],device)
-                std = device_compatible_to(self.std_tensors[name],device)
+                mean = device_compatible_to(self.mean_tensors[name], device)
+                std = device_compatible_to(self.std_tensors[name], device)
                 transformed_dyn_forcing[:, k] = tensor_dyn_forcing[:, k] * std + mean
 
         # Reconstruct input tensor
@@ -699,7 +700,7 @@ class Normalize_ERA5_and_Forcing:
 
         transformed_x = torch.cat(tensors, dim=1)
 
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
 
 class BridgescalerScaleState(object):
@@ -776,7 +777,7 @@ class BridgescalerScaleState(object):
             x_surface_da, channels_last=False
         ).values
         x_transformed = torch.cat((x_3d_transformed, x_surface_transformed), dim=1)
-        return device_compatible_to(x_transformed,device)
+        return device_compatible_to(x_transformed, device)
 
     def transform_array(self, x: torch.Tensor) -> torch.Tensor:
         """Transform.
@@ -812,7 +813,7 @@ class BridgescalerScaleState(object):
             x_surface_da, channels_last=False
         ).values
         x_transformed = torch.cat((x_3d_transformed, x_surface_transformed), dim=1)
-        return device_compatible_to(x_transformed,device)
+        return device_compatible_to(x_transformed, device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Transform.
@@ -927,20 +928,20 @@ class NormalizeState_Quantile:
         transformed_surface_tensor = surface_tensor.clone()
         # 3dvars
         rscal_3d = np.array(x[:, : (len(self.variables) * self.levels), :, :])
-        transformed_tensor[:, :, :, :] = device_compatible_to(torch.tensor(
-            (self.scaler_3d.inverse_transform(rscal_3d))
-        ),device)
+        transformed_tensor[:, :, :, :] = device_compatible_to(
+            torch.tensor((self.scaler_3d.inverse_transform(rscal_3d))), device
+        )
         # surf
         rscal_surf = np.array(x[:, (len(self.variables) * self.levels) :, :, :])
-        transformed_surface_tensor[:, :, :, :] = device_compatible_to(torch.tensor(
-            (self.scaler_surf.inverse_transform(rscal_surf))
-        ),device)
+        transformed_surface_tensor[:, :, :, :] = device_compatible_to(
+            torch.tensor((self.scaler_surf.inverse_transform(rscal_surf))), device
+        )
         # cat them
         transformed_x = torch.cat(
             (transformed_tensor, transformed_surface_tensor), dim=1
         )
         # return
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
     def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Transform.
@@ -1052,13 +1053,17 @@ class NormalizeTendency:
 
         # Apply z-score normalization using the pre-loaded mean and std
         for name in self.variables:
-            mean = device_compatible_to(self.mean[name].view(1, 1, self.mean[name].size(0), 1, 1),device)
-            std = device_compatible_to(self.std[name].view(1, 1, self.std[name].size(0), 1, 1),device)
+            mean = device_compatible_to(
+                self.mean[name].view(1, 1, self.mean[name].size(0), 1, 1), device
+            )
+            std = device_compatible_to(
+                self.std[name].view(1, 1, self.std[name].size(0), 1, 1), device
+            )
             transformed_tensor = (tensor - mean) / std
 
         for name in self.surface_variables:
-            mean = device_compatible_to(self.mean[name].view(1, 1, 1, 1),device)
-            std = device_compatible_to(self.std[name].view(1, 1, 1, 1),device)
+            mean = device_compatible_to(self.mean[name].view(1, 1, 1, 1), device)
+            std = device_compatible_to(self.std[name].view(1, 1, 1, 1), device)
             transformed_surface_tensor = (surface_tensor - mean) / std
 
         return transformed_tensor, transformed_surface_tensor
@@ -1080,13 +1085,17 @@ class NormalizeTendency:
 
         # Reverse z-score normalization using the pre-loaded mean and std
         for name in self.variables:
-            mean = device_compatible_to(self.mean[name].view(1, 1, self.mean[name].size(0), 1, 1),device)
-            std = device_compatible_to(self.std[name].view(1, 1, self.std[name].size(0), 1, 1),device)
+            mean = device_compatible_to(
+                self.mean[name].view(1, 1, self.mean[name].size(0), 1, 1), device
+            )
+            std = device_compatible_to(
+                self.std[name].view(1, 1, self.std[name].size(0), 1, 1), device
+            )
             transformed_tensor = tensor * std + mean
 
         for name in self.surface_variables:
-            mean = device_compatible_to(self.mean[name].view(1, 1, 1, 1),device)
-            std = device_compatible_to(self.std[name].view(1, 1, 1, 1),device)
+            mean = device_compatible_to(self.mean[name].view(1, 1, 1, 1), device)
+            std = device_compatible_to(self.std[name].view(1, 1, 1, 1), device)
             transformed_surface_tensor = surface_tensor * std + mean
 
         return transformed_tensor, transformed_surface_tensor
@@ -1634,20 +1643,20 @@ class NormalizeState_Quantile_Bridgescalar:
         # 3dvars
         rscal_3d = np.array(x[:, : (len(self.variables) * self.levels), :, :])
 
-        transformed_tensor[:, :, :, :] = device_compatible_to(torch.tensor(
-            (self.scaler_3d.inverse_transform(rscal_3d))
-        ),device)
+        transformed_tensor[:, :, :, :] = device_compatible_to(
+            torch.tensor((self.scaler_3d.inverse_transform(rscal_3d))), device
+        )
         # surf
         rscal_surf = np.array(x[:, (len(self.variables) * self.levels) :, :, :])
-        transformed_surface_tensor[:, :, :, :] = device_compatible_to(torch.tensor(
-            (self.scaler_surf.inverse_transform(rscal_surf))
-        ),device)
+        transformed_surface_tensor[:, :, :, :] = device_compatible_to(
+            torch.tensor((self.scaler_surf.inverse_transform(rscal_surf))), device
+        )
         # cat them
         transformed_x = torch.cat(
             (transformed_tensor, transformed_surface_tensor), dim=1
         )
         # return
-        return device_compatible_to(transformed_x,device)
+        return device_compatible_to(transformed_x, device)
 
     def transform(self, sample):
         """Transform.
