@@ -186,16 +186,18 @@ It is the recommended path for new experiments.
 # 1. Generate a config from a built-in template
 credit init --grid 0.25deg -o my_experiment.yml   # or --grid 1deg
 
-# 2. Edit save_loc and verify data paths, then train
-credit train -c my_experiment.yml
+# 2. Edit save_loc and verify data paths, then submit
+credit submit --cluster casper  -c my_experiment.yml --gpus 4
+credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1
 
-# 3. Submit to Casper or Derecho instead of running locally
-credit submit --cluster casper  -c my_experiment.yml --gpus 1
-credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 2
+# 3. Resubmit from checkpoint when the job hits wall time (repeat as needed)
+credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1 --reload
 ```
 
 `credit submit` generates a PBS script and calls `qsub` automatically.
-Use `--dry-run` to preview the script before submitting.
+`--reload` patches the resume fields and writes `<save_loc>/config_reload.yml` — no
+config editing required between job restarts.
+Use `--dry-run` to preview before submitting.
 
 ### Available configs
 
@@ -251,14 +253,14 @@ See [Monitoring with TensorBoard](tensorboard.md) for port-forwarding instructio
 The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`:
 
 ```bash
-# Casper: single A100 80 GB, 4 GPUs, 12 hour wall time
-credit submit --cluster casper -c config.yml --gpus 4 --walltime 12:00:00
+# Casper: 4 GPUs, 12 hour wall time
+credit submit --cluster casper  -c config.yml --gpus 4 --walltime 12:00:00
 
-# Derecho: 2 nodes × 4 GPUs = 8 GPUs total
-credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2
+# Derecho: 1 node × 4 GPUs
+credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1
 
 # Preview the script without submitting
-credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2 --dry-run
+credit submit --cluster derecho -c config.yml --gpus 4 --dry-run
 
 # Override account and queue
 credit submit --cluster derecho -c config.yml --account NAML0001 --queue preempt --gpus 4
@@ -269,16 +271,32 @@ overridden individually. See `credit submit --help` for the full option list.
 
 ### Resuming training
 
-After the first job completes (e.g., epoch 5 of 70), set the following in your config
-and resubmit:
+Because wall-time limits on Casper (12 h) and Derecho rarely cover a full training run
+(e.g. 70 epochs), jobs need to be resubmitted from a checkpoint. The `--reload` flag
+handles this automatically — no config editing required:
 
-```yaml
-trainer:
-    load_weights: True
-    load_optimizer: True
-    load_scaler: True
-    load_scheduler: True
-    reload_epoch: True
+```bash
+# First job
+credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1
+
+# Every subsequent job (run after the previous one finishes)
+credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --reload
 ```
 
-CREDIT will automatically detect the latest checkpoint in `save_loc` and resume from it.
+`--reload` does three things:
+
+1. Reads your config and sets the five resume fields:
+   ```yaml
+   load_weights: True
+   load_optimizer: True
+   load_scaler: True
+   load_scheduler: True
+   reload_epoch: True   # auto-detects next epoch from checkpoint
+   ```
+2. Writes the patched config to `<save_loc>/config_reload.yml`.
+3. Submits the job using that config.
+
+`reload_epoch: True` causes the trainer to read `epoch` from the checkpoint and set
+`start_epoch = checkpoint_epoch + 1`, so the epoch counter is always continuous across
+restarts. Use `--dry-run` with `--reload` to inspect the patched config and PBS script
+before submitting.
