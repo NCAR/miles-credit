@@ -405,63 +405,67 @@ def _plot(args: argparse.Namespace) -> None:
 
     # ---- Load model ----
     from credit.models import load_model
-    from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
+    from credit.models.checkpoint import load_state_dict_error_handler
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_model(conf, load_weights=False)
     model = model.to(device)
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    load_state_dict_error_handler(model, ckpt)
+    load_msg = model.load_state_dict(ckpt["model_state_dict"], strict=False)
+    load_state_dict_error_handler(load_msg)
     model.eval()
     logger.info(f"Loaded checkpoint: {ckpt_path}")
 
     # ---- Load one validation sample ----
-    from credit.datasets.era5 import ERA5Dataset
+    import pandas as pd
+    import torch.nn as nn
+    from credit.datasets.multi_source import MultiSourceDataset
     from credit.preblock import ERA5Normalizer, ConcatPreblock, apply_preblocks
 
     data_conf = conf.get("data_valid", conf["data"])
 
-    # build sample date filter if requested
-    sample_date = args.sample_date  # e.g. "2020-06-01T00"
+    dataset = MultiSourceDataset(data_conf, return_target=True)
 
-    dataset = ERA5Dataset(data_conf, split="valid")
-    if sample_date is not None:
-        import pandas as pd
-        target_dt = pd.Timestamp(sample_date)
-        idx = None
-        for i in range(min(len(dataset), 500)):
-            t = dataset.get_time(i)
+    # pick timestamp
+    if args.sample_date is not None:
+        target_dt = pd.Timestamp(args.sample_date)
+        ts = None
+        for t in dataset.datetimes:
             if pd.Timestamp(t) >= target_dt:
-                idx = i
+                ts = t
                 break
-        if idx is None:
-            logger.warning("sample_date %s not found in validation set — using sample 0", sample_date)
-            idx = 0
+        if ts is None:
+            logger.warning("sample_date %s not found — using first sample", args.sample_date)
+            ts = dataset.datetimes[0]
     else:
-        idx = 0
+        ts = dataset.datetimes[0]
 
-    sample = dataset[idx]
+    sample = dataset[(ts, 0)]
 
-    # ---- Pre-process (normalise) ----
-    mean_path = data_conf.get("mean_path") or conf["data"].get("mean_path")
-    std_path  = data_conf.get("std_path")  or conf["data"].get("std_path")
-    normalizer = ERA5Normalizer(mean_path=mean_path, std_path=std_path)
-    preblocks = [normalizer, ConcatPreblock(conf)]
-    sample = apply_preblocks(sample, preblocks)
+    # ---- Pre-process (normalise + concat) ----
+    from torch.utils.data import default_collate
+    # default_collate adds the batch dimension exactly as the DataLoader would
+    batch = default_collate([sample])
 
-    x = sample["x"].unsqueeze(0).to(device)   # (1, C_in, H, W) or (1, C_in, 1, H, W)
-    y = sample["y"].unsqueeze(0)               # (1, C_out, H, W) or similar
+    preblocks = nn.ModuleDict({
+        "norm":   ERA5Normalizer(conf),
+        "concat": ConcatPreblock(),
+    })
+    batch = apply_preblocks(preblocks, batch)
+
+    x = batch["x"].to(device)    # (1, C_in, T, H, W)
+    y = batch["y"]               # (1, C_out, T, H, W)
 
     # ---- Forward pass ----
     with torch.no_grad():
         y_pred = model(x)
 
-    # squeeze batch and any singleton time dim
+    # squeeze batch dim and time dim → (C, H, W)
     def _squeeze(t):
-        t = t.squeeze(0)
-        if t.ndim == 4 and t.shape[1] == 1:
-            t = t.squeeze(1)
-        return t.cpu().float()
+        t = t.squeeze(0).cpu().float()  # remove batch dim → (C, T, H, W) or (C, H, W)
+        if t.ndim == 4:
+            t = t[:, 0]                 # take first time step → (C, H, W)
+        return t
 
     y_true_np  = _squeeze(y).numpy()   # (C_out, H, W)
     y_pred_np  = _squeeze(y_pred).numpy()
