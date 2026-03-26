@@ -1,126 +1,278 @@
 # AI Agent (`credit agent`)
 
-`credit agent` is an agentic AI assistant that can **read your files, inspect logs, and run
-read-only shell commands** to diagnose problems and answer questions about your CREDIT runs.
-
-Unlike [`credit ask`](quickstart.md#get-help-from-the-ai-assistant) — which is a single-shot
-Q&A — `credit agent` runs a multi-turn loop.  It looks at your actual config, training logs,
-and PBS output, iterates until it has enough information, then gives you a concrete answer.
+`credit agent` is an agentic AI assistant built into CREDIT.  Unlike a plain chatbot, it
+has **eyes** — it reads your actual files, inspects your logs, and runs shell commands before
+answering.  You describe a problem in plain English; the agent figures out what to look at and
+comes back with a concrete, specific answer grounded in your real data.
 
 ---
 
-## Requirements
-
-`credit agent` requires an Anthropic API key **with active API credits**.
-
-> **Note:** A Claude.ai Pro subscription does **not** include API access.
-> API billing is separate at [console.anthropic.com](https://console.anthropic.com/settings/billing).
+## Quick start
 
 ```bash
-# Install the agent extra
+# 1. Install
 pip install "miles-credit[agent]"
 
-# Set your API key (add to ~/.bashrc to persist)
-export ANTHROPIC_API_KEY=sk-ant-...
+# 2. Set your Anthropic API key (add to ~/.bashrc)
+export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com → API keys
+
+# 3. Ask anything
+credit agent "why did my last training run crash?"
+credit agent -c config.yml "is my learning rate too high for 0.25 degree?"
 ```
+
+> **Requires Anthropic API credits.**  A Claude.ai Pro subscription does *not* include API
+> access — billing is separate at
+> [console.anthropic.com/settings/billing](https://console.anthropic.com/settings/billing).
+> A typical agent session costs **$0.01–0.05**.  See [Cost](#cost) for details.
 
 ---
 
-## Usage
+## What it does that `credit ask` can't
+
+`credit ask` is a single-shot Q&A — you paste in a question, it answers from its training
+knowledge plus whatever context you inject with `-c`.  It's fast and cheap and works with
+four free/low-cost providers (Groq, Gemini, OpenAI, Anthropic).
+
+`credit agent` runs a **multi-turn agentic loop**:
+
+```
+Your question
+    ↓
+Agent decides what to look at
+    ↓
+Reads PBS log  →  finds CUDA OOM traceback
+    ↓
+Reads config   →  sees train_batch_size: 8
+    ↓
+Reads source   →  confirms memory layout for 0.25° × 18 levels
+    ↓
+Answer: "Reduce batch size to 4 or enable amp: True …"
+```
+
+It keeps going — reading more files, running more commands — until it has enough information
+to give you a specific, actionable answer.
+
+| | `credit ask` | `credit agent` |
+|---|---|---|
+| **Providers** | Anthropic, OpenAI, Gemini, Groq | Anthropic only |
+| **File access** | No | Yes — reads any file you have access to |
+| **Shell access** | No | Yes — safe read-only commands |
+| **Multi-turn** | No | Yes (default: 20 turns) |
+| **Best for** | Quick questions, free usage | Diagnosing crashes, deep config review |
+| **Model** | Claude Haiku (fast, cheap) | Claude Sonnet (more capable) |
+
+---
+
+## Installation and setup
+
+### 1. Install the package
+
+```bash
+pip install "miles-credit[agent]"
+```
+
+If you already installed CREDIT without extras, this adds only `anthropic` — nothing else changes.
+
+### 2. Get an API key
+
+1. Sign up or log in at [console.anthropic.com](https://console.anthropic.com)
+2. Go to **API Keys** → **Create Key**
+3. Add credits at **Settings → Billing** (pay-as-you-go, no subscription required)
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Persist across sessions
+echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> ~/.bashrc
+```
+
+> **NCAR users:** Check whether your group has a shared API key before creating your own.
+> Contact [milescore@ucar.edu](mailto:milescore@ucar.edu).
+
+---
+
+## Usage reference
 
 ```
 credit agent [-c CONFIG] [--max-turns N] QUESTION
 ```
 
-| Flag | Description |
+| Argument | Description |
 |---|---|
-| `QUESTION` | Your question or task (quote it) |
-| `-c CONFIG` | Path to a YAML config — injects config, training log, and most recent PBS output as context |
-| `--max-turns N` | Maximum agentic turns before stopping (default: 20) |
+| `QUESTION` | Your question or task in plain English |
+| `-c CONFIG` | Path to your run's YAML config — the agent gets your config, training log, and most recent PBS output as starting context |
+| `--max-turns N` | Stop after N agentic turns (default: 20). Increase for very complex investigations. |
 
 ---
 
-## Examples
+## Example sessions
 
-**Diagnose a crashed training run:**
+### Diagnose a training crash
+
 ```bash
 credit agent -c config/wxformer_1dg_6hr_v2.yml "why did my training run crash?"
 ```
-The agent will read your PBS output log, find the traceback, read relevant source files,
-and explain what went wrong with a suggested fix.
 
-**Check running jobs:**
+The agent will:
+1. Read your config to find `save_loc`
+2. Glob for PBS output files (`*.o*`) and read the most recent one
+3. Locate the traceback
+4. If it's an OOM, read your config's batch size, model dimensions, and `amp` setting
+5. Return a specific fix: e.g. "reduce `train_batch_size` from 8 to 4, or set `amp: True`"
+
+### Check job queue and walltime
+
 ```bash
-credit agent "what PBS jobs are currently running and how long have they been running?"
+credit agent "how many of my jobs are queued on Derecho, and when does the running one expire?"
 ```
 
-**Config review:**
+The agent runs `qstat -u $USER`, parses the output, and tells you exactly what's running,
+how much walltime remains, and whether anything is stuck in queue.
+
+### Config review before a long run
+
 ```bash
-credit agent -c config.yml "is my learning rate schedule appropriate for 0.25 degree training on 16 H100s?"
+credit agent -c config/big_run.yml \
+  "I'm about to start a 200-epoch run on 8 H100s. Review my config for anything that would waste compute or cause it to fail."
 ```
 
-**Compare configs:**
+The agent reads your full config and cross-references it with the source code to flag issues —
+wrong `num_epoch` vs `epochs` ratio, missing `save_best_weights`, `use_scheduler: False` with
+a large run, etc.
+
+### Understand source code
+
 ```bash
-credit agent "diff config/my_run.yml against config/starter_v2.yml and explain the differences"
+credit agent "walk me through how ConcatPreblock assembles the batch tensor — what goes into x and what goes into y?"
 ```
 
-**Understand source code:**
+The agent reads `credit/preblock/concat.py` and the relevant trainer code and gives you a
+plain-English explanation with line references.
+
+### Compare two configs
+
 ```bash
-credit agent "how does the ConcatPreblock assemble the batch tensor?"
+credit agent "compare config/run_a.yml and config/run_b.yml and explain every difference"
 ```
+
+The agent reads both files and produces a structured diff with explanations of what each
+difference means for training behaviour.
+
+### Debug a data loading hang
+
+```bash
+credit agent -c config.yml "my training job starts but then hangs and never prints a loss — what's wrong?"
+```
+
+The agent checks your `thread_workers`, `prefetch_factor`, and dataset size, estimates
+DataLoader memory usage, and flags if you're likely hitting an OOM or deadlock.
 
 ---
 
-## What the Agent Can Do
+## What the agent can access
 
-The agent has access to three tools scoped to your environment:
+The agent has three tools. All are **read-only** — it cannot modify, delete, or move files,
+and cannot submit or cancel jobs.
 
-| Tool | Description |
+### `read_file`
+
+Reads any file you have filesystem access to.  Returns up to 400 lines from the end of the
+file by default (configurable via the `tail` parameter the agent chooses internally).
+
+Best used for: configs, PBS output logs, Python tracebacks, source files, checkpoint metadata.
+
+### `list_files`
+
+Glob-style file discovery.  The agent uses this to find your PBS logs, locate configs, or
+discover checkpoint directories.
+
+Examples it might run internally:
+```
+*.o*          → find PBS output files in current directory
+logs/**/*.txt → find all log files recursively
+save_loc/**   → find checkpoints for your run
+```
+
+### `bash`
+
+Runs read-only shell commands with a 30-second timeout.  Permitted commands include:
+
+| Command | What it's used for |
 |---|---|
-| `read_file` | Read any file — configs, PBS logs, Python source, checkpoints metadata |
-| `list_files` | Glob for files by pattern (`*.yml`, `logs/*.o*`, etc.) |
-| `bash` | Run safe read-only commands: `grep`, `tail`, `find`, `qstat`, `git log`, `git diff` |
+| `qstat` / `squeue` | Check job queue status |
+| `grep` | Search files for patterns |
+| `tail` / `head` | Read the end/start of large files |
+| `find` | Locate files by name or modification time |
+| `git log` / `git diff` | Inspect repo history |
+| `ls` / `wc` | List files, count lines |
+| `diff` | Compare two files |
 
-Destructive commands (`rm`, `mv`, `git push`, `qdel`, etc.) are blocked.
-
----
-
-## How It Works
-
-```
-You: "why did my training run crash?"
-         ↓
-Agent reads PBS output log (tail 400 lines)
-         ↓
-Finds: CUDA OOM traceback in trainerERA5v2.py:312
-         ↓
-Agent reads config.yml → sees train_batch_size: 8
-         ↓
-Agent reads credit/trainers/trainerERA5v2.py:312 for context
-         ↓
-Answer: "Your batch size of 8 on a 40 GB A100 is too large for 0.25°
-         with 18 levels × 4 variables.  Try train_batch_size: 4, or
-         enable amp: True to reduce memory usage."
-```
+The following are **blocked** regardless of how they're phrased:
+`rm`, `mv`, `cp`, `git push`, `git reset`, `git checkout`, `qdel`, `scancel`, `kill`,
+`pip install`, `conda install`, `sudo`, and any output-redirect operators (`>`, `>>`).
 
 ---
 
-## vs. `credit ask`
+## Tips for best results
 
-| | `credit ask` | `credit agent` |
-|---|---|---|
-| **Providers** | Anthropic, OpenAI, Gemini, Groq | Anthropic only |
-| **File access** | No (context injected once) | Yes (reads files during the loop) |
-| **Multi-turn** | No | Yes (up to `--max-turns`) |
-| **Best for** | Quick questions, free-tier usage | Deep diagnosis, code understanding |
-| **Cost** | Low (Haiku) | Higher (Sonnet — more capable) |
+**Give it your config with `-c`.** Without it the agent has to search for context; with it
+the agent starts with your full run setup and gets to the answer faster.
 
-Use `credit ask` for quick questions and when you don't have Anthropic credits.
-Use `credit agent` when you need it to actually look at your data.
+**Be specific about what went wrong.**  "it crashed" forces the agent to explore; "it crashed
+with CUDA OOM at epoch 3" lets it skip the discovery phase and go straight to solutions.
+
+**For source code questions, name the thing.**  "how does ConcatPreblock work?" is better
+than "how does the data pipeline work?" because the agent can immediately `read_file` the
+right module.
+
+**Use `--max-turns` for very complex tasks.**  The default of 20 is enough for most
+debugging sessions.  For a full config audit or multi-file code review, `--max-turns 40`
+gives the agent more room.
 
 ---
 
 ## Cost
 
-`credit agent` uses `claude-sonnet-4-6`.  A typical debugging session (5–10 turns,
-reading a few files) costs roughly **$0.01–0.05** depending on file sizes.
+`credit agent` uses `claude-sonnet-4-6` — Anthropic's mid-tier model that balances
+capability with cost.
+
+| Session type | Typical turns | Approximate cost |
+|---|---|---|
+| Simple Q&A (no files needed) | 1–2 | < $0.005 |
+| Diagnose a crash (read log + config) | 3–6 | $0.01–0.02 |
+| Full config review | 5–10 | $0.02–0.05 |
+| Multi-file code investigation | 10–20 | $0.05–0.15 |
+
+Pricing is based on Anthropic's published input/output token rates.
+A full PBS output log is typically 5,000–20,000 tokens; a config is 1,000–3,000 tokens.
+
+---
+
+## Troubleshooting
+
+**`Anthropic API key has no credits`**
+Add credits at [console.anthropic.com/settings/billing](https://console.anthropic.com/settings/billing).
+API credits are separate from a Claude.ai subscription.
+
+**`ANTHROPIC_API_KEY is not set`**
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**`anthropic package required`**
+```bash
+pip install "miles-credit[agent]"
+```
+
+**Agent gives a generic answer and doesn't read files**
+Make sure you're passing `-c config.yml` so it has a starting point.  You can also be explicit:
+```bash
+credit agent "read the most recent *.o* file in this directory and tell me if there are any errors"
+```
+
+**Agent hits `max_turns` without finishing**
+Increase the limit:
+```bash
+credit agent --max-turns 40 -c config.yml "do a full audit of my training setup"
+```

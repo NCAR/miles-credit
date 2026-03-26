@@ -7,7 +7,7 @@
 [CREDIT npj Climate and Atmospheric Science Article](nature.com/articles/s41612-025-01125-6)
 
 ## About
-CREDIT is an open software platform to train and deploy AI atmospheric prediction models. CREDIT offers fast models 
+CREDIT is an open software platform to train and deploy AI atmospheric prediction models. CREDIT offers fast models
 that can be flexibly configured both in terms of input data and neural network architecture. The interface is designed
 to be user-friendly and enable fast spin-up and iteration. CREDIT is backed by the AI and atmospheric science expertise
 of the MILES group and the NSF National Center for Atmospheric Research, leading to design choices that balance advanced
@@ -17,6 +17,27 @@ CREDIT has reached its first stable release with a full set of models, training,
 to be under active development. Please contact [the MILES group](mailto:milescore@ucar.edu) if you have any questions about CREDIT.
 
 **New to CREDIT?** See [QUICKSTART.md](QUICKSTART.md) to get up and running locally, or the [full online Quickstart](https://miles-credit.readthedocs.io/en/latest/quickstart.html) for detailed guidance.
+
+## AI assistant
+
+CREDIT ships with two built-in AI tools for getting help and diagnosing problems:
+
+**`credit ask`** — one-shot Q&A, works with Anthropic, OpenAI, Google Gemini, or Groq (free tier):
+```bash
+pip install "miles-credit[ask]"
+export GROQ_API_KEY=gsk_...        # free at console.groq.com
+credit ask -c my_run.yml "why is my loss not decreasing?"
+```
+
+**`credit agent`** — agentic assistant that reads your files and runs shell commands before answering.
+Point it at a crashed run and it finds the traceback, reads the config, and tells you exactly what to fix:
+```bash
+pip install "miles-credit[agent]"
+export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com — ~$0.01 per session
+credit agent -c my_run.yml "why did my training run crash?"
+```
+
+See the [AI Agent documentation](https://miles-credit.readthedocs.io/en/latest/agent.html) for the full reference.
 
 MILES CREDIT also provides more detailed [documentation](https://miles-credit.readthedocs.io/en/latest/) with installation
 instructions, how to get started training and deploying models, how to interpret the config files, and full API docs.

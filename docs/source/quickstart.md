@@ -271,6 +271,30 @@ credit ask "your question here"
 
 ---
 
+## 7. Go deeper with the AI agent
+
+`credit ask` is great for quick questions.  When you need to actually diagnose a crash or
+audit a config, use `credit agent` — it reads your files and runs shell commands before answering.
+
+```bash
+pip install "miles-credit[agent]"
+export ANTHROPIC_API_KEY=sk-ant-...   # requires API credits (not Claude.ai Pro)
+
+# Agent reads your PBS log, finds the traceback, explains the fix
+credit agent -c config.yml "why did my training run crash?"
+
+# Audit your config before a long run
+credit agent -c config.yml "review this config before I start a 200-epoch run on 8 H100s"
+
+# Check your job queue
+credit agent "what PBS jobs are running and how much walltime do they have left?"
+```
+
+A typical debugging session (3–6 turns, reading a log + config) costs **~$0.01–0.02**.
+See the full [AI Agent documentation](agent.md) for all examples and options.
+
+---
+
 ## Common problems
 
 | Symptom | Fix |
