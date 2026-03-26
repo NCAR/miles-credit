@@ -458,6 +458,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         "global_mass_fixer",
         "global_water_fixer",
         "global_energy_fixer",
+        "global_energy_fixer_updown",
     ]
 
     # if activate is false, set all post modules to false
@@ -783,6 +784,50 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 if var in conf["model"]["post_conf"]["global_energy_fixer"]["surface_pressure_name"]
             ]
             conf["model"]["post_conf"]["global_energy_fixer"]["sp_inds"] = sp_inds[0]
+
+    # --------------------------------------------------------------------- #
+    # global energy fixer (up/down flux version)
+    flag_energy_updown = (
+        conf["model"]["post_conf"]["activate"] and conf["model"]["post_conf"]["global_energy_fixer_updown"]["activate"]
+    )
+
+    if flag_energy_updown:
+        cfg_ud = conf["model"]["post_conf"]["global_energy_fixer_updown"]
+
+        cfg_ud.setdefault("activate_outside_model", False)
+        cfg_ud.setdefault("denorm", True)
+        cfg_ud.setdefault("simple_demo", False)
+        cfg_ud.setdefault("midpoint", True)
+        cfg_ud.setdefault("grid_type", "sigma")
+
+        if cfg_ud["simple_demo"] is False:
+            assert "lon_lat_level_name" in cfg_ud, "Must specify var names for lat/lon/level in physics reference file"
+
+        if cfg_ud["grid_type"] == "sigma":
+            assert "surface_pressure_name" in cfg_ud, (
+                "Must specify surface pressure var name when using hybrid sigma-pressure coordinates"
+            )
+
+        def _find_ind(name_key, single=False):
+            inds = [i for i, v in enumerate(varname_output) if v in cfg_ud[name_key]]
+            return inds[0] if single else inds
+
+        cfg_ud["T_inds"] = _find_ind("air_temperature_name")
+        cfg_ud["q_inds"] = _find_ind("specific_total_water_name")
+        cfg_ud["U_inds"] = _find_ind("u_wind_name")
+        cfg_ud["V_inds"] = _find_ind("v_wind_name")
+        cfg_ud["TOA_down_solar_ind"] = _find_ind("TOA_down_solar_name", single=True)
+        cfg_ud["TOA_up_solar_ind"] = _find_ind("TOA_up_solar_name", single=True)
+        cfg_ud["TOA_up_OLR_ind"] = _find_ind("TOA_up_OLR_name", single=True)
+        cfg_ud["surf_down_solar_ind"] = _find_ind("surf_down_solar_name", single=True)
+        cfg_ud["surf_up_solar_ind"] = _find_ind("surf_up_solar_name", single=True)
+        cfg_ud["surf_down_LW_ind"] = _find_ind("surf_down_LW_name", single=True)
+        cfg_ud["surf_up_LW_ind"] = _find_ind("surf_up_LW_name", single=True)
+        cfg_ud["surf_SH_ind"] = _find_ind("surf_SH_name", single=True)
+        cfg_ud["surf_LH_ind"] = _find_ind("surf_LH_name", single=True)
+
+        if cfg_ud["grid_type"] == "sigma":
+            cfg_ud["sp_inds"] = _find_ind("surface_pressure_name", single=True)
 
     # --------------------------------------------------------- #
     # conf['trainer'] section
