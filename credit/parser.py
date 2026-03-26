@@ -223,9 +223,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 conf["data"]["flag_surface"] = False
             elif len(conf["data"]["surface_variables"]) > 0:
                 conf["data"]["flag_surface"] = True
-                assert "save_loc_surface" in conf["data"], (
-                    "surface var save locations ('save_loc_surface') is missing from conf['data']"
-                )
+                assert (
+                    "save_loc_surface" in conf["data"]
+                ), "surface var save locations ('save_loc_surface') is missing from conf['data']"
             else:
                 conf["data"]["flag_surface"] = False
         else:
@@ -237,9 +237,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 conf["data"]["flag_dyn_forcing"] = False
             elif len(conf["data"]["dynamic_forcing_variables"]) > 0:
                 conf["data"]["flag_dyn_forcing"] = True
-                assert "save_loc_dynamic_forcing" in conf["data"], (
-                    "dynamic forcing var save locations ('save_loc_dynamic_forcing') is missing from conf['data']"
-                )
+                assert (
+                    "save_loc_dynamic_forcing" in conf["data"]
+                ), "dynamic forcing var save locations ('save_loc_dynamic_forcing') is missing from conf['data']"
             else:
                 conf["data"]["flag_dyn_forcing"] = False
         else:
@@ -251,9 +251,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 conf["data"]["flag_diagnostic"] = False
             elif len(conf["data"]["diagnostic_variables"]) > 0:
                 conf["data"]["flag_diagnostic"] = True
-                assert "save_loc_diagnostic" in conf["data"], (
-                    "diagnostic var save locations ('save_loc_diagnostic') is missing from conf['data']"
-                )
+                assert (
+                    "save_loc_diagnostic" in conf["data"]
+                ), "diagnostic var save locations ('save_loc_diagnostic') is missing from conf['data']"
             else:
                 conf["data"]["flag_diagnostic"] = False
         else:
@@ -265,9 +265,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 conf["data"]["flag_forcing"] = False
             elif len(conf["data"]["forcing_variables"]) > 0:
                 conf["data"]["flag_forcing"] = True
-                assert "save_loc_forcing" in conf["data"], (
-                    "forcing var save locations ('save_loc_forcing') is missing from conf['data']"
-                )
+                assert (
+                    "save_loc_forcing" in conf["data"]
+                ), "forcing var save locations ('save_loc_forcing') is missing from conf['data']"
             else:
                 conf["data"]["flag_forcing"] = False
         else:
@@ -279,9 +279,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 conf["data"]["flag_static"] = False
             elif len(conf["data"]["static_variables"]) > 0:
                 conf["data"]["flag_static"] = True
-                assert "save_loc_static" in conf["data"], (
-                    "static var save locations ('save_loc_static') is missing from conf['data']"
-                )
+                assert (
+                    "save_loc_static" in conf["data"]
+                ), "static var save locations ('save_loc_static') is missing from conf['data']"
             else:
                 conf["data"]["flag_static"] = False
         else:
@@ -345,13 +345,13 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
             # 'valid_years' is required even for conf['trainer']['skip_validation']: True
             # 'valid_years' and 'train_years' can overlap
-            assert "valid_years" in conf["data"], (
-                "year range for validation ('valid_years') is missing from conf['data']"
-            )
+            assert (
+                "valid_years" in conf["data"]
+            ), "year range for validation ('valid_years') is missing from conf['data']"
 
-            assert "forecast_len" in conf["data"], (
-                "Number of time frames for loss compute ('forecast_len') is missing from conf['data']"
-            )
+            assert (
+                "forecast_len" in conf["data"]
+            ), "Number of time frames for loss compute ('forecast_len') is missing from conf['data']"
 
             if "valid_history_len" not in conf["data"]:
                 # use "history_len" for "valid_history_len"
@@ -375,9 +375,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 conf["data"]["total_time_steps"] = conf["data"]["forecast_len"]
 
         assert "history_len" in conf["data"], "Number of input time frames ('history_len') is missing from conf['data']"
-        assert "lead_time_periods" in conf["data"], (
-            "Number of forecast hours ('lead_time_periods') is missing from conf['data']"
-        )
+        assert (
+            "lead_time_periods" in conf["data"]
+        ), "Number of forecast hours ('lead_time_periods') is missing from conf['data']"
         assert "scaler_type" in conf["data"], "'scaler_type' is missing from conf['data']"
 
         if conf["data"]["scaler_type"] == "std_new":
@@ -458,6 +458,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         "global_mass_fixer",
         "global_water_fixer",
         "global_energy_fixer",
+        "global_energy_fixer_updown",
     ]
 
     # if activate is false, set all post modules to false
@@ -520,13 +521,13 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # SKEBS
     if conf["model"]["post_conf"]["skebs"]["activate"]:
-        assert "freeze_base_model_weights" in conf["model"]["post_conf"]["skebs"], (
-            "need to specify freeze_base_model_weights in skebs config"
-        )
+        assert (
+            "freeze_base_model_weights" in conf["model"]["post_conf"]["skebs"]
+        ), "need to specify freeze_base_model_weights in skebs config"
 
-        assert conf["trainer"]["train_batch_size"] == conf["trainer"]["valid_batch_size"], (
-            "train and valid batch sizes need to be the same for skebs"
-        )
+        assert (
+            conf["trainer"]["train_batch_size"] == conf["trainer"]["valid_batch_size"]
+        ), "train and valid batch sizes need to be the same for skebs"
 
         # setup backscatter writing
         conf["model"]["post_conf"]["predict"] = {k: v for k, v in conf["predict"].items()}
@@ -614,19 +615,19 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         conf["model"]["post_conf"]["global_mass_fixer"].setdefault("midpoint", False)
         conf["model"]["post_conf"]["global_mass_fixer"].setdefault("grid_type", "pressure")
 
-        assert "fix_level_num" in conf["model"]["post_conf"]["global_mass_fixer"], (
-            "Must specifiy what level to fix on specific total water"
-        )
+        assert (
+            "fix_level_num" in conf["model"]["post_conf"]["global_mass_fixer"]
+        ), "Must specifiy what level to fix on specific total water"
 
         if conf["model"]["post_conf"]["global_mass_fixer"]["simple_demo"] is False:
-            assert "lon_lat_level_name" in conf["model"]["post_conf"]["global_mass_fixer"], (
-                "Must specifiy var names for lat/lon/level in physics reference file"
-            )
+            assert (
+                "lon_lat_level_name" in conf["model"]["post_conf"]["global_mass_fixer"]
+            ), "Must specifiy var names for lat/lon/level in physics reference file"
 
         if conf["model"]["post_conf"]["global_mass_fixer"]["grid_type"] == "sigma":
-            assert "surface_pressure_name" in conf["model"]["post_conf"]["global_mass_fixer"], (
-                "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
-            )
+            assert (
+                "surface_pressure_name" in conf["model"]["post_conf"]["global_mass_fixer"]
+            ), "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
 
         q_inds = [
             i_var
@@ -660,14 +661,14 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         conf["model"]["post_conf"]["global_water_fixer"].setdefault("grid_type", "pressure")
 
         if conf["model"]["post_conf"]["global_water_fixer"]["simple_demo"] is False:
-            assert "lon_lat_level_name" in conf["model"]["post_conf"]["global_water_fixer"], (
-                "Must specifiy var names for lat/lon/level in physics reference file"
-            )
+            assert (
+                "lon_lat_level_name" in conf["model"]["post_conf"]["global_water_fixer"]
+            ), "Must specifiy var names for lat/lon/level in physics reference file"
 
         if conf["model"]["post_conf"]["global_water_fixer"]["grid_type"] == "sigma":
-            assert "surface_pressure_name" in conf["model"]["post_conf"]["global_water_fixer"], (
-                "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
-            )
+            assert (
+                "surface_pressure_name" in conf["model"]["post_conf"]["global_water_fixer"]
+            ), "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
         q_inds = [
             i_var
             for i_var, var in enumerate(varname_output)
@@ -717,14 +718,14 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         conf["model"]["post_conf"]["global_energy_fixer"].setdefault("grid_type", "pressure")
 
         if conf["model"]["post_conf"]["global_energy_fixer"]["simple_demo"] is False:
-            assert "lon_lat_level_name" in conf["model"]["post_conf"]["global_energy_fixer"], (
-                "Must specifiy var names for lat/lon/level in physics reference file"
-            )
+            assert (
+                "lon_lat_level_name" in conf["model"]["post_conf"]["global_energy_fixer"]
+            ), "Must specifiy var names for lat/lon/level in physics reference file"
 
         if conf["model"]["post_conf"]["global_energy_fixer"]["grid_type"] == "sigma":
-            assert "surface_pressure_name" in conf["model"]["post_conf"]["global_energy_fixer"], (
-                "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
-            )
+            assert (
+                "surface_pressure_name" in conf["model"]["post_conf"]["global_energy_fixer"]
+            ), "Must specifiy surface pressure var name when using hybrid sigma-pressure coordinates"
 
         T_inds = [
             i_var
@@ -784,6 +785,50 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             ]
             conf["model"]["post_conf"]["global_energy_fixer"]["sp_inds"] = sp_inds[0]
 
+    # --------------------------------------------------------------------- #
+    # global energy fixer (up/down flux version)
+    flag_energy_updown = (
+        conf["model"]["post_conf"]["activate"] and conf["model"]["post_conf"]["global_energy_fixer_updown"]["activate"]
+    )
+
+    if flag_energy_updown:
+        cfg_ud = conf["model"]["post_conf"]["global_energy_fixer_updown"]
+
+        cfg_ud.setdefault("activate_outside_model", False)
+        cfg_ud.setdefault("denorm", True)
+        cfg_ud.setdefault("simple_demo", False)
+        cfg_ud.setdefault("midpoint", True)
+        cfg_ud.setdefault("grid_type", "sigma")
+
+        if cfg_ud["simple_demo"] is False:
+            assert "lon_lat_level_name" in cfg_ud, "Must specify var names for lat/lon/level in physics reference file"
+
+        if cfg_ud["grid_type"] == "sigma":
+            assert (
+                "surface_pressure_name" in cfg_ud
+            ), "Must specify surface pressure var name when using hybrid sigma-pressure coordinates"
+
+        def _find_ind(name_key, single=False):
+            inds = [i for i, v in enumerate(varname_output) if v in cfg_ud[name_key]]
+            return inds[0] if single else inds
+
+        cfg_ud["T_inds"] = _find_ind("air_temperature_name")
+        cfg_ud["q_inds"] = _find_ind("specific_total_water_name")
+        cfg_ud["U_inds"] = _find_ind("u_wind_name")
+        cfg_ud["V_inds"] = _find_ind("v_wind_name")
+        cfg_ud["TOA_down_solar_ind"] = _find_ind("TOA_down_solar_name", single=True)
+        cfg_ud["TOA_up_solar_ind"] = _find_ind("TOA_up_solar_name", single=True)
+        cfg_ud["TOA_up_OLR_ind"] = _find_ind("TOA_up_OLR_name", single=True)
+        cfg_ud["surf_down_solar_ind"] = _find_ind("surf_down_solar_name", single=True)
+        cfg_ud["surf_up_solar_ind"] = _find_ind("surf_up_solar_name", single=True)
+        cfg_ud["surf_down_LW_ind"] = _find_ind("surf_down_LW_name", single=True)
+        cfg_ud["surf_up_LW_ind"] = _find_ind("surf_up_LW_name", single=True)
+        cfg_ud["surf_SH_ind"] = _find_ind("surf_SH_name", single=True)
+        cfg_ud["surf_LH_ind"] = _find_ind("surf_LH_name", single=True)
+
+        if cfg_ud["grid_type"] == "sigma":
+            cfg_ud["sp_inds"] = _find_ind("surface_pressure_name", single=True)
+
     # --------------------------------------------------------- #
     # conf['trainer'] section
 
@@ -801,21 +846,21 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         assert "load_weights" in conf["trainer"], "must specify 'load_weights' in conf['trainer']"
         assert "learning_rate" in conf["trainer"], "must specify 'learning_rate' in conf['trainer']"
 
-        assert "batches_per_epoch" in conf["trainer"], (
-            "Number of training batches per epoch ('batches_per_epoch') is missing from onf['trainer']"
-        )
+        assert (
+            "batches_per_epoch" in conf["trainer"]
+        ), "Number of training batches per epoch ('batches_per_epoch') is missing from onf['trainer']"
 
-        assert "train_batch_size" in conf["trainer"], (
-            "Training set batch size ('train_batch_size') is missing from onf['trainer']"
-        )
+        assert (
+            "train_batch_size" in conf["trainer"]
+        ), "Training set batch size ('train_batch_size') is missing from onf['trainer']"
 
         if "ensemble_size" not in conf["trainer"]:
             conf["trainer"]["ensemble_size"] = 1  # default value of 1 means deterministic training
 
         if conf["trainer"]["ensemble_size"] > 1:
-            assert conf["loss"]["training_loss"] in ["KCRPS", "almost-fair-crps"], (
-                f"""{conf["loss"]["training_loss"]} loss incompatible with ensemble training. ensemble_size is {conf["trainer"]["ensemble_size"]}"""
-            )
+            assert (
+                conf["loss"]["training_loss"] in ["KCRPS", "almost-fair-crps"]
+            ), f"""{conf["loss"]["training_loss"]} loss incompatible with ensemble training. ensemble_size is {conf["trainer"]["ensemble_size"]}"""
 
         if "load_scaler" not in conf["trainer"]:
             conf["trainer"]["load_scaler"] = False
@@ -843,13 +888,13 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
         if conf["trainer"]["skip_validation"] is False:
             # do not skip validaiton
-            assert "valid_batch_size" in conf["trainer"], (
-                "Validation set batch size ('valid_batch_size') is missing from conf['trainer']"
-            )
+            assert (
+                "valid_batch_size" in conf["trainer"]
+            ), "Validation set batch size ('valid_batch_size') is missing from conf['trainer']"
 
-            assert "valid_batches_per_epoch" in conf["trainer"], (
-                "Number of validation batches per epoch ('valid_batches_per_epoch') is missing from conf['trainer']"
-            )
+            assert (
+                "valid_batches_per_epoch" in conf["trainer"]
+            ), "Number of validation batches per epoch ('valid_batches_per_epoch') is missing from conf['trainer']"
 
         if "save_metric_vars" not in conf["trainer"]:
             conf["trainer"]["save_metric_vars"] = []  # averaged metrics only
@@ -861,21 +906,21 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 # lr will be controlled by scheduler
                 conf["trainer"]["update_learning_rate"] = False
 
-                assert "scheduler" in conf["trainer"], (
-                    "must specify 'scheduler' in conf['trainer'] when a scheduler is used"
-                )
+                assert (
+                    "scheduler" in conf["trainer"]
+                ), "must specify 'scheduler' in conf['trainer'] when a scheduler is used"
 
-                assert "reload_epoch" in conf["trainer"], (
-                    "must specify 'reload_epoch' in conf['trainer'] when a scheduler is used"
-                )
+                assert (
+                    "reload_epoch" in conf["trainer"]
+                ), "must specify 'reload_epoch' in conf['trainer'] when a scheduler is used"
 
-                assert "load_optimizer" in conf["trainer"], (
-                    "must specify 'load_optimizer' in conf['trainer'] when a scheduler is used"
-                )
+                assert (
+                    "load_optimizer" in conf["trainer"]
+                ), "must specify 'load_optimizer' in conf['trainer'] when a scheduler is used"
 
-                assert "load_scheduler" in conf["trainer"], (
-                    "must specify 'load_scheduler' in conf['trainer'] when a scheduler is used"
-                )
+                assert (
+                    "load_scheduler" in conf["trainer"]
+                ), "must specify 'load_scheduler' in conf['trainer'] when a scheduler is used"
 
             # ------------------------------------------------------------------------------ #
             else:
@@ -944,9 +989,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             assert "use_variable_weights" in conf["loss"], "must specify 'use_variable_weights' in conf['loss']"
 
             if conf["loss"]["use_variable_weights"]:
-                assert "variable_weights" in conf["loss"], (
-                    "must specify 'variable_weights' in conf['loss'] if 'use_variable_weights': True"
-                )
+                assert (
+                    "variable_weights" in conf["loss"]
+                ), "must specify 'variable_weights' in conf['loss'] if 'use_variable_weights': True"
 
                 # ----------------------------------------------------------------------------------------- #
                 # check and reorganize variable weights
@@ -1029,9 +1074,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
         else:
             assert "forecasts" in conf["predict"], "Rollout settings ('forecasts') is missing from conf['predict']"
-            assert "save_forecast" in conf["predict"], (
-                "Rollout save location ('save_forecast') is missing from conf['predict']"
-            )
+            assert (
+                "save_forecast" in conf["predict"]
+            ), "Rollout save location ('save_forecast') is missing from conf['predict']"
 
             conf["predict"]["save_forecast"] = os.path.expandvars(conf["predict"]["save_forecast"])
 
@@ -1143,17 +1188,17 @@ def training_data_check(conf, print_summary=False):
         valid_dyn_forcing_files = [file for file in dyn_forcing_files if any(year in file for year in valid_years)]
 
         for i_year, year in enumerate(train_years):
-            assert year in train_dyn_forcing_files[i_year], (
-                "[Year {}] is missing from [dynamic forcing files {}]".format(
-                    year, conf["data"]["save_loc_dynamic_forcing"]
-                )
+            assert (
+                year in train_dyn_forcing_files[i_year]
+            ), "[Year {}] is missing from [dynamic forcing files {}]".format(
+                year, conf["data"]["save_loc_dynamic_forcing"]
             )
 
         for i_year, year in enumerate(valid_years):
-            assert year in valid_dyn_forcing_files[i_year], (
-                "[Year {}] is missing from [dynamic forcing files {}]".format(
-                    year, conf["data"]["save_loc_dynamic_forcing"]
-                )
+            assert (
+                year in valid_dyn_forcing_files[i_year]
+            ), "[Year {}] is missing from [dynamic forcing files {}]".format(
+                year, conf["data"]["save_loc_dynamic_forcing"]
             )
 
     ## diagnostic files
@@ -1185,9 +1230,9 @@ def training_data_check(conf, print_summary=False):
     ds_upper_air = get_forward_data(train_ERA_files[0])
     varnames_upper_air = list(ds_upper_air.keys())
 
-    assert all(varname in varnames_upper_air for varname in conf["data"]["variables"]), (
-        "upper-air variables [{}] are not fully covered by conf['data']['save_loc']".format(conf["data"]["variables"])
-    )
+    assert all(
+        varname in varnames_upper_air for varname in conf["data"]["variables"]
+    ), "upper-air variables [{}] are not fully covered by conf['data']['save_loc']".format(conf["data"]["variables"])
 
     # assign the upper_air vars in yaml if it can pass checks
     varnames_upper_air = conf["data"]["variables"]
@@ -1201,10 +1246,10 @@ def training_data_check(conf, print_summary=False):
         ds_surface = get_forward_data(train_surface_files[0])
         varnames_surface = list(ds_surface.keys())
 
-        assert all(varname in varnames_surface for varname in conf["data"]["surface_variables"]), (
-            "Surface variables [{}] are not fully covered by conf['data']['save_loc_surface']".format(
-                conf["data"]["surface_variables"]
-            )
+        assert all(
+            varname in varnames_surface for varname in conf["data"]["surface_variables"]
+        ), "Surface variables [{}] are not fully covered by conf['data']['save_loc_surface']".format(
+            conf["data"]["surface_variables"]
         )
 
         all_vars += conf["data"]["surface_variables"]
@@ -1214,10 +1259,10 @@ def training_data_check(conf, print_summary=False):
         ds_dyn_forcing = get_forward_data(train_dyn_forcing_files[0])
         varnames_dyn_forcing = list(ds_dyn_forcing.keys())
 
-        assert all(varname in varnames_dyn_forcing for varname in conf["data"]["dynamic_forcing_variables"]), (
-            "Dynamic forcing variables [{}] are not fully covered by conf['data']['save_loc_dynamic_forcing']".format(
-                conf["data"]["dynamic_forcing_variables"]
-            )
+        assert all(
+            varname in varnames_dyn_forcing for varname in conf["data"]["dynamic_forcing_variables"]
+        ), "Dynamic forcing variables [{}] are not fully covered by conf['data']['save_loc_dynamic_forcing']".format(
+            conf["data"]["dynamic_forcing_variables"]
         )
 
         all_vars += conf["data"]["dynamic_forcing_variables"]
@@ -1227,10 +1272,10 @@ def training_data_check(conf, print_summary=False):
         ds_diagnostic = get_forward_data(train_diagnostic_files[0])
         varnames_diagnostic = list(ds_diagnostic.keys())
 
-        assert all(varname in varnames_diagnostic for varname in conf["data"]["diagnostic_variables"]), (
-            "Diagnostic variables [{}] are not fully covered by conf['data']['save_loc_diagnostic']".format(
-                conf["data"]["diagnostic_variables"]
-            )
+        assert all(
+            varname in varnames_diagnostic for varname in conf["data"]["diagnostic_variables"]
+        ), "Diagnostic variables [{}] are not fully covered by conf['data']['save_loc_diagnostic']".format(
+            conf["data"]["diagnostic_variables"]
         )
 
         all_vars += conf["data"]["diagnostic_variables"]
@@ -1240,10 +1285,10 @@ def training_data_check(conf, print_summary=False):
         ds_forcing = get_forward_data(conf["data"]["save_loc_forcing"])
         varnames_forcing = list(ds_forcing.keys())
 
-        assert all(varname in varnames_forcing for varname in conf["data"]["forcing_variables"]), (
-            "Forcing variables [{}] are not fully covered by conf['data']['save_loc_forcing']".format(
-                conf["data"]["forcing_variables"]
-            )
+        assert all(
+            varname in varnames_forcing for varname in conf["data"]["forcing_variables"]
+        ), "Forcing variables [{}] are not fully covered by conf['data']['save_loc_forcing']".format(
+            conf["data"]["forcing_variables"]
         )
 
     # static variables
@@ -1251,19 +1296,19 @@ def training_data_check(conf, print_summary=False):
         ds_static = get_forward_data(conf["data"]["save_loc_static"])
         varnames_static = list(ds_static.keys())
 
-        assert all(varname in varnames_static for varname in conf["data"]["static_variables"]), (
-            "Static variables [{}] are not fully covered by conf['data']['save_loc_static']".format(
-                conf["data"]["static_variables"]
-            )
+        assert all(
+            varname in varnames_static for varname in conf["data"]["static_variables"]
+        ), "Static variables [{}] are not fully covered by conf['data']['save_loc_static']".format(
+            conf["data"]["static_variables"]
         )
 
     # comparing all_vars against mean, std files
     ds_mean = get_forward_data(conf["data"]["mean_path"])
     varname_ds_mean = list(ds_mean.keys())
 
-    assert all(varname in varname_ds_mean for varname in all_vars), (
-        "Variables are not fully covered by conf['data']['mean_path']"
-    )
+    assert all(
+        varname in varname_ds_mean for varname in all_vars
+    ), "Variables are not fully covered by conf['data']['mean_path']"
 
     ds_std = get_forward_data(conf["data"]["std_path"])
     varname_ds_std = list(ds_std.keys())
@@ -1272,9 +1317,9 @@ def training_data_check(conf, print_summary=False):
         if varname not in varname_ds_std:
             missing_vars.append(varname)
     missing_var_str = ", ".join(missing_vars)
-    assert all(varname in varname_ds_std for varname in all_vars), (
-        f"Variables {missing_var_str} are not fully covered by conf['data']['std_path']"
-    )
+    assert all(
+        varname in varname_ds_std for varname in all_vars
+    ), f"Variables {missing_var_str} are not fully covered by conf['data']['std_path']"
 
     if print_summary:
         print("Variable name checking passed")
@@ -1293,56 +1338,56 @@ def training_data_check(conf, print_summary=False):
         coord_surface = list(ds_surface.coords.keys())
         coord_surface = remove_string_by_pattern(coord_surface, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_surface), (
-            "Surface file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_surface
+        ), "Surface file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_surface:
-            assert ds_upper_air.coords[coord_name].equals(ds_surface.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and surface files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_surface.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and surface files".format(coord_name)
 
     # dyn forcing files
     if conf["data"]["flag_dyn_forcing"]:
         coord_dyn_forcing = list(ds_dyn_forcing.coords.keys())
         coord_dyn_forcing = remove_string_by_pattern(coord_dyn_forcing, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_dyn_forcing), (
-            "Dynamic forcing file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_dyn_forcing
+        ), "Dynamic forcing file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_dyn_forcing:
-            assert ds_upper_air.coords[coord_name].equals(ds_dyn_forcing.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and dynamic forcing files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_dyn_forcing.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and dynamic forcing files".format(coord_name)
 
     # diagnostic files
     if conf["data"]["flag_diagnostic"]:
         coord_diagnostic = list(ds_diagnostic.coords.keys())
         coord_diagnostic = remove_string_by_pattern(coord_diagnostic, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_diagnostic), (
-            "Diagnostic file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_diagnostic
+        ), "Diagnostic file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_diagnostic:
-            assert ds_upper_air.coords[coord_name].equals(ds_diagnostic.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and diagnostic files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_diagnostic.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and diagnostic files".format(coord_name)
 
     # forcing files
     if conf["data"]["flag_forcing"]:
         coord_forcing = list(ds_forcing.coords.keys())
         coord_forcing = remove_string_by_pattern(coord_forcing, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_forcing), (
-            "Forcing file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_forcing
+        ), "Forcing file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_forcing:
-            assert ds_upper_air.coords[coord_name].equals(ds_forcing.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and forcing files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_forcing.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and forcing files".format(coord_name)
 
         # ============================================== #
         # !! assumed subdaily inputs, may need to fix !! #
@@ -1354,58 +1399,58 @@ def training_data_check(conf, print_summary=False):
         coord_static = list(ds_static.coords.keys())
         coord_static = remove_string_by_pattern(coord_static, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_static), (
-            "Static file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_static
+        ), "Static file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_static:
-            assert ds_upper_air.coords[coord_name].equals(ds_static.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and static files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_static.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and static files".format(coord_name)
 
     # zscore mean file (no time coordinate)
     coord_mean = list(ds_mean.coords.keys())
     coord_mean = remove_string_by_pattern(coord_mean, "time")
 
-    assert all(coord_name in coord_upper_air for coord_name in coord_mean), (
-        "zscore mean file coordinate names mismatched with upper-air files"
-    )
+    assert all(
+        coord_name in coord_upper_air for coord_name in coord_mean
+    ), "zscore mean file coordinate names mismatched with upper-air files"
 
     for coord_name in coord_mean:
-        assert ds_upper_air.coords[coord_name].equals(ds_mean.coords[coord_name]), (
-            "coordinate {} mismatched between upper-air and mean files".format(coord_name)
-        )
+        assert ds_upper_air.coords[coord_name].equals(
+            ds_mean.coords[coord_name]
+        ), "coordinate {} mismatched between upper-air and mean files".format(coord_name)
 
     # zscore std file (no time coordinate)
     coord_std = list(ds_std.coords.keys())
     coord_std = remove_string_by_pattern(coord_std, "time")
 
-    assert all(coord_name in coord_upper_air for coord_name in coord_std), (
-        "zscore std file coordinate names mismatched with upper-air files"
-    )
+    assert all(
+        coord_name in coord_upper_air for coord_name in coord_std
+    ), "zscore std file coordinate names mismatched with upper-air files"
 
     for coord_name in coord_std:
-        assert ds_upper_air.coords[coord_name].equals(ds_std.coords[coord_name]), (
-            "coordinate {} mismatched between upper-air and std files".format(coord_name)
-        )
+        assert ds_upper_air.coords[coord_name].equals(
+            ds_std.coords[coord_name]
+        ), "coordinate {} mismatched between upper-air and std files".format(coord_name)
 
     # lat / lon file
     ds_weights = get_forward_data(conf["loss"]["latitude_weights"])
     coord_latlon = list(ds_weights.coords.keys())
     coord_latlon = remove_string_by_pattern(coord_latlon, "time")
 
-    assert all(coord_name in coord_upper_air for coord_name in coord_latlon), (
-        "conf['loss']['latitude_weights'] file coordinate names mismatched with upper-air files"
-    )
+    assert all(
+        coord_name in coord_upper_air for coord_name in coord_latlon
+    ), "conf['loss']['latitude_weights'] file coordinate names mismatched with upper-air files"
 
     # model level consistency final checks
     N_level_mean = len(ds_mean[varnames_upper_air[0]].values)
     N_level_model = conf["model"]["levels"]
 
-    assert N_level_mean == N_level_model, (
-        "number of upper air levels mismatched between model config {} and input data {}".format(
-            N_level_model, N_level_mean
-        )
+    assert (
+        N_level_mean == N_level_model
+    ), "number of upper air levels mismatched between model config {} and input data {}".format(
+        N_level_model, N_level_mean
     )
 
     if print_summary:
@@ -1489,9 +1534,9 @@ def predict_data_check(conf, print_summary=False):
     ds_upper_air = get_forward_data(pred_ERA_files[0])
     varnames_upper_air = list(ds_upper_air.keys())
 
-    assert all(varname in varnames_upper_air for varname in conf["data"]["variables"]), (
-        "upper-air variables [{}] are not fully covered by conf['data']['save_loc']".format(conf["data"]["variables"])
-    )
+    assert all(
+        varname in varnames_upper_air for varname in conf["data"]["variables"]
+    ), "upper-air variables [{}] are not fully covered by conf['data']['save_loc']".format(conf["data"]["variables"])
 
     # collecting all variables that require zscores
     # deep copy to avoid changing conf['data'] by accident
@@ -1502,10 +1547,10 @@ def predict_data_check(conf, print_summary=False):
         ds_surface = get_forward_data(pred_surface_files[0])
         varnames_surface = list(ds_surface.keys())
 
-        assert all(varname in varnames_surface for varname in conf["data"]["surface_variables"]), (
-            "Surface variables [{}] are not fully covered by conf['data']['save_loc_surface']".format(
-                conf["data"]["surface_variables"]
-            )
+        assert all(
+            varname in varnames_surface for varname in conf["data"]["surface_variables"]
+        ), "Surface variables [{}] are not fully covered by conf['data']['save_loc_surface']".format(
+            conf["data"]["surface_variables"]
         )
 
         all_vars += conf["data"]["surface_variables"]
@@ -1515,10 +1560,10 @@ def predict_data_check(conf, print_summary=False):
         ds_dyn_forcing = get_forward_data(pred_dyn_forcing_files[0])
         varnames_dyn_forcing = list(ds_dyn_forcing.keys())
 
-        assert all(varname in varnames_dyn_forcing for varname in conf["data"]["dynamic_forcing_variables"]), (
-            "Dynamic forcing variables [{}] are not fully covered by conf['data']['save_loc_dynamic_forcing']".format(
-                conf["data"]["dynamic_forcing_variables"]
-            )
+        assert all(
+            varname in varnames_dyn_forcing for varname in conf["data"]["dynamic_forcing_variables"]
+        ), "Dynamic forcing variables [{}] are not fully covered by conf['data']['save_loc_dynamic_forcing']".format(
+            conf["data"]["dynamic_forcing_variables"]
         )
 
         all_vars += conf["data"]["dynamic_forcing_variables"]
@@ -1532,10 +1577,10 @@ def predict_data_check(conf, print_summary=False):
         ds_forcing = get_forward_data(conf["data"]["save_loc_forcing"])
         varnames_forcing = list(ds_forcing.keys())
 
-        assert all(varname in varnames_forcing for varname in conf["data"]["forcing_variables"]), (
-            "Forcing variables [{}] are not fully covered by conf['data']['save_loc_forcing']".format(
-                conf["data"]["forcing_variables"]
-            )
+        assert all(
+            varname in varnames_forcing for varname in conf["data"]["forcing_variables"]
+        ), "Forcing variables [{}] are not fully covered by conf['data']['save_loc_forcing']".format(
+            conf["data"]["forcing_variables"]
         )
 
     # static variables
@@ -1543,26 +1588,26 @@ def predict_data_check(conf, print_summary=False):
         ds_static = get_forward_data(conf["data"]["save_loc_static"])
         varnames_static = list(ds_static.keys())
 
-        assert all(varname in varnames_static for varname in conf["data"]["static_variables"]), (
-            "Static variables [{}] are not fully covered by conf['data']['save_loc_static']".format(
-                conf["data"]["static_variables"]
-            )
+        assert all(
+            varname in varnames_static for varname in conf["data"]["static_variables"]
+        ), "Static variables [{}] are not fully covered by conf['data']['save_loc_static']".format(
+            conf["data"]["static_variables"]
         )
 
     # comparing all_vars against mean, std files
     ds_mean = get_forward_data(conf["data"]["mean_path"])
     varname_ds_mean = list(ds_mean.keys())
 
-    assert all(varname in varname_ds_mean for varname in all_vars), (
-        "Variables are not fully covered by conf['data']['mean_path']"
-    )
+    assert all(
+        varname in varname_ds_mean for varname in all_vars
+    ), "Variables are not fully covered by conf['data']['mean_path']"
 
     ds_std = get_forward_data(conf["data"]["std_path"])
     varname_ds_std = list(ds_std.keys())
 
-    assert all(varname in varname_ds_std for varname in all_vars), (
-        "Variables are not fully covered by conf['data']['std_path']"
-    )
+    assert all(
+        varname in varname_ds_std for varname in all_vars
+    ), "Variables are not fully covered by conf['data']['std_path']"
 
     if print_summary:
         print("Variable name checking passed")
@@ -1581,42 +1626,42 @@ def predict_data_check(conf, print_summary=False):
         coord_surface = list(ds_surface.coords.keys())
         coord_surface = remove_string_by_pattern(coord_surface, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_surface), (
-            "Surface file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_surface
+        ), "Surface file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_surface:
-            assert ds_upper_air.coords[coord_name].equals(ds_surface.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and surface files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_surface.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and surface files".format(coord_name)
 
     # dyn forcing files
     if conf["data"]["flag_dyn_forcing"]:
         coord_dyn_forcing = list(ds_dyn_forcing.coords.keys())
         coord_dyn_forcing = remove_string_by_pattern(coord_dyn_forcing, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_dyn_forcing), (
-            "Dynamic forcing file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_dyn_forcing
+        ), "Dynamic forcing file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_dyn_forcing:
-            assert ds_upper_air.coords[coord_name].equals(ds_dyn_forcing.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and dynamic forcing files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_dyn_forcing.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and dynamic forcing files".format(coord_name)
 
     # forcing files
     if conf["data"]["flag_forcing"]:
         coord_forcing = list(ds_forcing.coords.keys())
         coord_forcing = remove_string_by_pattern(coord_forcing, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_forcing), (
-            "Forcing file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_forcing
+        ), "Forcing file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_forcing:
-            assert ds_upper_air.coords[coord_name].equals(ds_forcing.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and forcing files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_forcing.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and forcing files".format(coord_name)
 
         # ============================================== #
         # !! assumed subdaily inputs, may need to fix !! #
@@ -1628,49 +1673,49 @@ def predict_data_check(conf, print_summary=False):
         coord_static = list(ds_static.coords.keys())
         coord_static = remove_string_by_pattern(coord_static, "time")
 
-        assert all(coord_name in coord_upper_air for coord_name in coord_static), (
-            "Static file coordinate names mismatched with upper-air files"
-        )
+        assert all(
+            coord_name in coord_upper_air for coord_name in coord_static
+        ), "Static file coordinate names mismatched with upper-air files"
 
         for coord_name in coord_static:
-            assert ds_upper_air.coords[coord_name].equals(ds_static.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and static files".format(coord_name)
-            )
+            assert ds_upper_air.coords[coord_name].equals(
+                ds_static.coords[coord_name]
+            ), "coordinate {} mismatched between upper-air and static files".format(coord_name)
 
     # zscore mean file (no time coordinate)
     coord_mean = list(ds_mean.coords.keys())
     coord_mean = remove_string_by_pattern(coord_mean, "time")
 
-    assert all(coord_name in coord_upper_air for coord_name in coord_mean), (
-        "zscore mean file coordinate names mismatched with upper-air files"
-    )
+    assert all(
+        coord_name in coord_upper_air for coord_name in coord_mean
+    ), "zscore mean file coordinate names mismatched with upper-air files"
 
     for coord_name in coord_mean:
-        assert ds_upper_air.coords[coord_name].equals(ds_mean.coords[coord_name]), (
-            "coordinate {} mismatched between upper-air and mean files".format(coord_name)
-        )
+        assert ds_upper_air.coords[coord_name].equals(
+            ds_mean.coords[coord_name]
+        ), "coordinate {} mismatched between upper-air and mean files".format(coord_name)
 
     # zscore std file (no time coordinate)
     coord_std = list(ds_std.coords.keys())
     coord_std = remove_string_by_pattern(coord_std, "time")
 
-    assert all(coord_name in coord_upper_air for coord_name in coord_std), (
-        "zscore std file coordinate names mismatched with upper-air files"
-    )
+    assert all(
+        coord_name in coord_upper_air for coord_name in coord_std
+    ), "zscore std file coordinate names mismatched with upper-air files"
 
     for coord_name in coord_std:
-        assert ds_upper_air.coords[coord_name].equals(ds_std.coords[coord_name]), (
-            "coordinate {} mismatched between upper-air and std files".format(coord_name)
-        )
+        assert ds_upper_air.coords[coord_name].equals(
+            ds_std.coords[coord_name]
+        ), "coordinate {} mismatched between upper-air and std files".format(coord_name)
 
     # lat / lon file
     ds_weights = get_forward_data(conf["loss"]["latitude_weights"])
     coord_latlon = list(ds_weights.coords.keys())
     coord_latlon = remove_string_by_pattern(coord_latlon, "time")
 
-    assert all(coord_name in coord_upper_air for coord_name in coord_latlon), (
-        "conf['loss']['latitude_weights'] file coordinate names mismatched with upper-air files"
-    )
+    assert all(
+        coord_name in coord_upper_air for coord_name in coord_latlon
+    ), "conf['loss']['latitude_weights'] file coordinate names mismatched with upper-air files"
 
     if print_summary:
         print("Coordinate checking passed")
