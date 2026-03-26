@@ -652,7 +652,12 @@ class _ProviderError(Exception):
 
 def _ask_anthropic(user_msg: str) -> None:
     """Stream a response via the Anthropic API (claude-haiku)."""
+    import logging
+
     import anthropic
+
+    # httpx logs every request at INFO level — suppress it for clean CLI output
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     try:
@@ -667,9 +672,9 @@ def _ask_anthropic(user_msg: str) -> None:
     except anthropic.BadRequestError as e:
         if "credit balance is too low" in str(e):
             raise _ProviderError(
-                "Anthropic API key is set but the account has no credits.\n"
-                "Add credits at: https://console.anthropic.com/settings/billing\n"
-                "Note: a Claude.ai Pro subscription does NOT include API access."
+                "Anthropic API key has no credits.\n"
+                "  → Add credits: https://console.anthropic.com/settings/billing\n"
+                "  → Note: Claude.ai Pro does NOT include API access."
             ) from e
         raise
 
@@ -806,10 +811,13 @@ def _ask(args: argparse.Namespace) -> None:
     print()
     for attempt, p in enumerate(ordered):
         _, pkg, label = _PROVIDERS[p]
-        # Skip if package not installed
         try:
             __import__(pkg)
         except ImportError:
+            print(
+                f"Skipping {label}: package not installed.  Fix: pip install {_PROVIDER_INSTALL[p]}",
+                file=sys.stderr,
+            )
             continue
         if p != "anthropic" or attempt > 0:
             print(f"(using {label})\n")
@@ -818,14 +826,19 @@ def _ask(args: argparse.Namespace) -> None:
             print("\n")
             return
         except _ProviderError as exc:
+            print(f"\n{exc}", file=sys.stderr)
             remaining = [x for x in ordered[attempt + 1 :] if os.environ.get(_PROVIDERS[x][0])]
-            print(f"\nWarning: {exc}", file=sys.stderr)
             if remaining:
-                print("Falling back to next available provider…\n", file=sys.stderr)
-            else:
-                sys.exit(1)
+                print("Trying next provider…\n", file=sys.stderr)
 
-    print("No working provider found.", file=sys.stderr)
+    print(
+        "\nNo working provider found. Set one of:\n"
+        "  export GROQ_API_KEY=gsk_...      # https://console.groq.com  (free)\n"
+        "  export GOOGLE_API_KEY=AIza...    # https://aistudio.google.com  (free for NCAR)\n"
+        "  export OPENAI_API_KEY=sk-...     # https://platform.openai.com\n"
+        "  export ANTHROPIC_API_KEY=sk-ant- # https://console.anthropic.com  (requires credits)",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
