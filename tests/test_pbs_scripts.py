@@ -376,6 +376,102 @@ class TestInitTemplates:
 
 
 # ---------------------------------------------------------------------------
+# _compute_chain — auto-chain from config
+# ---------------------------------------------------------------------------
+
+class TestComputeChain:
+    """_compute_chain reads epochs/num_epoch from config when --chain not passed."""
+
+    from credit.cli import _compute_chain
+
+    def _args(self, chain=None, config=None):
+        return argparse.Namespace(chain=chain, config=config)
+
+    def test_explicit_chain_respected(self, tmp_path):
+        """Explicit --chain N always wins."""
+        from credit.cli import _compute_chain
+        args = self._args(chain=7, config=str(tmp_path / "c.yml"))
+        assert _compute_chain(args) == 7
+
+    def test_auto_chain_from_config(self, tmp_path):
+        """ceil(70 / 5) = 14 when --chain not passed."""
+        import yaml
+        from credit.cli import _compute_chain
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"trainer": {"epochs": 70, "num_epoch": 5}}))
+        assert _compute_chain(self._args(config=str(cfg))) == 14
+
+    def test_auto_chain_rounds_up(self, tmp_path):
+        """ceil(71 / 5) = 15."""
+        import yaml
+        from credit.cli import _compute_chain
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"trainer": {"epochs": 71, "num_epoch": 5}}))
+        assert _compute_chain(self._args(config=str(cfg))) == 15
+
+    def test_fallback_to_1_when_keys_missing(self, tmp_path):
+        """Falls back to 1 if config has no trainer.epochs/num_epoch."""
+        import yaml
+        from credit.cli import _compute_chain
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"trainer": {}}))
+        assert _compute_chain(self._args(config=str(cfg))) == 1
+
+    def test_fallback_to_1_when_file_missing(self, tmp_path):
+        """Falls back to 1 gracefully if config file doesn't exist."""
+        from credit.cli import _compute_chain
+        assert _compute_chain(self._args(config=str(tmp_path / "nope.yml"))) == 1
+
+
+# ---------------------------------------------------------------------------
+# _print_job_plan — smoke test (just checks it runs without error)
+# ---------------------------------------------------------------------------
+
+class TestPrintJobPlan:
+    def _args(self, cluster="casper", gpus=4, nodes=1, walltime="12:00:00", config=None):
+        return argparse.Namespace(
+            cluster=cluster, gpus=gpus, nodes=nodes,
+            walltime=walltime, config=config,
+        )
+
+    def test_runs_without_error(self, tmp_path, capsys):
+        import yaml
+        from credit.cli import _print_job_plan
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({
+            "trainer": {"epochs": 70, "num_epoch": 5, "train_batch_size": 1,
+                        "thread_workers": 1, "prefetch_factor": 1},
+            "model": {"image_height": 721, "image_width": 1440},
+            "data": {"source": {"ERA5": {
+                "levels": list(range(13)),
+                "variables": {"prognostic": {"vars_3D": ["T"], "vars_2D": []},
+                              "diagnostic": {"vars_2D": []}},
+            }}},
+        }))
+        _print_job_plan(self._args(config=str(cfg)), n_jobs=14)
+        out = capsys.readouterr().out
+        assert "Job plan" in out
+        assert "14" in out
+
+    def test_shows_cluster_and_chain(self, tmp_path, capsys):
+        import yaml
+        from credit.cli import _print_job_plan
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"trainer": {"epochs": 70, "num_epoch": 5}}))
+        _print_job_plan(self._args(cluster="derecho", config=str(cfg)), n_jobs=14)
+        out = capsys.readouterr().out
+        assert "derecho" in out
+        assert "14" in out
+
+    def test_tolerates_missing_config(self, tmp_path, capsys):
+        """Should not raise even if config is missing."""
+        from credit.cli import _print_job_plan
+        _print_job_plan(self._args(config=str(tmp_path / "nope.yml")), n_jobs=1)
+        out = capsys.readouterr().out
+        assert "Job plan" in out
+
+
+# ---------------------------------------------------------------------------
 # credit ask — error-path coverage (no API key or package required)
 # ---------------------------------------------------------------------------
 

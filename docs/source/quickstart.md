@@ -94,39 +94,55 @@ may want to change before your first run:
 
 ## 3. Submit a training job
 
-### How many jobs do I need?
-
-`--chain N` submits N back-to-back jobs using PBS `afterok` dependencies.
-Rule of thumb: `N = ceil(total_epochs / num_epoch)`.
-
-| `epochs` | `num_epoch` | `--chain` |
-|----------|-------------|-----------|
-| 70 | 5 | 14 |
-| 70 | 10 | 7 |
-| 100 | 10 | 10 |
-
 ### Submit
 
+`credit submit` automatically figures out how many jobs to chain from
+`trainer.epochs / trainer.num_epoch` in your config — you don't need to
+calculate it yourself.
+
 ```bash
-# Casper — 4 GPUs, 12 h walltime, 14 chained jobs
-credit submit --cluster casper -c my_run.yml --gpus 4 --chain 14
+# Casper — chain computed automatically from config
+credit submit --cluster casper  -c my_run.yml --gpus 4
 
 # Derecho — 1 node × 4 GPUs
-credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 1 --chain 14
+credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 1
 
 # Derecho — multi-node (e.g. 4 nodes × 4 GPUs = 16 GPUs total)
-credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 4 --chain 14
+credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 4
 ```
 
-Preview the PBS script before submitting:
+Before submitting, `credit submit` always prints a job plan:
+
+```
+====================================================
+  Job plan
+====================================================
+  Cluster  : casper
+  Config   : my_run.yml
+  GPUs     : 4 GPU(s)
+  Walltime : 12:00:00 per job
+  Chain    : 14 jobs  (70 epochs ÷ 5 per job)
+  DataLoader memory est. : ~8 GB
+====================================================
+```
+
+If the memory estimate is high (> 24 GB) it will warn you to reduce
+`thread_workers` or `prefetch_factor` before the job hangs silently.
+
+Override the chain length manually if needed:
+
+```bash
+credit submit --cluster casper -c my_run.yml --gpus 4 --chain 5
+```
+
+Preview the full PBS script without submitting:
 
 ```bash
 credit submit --cluster casper -c my_run.yml --gpus 4 --dry-run
 ```
 
-When the command completes you'll see the PBS job IDs printed. Job 1 starts
-immediately; jobs 2–N are queued with `afterok` and start automatically when
-the previous job succeeds.
+Job 1 starts immediately; jobs 2–N are queued with PBS `afterok` and start
+automatically when the previous job succeeds.
 
 ### Resuming a failed chain
 

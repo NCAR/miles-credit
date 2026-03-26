@@ -251,11 +251,77 @@ def _qsub(script: str) -> str:
     return result.stdout.strip()
 
 
+def _compute_chain(args: argparse.Namespace) -> int:
+    """Return the number of jobs to chain.
+
+    If --chain was explicitly passed use it as-is.  Otherwise read
+    ``trainer.epochs`` and ``trainer.num_epoch`` from the config and compute
+    ``ceil(epochs / num_epoch)``, falling back to 1 if the keys are absent.
+    """
+    if args.chain is not None:
+        return args.chain
+    try:
+        import math
+        import yaml
+        with open(args.config) as f:
+            conf = yaml.safe_load(f)
+        trainer = conf.get("trainer", {})
+        epochs     = int(trainer["epochs"])
+        num_epoch  = int(trainer["num_epoch"])
+        return math.ceil(epochs / num_epoch)
+    except Exception:
+        return 1
+
+
+def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
+    """Print a human-readable summary of what is about to be submitted."""
+    import yaml
+    from credit.trainers.preflight import estimate_dataloader_memory_gb
+    try:
+        with open(args.config) as f:
+            conf = yaml.safe_load(f)
+    except Exception:
+        conf = {}
+
+    trainer   = conf.get("trainer", {})
+    epochs    = trainer.get("epochs", "?")
+    per_job   = trainer.get("num_epoch", "?")
+    walltime  = args.walltime
+
+    gpu_str = f"{args.gpus} GPU(s)"
+    if args.cluster == "derecho" and getattr(args, "nodes", 1) > 1:
+        gpu_str = f"{args.gpus} GPU(s) × {args.nodes} nodes ({args.gpus * args.nodes} total)"
+
+    mem_est = estimate_dataloader_memory_gb(conf)
+    mem_str = f"~{mem_est:.0f} GB" if mem_est > 0 else "unknown"
+    mem_warn = "  ⚠  consider reducing thread_workers / prefetch_factor" if mem_est > 24 else ""
+
+    chain_desc = (
+        f"{n_jobs} job(s)  ({epochs} epochs ÷ {per_job} per job)"
+        if n_jobs > 1 else "1 job (no chaining)"
+    )
+
+    print()
+    print("=" * 52)
+    print("  Job plan")
+    print("=" * 52)
+    print(f"  Cluster  : {args.cluster}")
+    print(f"  Config   : {args.config}")
+    print(f"  GPUs     : {gpu_str}")
+    print(f"  Walltime : {walltime} per job")
+    print(f"  Chain    : {chain_desc}")
+    print(f"  DataLoader memory est. : {mem_str}{mem_warn}")
+    print("=" * 52)
+    print()
+
+
 def _submit(args: argparse.Namespace) -> None:
     """Generate and optionally submit PBS batch scripts, with optional chaining."""
     repo = _repo_root()
     account = args.account or os.environ.get("PBS_ACCOUNT", "NAML0001")
-    n_jobs = args.chain  # 1 = single job (default), N = chain of N jobs
+    n_jobs = _compute_chain(args)
+
+    _print_job_plan(args, n_jobs)
 
     # First job: fresh or reload depending on --reload flag
     first_config = os.path.abspath(args.config)
@@ -286,10 +352,6 @@ def _submit(args: argparse.Namespace) -> None:
         script = _build_pbs_script(args, reload_config, repo, account, depend_on=job_id)
         job_id = _qsub(script)
         print(f"[{i}/{n_jobs}] {job_id}  afterok  (reload)")
-
-    print(f"\n  Cluster : {args.cluster}")
-    print(f"  Config  : {args.config}")
-    print(f"  GPUs    : {args.gpus}" + (f" x {args.nodes} nodes" if args.cluster == "derecho" else ""))
 
 
 def _find_torchrun() -> str:
@@ -899,11 +961,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reload", action="store_true",
                    help="Resume from checkpoint: patch load_weights/optimizer/scaler/"
                         "scheduler/reload_epoch in the config and submit the reload job")
-    p.add_argument("--chain", type=int, default=1, metavar="N",
+    p.add_argument("--chain", type=int, default=None, metavar="N",
                    help="Submit N jobs in sequence using PBS afterok dependencies. "
                         "Job 1 uses the base config (or --reload config); jobs 2..N "
-                        "are automatic reload jobs. Example: --chain 10 submits 10 "
-                        "back-to-back jobs covering ~10x walltime of training.")
+                        "are automatic reload jobs. If omitted, computed automatically "
+                        "from ceil(trainer.epochs / trainer.num_epoch) in the config. "
+                        "Example: --chain 10 submits 10 back-to-back jobs.")
 
     # ---- plot ----
     p = sub.add_parser(
