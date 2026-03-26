@@ -509,7 +509,7 @@ def _build_denorm_stats(conf):
 
 
 _CREDIT_SYSTEM_PROMPT = """\
-You are an expert assistant for CREDIT (Community Research Earth-system Digital Intelligence Tool),
+You are an expert assistant for CREDIT (Community Research Earth Digital Intelligence Twin),
 an AI-based numerical weather prediction framework developed by the NCAR MILES group.
 
 ## What CREDIT is
