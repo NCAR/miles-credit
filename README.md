@@ -16,8 +16,10 @@ AI/ML with our physical knowledge of the atmosphere.
 CREDIT has reached its first stable release with a full set of models, training, and deployment options. It continues
 to be under active development. Please contact [the MILES group](mailto:milescore@ucar.edu) if you have any questions about CREDIT.
 
+**New to CREDIT?** The [Quickstart](https://miles-credit.readthedocs.io/en/latest/quickstart.html) gets you from zero to a running training job in under 10 minutes.
+
 MILES CREDIT also provides more detailed [documentation](https://miles-credit.readthedocs.io/en/latest/) with installation
-instructions, how to get started training and deploying models, how to interpret the config files, and full API docs. 
+instructions, how to get started training and deploying models, how to interpret the config files, and full API docs.
 
 ## Citing CREDIT
 If you are interested in using CREDIT as part of your research, please cite the following paper:

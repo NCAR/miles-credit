@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader
 
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
+from credit.trainers.preflight import check_dataloader_startup
 from credit.trainers.utils import cleanup
 
 try:
@@ -357,6 +358,10 @@ class BaseTrainer(ABC):
 
         # Cap total epochs by num_epoch
         epoch_limit = min(epochs, start_epoch + self.num_epoch)
+
+        # Preflight: check DataLoader memory and first-batch latency (rank-0 only)
+        timeout_s = conf.get("trainer", {}).get("dataloader_timeout_s", 300)
+        check_dataloader_startup(conf, train_loader, rank=self.rank, timeout_s=timeout_s)
 
         for epoch in range(start_epoch, epoch_limit):
 

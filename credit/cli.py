@@ -425,6 +425,187 @@ def _build_denorm_stats(conf):
     return np.concatenate(means), np.concatenate(stds)
 
 
+_CREDIT_SYSTEM_PROMPT = """\
+You are an expert assistant for CREDIT (Community Research Earth-system Digital Intelligence Tool),
+an AI-based numerical weather prediction framework developed by the NCAR MILES group.
+
+## What CREDIT is
+CREDIT trains deep learning models (primarily WXFormer) to forecast global atmospheric state.
+It runs on NCAR HPC clusters: Casper (single-node, A100/H100 GPUs) and Derecho (multi-node, A100 GPUs).
+The main entry point is the `credit` CLI.
+
+## Key CLI commands
+- `credit train -c config.yml`                    — start/resume training
+- `credit submit --cluster casper|derecho -c config.yml --gpus N [--nodes N] [--chain N] [--reload]`
+- `credit plot -c config.yml --field VAR_2T --denorm`   — quick visualisation from checkpoint
+- `credit rollout -c config.yml`                  — batch forecast to NetCDF
+- `credit realtime -c config.yml --init-time YYYY-MM-DDTHH --steps N`
+- `credit init --grid 1deg|0.25deg -o my_config.yml`    — generate starter config
+- `credit ask "..."`                              — this command
+
+## v2 data schema (YAML)
+```yaml
+data:
+  source:
+    ERA5:
+      levels: [...]          # pressure/model levels
+      variables:
+        prognostic:
+          vars_3D: [U, V, T, Q, Z]    # each × n_levels channels
+          vars_2D: [SP, VAR_2T, ...]
+        diagnostic:
+          vars_2D: [precip, evap, ...]
+  mean_path: /path/to/mean.nc
+  std_path:  /path/to/std.nc
+```
+
+## Trainer config
+```yaml
+trainer:
+  type: era5-v2
+  mode: ddp           # none | ddp | fsdp
+  train_batch_size: 8
+  num_epoch: 5        # epochs per PBS job
+  epochs: 70          # total training target
+  thread_workers: 4   # DataLoader workers per GPU
+  prefetch_factor: 4
+  use_tensorboard: True
+  use_ema: True
+  ema_decay: 0.9999
+  use_scheduler: True
+  scheduler:
+    scheduler_type: linear-warmup-cosine
+    warmup_steps: 1000
+    total_steps: 500000
+    min_lr: 1.0e-5
+  dataloader_timeout_s: 300   # preflight hang detection
+```
+
+## Cluster specifics
+- **Casper**: 1 node, torchrun --standalone, GPUs: V100/A100/H100, queue: casper
+  - Pre-built env: `/glade/u/home/schreck/.conda/envs/credit-casper`
+- **Derecho single-node**: torchrun --standalone (NOT mpiexec)
+- **Derecho multi-node**: mpiexec + torchrun --rdzv-backend=c10d
+  - Pre-built env: `/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221`
+- Data root: `/glade/campaign/cisl/aiml/ksha/CREDIT_data/`
+- Default save_loc: `/glade/derecho/scratch/$USER/CREDIT_runs/`
+
+## Common problems and fixes
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| Training loop hangs on startup | DataLoader OOM (too many workers × prefetch × batch × channels) | Reduce `thread_workers` to 1 or 0, or `prefetch_factor` to 1 |
+| `RendezvousConnectionError` on Derecho | Single-node job using c10d rendezvous | Use `--nodes 1` so `credit submit` generates `--standalone` |
+| Loss > 100 or growing | Bad normalization or wrong data paths | Check `mean_path`/`std_path`; run `credit plot --denorm` |
+| Loss stuck (not decreasing) | LR too low/high, wrong scheduler, EMA misconfigured | Check scheduler config; try reducing LR 10×; check warmup_steps |
+| `KeyError: 'linear-warmup-cosine'` | Old CREDIT version | `pip install -e . --no-deps` to reinstall |
+| Checkpoint not found | Wrong `save_loc` or first epoch | Set `load_weights: False` for first run |
+| PBS job cancelled after failure | Normal: `afterok` chain auto-cancels remaining jobs | Use `credit submit --reload --chain N` to restart |
+| FSDP + EMA slow | EMA does extra full-param sync on FSDP | Use `use_ema: False` with FSDP or accept overhead |
+
+## How --chain works
+`--chain N` submits N PBS jobs with afterok dependencies. Job 1 runs fresh (or --reload).
+Jobs 2..N auto-generate `config_reload.yml` and resume from checkpoint.
+Rule of thumb: chain = ceil(total_epochs / num_epoch). E.g., 70 epochs / 5 per job = 14.
+
+## What healthy training looks like
+- After epoch 1: train_loss ≈ 1–3 (order 1)
+- Loss should decrease steadily each epoch
+- Validation loss should track training loss (not diverge)
+- `credit plot -c config.yml --field VAR_2T --denorm` should show recognisable weather patterns after ~10 epochs
+
+Be concise, specific, and actionable. When referencing config keys use inline code. If you see a training log or config in the context, use it to give run-specific advice.
+"""
+
+
+def _collect_run_context(args: argparse.Namespace) -> str:
+    """Gather config, training log, and recent PBS output for context injection."""
+    import glob as _glob
+    parts = []
+
+    # ---- Config ----
+    if getattr(args, "config", None):
+        try:
+            with open(args.config) as f:
+                raw = f.read()
+            parts.append(f"## Active config ({args.config})\n```yaml\n{raw}\n```")
+        except OSError:
+            pass
+
+        # ---- Training log ----
+        try:
+            import yaml, pandas as pd
+            with open(args.config) as f:
+                conf = yaml.safe_load(f)
+            save_loc = conf.get("save_loc", "")
+            log_path = os.path.join(save_loc, "training_log.csv")
+            if os.path.exists(log_path):
+                df = pd.read_csv(log_path)
+                tail = df.tail(20).to_string(index=False)
+                parts.append(f"## training_log.csv (last {min(20, len(df))} rows)\n```\n{tail}\n```")
+        except Exception:
+            pass
+
+        # ---- Most recent PBS output file ----
+        try:
+            pbs_files = _glob.glob("credit_v2.o*") + _glob.glob("credit.o*")
+            if pbs_files:
+                newest = max(pbs_files, key=os.path.getmtime)
+                with open(newest) as f:
+                    lines = f.readlines()
+                tail_lines = "".join(lines[-60:])
+                parts.append(
+                    f"## Most recent PBS output ({newest}, last 60 lines)\n"
+                    f"```\n{tail_lines}\n```"
+                )
+        except Exception:
+            pass
+
+    return "\n\n".join(parts)
+
+
+def _ask(args: argparse.Namespace) -> None:
+    """Ask the CREDIT AI assistant a question about your run."""
+    try:
+        import anthropic
+    except ImportError:
+        print(
+            "The 'anthropic' package is required for 'credit ask'.\n"
+            "Install it with:\n\n"
+            "  pip install anthropic\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        print(
+            "ANTHROPIC_API_KEY is not set.\n\n"
+            "Get a free API key at https://console.anthropic.com/\n"
+            "then run:\n\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...\n\n"
+            "or add that line to your ~/.bashrc.\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    question = " ".join(args.question)
+    context  = _collect_run_context(args)
+    user_msg = f"{context}\n\n## Question\n{question}" if context else question
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    print()  # breathing room
+    with client.messages.stream(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        system=_CREDIT_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_msg}],
+    ) as stream:
+        for text in stream.text_stream:
+            print(text, end="", flush=True)
+    print("\n")  # final newline
+
+
 def _plot(args: argparse.Namespace) -> None:
     """Load checkpoint, run one forward pass, produce global maps."""
     import yaml
@@ -758,6 +939,28 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Inverse-normalise output to physical units using mean/std files"
                         " from the config (e.g. K for temperature, Pa for surface pressure)")
 
+    # ---- ask ----
+    p = sub.add_parser(
+        "ask",
+        help="Ask the CREDIT AI assistant a question about your run",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Ask the CREDIT AI assistant anything about training, config, or debugging.
+            Set ANTHROPIC_API_KEY in your environment to use this command.
+
+            Examples:
+              credit ask "why is my training loss stuck at 2.5?"
+              credit ask -c config.yml "is my batch size too large for 0.25 degree?"
+              credit ask -c config.yml "what do I do if my Derecho job hangs?"
+              credit ask "how do I resume a failed chain of PBS jobs?"
+        """),
+    )
+    p.add_argument("question", nargs="+", metavar="QUESTION",
+                   help="Your question (quote it or pass as multiple words)")
+    p.add_argument("-c", "--config", default=None, metavar="CONFIG",
+                   help="Optional config YAML — injects your run's config, training log, "
+                        "and most recent PBS output as context")
+
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")
     p.add_argument("--grid", choices=["0.25deg", "1deg"], default="0.25deg",
@@ -789,6 +992,7 @@ def main() -> None:
         "submit":   _submit,
         "init":     _init,
         "plot":     _plot,
+        "ask":      _ask,
     }
     dispatch[args.command](args)
 

@@ -67,6 +67,9 @@ develop = ["pre-commit",
     "ruff",
     "pytest"]
 
+ask    = ["anthropic>=0.40"]
+serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+
 [tool.setuptools]
 
 packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets",

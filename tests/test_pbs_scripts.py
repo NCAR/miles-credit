@@ -373,3 +373,64 @@ class TestInitTemplates:
                 assert isinstance(conf, dict), f"{name} did not parse to a dict"
                 assert "trainer" in conf, f"{name} missing 'trainer' key"
                 assert "data" in conf, f"{name} missing 'data' key"
+
+
+# ---------------------------------------------------------------------------
+# credit ask — error-path coverage (no API key or package required)
+# ---------------------------------------------------------------------------
+
+class TestCreditAsk:
+    """Test _ask error branches without a real API key or anthropic package."""
+
+    def _ask_args(self, question="test question", config=None):
+        import argparse
+        return argparse.Namespace(question=[question], config=config)
+
+    def test_missing_api_key_exits_1(self, monkeypatch):
+        """_ask exits with code 1 when ANTHROPIC_API_KEY is not set."""
+        import pytest
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        # anthropic is importable in CI; key check happens after import
+        try:
+            import anthropic  # noqa: F401
+        except ImportError:
+            pytest.skip("anthropic not installed")
+
+        from credit.cli import _ask
+        with pytest.raises(SystemExit) as exc_info:
+            _ask(self._ask_args())
+        assert exc_info.value.code == 1
+
+    def test_missing_api_key_message(self, monkeypatch, capsys):
+        """Error message tells the user exactly what to do."""
+        import pytest
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        try:
+            import anthropic  # noqa: F401
+        except ImportError:
+            pytest.skip("anthropic not installed")
+
+        from credit.cli import _ask
+        with pytest.raises(SystemExit):
+            _ask(self._ask_args())
+        err = capsys.readouterr().err
+        assert "ANTHROPIC_API_KEY" in err
+        assert "console.anthropic.com" in err
+
+    def test_missing_anthropic_package_exits_1(self, monkeypatch):
+        """_ask exits with code 1 when the anthropic package is not installed."""
+        import pytest, sys
+        monkeypatch.setitem(sys.modules, "anthropic", None)
+        from credit.cli import _ask
+        with pytest.raises(SystemExit) as exc_info:
+            _ask(self._ask_args())
+        assert exc_info.value.code == 1
+
+    def test_missing_anthropic_package_message(self, monkeypatch, capsys):
+        import sys
+        monkeypatch.setitem(sys.modules, "anthropic", None)
+        from credit.cli import _ask
+        with pytest.raises(SystemExit):
+            _ask(self._ask_args())
+        err = capsys.readouterr().err
+        assert "pip install anthropic" in err
