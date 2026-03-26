@@ -59,7 +59,9 @@ class UpBlock(nn.Module):
 
         blk = []
         for i in range(num_residuals):
-            blk.append(nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1))
+            blk.append(
+                nn.Conv2d(out_chans, out_chans, kernel_size=3, stride=1, padding=1)
+            )
             blk.append(nn.GroupNorm(num_groups, out_chans))
             blk.append(nn.SiLU())
         self.b = nn.Sequential(*blk)
@@ -254,7 +256,11 @@ class CrossFormerDiffusion(BaseModel):
 
         # dimensions
         last_dim = dim[-1]
-        first_dim = self.total_input_channels if (patch_height == 1 and patch_width == 1) else dim[0]
+        first_dim = (
+            self.total_input_channels
+            if (patch_height == 1 and patch_width == 1)
+            else dim[0]
+        )
         dims = [first_dim, *dim]
         dim_in_and_out = tuple(zip(dims[:-1], dims[1:]))
         self.condition = condition
@@ -307,15 +313,21 @@ class CrossFormerDiffusion(BaseModel):
         )
 
         time_emb_dim = dim[0]
-        self.time_to_emb = nn.Sequential(nn.Linear(1, time_emb_dim), nn.SiLU(), nn.Linear(time_emb_dim, time_emb_dim))
-        self.time_emb_proj = nn.ModuleList([nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, d)) for d in dim])
+        self.time_to_emb = nn.Sequential(
+            nn.Linear(1, time_emb_dim), nn.SiLU(), nn.Linear(time_emb_dim, time_emb_dim)
+        )
+        self.time_emb_proj = nn.ModuleList(
+            [nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, d)) for d in dim]
+        )
 
         # =================================================================================== #
 
         self.up_block1 = UpBlock(1 * last_dim, last_dim // 2, dim[0])
         self.up_block2 = UpBlock(2 * (last_dim // 2), last_dim // 4, dim[0])
         self.up_block3 = UpBlock(2 * (last_dim // 4), last_dim // 8, dim[0])
-        self.up_block4 = nn.ConvTranspose2d(2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1)
+        self.up_block4 = nn.ConvTranspose2d(
+            2 * (last_dim // 8), output_channels, kernel_size=4, stride=2, padding=1
+        )
 
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")
@@ -327,7 +339,9 @@ class CrossFormerDiffusion(BaseModel):
                 if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
                     "freeze_base_model_weights", False
                 ):
-                    logger.warning("freezing all base model weights due to skebs config")
+                    logger.warning(
+                        "freezing all base model weights due to skebs config"
+                    )
                     for param in self.parameters():
                         param.requires_grad = False
 
@@ -342,7 +356,14 @@ class CrossFormerDiffusion(BaseModel):
             # input_channels = self.output_channels
             x_self_cond = default(
                 x_self_cond,
-                torch.zeros(x.shape[0], self.output_channels, x.shape[2], x.shape[3], x.shape[4], device=x.device),
+                torch.zeros(
+                    x.shape[0],
+                    self.output_channels,
+                    x.shape[2],
+                    x.shape[3],
+                    x.shape[4],
+                    device=x.device,
+                ),
             )
             x = torch.cat((x_self_cond[:, : self.output_channels], x), dim=1)
 
@@ -359,7 +380,9 @@ class CrossFormerDiffusion(BaseModel):
         t_emb = self.time_to_emb(t)  # [B, time_emb_dim]
 
         # Project time embedding for each level of transformer
-        t_emb_levels = [proj(t_emb) for proj in self.time_emb_proj]  # List of [B, dim[i]] per level
+        t_emb_levels = [
+            proj(t_emb) for proj in self.time_emb_proj
+        ]  # List of [B, dim[i]] per level
 
         # Patch embedding or 3D temporal pooling
         if self.patch_width > 1 and self.patch_height > 1:
@@ -374,7 +397,9 @@ class CrossFormerDiffusion(BaseModel):
         t_emb = self.time_to_emb(t)  # [B, model_dim]
 
         encodings = []
-        for (cross_embed_layer, transformer_layer), t_emb_proj in zip(self.layers, t_emb_levels):
+        for (cross_embed_layer, transformer_layer), t_emb_proj in zip(
+            self.layers, t_emb_levels
+        ):
             # Apply cross embedding layer (convolution)
             x = cross_embed_layer(x)  # Shape: [B, dim_out, H', W']
 
@@ -398,7 +423,9 @@ class CrossFormerDiffusion(BaseModel):
             x = self.padding_opt.unpad(x)
 
         if self.use_interp:
-            x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
+            x = F.interpolate(
+                x, size=(self.image_height, self.image_width), mode="bilinear"
+            )
 
         x = x.unsqueeze(2)
 

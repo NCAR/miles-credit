@@ -11,9 +11,9 @@ import traceback
 from os.path import join
 
 import pandas as pd
+
 # ---------- #
 # Numerics
-from datetime import datetime, timedelta
 import xarray as xr
 import numpy as np
 
@@ -25,7 +25,10 @@ import torch
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info
-from credit.datasets.goes_load_dataset_and_dataloader import load_predict_dataset, load_dataloader
+from credit.datasets.goes_load_dataset_and_dataloader import (
+    load_predict_dataset,
+    load_dataloader,
+)
 from credit.pbs import launch_script, launch_script_mpi
 from credit.forecast import load_forecasts
 from credit.distributed import distributed_model_wrapper, setup
@@ -40,6 +43,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 import subprocess
 
+
 def get_num_cpus():
     if "glade" in os.getcwd():
         num_cpus = subprocess.run(
@@ -50,45 +54,56 @@ def get_num_cpus():
         ).stdout.split()[-1]
     else:
         num_cpus = os.cpu_count()
-    
+
     return int(num_cpus)
 
 
-
 def get_rollout_init_times(conf):
-
     forecast_conf = conf["predict"]["forecasts"]
-    
+
     if forecast_conf["type"] == "debugger":
         init_times_str = [
-                            "2022-06-30T23:55:06", 
-                            "2022-07-01T14:55:06", # NA convective case
-                            "2022-12-02T11:55:06", 
-                            "2022-12-15T23:55:05", #SA convective case
-                            "2022-12-16T11:55:06", #SA convective case
-                         ]
-        rollout_init_times = ([pd.Timestamp("2022-07-01") + pd.Timedelta("30m")] # check 30min offset case
-                              + [pd.Timestamp(time) for time in init_times_str])
+            "2022-06-30T23:55:06",
+            "2022-07-01T14:55:06",  # NA convective case
+            "2022-12-02T11:55:06",
+            "2022-12-15T23:55:05",  # SA convective case
+            "2022-12-16T11:55:06",  # SA convective case
+        ]
+        rollout_init_times = (
+            [
+                pd.Timestamp("2022-07-01") + pd.Timedelta("30m")
+            ]  # check 30min offset case
+            + [pd.Timestamp(time) for time in init_times_str]
+        )
         return rollout_init_times
-    
+
     elif forecast_conf["type"] == "standard":
         start_dt = pd.Timestamp(year=2022, month=7, day=1, hour=0)
         ic_interval = pd.Timedelta(2, "w")
         num_inits = 13
         rollout_init_times = [start_dt + k * ic_interval for k in range(num_inits)]
-        rollout_init_times += [t + pd.Timedelta("12h") for t in rollout_init_times[-2:]] # 12h to last two SA convection
-        rollout_init_times = ([pd.Timestamp("2022-01-01")] 
-                              + [pd.Timestamp("2022-07-01") + pd.Timedelta("30m")] # check 30m offset case
-                              + [pd.Timestamp("2022-07-01") +  pd.Timedelta("15h")] # NA convection case
-                              + rollout_init_times)
+        rollout_init_times += [
+            t + pd.Timedelta("12h") for t in rollout_init_times[-2:]
+        ]  # 12h to last two SA convection
+        rollout_init_times = (
+            [pd.Timestamp("2022-01-01")]
+            + [
+                pd.Timestamp("2022-07-01") + pd.Timedelta("30m")
+            ]  # check 30m offset case
+            + [pd.Timestamp("2022-07-01") + pd.Timedelta("15h")]  # NA convection case
+            + rollout_init_times
+        )
         return rollout_init_times
-    
+
     elif forecast_conf["type"] == "custom":
-        start_dts = [pd.Timestamp(year=forecast_conf["start_year"],
-                                month=forecast_conf["start_month"],
-                                day=forecast_conf["start_day"],
-                                hour=hour)
-                                for hour in forecast_conf["start_hours"]
+        start_dts = [
+            pd.Timestamp(
+                year=forecast_conf["start_year"],
+                month=forecast_conf["start_month"],
+                day=forecast_conf["start_day"],
+                hour=hour,
+            )
+            for hour in forecast_conf["start_hours"]
         ]
         ic_interval_days = pd.Timedelta(forecast_conf["ic_interval_days"], "d")
         num_inits = forecast_conf["num_inits"]
@@ -96,7 +111,7 @@ def get_rollout_init_times(conf):
         rollout_init_times = []
         for k in range(num_inits):
             rollout_init_times += [start + k * ic_interval_days for start in start_dts]
-        
+
         return rollout_init_times
 
     raise ValueError(f"{forecast_conf['type']} is not a valid rollout type")
@@ -107,11 +122,15 @@ class ForecastProcessor:
         self.conf = conf
         self.device = device
         padding_conf = conf["model"].get("padding_conf", {})
-        self.pad_output = True if not padding_conf else not padding_conf.get("activate", False)
+        self.pad_output = (
+            True if not padding_conf else not padding_conf.get("activate", False)
+        )
 
         self.save_forecast_dir = conf["predict"].get("save_forecast", None)
         if not self.save_forecast_dir:
-            self.save_forecast_dir = os.path.expandvars(join(conf["save_loc"], "forecasts"))
+            self.save_forecast_dir = os.path.expandvars(
+                join(conf["save_loc"], "forecasts")
+            )
 
         self.batch_size = conf["predict"].get("batch_size", 1)
         self.ensemble_size = conf["predict"].get("ensemble_size", 1)
@@ -125,8 +144,10 @@ class ForecastProcessor:
         # setup xarray saving
         self.ref_array = self._ref_array()
 
-        #setup scaler
-        scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats.nc"
+        # setup scaler
+        scaler_ds_path = (
+            "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats.nc"
+        )
         self.log_normal_scaling = conf["data"].get("log_normal_scaling", False)
         if self.log_normal_scaling:
             scaler_ds_path = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats_logC04.nc"
@@ -143,45 +164,48 @@ class ForecastProcessor:
         self.padded_lon = ref_array.longitude
 
         if self.pad_output:
-            self.padded_lat = np.pad(ref_array.latitude, 
-                                (11,10), 
-                                mode="linear_ramp", 
-                                end_values=(-50.1 - 11* 0.1, 50.1 + 10*.1))
-            self.padded_lon = np.pad(ref_array.longitude, 
-                                (19,18), 
-                                mode="linear_ramp", 
-                                end_values=(-121.1 - 19 * 0.1, -28.9 + 18*.1))
-        
+            self.padded_lat = np.pad(
+                ref_array.latitude,
+                (11, 10),
+                mode="linear_ramp",
+                end_values=(-50.1 - 11 * 0.1, 50.1 + 10 * 0.1),
+            )
+            self.padded_lon = np.pad(
+                ref_array.longitude,
+                (19, 18),
+                mode="linear_ramp",
+                end_values=(-121.1 - 19 * 0.1, -28.9 + 18 * 0.1),
+            )
+
     def inverse_transform_ABI(self, da):
         unscaled = da * self.scaler_ds["std"] + self.scaler_ds["mean"]
 
-        if self.log_normal_scaling: #log normal for ch4
-            unscaled[:,0] = np.exp(unscaled[:,0])
-        
-        return unscaled
-    
-    def make_dataarray(self, y_pred_member, save_datetime):
-        y_pred_member = y_pred_member.squeeze(2) # 1,c,t,lat,lon -> 1, c, lat lon
+        if self.log_normal_scaling:  # log normal for ch4
+            unscaled[:, 0] = np.exp(unscaled[:, 0])
 
-        da = xr.DataArray(y_pred_member, 
-                        dims=[ "t", "channel", "latitude", "longitude"],
-                                coords={
-                                    "t": [pd.Timestamp(save_datetime)],
-                                    "channel": self.channel,
-                                    "latitude": self.padded_lat,
-                                    "longitude": self.padded_lon,
-                                },
-                        )
+        return unscaled
+
+    def make_dataarray(self, y_pred_member, save_datetime):
+        y_pred_member = y_pred_member.squeeze(2)  # 1,c,t,lat,lon -> 1, c, lat lon
+
+        da = xr.DataArray(
+            y_pred_member,
+            dims=["t", "channel", "latitude", "longitude"],
+            coords={
+                "t": [pd.Timestamp(save_datetime)],
+                "channel": self.channel,
+                "latitude": self.padded_lat,
+                "longitude": self.padded_lon,
+            },
+        )
         da = self.inverse_transform_ABI(da)
         return da
-    
+
     def save_dataarray(self, pred_da, init_datetime, save_datetime):
-        
         pred_ds = xr.Dataset({"BT_or_R": pred_da})
-        pred_ds.to_netcdf(join(self.save_forecast_dir,
-                               init_datetime,
-                               f"{save_datetime}.nc"),
-                               mode="w")
+        pred_ds.to_netcdf(
+            join(self.save_forecast_dir, init_datetime, f"{save_datetime}.nc"), mode="w"
+        )
 
     def process(self, y_pred, init_datetimes, save_datetimes):
         try:
@@ -192,9 +216,11 @@ class ForecastProcessor:
             for j, times in enumerate(zip(init_datetimes, save_datetimes)):
                 init_datetime, save_datetime = times
                 y_pred_ensemble = []
-                for i in range(self.ensemble_size):  
+                for i in range(self.ensemble_size):
                     # ensemble_size default is 1, will run with i=0 retaining behavior of non-ensemble loop
-                    y_pred_member = self.make_dataarray(y_pred[j + i : j + i + 1], save_datetime)
+                    y_pred_member = self.make_dataarray(
+                        y_pred[j + i : j + i + 1], save_datetime
+                    )
                     y_pred_ensemble.append(y_pred_member)
 
                 if self.ensemble_size > 1:
@@ -217,7 +243,6 @@ def predict(rank, world_size, conf, p):
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["predict"]["mode"])
 
-
     # infer device id from rank
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
@@ -229,7 +254,6 @@ def predict(rank, world_size, conf, p):
 
     # config settings
     seed_everything(conf["seed"])
-
 
     # batch size
     batch_size = conf["predict"].get("batch_size", 1)
@@ -283,7 +307,9 @@ def predict(rank, world_size, conf, p):
         # Load model weights (if any), an optimizer, scheduler, and gradient scaler
         model = load_model_state(conf, model, device)
     else:
-        raise ValueError(f'''{conf["predict"]["mode"]} is not a valid prediction mode''')
+        raise ValueError(
+            f"""{conf["predict"]["mode"]} is not a valid prediction mode"""
+        )
 
     # Put model in inference mode
     model.eval()
@@ -296,16 +322,15 @@ def predict(rank, world_size, conf, p):
 
     # forecast count = a constant for each run
     forecast_count = 0
-    
+
     # y_pred allocation and results tracking
     results = []
-    
+
     start_time = time.time()
     # Rollout
     with torch.no_grad():
         # model inference loop
         for _ in range(num_batches):
-
             # init
             batch = next(dl)
             if "era5" in batch.keys():
@@ -327,10 +352,14 @@ def predict(rank, world_size, conf, p):
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
                 if "era5" in batch.keys():
-                    x_era5 = torch.concat([batch_era5["prognostic"].to(device),
-                                           era5_static.detach().clone(),
-                                           batch_era5["dynamic_forcing"].to(device)],
-                                           dim=1).float()
+                    x_era5 = torch.concat(
+                        [
+                            batch_era5["prognostic"].to(device),
+                            era5_static.detach().clone(),
+                            batch_era5["dynamic_forcing"].to(device),
+                        ],
+                        dim=1,
+                    ).float()
                     forcing_t_delta = batch_era5["timedelta_seconds"].to(device).float()
 
                     if ensemble_size > 1:
@@ -338,20 +367,27 @@ def predict(rank, world_size, conf, p):
                     if flag_clamp:
                         x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
                 ###############################
-                
-                # Model inference on the entire batch
-                y_pred = model(x, x_era5, forcing_t_delta) if "era5" in batch.keys() else model(x)
 
-                batch = next(dl) # load in y timestep for metric computation and forecast timestamp
-                
+                # Model inference on the entire batch
+                y_pred = (
+                    model(x, x_era5, forcing_t_delta)
+                    if "era5" in batch.keys()
+                    else model(x)
+                )
+
+                batch = next(
+                    dl
+                )  # load in y timestep for metric computation and forecast timestamp
+
                 save_datetimes = batch["datetime"]
                 # process according to y timestep
 
                 result = p.apply_async(
                     result_processor.process,
-                    (y_pred.cpu(),
-                     init_datetimes,
-                     save_datetimes,
+                    (
+                        y_pred.cpu(),
+                        init_datetimes,
+                        save_datetimes,
                     ),
                 )
                 results.append(result)
@@ -378,12 +414,13 @@ def predict(rank, world_size, conf, p):
 
                     forecast_count += batch_size
 
-
         if distributed:
             torch.distributed.barrier()
 
     end_time = time.time()
-    logger.info(f"total rollout time: {end_time - start_time:02}s for {len(rollout_init_times) * dataset.num_forecast_steps} forecasts")
+    logger.info(
+        f"total rollout time: {end_time - start_time:02}s for {len(rollout_init_times) * dataset.num_forecast_steps} forecasts"
+    )
     return 1
 
 
@@ -466,7 +503,7 @@ def main():
         "-debug",
         "--debug",
         type=int,
-        default=-1, # -1 does nothing
+        default=-1,  # -1 does nothing
         help="debug mode",
     )
 
@@ -490,8 +527,6 @@ def main():
     # Stream output to stdout
     ch = logging.StreamHandler()
 
-
-
     # Load the configuration and get the relevant variables
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
@@ -501,14 +536,19 @@ def main():
             rollout_conf = yaml.load(cf, Loader=yaml.FullLoader)
         conf["predict"] = rollout_conf["predict"]
 
-    if debug == 1 or conf["model"]["type"] == "debugger" or conf["predict"]["forecasts"]["type"] == "debugger" or conf.get("debug", False):
+    if (
+        debug == 1
+        or conf["model"]["type"] == "debugger"
+        or conf["predict"]["forecasts"]["type"] == "debugger"
+        or conf.get("debug", False)
+    ):
         print("setting logging to debug")
         ch.setLevel(logging.DEBUG)
     else:
         ch.setLevel(logging.INFO)
 
     if debug == 0:
-        ch.setLevel(logging.INFO) 
+        ch.setLevel(logging.INFO)
 
     ch.setFormatter(formatter)
     root.addHandler(ch)
@@ -531,8 +571,11 @@ def main():
     if launch:
         # Where does this script live?
         script_path = Path(__file__).absolute()
-        if (conf["pbs"]["queue"] == "casper" or
-            conf["pbs"]["queue"] == "develop" and conf["pbs"]["ngpus"] == 1):
+        if (
+            conf["pbs"]["queue"] == "casper"
+            or conf["pbs"]["queue"] == "develop"
+            and conf["pbs"]["ngpus"] == 1
+        ):
             logging.info("Launching to PBS on Casper or Derecho develop")
             launch_script(config, script_path)
         else:
@@ -570,6 +613,7 @@ def main():
         # Ensure all processes are finished
         p.close()
         p.join()
-    
+
+
 if __name__ == "__main__":
     main()

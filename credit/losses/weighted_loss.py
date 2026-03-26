@@ -38,13 +38,16 @@ def latitude_weights(conf):
     image_height = conf["model"]["image_height"]
 
     if image_height > len(weights):
-        logger.warning("image dimensions do not match latitude weights, replicating edge weights")
+        logger.warning(
+            "image dimensions do not match latitude weights, replicating edge weights"
+        )
         total_pad = image_height - len(lat)
         pad_l = total_pad // 2
         pad_r = total_pad // 2 + total_pad % 2
 
-        weights = torch.nn.functional.pad(weights.unsqueeze(0), (pad_l, pad_r), "replicate").squeeze(0)
-
+        weights = torch.nn.functional.pad(
+            weights.unsqueeze(0), (pad_l, pad_r), "replicate"
+        ).squeeze(0)
 
     # Create a 2D tensor of weights
     L = weights.unsqueeze(1).expand(-1, lon_dim)
@@ -79,12 +82,15 @@ def variable_weights(conf, channels, frames):
     # surface + diag channels
     N_channels_single = len(varname_surface) + len(varname_diagnostics)
 
-    weights_upper_air = torch.tensor([conf["loss"]["variable_weights"][var] for var in varname_upper_air]).view(
-        1, channels * frames, 1, 1
-    )
+    weights_upper_air = torch.tensor(
+        [conf["loss"]["variable_weights"][var] for var in varname_upper_air]
+    ).view(1, channels * frames, 1, 1)
 
     weights_single = torch.tensor(
-        [conf["loss"]["variable_weights"][var] for var in (varname_surface + varname_diagnostics)]
+        [
+            conf["loss"]["variable_weights"][var]
+            for var in (varname_surface + varname_diagnostics)
+        ]
     ).view(1, N_channels_single, 1, 1)
 
     # Combine all weights along the color channel
@@ -156,7 +162,11 @@ class VariableTotalLoss2D(torch.nn.Module):
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
 
-        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
+        levels = (
+            conf["model"]["levels"]
+            if "levels" in conf["model"]
+            else conf["model"]["frames"]
+        )
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
@@ -175,9 +185,12 @@ class VariableTotalLoss2D(torch.nn.Module):
             logger.info("Using variable weights in loss calculations")
 
             var_weights = [
-                value if isinstance(value, list) else [value] for value in conf["loss"]["variable_weights"].values()
+                value if isinstance(value, list) else [value]
+                for value in conf["loss"]["variable_weights"].values()
             ]
-            var_weights = np.concatenate([np.array(wt_list) for wt_list in var_weights], axis=0)
+            var_weights = np.concatenate(
+                [np.array(wt_list) for wt_list in var_weights], axis=0
+            )
             # var_weights = np.array([item for sublist in var_weights for item in sublist])
 
             self.var_weights = torch.from_numpy(var_weights)
@@ -190,13 +203,21 @@ class VariableTotalLoss2D(torch.nn.Module):
                 wavenum_init=conf["loss"]["spectral_wavenum_init"], reduction="none"
             )
 
-        self.use_power_loss = conf["loss"]["use_power_loss"] if "use_power_loss" in conf["loss"] else False
+        self.use_power_loss = (
+            conf["loss"]["use_power_loss"]
+            if "use_power_loss" in conf["loss"]
+            else False
+        )
         if self.use_power_loss:
             self.power_lambda_reg = conf["loss"]["spectral_lambda_reg"]
-            self.power_loss = PSDLoss(wavenum_init=conf["loss"]["spectral_wavenum_init"])
+            self.power_loss = PSDLoss(
+                wavenum_init=conf["loss"]["spectral_wavenum_init"]
+            )
 
         self.validation = validation
-        if conf["loss"]["training_loss"] == "KCRPS":  # for ensembles, load same loss for train and valid
+        if (
+            conf["loss"]["training_loss"] == "KCRPS"
+        ):  # for ensembles, load same loss for train and valid
             self.loss_fn = base_losses(conf, reduction="none", validation=False)
         elif self.validation:
             if "validation_loss" in conf["loss"]:
@@ -241,9 +262,16 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         # Add the spectral loss
         if not self.validation and self.use_power_loss:
-            loss += self.power_lambda_reg * self.power_loss(target, pred, weights=self.lat_weights)
+            loss += self.power_lambda_reg * self.power_loss(
+                target, pred, weights=self.lat_weights
+            )
 
         if not self.validation and self.use_spectral_loss:
-            loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=self.lat_weights).mean()
+            loss += (
+                self.spectral_lambda_reg
+                * self.spectral_loss_surface(
+                    target, pred, weights=self.lat_weights
+                ).mean()
+            )
 
         return loss

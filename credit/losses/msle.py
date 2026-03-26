@@ -28,7 +28,9 @@ class MSLELoss(torch.nn.Module):
         Returns:
             torch.Tensor: MSLE loss value.
         """
-        log_prediction = torch.log(prediction.abs() + 1)  # Adding 1 to avoid logarithm of zero
+        log_prediction = torch.log(
+            prediction.abs() + 1
+        )  # Adding 1 to avoid logarithm of zero
         log_target = torch.log(target.abs() + 1)
         loss = F.mse_loss(log_prediction, log_target, reduction=self.reduction)
         return loss

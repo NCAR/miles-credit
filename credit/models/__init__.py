@@ -23,7 +23,6 @@ from credit.models.unet_diffusion import UnetDiffusion
 from credit.diffusion import ModifiedGaussianDiffusion
 
 
-
 logger = logging.getLogger(__name__)
 
 # Define model types and their corresponding classes
@@ -49,11 +48,23 @@ model_types = {
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
     "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
     "debugger": (DebuggerModel, "Loading the debugger model"),
-    "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
+    "crossformer_downscaling": (
+        DownscalingCrossFormer,
+        "Loading downscaling crossformer model",
+    ),
     "crossformer_regional": (RegionalCrossFormer, "Loading regional crossformer model"),
-    "crossformer_regionalv2": (RegionalCrossFormer2, "Loading regional crossformer v2 model"),
-    "crossformer_regional_invertable": (RegionalCrossFormerInvertable, "Loading regional crossformer invertable model"),
-    "crossformer_regional_ensemble": (RegionalCrossFormerWithNoise, "Loading regional crossformer ensemble model"),
+    "crossformer_regionalv2": (
+        RegionalCrossFormer2,
+        "Loading regional crossformer v2 model",
+    ),
+    "crossformer_regional_invertable": (
+        RegionalCrossFormerInvertable,
+        "Loading regional crossformer invertable model",
+    ),
+    "crossformer_regional_ensemble": (
+        RegionalCrossFormerWithNoise,
+        "Loading regional crossformer ensemble model",
+    ),
     "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
 }
 

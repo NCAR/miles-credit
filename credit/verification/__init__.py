@@ -1,9 +1,8 @@
+from credit.verification.goes_10km_verification import (
+    verification as goes_10km_verification,
+)
 
-from credit.verification.goes_10km_verification import verification as goes_10km_verification
-valid_verification = {
-    "goes-10km": goes_10km_verification
-}
-
+valid_verification = {"goes-10km": goes_10km_verification}
 
 
 def load_verification(conf):

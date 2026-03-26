@@ -137,7 +137,9 @@ def get_tsi(timestamps: Sequence, tsi_data: xr.DataArray) -> np.array:
     return np.interp(fractional_year, tsi_data.coords["time"].data, tsi_data.data)
 
 
-def get_toa_radiation(start_date: str, end_date: str, step_freq: str = "1h", sub_freq: str = "10Min"):
+def get_toa_radiation(
+    start_date: str, end_date: str, step_freq: str = "1h", sub_freq: str = "10Min"
+):
     """
     Calculate top of atmosphere solar irradiance
 
@@ -211,7 +213,9 @@ def get_solar_radiation_loc(
         dx=sub_sec,
         axis=1,
     )
-    step_dates = pd.date_range(start=start_date_ts, end=end_date_ts, freq=step_freq, tz="utc")
+    step_dates = pd.date_range(
+        start=start_date_ts, end=end_date_ts, freq=step_freq, tz="utc"
+    )
     step_cos_zenith = pd.Series(cos_zenith, index=dates)[step_dates]
 
     out_rad_da = xr.DataArray(
@@ -255,7 +259,9 @@ if __name__ == "__main__":
     solar_ts = []
     toa_radiation = get_toa_radiation("2016-01-01", "2016-12-31 23:00")
     for lon_val, lat_val in tqdm(zip(lon_grid.ravel(), lat_grid.ravel())):
-        out = get_solar_radiation_loc(toa_radiation, lon_val, lat_val, 0.0, "2016-01-01", "2016-12-31 23:00")
+        out = get_solar_radiation_loc(
+            toa_radiation, lon_val, lat_val, 0.0, "2016-01-01", "2016-12-31 23:00"
+        )
         solar_ts.append(out)
     combined = xr.combine_by_coords(solar_ts)
     print(combined)

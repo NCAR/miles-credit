@@ -44,12 +44,19 @@ class PSDLoss(torch.nn.Module):
         # Calculate mean of squared distance weighted by latitude
         lat_shape = pred_psd.shape[-2]
         if weights is None:  # weights for a normal average
-            weights = torch.full((1, lat_shape), 1 / lat_shape, dtype=torch.float32).to(device=device, dtype=dtype)
+            weights = torch.full((1, lat_shape), 1 / lat_shape, dtype=torch.float32).to(
+                device=device, dtype=dtype
+            )
         else:
-            weights = weights.permute(0, 2, 1).to(device=device, dtype=dtype) / weights.sum()
+            weights = (
+                weights.permute(0, 2, 1).to(device=device, dtype=dtype) / weights.sum()
+            )
             # (1, lat, 1) -> (1, 1, lat)
         # (B, C, t, lat, coeffs)
-        sq_diff = (true_psd_log[..., self.wavenum_init :] - pred_psd_log[..., self.wavenum_init :]) ** 2
+        sq_diff = (
+            true_psd_log[..., self.wavenum_init :]
+            - pred_psd_log[..., self.wavenum_init :]
+        ) ** 2
 
         loss = torch.mean(torch.matmul(weights, sq_diff))
         # (B, C, t, lat, coeffs) -> (B, C, t, 1, coeffs) -> ()
@@ -58,7 +65,9 @@ class PSDLoss(torch.nn.Module):
     def get_psd(self, f_x, device, dtype):
         # (B, C, t, lat, lon)
         f_k = torch.fft.rfft(f_x, dim=-1, norm="forward")
-        mult_by_two = torch.full(f_k.shape[-1:], 2.0, dtype=torch.float32).to(device=device, dtype=dtype)
+        mult_by_two = torch.full(f_k.shape[-1:], 2.0, dtype=torch.float32).to(
+            device=device, dtype=dtype
+        )
         mult_by_two[0] = 1.0  # except first coord
         magnitudes = torch.real(f_k * torch.conj(f_k)) * mult_by_two
         # (B, C, t, lat, coeffs)

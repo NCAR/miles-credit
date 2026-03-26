@@ -84,13 +84,17 @@ def calculate_ensemble_metrics(ensemble_preds, true_values):
 
     # RMSE calculation (equation C3)
     # First calculate MSE per forecast/batch
-    mse_per_forecast = ((ensemble_mean - true_values) ** 2).mean(dim=[3, 4])  # (batch, channels, 1)
+    mse_per_forecast = ((ensemble_mean - true_values) ** 2).mean(
+        dim=[3, 4]
+    )  # (batch, channels, 1)
     # Take sqrt first, then average across forecasts
     rmse_per_channel = torch.sqrt(mse_per_forecast).mean(dim=[0, 2])  # (channels,)
 
     # STD/SES calculation (equation C4)
     # Compute deviations from ensemble mean
-    deviations = ensemble_preds - ensemble_mean.unsqueeze(0)  # (n_members, batch, channels, 1, h, w)
+    deviations = ensemble_preds - ensemble_mean.unsqueeze(
+        0
+    )  # (n_members, batch, channels, 1, h, w)
     # Calculate MSE of deviations per member
     mse_spread = (deviations**2).mean(dim=[0, 3, 4])  # (batch, channels, 1)
     # Take sqrt first, then average
@@ -132,7 +136,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
         logger.info("Loading Normalize_ERA5_and_Forcing transforms")
         state_transformer = Normalize_ERA5_and_Forcing(conf)
     else:
-        logger.warning("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
+        logger.warning(
+            "Scaler type {} not supported".format(conf["data"]["scaler_type"])
+        )
         raise
 
     # number of diagnostic variables
@@ -222,7 +228,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
         model = distributed_model_wrapper(conf, model, device)
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
-        load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+        load_msg = model.module.load_state_dict(
+            checkpoint["model_state_dict"], strict=False
+        )
         load_state_dict_error_handler(load_msg)
 
     elif conf["predict"]["mode"] == "fsdp":
@@ -239,7 +247,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
     ensemble_size = conf["predict"].get("ensemble_size", 1)
     conf["trainer"]["ensemble_size"] = 1
     if "climatology" in conf["predict"]:
-        metrics = LatWeightedMetricsClimatology(conf, climatology=xr.open_dataset(conf["predict"]["climatology"]))
+        metrics = LatWeightedMetricsClimatology(
+            conf, climatology=xr.open_dataset(conf["predict"]["climatology"])
+        )
     else:
         metrics = LatWeightedMetrics(conf)
     metrics_results = defaultdict(list)
@@ -254,23 +264,33 @@ def predict(rank, world_size, conf, backend=None, p=None):
         )
 
     # Noise and bred-vector set up
-    use_bred_vectors = conf["predict"]["ensemble"].get("bred_vector", {}).get("enabled", False)
-    use_temporal_noise = conf["predict"]["ensemble"].get("temporal_noise", {}).get("enabled", False)
+    use_bred_vectors = (
+        conf["predict"]["ensemble"].get("bred_vector", {}).get("enabled", False)
+    )
+    use_temporal_noise = (
+        conf["predict"]["ensemble"].get("temporal_noise", {}).get("enabled", False)
+    )
     noise_cfg = conf["predict"]["ensemble"]["noise"]
 
     # Check if we have weights if working with bred-vectors
     weights = 1.0
     if use_bred_vectors or "weights" in conf["predict"]["ensemble"]["noise"]:
-        weights = np.array(conf["predict"]["ensemble"]["bred_vector"].get("weights", [1.0]))
+        weights = np.array(
+            conf["predict"]["ensemble"]["bred_vector"].get("weights", [1.0])
+        )
 
     noise_cfg["amplitude"] = noise_cfg["amplitude"] * weights
     if noise_cfg["type"] in ["white", "gaussian"]:
         noise = GaussianNoise(amplitude=noise_cfg["amplitude"])
     elif noise_cfg["type"] == "red":
-        noise = ColorNoise(amplitude=noise_cfg["amplitude"], reddening=noise_cfg["reddening"])
+        noise = ColorNoise(
+            amplitude=noise_cfg["amplitude"], reddening=noise_cfg["reddening"]
+        )
     elif noise_cfg["type"] == "spherical":
         noise = SphericalNoise(
-            amplitude=noise_cfg["amplitude"], smoothness=noise_cfg["smoothness"], length_scale=noise_cfg["length_scale"]
+            amplitude=noise_cfg["amplitude"],
+            smoothness=noise_cfg["smoothness"],
+            length_scale=noise_cfg["length_scale"],
         )
 
     # Bred vector setup
@@ -302,7 +322,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
             temporal_cfg["temporal_correlation"],
             temporal_cfg["perturbation_std"],
             temporal_cfg["hemispheric_rescale"],
-            terrain_file=conf["loss"]["latitude_weights"]
+            terrain_file=conf["loss"]["latitude_weights"],
         )
 
     # Rollout
@@ -321,7 +341,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
             # Initial input processing
             if forecast_step == 1:
-                current_forecast = load_forecasts(conf)[forecast_count : (forecast_count + batch_size)]
+                current_forecast = load_forecasts(conf)[
+                    forecast_count : (forecast_count + batch_size)
+                ]
                 if use_bred_vectors:
                     dataset_bred_vectors = Predict_Dataset_Batcher(
                         varname_upper_air=data_config["varname_upper_air"],
@@ -336,7 +358,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                         filename_forcing=data_config["forcing_files"],
                         filename_static=data_config["static_files"],
                         filename_diagnostic=data_config["diagnostic_files"],
-                        fcst_datetime=adjust_start_times(current_forecast, hours=bred_time_lag),
+                        fcst_datetime=adjust_start_times(
+                            current_forecast, hours=bred_time_lag
+                        ),
                         lead_time_periods=lead_time_periods,
                         history_len=data_config["history_len"],
                         skip_periods=data_config["skip_periods"],
@@ -353,19 +377,32 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
                 # Process the entire batch at once
                 init_datetimes = [
-                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime("%Y-%m-%dT%HZ")
+                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime(
+                        "%Y-%m-%dT%HZ"
+                    )
                     for i in range(batch_size)
                 ]
-                save_datetimes[forecast_count : forecast_count + batch_size] = init_datetimes
+                save_datetimes[forecast_count : forecast_count + batch_size] = (
+                    init_datetimes
+                )
 
                 if "x_surf" in batch:
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(device).float()
+                    x = (
+                        concat_and_reshape(batch["x"], batch["x_surf"])
+                        .to(device)
+                        .float()
+                    )
                 else:
                     x = reshape_only(batch["x"]).to(device).float()
 
                 # Add forcing and static variables
                 if "x_forcing_static" in batch:
-                    x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                    x_forcing_batch = (
+                        batch["x_forcing_static"]
+                        .to(device)
+                        .permute(0, 2, 1, 3, 4)
+                        .float()
+                    )
                     x = torch.cat((x, x_forcing_batch), dim=1)
 
                 # Clamp if needed
@@ -373,7 +410,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
                 if use_bred_vectors:
-                    outputs = bred_generator(x, dataset_bred_vectors, return_delta_x=use_temporal_noise)
+                    outputs = bred_generator(
+                        x, dataset_bred_vectors, return_delta_x=use_temporal_noise
+                    )
 
                     if use_temporal_noise:
                         ensemble_members, delta_x_members = outputs
@@ -388,11 +427,16 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 else:
                     # If not using bred-vectors, need to copy x tensor here then add noise
                     if use_temporal_noise:
-                        ensemble_members, delta_x_members = zip(*[temporal_noise(x, None, 1) for _ in range(ensemble_size)])
+                        ensemble_members, delta_x_members = zip(
+                            *[temporal_noise(x, None, 1) for _ in range(ensemble_size)]
+                        )
                         # Remove static and dynamic forcing channels from delta_x_members
                         # Only keep perturbations for dynamic variables
                         if static_dim_size > 0:
-                            delta_x_members = [delta_x[:, :-static_dim_size, ...] for delta_x in delta_x_members]
+                            delta_x_members = [
+                                delta_x[:, :-static_dim_size, ...]
+                                for delta_x in delta_x_members
+                            ]
 
                     else:
                         ensemble_members = [x + noise(x) for _ in range(ensemble_size)]
@@ -402,18 +446,29 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 # Pre-load x_forcing_static if available
                 x_forcing_batch = None
                 if "x_forcing_static" in batch:
-                    x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+                    x_forcing_batch = (
+                        batch["x_forcing_static"]
+                        .to(device)
+                        .permute(0, 2, 1, 3, 4)
+                        .float()
+                    )
 
                 # Apply operations to each ensemble member
                 if use_temporal_noise:
-                    for i, (member_x, delta_x) in enumerate(zip(ensemble_members, delta_x_members)):
-                        member_x, delta_x = temporal_noise(member_x, delta_x, forecast_step)
+                    for i, (member_x, delta_x) in enumerate(
+                        zip(ensemble_members, delta_x_members)
+                    ):
+                        member_x, delta_x = temporal_noise(
+                            member_x, delta_x, forecast_step
+                        )
 
                         if x_forcing_batch is not None:
                             member_x = torch.cat((member_x, x_forcing_batch), dim=1)
 
                         if flag_clamp:
-                            member_x = torch.clamp(member_x, min=clamp_min, max=clamp_max)
+                            member_x = torch.clamp(
+                                member_x, min=clamp_min, max=clamp_max
+                            )
 
                         ensemble_members[i] = member_x
                         delta_x_members[i] = delta_x
@@ -423,7 +478,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                         if x_forcing_batch is not None:
                             member_x = torch.cat((member_x, x_forcing_batch), dim=1)
                         if flag_clamp:
-                            member_x = torch.clamp(member_x, min=clamp_min, max=clamp_max)
+                            member_x = torch.clamp(
+                                member_x, min=clamp_min, max=clamp_max
+                            )
 
                         ensemble_members[i] = member_x
 
@@ -468,12 +525,24 @@ def predict(rank, world_size, conf, backend=None, p=None):
                 y_pred_units = state_transformer.inverse_transform(y_pred.cpu())
                 y_preds.append(y_pred_units)
 
-                if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
-                    y_pred = dpf.diff_lap2d_filt(y_pred.to(device).squeeze()).unsqueeze(0).unsqueeze(2).cpu()
+                if (
+                    "use_laplace_filter" in conf["predict"]
+                    and conf["predict"]["use_laplace_filter"]
+                ):
+                    y_pred = (
+                        dpf.diff_lap2d_filt(y_pred.to(device).squeeze())
+                        .unsqueeze(0)
+                        .unsqueeze(2)
+                        .cpu()
+                    )
 
                 # Calculate correct datetime for current forecast
-                init_datetime = [datetime.utcfromtimestamp(t) for t in batch["datetime"]]
-                utc_datetime = [t + timedelta(hours=lead_time_periods) for t in init_datetime]
+                init_datetime = [
+                    datetime.utcfromtimestamp(t) for t in batch["datetime"]
+                ]
+                utc_datetime = [
+                    t + timedelta(hours=lead_time_periods) for t in init_datetime
+                ]
 
                 # Prepare INDIVIDUAL state for next iteration for THIS ensemble member
                 # y_pred_for_next = state_transformer.transform_array(y_pred_units).to(device)
@@ -484,12 +553,16 @@ def predict(rank, world_size, conf, backend=None, p=None):
                         next_x = y_pred.detach()
                 else:
                     if static_dim_size == 0:
-                        x_detach = member[:, :, 1:, ...].detach()  # Use THIS member's history
+                        x_detach = member[
+                            :, :, 1:, ...
+                        ].detach()  # Use THIS member's history
                     else:
                         x_detach = member[:, :-static_dim_size, 1:, ...].detach()
 
                     if "y_diag" in batch:
-                        next_x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)
+                        next_x = torch.cat(
+                            [x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2
+                        )
                     else:
                         next_x = torch.cat([x_detach, y_pred.detach()], dim=2)
 
@@ -512,7 +585,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                     results.append((j, result))
 
                     print_str = f"Forecast: {forecast_count + 1 + j} "
-                    print_str += f"Date: {utc_datetime[j].strftime('%Y-%m-%d %H:%M:%S')} "
+                    print_str += (
+                        f"Date: {utc_datetime[j].strftime('%Y-%m-%d %H:%M:%S')} "
+                    )
                     print_str += f"Hour: {forecast_step * lead_time_periods} "
                     print_str += f"Ensemble member: {i + 1} "
                     print(print_str)
@@ -524,7 +599,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
             # Stack ensemble predictions to shape [ensemble_size, *prediction_shape]
             ensemble_predictions = torch.stack(y_preds)  # Shape: [ensemble_size, ...]
             for j in range(y.shape[0]):  # Loop over batch size
-                crps_scores = calculate_crps_per_channel(ensemble_predictions[:, j].unsqueeze(1), y[j].unsqueeze(0))
+                crps_scores = calculate_crps_per_channel(
+                    ensemble_predictions[:, j].unsqueeze(1), y[j].unsqueeze(0)
+                )
                 crps_dict[j]["forecast_step"].append(forecast_step)
                 for q, var in enumerate(metrics.vars):
                     crps_dict[j][f"crps_{var}"].append(crps_scores[:, q].item())
@@ -534,7 +611,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
             # Expand y_true to match y_pred dimensions
             y_true_expanded = y.unsqueeze(0)
 
-            rmse_per_channel, std_per_channel = calculate_ensemble_metrics(ensemble_predictions_zscore, y_true_expanded)
+            rmse_per_channel, std_per_channel = calculate_ensemble_metrics(
+                ensemble_predictions_zscore, y_true_expanded
+            )
             # print("RMSE (averaged over ensemble members):", rmse_per_channel)
             # print("STD (averaged across spatial dims):", std_per_channel)
             # raise
@@ -546,14 +625,18 @@ def predict(rank, world_size, conf, backend=None, p=None):
                         metrics_results[batch_idx][h].append(v)
 
                 # Save results
-                save_location = os.path.join(os.path.expandvars(conf["predict"]["save_forecast"]))
+                save_location = os.path.join(
+                    os.path.expandvars(conf["predict"]["save_forecast"])
+                )
                 os.makedirs(save_location, exist_ok=True)
 
                 for j in range(batch_size):
                     df = pd.DataFrame(metrics_results[j])
                     crps = pd.DataFrame(crps_dict[j])
 
-                    df.to_csv(os.path.join(save_location, f"{init_datetimes[j]}_ensemble.csv"))
+                    df.to_csv(
+                        os.path.join(save_location, f"{init_datetimes[j]}_ensemble.csv")
+                    )
                     # Compute the mean and std for the ensemble
                     # Drop any Unnamed columns
                     df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
@@ -562,22 +645,34 @@ def predict(rank, world_size, conf, backend=None, p=None):
                     ave_df = df.groupby("datetime").agg(["mean", "std"]).reset_index()
 
                     # Flatten the MultiIndex columns created by aggregation
-                    ave_df.columns = ["_".join(col).rstrip("_") for col in ave_df.columns]
+                    ave_df.columns = [
+                        "_".join(col).rstrip("_") for col in ave_df.columns
+                    ]
 
                     # Drop forecast_step_std column
                     ave_df = ave_df.drop(columns=["forecast_step_std"], errors="ignore")
 
                     # Rename forecast_step_mean to forecast_step
-                    ave_df.rename(columns={"forecast_step_mean": "forecast_step"}, inplace=True)
+                    ave_df.rename(
+                        columns={"forecast_step_mean": "forecast_step"}, inplace=True
+                    )
 
                     cols = list(ave_df.columns)
-                    cols.remove("forecast_step")  # Remove forecast_step from its current position
-                    cols.insert(1, "forecast_step")  # Insert forecast_step as the second column
+                    cols.remove(
+                        "forecast_step"
+                    )  # Remove forecast_step from its current position
+                    cols.insert(
+                        1, "forecast_step"
+                    )  # Insert forecast_step as the second column
                     ave_df = ave_df[cols]
 
                     # Sort and merge
-                    df1_sorted = ave_df.sort_index(axis=1)  # Sort columns of df1 alphabetically
-                    df2_sorted = crps.sort_index(axis=1)  # Sort columns of df2 alphabetically
+                    df1_sorted = ave_df.sort_index(
+                        axis=1
+                    )  # Sort columns of df1 alphabetically
+                    df2_sorted = crps.sort_index(
+                        axis=1
+                    )  # Sort columns of df2 alphabetically
 
                     # Merge the DataFrames on 'forecast_step'
                     merged_df = pd.merge(df1_sorted, df2_sorted, on="forecast_step")
@@ -586,7 +681,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
                     ave_df = merged_df.sort_index(axis=1)
 
                     # Save
-                    ave_df.to_csv(os.path.join(save_location, f"{init_datetimes[j]}_average.csv"))
+                    ave_df.to_csv(
+                        os.path.join(save_location, f"{init_datetimes[j]}_average.csv")
+                    )
 
                 # Clear everything
                 results = []
@@ -698,12 +795,16 @@ if __name__ == "__main__":
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
-    conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
+    conf = credit_main_parser(
+        conf, parse_training=False, parse_predict=True, print_summary=False
+    )
     predict_data_check(conf, print_summary=False)
     data_config = setup_data_loading(conf)
 
     # create a save location for rollout
-    assert "save_forecast" in conf["predict"], "Please specify the output dir through conf['predict']['save_forecast']"
+    assert (
+        "save_forecast" in conf["predict"]
+    ), "Please specify the output dir through conf['predict']['save_forecast']"
 
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)

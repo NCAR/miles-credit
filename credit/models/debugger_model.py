@@ -3,9 +3,9 @@ import logging
 import torch
 from credit.models.base_model import BaseModel
 from credit.postblock import PostBlock
-import torch.distributed as dist
 
 logger = logging.getLogger(__name__)
+
 
 class DebuggerModel(BaseModel):
     def __init__(
@@ -29,7 +29,7 @@ class DebuggerModel(BaseModel):
         prediction is self.coef * x
         """
         super().__init__()
-        
+
         # check if these params are in the config
         self.image_height = image_height
         self.image_width = image_width
@@ -40,9 +40,8 @@ class DebuggerModel(BaseModel):
         self.input_only_channels = input_only_channels
         self.output_only_channels = output_only_channels
 
-
         # input channels
-        input_channels = channels * levels + surface_channels #+ input_only_channels
+        input_channels = channels * levels + surface_channels  # + input_only_channels
         # output channels
         output_channels = channels * levels + surface_channels + output_only_channels
 
@@ -53,23 +52,24 @@ class DebuggerModel(BaseModel):
         if post_conf is None:
             post_conf = {"activate": False}
 
-        self.use_post_block = post_conf['activate']
+        self.use_post_block = post_conf["activate"]
 
         if self.use_post_block:
             # freeze base model weights before postblock init
-            if (post_conf["skebs"].get("activate", False) 
-                and post_conf["skebs"].get("freeze_base_model_weights", False)):
+            if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
+                "freeze_base_model_weights", False
+            ):
                 logger.warning("freezing all base model weights due to skebs config")
                 for param in self.parameters():
                     param.requires_grad = False
-            
+
             logger.info("using postblock")
             self.postblock = PostBlock(post_conf)
 
     def forward(self, x, **kwargs):
         """
-            forward that multiplies self.coef to the input
-            used to test postblock and other model parts
+        forward that multiplies self.coef to the input
+        used to test postblock and other model parts
         """
 
         if isinstance(x, dict):
@@ -78,7 +78,7 @@ class DebuggerModel(BaseModel):
         x_copy = None
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
-        
+
         # #batch=2 test:
         # if x.shape[0] == 4:
         #     rand = torch.arange(4).to(x.device)
@@ -90,7 +90,7 @@ class DebuggerModel(BaseModel):
         #         rand = torch.tensor([1.0, 3.0]).to(x.device)
 
         # x = x + rand.view(rand.shape[0], 1, 1, 1, 1)
-        
+
         x = x.permute(0, 2, 3, 4, 1)
         x = self.linear(x)
         x = x.permute(0, -1, 1, 2, 3)
@@ -103,6 +103,7 @@ class DebuggerModel(BaseModel):
             x = self.postblock(x)
 
         return x
+
 
 if __name__ == "__main__":
     image_height = 640  # 640, 192
@@ -130,7 +131,7 @@ if __name__ == "__main__":
         surface_channels=surface_channels,
         input_only_channels=input_only_channels,
         levels=levels,
-        post_conf=None
+        post_conf=None,
     ).to("cuda")
 
     num_params = sum(p.numel() for p in model.parameters())

@@ -91,7 +91,9 @@ class SphericalNoise:
         if lat_size <= 144:
             harmonic_lat_size = 144  # Will generate 144x288
         elif lat_size <= 256:
-            harmonic_lat_size = 256  # Will generate 256x512, then we'll crop longitude too
+            harmonic_lat_size = (
+                256  # Will generate 256x512, then we'll crop longitude too
+            )
         else:
             harmonic_lat_size = ((lat_size + 31) // 32) * 32  # Round up to nearest 32
 
@@ -112,7 +114,9 @@ class SphericalNoise:
         batch_size = np.array(input_shape[:-2]).prod()
 
         # Generate base noise at larger valid grid size
-        base_noise = noise_generator(batch_size).reshape(*input_shape[:-2], harmonic_lat_size, harmonic_lon_size)
+        base_noise = noise_generator(batch_size).reshape(
+            *input_shape[:-2], harmonic_lat_size, harmonic_lon_size
+        )
 
         # Crop to target size, respecting Earth's spherical geometry
         if (harmonic_lat_size, harmonic_lon_size) != (lat_size, lon_size):
@@ -123,7 +127,9 @@ class SphericalNoise:
             # Longitude cropping: maintain periodicity by sampling evenly across 360°
             if harmonic_lon_size != lon_size:
                 # Calculate stride to sample evenly across the full longitude range
-                lon_indices = torch.linspace(0, harmonic_lon_size - 1, lon_size, dtype=torch.long)
+                lon_indices = torch.linspace(
+                    0, harmonic_lon_size - 1, lon_size, dtype=torch.long
+                )
                 final_noise = base_noise[..., lat_start:lat_end, :]
                 final_noise = final_noise[..., lon_indices]
             else:
@@ -135,7 +141,9 @@ class SphericalNoise:
             final_noise = self.padding_opt.unpad(final_noise)
 
         if hasattr(self.amplitude, "__len__"):
-            amp_tensor = torch.tensor(self.amplitude, device=final_noise.device, dtype=final_noise.dtype)
+            amp_tensor = torch.tensor(
+                self.amplitude, device=final_noise.device, dtype=final_noise.dtype
+            )
             C1 = len(amp_tensor)
             final_noise[:, -C1:, :, :] *= amp_tensor.view(1, -1, 1, 1, 1)
             return final_noise
@@ -198,7 +206,10 @@ class SphericalRandomField(torch.nn.Module):
 
         # Validate smoothness parameter
         if smoothness < 1.0:
-            raise ValueError(f"Smoothness parameter must be > 1.0 for well-defined covariance. " f"Got: {smoothness}")
+            raise ValueError(
+                f"Smoothness parameter must be > 1.0 for well-defined covariance. "
+                f"Got: {smoothness}"
+            )
 
         # Set default variance scale if not provided
         if variance_scale is None:
@@ -206,21 +217,31 @@ class SphericalRandomField(torch.nn.Module):
 
         # Initialize inverse spherical harmonic transform
         self.inverse_sht = (
-            InverseRealSHT(self.latitude_modes, self.longitude_modes, grid=grid_type, norm="backward")
+            InverseRealSHT(
+                self.latitude_modes,
+                self.longitude_modes,
+                grid=grid_type,
+                norm="backward",
+            )
             .to(dtype=dtype)
             .to(device=device)
         )
 
         # Compute square root of covariance eigenvalues
         # Eigenvalues of spherical Laplacian: λ_j = j(j+1) for j = 0, 1, 2, ...
-        laplacian_eigenvals = torch.tensor([j * (j + 1) for j in range(self.latitude_modes)], device=device)
+        laplacian_eigenvals = torch.tensor(
+            [j * (j + 1) for j in range(self.latitude_modes)], device=device
+        )
 
         # Reshape for broadcasting over all spherical harmonic modes
-        laplacian_eigenvals = laplacian_eigenvals.view(self.latitude_modes, 1).repeat(1, self.latitude_modes + 1)
+        laplacian_eigenvals = laplacian_eigenvals.view(self.latitude_modes, 1).repeat(
+            1, self.latitude_modes + 1
+        )
 
         # Compute covariance eigenvalues: σ² * (λ/R² + τ²)^(-α)
         covariance_eigenvals = variance_scale * (
-            (laplacian_eigenvals / sphere_radius**2 + length_scale**2) ** (-smoothness / 2.0)
+            (laplacian_eigenvals / sphere_radius**2 + length_scale**2)
+            ** (-smoothness / 2.0)
         )
 
         # Apply lower triangular mask (spherical harmonics structure)
@@ -239,7 +260,9 @@ class SphericalRandomField(torch.nn.Module):
         self.register_buffer("gaussian_mean", gaussian_mean)
         self.register_buffer("gaussian_std", gaussian_std)
 
-    def forward(self, num_samples: int, noise_input: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self, num_samples: int, noise_input: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """Generate random field samples on the sphere.
 
         Uses Karhunen-Loève expansion to generate correlated random fields:
@@ -262,7 +285,9 @@ class SphericalRandomField(torch.nn.Module):
         # Generate or use provided Gaussian noise in spherical harmonic space
         if noise_input is None:
             # Create standard Gaussian distribution
-            gaussian_dist = torch.distributions.normal.Normal(self.gaussian_mean, self.gaussian_std)
+            gaussian_dist = torch.distributions.normal.Normal(
+                self.gaussian_mean, self.gaussian_std
+            )
 
             # Sample complex Gaussian noise: real and imaginary parts
             noise_shape = torch.Size(
