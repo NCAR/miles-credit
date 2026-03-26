@@ -635,12 +635,12 @@ class TestCreditAsk:
 
 
 class TestCreditAgent:
-    """Tests for credit agent — agentic session with file/bash tools."""
+    """Tests for credit ask (agentic mode) — file/bash tools and CLI entry point."""
 
     def _agent_args(self, question="test question", config=None, max_turns=20):
         import argparse
 
-        args = argparse.Namespace(command="agent", question=[question], config=config, max_turns=max_turns)
+        args = argparse.Namespace(command="ask", question=[question], config=config, max_turns=max_turns, provider=None)
         return args
 
     # ---- tool unit tests ----
@@ -728,22 +728,27 @@ class TestCreditAgent:
     # ---- CLI-level tests ----
 
     def test_no_api_key_exits_1(self, monkeypatch):
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        from credit.cli import _agent
+        # With no API keys at all, _ask should exit 1
+        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GROQ_API_KEY"):
+            monkeypatch.delenv(key, raising=False)
+        from credit.cli import _ask
         import pytest
 
         with pytest.raises(SystemExit) as exc_info:
-            _agent(self._agent_args())
+            _ask(self._agent_args())
         assert exc_info.value.code == 1
 
-    def test_anthropic_missing_exits_1(self, monkeypatch, tmp_path):
+    def test_anthropic_missing_exits_1(self, monkeypatch):
         import sys
 
+        # Anthropic key set but package unavailable, no other keys — should exit 1
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        for key in ("OPENAI_API_KEY", "GOOGLE_API_KEY", "GROQ_API_KEY"):
+            monkeypatch.delenv(key, raising=False)
         monkeypatch.setitem(sys.modules, "anthropic", None)
-        from credit.cli import _agent
+        from credit.cli import _ask
         import pytest
 
         with pytest.raises(SystemExit) as exc_info:
-            _agent(self._agent_args())
+            _ask(self._agent_args())
         assert exc_info.value.code == 1

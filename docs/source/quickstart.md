@@ -222,8 +222,9 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 
 ## 6. Get help from the AI assistant
 
-CREDIT has two AI tools: `credit ask` (quick Q&A) and `credit agent` (reads your files
-and diagnoses problems).  Both need an API key — **NCAR users already have one.**
+`credit ask` is a unified AI assistant — it automatically runs in agent mode (reads files,
+runs commands, iterates) when Anthropic is available, or falls back to simple chat
+(Groq, Gemini, OpenAI) otherwise.
 
 :::{note}
 **NCAR users on Casper or Derecho — shared Anthropic credits are available now:**
@@ -233,74 +234,39 @@ and diagnoses problems).  Both need an API key — **NCAR users already have one
 module use /glade/work/bdobbins/llms/modules
 module load llms
 
-# That's it — credit ask and credit agent will pick up the key automatically
+# That's it — credit ask picks up the key automatically
 credit ask "how do I resume a failed Derecho job?"
-credit agent -c my_run.yml "why did my training run crash?"
+credit ask -c my_run.yml "why did my training run crash?"
 ```
 
 Access is open to all NCAR staff while credits are available.
 Contact [milescore@ucar.edu](mailto:milescore@ucar.edu) if you expect heavy usage.
 :::
 
-### `credit ask` — quick Q&A
-
-Answers questions in one shot, automatically injecting your config, training log, and recent
-PBS output as context.  Works with four providers — set whichever key you have:
-
-| Provider | Env var | Model | Cost |
-|----------|---------|-------|------|
-| **Anthropic** | `ANTHROPIC_API_KEY` | Claude Haiku | Pay-per-use (NCAR: shared) |
-| OpenAI | `OPENAI_API_KEY` | GPT-4o | Pay-per-use |
-| Google | `GOOGLE_API_KEY` | Gemini 1.5 Pro | Free for NCAR via AI Studio |
-| Groq | `GROQ_API_KEY` | Llama 3 Instant | Free tier (no card needed) |
-
-Priority when multiple keys are set: Anthropic → OpenAI → Google → Groq.
-
 ```bash
 pip install "miles-credit[ask]"
 
+# With ANTHROPIC_API_KEY set: runs full agent mode — reads your PBS log, config, and source
+credit ask -c my_run.yml "why did my training run crash?"
+credit ask -c my_run.yml "review this config before I start a 200-epoch run on 8 H100s"
+credit ask "what PBS jobs are running and how much walltime do they have left?"
+credit ask "how does ConcatPreblock assemble the batch tensor?"
+
+# Without Anthropic: simple one-shot Q&A via Groq/Gemini/OpenAI
 credit ask "how do I resume a failed Derecho job?"
 credit ask -c my_run.yml "my loss stopped decreasing at epoch 12, what should I check?"
-credit ask -c my_run.yml "is my batch size too large for 0.25 degree?"
 ```
 
----
+**Non-NCAR users — set any one of these keys and the right mode is chosen automatically:**
 
-## 7. `credit agent` — agentic AI that reads your files
+| Provider | Env var | Mode | Cost |
+|----------|---------|------|------|
+| **Anthropic** | `ANTHROPIC_API_KEY` | Agent (multi-turn, reads files) | ~$0.01–0.05/session |
+| OpenAI | `OPENAI_API_KEY` | Simple chat | Pay-per-use |
+| Google | `GOOGLE_API_KEY` | Simple chat | Free via AI Studio |
+| Groq | `GROQ_API_KEY` | Simple chat | Free tier (no card needed) |
 
-When you need to actually *diagnose* a crash rather than just ask about it, use
-`credit agent`.  It reads your PBS logs, inspects your config, and runs shell commands
-before answering — no copy-pasting tracebacks required.
-
-:::{note}
-**NCAR users:** load the shared key first (see section 6 above), then:
-
-```bash
-pip install "miles-credit[agent]"
-
-credit agent -c my_run.yml "why did my training run crash?"
-```
-:::
-
-```bash
-# For non-NCAR users — requires Anthropic API key with credits
-pip install "miles-credit[agent]"
-export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com (~$0.01–0.02 per session)
-
-# Diagnose a crash — reads PBS log, finds traceback, explains the fix
-credit agent -c config.yml "why did my training run crash?"
-
-# Audit a config before a long run
-credit agent -c config.yml "review this config before I start a 200-epoch run on 8 H100s"
-
-# Check job queue with real data
-credit agent "what PBS jobs are running and how much walltime do they have left?"
-
-# Understand the codebase
-credit agent "how does ConcatPreblock assemble the batch tensor?"
-```
-
-See the full [AI Agent documentation](agent.md) for all examples, options, and cost details.
+See the full [AI Assistant documentation](agent.md) for all examples, options, and cost details.
 
 ---
 

@@ -107,9 +107,10 @@ Plots are saved to `<save_loc>/plots/`. No GPU required.
 
 ---
 
-## 6. Get help — `credit ask` and `credit agent`
+## 6. Get help — `credit ask`
 
-CREDIT has two built-in AI tools for getting help.
+`credit ask` is a unified AI assistant — agent mode when Anthropic is available,
+simple chat otherwise.
 
 **NCAR users on Casper or Derecho:** shared Anthropic credits are available for all NCAR staff.
 Add these two lines to `~/.bashrc` — no personal API key or billing required:
@@ -119,31 +120,32 @@ module use /glade/work/bdobbins/llms/modules
 module load llms
 ```
 
-Then source it (`source ~/.bashrc`) and both tools work immediately:
+Then source it (`source ~/.bashrc`) and the tool works immediately:
 
 ```bash
-pip install "miles-credit[ask]" "miles-credit[agent]"
+pip install "miles-credit[ask]"
 
+# Agent mode (Anthropic): reads your files, runs commands, iterates to a confident answer
+credit ask -c my_run.yml "why did my training run crash?"
+credit ask "what PBS jobs are running and how much walltime do they have left?"
+
+# Falls back to simple chat when Anthropic is unavailable
 credit ask "my loss is stuck at 2.5 after 15 epochs, what should I check?"
-credit agent -c my_run.yml "why did my training run crash?"
 ```
 
-**Non-NCAR users:** set any of these keys and the right provider is chosen automatically:
+**Non-NCAR users:** set any of these keys and the right mode is chosen automatically:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com
-export OPENAI_API_KEY=sk-...          # https://platform.openai.com
-export GOOGLE_API_KEY=AIza...         # https://aistudio.google.com  (free for many institutions)
-export GROQ_API_KEY=gsk_...           # https://console.groq.com     (free, no card needed)
+export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com  (agent mode, ~$0.01–0.05/session)
+export OPENAI_API_KEY=sk-...          # https://platform.openai.com    (simple chat)
+export GOOGLE_API_KEY=AIza...         # https://aistudio.google.com    (simple chat, free for many institutions)
+export GROQ_API_KEY=gsk_...           # https://console.groq.com       (simple chat, free, no card needed)
 
 pip install "miles-credit[ask]"
 credit ask "my loss is stuck at 2.5 after 15 epochs, what should I check?"
 ```
 
-`credit ask` works with any provider. `credit agent` (reads your files, diagnoses crashes)
-requires Anthropic specifically — ~$0.01–0.02 per session for non-NCAR users.
-
-Full agent docs: https://miles-credit.readthedocs.io/en/latest/agent.html
+Full docs: https://miles-credit.readthedocs.io/en/latest/agent.html
 
 ---
 

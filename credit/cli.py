@@ -751,32 +751,122 @@ _PROVIDER_RUNNERS = {
 
 
 def _ask(args: argparse.Namespace) -> None:
-    """Ask the CREDIT AI assistant a question about your run.
+    """Unified AI assistant: tries agentic mode (Anthropic tool-use) first, falls back to simple chat.
 
-    Provider priority when --provider is not set (first key found wins):
-      1. ANTHROPIC_API_KEY  → Claude Haiku        (pip install anthropic)
-      2. OPENAI_API_KEY     → GPT-4o              (pip install openai)
-      3. GOOGLE_API_KEY     → Gemini 1.5 Pro      (pip install google-generativeai)
-      4. GROQ_API_KEY       → Llama 3 Instant     (pip install groq — free tier)
+    Agent mode (when ANTHROPIC_API_KEY is set and anthropic is installed):
+      Multi-turn loop — reads files, runs shell commands, iterates until it has a confident answer.
+
+    Simple chat fallback (Groq, Gemini, OpenAI, or Anthropic Haiku):
+      One-shot Q&A using whichever key is set.  Provider priority:
+        1. ANTHROPIC_API_KEY  → Claude Haiku        (pip install anthropic)
+        2. OPENAI_API_KEY     → GPT-4o              (pip install openai)
+        3. GOOGLE_API_KEY     → Gemini 1.5 Pro      (pip install google-generativeai)
+        4. GROQ_API_KEY       → Llama 3 Instant     (pip install groq — free tier)
     """
-    # ---- Resolve provider ----
+    import logging
+
+    question = " ".join(args.question)
+    context = _collect_run_context(args)
     explicit = getattr(args, "provider", None)
+
+    # ------------------------------------------------------------------
+    # Agent mode: Anthropic tool-use (skipped when --provider forces
+    # a non-Anthropic provider).
+    # ------------------------------------------------------------------
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    _try_agent = (explicit is None or explicit == "anthropic") and bool(api_key)
+    _skip_anthropic = False  # set True if agent billing fails
+
+    if _try_agent:
+        _ant = None
+        try:
+            import anthropic as _ant_mod
+
+            _ant = _ant_mod
+        except ImportError:
+            pass
+
+        if _ant is not None:
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            user_msg = f"{context}\n\n## Task\n{question}" if context else question
+            client = _ant.Anthropic(api_key=api_key)
+            messages = [{"role": "user", "content": user_msg}]
+            max_turns = getattr(args, "max_turns", 20)
+            print()
+
+            for _turn in range(max_turns):
+                try:
+                    response = client.messages.create(
+                        model="claude-sonnet-4-6",
+                        max_tokens=4096,
+                        system=_AGENT_SYSTEM_PROMPT,
+                        tools=_AGENT_TOOL_DEFS,
+                        messages=messages,
+                    )
+                except _ant.BadRequestError as exc:
+                    if "credit balance is too low" in str(exc):
+                        print(
+                            "Anthropic API key has no credits — falling back to simple chat.\n",
+                            file=sys.stderr,
+                        )
+                        _skip_anthropic = True
+                        break
+                    print(f"API error: {exc}", file=sys.stderr)
+                    sys.exit(1)
+
+                for block in response.content:
+                    if block.type == "text" and block.text:
+                        print(block.text, end="", flush=True)
+
+                tool_calls = [b for b in response.content if b.type == "tool_use"]
+                if response.stop_reason == "end_turn" or not tool_calls:
+                    print("\n")
+                    return
+
+                messages.append({"role": "assistant", "content": response.content})
+                tool_results = []
+                for tc in tool_calls:
+                    if not any(b.type == "text" for b in response.content):
+                        print(f"\n[{tc.name}: {tc.input}]", flush=True)
+                    result = _dispatch_tool(tc.name, tc.input)
+                    tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": result})
+                messages.append({"role": "user", "content": tool_results})
+            else:
+                print(f"\n[reached max_turns={max_turns}]", file=sys.stderr)
+                print("\n")
+                return
+            # loop exited via break (billing error) — fall through to simple chat
+
+    # ------------------------------------------------------------------
+    # Simple chat fallback
+    # ------------------------------------------------------------------
+    user_msg = f"{context}\n\n## Question\n{question}" if context else question
+
     if explicit:
         if explicit not in _PROVIDERS:
             print(f"Unknown provider {explicit!r}. Choose: {', '.join(_PROVIDERS)}", file=sys.stderr)
             sys.exit(1)
-        env_key, pkg, label = _PROVIDERS[explicit]
+        env_key, _pkg, _label = _PROVIDERS[explicit]
         if not os.environ.get(env_key):
             print(f"{env_key} is not set.", file=sys.stderr)
             sys.exit(1)
-        provider = explicit
+        ordered = [explicit]
     else:
-        provider = None
-        for name, (env_key, pkg, label) in _PROVIDERS.items():
-            if os.environ.get(env_key):
-                provider = name
-                break
-        if provider is None:
+        ordered = [p for p in _PROVIDERS if os.environ.get(_PROVIDERS[p][0])]
+        if _skip_anthropic and "anthropic" in ordered:
+            ordered.remove("anthropic")
+
+    if not ordered:
+        if _skip_anthropic:
+            print(
+                "\nNo working provider found.\n"
+                "Anthropic credits are exhausted. Set a fallback key:\n"
+                "  export GROQ_API_KEY=gsk_...    # https://console.groq.com  (free)\n"
+                "  export GOOGLE_API_KEY=AIza...  # https://aistudio.google.com\n"
+                "  export OPENAI_API_KEY=sk-...   # https://platform.openai.com",
+                file=sys.stderr,
+            )
+        else:
             _ncar = _is_ncar_system()
             msg = "No API key found."
             if _ncar:
@@ -796,27 +886,7 @@ def _ask(args: argparse.Namespace) -> None:
                 "#get-help-from-the-ai-assistant"
             )
             print(msg, file=sys.stderr)
-            sys.exit(1)
-
-    # ---- Check package is installed ----
-    _, pkg, label = _PROVIDERS[provider]
-    try:
-        __import__(pkg)
-    except ImportError:
-        print(f"pip install {_PROVIDER_INSTALL[provider]}", file=sys.stderr)
         sys.exit(1)
-
-    question = " ".join(args.question)
-    context = _collect_run_context(args)
-    user_msg = f"{context}\n\n## Question\n{question}" if context else question
-
-    # Build ordered list of providers to try: chosen one first, then the rest
-    if explicit:
-        ordered = [provider]
-    else:
-        ordered = list(_PROVIDERS.keys())
-        # Only include providers whose keys are actually set
-        ordered = [p for p in ordered if os.environ.get(_PROVIDERS[p][0])]
 
     print()
     for attempt, p in enumerate(ordered):
@@ -1470,22 +1540,31 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- ask ----
     p = sub.add_parser(
         "ask",
-        help="Ask the CREDIT AI assistant a question about your run",
+        help="Ask the CREDIT AI assistant a question — agentic if Anthropic is available, simple chat otherwise",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent("""\
             Ask the CREDIT AI assistant anything about training, config, or debugging.
-            Supports Anthropic, OpenAI, Google Gemini, and Groq — whichever key is set.
 
-            Provider priority (first key found wins, or use --provider to pick):
+            When ANTHROPIC_API_KEY is set, runs in AGENT mode: a multi-turn loop that
+            reads your files, runs grep/tail/qstat, and iterates until it has a confident
+            answer.  When Anthropic is unavailable, falls back to simple one-shot chat
+            using whichever key is set (Groq, Gemini, or OpenAI).
+
+            Provider priority for simple chat fallback (first key found wins):
               ANTHROPIC_API_KEY  → Claude Haiku       https://console.anthropic.com
               OPENAI_API_KEY     → GPT-4o             https://platform.openai.com
               GOOGLE_API_KEY     → Gemini 1.5 Pro     https://aistudio.google.com (free for NCAR)
               GROQ_API_KEY       → Llama 3 Instant    https://console.groq.com    (free tier)
 
+            NCAR users (Casper/Derecho) — shared Anthropic credits available:
+              module use /glade/work/bdobbins/llms/modules
+              module load llms
+
             Examples:
               credit ask "why is my training loss stuck at 2.5?"
+              credit ask -c config.yml "why did my training run crash?"
               credit ask -c config.yml "is my batch size too large for 0.25 degree?"
-              credit ask --provider gemini -c config.yml "what do I do if my Derecho job hangs?"
+              credit ask --provider gemini "what do I do if my Derecho job hangs?"
         """),
     )
     p.add_argument("question", nargs="+", metavar="QUESTION", help="Your question (quote it or pass as multiple words)")
@@ -1500,45 +1579,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--provider",
         default=None,
         choices=["anthropic", "openai", "gemini", "groq"],
-        help="Force a specific LLM provider (default: auto-detect from env keys)",
-    )
-
-    # ---- agent ----
-    p = sub.add_parser(
-        "agent",
-        help="Agentic AI assistant — reads files and runs commands to diagnose your run",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=textwrap.dedent("""\
-            Agentic AI assistant that can read your config, logs, and source code
-            to answer questions and diagnose problems.  Unlike 'credit ask' (one-shot
-            Q&A), the agent runs a multi-turn loop: it reads files, runs grep/tail/qstat,
-            and iterates until it has a confident answer.
-
-            Requires ANTHROPIC_API_KEY with active API credits.
-              export ANTHROPIC_API_KEY=sk-ant-...
-              → https://console.anthropic.com
-
-            Examples:
-              credit agent "why did my training run crash?"
-              credit agent -c config.yml "is my learning rate schedule correct for 0.25 deg?"
-              credit agent "what PBS jobs are currently running and how long have they been running?"
-              credit agent -c config.yml "diff my config against the 1deg starter and explain differences"
-        """),
-    )
-    p.add_argument("question", nargs="+", metavar="QUESTION", help="Your question or task")
-    p.add_argument(
-        "-c",
-        "--config",
-        default=None,
-        metavar="CONFIG",
-        help="Config YAML — injects your run's config, training log, and PBS output as starting context",
+        help="Force a specific LLM provider for simple chat (default: auto-detect; Anthropic agent always tried first)",
     )
     p.add_argument(
         "--max-turns",
         type=int,
         default=20,
         dest="max_turns",
-        help="Maximum agentic turns before stopping (default: 20)",
+        help="Maximum agentic turns before stopping (default: 20; only applies in agent mode)",
     )
 
     # ---- init ----
@@ -1578,7 +1626,6 @@ def main() -> None:
         "init": _init,
         "plot": _plot,
         "ask": _ask,
-        "agent": _agent,
     }
     dispatch[args.command](args)
 
