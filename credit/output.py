@@ -16,6 +16,7 @@ from credit.data import drop_var_from_dataset
 from credit.interp import full_state_pressure_interpolation
 from inspect import signature
 from credit.transforms import Normalize_ERA5_and_Forcing
+from os.path import expandvars
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def load_metadata(conf):
     """
     # set priorities for user-specified metadata
     if conf["predict"]["metadata"]:
-        meta_file = conf["predict"]["metadata"]
+        meta_file = expandvars(conf["predict"]["metadata"])
         with open(meta_file) as f:
             meta_data = yaml.load(f, Loader=yaml.SafeLoader)
     else:
