@@ -27,6 +27,21 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _prompt(prompt: str, default=None) -> str:
+    """Print a prompt and return stripped input, or *default* if empty."""
+    hint = f" [{default}]" if default is not None else ""
+    val = input(f"  {prompt}{hint}: ").strip()
+    return val if val else (str(default) if default is not None else "")
+
+
+def _prompt_bool(prompt: str, default: bool = True) -> bool:
+    hint = "Y/n" if default else "y/N"
+    val = input(f"  {prompt} [{hint}]: ").strip().lower()
+    if not val:
+        return default
+    return val in ("y", "yes")
+
+
 def _setup_logging(level: int = logging.INFO) -> None:
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
@@ -118,6 +133,146 @@ def _write_reload_config(config_path: str) -> str:
         yaml.dump(conf, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
     return reload_path
+
+
+def _convert(args: argparse.Namespace) -> None:
+    """Interactive v1 → v2 config converter."""
+    import yaml
+
+    with open(args.config) as f:
+        conf = yaml.safe_load(f)
+
+    trainer_type = conf.get("trainer", {}).get("type", "unknown")
+
+    print()
+    print("=" * 62)
+    print("  CREDIT config converter  (v1 → v2)")
+    print("=" * 62)
+    print(f"  Input  : {args.config}")
+    print(f"  Trainer: {trainer_type}")
+    print()
+
+    # ------------------------------------------------------------------
+    # Auto-transformations — no questions needed
+    # ------------------------------------------------------------------
+    changes = []
+
+    # trainer.type
+    V1_TYPES = {"era5", "standard", "universal"}
+    if trainer_type in V1_TYPES:
+        conf["trainer"]["type"] = "era5-v2"
+        changes.append(f"trainer.type: '{trainer_type}' → 'era5-v2'")
+
+    # forecast_len: v1 uses 0 = single step, v2 uses 1 = single step
+    fl = conf.get("data", {}).get("forecast_len", 0)
+    new_fl = fl + 1
+    conf["data"]["forecast_len"] = new_fl
+    changes.append(f"data.forecast_len: {fl} → {new_fl}  (v2: 1 = single step)")
+
+    vfl = conf.get("data", {}).get("valid_forecast_len", fl)
+    new_vfl = vfl + 1
+    conf["data"]["valid_forecast_len"] = new_vfl
+    changes.append(f"data.valid_forecast_len: {vfl} → {new_vfl}")
+
+    # backprop_on_timestep: v1 is 0-indexed, v2 is 1-indexed
+    bpt = conf.get("data", {}).get("backprop_on_timestep")
+    if bpt is not None:
+        new_bpt = [t + 1 for t in bpt]
+        conf["data"]["backprop_on_timestep"] = new_bpt
+        changes.append(f"data.backprop_on_timestep: {bpt} → {new_bpt}  (1-indexed in v2)")
+
+    print("  Auto-applied:")
+    for c in changes:
+        print(f"    + {c}")
+    print()
+
+    # ------------------------------------------------------------------
+    # New v2 trainer features
+    # ------------------------------------------------------------------
+    print("  --- New v2 trainer features ---")
+
+    use_ema = _prompt_bool("Enable EMA (exponential moving average of weights)? Recommended", default=True)
+    conf["trainer"]["use_ema"] = use_ema
+    if use_ema:
+        ema_decay = _prompt("EMA decay", default="0.9999")
+        conf["trainer"]["ema_decay"] = float(ema_decay)
+
+    use_tb = _prompt_bool("Enable TensorBoard logging", default=True)
+    conf["trainer"]["use_tensorboard"] = use_tb
+    print()
+
+    # ------------------------------------------------------------------
+    # Ensemble detection
+    # ------------------------------------------------------------------
+    ensemble_size = conf.get("trainer", {}).get("ensemble_size", 1)
+    loss_type = conf.get("loss", {}).get("training_loss", "")
+    is_ensemble = ensemble_size > 1 or "crps" in loss_type.lower()
+
+    if is_ensemble:
+        print(f"  --- Ensemble settings (detected: ensemble_size={ensemble_size}, loss={loss_type}) ---")
+        keep_ensemble = _prompt_bool("Keep ensemble training", default=True)
+        if keep_ensemble:
+            new_size = _prompt("Ensemble size", default=str(ensemble_size))
+            conf["trainer"]["ensemble_size"] = int(new_size)
+        else:
+            conf["trainer"]["ensemble_size"] = 1
+            print("  Note: consider changing loss.training_loss from crps to mse or mae")
+        print()
+
+    # ------------------------------------------------------------------
+    # PBS / job settings
+    # ------------------------------------------------------------------
+    print("  --- PBS / job settings ---")
+    pbs = conf.get("pbs", {})
+
+    cluster = _prompt("Cluster (casper/derecho)", default="derecho")
+    account = _prompt(
+        "PBS account code",
+        default=pbs.get("project") or pbs.get("account") or os.environ.get("PBS_ACCOUNT") or "NAML0001",
+    )
+    conda = _prompt("Conda env (name or full path)", default=pbs.get("conda") or pbs.get("conda_env") or "credit-derecho")
+    walltime = _prompt("Walltime (HH:MM:SS)", default=pbs.get("walltime") or "12:00:00")
+    job_name = _prompt("Job name", default=pbs.get("job_name") or "credit_v2")
+
+    new_pbs = {
+        "project": account,
+        "job_name": job_name,
+        "walltime": walltime,
+        "conda": conda,
+    }
+
+    if cluster == "derecho":
+        nodes = int(_prompt("Nodes", default=str(pbs.get("nodes") or 1)))
+        gpus = int(_prompt("GPUs per node", default=str(pbs.get("ngpus") or pbs.get("gpus") or 4)))
+        cpus = int(_prompt("CPUs per node", default=str(pbs.get("ncpus") or pbs.get("cpus") or 64)))
+        mem = _prompt("Memory per node", default=pbs.get("mem") or "480GB")
+        queue = _prompt("Queue", default=pbs.get("queue") or "main")
+        new_pbs.update({"nodes": nodes, "ngpus": gpus, "ncpus": cpus, "mem": mem, "queue": queue})
+    else:
+        gpus = int(_prompt("GPUs", default=str(pbs.get("ngpus") or pbs.get("gpus") or 4)))
+        cpus = int(_prompt("CPUs per node", default=str(pbs.get("ncpus") or pbs.get("cpus") or 8)))
+        mem = _prompt("Memory", default=pbs.get("mem") or "128GB")
+        gpu_type = _prompt("GPU type", default=pbs.get("gpu_type") or "a100_80gb")
+        queue = _prompt("Queue", default=pbs.get("queue") or "casper")
+        new_pbs.update({"ngpus": gpus, "ncpus": cpus, "mem": mem, "gpu_type": gpu_type, "queue": queue})
+
+    conf["pbs"] = new_pbs
+
+    # ------------------------------------------------------------------
+    # Output
+    # ------------------------------------------------------------------
+    print()
+    base, ext = os.path.splitext(args.config)
+    default_out = getattr(args, "output", None) or (f"{base}_v2{ext}" if ext else f"{args.config}_v2.yml")
+    out_path = _prompt("Output config path", default=default_out)
+
+    with open(out_path, "w") as f:
+        yaml.dump(conf, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    print()
+    print(f"  Saved → {out_path}")
+    print("=" * 62)
+    print()
 
 
 def _load_pbs_config(config_path: str) -> dict:
@@ -1643,6 +1798,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum agentic turns before stopping (default: 20; only applies in agent mode)",
     )
 
+    # ---- convert ----
+    p = sub.add_parser(
+        "convert",
+        help="Interactively convert a v1 config to v2",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Convert a v1 CREDIT config to v2 format.
+
+            Automatic changes:
+              - trainer.type: era5 → era5-v2
+              - data.forecast_len: +1  (v2 semantics: 1 = single step, v1 used 0)
+              - data.valid_forecast_len: +1
+              - data.backprop_on_timestep: shifted to 1-indexed
+
+            Interactive prompts for new v2 features:
+              - EMA (exponential moving average of weights)
+              - TensorBoard logging
+              - Ensemble settings (kept if detected)
+              - PBS / job settings (account, conda env, nodes, walltime, ...)
+
+            Example:
+              credit convert -c old_model.yml          # saves to old_model_v2.yml
+              credit convert -c old_model.yml -o new.yml
+        """),
+    )
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="v1 config YAML to convert")
+    p.add_argument("-o", "--output", default=None, metavar="OUTPUT", help="Output path (default: <input>_v2.yml)")
+
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")
     p.add_argument(
@@ -1677,6 +1860,7 @@ def main() -> None:
         "rollout": _rollout,
         "realtime": _realtime,
         "submit": _submit,
+        "convert": _convert,
         "init": _init,
         "plot": _plot,
         "ask": _ask,
