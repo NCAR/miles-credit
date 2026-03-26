@@ -632,3 +632,118 @@ class TestCreditAsk:
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
+
+
+class TestCreditAgent:
+    """Tests for credit agent — agentic session with file/bash tools."""
+
+    def _agent_args(self, question="test question", config=None, max_turns=20):
+        import argparse
+
+        args = argparse.Namespace(command="agent", question=[question], config=config, max_turns=max_turns)
+        return args
+
+    # ---- tool unit tests ----
+
+    def test_read_file_returns_contents(self, tmp_path):
+        f = tmp_path / "test.yml"
+        f.write_text("trainer:\n  epochs: 10\n")
+        from credit.cli import _agent_read_file
+
+        result = _agent_read_file(str(f))
+        assert "epochs: 10" in result
+
+    def test_read_file_missing_returns_error(self):
+        from credit.cli import _agent_read_file
+
+        result = _agent_read_file("/nonexistent/path/file.txt")
+        assert "not found" in result.lower() or "error" in result.lower()
+
+    def test_read_file_tail_limits_lines(self, tmp_path):
+        f = tmp_path / "big.txt"
+        f.write_text("\n".join(str(i) for i in range(1000)))
+        from credit.cli import _agent_read_file
+
+        result = _agent_read_file(str(f), tail=10)
+        lines = result.strip().splitlines()
+        # Should include the "omitted" header + 10 lines
+        assert "omitted" in result
+        assert len([ln for ln in lines if ln.strip().isdigit()]) == 10
+
+    def test_list_files_finds_matches(self, tmp_path):
+        (tmp_path / "a.yml").write_text("a")
+        (tmp_path / "b.yml").write_text("b")
+        (tmp_path / "c.txt").write_text("c")
+        import os
+
+        old = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            from credit.cli import _agent_list_files
+
+            result = _agent_list_files("*.yml")
+            assert "a.yml" in result
+            assert "b.yml" in result
+            assert "c.txt" not in result
+        finally:
+            os.chdir(old)
+
+    def test_list_files_no_match(self, tmp_path):
+        import os
+
+        old = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            from credit.cli import _agent_list_files
+
+            result = _agent_list_files("*.nonexistent")
+            assert "No files matched" in result
+        finally:
+            os.chdir(old)
+
+    def test_bash_safe_command_runs(self):
+        from credit.cli import _agent_bash
+
+        result = _agent_bash("echo hello")
+        assert "hello" in result
+
+    def test_bash_blocks_rm(self):
+        from credit.cli import _agent_bash
+
+        result = _agent_bash("rm -rf /tmp/something")
+        assert "Blocked" in result
+
+    def test_bash_blocks_git_push(self):
+        from credit.cli import _agent_bash
+
+        result = _agent_bash("git push origin main")
+        assert "Blocked" in result
+
+    def test_bash_blocks_qdel(self):
+        from credit.cli import _agent_bash
+
+        result = _agent_bash("qdel 12345")
+        assert "Blocked" in result
+
+    # ---- CLI-level tests ----
+
+    def test_no_api_key_exits_1(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        from credit.cli import _agent
+        import pytest
+
+        with pytest.raises(SystemExit) as exc_info:
+            _agent(self._agent_args())
+        assert exc_info.value.code == 1
+
+    def test_anthropic_missing_exits_1(self, monkeypatch, tmp_path):
+        import sys
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        monkeypatch.setitem(sys.modules, "anthropic", None)
+        from credit.cli import _agent
+        import pytest
+
+        with pytest.raises(SystemExit) as exc_info:
+            _agent(self._agent_args())
+        assert exc_info.value.code == 1

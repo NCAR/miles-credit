@@ -13,6 +13,7 @@ Examples
 """
 
 import argparse
+import pathlib
 import logging
 import os
 import sys
@@ -842,6 +843,250 @@ def _ask(args: argparse.Namespace) -> None:
     sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# credit agent — agentic session with file/bash tools
+# ---------------------------------------------------------------------------
+
+_AGENT_SYSTEM_PROMPT = """\
+You are an expert agentic assistant for CREDIT (Community Research Earth Digital Intelligence Twin),
+an AI-based numerical weather prediction framework developed by the NCAR MILES group.
+
+You have access to tools that let you read files, list files, and run safe read-only shell commands.
+Use them to investigate the user's question thoroughly before answering.
+
+Typical tasks:
+- Diagnose why a training run crashed (read PBS logs, config, Python tracebacks)
+- Explain what a config option does (read the relevant source file)
+- Suggest config changes based on the user's hardware and dataset
+- Check whether a job is still running (qstat) and interpret its output
+- Diff configs between two experiments
+
+Guidelines:
+- Always read relevant files before speculating — the answer is usually in the logs or config.
+- When reading PBS output files (*.o*), focus on the last 100 lines first.
+- Suggest concrete, actionable fixes — not generic advice.
+- Keep responses concise; use markdown headers and code blocks.
+"""
+
+_AGENT_TOOL_DEFS = [
+    {
+        "name": "read_file",
+        "description": (
+            "Read the contents of a file. Useful for configs (*.yml), PBS output logs (*.o*), "
+            "Python tracebacks, and source code. Returns at most 400 lines from the end of the file."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to the file (absolute or relative to cwd)"},
+                "tail": {
+                    "type": "integer",
+                    "description": "Read only the last N lines (default 400). Pass 0 for the full file.",
+                    "default": 400,
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "list_files",
+        "description": "List files matching a glob pattern. Useful for finding configs, logs, checkpoints.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern relative to cwd, e.g. '*.yml', 'logs/*.txt', '**/*.py'",
+                }
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "bash",
+        "description": (
+            "Run a read-only shell command and return stdout+stderr. "
+            "Allowed commands: grep, find, tail, head, cat, ls, wc, diff, git log, git diff, git status, "
+            "qstat, squeue, python -c (imports only). Destructive commands are blocked."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"command": {"type": "string", "description": "Shell command to run"}},
+            "required": ["command"],
+        },
+    },
+]
+
+# Commands that could cause harm — block them in the agent bash tool
+_AGENT_BASH_BLOCKLIST = (
+    "rm ",
+    "rmdir",
+    "mv ",
+    "cp ",
+    "> ",
+    ">>",
+    "tee ",
+    "dd ",
+    "mkfs",
+    "chmod",
+    "chown",
+    "curl",
+    "wget",
+    "pip install",
+    "conda install",
+    "git commit",
+    "git push",
+    "git reset",
+    "git checkout",
+    "kill ",
+    "pkill",
+    "qdel",
+    "scancel",
+    "sudo",
+)
+
+
+def _agent_read_file(path: str, tail: int = 400) -> str:
+    try:
+        p = pathlib.Path(path).expanduser()
+        if not p.exists():
+            return f"File not found: {path}"
+        if p.stat().st_size > 10 * 1024 * 1024:
+            return f"File too large to read (>{10} MB): {path}"
+        lines = p.read_text(errors="replace").splitlines()
+        if tail and len(lines) > tail:
+            skipped = len(lines) - tail
+            text = "\n".join(lines[-tail:])
+            return f"[… {skipped} lines omitted …]\n{text}"
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"Error reading {path}: {exc}"
+
+
+def _agent_list_files(pattern: str) -> str:
+    import glob as _glob
+
+    matches = sorted(_glob.glob(pattern, recursive=True))
+    if not matches:
+        return f"No files matched: {pattern}"
+    return "\n".join(matches[:200])
+
+
+def _agent_bash(command: str) -> str:
+    import subprocess
+
+    lower = command.lower()
+    for blocked in _AGENT_BASH_BLOCKLIST:
+        if blocked in lower:
+            return f"Blocked: '{blocked}' is not allowed in agent bash. Use read_file or list_files instead."
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        out = (result.stdout + result.stderr).strip()
+        if len(out) > 8000:
+            out = out[-8000:]
+        return out or "(no output)"
+    except subprocess.TimeoutExpired:
+        return "Command timed out after 30 s."
+    except Exception as exc:
+        return f"Error: {exc}"
+
+
+def _dispatch_tool(name: str, tool_input: dict) -> str:
+    if name == "read_file":
+        return _agent_read_file(tool_input["path"], tool_input.get("tail", 400))
+    if name == "list_files":
+        return _agent_list_files(tool_input["pattern"])
+    if name == "bash":
+        return _agent_bash(tool_input["command"])
+    return f"Unknown tool: {name}"
+
+
+def _agent(args: argparse.Namespace) -> None:
+    """Run an agentic session: Claude reads files and runs commands to answer your question."""
+    import logging
+
+    try:
+        import anthropic
+    except ImportError:
+        print("anthropic package required: pip install 'miles-credit[agent]'", file=sys.stderr)
+        sys.exit(1)
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print(
+            "ANTHROPIC_API_KEY is not set.\n"
+            "credit agent requires an Anthropic API key with active credits.\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...\n"
+            "  → https://console.anthropic.com",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    question = " ".join(args.question)
+    context = _collect_run_context(args)
+    user_msg = f"{context}\n\n## Task\n{question}" if context else question
+
+    client = anthropic.Anthropic(api_key=api_key)
+    messages = [{"role": "user", "content": user_msg}]
+    max_turns = getattr(args, "max_turns", 20)
+
+    print()
+    for turn in range(max_turns):
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4096,
+                system=_AGENT_SYSTEM_PROMPT,
+                tools=_AGENT_TOOL_DEFS,
+                messages=messages,
+            )
+        except anthropic.BadRequestError as exc:
+            if "credit balance is too low" in str(exc):
+                print(
+                    "Anthropic API key has no credits.\n"
+                    "  → Add credits: https://console.anthropic.com/settings/billing\n"
+                    "  → Note: Claude.ai Pro does NOT include API access.",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"API error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        # Print any text blocks
+        for block in response.content:
+            if block.type == "text" and block.text:
+                print(block.text, end="", flush=True)
+
+        # Collect tool calls
+        tool_calls = [b for b in response.content if b.type == "tool_use"]
+
+        if response.stop_reason == "end_turn" or not tool_calls:
+            break
+
+        # Execute tools, print what we're doing
+        messages.append({"role": "assistant", "content": response.content})
+        tool_results = []
+        for tc in tool_calls:
+            if not any(b.type == "text" for b in response.content):
+                # Print tool call summary when Claude didn't add narrative text
+                print(f"\n[{tc.name}: {tc.input}]", flush=True)
+            result = _dispatch_tool(tc.name, tc.input)
+            tool_results.append({"type": "tool_result", "tool_use_id": tc.id, "content": result})
+        messages.append({"role": "user", "content": tool_results})
+    else:
+        print(f"\n[reached max_turns={max_turns}]", file=sys.stderr)
+
+    print("\n")
+
+
 def _plot(args: argparse.Namespace) -> None:
     """Load checkpoint, run one forward pass, produce global maps."""
     import yaml
@@ -1232,6 +1477,44 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Force a specific LLM provider (default: auto-detect from env keys)",
     )
 
+    # ---- agent ----
+    p = sub.add_parser(
+        "agent",
+        help="Agentic AI assistant — reads files and runs commands to diagnose your run",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Agentic AI assistant that can read your config, logs, and source code
+            to answer questions and diagnose problems.  Unlike 'credit ask' (one-shot
+            Q&A), the agent runs a multi-turn loop: it reads files, runs grep/tail/qstat,
+            and iterates until it has a confident answer.
+
+            Requires ANTHROPIC_API_KEY with active API credits.
+              export ANTHROPIC_API_KEY=sk-ant-...
+              → https://console.anthropic.com
+
+            Examples:
+              credit agent "why did my training run crash?"
+              credit agent -c config.yml "is my learning rate schedule correct for 0.25 deg?"
+              credit agent "what PBS jobs are currently running and how long have they been running?"
+              credit agent -c config.yml "diff my config against the 1deg starter and explain differences"
+        """),
+    )
+    p.add_argument("question", nargs="+", metavar="QUESTION", help="Your question or task")
+    p.add_argument(
+        "-c",
+        "--config",
+        default=None,
+        metavar="CONFIG",
+        help="Config YAML — injects your run's config, training log, and PBS output as starting context",
+    )
+    p.add_argument(
+        "--max-turns",
+        type=int,
+        default=20,
+        dest="max_turns",
+        help="Maximum agentic turns before stopping (default: 20)",
+    )
+
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")
     p.add_argument(
@@ -1269,6 +1552,7 @@ def main() -> None:
         "init": _init,
         "plot": _plot,
         "ask": _ask,
+        "agent": _agent,
     }
     dispatch[args.command](args)
 

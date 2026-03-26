@@ -47,6 +47,7 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    Monitoring with TensorBoard <tensorboard.md>
    Running Inference <Inference.md>
    Forecast API Server <serve.md>
+   AI Agent <agent.md>
    Evaluation and Metrics <Evaluation.md>
    Ensemble Training <Ensembles.md>
    Ensemble Inference <EnsemblesInference.md>
