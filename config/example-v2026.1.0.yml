@@ -321,6 +321,37 @@ model:
             #     net latent heat flux on the surface [J/m^2]
             surface_energy_flux_name: ['surface_sensible_heat_flux', 'surface_latent_heat_flux',]
 
+        # Global energy fixer using explicit up/down flux decomposition.
+        # Use this instead of global_energy_fixer when the model predicts separate
+        # downwelling and upwelling fluxes (e.g. FSDS_J, FSUS, FLDS_J, FLUS).
+        # Only one of global_energy_fixer / global_energy_fixer_updown should be active.
+        global_energy_fixer_updown:
+            activate: False
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            surface_geopotential_name: ['geopotential_at_surface']
+            air_temperature_name: ['temperature']
+            specific_total_water_name: ['specific_total_water']
+            u_wind_name: ['u_component_of_wind']
+            v_wind_name: ['v_component_of_wind']
+            # TOA fluxes — all in J/m² per timestep (same units as other output vars)
+            TOA_down_solar_name: ['FSDS_TOA']        # incident SW at TOA (SOLIN × DT)
+            TOA_up_solar_name:   ['FSUS_TOA']        # reflected SW at TOA (FSUTOA × DT)
+            TOA_up_OLR_name:     ['FLUT_J']          # outgoing LW at TOA (FLUT × DT)
+            # Surface fluxes — all in J/m² per timestep
+            surf_down_solar_name: ['FSDS_J']         # downwelling SW at surface
+            surf_up_solar_name:   ['FSUS']           # upwelling SW at surface
+            surf_down_LW_name:    ['FLDS_J']         # downwelling LW at surface
+            surf_up_LW_name:      ['FLUS']           # upwelling LW at surface
+            # Turbulent fluxes — positive-upward, J/m² per timestep
+            surf_SH_name: ['SHFLX_J']               # sensible heat flux (positive = surface → atm)
+            surf_LH_name: ['LHFLX_J']               # latent heat flux   (positive = surface → atm)
+
 
 loss: 
     # the main training loss
