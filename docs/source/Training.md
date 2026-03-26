@@ -67,101 +67,55 @@ Then, start training as usual:
 credit_train -c config/model.yml
 ```
 
-This command generates a **launch script (`launch.sh`)** and submits a job on **Derecho**, allocating the required number of nodes and GPUs. The settings for this job are controlled by the `pbs` field in `model.yml`.
+This command generates a PBS script and submits it via `qsub`.
+Job resources are controlled by the `pbs:` section of your config — see below.
 
-### Example PBS Configuration (Derecho)
+### PBS configuration in your config file
+
+The `pbs:` block is the primary place to set your **allocation code**, walltime, node count,
+conda environment, and other job parameters. You do not need to pass these on the command line
+every time.
 
 ```yaml
+# ---- Derecho ----------------------------------------------------------------
 pbs:
-    conda: "credit-derecho"
-    project: "NAML0001"
-    job_name: "train_model"
-    walltime: "12:00:00"
-    nodes: 8
-    ncpus: 64
-    ngpus: 4
-    mem: '480GB'
-    queue: 'main'
+    project: "NCAR0001"        # YOUR allocation code (PBS -A) — change this!
+    job_name: "credit_v2"      # job name shown in qstat
+    walltime: "12:00:00"       # wall-clock limit per job (HH:MM:SS)
+    nodes: 1                   # number of nodes (derecho only; casper is always 1)
+    ncpus: 64                  # CPUs per node
+    ngpus: 4                   # GPUs per node
+    mem: ‘480GB’               # memory per node
+    queue: ‘main’              # queue name
+    conda: "credit-derecho"    # conda env name or full path
 ```
 
-- **`conda`**: The environment containing the `miles-credit` installation.
-- **`project`**: Your project code.
-- **`nodes`** and **`ngpus`**: The number of nodes and GPUs per node. In this example, `8 nodes × 4 GPUs` = **32 GPUs total**.
-
-### Example `launch.sh` Script for Derecho
-
-```bash
-#!/bin/bash
-#PBS -A NAML0001
-#PBS -N train_model
-#PBS -l walltime=12:00:00
-#PBS -l select=1:ncpus=64:ngpus=4
-#PBS -q main
-#PBS -j oe
-#PBS -k eod
-#PBS -r n
-
-# Load modules
-module load conda cuda cudnn mkl
-conda activate credit-derecho
-
-# Export environment variables
-export LSCRATCH=/glade/derecho/scratch/schreck/
-export LOGLEVEL=INFO
-
-# Launch training
-mpiexec --cpu-bind none --no-transfer \
-    python applications/train.py -c model.yml --backend nccl
+```yaml
+# ---- Casper -----------------------------------------------------------------
+pbs:
+    project: "NCAR0001"
+    job_name: "credit_v2"
+    walltime: "04:00:00"
+    ncpus: 8
+    ngpus: 1
+    mem: ‘128GB’
+    queue: ‘casper’
+    gpu_type: ‘a100_80gb’      # a100_80gb, v100, h100, etc.
+    conda: "credit"
 ```
 
-This script utilizes **MPI** for coordinating training across **multiple nodes and GPUs**. It includes necessary environment variables for Derecho’s system configuration. **Users should not need to modify this script**, as it is tailored for Derecho and may change with system updates.
+**Resolution order** — the same setting can come from three places, highest priority first:
+
+| Priority | Source | Example |
+|---|---|---|
+| 1 | CLI flag | `--account NCAR0001 --gpus 4` |
+| 2 | `pbs:` section in config | `project: "NCAR0001"` |
+| 3 | Built-in cluster default | 4 GPUs, 12 h walltime, etc. |
+
+You can also export `PBS_ACCOUNT` in your shell as a global fallback for the account code
+(useful if you work across multiple configs but always charge the same project).
 
 ## Running on Casper vs. Derecho
-
-For **Casper**, modify `model.yml` as follows:
-
-```yaml
-pbs:
-    conda: "credit"
-    project: "NAML0001"
-    job_name: "train_model"
-    nodes: 1
-    ncpus: 32
-    ngpus: 4
-    mem: '900GB'
-    walltime: '4:00:00'
-    gpu_type: 'a100'
-    queue: 'casper'
-```
-
-Once again, to launch the job on Casper, run:
-
-```bash
-credit_train -c config/example-v2026.1.0.yml -l 1
-```
-
-This command generates a **launch script (`launch.sh`)**, which will look like:
-
-```bash
-#!/bin/bash -l
-#PBS -N train_model
-#PBS -l select=1:ncpus=32:ngpus=4:mem=900g:gpu_type=a100
-#PBS -l walltime=4:00:00
-#PBS -A NAML0001
-#PBS -q casper
-#PBS -j oe
-#PBS -k eod
-source ~/.bashrc
-conda activate credit-casper
-torchrun --standalone --nnodes 1 --nproc-per-node=4 applications/train.py -c config/example-v2026.1.0.yml
-```
-
-and note that the `torchrun` command is used rather than MPI. In order to utilize MPI,
-PyTorch needs to be compiled from source on your own system against the MPI installation on that system.
-`torchrun` can perform distributed training across all GPUs on a single node with minimal configuration
-and is recommended for use on Casper or other servers focused on single node training.
-It is possible to use `torchrun` for multi-node training orchestration but requires starting torchrun
-instances separately on each node and coordinating communication. 
 
 ### Key Differences
 
@@ -203,10 +157,10 @@ pip install -e . --no-deps
 # 3. Generate a config from a built-in template
 credit init --grid 1deg -o my_experiment.yml      # or --grid 0.25deg for full-res
 
-# 4. Submit a chain of jobs that covers your full training run
-#    (adjust --chain based on epochs-per-job, see below)
-credit submit --cluster casper  -c my_experiment.yml --gpus 4 --chain 10
-credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1 --chain 10
+# 4. Set your allocation in the pbs: section of my_experiment.yml, then submit.
+#    --chain auto-computes job count from ceil(epochs / num_epoch) in the config.
+credit submit --cluster casper  -c my_experiment.yml --chain 10
+credit submit --cluster derecho -c my_experiment.yml --chain 10
 ```
 
 That's it. `--chain 10` submits 10 back-to-back jobs via PBS `afterok` dependencies —
@@ -235,7 +189,7 @@ Rule of thumb: `--chain = ceil(total_epochs / epochs_per_job)`.
 Use `--dry-run` to inspect the PBS scripts before submitting:
 
 ```bash
-credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1 --chain 10 --dry-run
+credit submit --cluster derecho -c my_experiment.yml --chain 10 --dry-run
 ```
 
 ### Available configs
@@ -298,24 +252,28 @@ See [Monitoring with TensorBoard](tensorboard.md) for port-forwarding instructio
 
 ### Job submission
 
-The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`:
+The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`.
+Resource settings are read from the `pbs:` section of your config (see above); CLI flags
+override them when provided.
 
 ```bash
-# Casper: 4 GPUs, 12 hour wall time
-credit submit --cluster casper  -c config.yml --gpus 4 --walltime 12:00:00
+# Minimal — all settings come from the pbs: block in config.yml
+credit submit --cluster derecho -c config.yml
 
-# Derecho: 1 node × 4 GPUs
-credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1
+# Override specific settings on the fly
+credit submit --cluster derecho -c config.yml --nodes 2 --walltime 06:00:00
 
-# Preview the script without submitting
-credit submit --cluster derecho -c config.yml --gpus 4 --dry-run
+# Charge a different account for this run only
+credit submit --cluster derecho -c config.yml --account NCAR0002
 
-# Override account and queue
-credit submit --cluster derecho -c config.yml --account NAML0001 --queue preempt --gpus 4
+# Preview the generated PBS script without submitting
+credit submit --cluster derecho -c config.yml --dry-run
+
+# Casper
+credit submit --cluster casper -c config.yml
 ```
 
-All resource defaults (CPUs, memory, GPU type, queue) are pre-set per cluster and can be
-overridden individually. See `credit submit --help` for the full option list.
+See `credit submit --help` for the full option list.
 
 ### Resuming training
 
@@ -329,10 +287,10 @@ job only starts after the previous one completes successfully:
 
 ```bash
 # Submit 10 back-to-back jobs (job 1 fresh, jobs 2–10 auto-reload)
-credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --chain 10
+credit submit --cluster derecho -c config.yml --chain 10
 
 # Same for Casper
-credit submit --cluster casper -c config.yml --gpus 4 --chain 10
+credit submit --cluster casper -c config.yml --chain 10
 ```
 
 If you estimate ~5 epochs per 12 h wall time and need 70 epochs total, `--chain 14`
@@ -341,7 +299,7 @@ covers the full run without any manual resubmission.
 Use `--dry-run` to preview all scripts before submitting:
 
 ```bash
-credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --chain 10 --dry-run
+credit submit --cluster derecho -c config.yml --chain 10 --dry-run
 ```
 
 #### Option B — manual reload with `--reload`
@@ -350,10 +308,10 @@ Submit one job at a time. After each job completes, resubmit with `--reload`:
 
 ```bash
 # First job
-credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1
+credit submit --cluster derecho -c config.yml
 
 # Every subsequent job
-credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --reload
+credit submit --cluster derecho -c config.yml --reload
 ```
 
 #### Restarting a failed chain
@@ -364,7 +322,7 @@ last good checkpoint, combine `--reload` and `--chain`:
 
 ```bash
 # Resume and re-queue 5 more jobs from the latest checkpoint
-credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --reload --chain 5
+credit submit --cluster derecho -c config.yml --reload --chain 5
 ```
 
 Job 1 picks up from the checkpoint; jobs 2–5 are chained behind it with `afterok`.

@@ -592,27 +592,33 @@ trainer:
     # This only works with ERA5_MultiStep_Batcher or MultiprocessingBatcherPrefetch
     prefetch_factor: 2
 
-# credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
-pbs: 
-    # example for derecho
-    conda: "credit-derecho"
-    project: "NAML0001"
-    job_name: "train_model"
-    walltime: "12:00:00"
-    nodes: 8
-    ncpus: 64
-    ngpus: 4
-    mem: '480GB'
-    queue: 'main'
-    
-    # examaple for casper
-    # conda: "credit"
-    # job_name: 'train_model'
-    # nodes: 1
-    # ncpus: 8
-    # ngpus: 1
-    # mem: '128GB'
-    # walltime: '4:00:00'
-    # gpu_type: 'v100'
-    # project: 'NRIS0001'
-    # queue: 'casper'
+# PBS job submission settings for `credit submit`.
+# These values are used as defaults; CLI flags (--account, --gpus, etc.) take priority.
+# Resolution order: CLI flag > this pbs: section > cluster built-in default.
+#
+# Set project to YOUR allocation code — this is what gets charged on Derecho/Casper.
+# You can also export PBS_ACCOUNT in your shell instead of setting it here.
+
+# ---- Derecho example --------------------------------------------------------
+pbs:
+    project: "NAML0001"        # YOUR allocation code (PBS -A); required to charge the right account
+    job_name: "credit_v2"      # PBS job name shown in qstat
+    walltime: "12:00:00"       # wall-clock limit per job (HH:MM:SS)
+    nodes: 1                   # number of nodes (derecho only; casper is always 1)
+    ncpus: 64                  # CPUs per node  (derecho: 64 / casper: 8)
+    ngpus: 4                   # GPUs per node  (derecho: 4 / casper: up to 8)
+    mem: '480GB'               # memory per node (derecho: 480GB / casper: 128GB)
+    queue: 'main'              # queue name     (derecho: main / casper: casper)
+    conda: "credit-derecho"    # conda env name or full path to activate before training
+
+# ---- Casper example (uncomment and replace the block above) -----------------
+# pbs:
+#     project: "NAML0001"
+#     job_name: "credit_v2"
+#     walltime: "04:00:00"
+#     ncpus: 8
+#     ngpus: 1
+#     mem: '128GB'
+#     queue: 'casper'
+#     gpu_type: 'a100_80gb'   # casper GPU type (a100_80gb, v100, etc.)
+#     conda: "credit"

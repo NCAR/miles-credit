@@ -120,8 +120,68 @@ def _write_reload_config(config_path: str) -> str:
     return reload_path
 
 
-def _build_pbs_script(args: argparse.Namespace, config: str, repo: str, account: str, depend_on: str = None) -> str:
+def _load_pbs_config(config_path: str) -> dict:
+    """Return the ``pbs:`` section from a YAML config file, or an empty dict."""
+    try:
+        import yaml
+
+        with open(config_path) as f:
+            conf = yaml.safe_load(f)
+        return conf.get("pbs", {}) or {}
+    except Exception:
+        return {}
+
+
+def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Namespace:
+    """Return a copy of *args* with None fields filled from *pbs_cfg* then cluster defaults.
+
+    Resolution order: CLI flag > config ``pbs:`` section > cluster default.
+
+    Config key aliases (both spellings accepted):
+      project / account  → PBS account code
+      ngpus   / gpus     → GPUs per node
+      ncpus   / cpus     → CPUs per node
+      conda   / conda_env → conda environment path
+    """
+    import copy
+
+    r = copy.copy(args)
+
+    def _first(*vals):
+        for v in vals:
+            if v is not None:
+                return v
+        return None
+
+    is_casper = args.cluster == "casper"
+
+    r.account = _first(
+        args.account,
+        pbs_cfg.get("project") or pbs_cfg.get("account"),
+        os.environ.get("PBS_ACCOUNT"),
+        "NAML0001",
+    )
+    r.walltime = _first(args.walltime, pbs_cfg.get("walltime"), "12:00:00")
+    r.gpus = int(_first(args.gpus, pbs_cfg.get("ngpus") or pbs_cfg.get("gpus"), 4))
+    r.nodes = int(_first(args.nodes, pbs_cfg.get("nodes"), 1))
+    r.cpus = int(_first(args.cpus, pbs_cfg.get("ncpus") or pbs_cfg.get("cpus"), 8 if is_casper else 64))
+    r.mem = _first(args.mem, pbs_cfg.get("mem"), "128GB" if is_casper else "480GB")
+    r.queue = _first(args.queue, pbs_cfg.get("queue"), "casper" if is_casper else "main")
+    r.gpu_type = _first(args.gpu_type, pbs_cfg.get("gpu_type"), "a100_80gb")
+    r.conda_env = _first(
+        args.conda_env,
+        pbs_cfg.get("conda") or pbs_cfg.get("conda_env"),
+        "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221",
+    )
+    r.job_name = pbs_cfg.get("job_name", "credit_v2")
+    return r
+
+
+def _build_pbs_script(args: argparse.Namespace, config: str, repo: str, depend_on: str = None) -> str:
     """Return a PBS batch script string for the given args and config path.
+
+    *args* must already be resolved via :func:`_resolve_pbs_opts` so that all
+    fields (account, gpus, nodes, walltime, …) are concrete values.
 
     Args:
         depend_on: If set, adds ``#PBS -W depend=afterok:<depend_on>`` so this
@@ -130,19 +190,15 @@ def _build_pbs_script(args: argparse.Namespace, config: str, repo: str, account:
     depend_line = f"#PBS -W depend=afterok:{depend_on}\n" if depend_on else ""
 
     if args.cluster == "casper":
-        cpus = args.cpus or 8
-        mem = args.mem or "128GB"
-        gpu_type = args.gpu_type or "a100_80gb"
-        queue = args.queue or "casper"
         torchrun = args.torchrun or _find_torchrun()
 
         return textwrap.dedent(f"""\
             #!/bin/bash -l
-            #PBS -N credit_v2
-            #PBS -l select=1:ncpus={cpus}:ngpus={args.gpus}:mem={mem}:gpu_type={gpu_type}
+            #PBS -N {args.job_name}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
             #PBS -l walltime={args.walltime}
-            #PBS -A {account}
-            #PBS -q {queue}
+            #PBS -A {args.account}
+            #PBS -q {args.queue}
             #PBS -j oe
             #PBS -k eod
             {depend_line}
@@ -166,18 +222,15 @@ def _build_pbs_script(args: argparse.Namespace, config: str, repo: str, account:
 
     else:  # derecho
         nodes = args.nodes
-        cpus = args.cpus or 64
-        mem = args.mem or "480GB"
-        queue = args.queue or "main"
-        conda_env = args.conda_env or "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221"
+        conda_env = args.conda_env
 
         header = textwrap.dedent(f"""\
             #!/bin/bash
-            #PBS -A {account}
-            #PBS -N credit_v2
+            #PBS -A {args.account}
+            #PBS -N {args.job_name}
             #PBS -l walltime={args.walltime}
-            #PBS -l select={nodes}:ncpus={cpus}:ngpus={args.gpus}:mem={mem}
-            #PBS -q {queue}
+            #PBS -l select={nodes}:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
+            #PBS -q {args.queue}
             #PBS -j oe
             #PBS -k eod
             #PBS -r n
@@ -303,10 +356,9 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     trainer = conf.get("trainer", {})
     epochs = trainer.get("epochs", "?")
     per_job = trainer.get("num_epoch", "?")
-    walltime = args.walltime
 
     gpu_str = f"{args.gpus} GPU(s)"
-    if args.cluster == "derecho" and getattr(args, "nodes", 1) > 1:
+    if args.cluster == "derecho" and args.nodes > 1:
         gpu_str = f"{args.gpus} GPU(s) × {args.nodes} nodes ({args.gpus * args.nodes} total)"
 
     mem_est = estimate_dataloader_memory_gb(conf)
@@ -320,9 +372,10 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     print("  Job plan")
     print("=" * 52)
     print(f"  Cluster  : {args.cluster}")
+    print(f"  Account  : {args.account}")
     print(f"  Config   : {args.config}")
     print(f"  GPUs     : {gpu_str}")
-    print(f"  Walltime : {walltime} per job")
+    print(f"  Walltime : {args.walltime} per job")
     print(f"  Chain    : {chain_desc}")
     print(f"  DataLoader memory est. : {mem_str}{mem_warn}")
     print("=" * 52)
@@ -332,7 +385,8 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
 def _submit(args: argparse.Namespace) -> None:
     """Generate and optionally submit PBS batch scripts, with optional chaining."""
     repo = _repo_root()
-    account = args.account or os.environ.get("PBS_ACCOUNT", "NAML0001")
+    pbs_cfg = _load_pbs_config(args.config)
+    args = _resolve_pbs_opts(args, pbs_cfg)
     n_jobs = _compute_chain(args)
 
     _print_job_plan(args, n_jobs)
@@ -347,23 +401,23 @@ def _submit(args: argparse.Namespace) -> None:
     reload_config = _write_reload_config(os.path.abspath(args.config)) if n_jobs > 1 else None
 
     if args.dry_run:
-        script = _build_pbs_script(args, first_config, repo, account, depend_on=None)
+        script = _build_pbs_script(args, first_config, repo, depend_on=None)
         print(f"# --- Job 1/{n_jobs} ---")
         print(script)
         if n_jobs > 1:
-            script2 = _build_pbs_script(args, reload_config, repo, account, depend_on="<job_1_id>")
+            script2 = _build_pbs_script(args, reload_config, repo, depend_on="<job_1_id>")
             print(f"# --- Jobs 2..{n_jobs}/{n_jobs} (afterok chained, reload config) ---")
             print(script2)
         return
 
     # Submit job 1
-    script = _build_pbs_script(args, first_config, repo, account, depend_on=None)
+    script = _build_pbs_script(args, first_config, repo, depend_on=None)
     job_id = _qsub(script)
     print(f"[1/{n_jobs}] {job_id}  {first_config}")
 
     # Submit remaining chained reload jobs
     for i in range(2, n_jobs + 1):
-        script = _build_pbs_script(args, reload_config, repo, account, depend_on=job_id)
+        script = _build_pbs_script(args, reload_config, repo, depend_on=job_id)
         job_id = _qsub(script)
         print(f"[{i}/{n_jobs}] {job_id}  afterok  (reload)")
 
@@ -1448,14 +1502,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG")
     p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
-    p.add_argument("--gpus", type=int, default=4, metavar="N", help="GPUs per node (default: 4)")
-    p.add_argument("--nodes", type=int, default=1, metavar="N", help="Number of nodes, derecho only (default: 1)")
-    p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node (default: 8 casper / 64 derecho)")
-    p.add_argument("--mem", default=None, help="Memory per node (default: 128GB casper / 480GB derecho)")
-    p.add_argument("--walltime", default="12:00:00", metavar="HH:MM:SS", help="Job walltime (default: 12:00:00)")
-    p.add_argument("--account", metavar="ACCOUNT", help="PBS account code (default: $PBS_ACCOUNT or NAML0001)")
-    p.add_argument("--queue", metavar="QUEUE", help="PBS queue (default: casper / main)")
-    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (default: a100_80gb)")
+    p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per node (config pbs.ngpus → 4)")
+    p.add_argument("--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only (config pbs.nodes → 1)")
+    p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node (config pbs.ncpus → 8 casper / 64 derecho)")
+    p.add_argument("--mem", default=None, help="Memory per node (config pbs.mem → 128GB casper / 480GB derecho)")
+    p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime (config pbs.walltime → 12:00:00)")
+    p.add_argument("--account", metavar="ACCOUNT", help="PBS account code (config pbs.project → $PBS_ACCOUNT → NAML0001)")
+    p.add_argument("--queue", metavar="QUEUE", help="PBS queue (config pbs.queue → casper / main)")
+    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (config pbs.gpu_type → a100_80gb)")
     p.add_argument(
         "--torchrun", default=None, metavar="PATH", help="Path to torchrun binary (default: auto-detect from PATH)"
     )
