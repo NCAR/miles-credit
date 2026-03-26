@@ -656,40 +656,101 @@ def _ask_groq(user_msg: str) -> None:
         print(chunk.choices[0].delta.content or "", end="", flush=True)
 
 
+def _ask_openai(user_msg: str) -> None:
+    """Stream a response via the OpenAI API (gpt-4o)."""
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    stream = client.chat.completions.create(
+        model="gpt-4o",
+        max_tokens=1024,
+        messages=[
+            {"role": "system", "content": _CREDIT_SYSTEM_PROMPT},
+            {"role": "user",   "content": user_msg},
+        ],
+        stream=True,
+    )
+    for chunk in stream:
+        print(chunk.choices[0].delta.content or "", end="", flush=True)
+
+
+def _ask_gemini(user_msg: str) -> None:
+    """Stream a response via the Google Gemini API (gemini-1.5-pro)."""
+    import google.generativeai as genai
+    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-pro",
+        system_instruction=_CREDIT_SYSTEM_PROMPT,
+    )
+    for chunk in model.generate_content(user_msg, stream=True):
+        print(chunk.text, end="", flush=True)
+
+
+_PROVIDERS = {
+    "anthropic": ("ANTHROPIC_API_KEY", "anthropic",          "Claude Haiku"),
+    "openai":    ("OPENAI_API_KEY",    "openai",             "GPT-4o"),
+    "gemini":    ("GOOGLE_API_KEY",    "google.generativeai","Gemini 1.5 Pro"),
+    "groq":      ("GROQ_API_KEY",      "groq",               "Llama 3 Instant (free)"),
+}
+_PROVIDER_INSTALL = {
+    "anthropic": "anthropic",
+    "openai":    "openai",
+    "gemini":    "google-generativeai",
+    "groq":      "groq",
+}
+_PROVIDER_RUNNERS = {
+    "anthropic": _ask_anthropic,
+    "openai":    _ask_openai,
+    "gemini":    _ask_gemini,
+    "groq":      _ask_groq,
+}
+
+
 def _ask(args: argparse.Namespace) -> None:
     """Ask the CREDIT AI assistant a question about your run.
 
-    Provider auto-detection (first match wins):
-      1. ANTHROPIC_API_KEY  → claude-haiku   (pip install anthropic)
-      2. GROQ_API_KEY       → llama3-instant  (pip install groq  — free tier)
+    Provider priority when --provider is not set (first key found wins):
+      1. ANTHROPIC_API_KEY  → Claude Haiku        (pip install anthropic)
+      2. OPENAI_API_KEY     → GPT-4o              (pip install openai)
+      3. GOOGLE_API_KEY     → Gemini 1.5 Pro      (pip install google-generativeai)
+      4. GROQ_API_KEY       → Llama 3 Instant     (pip install groq — free tier)
     """
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    groq_key      = os.environ.get("GROQ_API_KEY", "")
-
-    if anthropic_key:
-        try:
-            import anthropic  # noqa: F401
-        except ImportError:
-            print("pip install anthropic  (or set GROQ_API_KEY for the free Groq fallback)",
-                  file=sys.stderr)
+    # ---- Resolve provider ----
+    explicit = getattr(args, "provider", None)
+    if explicit:
+        if explicit not in _PROVIDERS:
+            print(f"Unknown provider {explicit!r}. Choose: {', '.join(_PROVIDERS)}", file=sys.stderr)
             sys.exit(1)
-        provider = "anthropic"
-    elif groq_key:
-        try:
-            import groq  # noqa: F401
-        except ImportError:
-            print("pip install groq", file=sys.stderr)
+        env_key, pkg, label = _PROVIDERS[explicit]
+        if not os.environ.get(env_key):
+            print(f"{env_key} is not set.", file=sys.stderr)
             sys.exit(1)
-        provider = "groq"
+        provider = explicit
     else:
-        print(
-            "No API key found.  Set one of:\n\n"
-            "  export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com  (pay-per-use)\n"
-            "  export GROQ_API_KEY=gsk_...            # https://console.groq.com      (free tier)\n\n"
-            "Add to ~/.bashrc to persist.\n"
-            "See: https://miles-credit.readthedocs.io/en/latest/quickstart.html#get-help-from-the-ai-assistant",
-            file=sys.stderr,
-        )
+        provider = None
+        for name, (env_key, pkg, label) in _PROVIDERS.items():
+            if os.environ.get(env_key):
+                provider = name
+                break
+        if provider is None:
+            print(
+                "No API key found.  Set one of:\n\n"
+                "  export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com\n"
+                "  export OPENAI_API_KEY=sk-...           # https://platform.openai.com\n"
+                "  export GOOGLE_API_KEY=AIza...          # https://aistudio.google.com  (free for NCAR)\n"
+                "  export GROQ_API_KEY=gsk_...            # https://console.groq.com     (free tier)\n\n"
+                "Add to ~/.bashrc to persist.\n"
+                "See: https://miles-credit.readthedocs.io/en/latest/quickstart.html"
+                "#get-help-from-the-ai-assistant",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    # ---- Check package is installed ----
+    _, pkg, label = _PROVIDERS[provider]
+    try:
+        __import__(pkg)
+    except ImportError:
+        print(f"pip install {_PROVIDER_INSTALL[provider]}", file=sys.stderr)
         sys.exit(1)
 
     question = " ".join(args.question)
@@ -697,11 +758,9 @@ def _ask(args: argparse.Namespace) -> None:
     user_msg = f"{context}\n\n## Question\n{question}" if context else question
 
     print()
-    if provider == "anthropic":
-        _ask_anthropic(user_msg)
-    else:
-        print("(using Groq / llama3 — free tier)\n")
-        _ask_groq(user_msg)
+    if provider != "anthropic":
+        print(f"(using {label})\n")
+    _PROVIDER_RUNNERS[provider](user_msg)
     print("\n")
 
 
@@ -1046,13 +1105,18 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent("""\
             Ask the CREDIT AI assistant anything about training, config, or debugging.
-            Set ANTHROPIC_API_KEY in your environment to use this command.
+            Supports Anthropic, OpenAI, Google Gemini, and Groq — whichever key is set.
+
+            Provider priority (first key found wins, or use --provider to pick):
+              ANTHROPIC_API_KEY  → Claude Haiku       https://console.anthropic.com
+              OPENAI_API_KEY     → GPT-4o             https://platform.openai.com
+              GOOGLE_API_KEY     → Gemini 1.5 Pro     https://aistudio.google.com (free for NCAR)
+              GROQ_API_KEY       → Llama 3 Instant    https://console.groq.com    (free tier)
 
             Examples:
               credit ask "why is my training loss stuck at 2.5?"
               credit ask -c config.yml "is my batch size too large for 0.25 degree?"
-              credit ask -c config.yml "what do I do if my Derecho job hangs?"
-              credit ask "how do I resume a failed chain of PBS jobs?"
+              credit ask --provider gemini -c config.yml "what do I do if my Derecho job hangs?"
         """),
     )
     p.add_argument("question", nargs="+", metavar="QUESTION",
@@ -1060,6 +1124,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--config", default=None, metavar="CONFIG",
                    help="Optional config YAML — injects your run's config, training log, "
                         "and most recent PBS output as context")
+    p.add_argument("--provider", default=None,
+                   choices=["anthropic", "openai", "gemini", "groq"],
+                   help="Force a specific LLM provider (default: auto-detect from env keys)")
 
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")

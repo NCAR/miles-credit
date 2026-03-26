@@ -109,19 +109,19 @@ Plots are saved to `<save_loc>/plots/`. No GPU required.
 
 ## 6. Get help
 
-`credit ask` supports two providers — set whichever key you have:
+`credit ask` supports four providers — set whichever key you have, it's detected automatically:
 
 ```bash
-# Anthropic (Claude Haiku) — pay-per-use
-pip install anthropic
-export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com
+export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com       (Claude Haiku)
+export OPENAI_API_KEY=sk-...          # https://platform.openai.com         (GPT-4o)
+export GOOGLE_API_KEY=AIza...         # https://aistudio.google.com         (Gemini Pro — free for NCAR)
+export GROQ_API_KEY=gsk_...           # https://console.groq.com            (Llama 3 — free tier)
 
-# Groq (Llama 3) — free tier, no credit card required
-pip install groq
-export GROQ_API_KEY=gsk_...           # https://console.groq.com
+pip install miles-credit[ask]         # installs all provider packages at once
 ```
 
-The provider is detected automatically. If you get a `400` / "insufficient credits" error, switch to Groq.
+Use `--provider` to pick explicitly: `credit ask --provider gemini "..."`.
+If you get a `400` / "insufficient credits" error, switch providers.
 
 ```bash
 credit ask "my loss is stuck at 2.5 after 15 epochs, what should I check?"

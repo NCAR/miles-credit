@@ -478,48 +478,75 @@ class TestPrintJobPlan:
 class TestCreditAsk:
     """Test _ask error branches — no real API key or network call needed."""
 
-    def _ask_args(self, question="test question", config=None):
+    def _ask_args(self, question="test question", config=None, provider=None):
         import argparse
-        return argparse.Namespace(question=[question], config=config)
+        return argparse.Namespace(question=[question], config=config, provider=provider)
+
+    def _clear_all_keys(self, monkeypatch):
+        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GROQ_API_KEY"):
+            monkeypatch.delenv(key, raising=False)
 
     def test_no_keys_exits_1(self, monkeypatch):
-        """Exits 1 when neither ANTHROPIC_API_KEY nor GROQ_API_KEY is set."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        """Exits 1 when no provider key is set."""
+        self._clear_all_keys(monkeypatch)
         from credit.cli import _ask
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
 
-    def test_no_keys_message_mentions_both_providers(self, monkeypatch, capsys):
-        """Error message tells user about both Anthropic and Groq."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    def test_no_keys_message_mentions_all_providers(self, monkeypatch, capsys):
+        """Error message lists all four providers."""
+        self._clear_all_keys(monkeypatch)
         from credit.cli import _ask
         with pytest.raises(SystemExit):
             _ask(self._ask_args())
         err = capsys.readouterr().err
-        assert "ANTHROPIC_API_KEY" in err
-        assert "GROQ_API_KEY" in err
-        assert "console.groq.com" in err
+        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GROQ_API_KEY"):
+            assert key in err
+
+    def test_explicit_provider_missing_key_exits_1(self, monkeypatch):
+        """--provider gemini exits 1 if GOOGLE_API_KEY is not set."""
+        self._clear_all_keys(monkeypatch)
+        from credit.cli import _ask
+        with pytest.raises(SystemExit) as exc_info:
+            _ask(self._ask_args(provider="gemini"))
+        assert exc_info.value.code == 1
 
     def test_anthropic_key_set_but_package_missing_exits_1(self, monkeypatch):
-        """Exits 1 with helpful message when anthropic package not installed."""
         import sys
+        self._clear_all_keys(monkeypatch)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-        monkeypatch.delenv("GROQ_API_KEY", raising=False)
         monkeypatch.setitem(sys.modules, "anthropic", None)
         from credit.cli import _ask
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
 
-    def test_groq_key_set_but_package_missing_exits_1(self, monkeypatch):
-        """Exits 1 with helpful message when groq package not installed."""
+    def test_openai_key_set_but_package_missing_exits_1(self, monkeypatch):
         import sys
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        self._clear_all_keys(monkeypatch)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+        monkeypatch.setitem(sys.modules, "openai", None)
+        from credit.cli import _ask
+        with pytest.raises(SystemExit) as exc_info:
+            _ask(self._ask_args())
+        assert exc_info.value.code == 1
+
+    def test_groq_key_set_but_package_missing_exits_1(self, monkeypatch):
+        import sys
+        self._clear_all_keys(monkeypatch)
         monkeypatch.setenv("GROQ_API_KEY", "gsk_fake")
         monkeypatch.setitem(sys.modules, "groq", None)
+        from credit.cli import _ask
+        with pytest.raises(SystemExit) as exc_info:
+            _ask(self._ask_args())
+        assert exc_info.value.code == 1
+
+    def test_gemini_key_set_but_package_missing_exits_1(self, monkeypatch):
+        import sys
+        self._clear_all_keys(monkeypatch)
+        monkeypatch.setenv("GOOGLE_API_KEY", "AIza-fake")
+        monkeypatch.setitem(sys.modules, "google.generativeai", None)
         from credit.cli import _ask
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())

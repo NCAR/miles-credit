@@ -67,7 +67,7 @@ develop = ["pre-commit",
     "ruff",
     "pytest"]
 
-ask    = ["anthropic>=0.40", "groq>=0.9"]
+ask    = ["anthropic>=0.40", "groq>=0.9", "openai>=1.0", "google-generativeai>=0.8"]
 serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 
 [tool.setuptools]

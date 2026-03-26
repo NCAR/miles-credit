@@ -225,26 +225,28 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 `credit ask` answers questions about your run, automatically injecting your
 config, training log, and recent PBS output as context.
 
-It supports two providers — use whichever you have access to:
+It supports four providers — set whichever key you have and it's used automatically.
+Use `--provider` to override:
 
-| Provider | Key | Model | Cost |
-|----------|-----|-------|------|
-| Anthropic | `ANTHROPIC_API_KEY` | Claude Haiku | Pay-per-use |
-| Groq | `GROQ_API_KEY` | Llama 3 Instant | **Free tier** |
+| Provider | Env var | Model | Cost | Notes |
+|----------|---------|-------|------|-------|
+| Anthropic | `ANTHROPIC_API_KEY` | Claude Haiku | Pay-per-use | `https://console.anthropic.com` |
+| OpenAI | `OPENAI_API_KEY` | GPT-4o | Pay-per-use | `https://platform.openai.com` |
+| Google | `GOOGLE_API_KEY` | Gemini 1.5 Pro | **Free for NCAR** | `https://aistudio.google.com` |
+| Groq | `GROQ_API_KEY` | Llama 3 Instant | **Free tier** | `https://console.groq.com` |
 
-`credit ask` detects whichever key is set and uses that provider automatically.
-If you have both set, Anthropic is preferred.
+Priority when multiple keys are set: Anthropic → OpenAI → Google → Groq.
 
 ```bash
-# --- Option 1: Anthropic (Claude Haiku) ---
-pip install anthropic
-export ANTHROPIC_API_KEY=sk-ant-...    # https://console.anthropic.com
+# Set whichever key(s) you have — add to ~/.bashrc to persist
+export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com
+export OPENAI_API_KEY=sk-...          # https://platform.openai.com
+export GOOGLE_API_KEY=AIza...         # https://aistudio.google.com  (free for NCAR users)
+export GROQ_API_KEY=gsk_...           # https://console.groq.com     (free, no card needed)
 
-# --- Option 2: Groq (free tier, no credit card required) ---
-pip install groq
-export GROQ_API_KEY=gsk_...            # https://console.groq.com
-
-# Add either export to ~/.bashrc to persist across sessions.
+# Install the package(s) for the provider(s) you want
+pip install anthropic                  # or: openai  /  google-generativeai  /  groq
+# All at once: pip install miles-credit[ask]
 ```
 
 ```bash
