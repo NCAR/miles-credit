@@ -104,29 +104,24 @@ def _write_reload_config(config_path: str) -> str:
     return reload_path
 
 
-def _submit(args: argparse.Namespace) -> None:
-    """Generate and optionally submit a PBS batch script."""
-    import subprocess
-    import tempfile
+def _build_pbs_script(args: argparse.Namespace, config: str, repo: str,
+                      account: str, depend_on: str = None) -> str:
+    """Return a PBS batch script string for the given args and config path.
 
-    repo = _repo_root()
-    config = os.path.abspath(args.config)
-
-    if args.reload:
-        config = _write_reload_config(config)
-        logger.info(f"Reload config written: {config}")
-
-    account = args.account or os.environ.get("PBS_ACCOUNT", "NAML0001")
+    Args:
+        depend_on: If set, adds ``#PBS -W depend=afterok:<depend_on>`` so this
+                   job only starts after the given job ID completes successfully.
+    """
+    depend_line = f"#PBS -W depend=afterok:{depend_on}\n" if depend_on else ""
 
     if args.cluster == "casper":
         cpus = args.cpus or 8
         mem = args.mem or "128GB"
         gpu_type = args.gpu_type or "a100_80gb"
         queue = args.queue or "casper"
-        # Try to find torchrun from the active conda environment first
         torchrun = args.torchrun or _find_torchrun()
 
-        script = textwrap.dedent(f"""\
+        return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N credit_v2
             #PBS -l select=1:ncpus={cpus}:ngpus={args.gpus}:mem={mem}:gpu_type={gpu_type}
@@ -135,9 +130,7 @@ def _submit(args: argparse.Namespace) -> None:
             #PBS -q {queue}
             #PBS -j oe
             #PBS -k eod
-
-            # Usage: credit submit --cluster casper -c {config} --gpus {args.gpus}
-
+            {depend_line}
             REPO={repo}
             CONFIG={config}
             NGPUS={args.gpus}
@@ -163,7 +156,7 @@ def _submit(args: argparse.Namespace) -> None:
         queue = args.queue or "main"
         conda_env = args.conda_env or "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221"
 
-        script = textwrap.dedent(f"""\
+        return textwrap.dedent(f"""\
             #!/bin/bash
             #PBS -A {account}
             #PBS -N credit_v2
@@ -173,9 +166,7 @@ def _submit(args: argparse.Namespace) -> None:
             #PBS -j oe
             #PBS -k eod
             #PBS -r n
-
-            # Usage: credit submit --cluster derecho -c {config} --gpus {args.gpus} --nodes {nodes}
-
+            {depend_line}
             module load ncarenv/24.12 gcc/12.4.0 ncarcompilers cray-mpich/8.1.29 \\
                         cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
 
@@ -225,9 +216,11 @@ def _submit(args: argparse.Namespace) -> None:
                 ${{REPO}}/applications/train_v2.py -c ${{CONFIG}}
         """)
 
-    if args.dry_run:
-        print(script)
-        return
+
+def _qsub(script: str) -> str:
+    """Write *script* to a temp file, call qsub, and return the job ID string."""
+    import subprocess
+    import tempfile
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
         f.write(script)
@@ -237,15 +230,52 @@ def _submit(args: argparse.Namespace) -> None:
     finally:
         os.unlink(script_path)
 
-    if result.returncode == 0:
-        job_id = result.stdout.strip()
-        print(f"Submitted job: {job_id}")
-        print(f"  Cluster : {args.cluster}")
-        print(f"  Config  : {config}")
-        print(f"  GPUs    : {args.gpus}" + (f"  x  {args.nodes} nodes" if args.cluster == "derecho" else ""))
-    else:
+    if result.returncode != 0:
         print(f"qsub failed:\n{result.stderr}", file=sys.stderr)
         sys.exit(1)
+
+    return result.stdout.strip()
+
+
+def _submit(args: argparse.Namespace) -> None:
+    """Generate and optionally submit PBS batch scripts, with optional chaining."""
+    repo = _repo_root()
+    account = args.account or os.environ.get("PBS_ACCOUNT", "NAML0001")
+    n_jobs = args.chain  # 1 = single job (default), N = chain of N jobs
+
+    # First job: fresh or reload depending on --reload flag
+    first_config = os.path.abspath(args.config)
+    if args.reload:
+        first_config = _write_reload_config(first_config)
+        logger.info(f"Reload config written: {first_config}")
+
+    # Reload config reused for all subsequent chained jobs (written once)
+    reload_config = _write_reload_config(os.path.abspath(args.config)) if n_jobs > 1 else None
+
+    if args.dry_run:
+        script = _build_pbs_script(args, first_config, repo, account, depend_on=None)
+        print(f"# --- Job 1/{n_jobs} ---")
+        print(script)
+        if n_jobs > 1:
+            script2 = _build_pbs_script(args, reload_config, repo, account, depend_on="<job_1_id>")
+            print(f"# --- Jobs 2..{n_jobs}/{n_jobs} (afterok chained, reload config) ---")
+            print(script2)
+        return
+
+    # Submit job 1
+    script = _build_pbs_script(args, first_config, repo, account, depend_on=None)
+    job_id = _qsub(script)
+    print(f"[1/{n_jobs}] {job_id}  {first_config}")
+
+    # Submit remaining chained reload jobs
+    for i in range(2, n_jobs + 1):
+        script = _build_pbs_script(args, reload_config, repo, account, depend_on=job_id)
+        job_id = _qsub(script)
+        print(f"[{i}/{n_jobs}] {job_id}  afterok  (reload)")
+
+    print(f"\n  Cluster : {args.cluster}")
+    print(f"  Config  : {args.config}")
+    print(f"  GPUs    : {args.gpus}" + (f" x {args.nodes} nodes" if args.cluster == "derecho" else ""))
 
 
 def _find_torchrun() -> str:
@@ -363,11 +393,13 @@ def _build_parser() -> argparse.ArgumentParser:
             Generate a PBS batch script and optionally submit it via qsub.
             Use --dry-run to inspect the script before submitting.
             Use --reload to resume from the latest checkpoint automatically.
+            Use --chain N to submit N back-to-back jobs via PBS afterok dependencies.
 
             Examples:
               credit submit --cluster casper  -c config.yml --gpus 1 --walltime 04:00:00
               credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2 --dry-run
               credit submit --cluster casper  -c config.yml --gpus 4 --reload
+              credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --chain 10
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG")
@@ -398,6 +430,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reload", action="store_true",
                    help="Resume from checkpoint: patch load_weights/optimizer/scaler/"
                         "scheduler/reload_epoch in the config and submit the reload job")
+    p.add_argument("--chain", type=int, default=1, metavar="N",
+                   help="Submit N jobs in sequence using PBS afterok dependencies. "
+                        "Job 1 uses the base config (or --reload config); jobs 2..N "
+                        "are automatic reload jobs. Example: --chain 10 submits 10 "
+                        "back-to-back jobs covering ~10x walltime of training.")
 
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")

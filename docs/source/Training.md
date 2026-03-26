@@ -271,32 +271,53 @@ overridden individually. See `credit submit --help` for the full option list.
 
 ### Resuming training
 
-Because wall-time limits on Casper (12 h) and Derecho rarely cover a full training run
-(e.g. 70 epochs), jobs need to be resubmitted from a checkpoint. The `--reload` flag
-handles this automatically — no config editing required:
+Wall-time limits on Casper (12 h) and Derecho mean a 70-epoch run typically needs
+multiple job submissions. Two options:
+
+#### Option A — chain jobs upfront with `--chain N`
+
+Submit all jobs at once before training starts. PBS `afterok` dependencies ensure each
+job only starts after the previous one completes successfully:
+
+```bash
+# Submit 10 back-to-back jobs (job 1 fresh, jobs 2–10 auto-reload)
+credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --chain 10
+
+# Same for Casper
+credit submit --cluster casper -c config.yml --gpus 4 --chain 10
+```
+
+If you estimate ~5 epochs per 12 h wall time and need 70 epochs total, `--chain 14`
+covers the full run without any manual resubmission.
+
+Use `--dry-run` to preview all scripts before submitting:
+
+```bash
+credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --chain 10 --dry-run
+```
+
+#### Option B — manual reload with `--reload`
+
+Submit one job at a time. After each job completes, resubmit with `--reload`:
 
 ```bash
 # First job
 credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1
 
-# Every subsequent job (run after the previous one finishes)
+# Every subsequent job
 credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --reload
 ```
 
-`--reload` does three things:
+Both options write `<save_loc>/config_reload.yml` with these five fields patched
+automatically — no manual config editing required:
 
-1. Reads your config and sets the five resume fields:
-   ```yaml
-   load_weights: True
-   load_optimizer: True
-   load_scaler: True
-   load_scheduler: True
-   reload_epoch: True   # auto-detects next epoch from checkpoint
-   ```
-2. Writes the patched config to `<save_loc>/config_reload.yml`.
-3. Submits the job using that config.
+```yaml
+load_weights: True
+load_optimizer: True
+load_scaler: True
+load_scheduler: True
+reload_epoch: True   # auto-detects next epoch from checkpoint
+```
 
-`reload_epoch: True` causes the trainer to read `epoch` from the checkpoint and set
-`start_epoch = checkpoint_epoch + 1`, so the epoch counter is always continuous across
-restarts. Use `--dry-run` with `--reload` to inspect the patched config and PBS script
-before submitting.
+`reload_epoch: True` causes the trainer to read the epoch from the checkpoint and set
+`start_epoch = checkpoint_epoch + 1`, so the epoch counter is always continuous.
