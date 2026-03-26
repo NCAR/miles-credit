@@ -5,8 +5,51 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau, CosineAnnealingLR
 from credit.models.checkpoint import FSDPOptimizerWrapper
 
-update_on_batch = ["cosine-annealing-restarts"]
+update_on_batch = ["cosine-annealing-restarts", "linear-warmup-cosine"]
 update_on_epoch = ["lambda", "plateau", "cosine-annealing"]
+
+
+class LinearWarmupCosineScheduler(LRScheduler):
+    """Linear warmup followed by cosine decay to min_lr.
+
+    Steps are batch-level (call scheduler.step() after each optimizer.step()).
+
+    Args:
+        optimizer: Wrapped optimizer.
+        warmup_steps: Number of steps to linearly ramp lr from 0 to base_lr.
+        total_steps: Total number of steps (warmup + cosine decay).
+        min_lr: Minimum learning rate at the end of decay (absolute value).
+        last_epoch: Used by LRScheduler for resume; -1 means start from scratch.
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        warmup_steps: int = 1000,
+        total_steps: int = 500_000,
+        min_lr: float = 1e-5,
+        last_epoch: int = -1,
+    ):
+        self.warmup_steps = warmup_steps
+        self.total_steps = total_steps
+        self.min_lr = min_lr
+        super().__init__(optimizer, last_epoch=last_epoch)
+
+    def get_lr(self):
+        step = self.last_epoch
+        lrs = []
+        for base_lr in self.base_lrs:
+            if step < self.warmup_steps:
+                lr = base_lr * step / max(1, self.warmup_steps)
+            else:
+                progress = (step - self.warmup_steps) / max(
+                    1, self.total_steps - self.warmup_steps
+                )
+                progress = min(progress, 1.0)
+                cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+                lr = self.min_lr + (base_lr - self.min_lr) * cosine
+            lrs.append(lr)
+        return lrs
 
 
 def load_scheduler(optimizer, conf):
@@ -36,6 +79,8 @@ def load_scheduler(optimizer, conf):
             scheduler = CosineAnnealingLR(optimizer, **conf["trainer"]["scheduler"])
         elif scheduler_type == "cosine-annealing-restarts":
             scheduler = CosineAnnealingWarmupRestarts(optimizer, **conf["trainer"]["scheduler"])
+        elif scheduler_type == "linear-warmup-cosine":
+            scheduler = LinearWarmupCosineScheduler(optimizer, **conf["trainer"]["scheduler"])
         else:
             raise ValueError(f"Invalid scheduler_type: {scheduler_type}")
     else:

@@ -1,12 +1,14 @@
 # --------------------------------------------------------------------------------------------------------------------- #
 # CREDIT starter config — v2 data schema, 1-degree ERA5, 6-hourly CrossFormer
 #
-# Quick-start: edit the USER SETTINGS sections below, then run:
-#   torchrun --standalone --nnodes=1 --nproc-per-node=<N_GPUS> \
-#       applications/train_v2.py -c config/starter_v2.yml
+# Quick-start: edit the USER SETTINGS sections below, then:
 #
-# Or submit to Casper via PBS:
-#   CONFIG=config/starter_v2.yml qsub scripts/casper_v2.sh
+#   # Preview the PBS script (no submission)
+#   credit submit --cluster casper -c config/starter_v2.yml --gpus 4 --chain 14 --dry-run
+#
+#   # Submit 14 chained jobs (~70 epochs at 5 epochs/job)
+#   credit submit --cluster casper  -c config/starter_v2.yml --gpus 4 --chain 14
+#   credit submit --cluster derecho -c config/starter_v2.yml --gpus 4 --nodes 1 --chain 14
 # --------------------------------------------------------------------------------------------------------------------- #
 
 # ---- USER SETTINGS: output directory ---- #

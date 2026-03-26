@@ -160,3 +160,94 @@ predict:
     shuffle: True
     chunksizes: [1, *height, *width]
 ```
+
+---
+
+## Running Rollouts with the v2 Data Schema
+
+If you trained with `trainer.type: era5-v2`, use the v2 rollout commands.
+The same YAML config used for training drives inference — no separate rollout config is needed.
+
+### Batch rollout to NetCDF
+
+`credit rollout` steps the model forward over a set of historical initial conditions
+and writes one NetCDF file per forecast:
+
+```bash
+credit rollout -c config/wxformer_1dg_6hr_v2.yml
+```
+
+To run on multiple GPUs pass `--mode ddp`:
+
+```bash
+credit rollout -c config/wxformer_1dg_6hr_v2.yml --mode ddp
+```
+
+The `predict` block in your config controls which dates are run and where output goes:
+
+```yaml
+predict:
+    mode: ddp           # none | ddp
+    batch_size: 4       # initial conditions per GPU per batch
+    ensemble_size: 1    # > 1 enables ensemble inference (requires ensemble model)
+    forecasts:
+        type: "custom"
+        start_year: 2020
+        start_month: 1
+        start_day: 1
+        start_hours: [0, 12]   # UTC hours to initialise each day
+        duration: 1             # forecast length in days
+        days: 1                 # number of days to run from start date
+    metadata: '/path/to/credit/metadata/era5.yaml'
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/my_run'
+    use_laplace_filter: False
+```
+
+Output files land in `save_forecast/`. Filename format is
+`<YYYY><MM><DD><HH>Z_<lead_hours>h.nc`.
+
+### Realtime forecast from a single init time
+
+`credit realtime` runs one forecast from a user-specified initialisation time,
+writing output as it steps (useful for operational or near-realtime use):
+
+```bash
+credit realtime -c config/wxformer_1dg_6hr_v2.yml \
+    --init-time 2024-01-15T00 \
+    --steps 40
+```
+
+`--steps 40` = 40 × 6 h = 10-day forecast. Output lands in `predict.save_forecast`.
+
+To override the output directory:
+
+```bash
+credit realtime -c config.yml --init-time 2024-06-01T12 --steps 40 \
+    --save-dir /tmp/test_forecast
+```
+
+### Quick sanity-check after training
+
+The fastest way to verify a freshly trained model produces sensible output:
+
+```bash
+# Plot a global map of temperature at the first model level
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field temperature
+
+# Multiple fields, specific level
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field temperature SP --level 5
+
+# Use a specific checkpoint
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field SP \
+    --checkpoint /glade/derecho/scratch/$USER/CREDIT_runs/my_run/checkpoint.pt
+```
+
+The plot is saved to `<save_loc>/plots/` as a PNG showing truth, prediction, and difference
+side by side for each requested field.
+
+### NCAR data paths
+
+The built-in v2 configs already point to the shared ERA5 archive at
+`/glade/campaign/cisl/aiml/ksha/CREDIT_data/` and the shared metadata at
+`/glade/u/home/akn7/miles-credit/credit/metadata/era5.yaml`.
+No path edits are needed for NCAR users.

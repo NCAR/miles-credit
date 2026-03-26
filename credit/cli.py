@@ -335,6 +335,216 @@ def _init(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# credit plot
+# ---------------------------------------------------------------------------
+
+def _build_channel_map(conf):
+    """Return a dict mapping variable name -> list of channel indices in the output tensor.
+
+    Channel order mirrors ConcatPreblock TARGET_FIELD_ORDER:
+        prognostic/3D (each var × n_levels), prognostic/2D, diagnostic/2D
+    """
+    src = conf["data"]["source"]["ERA5"]
+    n_levels = len(src.get("levels", []))
+    v = src["variables"]
+    prog = v.get("prognostic") or {}
+    diag = v.get("diagnostic") or {}
+
+    channel_map = {}
+    idx = 0
+    for vn in prog.get("vars_3D", []):
+        channel_map[vn] = list(range(idx, idx + n_levels))
+        idx += n_levels
+    for vn in prog.get("vars_2D", []):
+        channel_map[vn] = [idx]
+        idx += 1
+    for vn in diag.get("vars_2D", []):
+        channel_map[vn] = [idx]
+        idx += 1
+    return channel_map
+
+
+def _plot(args: argparse.Namespace) -> None:
+    """Load checkpoint, run one forward pass, produce global maps."""
+    import yaml
+    import numpy as np
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.gridspec as gridspec
+    except ImportError:
+        print("matplotlib is required for credit plot. Install with: pip install matplotlib",
+              file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        import cartopy.crs as ccrs
+        import cartopy.feature as cfeature
+        _HAS_CARTOPY = True
+    except ImportError:
+        _HAS_CARTOPY = False
+        logger.warning("cartopy not found — using plain lat/lon axes. "
+                       "Install cartopy for globe projections.")
+
+    import torch
+    import torch.nn as nn
+
+    with open(args.config) as f:
+        conf = yaml.safe_load(f)
+
+    save_loc = os.path.expandvars(conf.get("save_loc", "."))
+    ckpt_path = args.checkpoint or os.path.join(save_loc, "checkpoint.pt")
+    out_dir = args.output_dir or os.path.join(save_loc, "plots")
+    os.makedirs(out_dir, exist_ok=True)
+
+    if not os.path.exists(ckpt_path):
+        print(f"Checkpoint not found: {ckpt_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # ---- Load model ----
+    from credit.models import load_model
+    from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = load_model(conf, load_weights=False)
+    model = model.to(device)
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    load_state_dict_error_handler(model, ckpt)
+    model.eval()
+    logger.info(f"Loaded checkpoint: {ckpt_path}")
+
+    # ---- Load one validation sample ----
+    from credit.datasets.era5 import ERA5Dataset
+    from credit.preblock import ERA5Normalizer, ConcatPreblock, apply_preblocks
+
+    data_conf = conf.get("data_valid", conf["data"])
+
+    # build sample date filter if requested
+    sample_date = args.sample_date  # e.g. "2020-06-01T00"
+
+    dataset = ERA5Dataset(data_conf, split="valid")
+    if sample_date is not None:
+        import pandas as pd
+        target_dt = pd.Timestamp(sample_date)
+        idx = None
+        for i in range(min(len(dataset), 500)):
+            t = dataset.get_time(i)
+            if pd.Timestamp(t) >= target_dt:
+                idx = i
+                break
+        if idx is None:
+            logger.warning("sample_date %s not found in validation set — using sample 0", sample_date)
+            idx = 0
+    else:
+        idx = 0
+
+    sample = dataset[idx]
+
+    # ---- Pre-process (normalise) ----
+    mean_path = data_conf.get("mean_path") or conf["data"].get("mean_path")
+    std_path  = data_conf.get("std_path")  or conf["data"].get("std_path")
+    normalizer = ERA5Normalizer(mean_path=mean_path, std_path=std_path)
+    preblocks = [normalizer, ConcatPreblock(conf)]
+    sample = apply_preblocks(sample, preblocks)
+
+    x = sample["x"].unsqueeze(0).to(device)   # (1, C_in, H, W) or (1, C_in, 1, H, W)
+    y = sample["y"].unsqueeze(0)               # (1, C_out, H, W) or similar
+
+    # ---- Forward pass ----
+    with torch.no_grad():
+        y_pred = model(x)
+
+    # squeeze batch and any singleton time dim
+    def _squeeze(t):
+        t = t.squeeze(0)
+        if t.ndim == 4 and t.shape[1] == 1:
+            t = t.squeeze(1)
+        return t.cpu().float()
+
+    y_true_np  = _squeeze(y).numpy()   # (C_out, H, W)
+    y_pred_np  = _squeeze(y_pred).numpy()
+
+    # ---- Channel map ----
+    channel_map = _build_channel_map(conf)
+
+    # ---- Plot each requested field ----
+    for field in args.field:
+        if field not in channel_map:
+            available = ", ".join(sorted(channel_map.keys()))
+            print(f"Field '{field}' not found. Available: {available}", file=sys.stderr)
+            continue
+
+        chans = channel_map[field]
+        level_idx = min(args.level, len(chans) - 1)
+        c = chans[level_idx]
+
+        truth = y_true_np[c]   # (H, W)
+        pred  = y_pred_np[c]
+        diff  = pred - truth
+
+        # lat/lon grid
+        H, W = truth.shape
+        lats = np.linspace(90, -90, H)
+        lons = np.linspace(0, 360, W, endpoint=False)
+
+        vmin = float(np.percentile(truth, 2))
+        vmax = float(np.percentile(truth, 98))
+        dabs = float(np.percentile(np.abs(diff), 98))
+
+        title_suffix = f"  |  level_idx={level_idx}" if len(chans) > 1 else ""
+        ckpt_epoch = ckpt.get("epoch", "?")
+        fig_title = f"{field}{title_suffix}  |  epoch {ckpt_epoch}"
+
+        if _HAS_CARTOPY:
+            proj = ccrs.PlateCarree()
+            fig, axes = plt.subplots(
+                1, 3, figsize=(18, 5),
+                subplot_kw={"projection": proj},
+            )
+            def _add_features(ax):
+                ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+                ax.set_global()
+
+            im0 = axes[0].pcolormesh(lons, lats, truth, vmin=vmin, vmax=vmax,
+                                     cmap="RdBu_r", transform=proj)
+            _add_features(axes[0]); axes[0].set_title("Truth")
+            plt.colorbar(im0, ax=axes[0], shrink=0.6)
+
+            im1 = axes[1].pcolormesh(lons, lats, pred, vmin=vmin, vmax=vmax,
+                                     cmap="RdBu_r", transform=proj)
+            _add_features(axes[1]); axes[1].set_title("Prediction")
+            plt.colorbar(im1, ax=axes[1], shrink=0.6)
+
+            im2 = axes[2].pcolormesh(lons, lats, diff, vmin=-dabs, vmax=dabs,
+                                     cmap="bwr", transform=proj)
+            _add_features(axes[2]); axes[2].set_title("Difference (pred − truth)")
+            plt.colorbar(im2, ax=axes[2], shrink=0.6)
+        else:
+            fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+            axes[0].imshow(truth, vmin=vmin, vmax=vmax, cmap="RdBu_r",
+                           aspect="auto", origin="upper")
+            axes[0].set_title("Truth"); axes[0].axis("off")
+            axes[1].imshow(pred, vmin=vmin, vmax=vmax, cmap="RdBu_r",
+                           aspect="auto", origin="upper")
+            axes[1].set_title("Prediction"); axes[1].axis("off")
+            im2 = axes[2].imshow(diff, vmin=-dabs, vmax=dabs, cmap="bwr",
+                                 aspect="auto", origin="upper")
+            axes[2].set_title("Difference (pred − truth)"); axes[2].axis("off")
+            plt.colorbar(im2, ax=axes[2], shrink=0.7)
+
+        fig.suptitle(fig_title, fontsize=13)
+        plt.tight_layout()
+
+        safe_field = field.replace("/", "_")
+        out_path = os.path.join(out_dir, f"{safe_field}_lev{level_idx:02d}.png")
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Saved: {out_path}")
+
+
+# ---------------------------------------------------------------------------
 # CLI definition
 # ---------------------------------------------------------------------------
 
@@ -438,6 +648,37 @@ def _build_parser() -> argparse.ArgumentParser:
                         "are automatic reload jobs. Example: --chain 10 submits 10 "
                         "back-to-back jobs covering ~10x walltime of training.")
 
+    # ---- plot ----
+    p = sub.add_parser(
+        "plot",
+        help="Quick global map: truth vs prediction from a saved checkpoint",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Load a checkpoint, run one forward pass on a validation sample, and
+            produce a 3-panel global map (truth | prediction | difference) for each
+            requested field. Saved to <save_loc>/plots/.
+
+            Examples:
+              credit plot -c config.yml --field temperature
+              credit plot -c config.yml --field temperature SP --level 5
+              credit plot -c config.yml --field SP --checkpoint /path/to/checkpoint.pt
+              credit plot -c config.yml --field temperature --sample-date 2020-06-01T00
+        """),
+    )
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG",
+                   help="Training config YAML")
+    p.add_argument("--field", nargs="+", required=True, metavar="VAR",
+                   help="Variable name(s) to plot, e.g. temperature SP VAR_10U")
+    p.add_argument("--level", type=int, default=0, metavar="IDX",
+                   help="Level index for 3-D variables (0 = first level, default: 0)")
+    p.add_argument("--checkpoint", default=None, metavar="PATH",
+                   help="Checkpoint file (default: <save_loc>/checkpoint.pt)")
+    p.add_argument("--sample-date", default=None, metavar="YYYY-MM-DDTHH",
+                   dest="sample_date",
+                   help="Validation sample init time (default: first sample in valid set)")
+    p.add_argument("--output-dir", default=None, metavar="DIR", dest="output_dir",
+                   help="Where to save plots (default: <save_loc>/plots/)")
+
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")
     p.add_argument("--grid", choices=["0.25deg", "1deg"], default="0.25deg",
@@ -468,6 +709,7 @@ def main() -> None:
         "realtime": _realtime,
         "submit":   _submit,
         "init":     _init,
+        "plot":     _plot,
     }
     dispatch[args.command](args)
 
