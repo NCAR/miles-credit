@@ -646,19 +646,32 @@ def _collect_run_context(args: argparse.Namespace) -> str:
     return "\n\n".join(parts)
 
 
+class _ProviderError(Exception):
+    """Raised when a provider call fails in a way that should trigger fallback."""
+
+
 def _ask_anthropic(user_msg: str) -> None:
     """Stream a response via the Anthropic API (claude-haiku)."""
     import anthropic
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    with client.messages.stream(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
-        system=_CREDIT_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_msg}],
-    ) as stream:
-        for text in stream.text_stream:
-            print(text, end="", flush=True)
+    try:
+        with client.messages.stream(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            system=_CREDIT_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_msg}],
+        ) as stream:
+            for text in stream.text_stream:
+                print(text, end="", flush=True)
+    except anthropic.BadRequestError as e:
+        if "credit balance is too low" in str(e):
+            raise _ProviderError(
+                "Anthropic API key is set but the account has no credits.\n"
+                "Add credits at: https://console.anthropic.com/settings/billing\n"
+                "Note: a Claude.ai Pro subscription does NOT include API access."
+            ) from e
+        raise
 
 
 def _ask_groq(user_msg: str) -> None:
@@ -782,11 +795,38 @@ def _ask(args: argparse.Namespace) -> None:
     context = _collect_run_context(args)
     user_msg = f"{context}\n\n## Question\n{question}" if context else question
 
+    # Build ordered list of providers to try: chosen one first, then the rest
+    if explicit:
+        ordered = [provider]
+    else:
+        ordered = list(_PROVIDERS.keys())
+        # Only include providers whose keys are actually set
+        ordered = [p for p in ordered if os.environ.get(_PROVIDERS[p][0])]
+
     print()
-    if provider != "anthropic":
-        print(f"(using {label})\n")
-    _PROVIDER_RUNNERS[provider](user_msg)
-    print("\n")
+    for attempt, p in enumerate(ordered):
+        _, pkg, label = _PROVIDERS[p]
+        # Skip if package not installed
+        try:
+            __import__(pkg)
+        except ImportError:
+            continue
+        if p != "anthropic" or attempt > 0:
+            print(f"(using {label})\n")
+        try:
+            _PROVIDER_RUNNERS[p](user_msg)
+            print("\n")
+            return
+        except _ProviderError as exc:
+            remaining = [x for x in ordered[attempt + 1 :] if os.environ.get(_PROVIDERS[x][0])]
+            print(f"\nWarning: {exc}", file=sys.stderr)
+            if remaining:
+                print("Falling back to next available provider…\n", file=sys.stderr)
+            else:
+                sys.exit(1)
+
+    print("No working provider found.", file=sys.stderr)
+    sys.exit(1)
 
 
 def _plot(args: argparse.Namespace) -> None:

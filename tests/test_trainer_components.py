@@ -3,10 +3,8 @@
 All tests run on CPU with no data files required.
 """
 
-import math
 import torch
 import torch.nn as nn
-import pytest
 
 from credit.trainers.base_trainer import EMATracker, BaseTrainer
 from credit.scheduler import LinearWarmupCosineScheduler
@@ -15,6 +13,7 @@ from credit.scheduler import LinearWarmupCosineScheduler
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _tiny_model():
     return nn.Linear(4, 2)
@@ -43,8 +42,10 @@ def _minimal_conf(**trainer_overrides):
 
 class _ConcreteTrainer(BaseTrainer):
     """Minimal concrete subclass so we can instantiate BaseTrainer."""
+
     def train_one_epoch(self, *a, **kw):
         pass
+
     def validate(self, *a, **kw):
         return {}
 
@@ -52,6 +53,7 @@ class _ConcreteTrainer(BaseTrainer):
 # ---------------------------------------------------------------------------
 # EMATracker
 # ---------------------------------------------------------------------------
+
 
 class TestEMATracker:
     def test_update_moves_shadow_toward_param(self):
@@ -69,8 +71,7 @@ class TestEMATracker:
 
         # Shadow should have moved toward 1.0 for every key
         for k in ema.shadow:
-            assert not torch.equal(ema.shadow[k], initial[k]), \
-                f"Shadow did not update for key {k}"
+            assert not torch.equal(ema.shadow[k], initial[k]), f"Shadow did not update for key {k}"
 
     def test_swap_exchanges_weights(self):
         model = _tiny_model()
@@ -124,6 +125,7 @@ class TestEMATracker:
 # ---------------------------------------------------------------------------
 # BaseTrainer.__init__
 # ---------------------------------------------------------------------------
+
 
 class TestBaseTrainerInit:
     def test_basic_fields_extracted(self, tmp_path):
@@ -184,6 +186,7 @@ class TestBaseTrainerInit:
 # LinearWarmupCosineScheduler
 # ---------------------------------------------------------------------------
 
+
 class TestLinearWarmupCosineScheduler:
     def _make_scheduler(self, base_lr=1e-3, warmup_steps=100, total_steps=1000, min_lr=1e-5):
         model = _tiny_model()
@@ -208,8 +211,7 @@ class TestLinearWarmupCosineScheduler:
             scheduler.step()
             lrs.append(optimizer.param_groups[0]["lr"])
         # LR should be monotonically increasing during warmup
-        assert all(lrs[i] <= lrs[i + 1] for i in range(len(lrs) - 1)), \
-            "LR should increase monotonically during warmup"
+        assert all(lrs[i] <= lrs[i + 1] for i in range(len(lrs) - 1)), "LR should increase monotonically during warmup"
 
     def test_lr_peaks_at_base_lr(self):
         base_lr = 1e-3
@@ -217,13 +219,10 @@ class TestLinearWarmupCosineScheduler:
         for _ in range(100):
             scheduler.step()
         peak = optimizer.param_groups[0]["lr"]
-        assert abs(peak - base_lr) / base_lr < 0.02, \
-            f"Peak LR {peak} should be close to base_lr {base_lr}"
+        assert abs(peak - base_lr) / base_lr < 0.02, f"Peak LR {peak} should be close to base_lr {base_lr}"
 
     def test_lr_decays_after_warmup(self):
-        optimizer, scheduler = self._make_scheduler(
-            base_lr=1e-3, warmup_steps=100, total_steps=500
-        )
+        optimizer, scheduler = self._make_scheduler(base_lr=1e-3, warmup_steps=100, total_steps=500)
         # run through warmup
         for _ in range(100):
             scheduler.step()
@@ -236,21 +235,127 @@ class TestLinearWarmupCosineScheduler:
 
     def test_lr_reaches_min_lr_at_total_steps(self):
         min_lr = 1e-5
-        optimizer, scheduler = self._make_scheduler(
-            base_lr=1e-3, warmup_steps=100, total_steps=1000, min_lr=min_lr
-        )
+        optimizer, scheduler = self._make_scheduler(base_lr=1e-3, warmup_steps=100, total_steps=1000, min_lr=min_lr)
         for _ in range(1000):
             scheduler.step()
         final = optimizer.param_groups[0]["lr"]
-        assert abs(final - min_lr) / min_lr < 0.05, \
-            f"Final LR {final} should be close to min_lr {min_lr}"
+        assert abs(final - min_lr) / min_lr < 0.05, f"Final LR {final} should be close to min_lr {min_lr}"
 
     def test_lr_never_below_min_lr(self):
         min_lr = 1e-5
-        optimizer, scheduler = self._make_scheduler(
-            base_lr=1e-3, warmup_steps=100, total_steps=500, min_lr=min_lr
-        )
+        optimizer, scheduler = self._make_scheduler(base_lr=1e-3, warmup_steps=100, total_steps=500, min_lr=min_lr)
         for _ in range(600):  # past total_steps
             scheduler.step()
             lr = optimizer.param_groups[0]["lr"]
             assert lr >= min_lr - 1e-10, f"LR {lr} dropped below min_lr {min_lr}"
+
+
+# ---------------------------------------------------------------------------
+# Trainer subclass instantiation smoke tests
+#
+# These catch __init__ NameErrors / KeyErrors before any training runs.
+# Each test only calls __init__ — no forward pass, no data files needed.
+# ---------------------------------------------------------------------------
+
+
+def _era5_v1_conf(**overrides):
+    """Minimal conf for trainerERA5.Trainer (v1 data schema)."""
+    base = _minimal_conf()
+    base["data"] = {
+        "forecast_len": 1,
+        "history_len": 1,
+    }
+    base.update(overrides)
+    return base
+
+
+def _era5_v2_conf(**overrides):
+    """Minimal conf for trainerERA5v2.Trainer (v2 nested data schema)."""
+    base = _minimal_conf()
+    base["data"] = {
+        "forecast_len": 1,
+        "scaler_type": "std_new",
+        "source": {
+            "ERA5": {
+                "levels": [500, 850],
+                "variables": {
+                    "prognostic": {"vars_3D": ["temperature"], "vars_2D": ["SP"]},
+                    "diagnostic": {"vars_3D": [], "vars_2D": []},
+                    "dynamic_forcing": {"vars_2D": []},
+                    "static": {"vars_2D": []},
+                },
+            }
+        },
+        "mean_path": "/dev/null",
+        "std_path": "/dev/null",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestTrainerSubclassInstantiation:
+    """Smoke-test every Trainer subclass __init__ with a minimal conf.
+
+    Regression guard: catches undefined-name bugs (post_self, data_self, etc.)
+    introduced during refactors before any training is attempted.
+    """
+
+    def test_era5_trainer_init(self):
+        from credit.trainers.trainerERA5 import Trainer
+
+        t = Trainer(_tiny_model(), rank=0, conf=_era5_v1_conf())
+        assert t.forecast_len == 1
+        assert not t.flag_mass_conserve
+
+    def test_era5_trainer_init_with_post_conf_inactive(self):
+        from credit.trainers.trainerERA5 import Trainer
+
+        conf = _era5_v1_conf()
+        conf["model"] = {"post_conf": {"activate": False}}
+        t = Trainer(_tiny_model(), rank=0, conf=conf)
+        assert not t.flag_mass_conserve
+
+    def test_era5v2_trainer_init(self):
+        from unittest.mock import patch
+
+        # ERA5Normalizer loads mean/std files at init — replace with identity nn.Module
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            from credit.trainers.trainerERA5v2 import Trainer
+
+            t = Trainer(_tiny_model(), rank=0, conf=_era5_v2_conf())
+        assert t.forecast_len == 1
+
+    def test_era5_ensemble_trainer_init(self):
+        from credit.trainers.trainerERA5_ensemble import Trainer
+
+        Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
+
+    def test_era5_diffusion_trainer_init(self):
+        from credit.trainers.trainerERA5_Diffusion import Trainer
+
+        Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
+
+    def test_les_trainer_init(self):
+        from credit.trainers.trainerLES import Trainer
+
+        Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
+
+    def test_wrf_trainer_init(self):
+        from credit.trainers.trainerWRF import Trainer
+
+        Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
+
+    def test_wrf_multi_trainer_init(self):
+        from credit.trainers.trainerWRF_multi import Trainer
+
+        Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
+
+    def test_downscaling_trainer_init(self):
+        from credit.trainers.trainer_downscaling import Trainer
+
+        Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
+
+    def test_om4_samudra_trainer_init(self):
+        from credit.trainers.trainer_om4_samudra import Trainer
+
+        Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
