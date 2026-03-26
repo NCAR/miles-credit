@@ -111,19 +111,26 @@ async def lifespan(app: FastAPI):
     meta_data = load_metadata(conf)
 
     # Channel counts (needed to splice prognostic / dynamic-forcing channels)
-    src  = conf["data"]["source"]["ERA5"]
-    v    = src["variables"]
+    src = conf["data"]["source"]["ERA5"]
+    v = src["variables"]
     prog = v.get("prognostic") or {}
-    dyn  = v.get("dynamic_forcing") or {}
+    dyn = v.get("dynamic_forcing") or {}
     n_levels = len(src["levels"])
     n_prog = len(prog.get("vars_3D", [])) * n_levels + len(prog.get("vars_2D", []))
-    n_dyn  = len(dyn.get("vars_2D", []))
+    n_dyn = len(dyn.get("vars_2D", []))
 
     _STATE.update(
-        conf=conf, device=device, model=model,
-        preblocks=preblocks, denorm_mean=denorm_mean, denorm_std=denorm_std,
-        lat=lat, lon=lon, meta_data=meta_data,
-        n_prog=n_prog, n_dyn=n_dyn,
+        conf=conf,
+        device=device,
+        model=model,
+        preblocks=preblocks,
+        denorm_mean=denorm_mean,
+        denorm_std=denorm_std,
+        lat=lat,
+        lon=lon,
+        meta_data=meta_data,
+        n_prog=n_prog,
+        n_dyn=n_dyn,
     )
 
     yield  # ← server is running
@@ -146,6 +153,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
+
 
 class ForecastRequest(BaseModel):
     init_time: str
@@ -176,6 +184,7 @@ class ForecastResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health", summary="Liveness check")
 def health():
     """Returns 200 if the server is up and the model is loaded."""
@@ -201,17 +210,17 @@ def forecast(req: ForecastRequest):
     if not _STATE:
         raise HTTPException(503, "Model not loaded — server is still starting up.")
 
-    conf        = _STATE["conf"]
-    device      = _STATE["device"]
-    model       = _STATE["model"]
-    preblocks   = _STATE["preblocks"]
+    conf = _STATE["conf"]
+    device = _STATE["device"]
+    model = _STATE["model"]
+    preblocks = _STATE["preblocks"]
     denorm_mean = _STATE["denorm_mean"]
-    denorm_std  = _STATE["denorm_std"]
-    lat         = _STATE["lat"]
-    lon         = _STATE["lon"]
-    meta_data   = _STATE["meta_data"]
-    n_prog      = _STATE["n_prog"]
-    n_dyn       = _STATE["n_dyn"]
+    denorm_std = _STATE["denorm_std"]
+    lat = _STATE["lat"]
+    lon = _STATE["lon"]
+    meta_data = _STATE["meta_data"]
+    n_prog = _STATE["n_prog"]
+    n_dyn = _STATE["n_dyn"]
 
     # ---- Parse init time ----
     try:
@@ -219,7 +228,7 @@ def forecast(req: ForecastRequest):
     except Exception:
         raise HTTPException(422, f"Cannot parse init_time: {req.init_time!r}. Use YYYY-MM-DDTHH.")
 
-    dt                = pd.Timedelta(conf["data"]["timestep"])
+    dt = pd.Timedelta(conf["data"]["timestep"])
     lead_time_periods = conf["data"]["lead_time_periods"]
 
     # ---- Output directory ----
@@ -233,8 +242,8 @@ def forecast(req: ForecastRequest):
     # ---- Dataset (covers the requested init-time window) ----
     dataset_conf = dict(conf["data"])
     dataset_conf["start_datetime"] = str(init_time.date())
-    dataset_conf["end_datetime"]   = str((init_time + req.steps * dt).date())
-    dataset_conf["forecast_len"]   = 1
+    dataset_conf["end_datetime"] = str((init_time + req.steps * dt).date())
+    dataset_conf["forecast_len"] = 1
     try:
         dataset = ERA5Dataset(dataset_conf, return_target=False)
     except Exception as e:
@@ -244,15 +253,18 @@ def forecast(req: ForecastRequest):
     logger.info("Forecast %s  steps=%d  save_dir=%s", init_str, req.steps, save_dir)
 
     # ---- Postblocks (optional physical conservation fixers) ----
-    post_conf  = conf["model"].get("post_conf", {})
-    flag_mass  = flag_water = flag_energy = False
+    post_conf = conf["model"].get("post_conf", {})
+    flag_mass = flag_water = flag_energy = False
     if post_conf.get("activate", False):
-        if post_conf.get("global_mass_fixer",   {}).get("activate_outside_model", False):
-            flag_mass  = True;  opt_mass   = GlobalMassFixer(post_conf)
-        if post_conf.get("global_water_fixer",  {}).get("activate_outside_model", False):
-            flag_water = True;  opt_water  = GlobalWaterFixer(post_conf)
+        if post_conf.get("global_mass_fixer", {}).get("activate_outside_model", False):
+            flag_mass = True
+            opt_mass = GlobalMassFixer(post_conf)
+        if post_conf.get("global_water_fixer", {}).get("activate_outside_model", False):
+            flag_water = True
+            opt_water = GlobalWaterFixer(post_conf)
         if post_conf.get("global_energy_fixer", {}).get("activate_outside_model", False):
-            flag_energy = True; opt_energy = GlobalEnergyFixer(post_conf)
+            flag_energy = True
+            opt_energy = GlobalEnergyFixer(post_conf)
 
     # ---- Initial state ----
     try:
@@ -262,7 +274,7 @@ def forecast(req: ForecastRequest):
 
     batch = _sample_to_batch(sample)
     batch = apply_preblocks(preblocks, batch)
-    x     = batch["x"].to(device).float()   # (1, C_in, 1, H, W)
+    x = batch["x"].to(device).float()  # (1, C_in, 1, H, W)
 
     # ---- Autoregressive rollout ----
     x_init = None
@@ -288,23 +300,35 @@ def forecast(req: ForecastRequest):
                 # Async NetCDF write via SharedMemory (avoids pickling the array)
                 shm = SharedMemory(create=True, size=y_phys.nbytes)
                 np.ndarray(y_phys.shape, dtype=y_phys.dtype, buffer=shm.buf)[:] = y_phys
-                results.append(pool.apply_async(
-                    _save_worker,
-                    (shm.name, y_phys.shape, y_phys.dtype, init_str, step,
-                     lead_time_periods, lat, lon, meta_data, conf),
-                ))
+                results.append(
+                    pool.apply_async(
+                        _save_worker,
+                        (
+                            shm.name,
+                            y_phys.shape,
+                            y_phys.dtype,
+                            init_str,
+                            step,
+                            lead_time_periods,
+                            lat,
+                            lon,
+                            meta_data,
+                            conf,
+                        ),
+                    )
+                )
                 logger.debug("step %d/%d done", step, req.steps)
 
                 # Advance state for next step
                 if step < req.steps:
-                    t_next     = init_time + step * dt
-                    sample_frc = dataset[(t_next, 1)]          # dynamic_forcing only
-                    batch_frc  = _sample_to_batch(sample_frc)
-                    batch_frc  = apply_preblocks(preblocks, batch_frc)
-                    x_frc      = batch_frc["x"].to(device).float()
+                    t_next = init_time + step * dt
+                    sample_frc = dataset[(t_next, 1)]  # dynamic_forcing only
+                    batch_frc = _sample_to_batch(sample_frc)
+                    batch_frc = apply_preblocks(preblocks, batch_frc)
+                    x_frc = batch_frc["x"].to(device).float()
 
-                    x[:, :n_prog, ...]            = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
-                    x[:, n_prog:n_prog + n_dyn, ...] = x_frc
+                    x[:, :n_prog, ...] = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
+                    x[:, n_prog : n_prog + n_dyn, ...] = x_frc
                     # static channels (n_prog+n_dyn:) are unchanged
 
         for r in results:

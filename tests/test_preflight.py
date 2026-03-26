@@ -4,7 +4,6 @@ All tests run on CPU with no cluster or real data required.
 """
 
 import time
-import threading
 import pytest
 
 from credit.trainers.preflight import estimate_dataloader_memory_gb, check_dataloader_startup
@@ -14,20 +13,20 @@ from credit.trainers.preflight import estimate_dataloader_memory_gb, check_datal
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _conf(workers=4, prefetch=4, batch=1, h=721, w=1440,
-          vars_3d=None, vars_2d=None, diag_2d=None, n_levels=13):
+
+def _conf(workers=4, prefetch=4, batch=1, h=721, w=1440, vars_3d=None, vars_2d=None, diag_2d=None, n_levels=13):
     vars_3d = vars_3d if vars_3d is not None else ["U", "V", "T"]
     vars_2d = vars_2d if vars_2d is not None else ["SP"]
     diag_2d = diag_2d if diag_2d is not None else []
     return {
         "trainer": {
-            "thread_workers":   workers,
-            "prefetch_factor":  prefetch,
+            "thread_workers": workers,
+            "prefetch_factor": prefetch,
             "train_batch_size": batch,
         },
         "model": {
             "image_height": h,
-            "image_width":  w,
+            "image_width": w,
         },
         "data": {
             "source": {
@@ -47,14 +46,13 @@ def _conf(workers=4, prefetch=4, batch=1, h=721, w=1440,
 # estimate_dataloader_memory_gb — pure function tests
 # ---------------------------------------------------------------------------
 
+
 class TestEstimateDataloaderMemoryGb:
     def test_returns_float(self):
         assert isinstance(estimate_dataloader_memory_gb(_conf()), float)
 
     def test_zero_channels_returns_zero(self):
-        est = estimate_dataloader_memory_gb(
-            _conf(vars_3d=[], vars_2d=[], diag_2d=[], n_levels=13)
-        )
+        est = estimate_dataloader_memory_gb(_conf(vars_3d=[], vars_2d=[], diag_2d=[], n_levels=13))
         assert est == 0.0
 
     def test_empty_conf_returns_zero(self):
@@ -77,20 +75,35 @@ class TestEstimateDataloaderMemoryGb:
 
     def test_formula_1d_era5(self):
         """Spot-check with 1-degree ERA5: 3×13+1 = 40 channels."""
-        conf = _conf(workers=4, prefetch=4, batch=1, h=721, w=1440,
-                     vars_3d=["U", "V", "T"], vars_2d=["SP"],
-                     diag_2d=[], n_levels=13)
-        total_ch = 3 * 13 + 1          # 40
+        conf = _conf(
+            workers=4,
+            prefetch=4,
+            batch=1,
+            h=721,
+            w=1440,
+            vars_3d=["U", "V", "T"],
+            vars_2d=["SP"],
+            diag_2d=[],
+            n_levels=13,
+        )
+        total_ch = 3 * 13 + 1  # 40
         bytes_per_sample = 721 * 1440 * total_ch * 4 * 2
         expected_gb = (4 * 4 * 1 * bytes_per_sample) / 1e9
         assert abs(estimate_dataloader_memory_gb(conf) - expected_gb) < 0.01
 
     def test_025deg_era5_is_large(self):
         """0.25° ERA5 with typical settings should be >10 GB."""
-        conf = _conf(workers=4, prefetch=4, batch=1, h=721, w=1440,
-                     vars_3d=["U", "V", "T", "Q", "Z"],
-                     vars_2d=["SP", "VAR_2T", "VAR_10U", "VAR_10V"],
-                     diag_2d=[], n_levels=37)
+        conf = _conf(
+            workers=4,
+            prefetch=4,
+            batch=1,
+            h=721,
+            w=1440,
+            vars_3d=["U", "V", "T", "Q", "Z"],
+            vars_2d=["SP", "VAR_2T", "VAR_10U", "VAR_10V"],
+            diag_2d=[],
+            n_levels=37,
+        )
         est = estimate_dataloader_memory_gb(conf)
         assert est > 10.0
 
@@ -98,13 +111,17 @@ class TestEstimateDataloaderMemoryGb:
         """No 'trainer' key → falls back to defaults (workers=4, prefetch=4, batch=1)."""
         conf = {
             "model": {"image_height": 721, "image_width": 1440},
-            "data": {"source": {"ERA5": {
-                "levels": list(range(13)),
-                "variables": {
-                    "prognostic": {"vars_3D": ["T"], "vars_2D": []},
-                    "diagnostic": {"vars_2D": []},
-                },
-            }}},
+            "data": {
+                "source": {
+                    "ERA5": {
+                        "levels": list(range(13)),
+                        "variables": {
+                            "prognostic": {"vars_3D": ["T"], "vars_2D": []},
+                            "diagnostic": {"vars_2D": []},
+                        },
+                    }
+                }
+            },
         }
         est = estimate_dataloader_memory_gb(conf)
         assert est > 0.0
@@ -114,15 +131,19 @@ class TestEstimateDataloaderMemoryGb:
 # check_dataloader_startup — integration / side-effect tests
 # ---------------------------------------------------------------------------
 
+
 class _FastLoader:
     """Minimal loader that yields one dummy batch immediately."""
+
     def __iter__(self):
         import torch
+
         yield torch.zeros(1)
 
 
 class _SlowLoader:
     """Loader that always blocks for longer than any reasonable timeout."""
+
     def __iter__(self):
         while True:
             time.sleep(9999)
@@ -130,6 +151,7 @@ class _SlowLoader:
 
 class _ErrorLoader:
     """Loader that raises on first iteration."""
+
     def __iter__(self):
         raise ValueError("dataset exploded")
 

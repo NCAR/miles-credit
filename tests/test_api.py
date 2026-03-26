@@ -15,12 +15,13 @@ from unittest.mock import MagicMock, patch
 fastapi = pytest.importorskip("fastapi", reason="fastapi not installed — pip install miles-credit[serve]")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from applications.api import app, ForecastRequest, ForecastResponse, _STATE  # noqa: E402
+from applications.api import app, ForecastRequest  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Client fixture — does NOT trigger lifespan (model not loaded)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def client():
@@ -31,6 +32,7 @@ def client():
 # ---------------------------------------------------------------------------
 # Minimal mock state (replaces what lifespan normally populates)
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_state(n_prog=3, n_dyn=1, h=4, w=8, c_out=4):
     """Build a minimal _STATE dict with a trivial identity-like model."""
@@ -47,17 +49,19 @@ def _make_mock_state(n_prog=3, n_dyn=1, h=4, w=8, c_out=4):
             "timestep": "6h",
             "lead_time_periods": 6,
             "scaler_type": "std_new",
-            "source": {"ERA5": {
-                "levels": [500, 850],
-                "level_coord": "level",
-                "variables": {
-                    "prognostic": {"vars_3D": ["T"], "vars_2D": ["SP"]},
-                    "diagnostic": {"vars_2D": []},
-                    "dynamic_forcing": {"vars_2D": ["cos_lat"]},
-                },
-            }},
+            "source": {
+                "ERA5": {
+                    "levels": [500, 850],
+                    "level_coord": "level",
+                    "variables": {
+                        "prognostic": {"vars_3D": ["T"], "vars_2D": ["SP"]},
+                        "diagnostic": {"vars_2D": []},
+                        "dynamic_forcing": {"vars_2D": ["cos_lat"]},
+                    },
+                }
+            },
             "mean_path": "/fake/mean.nc",
-            "std_path":  "/fake/std.nc",
+            "std_path": "/fake/std.nc",
         },
         "model": {"post_conf": {"activate": False}},
         "predict": {"mode": "none", "save_forecast": "/tmp/credit_test_fcst"},
@@ -65,17 +69,17 @@ def _make_mock_state(n_prog=3, n_dyn=1, h=4, w=8, c_out=4):
     }
 
     return {
-        "conf":        conf,
-        "device":      device,
-        "model":       _TinyModel().eval(),
-        "preblocks":   torch.nn.ModuleDict(),
+        "conf": conf,
+        "device": device,
+        "model": _TinyModel().eval(),
+        "preblocks": torch.nn.ModuleDict(),
         "denorm_mean": torch.zeros(1, c_out, 1, 1, 1),
-        "denorm_std":  torch.ones(1, c_out, 1, 1, 1),
-        "lat":         np.linspace(90, -90, h),
-        "lon":         np.linspace(0, 360, w, endpoint=False),
-        "meta_data":   {},
-        "n_prog":      n_prog,
-        "n_dyn":       n_dyn,
+        "denorm_std": torch.ones(1, c_out, 1, 1, 1),
+        "lat": np.linspace(90, -90, h),
+        "lon": np.linspace(0, 360, w, endpoint=False),
+        "meta_data": {},
+        "n_prog": n_prog,
+        "n_dyn": n_dyn,
     }
 
 
@@ -90,6 +94,7 @@ def patched_client():
 # ---------------------------------------------------------------------------
 # /health
 # ---------------------------------------------------------------------------
+
 
 class TestHealth:
     def test_returns_200(self, client):
@@ -115,6 +120,7 @@ class TestHealth:
 # /forecast — pre-startup (empty _STATE)
 # ---------------------------------------------------------------------------
 
+
 class TestForecastNotReady:
     def test_503_when_state_empty(self, client):
         resp = client.post("/forecast", json={"init_time": "2024-01-15T00", "steps": 2})
@@ -128,6 +134,7 @@ class TestForecastNotReady:
 # ---------------------------------------------------------------------------
 # /forecast — schema validation (no model needed)
 # ---------------------------------------------------------------------------
+
 
 class TestForecastSchema:
     def test_missing_init_time_is_422(self, patched_client):
@@ -155,6 +162,7 @@ class TestForecastSchema:
 # /forecast — full round-trip with mocked dataset + save worker
 # ---------------------------------------------------------------------------
 
+
 class TestForecastRoundTrip:
     """Run one forecast step end-to-end with a mock dataset and no disk IO."""
 
@@ -162,7 +170,7 @@ class TestForecastRoundTrip:
         """Return a minimal ERA5Dataset-style sample dict."""
         return {
             "input": {
-                "era5": torch.zeros(n_in, 1, h, w),   # (C, T, H, W)
+                "era5": torch.zeros(n_in, 1, h, w),  # (C, T, H, W)
             },
             "metadata": {},
         }
@@ -183,16 +191,20 @@ class TestForecastRoundTrip:
         def _fake_save_worker(*args, **kwargs):
             pass  # no disk IO
 
-        with patch("applications.api.ERA5Dataset", return_value=mock_dataset), \
-             patch("applications.api.apply_preblocks", side_effect=_fake_apply_preblocks), \
-             patch("applications.api._save_worker", side_effect=_fake_save_worker), \
-             patch("multiprocessing.pool.Pool.apply_async", return_value=MagicMock(get=lambda: None)):
-
-            resp = patched_client.post("/forecast", json={
-                "init_time": "2024-01-15T00",
-                "steps": 1,
-                "save_dir": str(tmp_path),
-            })
+        with (
+            patch("applications.api.ERA5Dataset", return_value=mock_dataset),
+            patch("applications.api.apply_preblocks", side_effect=_fake_apply_preblocks),
+            patch("applications.api._save_worker", side_effect=_fake_save_worker),
+            patch("multiprocessing.pool.Pool.apply_async", return_value=MagicMock(get=lambda: None)),
+        ):
+            resp = patched_client.post(
+                "/forecast",
+                json={
+                    "init_time": "2024-01-15T00",
+                    "steps": 1,
+                    "save_dir": str(tmp_path),
+                },
+            )
 
         assert resp.status_code == 200
 
@@ -201,16 +213,20 @@ class TestForecastRoundTrip:
         mock_dataset = MagicMock()
         mock_dataset.__getitem__ = MagicMock(return_value=fake_sample)
 
-        with patch("applications.api.ERA5Dataset", return_value=mock_dataset), \
-             patch("applications.api.apply_preblocks", return_value={"x": torch.zeros(1, 5, 1, 4, 8)}), \
-             patch("applications.api._save_worker"), \
-             patch("multiprocessing.pool.Pool.apply_async", return_value=MagicMock(get=lambda: None)):
-
-            data = patched_client.post("/forecast", json={
-                "init_time": "2024-01-15T00",
-                "steps": 1,
-                "save_dir": str(tmp_path),
-            }).json()
+        with (
+            patch("applications.api.ERA5Dataset", return_value=mock_dataset),
+            patch("applications.api.apply_preblocks", return_value={"x": torch.zeros(1, 5, 1, 4, 8)}),
+            patch("applications.api._save_worker"),
+            patch("multiprocessing.pool.Pool.apply_async", return_value=MagicMock(get=lambda: None)),
+        ):
+            data = patched_client.post(
+                "/forecast",
+                json={
+                    "init_time": "2024-01-15T00",
+                    "steps": 1,
+                    "save_dir": str(tmp_path),
+                },
+            ).json()
 
         for field in ("status", "init_time", "steps", "lead_time_hours", "save_dir"):
             assert field in data, f"Missing field: {field}"
@@ -223,29 +239,37 @@ class TestForecastRoundTrip:
 
         # Call 0 → initial state (5 channels); subsequent calls → dynamic forcing (n_dyn=1 channel)
         call_count = {"n": 0}
+
         def _preblocks(preblocks, batch):
             t = torch.zeros(1, 1, 1, 4, 8) if call_count["n"] > 0 else torch.zeros(1, 5, 1, 4, 8)
             call_count["n"] += 1
             return {"x": t}
 
-        with patch("applications.api.ERA5Dataset", return_value=mock_dataset), \
-             patch("applications.api.apply_preblocks", side_effect=_preblocks), \
-             patch("applications.api._save_worker"), \
-             patch("multiprocessing.pool.Pool.apply_async", return_value=MagicMock(get=lambda: None)):
-
-            data = patched_client.post("/forecast", json={
-                "init_time": "2024-01-15T00",
-                "steps": 3,
-                "save_dir": str(tmp_path),
-            }).json()
+        with (
+            patch("applications.api.ERA5Dataset", return_value=mock_dataset),
+            patch("applications.api.apply_preblocks", side_effect=_preblocks),
+            patch("applications.api._save_worker"),
+            patch("multiprocessing.pool.Pool.apply_async", return_value=MagicMock(get=lambda: None)),
+        ):
+            data = patched_client.post(
+                "/forecast",
+                json={
+                    "init_time": "2024-01-15T00",
+                    "steps": 3,
+                    "save_dir": str(tmp_path),
+                },
+            ).json()
 
         # 3 steps × 6 h lead_time_periods = 18 h
         assert data["lead_time_hours"] == 18
 
     def test_dataset_open_failure_raises_500(self, patched_client):
         with patch("applications.api.ERA5Dataset", side_effect=FileNotFoundError("no data")):
-            resp = patched_client.post("/forecast", json={
-                "init_time": "2024-01-15T00",
-                "steps": 1,
-            })
+            resp = patched_client.post(
+                "/forecast",
+                json={
+                    "init_time": "2024-01-15T00",
+                    "steps": 1,
+                },
+            )
         assert resp.status_code == 500

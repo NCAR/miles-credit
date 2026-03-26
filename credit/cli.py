@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _setup_logging(level: int = logging.INFO) -> None:
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
@@ -43,30 +44,44 @@ def _repo_root() -> str:
 # Command handlers
 # ---------------------------------------------------------------------------
 
+
 def _train(args: argparse.Namespace) -> None:
     from credit.applications.train_v2 import main_cli
+
     sys.argv = ["credit-train", "-c", args.config, "--backend", args.backend]
     main_cli()
 
 
 def _rollout(args: argparse.Namespace) -> None:
     from credit.applications.rollout_to_netcdf_v2 import main
+
     sys.argv = [
-        "credit-rollout", "-c", args.config,
-        "-m", args.mode,
-        "-cpus", str(args.procs),
+        "credit-rollout",
+        "-c",
+        args.config,
+        "-m",
+        args.mode,
+        "-cpus",
+        str(args.procs),
     ]
     main()
 
 
 def _realtime(args: argparse.Namespace) -> None:
     from credit.applications.rollout_realtime_v2 import main
+
     argv = [
-        "credit-realtime", "-c", args.config,
-        "--init-time", args.init_time,
-        "--steps", str(args.steps),
-        "-m", args.mode,
-        "-p", str(args.procs),
+        "credit-realtime",
+        "-c",
+        args.config,
+        "--init-time",
+        args.init_time,
+        "--steps",
+        str(args.steps),
+        "-m",
+        args.mode,
+        "-p",
+        str(args.procs),
     ]
     if args.save_dir:
         argv += ["--save-dir", args.save_dir]
@@ -104,8 +119,7 @@ def _write_reload_config(config_path: str) -> str:
     return reload_path
 
 
-def _build_pbs_script(args: argparse.Namespace, config: str, repo: str,
-                      account: str, depend_on: str = None) -> str:
+def _build_pbs_script(args: argparse.Namespace, config: str, repo: str, account: str, depend_on: str = None) -> str:
     """Return a PBS batch script string for the given args and config path.
 
     Args:
@@ -263,11 +277,12 @@ def _compute_chain(args: argparse.Namespace) -> int:
     try:
         import math
         import yaml
+
         with open(args.config) as f:
             conf = yaml.safe_load(f)
         trainer = conf.get("trainer", {})
-        epochs     = int(trainer["epochs"])
-        num_epoch  = int(trainer["num_epoch"])
+        epochs = int(trainer["epochs"])
+        num_epoch = int(trainer["num_epoch"])
         return math.ceil(epochs / num_epoch)
     except Exception:
         return 1
@@ -277,16 +292,17 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     """Print a human-readable summary of what is about to be submitted."""
     import yaml
     from credit.trainers.preflight import estimate_dataloader_memory_gb
+
     try:
         with open(args.config) as f:
             conf = yaml.safe_load(f)
     except Exception:
         conf = {}
 
-    trainer   = conf.get("trainer", {})
-    epochs    = trainer.get("epochs", "?")
-    per_job   = trainer.get("num_epoch", "?")
-    walltime  = args.walltime
+    trainer = conf.get("trainer", {})
+    epochs = trainer.get("epochs", "?")
+    per_job = trainer.get("num_epoch", "?")
+    walltime = args.walltime
 
     gpu_str = f"{args.gpus} GPU(s)"
     if args.cluster == "derecho" and getattr(args, "nodes", 1) > 1:
@@ -296,10 +312,7 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     mem_str = f"~{mem_est:.0f} GB" if mem_est > 0 else "unknown"
     mem_warn = "  ⚠  consider reducing thread_workers / prefetch_factor" if mem_est > 24 else ""
 
-    chain_desc = (
-        f"{n_jobs} job(s)  ({epochs} epochs ÷ {per_job} per job)"
-        if n_jobs > 1 else "1 job (no chaining)"
-    )
+    chain_desc = f"{n_jobs} job(s)  ({epochs} epochs ÷ {per_job} per job)" if n_jobs > 1 else "1 job (no chaining)"
 
     print()
     print("=" * 52)
@@ -357,6 +370,7 @@ def _submit(args: argparse.Namespace) -> None:
 def _find_torchrun() -> str:
     """Return the path to torchrun, preferring the active conda env."""
     import shutil
+
     # Check if torchrun is on PATH (active conda env)
     tr = shutil.which("torchrun")
     if tr:
@@ -374,10 +388,10 @@ def _init(args: argparse.Namespace) -> None:
     import shutil
 
     templates = {
-        ("0.25deg", "wxformer_v2"):   "config/wxformer_025deg_6hr_v2.yml",
-        ("0.25deg", "crossformer"):   "config/wxformer_025deg_6hr_v2.yml",
-        ("1deg",    "wxformer_v2"):   "config/wxformer_1dg_6hr_v2.yml",
-        ("1deg",    "crossformer"):   "config/wxformer_1dg_6hr_v2.yml",
+        ("0.25deg", "wxformer_v2"): "config/wxformer_025deg_6hr_v2.yml",
+        ("0.25deg", "crossformer"): "config/wxformer_025deg_6hr_v2.yml",
+        ("1deg", "wxformer_v2"): "config/wxformer_1dg_6hr_v2.yml",
+        ("1deg", "crossformer"): "config/wxformer_1dg_6hr_v2.yml",
     }
 
     repo = _repo_root()
@@ -413,6 +427,7 @@ def _init(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # credit plot
 # ---------------------------------------------------------------------------
+
 
 def _build_channel_map(conf):
     """Return a dict mapping variable name -> list of channel indices in the output tensor.
@@ -462,7 +477,7 @@ def _build_denorm_stats(conf):
     diag = v.get("diagnostic") or {}
 
     mean_ds = xr.open_dataset(conf["data"]["mean_path"]).load()
-    std_ds  = xr.open_dataset(conf["data"]["std_path"]).load()
+    std_ds = xr.open_dataset(conf["data"]["std_path"]).load()
 
     def _stats(varname, is_3d):
         if varname not in mean_ds or varname not in std_ds:
@@ -478,11 +493,17 @@ def _build_denorm_stats(conf):
 
     means, stds = [], []
     for vn in prog.get("vars_3D", []):
-        m, s = _stats(vn, True);  means.append(m); stds.append(s)
+        m, s = _stats(vn, True)
+        means.append(m)
+        stds.append(s)
     for vn in prog.get("vars_2D", []):
-        m, s = _stats(vn, False); means.append(m); stds.append(s)
+        m, s = _stats(vn, False)
+        means.append(m)
+        stds.append(s)
     for vn in diag.get("vars_2D", []):
-        m, s = _stats(vn, False); means.append(m); stds.append(s)
+        m, s = _stats(vn, False)
+        means.append(m)
+        stds.append(s)
 
     return np.concatenate(means), np.concatenate(stds)
 
@@ -582,6 +603,7 @@ Be concise, specific, and actionable. When referencing config keys use inline co
 def _collect_run_context(args: argparse.Namespace) -> str:
     """Gather config, training log, and recent PBS output for context injection."""
     import glob as _glob
+
     parts = []
 
     # ---- Config ----
@@ -595,7 +617,9 @@ def _collect_run_context(args: argparse.Namespace) -> str:
 
         # ---- Training log ----
         try:
-            import yaml, pandas as pd
+            import yaml
+            import pandas as pd
+
             with open(args.config) as f:
                 conf = yaml.safe_load(f)
             save_loc = conf.get("save_loc", "")
@@ -615,10 +639,7 @@ def _collect_run_context(args: argparse.Namespace) -> str:
                 with open(newest) as f:
                     lines = f.readlines()
                 tail_lines = "".join(lines[-60:])
-                parts.append(
-                    f"## Most recent PBS output ({newest}, last 60 lines)\n"
-                    f"```\n{tail_lines}\n```"
-                )
+                parts.append(f"## Most recent PBS output ({newest}, last 60 lines)\n```\n{tail_lines}\n```")
         except Exception:
             pass
 
@@ -628,6 +649,7 @@ def _collect_run_context(args: argparse.Namespace) -> str:
 def _ask_anthropic(user_msg: str) -> None:
     """Stream a response via the Anthropic API (claude-haiku)."""
     import anthropic
+
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     with client.messages.stream(
         model="claude-haiku-4-5-20251001",
@@ -642,13 +664,14 @@ def _ask_anthropic(user_msg: str) -> None:
 def _ask_groq(user_msg: str) -> None:
     """Stream a response via the Groq API (llama3 — free tier)."""
     import groq
+
     client = groq.Groq(api_key=os.environ["GROQ_API_KEY"])
     stream = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         max_tokens=1024,
         messages=[
             {"role": "system", "content": _CREDIT_SYSTEM_PROMPT},
-            {"role": "user",   "content": user_msg},
+            {"role": "user", "content": user_msg},
         ],
         stream=True,
     )
@@ -659,13 +682,14 @@ def _ask_groq(user_msg: str) -> None:
 def _ask_openai(user_msg: str) -> None:
     """Stream a response via the OpenAI API (gpt-4o)."""
     from openai import OpenAI
+
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     stream = client.chat.completions.create(
         model="gpt-4o",
         max_tokens=1024,
         messages=[
             {"role": "system", "content": _CREDIT_SYSTEM_PROMPT},
-            {"role": "user",   "content": user_msg},
+            {"role": "user", "content": user_msg},
         ],
         stream=True,
     )
@@ -676,6 +700,7 @@ def _ask_openai(user_msg: str) -> None:
 def _ask_gemini(user_msg: str) -> None:
     """Stream a response via the Google Gemini API (gemini-1.5-pro)."""
     import google.generativeai as genai
+
     genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
     model = genai.GenerativeModel(
         model_name="gemini-1.5-pro",
@@ -686,22 +711,22 @@ def _ask_gemini(user_msg: str) -> None:
 
 
 _PROVIDERS = {
-    "anthropic": ("ANTHROPIC_API_KEY", "anthropic",          "Claude Haiku"),
-    "openai":    ("OPENAI_API_KEY",    "openai",             "GPT-4o"),
-    "gemini":    ("GOOGLE_API_KEY",    "google.generativeai","Gemini 1.5 Pro"),
-    "groq":      ("GROQ_API_KEY",      "groq",               "Llama 3 Instant (free)"),
+    "anthropic": ("ANTHROPIC_API_KEY", "anthropic", "Claude Haiku"),
+    "openai": ("OPENAI_API_KEY", "openai", "GPT-4o"),
+    "gemini": ("GOOGLE_API_KEY", "google.generativeai", "Gemini 1.5 Pro"),
+    "groq": ("GROQ_API_KEY", "groq", "Llama 3 Instant (free)"),
 }
 _PROVIDER_INSTALL = {
     "anthropic": "anthropic",
-    "openai":    "openai",
-    "gemini":    "google-generativeai",
-    "groq":      "groq",
+    "openai": "openai",
+    "gemini": "google-generativeai",
+    "groq": "groq",
 }
 _PROVIDER_RUNNERS = {
     "anthropic": _ask_anthropic,
-    "openai":    _ask_openai,
-    "gemini":    _ask_gemini,
-    "groq":      _ask_groq,
+    "openai": _ask_openai,
+    "gemini": _ask_gemini,
+    "groq": _ask_groq,
 }
 
 
@@ -754,7 +779,7 @@ def _ask(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     question = " ".join(args.question)
-    context  = _collect_run_context(args)
+    context = _collect_run_context(args)
     user_msg = f"{context}\n\n## Question\n{question}" if context else question
 
     print()
@@ -771,22 +796,21 @@ def _plot(args: argparse.Namespace) -> None:
 
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        import matplotlib.gridspec as gridspec
     except ImportError:
-        print("matplotlib is required for credit plot. Install with: pip install matplotlib",
-              file=sys.stderr)
+        print("matplotlib is required for credit plot. Install with: pip install matplotlib", file=sys.stderr)
         sys.exit(1)
 
     try:
         import cartopy.crs as ccrs
         import cartopy.feature as cfeature
+
         _HAS_CARTOPY = True
     except ImportError:
         _HAS_CARTOPY = False
-        logger.warning("cartopy not found — using plain lat/lon axes. "
-                       "Install cartopy for globe projections.")
+        logger.warning("cartopy not found — using plain lat/lon axes. Install cartopy for globe projections.")
 
     import torch
     import torch.nn as nn
@@ -818,7 +842,6 @@ def _plot(args: argparse.Namespace) -> None:
 
     # ---- Load one validation sample ----
     import pandas as pd
-    import torch.nn as nn
     from credit.datasets.multi_source import MultiSourceDataset
     from credit.preblock import ERA5Normalizer, ConcatPreblock, apply_preblocks
 
@@ -844,17 +867,20 @@ def _plot(args: argparse.Namespace) -> None:
 
     # ---- Pre-process (normalise + concat) ----
     from torch.utils.data import default_collate
+
     # default_collate adds the batch dimension exactly as the DataLoader would
     batch = default_collate([sample])
 
-    preblocks = nn.ModuleDict({
-        "norm":   ERA5Normalizer(conf),
-        "concat": ConcatPreblock(),
-    })
+    preblocks = nn.ModuleDict(
+        {
+            "norm": ERA5Normalizer(conf),
+            "concat": ConcatPreblock(),
+        }
+    )
     batch = apply_preblocks(preblocks, batch)
 
-    x = batch["x"].to(device)    # (1, C_in, T, H, W)
-    y = batch["y"]               # (1, C_out, T, H, W)
+    x = batch["x"].to(device)  # (1, C_in, T, H, W)
+    y = batch["y"]  # (1, C_out, T, H, W)
 
     # ---- Forward pass ----
     with torch.no_grad():
@@ -864,18 +890,18 @@ def _plot(args: argparse.Namespace) -> None:
     def _squeeze(t):
         t = t.squeeze(0).cpu().float()  # remove batch dim → (C, T, H, W) or (C, H, W)
         if t.ndim == 4:
-            t = t[:, 0]                 # take first time step → (C, H, W)
+            t = t[:, 0]  # take first time step → (C, H, W)
         return t
 
-    y_true_np  = _squeeze(y).numpy()   # (C_out, H, W)
-    y_pred_np  = _squeeze(y_pred).numpy()
+    y_true_np = _squeeze(y).numpy()  # (C_out, H, W)
+    y_pred_np = _squeeze(y_pred).numpy()
 
     # ---- Inverse-normalise to physical units (optional) ----
     unit_label = "normalised"
     if args.denorm:
         mean_arr, std_arr = _build_denorm_stats(conf)
-        mean_arr = mean_arr[:, None, None]   # broadcast over H, W
-        std_arr  = std_arr[:, None, None]
+        mean_arr = mean_arr[:, None, None]  # broadcast over H, W
+        std_arr = std_arr[:, None, None]
         y_true_np = y_true_np * std_arr + mean_arr
         y_pred_np = y_pred_np * std_arr + mean_arr
         unit_label = "physical units"
@@ -895,9 +921,9 @@ def _plot(args: argparse.Namespace) -> None:
         level_idx = min(args.level, len(chans) - 1)
         c = chans[level_idx]
 
-        truth = y_true_np[c]   # (H, W)
-        pred  = y_pred_np[c]
-        diff  = pred - truth
+        truth = y_true_np[c]  # (H, W)
+        pred = y_pred_np[c]
+        diff = pred - truth
 
         # lat/lon grid
         H, W = truth.shape
@@ -915,38 +941,41 @@ def _plot(args: argparse.Namespace) -> None:
         if _HAS_CARTOPY:
             proj = ccrs.PlateCarree()
             fig, axes = plt.subplots(
-                1, 3, figsize=(18, 5),
+                1,
+                3,
+                figsize=(18, 5),
                 subplot_kw={"projection": proj},
             )
+
             def _add_features(ax):
                 ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
                 ax.set_global()
 
-            im0 = axes[0].pcolormesh(lons, lats, truth, vmin=vmin, vmax=vmax,
-                                     cmap="RdBu_r", transform=proj)
-            _add_features(axes[0]); axes[0].set_title("Truth")
+            im0 = axes[0].pcolormesh(lons, lats, truth, vmin=vmin, vmax=vmax, cmap="RdBu_r", transform=proj)
+            _add_features(axes[0])
+            axes[0].set_title("Truth")
             plt.colorbar(im0, ax=axes[0], shrink=0.6)
 
-            im1 = axes[1].pcolormesh(lons, lats, pred, vmin=vmin, vmax=vmax,
-                                     cmap="RdBu_r", transform=proj)
-            _add_features(axes[1]); axes[1].set_title("Prediction")
+            im1 = axes[1].pcolormesh(lons, lats, pred, vmin=vmin, vmax=vmax, cmap="RdBu_r", transform=proj)
+            _add_features(axes[1])
+            axes[1].set_title("Prediction")
             plt.colorbar(im1, ax=axes[1], shrink=0.6)
 
-            im2 = axes[2].pcolormesh(lons, lats, diff, vmin=-dabs, vmax=dabs,
-                                     cmap="bwr", transform=proj)
-            _add_features(axes[2]); axes[2].set_title("Difference (pred − truth)")
+            im2 = axes[2].pcolormesh(lons, lats, diff, vmin=-dabs, vmax=dabs, cmap="bwr", transform=proj)
+            _add_features(axes[2])
+            axes[2].set_title("Difference (pred − truth)")
             plt.colorbar(im2, ax=axes[2], shrink=0.6)
         else:
             fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-            axes[0].imshow(truth, vmin=vmin, vmax=vmax, cmap="RdBu_r",
-                           aspect="auto", origin="upper")
-            axes[0].set_title("Truth"); axes[0].axis("off")
-            axes[1].imshow(pred, vmin=vmin, vmax=vmax, cmap="RdBu_r",
-                           aspect="auto", origin="upper")
-            axes[1].set_title("Prediction"); axes[1].axis("off")
-            im2 = axes[2].imshow(diff, vmin=-dabs, vmax=dabs, cmap="bwr",
-                                 aspect="auto", origin="upper")
-            axes[2].set_title("Difference (pred − truth)"); axes[2].axis("off")
+            axes[0].imshow(truth, vmin=vmin, vmax=vmax, cmap="RdBu_r", aspect="auto", origin="upper")
+            axes[0].set_title("Truth")
+            axes[0].axis("off")
+            axes[1].imshow(pred, vmin=vmin, vmax=vmax, cmap="RdBu_r", aspect="auto", origin="upper")
+            axes[1].set_title("Prediction")
+            axes[1].axis("off")
+            im2 = axes[2].imshow(diff, vmin=-dabs, vmax=dabs, cmap="bwr", aspect="auto", origin="upper")
+            axes[2].set_title("Difference (pred − truth)")
+            axes[2].axis("off")
             plt.colorbar(im2, ax=axes[2], shrink=0.7)
 
         fig.suptitle(fig_title, fontsize=13)
@@ -962,6 +991,7 @@ def _plot(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # CLI definition
 # ---------------------------------------------------------------------------
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -982,34 +1012,27 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ---- train ----
     p = sub.add_parser("train", help="Train a CREDIT v2 model")
-    p.add_argument("-c", "--config", required=True, metavar="CONFIG",
-                   help="Path to YAML training config")
-    p.add_argument("--backend", default="nccl", choices=["nccl", "gloo", "mpi"],
-                   help="Distributed backend (default: nccl)")
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML training config")
+    p.add_argument(
+        "--backend", default="nccl", choices=["nccl", "gloo", "mpi"], help="Distributed backend (default: nccl)"
+    )
 
     # ---- rollout ----
     p = sub.add_parser("rollout", help="Batch forecast rollout to NetCDF")
-    p.add_argument("-c", "--config", required=True, metavar="CONFIG",
-                   help="Path to YAML config")
-    p.add_argument("-m", "--mode", default="none",
-                   help="Distributed mode: none | ddp | fsdp (default: none)")
-    p.add_argument("-p", "--procs", type=int, default=4,
-                   help="CPU workers for async NetCDF save (default: 4)")
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
+    p.add_argument("-m", "--mode", default="none", help="Distributed mode: none | ddp | fsdp (default: none)")
+    p.add_argument("-p", "--procs", type=int, default=4, help="CPU workers for async NetCDF save (default: 4)")
 
     # ---- realtime ----
     p = sub.add_parser("realtime", help="Operational realtime forecast (single init time)")
-    p.add_argument("-c", "--config", required=True, metavar="CONFIG",
-                   help="Path to YAML config")
-    p.add_argument("--init-time", required=True, metavar="YYYY-MM-DDTHH",
-                   help="Forecast initialisation time, e.g. 2024-01-15T00")
-    p.add_argument("--steps", type=int, default=40,
-                   help="Number of autoregressive forecast steps (default: 40)")
-    p.add_argument("--save-dir", metavar="DIR",
-                   help="Override output directory from config")
-    p.add_argument("-m", "--mode", default="none",
-                   help="Distributed mode: none | ddp | fsdp (default: none)")
-    p.add_argument("-p", "--procs", type=int, default=4,
-                   help="CPU workers for async NetCDF save (default: 4)")
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
+    p.add_argument(
+        "--init-time", required=True, metavar="YYYY-MM-DDTHH", help="Forecast initialisation time, e.g. 2024-01-15T00"
+    )
+    p.add_argument("--steps", type=int, default=40, help="Number of autoregressive forecast steps (default: 40)")
+    p.add_argument("--save-dir", metavar="DIR", help="Override output directory from config")
+    p.add_argument("-m", "--mode", default="none", help="Distributed mode: none | ddp | fsdp (default: none)")
+    p.add_argument("-p", "--procs", type=int, default=4, help="CPU workers for async NetCDF save (default: 4)")
 
     # ---- submit ----
     p = sub.add_parser(
@@ -1030,39 +1053,43 @@ def _build_parser() -> argparse.ArgumentParser:
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG")
-    p.add_argument("--cluster", required=True, choices=["casper", "derecho"],
-                   help="Target NCAR HPC cluster")
-    p.add_argument("--gpus", type=int, default=4, metavar="N",
-                   help="GPUs per node (default: 4)")
-    p.add_argument("--nodes", type=int, default=1, metavar="N",
-                   help="Number of nodes, derecho only (default: 1)")
-    p.add_argument("--cpus", type=int, default=None, metavar="N",
-                   help="CPUs per node (default: 8 casper / 64 derecho)")
-    p.add_argument("--mem", default=None,
-                   help="Memory per node (default: 128GB casper / 480GB derecho)")
-    p.add_argument("--walltime", default="12:00:00", metavar="HH:MM:SS",
-                   help="Job walltime (default: 12:00:00)")
-    p.add_argument("--account", metavar="ACCOUNT",
-                   help="PBS account code (default: $PBS_ACCOUNT or NAML0001)")
-    p.add_argument("--queue", metavar="QUEUE",
-                   help="PBS queue (default: casper / main)")
-    p.add_argument("--gpu-type", dest="gpu_type", default=None,
-                   help="Casper GPU type (default: a100_80gb)")
-    p.add_argument("--torchrun", default=None, metavar="PATH",
-                   help="Path to torchrun binary (default: auto-detect from PATH)")
-    p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH",
-                   help="Conda environment path for derecho (default: credit-derecho-torch28-nccl221)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Print the PBS script without submitting")
-    p.add_argument("--reload", action="store_true",
-                   help="Resume from checkpoint: patch load_weights/optimizer/scaler/"
-                        "scheduler/reload_epoch in the config and submit the reload job")
-    p.add_argument("--chain", type=int, default=None, metavar="N",
-                   help="Submit N jobs in sequence using PBS afterok dependencies. "
-                        "Job 1 uses the base config (or --reload config); jobs 2..N "
-                        "are automatic reload jobs. If omitted, computed automatically "
-                        "from ceil(trainer.epochs / trainer.num_epoch) in the config. "
-                        "Example: --chain 10 submits 10 back-to-back jobs.")
+    p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
+    p.add_argument("--gpus", type=int, default=4, metavar="N", help="GPUs per node (default: 4)")
+    p.add_argument("--nodes", type=int, default=1, metavar="N", help="Number of nodes, derecho only (default: 1)")
+    p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node (default: 8 casper / 64 derecho)")
+    p.add_argument("--mem", default=None, help="Memory per node (default: 128GB casper / 480GB derecho)")
+    p.add_argument("--walltime", default="12:00:00", metavar="HH:MM:SS", help="Job walltime (default: 12:00:00)")
+    p.add_argument("--account", metavar="ACCOUNT", help="PBS account code (default: $PBS_ACCOUNT or NAML0001)")
+    p.add_argument("--queue", metavar="QUEUE", help="PBS queue (default: casper / main)")
+    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (default: a100_80gb)")
+    p.add_argument(
+        "--torchrun", default=None, metavar="PATH", help="Path to torchrun binary (default: auto-detect from PATH)"
+    )
+    p.add_argument(
+        "--conda-env",
+        dest="conda_env",
+        default=None,
+        metavar="PATH",
+        help="Conda environment path for derecho (default: credit-derecho-torch28-nccl221)",
+    )
+    p.add_argument("--dry-run", action="store_true", help="Print the PBS script without submitting")
+    p.add_argument(
+        "--reload",
+        action="store_true",
+        help="Resume from checkpoint: patch load_weights/optimizer/scaler/"
+        "scheduler/reload_epoch in the config and submit the reload job",
+    )
+    p.add_argument(
+        "--chain",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Submit N jobs in sequence using PBS afterok dependencies. "
+        "Job 1 uses the base config (or --reload config); jobs 2..N "
+        "are automatic reload jobs. If omitted, computed automatically "
+        "from ceil(trainer.epochs / trainer.num_epoch) in the config. "
+        "Example: --chain 10 submits 10 back-to-back jobs.",
+    )
 
     # ---- plot ----
     p = sub.add_parser(
@@ -1081,22 +1108,40 @@ def _build_parser() -> argparse.ArgumentParser:
               credit plot -c config.yml --field VAR_2T --sample-date 2020-06-01T00 --denorm
         """),
     )
-    p.add_argument("-c", "--config", required=True, metavar="CONFIG",
-                   help="Training config YAML")
-    p.add_argument("--field", nargs="+", required=True, metavar="VAR",
-                   help="Variable name(s) to plot, e.g. temperature SP VAR_10U")
-    p.add_argument("--level", type=int, default=0, metavar="IDX",
-                   help="Level index for 3-D variables (0 = first level, default: 0)")
-    p.add_argument("--checkpoint", default=None, metavar="PATH",
-                   help="Checkpoint file (default: <save_loc>/checkpoint.pt)")
-    p.add_argument("--sample-date", default=None, metavar="YYYY-MM-DDTHH",
-                   dest="sample_date",
-                   help="Validation sample init time (default: first sample in valid set)")
-    p.add_argument("--output-dir", default=None, metavar="DIR", dest="output_dir",
-                   help="Where to save plots (default: <save_loc>/plots/)")
-    p.add_argument("--denorm", action="store_true",
-                   help="Inverse-normalise output to physical units using mean/std files"
-                        " from the config (e.g. K for temperature, Pa for surface pressure)")
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Training config YAML")
+    p.add_argument(
+        "--field", nargs="+", required=True, metavar="VAR", help="Variable name(s) to plot, e.g. temperature SP VAR_10U"
+    )
+    p.add_argument(
+        "--level",
+        type=int,
+        default=0,
+        metavar="IDX",
+        help="Level index for 3-D variables (0 = first level, default: 0)",
+    )
+    p.add_argument(
+        "--checkpoint", default=None, metavar="PATH", help="Checkpoint file (default: <save_loc>/checkpoint.pt)"
+    )
+    p.add_argument(
+        "--sample-date",
+        default=None,
+        metavar="YYYY-MM-DDTHH",
+        dest="sample_date",
+        help="Validation sample init time (default: first sample in valid set)",
+    )
+    p.add_argument(
+        "--output-dir",
+        default=None,
+        metavar="DIR",
+        dest="output_dir",
+        help="Where to save plots (default: <save_loc>/plots/)",
+    )
+    p.add_argument(
+        "--denorm",
+        action="store_true",
+        help="Inverse-normalise output to physical units using mean/std files"
+        " from the config (e.g. K for temperature, Pa for surface pressure)",
+    )
 
     # ---- ask ----
     p = sub.add_parser(
@@ -1119,25 +1164,36 @@ def _build_parser() -> argparse.ArgumentParser:
               credit ask --provider gemini -c config.yml "what do I do if my Derecho job hangs?"
         """),
     )
-    p.add_argument("question", nargs="+", metavar="QUESTION",
-                   help="Your question (quote it or pass as multiple words)")
-    p.add_argument("-c", "--config", default=None, metavar="CONFIG",
-                   help="Optional config YAML — injects your run's config, training log, "
-                        "and most recent PBS output as context")
-    p.add_argument("--provider", default=None,
-                   choices=["anthropic", "openai", "gemini", "groq"],
-                   help="Force a specific LLM provider (default: auto-detect from env keys)")
+    p.add_argument("question", nargs="+", metavar="QUESTION", help="Your question (quote it or pass as multiple words)")
+    p.add_argument(
+        "-c",
+        "--config",
+        default=None,
+        metavar="CONFIG",
+        help="Optional config YAML — injects your run's config, training log, and most recent PBS output as context",
+    )
+    p.add_argument(
+        "--provider",
+        default=None,
+        choices=["anthropic", "openai", "gemini", "groq"],
+        help="Force a specific LLM provider (default: auto-detect from env keys)",
+    )
 
     # ---- init ----
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")
-    p.add_argument("--grid", choices=["0.25deg", "1deg"], default="0.25deg",
-                   help="Horizontal grid resolution (default: 0.25deg)")
-    p.add_argument("--model", choices=["crossformer", "wxformer_v2"], default="wxformer_v2",
-                   help="Model architecture (default: wxformer_v2)")
-    p.add_argument("-o", "--output", default="config.yml", metavar="FILE",
-                   help="Output file path (default: config.yml)")
-    p.add_argument("--force", action="store_true",
-                   help="Overwrite existing output file")
+    p.add_argument(
+        "--grid", choices=["0.25deg", "1deg"], default="0.25deg", help="Horizontal grid resolution (default: 0.25deg)"
+    )
+    p.add_argument(
+        "--model",
+        choices=["crossformer", "wxformer_v2"],
+        default="wxformer_v2",
+        help="Model architecture (default: wxformer_v2)",
+    )
+    p.add_argument(
+        "-o", "--output", default="config.yml", metavar="FILE", help="Output file path (default: config.yml)"
+    )
+    p.add_argument("--force", action="store_true", help="Overwrite existing output file")
 
     return parser
 
@@ -1153,13 +1209,13 @@ def main() -> None:
     _setup_logging()
 
     dispatch = {
-        "train":    _train,
-        "rollout":  _rollout,
+        "train": _train,
+        "rollout": _rollout,
         "realtime": _realtime,
-        "submit":   _submit,
-        "init":     _init,
-        "plot":     _plot,
-        "ask":      _ask,
+        "submit": _submit,
+        "init": _init,
+        "plot": _plot,
+        "ask": _ask,
     }
     dispatch[args.command](args)
 

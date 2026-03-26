@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Memory estimation
 # ---------------------------------------------------------------------------
 
+
 def estimate_dataloader_memory_gb(conf: dict) -> float:
     """Estimate peak CPU RAM used by the DataLoader (GB).
 
@@ -48,31 +49,31 @@ def estimate_dataloader_memory_gb(conf: dict) -> float:
     """
     try:
         trainer_conf = conf.get("trainer", {})
-        data_conf    = conf.get("data", {})
-        model_conf   = conf.get("model", {})
+        data_conf = conf.get("data", {})
+        model_conf = conf.get("model", {})
         src = data_conf.get("source", {}).get("ERA5", {})
-        v   = src.get("variables", {})
+        v = src.get("variables", {})
         prog = v.get("prognostic") or {}
         diag = v.get("diagnostic") or {}
 
-        n_levels   = len(src.get("levels", []))
-        n_vars_3d  = len(prog.get("vars_3D", []))
-        n_vars_2d  = len(prog.get("vars_2D", []))
-        n_diag_2d  = len(diag.get("vars_2D", []))
-        total_ch   = n_vars_3d * n_levels + n_vars_2d + n_diag_2d
+        n_levels = len(src.get("levels", []))
+        n_vars_3d = len(prog.get("vars_3D", []))
+        n_vars_2d = len(prog.get("vars_2D", []))
+        n_diag_2d = len(diag.get("vars_2D", []))
+        total_ch = n_vars_3d * n_levels + n_vars_2d + n_diag_2d
 
         if total_ch == 0:
             return 0.0
 
         H = model_conf.get("image_height", 721)
-        W = model_conf.get("image_width",  1440)
+        W = model_conf.get("image_width", 1440)
 
-        bytes_per_sample = H * W * total_ch * 4        # float32
-        bytes_per_sample *= 2                           # input + target
+        bytes_per_sample = H * W * total_ch * 4  # float32
+        bytes_per_sample *= 2  # input + target
 
-        workers        = trainer_conf.get("thread_workers", 4)
-        prefetch       = trainer_conf.get("prefetch_factor", 4)
-        batch_size     = trainer_conf.get("train_batch_size", 1)
+        workers = trainer_conf.get("thread_workers", 4)
+        prefetch = trainer_conf.get("prefetch_factor", 4)
+        batch_size = trainer_conf.get("train_batch_size", 1)
 
         total_bytes = workers * prefetch * batch_size * bytes_per_sample
         return total_bytes / 1e9
@@ -85,6 +86,7 @@ def _available_ram_gb() -> float:
     """Return available system RAM in GB, or 0 if psutil is not installed."""
     try:
         import psutil
+
         return psutil.virtual_memory().available / 1e9
     except ImportError:
         return 0.0
@@ -93,6 +95,7 @@ def _available_ram_gb() -> float:
 # ---------------------------------------------------------------------------
 # First-batch timeout check
 # ---------------------------------------------------------------------------
+
 
 def _fetch_one_batch(loader):
     """Return the first batch from *loader*, or raise on error."""
@@ -122,19 +125,21 @@ def check_dataloader_startup(
         return
 
     trainer_conf = conf.get("trainer", {})
-    workers  = trainer_conf.get("thread_workers", 4)
+    workers = trainer_conf.get("thread_workers", 4)
     prefetch = trainer_conf.get("prefetch_factor", 4)
-    batch    = trainer_conf.get("train_batch_size", 1)
+    batch = trainer_conf.get("train_batch_size", 1)
 
     # ---- Memory estimate ----
-    est_gb  = estimate_dataloader_memory_gb(conf)
+    est_gb = estimate_dataloader_memory_gb(conf)
     avail_gb = _available_ram_gb()
 
     if est_gb > 0:
         logger.info(
-            "DataLoader memory estimate: %.1f GB "
-            "(workers=%d × prefetch=%d × batch=%d)",
-            est_gb, workers, prefetch, batch,
+            "DataLoader memory estimate: %.1f GB (workers=%d × prefetch=%d × batch=%d)",
+            est_gb,
+            workers,
+            prefetch,
+            batch,
         )
         if avail_gb > 0:
             pct = 100 * est_gb / avail_gb
@@ -144,18 +149,24 @@ def check_dataloader_startup(
                     "Training could hang or OOM. Consider reducing "
                     "thread_workers (currently %d) or prefetch_factor (currently %d) "
                     "in your trainer config.",
-                    est_gb, pct, avail_gb, workers, prefetch,
+                    est_gb,
+                    pct,
+                    avail_gb,
+                    workers,
+                    prefetch,
                 )
             elif pct > 50:
                 logger.info(
                     "DataLoader memory (%.1f GB) is %.0f%% of available RAM (%.1f GB). "
                     "Looks OK, but watch memory if you increase workers or batch size.",
-                    est_gb, pct, avail_gb,
+                    est_gb,
+                    pct,
+                    avail_gb,
                 )
 
     # ---- First-batch timeout ----
     result: dict = {}
-    exc:    dict = {}
+    exc: dict = {}
 
     def _fetch():
         try:
@@ -174,13 +185,14 @@ def check_dataloader_startup(
         # Build a helpful diagnostic message
         mem_hint = (
             f"Estimated DataLoader RAM: {est_gb:.1f} GB "
-            f"({100*est_gb/avail_gb:.0f}% of {avail_gb:.1f} GB available). "
-            if est_gb > 0 and avail_gb > 0 else ""
+            f"({100 * est_gb / avail_gb:.0f}% of {avail_gb:.1f} GB available). "
+            if est_gb > 0 and avail_gb > 0
+            else ""
         )
         raise RuntimeError(
-            f"\n\n{'='*70}\n"
+            f"\n\n{'=' * 70}\n"
             f"DATA LOADING HANG DETECTED — first batch took >{timeout_s:.0f}s\n"
-            f"{'='*70}\n"
+            f"{'=' * 70}\n"
             f"{mem_hint}\n"
             f"Common causes and fixes:\n"
             f"  1. Too many DataLoader workers using too much RAM:\n"
@@ -191,7 +203,7 @@ def check_dataloader_startup(
             f"       Check your data paths are readable from this node.\n"
             f"  4. Workers forking inside a distributed job (common on Derecho):\n"
             f"       Try setting thread_workers: 0 to use the main process only.\n"
-            f"{'='*70}\n"
+            f"{'=' * 70}\n"
         )
 
     if "e" in exc:

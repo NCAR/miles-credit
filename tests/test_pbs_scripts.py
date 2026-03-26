@@ -21,10 +21,18 @@ from credit.cli import _build_pbs_script
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _casper_args(gpus=4, walltime="12:00:00", **kw):
     defaults = dict(
-        cluster="casper", gpus=gpus, nodes=1, cpus=None, mem=None,
-        walltime=walltime, queue=None, gpu_type=None, torchrun=None,
+        cluster="casper",
+        gpus=gpus,
+        nodes=1,
+        cpus=None,
+        mem=None,
+        walltime=walltime,
+        queue=None,
+        gpu_type=None,
+        torchrun=None,
         conda_env=None,
     )
     defaults.update(kw)
@@ -33,28 +41,40 @@ def _casper_args(gpus=4, walltime="12:00:00", **kw):
 
 def _derecho_args(nodes=1, gpus=4, walltime="12:00:00", **kw):
     defaults = dict(
-        cluster="derecho", nodes=nodes, gpus=gpus, cpus=None, mem=None,
-        walltime=walltime, queue=None, conda_env=None,
+        cluster="derecho",
+        nodes=nodes,
+        gpus=gpus,
+        cpus=None,
+        mem=None,
+        walltime=walltime,
+        queue=None,
+        conda_env=None,
     )
     defaults.update(kw)
     return argparse.Namespace(**defaults)
 
 
 FAKE_CONFIG = "/glade/work/user/my_run/config.yml"
-FAKE_REPO   = "/glade/work/user/miles-credit"
+FAKE_REPO = "/glade/work/user/miles-credit"
 FAKE_ACCOUNT = "NAML0001"
 
 
 def _casper_script(depend_on=None, **kw):
     return _build_pbs_script(
-        _casper_args(**kw), FAKE_CONFIG, FAKE_REPO, FAKE_ACCOUNT,
+        _casper_args(**kw),
+        FAKE_CONFIG,
+        FAKE_REPO,
+        FAKE_ACCOUNT,
         depend_on=depend_on,
     )
 
 
 def _derecho_script(nodes=1, depend_on=None, **kw):
     return _build_pbs_script(
-        _derecho_args(nodes=nodes, **kw), FAKE_CONFIG, FAKE_REPO, FAKE_ACCOUNT,
+        _derecho_args(nodes=nodes, **kw),
+        FAKE_CONFIG,
+        FAKE_REPO,
+        FAKE_ACCOUNT,
         depend_on=depend_on,
     )
 
@@ -62,6 +82,7 @@ def _derecho_script(nodes=1, depend_on=None, **kw):
 # ---------------------------------------------------------------------------
 # Casper
 # ---------------------------------------------------------------------------
+
 
 class TestCasperScript:
     def test_has_standalone(self):
@@ -107,6 +128,7 @@ class TestCasperScript:
 # Derecho — single node
 # ---------------------------------------------------------------------------
 
+
 class TestDerechoSingleNode:
     def test_has_standalone(self):
         assert "--standalone" in _derecho_script(nodes=1)
@@ -151,6 +173,7 @@ class TestDerechoSingleNode:
 # Derecho — multi-node
 # ---------------------------------------------------------------------------
 
+
 class TestDerechoMultiNode:
     def test_has_mpiexec(self):
         assert "mpiexec" in _derecho_script(nodes=4)
@@ -187,6 +210,7 @@ class TestDerechoMultiNode:
 # _write_reload_config
 # ---------------------------------------------------------------------------
 
+
 class TestWriteReloadConfig:
     def test_five_fields_set(self, tmp_path):
         import yaml
@@ -204,11 +228,11 @@ class TestWriteReloadConfig:
         with open(reload_path) as f:
             reloaded = yaml.safe_load(f)
 
-        assert reloaded["trainer"]["load_weights"]   is True
+        assert reloaded["trainer"]["load_weights"] is True
         assert reloaded["trainer"]["load_optimizer"] is True
-        assert reloaded["trainer"]["load_scaler"]    is True
+        assert reloaded["trainer"]["load_scaler"] is True
         assert reloaded["trainer"]["load_scheduler"] is True
-        assert reloaded["trainer"]["reload_epoch"]   is True
+        assert reloaded["trainer"]["reload_epoch"] is True
 
     def test_other_fields_preserved(self, tmp_path):
         import yaml
@@ -241,6 +265,7 @@ class TestWriteReloadConfig:
 # Scheduler integration
 # ---------------------------------------------------------------------------
 
+
 class TestSchedulerIntegration:
     def test_load_scheduler_creates_linear_warmup_cosine(self):
         import torch
@@ -264,10 +289,12 @@ class TestSchedulerIntegration:
 
     def test_linear_warmup_cosine_in_update_on_batch(self):
         from credit.scheduler import update_on_batch
+
         assert "linear-warmup-cosine" in update_on_batch
 
     def test_linear_warmup_cosine_not_in_update_on_epoch(self):
         from credit.scheduler import update_on_epoch
+
         assert "linear-warmup-cosine" not in update_on_epoch
 
 
@@ -275,42 +302,47 @@ class TestSchedulerIntegration:
 # Channel map / denorm alignment
 # ---------------------------------------------------------------------------
 
+
 class TestChannelAlignment:
     """_build_channel_map and _build_denorm_stats must agree on C_out."""
 
     def _conf(self, vars_3d, vars_2d, diag_2d, n_levels=5):
         return {
             "data": {
-                "source": {"ERA5": {
-                    "level_coord": "level",
-                    "levels": list(range(n_levels)),
-                    "variables": {
-                        "prognostic": {"vars_3D": vars_3d, "vars_2D": vars_2d},
-                        "diagnostic": {"vars_2D": diag_2d},
-                    },
-                }},
+                "source": {
+                    "ERA5": {
+                        "level_coord": "level",
+                        "levels": list(range(n_levels)),
+                        "variables": {
+                            "prognostic": {"vars_3D": vars_3d, "vars_2D": vars_2d},
+                            "diagnostic": {"vars_2D": diag_2d},
+                        },
+                    }
+                },
                 "mean_path": "/fake/mean.nc",
-                "std_path":  "/fake/std.nc",
+                "std_path": "/fake/std.nc",
             }
         }
 
     def _patch_xr(self, monkeypatch, conf):
         import numpy as np
         import xarray as xr
+
         src = conf["data"]["source"]["ERA5"]
         n = len(src["levels"])
         v = src["variables"]
         all_3d = (v.get("prognostic") or {}).get("vars_3D", [])
-        all_2d = list((v.get("prognostic") or {}).get("vars_2D", [])) + \
-                 list((v.get("diagnostic") or {}).get("vars_2D", []))
-        ds_vars = {vn: xr.DataArray(np.ones(n), dims=["level"],
-                                    coords={"level": src["levels"]}) for vn in all_3d}
+        all_2d = list((v.get("prognostic") or {}).get("vars_2D", [])) + list(
+            (v.get("diagnostic") or {}).get("vars_2D", [])
+        )
+        ds_vars = {vn: xr.DataArray(np.ones(n), dims=["level"], coords={"level": src["levels"]}) for vn in all_3d}
         ds_vars.update({vn: xr.DataArray(np.float32(1.0)) for vn in all_2d})
         ds = xr.Dataset(ds_vars)
         monkeypatch.setattr(xr, "open_dataset", lambda *a, **kw: ds)
 
     def test_lengths_match_simple(self, monkeypatch):
         from credit.cli import _build_channel_map, _build_denorm_stats
+
         conf = self._conf(["U", "V"], ["SP"], [], n_levels=3)
         self._patch_xr(monkeypatch, conf)
         cm = _build_channel_map(conf)
@@ -321,15 +353,17 @@ class TestChannelAlignment:
 
     def test_lengths_match_with_diagnostics(self, monkeypatch):
         from credit.cli import _build_channel_map, _build_denorm_stats
+
         conf = self._conf(["T", "Q"], ["SP", "VAR_2T"], ["precip", "evap"], n_levels=4)
         self._patch_xr(monkeypatch, conf)
         cm = _build_channel_map(conf)
         m, s = _build_denorm_stats(conf)
         total_from_map = sum(len(v) for v in cm.values())
-        assert len(m) == total_from_map == 4*2 + 2 + 2  # 12
+        assert len(m) == total_from_map == 4 * 2 + 2 + 2  # 12
 
     def test_channel_indices_are_contiguous(self):
         from credit.cli import _build_channel_map
+
         conf = self._conf(["U", "V", "T"], ["SP", "VAR_2T"], ["precip"], n_levels=3)
         cm = _build_channel_map(conf)
         all_idx = sorted(c for chans in cm.values() for c in chans)
@@ -340,30 +374,36 @@ class TestChannelAlignment:
 # credit init template existence
 # ---------------------------------------------------------------------------
 
+
 class TestInitTemplates:
     """Every template referenced by _init must exist on disk."""
 
     def test_1deg_template_exists(self):
         import os
         from credit.cli import _repo_root
+
         path = os.path.join(_repo_root(), "config", "wxformer_1dg_6hr_v2.yml")
         assert os.path.exists(path), f"Template missing: {path}"
 
     def test_025deg_template_exists(self):
         import os
         from credit.cli import _repo_root
+
         path = os.path.join(_repo_root(), "config", "wxformer_025deg_6hr_v2.yml")
         assert os.path.exists(path), f"Template missing: {path}"
 
     def test_starter_template_exists(self):
         import os
         from credit.cli import _repo_root
+
         path = os.path.join(_repo_root(), "config", "starter_v2.yml")
         assert os.path.exists(path), f"Template missing: {path}"
 
     def test_templates_are_valid_yaml(self):
-        import os, yaml
+        import os
+        import yaml
         from credit.cli import _repo_root
+
         repo = _repo_root()
         for name in ["wxformer_1dg_6hr_v2.yml", "wxformer_025deg_6hr_v2.yml", "starter_v2.yml"]:
             path = os.path.join(repo, "config", name)
@@ -379,6 +419,7 @@ class TestInitTemplates:
 # _compute_chain — auto-chain from config
 # ---------------------------------------------------------------------------
 
+
 class TestComputeChain:
     """_compute_chain reads epochs/num_epoch from config when --chain not passed."""
 
@@ -390,6 +431,7 @@ class TestComputeChain:
     def test_explicit_chain_respected(self, tmp_path):
         """Explicit --chain N always wins."""
         from credit.cli import _compute_chain
+
         args = self._args(chain=7, config=str(tmp_path / "c.yml"))
         assert _compute_chain(args) == 7
 
@@ -397,6 +439,7 @@ class TestComputeChain:
         """ceil(70 / 5) = 14 when --chain not passed."""
         import yaml
         from credit.cli import _compute_chain
+
         cfg = tmp_path / "conf.yml"
         cfg.write_text(yaml.dump({"trainer": {"epochs": 70, "num_epoch": 5}}))
         assert _compute_chain(self._args(config=str(cfg))) == 14
@@ -405,6 +448,7 @@ class TestComputeChain:
         """ceil(71 / 5) = 15."""
         import yaml
         from credit.cli import _compute_chain
+
         cfg = tmp_path / "conf.yml"
         cfg.write_text(yaml.dump({"trainer": {"epochs": 71, "num_epoch": 5}}))
         assert _compute_chain(self._args(config=str(cfg))) == 15
@@ -413,6 +457,7 @@ class TestComputeChain:
         """Falls back to 1 if config has no trainer.epochs/num_epoch."""
         import yaml
         from credit.cli import _compute_chain
+
         cfg = tmp_path / "conf.yml"
         cfg.write_text(yaml.dump({"trainer": {}}))
         assert _compute_chain(self._args(config=str(cfg))) == 1
@@ -420,6 +465,7 @@ class TestComputeChain:
     def test_fallback_to_1_when_file_missing(self, tmp_path):
         """Falls back to 1 gracefully if config file doesn't exist."""
         from credit.cli import _compute_chain
+
         assert _compute_chain(self._args(config=str(tmp_path / "nope.yml"))) == 1
 
 
@@ -427,27 +473,47 @@ class TestComputeChain:
 # _print_job_plan — smoke test (just checks it runs without error)
 # ---------------------------------------------------------------------------
 
+
 class TestPrintJobPlan:
     def _args(self, cluster="casper", gpus=4, nodes=1, walltime="12:00:00", config=None):
         return argparse.Namespace(
-            cluster=cluster, gpus=gpus, nodes=nodes,
-            walltime=walltime, config=config,
+            cluster=cluster,
+            gpus=gpus,
+            nodes=nodes,
+            walltime=walltime,
+            config=config,
         )
 
     def test_runs_without_error(self, tmp_path, capsys):
         import yaml
         from credit.cli import _print_job_plan
+
         cfg = tmp_path / "conf.yml"
-        cfg.write_text(yaml.dump({
-            "trainer": {"epochs": 70, "num_epoch": 5, "train_batch_size": 1,
-                        "thread_workers": 1, "prefetch_factor": 1},
-            "model": {"image_height": 721, "image_width": 1440},
-            "data": {"source": {"ERA5": {
-                "levels": list(range(13)),
-                "variables": {"prognostic": {"vars_3D": ["T"], "vars_2D": []},
-                              "diagnostic": {"vars_2D": []}},
-            }}},
-        }))
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "trainer": {
+                        "epochs": 70,
+                        "num_epoch": 5,
+                        "train_batch_size": 1,
+                        "thread_workers": 1,
+                        "prefetch_factor": 1,
+                    },
+                    "model": {"image_height": 721, "image_width": 1440},
+                    "data": {
+                        "source": {
+                            "ERA5": {
+                                "levels": list(range(13)),
+                                "variables": {
+                                    "prognostic": {"vars_3D": ["T"], "vars_2D": []},
+                                    "diagnostic": {"vars_2D": []},
+                                },
+                            }
+                        }
+                    },
+                }
+            )
+        )
         _print_job_plan(self._args(config=str(cfg)), n_jobs=14)
         out = capsys.readouterr().out
         assert "Job plan" in out
@@ -456,6 +522,7 @@ class TestPrintJobPlan:
     def test_shows_cluster_and_chain(self, tmp_path, capsys):
         import yaml
         from credit.cli import _print_job_plan
+
         cfg = tmp_path / "conf.yml"
         cfg.write_text(yaml.dump({"trainer": {"epochs": 70, "num_epoch": 5}}))
         _print_job_plan(self._args(cluster="derecho", config=str(cfg)), n_jobs=14)
@@ -466,6 +533,7 @@ class TestPrintJobPlan:
     def test_tolerates_missing_config(self, tmp_path, capsys):
         """Should not raise even if config is missing."""
         from credit.cli import _print_job_plan
+
         _print_job_plan(self._args(config=str(tmp_path / "nope.yml")), n_jobs=1)
         out = capsys.readouterr().out
         assert "Job plan" in out
@@ -475,11 +543,13 @@ class TestPrintJobPlan:
 # credit ask — error-path coverage (no API key or package required)
 # ---------------------------------------------------------------------------
 
+
 class TestCreditAsk:
     """Test _ask error branches — no real API key or network call needed."""
 
     def _ask_args(self, question="test question", config=None, provider=None):
         import argparse
+
         return argparse.Namespace(question=[question], config=config, provider=provider)
 
     def _clear_all_keys(self, monkeypatch):
@@ -490,6 +560,7 @@ class TestCreditAsk:
         """Exits 1 when no provider key is set."""
         self._clear_all_keys(monkeypatch)
         from credit.cli import _ask
+
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
@@ -498,6 +569,7 @@ class TestCreditAsk:
         """Error message lists all four providers."""
         self._clear_all_keys(monkeypatch)
         from credit.cli import _ask
+
         with pytest.raises(SystemExit):
             _ask(self._ask_args())
         err = capsys.readouterr().err
@@ -508,46 +580,55 @@ class TestCreditAsk:
         """--provider gemini exits 1 if GOOGLE_API_KEY is not set."""
         self._clear_all_keys(monkeypatch)
         from credit.cli import _ask
+
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args(provider="gemini"))
         assert exc_info.value.code == 1
 
     def test_anthropic_key_set_but_package_missing_exits_1(self, monkeypatch):
         import sys
+
         self._clear_all_keys(monkeypatch)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
         monkeypatch.setitem(sys.modules, "anthropic", None)
         from credit.cli import _ask
+
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
 
     def test_openai_key_set_but_package_missing_exits_1(self, monkeypatch):
         import sys
+
         self._clear_all_keys(monkeypatch)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
         monkeypatch.setitem(sys.modules, "openai", None)
         from credit.cli import _ask
+
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
 
     def test_groq_key_set_but_package_missing_exits_1(self, monkeypatch):
         import sys
+
         self._clear_all_keys(monkeypatch)
         monkeypatch.setenv("GROQ_API_KEY", "gsk_fake")
         monkeypatch.setitem(sys.modules, "groq", None)
         from credit.cli import _ask
+
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1
 
     def test_gemini_key_set_but_package_missing_exits_1(self, monkeypatch):
         import sys
+
         self._clear_all_keys(monkeypatch)
         monkeypatch.setenv("GOOGLE_API_KEY", "AIza-fake")
         monkeypatch.setitem(sys.modules, "google.generativeai", None)
         from credit.cli import _ask
+
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._ask_args())
         assert exc_info.value.code == 1

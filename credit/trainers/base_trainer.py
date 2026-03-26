@@ -154,17 +154,12 @@ class BaseTrainer(ABC):
         self.save_metric_vars = trainer_conf.get("save_metric_vars", [])
         self.train_one_epoch_mode = trainer_conf.get("train_one_epoch", False)
 
-        training_metric = trainer_conf.get(
-            "training_metric", "train_loss" if self.skip_validation else "valid_loss"
-        )
+        training_metric = trainer_conf.get("training_metric", "train_loss" if self.skip_validation else "valid_loss")
         self.training_metric = training_metric
         direction = trainer_conf.get("training_metric_direction", "min")
         self.direction = min if direction == "min" else max
 
-        logger.info(
-            f"Training metric: {self.training_metric} "
-            f"(direction: {'min' if self.direction is min else 'max'})"
-        )
+        logger.info(f"Training metric: {self.training_metric} (direction: {'min' if self.direction is min else 'max'})")
 
         # ---- EMA setup ----
         use_ema = trainer_conf.get("use_ema", False)
@@ -364,7 +359,6 @@ class BaseTrainer(ABC):
         check_dataloader_startup(conf, train_loader, rank=self.rank, timeout_s=timeout_s)
 
         for epoch in range(start_epoch, epoch_limit):
-
             # Backup previous epoch's checkpoint
             if epoch > start_epoch and self.save_backup_weights and self.rank == 0:
                 for fname in ("checkpoint.pt",):
@@ -439,9 +433,7 @@ class BaseTrainer(ABC):
 
             # ---- Save training log ----
             max_len = max(len(lst) for lst in results_dict.values())
-            padded = OrderedDict(
-                (k, [np.nan] * (max_len - len(v)) + v) for k, v in results_dict.items()
-            )
+            padded = OrderedDict((k, [np.nan] * (max_len - len(v)) + v) for k, v in results_dict.items())
             df = pd.DataFrame.from_dict(padded).reset_index()
             if trial:
                 trial_dir = os.path.join(self.save_loc, "trial_results")
