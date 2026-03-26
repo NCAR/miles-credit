@@ -45,26 +45,23 @@ class Trainer(BaseTrainer):
         self.opt_water = None
         self.opt_energy = None
 
-        if post_self.conf.get("activate", False):
-            if (
-                post_self.conf.get("global_mass_fixer", {}).get("activate", False)
-                and post_self.conf["global_mass_fixer"].get("activate_outside_model", False)
+        if post_conf.get("activate", False):
+            if post_conf.get("global_mass_fixer", {}).get("activate", False) and post_conf["global_mass_fixer"].get(
+                "activate_outside_model", False
             ):
                 logger.info("Activate GlobalMassFixer outside of model")
                 self.flag_mass_conserve = True
                 self.opt_mass = GlobalMassFixer(post_conf)
 
-            if (
-                post_self.conf.get("global_water_fixer", {}).get("activate", False)
-                and post_self.conf["global_water_fixer"].get("activate_outside_model", False)
+            if post_conf.get("global_water_fixer", {}).get("activate", False) and post_conf["global_water_fixer"].get(
+                "activate_outside_model", False
             ):
                 logger.info("Activate GlobalWaterFixer outside of model")
                 self.flag_water_conserve = True
                 self.opt_water = GlobalWaterFixer(post_conf)
 
-            if (
-                post_self.conf.get("global_energy_fixer", {}).get("activate", False)
-                and post_self.conf["global_energy_fixer"].get("activate_outside_model", False)
+            if post_conf.get("global_energy_fixer", {}).get("activate", False) and post_conf["global_energy_fixer"].get(
+                "activate_outside_model", False
             ):
                 logger.info("Activate GlobalEnergyFixer outside of model")
                 self.flag_energy_conserve = True
@@ -72,23 +69,23 @@ class Trainer(BaseTrainer):
 
         # ---- Static data/rollout settings ----
         data_conf = self.conf["data"]
-        self.varnum_diag = len(data_self.conf.get("diagnostic_variables", []))
+        self.varnum_diag = len(data_conf.get("diagnostic_variables", []))
         self.static_dim_size = (
-            len(data_self.conf.get("dynamic_forcing_variables", []))
-            + len(data_self.conf.get("forcing_variables", []))
-            + len(data_self.conf.get("static_variables", []))
+            len(data_conf.get("dynamic_forcing_variables", []))
+            + len(data_conf.get("forcing_variables", []))
+            + len(data_conf.get("static_variables", []))
         )
-        self.retain_graph = data_self.conf.get("retain_graph", False)
-        self.forecast_len = data_self.conf["forecast_len"]
+        self.retain_graph = data_conf.get("retain_graph", False)
+        self.forecast_len = data_conf["forecast_len"]
         if "backprop_on_timestep" in data_conf:
-            self.backprop_on_timestep = data_self.conf["backprop_on_timestep"]
+            self.backprop_on_timestep = data_conf["backprop_on_timestep"]
         else:
             self.backprop_on_timestep = list(range(0, self.forecast_len + 2))
         assert self.forecast_len <= self.backprop_on_timestep[-1], (
             f"forecast_len ({self.forecast_len + 1}) must not exceed the max value "
             f"in backprop_on_timestep {self.backprop_on_timestep}"
         )
-        data_clamp = data_self.conf.get("data_clamp")
+        data_clamp = data_conf.get("data_clamp")
         if data_clamp is None:
             self.flag_clamp = False
             self.clamp_min = None
@@ -98,10 +95,10 @@ class Trainer(BaseTrainer):
             self.clamp_min = float(data_clamp[0])
             self.clamp_max = float(data_clamp[1])
         self.valid_history_len = (
-            data_self.conf["valid_history_len"] if "valid_history_len" in data_conf else data_self.conf["history_len"]
+            data_conf["valid_history_len"] if "valid_history_len" in data_conf else data_conf["history_len"]
         )
         self.valid_forecast_len = (
-            data_self.conf["valid_forecast_len"] if "valid_forecast_len" in data_conf else data_self.conf["forecast_len"]
+            data_conf["valid_forecast_len"] if "valid_forecast_len" in data_conf else data_conf["forecast_len"]
         )
 
     def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
@@ -228,15 +225,15 @@ class Trainer(BaseTrainer):
                 # roll x forward for next step
                 if x.shape[2] == 1:
                     # single-timestep: step-in-step-out
-                    x = y_pred[:, :-self.varnum_diag, ...] if "y_diag" in batch else y_pred
+                    x = y_pred[:, : -self.varnum_diag, ...] if "y_diag" in batch else y_pred
                 else:
                     # multi-timestep: slide window, static channels re-added next pass
                     if self.static_dim_size == 0:
                         x_detach = x[:, :, 1:, ...].detach()
                     else:
-                        x_detach = x[:, :-self.static_dim_size, 1:, ...].detach()
+                        x_detach = x[:, : -self.static_dim_size, 1:, ...].detach()
                     if "y_diag" in batch:
-                        x = torch.cat([x_detach, y_pred[:, :-self.varnum_diag, ...]], dim=2)
+                        x = torch.cat([x_detach, y_pred[:, : -self.varnum_diag, ...]], dim=2)
                     else:
                         x = torch.cat([x_detach, y_pred], dim=2)
 
@@ -412,16 +409,16 @@ class Trainer(BaseTrainer):
 
                     # roll x forward: step-in-step-out
                     elif self.valid_history_len == 1:
-                        x = y_pred[:, :-self.varnum_diag, ...].detach() if "y_diag" in batch else y_pred.detach()
+                        x = y_pred[:, : -self.varnum_diag, ...].detach() if "y_diag" in batch else y_pred.detach()
 
                     # roll x forward: multi-timestep sliding window
                     else:
                         if self.static_dim_size == 0:
                             x_detach = x[:, :, 1:, ...].detach()
                         else:
-                            x_detach = x[:, :-self.static_dim_size, 1:, ...].detach()
+                            x_detach = x[:, : -self.static_dim_size, 1:, ...].detach()
                         if "y_diag" in batch:
-                            x = torch.cat([x_detach, y_pred[:, :-self.varnum_diag, ...].detach()], dim=2)
+                            x = torch.cat([x_detach, y_pred[:, : -self.varnum_diag, ...].detach()], dim=2)
                         else:
                             x = torch.cat([x_detach, y_pred.detach()], dim=2)
 

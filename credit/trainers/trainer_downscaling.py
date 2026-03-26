@@ -59,17 +59,17 @@ class Trainer(BaseTrainer):
         dconf = self.conf["data"]
         tconf = self.conf["trainer"]
 
-        self.batches_per_epoch = tself.conf["batches_per_epoch"]
-        self.grad_max_norm = tself.conf.get("grad_max_norm", 0.0)
-        self.amp = tself.conf["amp"]
-        self.distributed = True if tself.conf["mode"] in ["fsdp", "ddp"] else False
+        self.batches_per_epoch = tconf["batches_per_epoch"]
+        self.grad_max_norm = tconf.get("grad_max_norm", 0.0)
+        self.amp = tconf["amp"]
+        self.distributed = True if tconf["mode"] in ["fsdp", "ddp"] else False
 
-        self.ensemble_size = tself.conf.get("ensemble_size", 1)
+        self.ensemble_size = tconf.get("ensemble_size", 1)
         if self.ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
         logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
 
-        self.forecast_length = dself.conf["forecast_len"]
+        self.forecast_length = dconf["forecast_len"]
 
         self.ccount = count_channels(conf)
 
@@ -218,7 +218,10 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if (
+                self.conf["trainer"]["use_scheduler"]
+                and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -231,8 +234,8 @@ class Trainer(BaseTrainer):
         # write last training sample & prediction to file every so often
         if self.conf["trainer"]["save_data"]:
             saveconf = self.conf["trainer"]["save_data"]
-            if epoch % saveself.conf["frequency"] == 0:
-                wrangler = OutputWrangler(trainloader.dataset, **saveself.conf["output"])
+            if epoch % saveconf["frequency"] == 0:
+                wrangler = OutputWrangler(trainloader.dataset, **saveconf["output"])
                 wrangler.process(batch["y"], batch["dates"], prefix=f"ep{epoch}.target")
                 wrangler.process(y_pred.cpu().detach(), batch["dates"], prefix=f"ep{epoch}.predicted")
 

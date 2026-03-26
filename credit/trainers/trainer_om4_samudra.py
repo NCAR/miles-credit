@@ -123,21 +123,21 @@ class Trainer(BaseTrainer):
         flag_water_conserve = False
         flag_energy_conserve = False
 
-        if post_self.conf["activate"]:
-            if post_self.conf["global_mass_fixer"]["activate"]:
-                if post_self.conf["global_mass_fixer"]["activate_outside_model"]:
+        if post_conf["activate"]:
+            if post_conf["global_mass_fixer"]["activate"]:
+                if post_conf["global_mass_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalMassFixer outside of model")
                     flag_mass_conserve = True
                     opt_mass = GlobalMassFixer(post_conf)
 
-            if post_self.conf["global_water_fixer"]["activate"]:
-                if post_self.conf["global_water_fixer"]["activate_outside_model"]:
+            if post_conf["global_water_fixer"]["activate"]:
+                if post_conf["global_water_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalWaterFixer outside of model")
                     flag_water_conserve = True
                     opt_water = GlobalWaterFixer(post_conf)
 
-            if post_self.conf["global_energy_fixer"]["activate"]:
-                if post_self.conf["global_energy_fixer"]["activate_outside_model"]:
+            if post_conf["global_energy_fixer"]["activate"]:
+                if post_conf["global_energy_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalEnergyFixer outside of model")
                     flag_energy_conserve = True
                     opt_energy = GlobalEnergyFixer(post_conf)
@@ -145,7 +145,7 @@ class Trainer(BaseTrainer):
         # Wet mask always gets applied in Samudra modeling framework
         if epoch == 0:
             logger.info("Activate ocean wet-mask outside of model")
-        opt_wet = WetMaskBlock(conf)
+        opt_wet = WetMaskBlock(self.conf)
 
         # ====================================================== #
 
@@ -365,7 +365,10 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if (
+                self.conf["trainer"]["use_scheduler"]
+                and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -408,7 +411,9 @@ class Trainer(BaseTrainer):
 
         valid_batches_per_epoch = self.conf["trainer"]["valid_batches_per_epoch"]
         forecast_len = (
-            self.conf["data"]["valid_forecast_len"] if "valid_forecast_len" in self.conf["data"] else self.conf["forecast_len"]
+            self.conf["data"]["valid_forecast_len"]
+            if "valid_forecast_len" in self.conf["data"]
+            else self.conf["forecast_len"]
         )
         ensemble_size = self.conf["trainer"].get("ensemble_size", 1)
 
@@ -448,21 +453,21 @@ class Trainer(BaseTrainer):
         flag_water_conserve = False
         flag_energy_conserve = False
 
-        if post_self.conf["activate"]:
-            if post_self.conf["global_mass_fixer"]["activate"]:
-                if post_self.conf["global_mass_fixer"]["activate_outside_model"]:
+        if post_conf["activate"]:
+            if post_conf["global_mass_fixer"]["activate"]:
+                if post_conf["global_mass_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalMassFixer outside of model")
                     flag_mass_conserve = True
                     opt_mass = GlobalMassFixer(post_conf)
 
-            if post_self.conf["global_water_fixer"]["activate"]:
-                if post_self.conf["global_water_fixer"]["activate_outside_model"]:
+            if post_conf["global_water_fixer"]["activate"]:
+                if post_conf["global_water_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalWaterFixer outside of model")
                     flag_water_conserve = True
                     opt_water = GlobalWaterFixer(post_conf)
 
-            if post_self.conf["global_energy_fixer"]["activate"]:
-                if post_self.conf["global_energy_fixer"]["activate_outside_model"]:
+            if post_conf["global_energy_fixer"]["activate"]:
+                if post_conf["global_energy_fixer"]["activate_outside_model"]:
                     logger.info("Activate GlobalEnergyFixer outside of model")
                     flag_energy_conserve = True
                     opt_energy = GlobalEnergyFixer(post_conf)
@@ -470,7 +475,7 @@ class Trainer(BaseTrainer):
         # Wet mask always gets applied in Samudra modeling framework
         if epoch == 0:
             logger.info("Activate ocean wet-mask outside of model")
-        opt_wet = WetMaskBlock(conf)
+        opt_wet = WetMaskBlock(self.conf)
         # ====================================================== #
 
         batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
