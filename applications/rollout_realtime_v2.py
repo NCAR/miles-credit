@@ -128,13 +128,16 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
     for groups in [("vars_3D", True), ("vars_2D", False)]:
         for vname in prog.get(groups[0], []):
             m, s = _stats(vname, groups[1])
-            means.append(m); stds.append(s)
+            means.append(m)
+            stds.append(s)
     for groups in [("vars_3D", True), ("vars_2D", False)]:
         for vname in diag.get(groups[0], []):
             m, s = _stats(vname, groups[1])
-            means.append(m); stds.append(s)
+            means.append(m)
+            stds.append(s)
 
-    mean_ds.close(); std_ds.close()
+    mean_ds.close()
+    std_ds.close()
     return (
         torch.cat(means).view(1, -1, 1, 1, 1).to(device),
         torch.cat(stds).view(1, -1, 1, 1, 1).to(device),
@@ -227,11 +230,14 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     flag_mass = flag_water = flag_energy = False
     if post_conf.get("activate", False):
         if post_conf.get("global_mass_fixer", {}).get("activate_outside_model", False):
-            flag_mass = True; opt_mass = GlobalMassFixer(post_conf)
+            flag_mass = True
+            opt_mass = GlobalMassFixer(post_conf)
         if post_conf.get("global_water_fixer", {}).get("activate_outside_model", False):
-            flag_water = True; opt_water = GlobalWaterFixer(post_conf)
+            flag_water = True
+            opt_water = GlobalWaterFixer(post_conf)
         if post_conf.get("global_energy_fixer", {}).get("activate_outside_model", False):
-            flag_energy = True; opt_energy = GlobalEnergyFixer(post_conf)
+            flag_energy = True
+            opt_energy = GlobalEnergyFixer(post_conf)
 
     # ---- Model ----
     _inject_tracer_inds(conf)
