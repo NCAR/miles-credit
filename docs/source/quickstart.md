@@ -226,45 +226,34 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 runs commands, iterates) when Anthropic is available, or falls back to simple chat
 (Groq, Gemini, OpenAI) otherwise.
 
-:::{note}
-**NCAR users on Casper or Derecho — shared Anthropic credits are available now:**
-
-```bash
-# Add to ~/.bashrc so it persists across sessions
-module use /glade/work/bdobbins/llms/modules
-module load llms
-
-# That's it — credit ask picks up the key automatically
-credit ask "how do I resume a failed Derecho job?"
-credit ask -c my_run.yml "why did my training run crash?"
-```
-
-Access is open to all NCAR staff while credits are available.
-Contact [milescore@ucar.edu](mailto:milescore@ucar.edu) if you expect heavy usage.
-:::
-
 ```bash
 pip install "miles-credit[ask]"
 
-# With ANTHROPIC_API_KEY set: runs full agent mode — reads your PBS log, config, and source
-credit ask -c my_run.yml "why did my training run crash?"
-credit ask -c my_run.yml "review this config before I start a 200-epoch run on 8 H100s"
-credit ask "what PBS jobs are running and how much walltime do they have left?"
-credit ask "how does ConcatPreblock assemble the batch tensor?"
+# Set whichever key you have — free options work well for quick questions:
+export GROQ_API_KEY=gsk_...           # https://console.groq.com       (free, no card needed)
+export GOOGLE_API_KEY=AIza...         # https://aistudio.google.com    (free)
+export OPENAI_API_KEY=sk-...          # https://platform.openai.com
+export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com  (enables agent mode)
 
-# Without Anthropic: simple one-shot Q&A via Groq/Gemini/OpenAI
 credit ask "how do I resume a failed Derecho job?"
 credit ask -c my_run.yml "my loss stopped decreasing at epoch 12, what should I check?"
 ```
-
-**Non-NCAR users — set any one of these keys and the right mode is chosen automatically:**
 
 | Provider | Env var | Mode | Cost |
 |----------|---------|------|------|
 | **Anthropic** | `ANTHROPIC_API_KEY` | Agent (multi-turn, reads files) | ~$0.01–0.05/session |
 | OpenAI | `OPENAI_API_KEY` | Simple chat | Pay-per-use |
-| Google | `GOOGLE_API_KEY` | Simple chat | Free via AI Studio |
+| Google | `GOOGLE_API_KEY` | Simple chat | Free |
 | Groq | `GROQ_API_KEY` | Simple chat | Free tier (no card needed) |
+
+Priority when multiple keys are set: Anthropic agent → OpenAI → Google → Groq.
+
+```bash
+# Agent mode: reads your PBS log, config, and source to give a specific answer
+credit ask -c my_run.yml "why did my training run crash?"
+credit ask -c my_run.yml "review this config before I start a 200-epoch run on 8 H100s"
+credit ask "what PBS jobs are running and how much walltime do they have left?"
+```
 
 See the full [AI Assistant documentation](agent.md) for all examples, options, and cost details.
 

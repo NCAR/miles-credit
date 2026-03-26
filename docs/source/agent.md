@@ -12,32 +12,24 @@ best mode available based on your API keys:
 
 ## Quick start
 
-**NCAR users on Casper or Derecho** — shared Anthropic credits are available now.
-No personal API key or billing required:
-
 ```bash
-# Add to ~/.bashrc so it persists across sessions
-module use /glade/work/bdobbins/llms/modules
-module load llms
-
 pip install "miles-credit[ask]"
+
+# Free — no card needed, works immediately
+export GROQ_API_KEY=gsk_...        # https://console.groq.com
+
+# Or use your own Anthropic key to unlock agent mode (~$0.01–0.05/session)
+export ANTHROPIC_API_KEY=sk-ant-...  # https://console.anthropic.com
 
 credit ask "why did my last training run crash?"
 credit ask -c config.yml "is my learning rate too high for 0.25 degree?"
 ```
 
-**Everyone else:**
-
-```bash
-pip install "miles-credit[ask]"
-export ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com → API keys
-
-credit ask "why did my last training run crash?"
-```
-
 > **Note:** A Claude.ai Pro subscription does *not* include API access — billing is
 > separate at [console.anthropic.com/settings/billing](https://console.anthropic.com/settings/billing).
 > A typical session costs **$0.01–0.05**. See [Cost](#cost) for details.
+
+> **NCAR users:** institutional API access is in development. Check back soon.
 
 ---
 
@@ -94,18 +86,13 @@ pip install "miles-credit[ask]"
 
 ### 2. Get an API key
 
-**NCAR users (Casper / Derecho):** shared Anthropic credits are available for all NCAR staff.
-Add these two lines to your `~/.bashrc`:
+**Free option — no account required beyond a free Groq signup:**
 
 ```bash
-module use /glade/work/bdobbins/llms/modules
-module load llms
+export GROQ_API_KEY=gsk_...    # https://console.groq.com  (free tier, no card needed)
 ```
 
-Then `source ~/.bashrc` (or log in again).  `credit ask` will pick up the key automatically.
-Contact [milescore@ucar.edu](mailto:milescore@ucar.edu) if you expect heavy usage.
-
-**Everyone else:**
+**Anthropic (enables full agent mode):**
 
 1. Sign up or log in at [console.anthropic.com](https://console.anthropic.com)
 2. Go to **API Keys** → **Create Key**
@@ -118,11 +105,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> ~/.bashrc
 ```
 
-Or use a free provider (no Anthropic key needed):
-
-```bash
-export GROQ_API_KEY=gsk_...    # https://console.groq.com  (free, no card)
-```
+> **NCAR users:** institutional API access is in development. Check back soon.
 
 ---
 
@@ -294,14 +277,11 @@ API credits are separate from a Claude.ai subscription.
 
 **`No API key found`**
 ```bash
-# NCAR users:
-module use /glade/work/bdobbins/llms/modules
-module load llms
+# Free option — no card needed:
+export GROQ_API_KEY=gsk_...          # https://console.groq.com
 
-# Everyone else:
-export ANTHROPIC_API_KEY=sk-ant-...
-# or free alternatives:
-export GROQ_API_KEY=gsk_...
+# Or use your own Anthropic key for agent mode:
+export ANTHROPIC_API_KEY=sk-ant-...  # https://console.anthropic.com
 ```
 
 **`anthropic package required`**

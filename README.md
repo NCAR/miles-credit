@@ -21,28 +21,22 @@ to be under active development. Please contact [the MILES group](mailto:milescor
 ## AI assistant
 
 `credit ask` is a unified AI assistant — it automatically runs in agent mode (reads your
-files, runs shell commands, iterates until it has a confident answer) when Anthropic is
-available, or falls back to simple chat (Groq/Gemini/OpenAI) otherwise.
-
-**NCAR users on Casper or Derecho:** shared Anthropic credits are available for all NCAR staff.
-Add these lines to `~/.bashrc` — no personal API key required:
-```bash
-module use /glade/work/bdobbins/llms/modules
-module load llms
-```
+files, runs shell commands, iterates until it has a confident answer) when an Anthropic key
+is available, or falls back to simple chat (Groq/Gemini/OpenAI) otherwise.
 
 ```bash
 pip install "miles-credit[ask]"
 
-# Agent mode (Anthropic key set): reads PBS logs, config, and source to diagnose crashes
-credit ask -c my_run.yml "why did my training run crash?"
+# Free — no card needed
+export GROQ_API_KEY=gsk_...        # https://console.groq.com
 
-# Simple chat fallback (any key): one-shot Q&A
+# Or use your own Anthropic key for full agent mode (~$0.01–0.05/session)
+export ANTHROPIC_API_KEY=sk-ant-...  # https://console.anthropic.com
+
 credit ask "why is my loss not decreasing?"
+credit ask -c my_run.yml "why did my training run crash?"
 ```
 
-Non-NCAR users: agent mode requires an Anthropic API key (~$0.01–0.05 per session).
-Simple chat is free via Groq (`export GROQ_API_KEY=gsk_...`).
 See the [AI Assistant documentation](https://miles-credit.readthedocs.io/en/latest/agent.html) for the full reference.
 
 MILES CREDIT also provides more detailed [documentation](https://miles-credit.readthedocs.io/en/latest/) with installation
