@@ -47,6 +47,10 @@ echo "Clone done."
 echo "[2/3] Installing miles-credit in editable mode …"
 source activate "$TARGET_ENV"
 
+# Upgrade pip/setuptools first — older cloned envs may have versions
+# that cannot parse pyproject.toml license = {text = "..."} correctly
+pip install --upgrade pip setuptools wheel --quiet
+
 # Remove any previously installed (non-editable) miles-credit
 pip uninstall -y miles-credit 2>/dev/null || true
 

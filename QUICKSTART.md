@@ -10,18 +10,26 @@ Full documentation: https://miles-credit.readthedocs.io/en/latest/quickstart.htm
 
 **NCAR Casper:**
 ```bash
-conda activate /glade/u/home/schreck/.conda/envs/credit-casper
-git clone https://github.com/NCAR/miles-credit.git
-cd miles-credit
-pip install -e . --no-deps
+conda activate /glade/work/schreck/conda-envs/credit-main-casper
 ```
 
 **NCAR Derecho:**
 ```bash
-conda activate /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221
-git clone https://github.com/NCAR/miles-credit.git
-cd miles-credit
-pip install -e . --no-deps
+module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cuda/12.3.2 conda/latest
+conda activate /glade/work/schreck/conda-envs/credit-main-derecho
+```
+
+Both envs have `miles-credit` installed in editable mode from
+`/glade/work/schreck/repos/miles-credit-main` — `git pull` picks up changes automatically.
+No `pip install` needed.
+
+**Rebuild the env** (if you need a fresh clone):
+```bash
+# Casper — submit from a Casper login node
+qsub scripts/build_env_casper.sh
+
+# Derecho — submit from a Derecho login node
+qsub scripts/build_env_derecho.sh
 ```
 
 **Other systems:**

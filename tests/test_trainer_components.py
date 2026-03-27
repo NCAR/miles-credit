@@ -359,3 +359,199 @@ class TestTrainerSubclassInstantiation:
         from credit.trainers.trainer_om4_samudra import Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
+
+
+# ---------------------------------------------------------------------------
+# Multi-step training (forecast_len > 1) — ERA5 v2 trainer
+# ---------------------------------------------------------------------------
+
+
+def _era5_v2_multistep_conf(forecast_len, tmp_path):
+    """Minimal conf for trainerERA5v2.Trainer with forecast_len > 1."""
+    base = _minimal_conf()
+    base["save_loc"] = str(tmp_path)
+    base["trainer"]["batches_per_epoch"] = 1
+    base["trainer"]["valid_batches_per_epoch"] = 1
+    base["data"] = {
+        "forecast_len": forecast_len,
+        "retain_graph": False,
+        "scaler_type": "std_new",
+        "source": {
+            "ERA5": {
+                "levels": [],
+                "variables": {
+                    "prognostic": {"vars_3D": [], "vars_2D": ["a", "b", "c", "d"]},
+                    "diagnostic": {"vars_3D": [], "vars_2D": []},
+                    "dynamic_forcing": {"vars_2D": []},
+                    "static": {"vars_2D": []},
+                },
+            }
+        },
+        "mean_path": "/dev/null",
+        "std_path": "/dev/null",
+    }
+    return base
+
+
+class _FakeDataset:
+    """Stub dataset so the batches_per_epoch resolution logic doesn't crash."""
+
+    pass
+
+
+class _FakeLoader:
+    """Minimal iterable loader that yields pre-assembled {x, y} batches."""
+
+    def __init__(self, B, C, H, W, n_batches):
+        self.dataset = _FakeDataset()
+        self.sampler = None
+        self._shape = (B, C, H, W)
+        self._n = n_batches
+
+    def __len__(self):
+        return self._n
+
+    def __iter__(self):
+        import torch
+
+        for _ in range(self._n):
+            x = torch.randn(*self._shape)
+            y = torch.randn(*self._shape)
+            yield {"x": x, "y": y}
+
+
+class TestERA5v2MultiStepTraining:
+    """Verify forecast_len > 1 in the v2 trainer autoregressive loop."""
+
+    def test_forecast_len_2_init(self, tmp_path):
+        from unittest.mock import patch
+        import torch.nn as nn
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            t = Trainer(_tiny_model(), rank=0, conf=conf)
+
+        assert t.forecast_len == 2
+        assert t.backprop_on_timestep == [1, 2]
+        assert t.static_dim_size == 0
+        assert t.varnum_diag == 0
+
+    def test_backprop_on_timestep_default_covers_all_steps(self, tmp_path):
+        from unittest.mock import patch
+        import torch.nn as nn
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        for fl in [1, 2, 3]:
+            conf = _era5_v2_multistep_conf(forecast_len=fl, tmp_path=tmp_path)
+            with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+                t = Trainer(_tiny_model(), rank=0, conf=conf)
+            assert t.backprop_on_timestep == list(range(1, fl + 1))
+
+    def test_2step_train_one_epoch_runs(self, tmp_path):
+        """2-step autoregressive loop completes on CPU with toy data."""
+        import torch
+        import torch.nn as nn
+        from unittest.mock import patch
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        B, C, H, W = 1, 4, 4, 4
+        forecast_len = 2
+
+        # 1x1 conv so shapes stay intact and model has real parameters
+        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+
+        conf = _era5_v2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            trainer = Trainer(model, rank=0, conf=conf)
+
+        # _FakeLoader yields forecast_len * batches_per_epoch batches total
+        loader = _FakeLoader(B, C, H, W, n_batches=forecast_len)
+
+        def _metrics(pred, y):
+            return {"acc": 0.0, "mae": 0.0}
+
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
+        criterion = nn.MSELoss()
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        results = trainer.train_one_epoch(
+            epoch=0,
+            trainloader=loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            scaler=scaler,
+            scheduler=None,
+            metrics=_metrics,
+        )
+
+        assert "train_loss" in results
+        assert len(results["train_loss"]) == 1
+        assert results["train_forecast_len"][-1] == forecast_len
+        assert torch.isfinite(torch.tensor(results["train_loss"][0]))
+
+    def test_2step_x_replaced_with_y_pred(self, tmp_path):
+        """At t=2, prognostic channels of x must equal y_pred from t=1."""
+        import torch
+        import torch.nn as nn
+        from unittest.mock import patch
+        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.preblock import apply_preblocks
+
+        B, C, H, W = 1, 4, 4, 4
+        captured = {}
+
+        class _ConstModel(nn.Module):
+            """Returns a fixed tensor so we can track what y_pred was at t=1."""
+
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.ones(1))  # needs a param for optimizer
+
+            def forward(self, x):
+                out = x * self.w  # shape preserved, differentiable
+                captured["last_x"] = x.detach().clone()
+                captured["last_out"] = out.detach().clone()
+                return out
+
+        model = _ConstModel()
+        conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            trainer = Trainer(model, rank=0, conf=conf)
+
+        step = [0]
+        x_at_step1_out = [None]
+
+        original_apply = apply_preblocks
+
+        def _patched_apply(preblocks, batch):
+            batch = original_apply(preblocks, batch)
+            step[0] += 1
+            if step[0] == 1:
+                x_at_step1_out[0] = batch["x"].clone()
+            return batch
+
+        def _metrics(pred, y):
+            return {"acc": 0.0, "mae": 0.0}
+
+        loader = _FakeLoader(B, C, H, W, n_batches=2)
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
+        criterion = nn.MSELoss()
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        with patch("credit.trainers.trainerERA5v2.apply_preblocks", side_effect=_patched_apply):
+            trainer.train_one_epoch(
+                epoch=0,
+                trainloader=loader,
+                optimizer=optimizer,
+                criterion=criterion,
+                scaler=scaler,
+                scheduler=None,
+                metrics=_metrics,
+            )
+
+        # At t=2 the model sees x = y_pred from t=1 = x_at_step1_out (since model is identity-like)
+        # captured["last_x"] is the x fed to the model at t=2
+        assert captured["last_x"] is not None
+        expected = x_at_step1_out[0]  # y_pred at t=1 = model(x_t1) = x_t1 * 1.0 ≈ x_t1
+        torch.testing.assert_close(captured["last_x"], expected, atol=1e-5, rtol=1e-5)

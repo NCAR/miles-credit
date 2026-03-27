@@ -3,6 +3,21 @@
 This is a temporary file for testers reviewing this PR before merge.
 It covers what changed, how to get set up, and what to exercise.
 
+**Full documentation:** https://miles-credit.readthedocs.io/en/latest/
+
+| Topic | Doc page |
+|-------|----------|
+| Installation & environment setup | https://miles-credit.readthedocs.io/en/latest/installation.html |
+| Quickstart | https://miles-credit.readthedocs.io/en/latest/quickstart.html |
+| Getting started guide | https://miles-credit.readthedocs.io/en/latest/getting-started.html |
+| Config file reference | https://miles-credit.readthedocs.io/en/latest/config.html |
+| Training | https://miles-credit.readthedocs.io/en/latest/Training.html |
+| Inference / rollout | https://miles-credit.readthedocs.io/en/latest/Inference.html |
+| Ensemble inference | https://miles-credit.readthedocs.io/en/latest/EnsemblesInference.html |
+| Model architectures | https://miles-credit.readthedocs.io/en/latest/Model_Architectures.html |
+| Datasets | https://miles-credit.readthedocs.io/en/latest/DataSets.html |
+| Losses | https://miles-credit.readthedocs.io/en/latest/Losses.html |
+
 ---
 
 ## 1. Get the branch
@@ -25,21 +40,19 @@ git pull
 
 ## 2. Set up your environment
 
-**Casper** (activate schreck's pre-built env, no install needed):
+**Casper:**
 ```bash
 module load conda
-conda activate /glade/u/home/schreck/.conda/envs/credit-casper
-cd miles-credit
-pip install -e . --no-deps
+conda activate /glade/work/schreck/conda-envs/credit-main-casper
 ```
 
 **Derecho:**
 ```bash
-module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 cuda/12.3.2 conda/latest
+module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cuda/12.3.2 conda/latest
 conda activate /glade/work/schreck/conda-envs/credit-main-derecho
-cd miles-credit
-pip install -e . --no-deps
 ```
+
+Both envs have `miles-credit` installed in editable mode — no `pip install` needed.
 
 Verify install:
 ```bash
