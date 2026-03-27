@@ -36,11 +36,7 @@ class LogTransform(BasePreblock):
         # Validate data_types at init
         invalid = set(self.data_types) - set(self.VALID_DATA_TYPES)
         if invalid:
-            raise ValueError(
-                f"Invalid data_types {invalid}. "
-                f"Valid options are {self.VALID_DATA_TYPES}. "
-                f"Preblocks never operate on 'metadata'."
-            )
+            raise ValueError(f"Invalid data_types {invalid}. Valid options are {self.VALID_DATA_TYPES}. ")
 
         if base == "e":
             self._log_fn = torch.log
@@ -71,6 +67,6 @@ class LogTransform(BasePreblock):
 
                 x = batch[source][data_type][var_key]
                 # Out-of-place: safe for autograd
-                batch[source][data_type][var_key] = self._log_fn(x + self.eps)
+                batch[source][data_type][var_key] = self._log_fn(x + self.eps) - self._log_fn(self.eps)
 
         return batch
