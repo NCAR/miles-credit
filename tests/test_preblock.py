@@ -5,10 +5,29 @@ import pytest
 import torch
 import xarray as xr
 from bridgescaler.distributed_tensor import DStandardScalerTensor
-from bridgescaler import save_scaler
+from bridgescaler import save_scaler_dict, scale_var_dict
+from credit.preblock.regrid import Regridder
+from credit.preblock.scaler import BridgeScaleTransformer
 
-from credit.preblock.regrid import Regrid
-from credit.preblock.scaler import Scaler
+
+def create_synthetic_data() -> dict:
+    """
+    Creates synthetic data as a nested dictionary of torch tensors.
+
+    Structure: data[source][split][var_name]
+    - source: "ERA5"
+    - split: "input" | "target"
+    - var_name: "era5/pronostic/3d/T" | "era5/pronostic/3d/U" | "era5/pronostic/3d/V"
+    - tensor shape: (100, 16, 1, 8, 8)
+    """
+    shape = (100, 16, 1, 8, 8)
+    var_names = [
+        "era5/pronostic/3d/T",
+        "era5/pronostic/3d/U",
+        "era5/pronostic/3d/V",
+    ]
+
+    return {"era5": {split: {var: torch.randn(*shape) for var in var_names} for split in ("input", "target")}}
 
 
 # ---------------------------------------------------------------------------
@@ -20,17 +39,17 @@ from credit.preblock.scaler import Scaler
 def weight_file(tmp_path):
     """Write a minimal ESMF-compatible weight file and return its path.
 
-    Represents a 2:1 block-average downsampling from a 384×576 source grid to the
-    192×288 CREDIT destination grid.  Each destination cell is the average of the
-    4 corresponding source cells (weight = 0.25 each).
+    Represents a 2:1 block-average downsampling from an 8×8 source grid to a
+    4×4 destination grid, matching create_synthetic_data().  Each destination
+    cell is the average of the 4 corresponding source cells (weight = 0.25 each).
 
     Only the variables read by Regrid.__init__ are written:
       - dst_grid_dims: [nlon, nlat] SCRIP/ESMF convention; Regrid reverses with [::-1]
       - row, col, S:   1-based COO sparse entries
       - mask_a/b:      stubs so xarray exposes the n_a / n_b dimension sizes
     """
-    n_src_lat, n_src_lon = 384, 576
-    n_dst_lat, n_dst_lon = 192, 288
+    n_src_lat, n_src_lon = 8, 8
+    n_dst_lat, n_dst_lon = 4, 4
 
     # Build the COO sparse entries with numpy (vectorized, no Python loop)
     j_dst, i_dst = np.indices((n_dst_lat, n_dst_lon))
@@ -71,37 +90,55 @@ def weight_file(tmp_path):
 
 
 def test_regrid_output_shape(weight_file):
-    """Downsampling regrid produces the destination grid shape."""
+    """Downsampling regrid produces the destination grid shape for all splits."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    regrid = Regrid(path)
-    x = torch.randn(2, n_src_lat, n_src_lon)
-    assert regrid(x).shape == (2, n_dst_lat, n_dst_lon)
+    variables = ["era5/pronostic/3d/T"]
+    regrid = Regridder(path, variables=variables)
+    batch = create_synthetic_data()
+    result = regrid(batch)
+    for split in ("input", "target"):
+        assert result["era5"][split]["era5/pronostic/3d/T"].shape == (100, 16, 1, n_dst_lat, n_dst_lon)
 
 
 def test_regrid_uniform_input(weight_file):
     """Block-average regrid: uniform input maps to uniform output of the same value."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    regrid = Regrid(path)
-    x = torch.ones(n_src_lat, n_src_lon)
-    assert torch.allclose(regrid(x), torch.ones(n_dst_lat, n_dst_lon), atol=1e-5)
+    variables = ["era5/pronostic/3d/T"]
+    regrid = Regridder(path, variables=variables)
+    batch = {"era5": {"input": {"era5/pronostic/3d/T": torch.ones(1, 1, 1, n_src_lat, n_src_lon)}}}
+    result = regrid(batch)
+    assert torch.allclose(
+        result["era5"]["input"]["era5/pronostic/3d/T"],
+        torch.ones(1, 1, 1, n_dst_lat, n_dst_lon),
+        atol=1e-5,
+    )
 
 
 def test_regrid_reshape_false(weight_file):
-    """reshape_to_xy=False returns a flat (batch, n_b) tensor."""
+    """reshape_to_xy=False returns a flat (prod(lead_dims), n_b) tensor."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    regrid = Regrid(path, reshape_to_xy=False)
-    x = torch.randn(2, n_src_lat, n_src_lon)
-    assert regrid(x).shape == (2, n_dst_lat * n_dst_lon)
+    variables = ["era5/pronostic/3d/T"]
+    regrid = Regridder(path, variables=variables, reshape_to_xy=False)
+    batch = create_synthetic_data()
+    result = regrid(batch)
+    assert result["era5"]["input"]["era5/pronostic/3d/T"].shape == (100 * 16 * 1, n_dst_lat * n_dst_lon)
 
 
 def test_regrid_flip_axis(weight_file):
     """flip_axis is applied to the input before regridding."""
+    import copy
+
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    regrid = Regrid(path)
-    regrid_flip = Regrid(path, flip_axis=[-1])
-    x = torch.randn(n_src_lat, n_src_lon)
-    # For a non-uniform input, flipping before regridding should give a different result
-    assert not torch.allclose(regrid(x), regrid_flip(x))
+    variables = ["era5/pronostic/3d/T"]
+    regrid = Regridder(path, variables=variables)
+    regrid_flip = Regridder(path, variables=variables, flip_axis=[-1])
+    batch = create_synthetic_data()
+    result = regrid(copy.deepcopy(batch))
+    result_flip = regrid_flip(copy.deepcopy(batch))
+    assert not torch.allclose(
+        result["era5"]["input"]["era5/pronostic/3d/T"],
+        result_flip["era5"]["input"]["era5/pronostic/3d/T"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -116,40 +153,75 @@ def scaler_file(tmp_path):
     Uses 16 channels to match typical CREDIT usage.  Spatial size is kept small
     (8×8) so the fixture stays fast.
     """
-    n_channels = 16
-    x_fit = torch.from_numpy(np.random.random((100, n_channels, 1, 8, 8)))
+    x_dict = create_synthetic_data()
+    variables = x_dict["era5"]["input"].keys()
     scaler = DStandardScalerTensor(channels_last=False)
-    scaler.fit(x_fit)
+    scaler_dict = scale_var_dict(x_dict, scaler, method="fit")
     path = str(tmp_path / "scaler.json")
-    save_scaler(scaler, path)
-    return path, n_channels
+    save_scaler_dict(scaler_dict, path)
+    return path, variables, x_dict
 
 
 # ---------------------------------------------------------------------------
 # Scaler tests
 # ---------------------------------------------------------------------------
 
+# VAR_NAMES = ["era5/pronostic/3d/T", "era5/pronostic/3d/U", "era5/pronostic/3d/V"]
+
 
 def test_scaler_output_shape(scaler_file):
-    """Transform preserves the input tensor shape."""
-    path, n_channels = scaler_file
-    scaler = Scaler(path)
-    x = torch.from_numpy(np.random.random((2, n_channels, 1, 8, 8)))
-    assert scaler(x).shape == x.shape
+    """Transform preserves the input tensor shape for every variable."""
+    path, variables, data = scaler_file
+    scaler = BridgeScaleTransformer(scaler_path=path, variables=list(variables), method="transform")
+    original_shapes = {v: data["era5"]["input"][v].shape for v in variables}
+    result = scaler(data)
+    for v in variables:
+        assert result["era5"]["input"][v].shape == original_shapes[v]
 
 
 def test_scaler_transform_changes_values(scaler_file):
     """Transform produces different values than the raw input."""
-    path, n_channels = scaler_file
-    scaler = Scaler(path)
-    x = torch.from_numpy(np.random.random((2, n_channels, 1, 8, 8)))
-    assert not torch.allclose(scaler(x).float(), x.float())
+    path, variables, data = scaler_file
+    scaler = BridgeScaleTransformer(scaler_path=path, variables=list(variables), method="transform")
+    var = list(variables)[0]
+    original = data["era5"]["input"][var].clone()
+    result = scaler(data)
+    assert not torch.allclose(result["era5"]["input"][var].float(), original.float())
 
 
 def test_scaler_round_trip(scaler_file):
-    """transform followed by inverse_transform recovers the original tensor."""
-    path, n_channels = scaler_file
-    fwd = Scaler(path, inverse=False)
-    inv = Scaler(path, inverse=True)
-    x = torch.from_numpy(np.random.random((2, n_channels, 1, 8, 8)))
-    assert torch.allclose(inv(fwd(x)).float(), x.float(), atol=1e-5)
+    """transform followed by inverse recovers the original tensor."""
+    path, variables, data = scaler_file
+    var_list = list(variables)
+    fwd = BridgeScaleTransformer(scaler_path=path, variables=var_list, method="transform")
+    inv = BridgeScaleTransformer(scaler_path=path, variables=var_list, method="inverse")
+    var = var_list[0]
+    original = data["era5"]["input"][var].clone()
+    data = fwd(data)
+    data = inv(data)
+    assert torch.allclose(data["era5"]["input"][var].float(), original.float(), atol=1e-5)
+
+
+def test_scaler_invalid_data_type(scaler_file):
+    """Passing an invalid data_type raises ValueError at init."""
+    path, variables, _ = scaler_file
+    with pytest.raises(ValueError, match="Invalid data_types"):
+        BridgeScaleTransformer(
+            scaler_path=path,
+            variables=list(variables),
+            method="transform",
+            data_types=["not_a_valid_type"],
+        )
+
+
+def test_scaler_raises_missing_source(scaler_file):
+    """forward raises KeyError if a variable's source is absent from the batch."""
+    path, variables, data = scaler_file
+    # Use a variable that references a source not in the batch
+    scaler = BridgeScaleTransformer(
+        scaler_path=path,
+        variables=["MISSING_SOURCE/prognostic/3d/T"],
+        method="transform",
+    )
+    with pytest.raises(KeyError):
+        scaler(data)
