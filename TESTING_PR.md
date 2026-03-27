@@ -35,7 +35,7 @@ pip install -e . --no-deps
 
 **Derecho:**
 ```bash
-module load ncarenv/24.12 gcc/12.4.0 ncarcompilers cray-mpich/8.1.29 cuda/12.3.2 conda/latest
+module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 cuda/12.3.2 conda/latest
 conda activate /glade/work/schreck/conda-envs/credit-main-derecho
 cd miles-credit
 pip install -e . --no-deps
