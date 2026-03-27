@@ -1,0 +1,46 @@
+config: "/glade/derecho/scratch/dkimpara/CREDIT_runs/skebs_fcnn_scaled_train/model.yml"
+grid: "equiangular" #move this to data config in model conf?
+
+
+# [Optional] location of forecast data. default: above config's save_forecast location
+save_forecast: "/glade/derecho/scratch/dkimpara/CREDIT_runs/skebs_fcnn_scaled_train/analysis_test"
+# [Optional] filename to save eval results filename default: ensemble_eval.parquet
+# will save to save_forecast
+save_filename: "ensemble_eval.parquet"
+
+# analysis 
+# spread-error and ens RMSE computed for every forecast hour
+
+variables: ["U", "V", "T"]
+levels: [14, 20, 24] # uses isel
+single_level_variables: ["U10"]
+
+# use the following to specify leadtimes for other 
+# metrics: zonal spectrum, spread-reliability, rank histograms, div/vrt spectrum
+detailed_eval_hours: [6]
+
+# num bins for binned spread-skill reliability
+num_bins: 25
+
+
+###### provisioning setup ######
+# [Override] default: num_cpus - 1 (will detect num_cpus). also overrides -cpus CLI argument and 
+# num_process: 31
+
+
+# memory reqs:
+# num_cpus or num_process * num_ICs * ensemble_size * size of 1 variable,level dataarray
+# 1 deg equiangular 1 variable, ensemble_size 16: roughly 10mb
+
+pbs: 
+    # example for casper
+    conda: "~/credit"
+    job_name: 'ensemble_eval'
+    nodes: 1
+    ncpus: 32
+    ngpus: 0
+    mem: '128GB'
+    walltime: '01:00:00'
+    gpu_type: 'none'
+    project: 'NAML0001'
+    queue: 'casper'

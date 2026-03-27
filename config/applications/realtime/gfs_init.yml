@@ -1,0 +1,9 @@
+save_out_path: '/glade/derecho/scratch/cbecker/CREDIT/GFS_INIT_DATA/'
+init_time: "2025-03-25 0600"
+upper_air_variables: ['T', 'U', 'V', 'Q']
+surface_vaariables: ['SP', 't2m', 'Z500', 'T500','U500', 'V500', 'Q500']
+
+
+
+
+
