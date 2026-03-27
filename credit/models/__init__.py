@@ -38,6 +38,7 @@ from credit.models.swinrnn.swinrnn import CREDITSwinRNN
 from credit.models.fengwu.fengwu import CREDITFengWu
 from credit.models.graphcast.graphcast import CREDITGraphCast
 from credit.models.healpix.healpix import CREDITHEALPix
+from credit.models.fourcastnet3.fcn3 import CREDITFourCastNetV3
 
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ model_types = {
     "fengwu": (CREDITFengWu, "Loading FengWu (multi-group cross-attention ViT) ..."),
     "graphcast": (CREDITGraphCast, "Loading GraphCast (kNN GNN encoder-processor-decoder) ..."),
     "healpix": (CREDITHEALPix, "Loading DLWP-HEALPix (HEALPix U-Net with lat/lon reprojection) ..."),
+    "fourcastnet3": (CREDITFourCastNetV3, "Loading FourCastNet3 (spherical neural operator U-Net) ..."),
 }
 
 
