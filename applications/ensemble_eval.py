@@ -3,8 +3,6 @@
 # WARNING: DOES NOT USE model config file
 # see config/example_ensemble_eval.yml for an example config for this rollout
 #
-# WARNING: currently only works for CAM data, since the XRSamplerByYear can only handle one data file for all variables
-#
 
 from argparse import ArgumentParser
 from functools import partial
@@ -63,7 +61,6 @@ def do_eval(forecast_save_loc, conf, model_conf, fh):
     rollout_files = glob(join(forecast_save_loc, f"*/*_{fh:03}.nc"))
 
     sampler = XRSamplerByYear(None, conf=model_conf)  # load the truth sampler
-    # TODO: make this sampler work for ERA5
 
     # get lat wts
     ds = xr.open_dataset(rollout_files[0])
