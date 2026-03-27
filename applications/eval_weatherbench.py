@@ -41,47 +41,39 @@ logger = logging.getLogger(__name__)
 # Default climatology (1990-2019, 6-hourly, from Ankur's CREDIT verification data)
 DEFAULT_CLIM_PATH = "/glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc"
 
-LEVEL_IDS = [
-    1.0,
-    9.0,
-    19.0,
-    29.0,
-    39.0,
-    49.0,
-    59.0,
-    69.0,
-    79.0,
-    89.0,
-    97.0,
-    104.0,
-    111.0,
-    116.0,
-    122.0,
-    126.0,
-    131.0,
-    136.0,
-]
-
-# WB2 target levels (hPa) mapped to CREDIT level indices (approximate)
-# CREDIT uses model levels; these are the closest to standard WB2 pressure levels
+# WB2 target levels.
+# Each entry: label → (era5_var, credit_var, era5_level, credit_coord, credit_level)
+#   era5_var     : variable name in ERA5 zarr (long names)
+#   credit_var   : variable name in CREDIT forecast netCDF
+#   era5_level   : value of the ERA5 model-level coord (CREDIT model-level index, e.g. 69≈500hPa)
+#   credit_coord : 'pressure' for _PRES vars, 'level' for model-level vars
+#   credit_level : coordinate value to select in the forecast (pressure in hPa or model-level idx)
+# ERA5 mlevel zarr has no geopotential, so Z500 is omitted.
 WB2_TARGET_LEVELS = {
-    "Z500": ("Z", 69),  # level_id 69 ≈ 500 hPa
-    "T500": ("T", 69),
-    "U500": ("U", 69),
-    "V500": ("V", 69),
-    "Q500": ("Q", 69),
-    "Z850": ("Z", 89),  # level_id 89 ≈ 850 hPa
-    "T850": ("T", 89),
-    "U850": ("U", 89),
-    "V850": ("V", 89),
-    "Z250": ("Z", 49),  # level_id 49 ≈ 250 hPa
-    "U250": ("U", 49),
+    "T500": ("temperature", "T_PRES", 69.0, "pressure", 500.0),
+    "T700": ("temperature", "T_PRES", 79.0, "pressure", 700.0),
+    "T850": ("temperature", "T_PRES", 89.0, "pressure", 850.0),
+    "U500": ("u_component_of_wind", "U", 69.0, "level", 69.0),
+    "V500": ("v_component_of_wind", "V", 69.0, "level", 69.0),
+    "U850": ("u_component_of_wind", "U", 89.0, "level", 89.0),
+    "V850": ("v_component_of_wind", "V", 89.0, "level", 89.0),
+    "Q500": ("specific_humidity", "Q", 69.0, "level", 69.0),
+    "Q850": ("specific_humidity", "Q", 89.0, "level", 89.0),
 }
 
 WB2_SURFACE_VARS = ["t2m", "SP", "U500", "V500"]
 
 # ERA5 variable name mapping (zarr → CREDIT short name used in CSVs)
+# CREDIT ERA5 mlevel zarr files use the same short names as CREDIT output,
+# so upper-air variables are identity-mapped.
 ERA5_VAR_MAP = {
+    # upper-air (model-level ERA5 zarr uses CREDIT short names directly)
+    "Z": "Z",
+    "T": "T",
+    "U": "U",
+    "V": "V",
+    "Q": "Q",
+    # surface / diagnostic
     "u_component_of_wind": "U",
     "v_component_of_wind": "V",
     "temperature": "T",
@@ -207,7 +199,7 @@ def select_clim(ds_clim, valid_times, variable, level=None):
 
 def print_wb2_summary(scores_df):
     """Print WB2-style scorecard for key variables and lead times."""
-    key_vars = ["Z500", "T500", "t2m", "U500", "V500"]
+    key_vars = ["T500", "T850", "t2m", "U500", "V500", "Q850"]
     key_days = [1, 3, 5, 7, 10]
     key_steps = {d: d * 24 // 6 for d in key_days}  # assumes 6h steps
 
@@ -344,17 +336,23 @@ def compute_netcdf_scores(forecast_dir, era5_glob, clim_path=None, lead_time_hou
         valid_times = ds_pred_all.time.values
 
         # score upper-air variables at WB2 target levels
-        for label, (var_credit, level_id) in WB2_TARGET_LEVELS.items():
-            era5_var = next((k for k, v in ERA5_VAR_MAP.items() if v == var_credit), None)
-            if era5_var is None or era5_var not in ds_true_all:
+        for label, (era5_var, credit_var, era5_level, credit_coord, credit_level) in WB2_TARGET_LEVELS.items():
+            if era5_var not in ds_true_all:
+                logger.debug(f"Skipping {label}: ERA5 var '{era5_var}' not in dataset")
                 continue
-            if var_credit not in ds_pred_all:
+            if credit_var not in ds_pred_all:
+                logger.debug(f"Skipping {label}: forecast var '{credit_var}' not in dataset")
                 continue
-            da_pred = ds_pred_all[var_credit].sel(level=level_id, method="nearest")
-            da_true = ds_true_all[era5_var].sel(level=level_id, method="nearest")
+            da_pred = ds_pred_all[credit_var].sel({credit_coord: credit_level}, method="nearest")
+            da_true = ds_true_all[era5_var].sel(level=era5_level, method="nearest")
+            # Regrid ERA5 to forecast grid if coordinates differ (e.g. 192x288 vs 181x360)
+            if da_true.latitude.shape != da_pred.latitude.shape or not np.allclose(
+                da_true.latitude.values, da_pred.latitude.values, atol=0.1
+            ):
+                da_true = da_true.interp(latitude=da_pred.latitude, longitude=da_pred.longitude, method="linear")
             da_clim_var = None
             if ds_clim is not None and era5_var in ds_clim:
-                da_clim_var = select_clim(ds_clim, valid_times, era5_var, level=level_id)
+                da_clim_var = select_clim(ds_clim, valid_times, era5_var, level=era5_level)
                 da_clim_var = da_clim_var.interp(latitude=da_pred.latitude, longitude=da_pred.longitude)
             _add_scores(row, da_pred, da_true, label, da_clim=da_clim_var)
 
@@ -365,6 +363,11 @@ def compute_netcdf_scores(forecast_dir, era5_glob, clim_path=None, lead_time_hou
                 continue
             da_pred = ds_pred_all[credit_var]
             da_true = ds_true_all[era5_var]
+            # Regrid ERA5 to forecast grid if needed
+            if da_true.latitude.shape != da_pred.latitude.shape or not np.allclose(
+                da_true.latitude.values, da_pred.latitude.values, atol=0.1
+            ):
+                da_true = da_true.interp(latitude=da_pred.latitude, longitude=da_pred.longitude, method="linear")
             da_clim_var = None
             if ds_clim is not None and clim_var in ds_clim:
                 da_clim_var = select_clim(ds_clim, valid_times, clim_var)
@@ -496,6 +499,9 @@ def main():
     print_wb2_summary(scores)
 
     if args.plot:
+        import sys
+
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from plot_weatherbench import plot_all
 
         plot_all(args.out, args.plot, label=args.label, show_refs=not args.no_refs)
