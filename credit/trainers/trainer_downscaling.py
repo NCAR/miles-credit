@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(BaseTrainer):
-    def __init__(self, model: torch.nn.Module, rank: int):
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer class for handling the training, validation, and checkpointing of models.
 
@@ -48,7 +48,7 @@ class Trainer(BaseTrainer):
                 (not yet updated for downscaling)
 
         """
-        super().__init__(model, rank)
+        super().__init__(model, rank, conf)
         # Add any additional initialization if needed
         logger.info("Loading a downscaling trainer class")
 
@@ -56,8 +56,8 @@ class Trainer(BaseTrainer):
 
     # this stuff ought to move into init() rather than being rerun each time...
     def setup(self, conf):
-        dconf = conf["data"]
-        tconf = conf["trainer"]
+        dconf = self.conf["data"]
+        tconf = self.conf["trainer"]
 
         self.batches_per_epoch = tconf["batches_per_epoch"]
         self.grad_max_norm = tconf.get("grad_max_norm", 0.0)
@@ -92,7 +92,7 @@ class Trainer(BaseTrainer):
         self.setup(conf)
 
         # update the learning rate if epoch-by-epoch updates don't depend on a metric
-        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
+        if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # setup custom tqdm progress meter
@@ -210,7 +210,7 @@ class Trainer(BaseTrainer):
                 # f" forecast_len: {self.forecast_length+1:.6f}"
             )
 
-            ensemble_size = conf["trainer"].get("ensemble_size", 0)
+            ensemble_size = self.conf["trainer"].get("ensemble_size", 0)
             if ensemble_size > 1:
                 to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
             to_print += f" lr: {optimizer.param_groups[0]['lr']:.12f}"
@@ -218,7 +218,10 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if (
+                self.conf["trainer"]["use_scheduler"]
+                and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -229,8 +232,8 @@ class Trainer(BaseTrainer):
         gc.collect()
 
         # write last training sample & prediction to file every so often
-        if conf["trainer"]["save_data"]:
-            saveconf = conf["trainer"]["save_data"]
+        if self.conf["trainer"]["save_data"]:
+            saveconf = self.conf["trainer"]["save_data"]
             if epoch % saveconf["frequency"] == 0:
                 wrangler = OutputWrangler(trainloader.dataset, **saveconf["output"])
                 wrangler.process(batch["y"], batch["dates"], prefix=f"ep{epoch}.target")
@@ -240,7 +243,7 @@ class Trainer(BaseTrainer):
 
     ###################################
 
-    def validate(self, epoch, conf, valid_loader, criterion, metrics):
+    def validate(self, epoch, valid_loader, criterion, metrics):
         """
         Validates the model on the validation dataset.
 
@@ -259,60 +262,60 @@ class Trainer(BaseTrainer):
 
         ## update me VV
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
+        varnum_diag = len(self.conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
         static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
+            len(self.conf["data"]["dynamic_forcing_variables"])
+            + len(self.conf["data"]["forcing_variables"])
+            + len(self.conf["data"]["static_variables"])
         )
         # ^^
 
-        valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
-        history_len = conf["history_len"]
-        forecast_len = conf["forecast_len"]
+        valid_batches_per_epoch = self.conf["trainer"]["valid_batches_per_epoch"]
+        history_len = self.conf["history_len"]
+        forecast_len = self.conf["forecast_len"]
 
-        # ensemble_size = conf["trainer"].get("ensemble_size", 1)
+        # ensemble_size = self.conf["trainer"].get("ensemble_size", 1)
 
-        # distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        # distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         results_dict = defaultdict(list)
 
         # begin common block 1
         # ------------------------------------------------------- #
         # clamp to remove outliers
-        if conf["data"]["data_clamp"] is None:
+        if self.conf["data"]["data_clamp"] is None:
             flag_clamp = False
         else:
             flag_clamp = True
-            clamp_min = float(conf["data"]["data_clamp"][0])
-            clamp_max = float(conf["data"]["data_clamp"][1])
+            clamp_min = float(self.conf["data"]["data_clamp"][0])
+            clamp_max = float(self.conf["data"]["data_clamp"][1])
 
         # ====================================================== #
         # postblock opts outside of model
         # skip all this for now
 
-        # post_conf = conf["model"]["post_conf"]
+        # post_conf = self.conf["model"]["post_conf"]
         # flag_mass_conserve = False
         # flag_water_conserve = False
         # flag_energy_conserve = False
         #
-        # if post_conf["activate"]:
-        #     if post_conf["global_mass_fixer"]["activate"]:
-        #         if post_conf["global_mass_fixer"]["activate_outside_model"]:
+        # if post_self.conf["activate"]:
+        #     if post_self.conf["global_mass_fixer"]["activate"]:
+        #         if post_self.conf["global_mass_fixer"]["activate_outside_model"]:
         #             logger.info("Activate GlobalMassFixer outside of model")
         #             flag_mass_conserve = True
         #             opt_mass = GlobalMassFixer(post_conf)
         #
-        #     if post_conf["global_water_fixer"]["activate"]:
-        #         if post_conf["global_water_fixer"]["activate_outside_model"]:
+        #     if post_self.conf["global_water_fixer"]["activate"]:
+        #         if post_self.conf["global_water_fixer"]["activate_outside_model"]:
         #             logger.info("Activate GlobalWaterFixer outside of model")
         #             flag_water_conserve = True
         #             opt_water = GlobalWaterFixer(post_conf)
         #
-        #     if post_conf["global_energy_fixer"]["activate"]:
-        #         if post_conf["global_energy_fixer"]["activate_outside_model"]:
+        #     if post_self.conf["global_energy_fixer"]["activate"]:
+        #         if post_self.conf["global_energy_fixer"]["activate_outside_model"]:
         #             logger.info("Activate GlobalEnergyFixer outside of model")
         #             flag_energy_conserve = True
         #             opt_energy = GlobalEnergyFixer(post_conf)
@@ -364,7 +367,7 @@ class Trainer(BaseTrainer):
                         # copies each sample in the batch ensemble_size number of times.
                         # if samples in the batch are ordered (x,y,z) then the result tensor is (x, x, ..., y, y, ..., z,z ...)
                         # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
-                        ensemble_size = conf["trainer"].get("ensemble_size", 0)
+                        ensemble_size = self.conf["trainer"].get("ensemble_size", 0)
                         if ensemble_size > 1:
                             x = torch.repeat_interleave(x, ensemble_size, 0)
 
@@ -500,7 +503,7 @@ class Trainer(BaseTrainer):
                     np.mean(results_dict["valid_acc"]),
                     np.mean(results_dict["valid_mae"]),
                 )
-                ensemble_size = conf["trainer"].get("ensemble_size", 0)
+                ensemble_size = self.conf["trainer"].get("ensemble_size", 0)
                 if ensemble_size > 1:
                     to_print += f" std: {np.mean(results_dict['valid_std']):.6f}"
                 if self.rank == 0:
