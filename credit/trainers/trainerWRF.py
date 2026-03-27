@@ -22,31 +22,31 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(BaseTrainer):
-    def __init__(self, model: torch.nn.Module, rank: int):
-        super().__init__(model, rank)
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
+        super().__init__(model, rank, conf)
 
         logger.info("WRF single-step training")
 
     # Training function.
-    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
+    def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         # training hyperparameters
-        batches_per_epoch = conf["trainer"]["batches_per_epoch"]
-        grad_accum_every = conf["trainer"]["grad_accum_every"]
-        grad_max_norm = conf["trainer"]["grad_max_norm"]
-        forecast_len = conf["data"]["forecast_len"]
-        amp = conf["trainer"]["amp"]
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        batches_per_epoch = self.conf["trainer"]["batches_per_epoch"]
+        grad_accum_every = self.conf["trainer"]["grad_accum_every"]
+        grad_max_norm = self.conf["trainer"]["grad_max_norm"]
+        forecast_len = self.conf["data"]["forecast_len"]
+        amp = self.conf["trainer"]["amp"]
+        distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         # forecast step
-        if "total_time_steps" in conf["data"]:
-            total_time_steps = conf["data"]["total_time_steps"]
+        if "total_time_steps" in self.conf["data"]:
+            total_time_steps = self.conf["data"]["total_time_steps"]
         else:
             total_time_steps = forecast_len
 
         assert total_time_steps == 0, "This trainer supports `forecast_len=0` only"
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
+        if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # ====================================================== #
@@ -199,7 +199,10 @@ class Trainer(BaseTrainer):
             if self.rank == 0:
                 batch_group_generator.set_description(to_print)
 
-            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if (
+                self.conf["trainer"]["use_scheduler"]
+                and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
                 scheduler.step()
 
             if i >= batches_per_epoch and i > 0:
@@ -214,15 +217,17 @@ class Trainer(BaseTrainer):
 
         return results_dict
 
-    def validate(self, epoch, conf, valid_loader, criterion, metrics):
+    def validate(self, epoch, valid_loader, criterion, metrics):
         self.model.eval()
 
-        valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
+        valid_batches_per_epoch = self.conf["trainer"]["valid_batches_per_epoch"]
 
-        forecast_len = conf["data"]["valid_forecast_len"]
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        forecast_len = self.conf["data"]["valid_forecast_len"]
+        distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
-        total_time_steps = conf["data"]["total_time_steps"] if "total_time_steps" in conf["data"] else forecast_len
+        total_time_steps = (
+            self.conf["data"]["total_time_steps"] if "total_time_steps" in self.conf["data"] else forecast_len
+        )
 
         assert total_time_steps == 0, "This trainer supports `forecast_len=0` only"
 
