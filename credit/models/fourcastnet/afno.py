@@ -86,14 +86,15 @@ class AFNOLayer(nn.Module):
         xr, xi = x.real, x.imag
 
         # layer 1 (complex MLP): (B, H, Wf, nb, bs) @ (nb, bs, hidden)
+        # subscripts: b=batch h=height w=width n=n_blocks s=block_size e=hidden
         o1r = (
-            torch.einsum("bhwnb, nbh -> bhwnh", xr, self.w1r)
-            - torch.einsum("bhwnb, nbh -> bhwnh", xi, self.w1i)
+            torch.einsum("bhwns, nse -> bhwne", xr, self.w1r)
+            - torch.einsum("bhwns, nse -> bhwne", xi, self.w1i)
             + self.b1r[None, None, None]
         )
         o1i = (
-            torch.einsum("bhwnb, nbh -> bhwnh", xr, self.w1i)
-            + torch.einsum("bhwnb, nbh -> bhwnh", xi, self.w1r)
+            torch.einsum("bhwns, nse -> bhwne", xr, self.w1i)
+            + torch.einsum("bhwns, nse -> bhwne", xi, self.w1r)
             + self.b1i[None, None, None]
         )
         o1r = torch.nn.functional.relu(o1r)
@@ -101,13 +102,13 @@ class AFNOLayer(nn.Module):
 
         # layer 2
         o2r = (
-            torch.einsum("bhwnh, nhb -> bhwnb", o1r, self.w2r)
-            - torch.einsum("bhwnh, nhb -> bhwnb", o1i, self.w2i)
+            torch.einsum("bhwne, nes -> bhwns", o1r, self.w2r)
+            - torch.einsum("bhwne, nes -> bhwns", o1i, self.w2i)
             + self.b2r[None, None, None]
         )
         o2i = (
-            torch.einsum("bhwnh, nhb -> bhwni", o1r, self.w2i)
-            + torch.einsum("bhwnh, nhb -> bhwnb", o1i, self.w2r)
+            torch.einsum("bhwne, nes -> bhwns", o1r, self.w2i)
+            + torch.einsum("bhwne, nes -> bhwns", o1i, self.w2r)
             + self.b2i[None, None, None]
         )
 
