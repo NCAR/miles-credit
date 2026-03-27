@@ -13,6 +13,13 @@ from credit.models.graph import GraphResTransfGRU
 from credit.models.debugger_model import DebuggerModel
 from credit.models.wxformer.crossformer import CrossFormer as WXFormer
 from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
+
+try:
+    from credit.models.wxformer.wxformer_v2_ensemble import CrossFormerV2WithNoise
+
+    _WXFORMER_V2_SDL = True
+except ImportError:
+    _WXFORMER_V2_SDL = False
 from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
 from credit.models.unet_downscaling import DownscalingSegmentationModel
 from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
@@ -23,6 +30,14 @@ from credit.models.dscale_wrf import DscaleTransformer
 from credit.models.aurora.model import CREDITAurora
 from credit.models.pangu.pangu import CREDITPangu
 from credit.models.aifs.aifs import CREDITAifs
+from credit.models.stormer.stormer import CREDITStormer
+from credit.models.climax.climax import CREDITClimaX
+from credit.models.fourcastnet.afno import CREDITFourCastNet
+from credit.models.sfno.sfno import CREDITSfno
+from credit.models.swinrnn.swinrnn import CREDITSwinRNN
+from credit.models.fengwu.fengwu import CREDITFengWu
+from credit.models.graphcast.graphcast import CREDITGraphCast
+from credit.models.healpix.healpix import CREDITHEALPix
 
 
 logger = logging.getLogger(__name__)
@@ -48,11 +63,29 @@ model_types = {
     "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
     "crossformer-ensemble": (
         CrossFormerWithNoise,
-        "Loading the ensemble CrossFormer model with a noise injection scheme ...",
+        "Loading the WXFormer v1 SDL ensemble model (noise injection at each transformer scale) ...",
     ),
+    # wxformer-sdl: canonical name for SDL ensemble (v1 backbone)
+    "wxformer-sdl": (
+        CrossFormerWithNoise,
+        "Loading the WXFormer SDL ensemble model (noise injection at each transformer scale) ...",
+    ),
+    # crossformer-style: legacy alias — keep so existing configs don't break
     "crossformer-style": (
         CrossFormerWithNoise,
-        "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
+        "Loading the WXFormer SDL ensemble model (legacy alias for wxformer-sdl) ...",
+    ),
+    # wxformer-v2-sdl: SDL on v2 backbone; supports freeze + pretrained_weights
+    # (only available when wxformer_v2.py exists)
+    **(
+        {
+            "wxformer-v2-sdl": (
+                CrossFormerV2WithNoise,
+                "Loading the WXFormer v2 SDL ensemble model ...",
+            )
+        }
+        if _WXFORMER_V2_SDL
+        else {}
     ),
     "unet": (SegmentationModel, "Loading a unet model"),
     "fuxi": (Fuxi, "Loading Fuxi model"),
@@ -66,9 +99,18 @@ model_types = {
         "Loading downscaling crossformer model",
     ),
     "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
+    # ── Model zoo ──────────────────────────────────────────────────────────
     "aurora": (CREDITAurora, "Loading Aurora (Perceiver3D + Swin3D backbone) ..."),
     "pangu": (CREDITPangu, "Loading Pangu-Weather (3D Earth Transformer) ..."),
     "aifs": (CREDITAifs, "Loading AIFS lat/lon Transformer processor ..."),
+    "stormer": (CREDITStormer, "Loading Stormer (plain ViT weather model) ..."),
+    "climax": (CREDITClimaX, "Loading ClimaX (per-variable tokenization ViT) ..."),
+    "fourcastnet": (CREDITFourCastNet, "Loading FourCastNet v1 (AFNO ViT) ..."),
+    "sfno": (CREDITSfno, "Loading SFNO (Spherical Fourier Neural Operator) ..."),
+    "swinrnn": (CREDITSwinRNN, "Loading SwinRNN (Swin encoder-decoder) ..."),
+    "fengwu": (CREDITFengWu, "Loading FengWu (multi-group cross-attention ViT) ..."),
+    "graphcast": (CREDITGraphCast, "Loading GraphCast (kNN GNN encoder-processor-decoder) ..."),
+    "healpix": (CREDITHEALPix, "Loading DLWP-HEALPix (HEALPix U-Net with lat/lon reprojection) ..."),
 }
 
 
