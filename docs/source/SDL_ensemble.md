@@ -187,9 +187,19 @@ The 2022 ERA5 ensemble verification results are archived at:
 Contents:
 - `model.yml` — the exact config used for the paper runs
 - `metrics_csv/` — per-init spread/RMSE CSVs
-- `ensemble_metrics.ipynb`, `ensemble_plots.ipynb` — the plotting notebooks
 - `beta_data/` — post-training beta scaling experiments (noise amplitude sweeps)
 - `ffs_output/` — forward flux sampling (hurricane genesis probability) output
+
+The analysis notebooks are versioned in the repo at `notebooks/ensemble/`:
+
+| Notebook | Purpose |
+|---|---|
+| [`ensemble_metrics.ipynb`](../../notebooks/ensemble/ensemble_metrics.ipynb) | Load `metrics_csv/`, compute paper numbers (spread, RMSE, CRPS) |
+| [`ensemble_plots.ipynb`](../../notebooks/ensemble/ensemble_plots.ipynb) | Multi-panel verification plots with optional IFS comparison |
+| [`spectra.ipynb`](../../notebooks/ensemble/spectra.ipynb) | KE spectra via spherical harmonics (Will Chapman) |
+
+Each notebook has a `# === CONFIGURATION ===` cell at the top — edit `SCHEDULER_DIR` to point to
+your data and run from top to bottom.
 
 To reproduce the rollout from scratch using the same checkpoint and config:
 
