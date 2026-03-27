@@ -44,15 +44,19 @@ git pull
 ```bash
 module load conda
 conda activate /glade/work/schreck/conda-envs/credit-main-casper
+pip install -e . --no-deps   # installs YOUR checkout into the shared env
 ```
 
 **Derecho:**
 ```bash
 module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cuda/12.3.2 conda/latest
 conda activate /glade/work/schreck/conda-envs/credit-main-derecho
+pip install -e . --no-deps   # installs YOUR checkout into the shared env
 ```
 
-Both envs have `miles-credit` installed in editable mode — no `pip install` needed.
+The shared envs have all dependencies pre-installed. The `pip install -e . --no-deps`
+step wires your local clone into the env so you're running the PR code, not someone
+else's checkout. This only takes a few seconds.
 
 Verify install:
 ```bash
