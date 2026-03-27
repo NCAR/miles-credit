@@ -21,15 +21,14 @@ import xarray as xr
 import yaml
 
 from credit.pbs import launch_script, launch_script_mpi, get_num_cpus
-from credit.verification.ensemble import binned_spread_skill, rank_histogram_apply, spread_error
+from credit.verification.ensemble import binned_spread_skill, crps, rank_histogram_apply, spread_error
 from credit.verification.standard import average_div_rot_spectrum, average_zonal_spectrum
 from credit.xr_sampler import XRSamplerByYear
 
 
 def evaluate(num_files, forecast_save_loc, conf, model_conf, p):
     # break up computations by forecast hour6
-    # computations: spread-error, zonal spectrum, binned hist, rank hist, div/vorticity spectrum
-    # TODO: CRPS
+    # computations: spread-error, CRPS, zonal spectrum, binned hist, rank hist, div/vorticity spectrum
 
     model_timestep = model_conf["data"]["lead_time_periods"]
     forecast_hours = model_timestep * (np.arange(num_files) + 1)
@@ -116,15 +115,19 @@ def do_eval(forecast_save_loc, conf, model_conf, fh):
 
 
 def _do_standard_eval_on_variable(w_lat, da_pred, da_true, variable, level):
-    # ensemble spread, ensemble RMSE
+    # ensemble spread, ensemble RMSE, and CRPS
     variable_name = f"{variable}"
     if level:
         variable_name += f"_{level}"
 
-    # compute spread error
+    # compute spread error (std / rmse by region)
     result_dict = spread_error(da_pred, da_true, w_lat)
 
-    # append variable name to keys
+    # compute CRPS by region
+    crps_dict = crps(da_pred, da_true, w_lat)
+    result_dict = result_dict | crps_dict
+
+    # append variable name to all keys
     result_dict = {f"{k}_{variable_name}": value for k, value in result_dict.items()}
 
     return result_dict
