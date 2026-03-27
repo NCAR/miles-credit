@@ -18,7 +18,7 @@ CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2
 def test_unet():
     """Test the unet model."""
     # load config
-    config = os.path.join(CONFIG_FILE_DIR, "unet_1dg_test.yml")
+    config = os.path.join(CONFIG_FILE_DIR, "applications", "other_models", "unet_1dg_test.yml")
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
@@ -52,7 +52,7 @@ def test_unet():
 def test_crossformer():
     """Test the crossformer model."""
     # load config
-    config = os.path.join(CONFIG_FILE_DIR, "wxformer_1dg_test.yml")
+    config = os.path.join(CONFIG_FILE_DIR, "dev", "wxformer_1dg_test.yml")
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
@@ -107,7 +107,7 @@ def test_fuxi():
     AssertionError if any of the checks fail.
 
     """
-    config = os.path.join(CONFIG_FILE_DIR, "fuxi_1deg_test.yml")
+    config = os.path.join(CONFIG_FILE_DIR, "applications", "other_models", "fuxi_1deg_test.yml")
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
     # handle config args
