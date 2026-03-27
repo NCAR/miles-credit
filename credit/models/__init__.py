@@ -20,6 +20,9 @@ from credit.models.unet_diffusion import UnetDiffusion
 from credit.diffusion import ModifiedGaussianDiffusion
 from credit.models.swin_wrf import WRFTransformer
 from credit.models.dscale_wrf import DscaleTransformer
+from credit.models.aurora.model import CREDITAurora
+from credit.models.pangu.pangu import CREDITPangu
+from credit.models.aifs.aifs import CREDITAifs
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +66,9 @@ model_types = {
         "Loading downscaling crossformer model",
     ),
     "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
+    "aurora": (CREDITAurora, "Loading Aurora (Perceiver3D + Swin3D backbone) ..."),
+    "pangu": (CREDITPangu, "Loading Pangu-Weather (3D Earth Transformer) ..."),
+    "aifs": (CREDITAifs, "Loading AIFS lat/lon Transformer processor ..."),
 }
 
 
