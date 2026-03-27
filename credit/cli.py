@@ -577,6 +577,177 @@ def _submit(args: argparse.Namespace) -> None:
         print(f"[{i}/{n_jobs}] {job_id}  afterok  (reload)")
 
 
+def _build_rollout_pbs_script(
+    args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int
+) -> str:
+    """Return a PBS script for one subset of an ensemble rollout.
+
+    Each job runs ``rollout_to_netcdf_v2.py --subset <subset> --no_subset <n_subsets>``.
+    Jobs are independent (no afterok chain) — they all start at once.
+    """
+    job_name = f"{args.job_name[:10]}-{subset:02d}of{n_subsets:02d}"
+
+    if args.cluster == "casper":
+        torchrun = args.torchrun or _find_torchrun()
+        return textwrap.dedent(f"""\
+            #!/bin/bash -l
+            #PBS -N {job_name}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l walltime={args.walltime}
+            #PBS -A {args.account}
+            #PBS -q {args.queue}
+            #PBS -j oe
+            #PBS -k eod
+
+            REPO={repo}
+            CONFIG={config}
+            NGPUS={args.gpus}
+
+            echo "Ensemble rollout — subset {subset} of {n_subsets}"
+            echo "Config  : ${{CONFIG}}"
+            echo "Node    : $(hostname)"
+            echo "GPUs    : ${{NGPUS}}"
+
+            export PYTHONPATH="${{REPO}}:${{PYTHONPATH}}"
+            export PYTHONNOUSERSITE=1
+            export OMP_NUM_THREADS=1
+            export MKL_NUM_THREADS=1
+            export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+            {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+                ${{REPO}}/applications/rollout_to_netcdf_v2.py \\
+                -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
+        """)
+
+    else:  # derecho — single node for rollout (inference doesn't need multi-node)
+        conda_env = args.conda_env
+        return textwrap.dedent(f"""\
+            #!/bin/bash
+            #PBS -A {args.account}
+            #PBS -N {job_name}
+            #PBS -l walltime={args.walltime}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
+            #PBS -q {args.queue}
+            #PBS -j oe
+            #PBS -k eod
+            #PBS -r n
+
+            module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 \\
+                        cuda/12.3.2 conda/latest
+
+            conda activate {conda_env}
+
+            REPO={repo}
+            CONFIG={config}
+
+            echo "Ensemble rollout — subset {subset} of {n_subsets}"
+            echo "Config  : ${{CONFIG}}"
+
+            export PYTHONPATH="${{REPO}}:${{PYTHONPATH}}"
+            export OMP_NUM_THREADS=1
+            export MKL_NUM_THREADS=1
+            export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+            torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
+                ${{REPO}}/applications/rollout_to_netcdf_v2.py \\
+                -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
+        """)
+
+
+def _print_ensemble_rollout_plan(
+    args: argparse.Namespace, n_jobs: int, n_forecasts: int, ensemble_size: int
+) -> None:
+    """Print a human-readable summary of an ensemble rollout submission."""
+    per_job = -(-n_forecasts // n_jobs)  # ceiling division
+    total_runs = n_forecasts * ensemble_size
+
+    print()
+    print("=" * 56)
+    print("  Ensemble rollout plan")
+    print("=" * 56)
+    print(f"  Cluster        : {args.cluster}")
+    print(f"  Account        : {args.account}")
+    print(f"  Config         : {args.config}")
+    print(f"  Init times     : {n_forecasts}  ({per_job} per job)")
+    print(f"  Ensemble size  : {ensemble_size}  →  {total_runs} total forecasts")
+    print(f"  Parallel jobs  : {n_jobs}  (all start at once, no dependencies)")
+    print(f"  GPUs per job   : {args.gpus}")
+    print(f"  Walltime/job   : {args.walltime}")
+    print("=" * 56)
+    print()
+
+
+def _rollout_ensemble(args: argparse.Namespace) -> None:
+    """Submit N parallel PBS jobs to cover all ensemble rollout init times."""
+    import yaml
+
+    repo = _repo_root()
+    pbs_cfg = _load_pbs_config(args.config)
+
+    # Rollout-specific cluster defaults (inference is lighter than training)
+    is_casper = args.cluster == "casper"
+    _rollout_defaults = {
+        "ngpus": 1,
+        "ncpus": 8 if is_casper else 16,
+        "mem": "128GB",
+        "walltime": "06:00:00",
+    }
+    # Apply rollout defaults only where pbs_cfg doesn't already specify
+    merged_pbs = {**_rollout_defaults, **{k: v for k, v in pbs_cfg.items() if v is not None}}
+
+    # _resolve_pbs_opts expects these fields; rollout always runs single-node
+    if not hasattr(args, "nodes"):
+        args.nodes = None
+    if not hasattr(args, "torchrun"):
+        args.torchrun = None
+
+    args = _resolve_pbs_opts(args, merged_pbs)
+
+    # Rollout defaults to 1 GPU per job (inference, not training)
+    # _resolve_pbs_opts set args.gpus from config/CLI; if still defaulting from
+    # training defaults (4), honour the user choice — they may want more.
+
+    n_jobs = args.jobs
+
+    # Count init times from config so we can show a useful plan
+    try:
+        from credit.forecast import load_forecasts
+        with open(args.config) as f:
+            conf = yaml.safe_load(f)
+        all_forecasts = load_forecasts(conf)
+        n_forecasts = len(all_forecasts)
+        ensemble_size = conf.get("predict", {}).get("ensemble_size", 1)
+    except Exception:
+        n_forecasts = "?"
+        ensemble_size = "?"
+
+    _print_ensemble_rollout_plan(args, n_jobs, n_forecasts, ensemble_size)
+
+    config_abs = os.path.abspath(args.config)
+
+    if args.dry_run:
+        for i in range(1, n_jobs + 1):
+            print(f"# {'='*50}")
+            print(f"# Job {i}/{n_jobs}  (subset {i} of {n_jobs})")
+            print(f"# {'='*50}")
+            print(_build_rollout_pbs_script(args, config_abs, repo, i, n_jobs))
+        return
+
+    job_ids = []
+    for i in range(1, n_jobs + 1):
+        script = _build_rollout_pbs_script(args, config_abs, repo, i, n_jobs)
+        job_id = _qsub(script)
+        job_ids.append(job_id)
+        print(f"[{i:2d}/{n_jobs}] {job_id}")
+
+    print()
+    print(f"Submitted {n_jobs} parallel rollout jobs.")
+    print(f"Output will be written to: {conf.get('predict', {}).get('save_forecast', '<save_forecast in config>')}")
+    print()
+    print("Monitor with:")
+    print(f"  qstat -u $USER")
+
+
 def _find_torchrun() -> str:
     """Return the path to torchrun, preferring the active conda env."""
     import shutil
@@ -1606,6 +1777,7 @@ def _build_parser() -> argparse.ArgumentParser:
               credit train -c config.yml
               credit realtime -c config.yml --init-time 2024-01-15T00 --steps 40
               credit rollout  -c config.yml
+              credit rollout-ensemble --cluster casper -c config.yml --jobs 10
               credit submit   --cluster casper  -c config.yml --gpus 1
               credit submit   --cluster derecho -c config.yml --gpus 4 --nodes 2
               credit init     --grid 0.25deg -o my_config.yml
@@ -1625,6 +1797,44 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
     p.add_argument("-m", "--mode", default="none", help="Distributed mode: none | ddp | fsdp (default: none)")
     p.add_argument("-p", "--procs", type=int, default=4, help="CPU workers for async NetCDF save (default: 4)")
+
+    # ---- rollout-ensemble ----
+    p = sub.add_parser(
+        "rollout-ensemble",
+        help="Submit N parallel PBS rollout jobs covering all ensemble init times",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Split an ensemble rollout across N parallel PBS jobs — one job per
+            subset of init times.  All jobs start at once (no afterok chain).
+
+            The number of init times and ensemble_size are read from the config's
+            predict: section.  PBS settings follow the same resolution order as
+            credit submit: CLI flag > config pbs: > cluster default.
+
+            For rollout (inference), 1 GPU per job is usually sufficient on Casper.
+
+            Examples:
+              credit rollout-ensemble --cluster casper -c config.yml --jobs 10 --dry-run
+              credit rollout-ensemble --cluster casper -c config.yml --jobs 10
+              credit rollout-ensemble --cluster derecho -c config.yml --jobs 20 --gpus 1
+        """),
+    )
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to v2 YAML config")
+    p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
+    p.add_argument("--jobs", type=int, default=10, metavar="N", help="Number of parallel PBS jobs (default: 10)")
+    p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per job (config pbs.ngpus → 1)")
+    p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per job (config pbs.ncpus → 8 casper / 16 derecho)")
+    p.add_argument("--mem", default=None, help="Memory per job (config pbs.mem → 128GB casper / 128GB derecho)")
+    p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Walltime per job (config pbs.walltime → 06:00:00)")
+    p.add_argument("--account", metavar="ACCOUNT", help="PBS account code (config pbs.project → $PBS_ACCOUNT → NAML0001)")
+    p.add_argument("--queue", metavar="QUEUE", help="PBS queue (config pbs.queue → casper / main)")
+    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (config pbs.gpu_type → a100_80gb)")
+    p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary (default: auto-detect)")
+    p.add_argument(
+        "--conda-env", dest="conda_env", default=None, metavar="PATH",
+        help="Conda env path for derecho (default: from config pbs.conda)",
+    )
+    p.add_argument("--dry-run", action="store_true", help="Print PBS scripts without submitting")
 
     # ---- realtime ----
     p = sub.add_parser("realtime", help="Operational realtime forecast (single init time)")
@@ -1858,6 +2068,7 @@ def main() -> None:
     dispatch = {
         "train": _train,
         "rollout": _rollout,
+        "rollout-ensemble": _rollout_ensemble,
         "realtime": _realtime,
         "submit": _submit,
         "convert": _convert,
