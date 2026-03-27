@@ -31,7 +31,7 @@ jobs:
         run: | 
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install . 
+          pip install ".[ask,agent,serve]"
           pip install ruff pytest pytest-cov
       - name: Lint with ruff
         run: |
@@ -46,7 +46,7 @@ jobs:
           pytest
       - name: Pytest Coverage
         run: |
-           pytest --cov=credit --cov-branch --cov-report=xml
+           pytest --cov=credit --cov=applications --cov-branch --cov-report=xml
         #  pytest --cov=credit tests/ | tee pytest-coverage.txt
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3

@@ -46,13 +46,13 @@ class Trainer(BaseTrainer):
             and checkpointing.
     """
 
-    def __init__(self, model: torch.nn.Module, rank: int):
-        super().__init__(model, rank)
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
+        super().__init__(model, rank, conf)
 
         logger.info("Loading a multi-step trainer class")
 
     # Training function.
-    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
+    def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         """
         Trains the model for one epoch.
 
@@ -70,38 +70,38 @@ class Trainer(BaseTrainer):
             dict: Dictionary containing training metrics and loss for the epoch.
         """
 
-        batches_per_epoch = conf["trainer"]["batches_per_epoch"]
-        grad_max_norm = conf["trainer"]["grad_max_norm"]
-        amp = conf["trainer"]["amp"]
+        batches_per_epoch = self.conf["trainer"]["batches_per_epoch"]
+        grad_max_norm = self.conf["trainer"]["grad_max_norm"]
+        amp = self.conf["trainer"]["amp"]
 
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
-        forecast_length = conf["data"]["forecast_len"]
+        distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        forecast_length = self.conf["data"]["forecast_len"]
 
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
+        varnum_diag = len(self.conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
         static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-            + len(conf["data"]["boundary"]["variables"])
-            + len(conf["data"]["boundary"]["surface_variables"])
+            len(self.conf["data"]["dynamic_forcing_variables"])
+            + len(self.conf["data"]["forcing_variables"])
+            + len(self.conf["data"]["static_variables"])
+            + len(self.conf["data"]["boundary"]["variables"])
+            + len(self.conf["data"]["boundary"]["surface_variables"])
         )
 
         # [Optional] Use the config option to set when to backprop
-        if "backprop_on_timestep" in conf["data"]:
-            backprop_on_timestep = conf["data"]["backprop_on_timestep"]
+        if "backprop_on_timestep" in self.conf["data"]:
+            backprop_on_timestep = self.conf["data"]["backprop_on_timestep"]
         else:
             # If not specified in config, use the range 1 to forecast_len
-            backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
+            backprop_on_timestep = list(range(0, self.conf["data"]["forecast_len"] + 1 + 1))
 
         assert forecast_length <= backprop_on_timestep[-1], (
             f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
         )
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
+        if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # set up a custom tqdm
@@ -275,7 +275,10 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if (
+                self.conf["trainer"]["use_scheduler"]
+                and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -287,7 +290,7 @@ class Trainer(BaseTrainer):
 
         return results_dict
 
-    def validate(self, epoch, conf, valid_loader, criterion, metrics):
+    def validate(self, epoch, valid_loader, criterion, metrics):
         """
         Validates the model on the validation dataset.
 
@@ -305,22 +308,22 @@ class Trainer(BaseTrainer):
         self.model.eval()
 
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
+        varnum_diag = len(self.conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
         static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
-            + len(conf["data"]["boundary"]["variables"])
-            + len(conf["data"]["boundary"]["surface_variables"])
+            len(self.conf["data"]["dynamic_forcing_variables"])
+            + len(self.conf["data"]["forcing_variables"])
+            + len(self.conf["data"]["static_variables"])
+            + len(self.conf["data"]["boundary"]["variables"])
+            + len(self.conf["data"]["boundary"]["surface_variables"])
         )
 
-        valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
-        history_len = conf["data"]["valid_history_len"]
-        forecast_len = conf["data"]["valid_forecast_len"]
+        valid_batches_per_epoch = self.conf["trainer"]["valid_batches_per_epoch"]
+        history_len = self.conf["data"]["valid_history_len"]
+        forecast_len = self.conf["data"]["valid_forecast_len"]
 
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         results_dict = defaultdict(list)
 
