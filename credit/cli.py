@@ -332,16 +332,34 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     return r
 
 
-def _build_pbs_script(args: argparse.Namespace, config: str, repo: str, depend_on: str = None) -> str:
+def _build_pbs_script(
+    args: argparse.Namespace, config: str, repo: str, account: str = None, depend_on: str = None
+) -> str:
     """Return a PBS batch script string for the given args and config path.
 
     *args* must already be resolved via :func:`_resolve_pbs_opts` so that all
-    fields (account, gpus, nodes, walltime, …) are concrete values.
+    fields (gpus, nodes, walltime, …) are concrete values.
 
     Args:
+        account:   PBS account string; overrides ``args.account`` when provided.
         depend_on: If set, adds ``#PBS -W depend=afterok:<depend_on>`` so this
                    job only starts after the given job ID completes successfully.
     """
+    # Apply defaults for fields not set by the caller (mirrors _resolve_pbs_opts defaults).
+    is_casper = getattr(args, "cluster", "casper") == "casper"
+    _d = argparse.Namespace(
+        job_name="credit_v2",
+        account="NAML0001",
+        cpus=8 if is_casper else 64,
+        mem="128GB" if is_casper else "480GB",
+        queue="casper" if is_casper else "main",
+        gpu_type="a100_80gb",
+        torchrun=None,
+        conda_env="/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221",
+    )
+    args = argparse.Namespace(**{**vars(_d), **{k: v for k, v in vars(args).items() if v is not None}})
+    if account is not None:
+        args.account = account
     depend_line = f"#PBS -W depend=afterok:{depend_on}\n" if depend_on else ""
 
     if args.cluster == "casper":
@@ -390,7 +408,7 @@ def _build_pbs_script(args: argparse.Namespace, config: str, repo: str, depend_o
             #PBS -k eod
             #PBS -r n
             {depend_line}
-            module load ncarenv/24.12 gcc/12.4.0 ncarcompilers cray-mpich/8.1.29 \\
+            module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 \\
                         cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
 
             conda activate {conda_env}
@@ -527,8 +545,8 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     print("  Job plan")
     print("=" * 52)
     print(f"  Cluster  : {args.cluster}")
-    print(f"  Account  : {args.account}")
-    print(f"  Config   : {args.config}")
+    print(f"  Account  : {getattr(args, 'account', 'unset')}")
+    print(f"  Config   : {getattr(args, 'config', 'unset')}")
     print(f"  GPUs     : {gpu_str}")
     print(f"  Walltime : {args.walltime} per job")
     print(f"  Chain    : {chain_desc}")
