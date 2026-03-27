@@ -365,11 +365,19 @@ def main():
     parser.add_argument("-m", "--mode", type=str, default="none", help="Override predict mode: none | ddp | fsdp")
     parser.add_argument("-cpus", "--num_cpus", type=int, default=4, help="Number of CPU workers for async save pool.")
     parser.add_argument(
-        "-s", "--subset", type=int, default=None, metavar="N",
+        "-s",
+        "--subset",
+        type=int,
+        default=None,
+        metavar="N",
         help="Run the Nth subset of init times (1-indexed). Use with --no_subset.",
     )
     parser.add_argument(
-        "-ns", "--no_subset", type=int, default=None, metavar="M",
+        "-ns",
+        "--no_subset",
+        type=int,
+        default=None,
+        metavar="M",
         help="Total number of subsets to split init times across (one per PBS job).",
     )
     args = parser.parse_args()
@@ -410,6 +418,7 @@ def main():
 
     if args.no_subset and args.subset:
         import numpy as np
+
         all_forecasts = conf["predict"]["forecasts"]
         subsets = np.array_split(all_forecasts, args.no_subset)
         conf["predict"]["forecasts"] = subsets[args.subset - 1].tolist()

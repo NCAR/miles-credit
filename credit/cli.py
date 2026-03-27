@@ -230,7 +230,9 @@ def _convert(args: argparse.Namespace) -> None:
         "PBS account code",
         default=pbs.get("project") or pbs.get("account") or os.environ.get("PBS_ACCOUNT") or "NAML0001",
     )
-    conda = _prompt("Conda env (name or full path)", default=pbs.get("conda") or pbs.get("conda_env") or "credit-derecho")
+    conda = _prompt(
+        "Conda env (name or full path)", default=pbs.get("conda") or pbs.get("conda_env") or "credit-derecho"
+    )
     walltime = _prompt("Walltime (HH:MM:SS)", default=pbs.get("walltime") or "12:00:00")
     job_name = _prompt("Job name", default=pbs.get("job_name") or "credit_v2")
 
@@ -595,9 +597,7 @@ def _submit(args: argparse.Namespace) -> None:
         print(f"[{i}/{n_jobs}] {job_id}  afterok  (reload)")
 
 
-def _build_rollout_pbs_script(
-    args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int
-) -> str:
+def _build_rollout_pbs_script(args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int) -> str:
     """Return a PBS script for one subset of an ensemble rollout.
 
     Each job runs ``rollout_to_netcdf_v2.py --subset <subset> --no_subset <n_subsets>``.
@@ -672,9 +672,7 @@ def _build_rollout_pbs_script(
         """)
 
 
-def _print_ensemble_rollout_plan(
-    args: argparse.Namespace, n_jobs: int, n_forecasts: int, ensemble_size: int
-) -> None:
+def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_forecasts: int, ensemble_size: int) -> None:
     """Print a human-readable summary of an ensemble rollout submission."""
     per_job = -(-n_forecasts // n_jobs)  # ceiling division
     total_runs = n_forecasts * ensemble_size
@@ -730,6 +728,7 @@ def _rollout_ensemble(args: argparse.Namespace) -> None:
     # Count init times from config so we can show a useful plan
     try:
         from credit.forecast import load_forecasts
+
         with open(args.config) as f:
             conf = yaml.safe_load(f)
         all_forecasts = load_forecasts(conf)
@@ -745,9 +744,9 @@ def _rollout_ensemble(args: argparse.Namespace) -> None:
 
     if args.dry_run:
         for i in range(1, n_jobs + 1):
-            print(f"# {'='*50}")
+            print(f"# {'=' * 50}")
             print(f"# Job {i}/{n_jobs}  (subset {i} of {n_jobs})")
-            print(f"# {'='*50}")
+            print(f"# {'=' * 50}")
             print(_build_rollout_pbs_script(args, config_abs, repo, i, n_jobs))
         return
 
@@ -763,7 +762,7 @@ def _rollout_ensemble(args: argparse.Namespace) -> None:
     print(f"Output will be written to: {conf.get('predict', {}).get('save_forecast', '<save_forecast in config>')}")
     print()
     print("Monitor with:")
-    print(f"  qstat -u $USER")
+    print("  qstat -u $USER")
 
 
 def _find_torchrun() -> str:
@@ -1841,15 +1840,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
     p.add_argument("--jobs", type=int, default=10, metavar="N", help="Number of parallel PBS jobs (default: 10)")
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per job (config pbs.ngpus → 1)")
-    p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per job (config pbs.ncpus → 8 casper / 16 derecho)")
+    p.add_argument(
+        "--cpus", type=int, default=None, metavar="N", help="CPUs per job (config pbs.ncpus → 8 casper / 16 derecho)"
+    )
     p.add_argument("--mem", default=None, help="Memory per job (config pbs.mem → 128GB casper / 128GB derecho)")
-    p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Walltime per job (config pbs.walltime → 06:00:00)")
-    p.add_argument("--account", metavar="ACCOUNT", help="PBS account code (config pbs.project → $PBS_ACCOUNT → NAML0001)")
+    p.add_argument(
+        "--walltime", default=None, metavar="HH:MM:SS", help="Walltime per job (config pbs.walltime → 06:00:00)"
+    )
+    p.add_argument(
+        "--account", metavar="ACCOUNT", help="PBS account code (config pbs.project → $PBS_ACCOUNT → NAML0001)"
+    )
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue (config pbs.queue → casper / main)")
-    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (config pbs.gpu_type → a100_80gb)")
+    p.add_argument(
+        "--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (config pbs.gpu_type → a100_80gb)"
+    )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary (default: auto-detect)")
     p.add_argument(
-        "--conda-env", dest="conda_env", default=None, metavar="PATH",
+        "--conda-env",
+        dest="conda_env",
+        default=None,
+        metavar="PATH",
         help="Conda env path for derecho (default: from config pbs.conda)",
     )
     p.add_argument("--dry-run", action="store_true", help="Print PBS scripts without submitting")
@@ -1886,13 +1896,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--config", required=True, metavar="CONFIG")
     p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per node (config pbs.ngpus → 4)")
-    p.add_argument("--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only (config pbs.nodes → 1)")
-    p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node (config pbs.ncpus → 8 casper / 64 derecho)")
+    p.add_argument(
+        "--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only (config pbs.nodes → 1)"
+    )
+    p.add_argument(
+        "--cpus", type=int, default=None, metavar="N", help="CPUs per node (config pbs.ncpus → 8 casper / 64 derecho)"
+    )
     p.add_argument("--mem", default=None, help="Memory per node (config pbs.mem → 128GB casper / 480GB derecho)")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime (config pbs.walltime → 12:00:00)")
-    p.add_argument("--account", metavar="ACCOUNT", help="PBS account code (config pbs.project → $PBS_ACCOUNT → NAML0001)")
+    p.add_argument(
+        "--account", metavar="ACCOUNT", help="PBS account code (config pbs.project → $PBS_ACCOUNT → NAML0001)"
+    )
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue (config pbs.queue → casper / main)")
-    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (config pbs.gpu_type → a100_80gb)")
+    p.add_argument(
+        "--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (config pbs.gpu_type → a100_80gb)"
+    )
     p.add_argument(
         "--torchrun", default=None, metavar="PATH", help="Path to torchrun binary (default: auto-detect from PATH)"
     )
