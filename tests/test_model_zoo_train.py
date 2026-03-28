@@ -227,7 +227,33 @@ def make_aifs():
     return m, C_IN, C_OUT
 
 
+def make_wxformer():
+    from credit.models.wxformer.crossformer import CrossFormer as WXFormer
+
+    m = WXFormer(
+        image_height=H,
+        image_width=W,
+        frames=2,
+        channels=2,
+        surface_channels=2,
+        input_only_channels=1,
+        output_only_channels=0,
+        levels=2,
+        dim=(16, 32),
+        depth=(2, 2),
+        global_window_size=(2, 1),
+        local_window_size=4,
+        cross_embed_kernel_sizes=((2, 4), (2, 4)),
+        cross_embed_strides=(2, 2),
+        use_spectral_norm=True,
+    ).to(device)
+    C_IN = 2 * 2 + 2 + 1
+    C_OUT = 2 * 2 + 2
+    return m, C_IN, C_OUT
+
+
 MODELS = {
+    "wxformer": make_wxformer,
     "stormer": make_stormer,
     "climax": make_climax,
     "fourcastnet": make_fourcastnet,
