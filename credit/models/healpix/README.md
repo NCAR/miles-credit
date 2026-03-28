@@ -7,7 +7,7 @@ https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2023MS003700
 - https://github.com/NVlabs/earth2grid (Apache 2.0)
 - Face adjacency logic also available in NVIDIA PhysicsNeMo: https://github.com/NVIDIA/physicsnemo (Apache 2.0)
 
-**Original code — DLWP U-Net reference:** NCAR/MILES DLWP repository.
+**Original code — DLWP U-Net reference:** Weyn, Karlbauer et al., DLWP-CS / DLWP-HEALPix repository (University of Washington / NVIDIA).
 
 ## Architecture
 
