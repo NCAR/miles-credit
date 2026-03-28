@@ -299,7 +299,7 @@ def compute_netcdf_scores(forecast_dir, era5_glob, clim_path=None, lead_time_hou
 
     for step in sorted(step_files.keys()):
         files = step_files[step]
-        lead_h = step * lead_time_hours
+        lead_h = step  # filename suffix is already lead-time hours (e.g. _006.nc = 6h)
         logger.info(f"Step {step} ({lead_h}h): {len(files)} forecasts")
 
         pred_list, true_list = [], []
