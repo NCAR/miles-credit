@@ -12,7 +12,13 @@ from credit.models.swin import SwinTransformerV2Cr
 from credit.models.graph import GraphResTransfGRU
 from credit.models.debugger_model import DebuggerModel
 from credit.models.wxformer.crossformer import CrossFormer as WXFormer
+from credit.models.wxformer.wxformer_v2 import CrossFormer as WXFormerV2
 from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
+
+try:
+    from credit.models.wxformer.wxformer_v2_ensemble import CrossFormerV2WithNoise
+except ImportError:
+    CrossFormerV2WithNoise = None
 from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
 from credit.models.unet_downscaling import DownscalingSegmentationModel
 from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
@@ -43,6 +49,17 @@ model_types = {
         "Loading A DDPM model with UNET Backbone ...",
     ),
     "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
+    "wxformer_v2": (WXFormerV2, "Loading the WXFormer v2 model (PixelShuffle + SwiGLU + shifted/grid attention) ..."),
+    **(
+        {
+            "wxformer_v2_ensemble": (
+                CrossFormerV2WithNoise,
+                "Loading the WXFormer v2 ensemble model with SDL noise injection ...",
+            )
+        }
+        if CrossFormerV2WithNoise is not None
+        else {}
+    ),
     "crossformer-ensemble": (
         CrossFormerWithNoise,
         "Loading the ensemble CrossFormer model with a noise injection scheme ...",
