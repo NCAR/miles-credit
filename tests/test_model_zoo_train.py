@@ -234,9 +234,11 @@ def make_wxformer():
     FRAMES = 2
     C_IN = 2 * 2 + 2 + 1  # channels*levels + surface + input_only
     C_OUT = 2 * 2 + 2  # channels*levels + surface
+    # 4 downsampling stages (stride 2 each) shrink H→H/16; use 64 so min stage is 4×4.
+    HW = 64
     m = WXFormer(
-        image_height=H,
-        image_width=W,
+        image_height=HW,
+        image_width=HW,
         frames=FRAMES,
         channels=2,
         surface_channels=2,
@@ -245,13 +247,14 @@ def make_wxformer():
         levels=2,
         dim=(4, 8, 16, 32),
         depth=(2, 2, 2, 2),
+        dim_head=4,
         global_window_size=(2, 2, 1, 1),
         local_window_size=4,
         cross_embed_kernel_sizes=((2, 4), (2, 4), (2, 4), (2, 4)),
         cross_embed_strides=(2, 2, 2, 2),
         use_spectral_norm=True,
     ).to(device)
-    return m, C_IN, C_OUT, FRAMES
+    return m, C_IN, C_OUT, FRAMES, HW
 
 
 MODELS = {
@@ -280,13 +283,22 @@ def train_one(name, factory, n_steps=N_STEPS):
     try:
         result = factory()
         model, C_IN, C_OUT = result[0], result[1], result[2]
-        frames = result[3] if len(result) == 4 else None
+        frames = result[3] if len(result) >= 4 else None
+        hw = result[4] if len(result) >= 5 else None  # optional custom spatial size
+        _H = hw if hw is not None else H
+        _W = hw if hw is not None else W
         n_params = _params(model)
 
         # fixed random target so we're fitting one sample
         torch.manual_seed(42)
-        x = torch.randn(B, C_IN, frames, H, W, device=device) if frames else torch.randn(B, C_IN, H, W, device=device)
-        y_tgt = torch.randn(B, C_OUT, 1, H, W, device=device) if frames else torch.randn(B, C_OUT, H, W, device=device)
+        x = (
+            torch.randn(B, C_IN, frames, _H, _W, device=device)
+            if frames
+            else torch.randn(B, C_IN, _H, _W, device=device)
+        )
+        y_tgt = (
+            torch.randn(B, C_OUT, 1, _H, _W, device=device) if frames else torch.randn(B, C_OUT, _H, _W, device=device)
+        )
 
         opt = torch.optim.Adam(model.parameters(), lr=LR)
         crit = nn.MSELoss()

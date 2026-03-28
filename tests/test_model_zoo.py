@@ -240,9 +240,11 @@ def make_wxformer():
     FRAMES = 2
     C_IN = 2 * 2 + 2 + 1  # channels*levels + surface + input_only
     C_OUT = 2 * 2 + 2  # channels*levels + surface
+    # 4 downsampling stages (stride 2 each) shrink H→H/16; use 64 so min stage is 4×4.
+    HW = 64
     m = WXFormer(
-        image_height=H,
-        image_width=W,
+        image_height=HW,
+        image_width=HW,
         frames=FRAMES,
         channels=2,
         surface_channels=2,
@@ -251,13 +253,14 @@ def make_wxformer():
         levels=2,
         dim=(4, 8, 16, 32),
         depth=(2, 2, 2, 2),
+        dim_head=4,
         global_window_size=(2, 2, 1, 1),
         local_window_size=4,
         cross_embed_kernel_sizes=((2, 4), (2, 4), (2, 4), (2, 4)),
         cross_embed_strides=(2, 2, 2, 2),
         use_spectral_norm=True,
     ).to(device)
-    return m, torch.randn(B, C_IN, FRAMES, H, W, device=device), (B, C_OUT, 1, H, W)
+    return m, torch.randn(B, C_IN, FRAMES, HW, HW, device=device), (B, C_OUT, 1, HW, HW)
 
 
 MODELS = {
