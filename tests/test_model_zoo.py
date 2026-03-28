@@ -235,11 +235,15 @@ def make_aifs():
 def make_wxformer():
     from credit.models.wxformer.crossformer import CrossFormer as WXFormer
 
-    # minimal config: 2 atmos vars × 2 levels + 2 surface + 1 input-only = 7 in, 6 out
+    # CrossFormer I/O: (B, C_per_frame, T, H, W) → (B, C_out, 1, H, W)
+    # 2 atmos vars × 2 levels + 2 surface + 1 input-only = 7 in, 6 out
+    FRAMES = 2
+    C_IN = 2 * 2 + 2 + 1  # channels*levels + surface + input_only
+    C_OUT = 2 * 2 + 2  # channels*levels + surface
     m = WXFormer(
         image_height=H,
         image_width=W,
-        frames=2,
+        frames=FRAMES,
         channels=2,
         surface_channels=2,
         input_only_channels=1,
@@ -253,9 +257,7 @@ def make_wxformer():
         cross_embed_strides=(2, 2),
         use_spectral_norm=True,
     ).to(device)
-    C_IN = 2 * 2 + 2 + 1  # channels*levels + surface + input_only
-    C_OUT = 2 * 2 + 2  # channels*levels + surface
-    return m, torch.randn(B, C_IN, H, W, device=device), (B, C_OUT, H, W)
+    return m, torch.randn(B, C_IN, FRAMES, H, W, device=device), (B, C_OUT, 1, H, W)
 
 
 MODELS = {

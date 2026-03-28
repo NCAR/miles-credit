@@ -230,10 +230,14 @@ def make_aifs():
 def make_wxformer():
     from credit.models.wxformer.crossformer import CrossFormer as WXFormer
 
+    # CrossFormer I/O: (B, C_per_frame, T, H, W) → (B, C_out, 1, H, W)
+    FRAMES = 2
+    C_IN = 2 * 2 + 2 + 1  # channels*levels + surface + input_only
+    C_OUT = 2 * 2 + 2  # channels*levels + surface
     m = WXFormer(
         image_height=H,
         image_width=W,
-        frames=2,
+        frames=FRAMES,
         channels=2,
         surface_channels=2,
         input_only_channels=1,
@@ -247,9 +251,7 @@ def make_wxformer():
         cross_embed_strides=(2, 2),
         use_spectral_norm=True,
     ).to(device)
-    C_IN = 2 * 2 + 2 + 1
-    C_OUT = 2 * 2 + 2
-    return m, C_IN, C_OUT
+    return m, C_IN, C_OUT, FRAMES
 
 
 MODELS = {
@@ -276,13 +278,15 @@ MODELS = {
 
 def train_one(name, factory, n_steps=N_STEPS):
     try:
-        model, C_IN, C_OUT = factory()
+        result = factory()
+        model, C_IN, C_OUT = result[0], result[1], result[2]
+        frames = result[3] if len(result) == 4 else None
         n_params = _params(model)
 
         # fixed random target so we're fitting one sample
         torch.manual_seed(42)
-        x = torch.randn(B, C_IN, H, W, device=device)
-        y_tgt = torch.randn(B, C_OUT, H, W, device=device)
+        x = torch.randn(B, C_IN, frames, H, W, device=device) if frames else torch.randn(B, C_IN, H, W, device=device)
+        y_tgt = torch.randn(B, C_OUT, 1, H, W, device=device) if frames else torch.randn(B, C_OUT, H, W, device=device)
 
         opt = torch.optim.Adam(model.parameters(), lr=LR)
         crit = nn.MSELoss()
