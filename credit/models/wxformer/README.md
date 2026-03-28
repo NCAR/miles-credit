@@ -2,6 +2,9 @@
 
 **Our model.** Developed at NCAR/MILES for production ERA5 weather forecasting.
 
+**Paper:** Schreck et al., "Community Research Earth Digital Intelligence Twin: a scalable framework for AI-driven Earth System Modeling," npj Climate and Atmospheric Science 8, 239 (2025).
+https://doi.org/10.1038/s41612-025-01125-6
+
 ## Variants
 
 | File | Class | Config key | Notes |
