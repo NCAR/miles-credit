@@ -46,6 +46,25 @@ production GraphCast; this implementation captures the message-passing spirit
 but is structurally simpler. Expect it to train and converge but do not expect
 it to match production GraphCast skill.
 
+## CREDIT config
+
+```yaml
+model:
+  type: graphcast
+  in_channels: 70
+  out_channels: 69
+  img_size: [192, 288]
+  latent_dim: 512        # node/edge feature dimension
+  edge_dim: 256
+  processor_depth: 16    # message-passing iterations
+  k_neighbours: 6        # kNN connectivity; 6 ≈ icosahedral mesh
+  mlp_hidden: 512
+```
+
+**Warning**: at 192×288 the pairwise distance matrix is (192×288)² = 3×10⁹ floats
+— far too large. The kNN graph is built in chunks but still slow at full resolution.
+Consider using a coarser grid or pre-saving the edge index to disk.
+
 ## Known caveats
 
 - kNN graph construction is O(N²) in node count. At 1° global resolution

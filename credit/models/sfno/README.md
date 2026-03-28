@@ -39,6 +39,24 @@ Differences from reference:
 Tested with rfft2 fallback (torch-harmonics not in credit-casper env).
 Install `torch-harmonics` for true spherical equivariance.
 
+## CREDIT config
+
+```yaml
+model:
+  type: sfno
+  in_channels: 70
+  out_channels: 69
+  img_size: [192, 288]
+  patch_size: 4
+  embed_dim: 768
+  depth: 12
+  n_modes: 96            # spectral truncation; defaults to min(H, W//2+1)
+  drop_rate: 0.0
+```
+
+Install `torch-harmonics` for true spherical equivariance: `pip install torch-harmonics`
+Without it rfft2 is used automatically — still trains fine.
+
 ## Known caveats
 
 - Install: `pip install torch-harmonics` (requires CUDA-compatible build).

@@ -48,6 +48,28 @@ Differences from reference:
 Cross-group fusion logic is non-trivial — written from paper description rather
 than reference weights. Loss convergence will validate.
 
+## CREDIT config
+
+```yaml
+model:
+  type: fengwu
+  in_channels: 70
+  out_channels: 69
+  img_size: [192, 288]
+  patch_size: 4
+  embed_dim: 512
+  encoder_depth: 6
+  fuser_depth: 4
+  decoder_depth: 6
+  num_heads: 8
+  # Optional: split variables into groups
+  # group_sizes: [25, 25, 20]  # must sum to in_channels
+  # Default (no group_sizes): single group = plain ViT, no cross-attention
+```
+
+Without `group_sizes`, this is identical to a plain ViT (fuser is trivially skipped).
+Set `group_sizes` to e.g. `[levels*4, 4]` to separate upper-air from surface variables.
+
 ## Known caveats
 
 - `sum(group_sizes)` must equal `in_channels`.

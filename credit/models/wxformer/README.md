@@ -27,6 +27,38 @@ Based on `CrossFormer` (Zhang et al., 2021, https://arxiv.org/abs/2108.01072)
 adapted for weather forecasting at NCAR. WXFormer v1 was used to produce the
 MILES ensemble results reported in internal papers/campaigns.
 
+## CREDIT config
+
+Deterministic backbone (`wxformer`):
+
+```yaml
+model:
+  type: wxformer
+  image_height: 192
+  image_width: 288
+  frames: 2
+  channels: 4               # 3D vars: U, V, T, Q
+  surface_channels: 7       # surface vars
+  input_only_channels: 3    # forcing (e.g. TOA insolation) — not predicted
+  output_only_channels: 0
+  levels: 15                # pressure levels per 3D var
+  dim: [64, 128, 256, 512]
+  depth: [2, 2, 8, 2]
+  use_spectral_norm: true   # never remove — needed for DDP stability
+```
+
+SDL ensemble (`wxformer-sdl`) adds noise injection at each scale:
+
+```yaml
+model:
+  type: wxformer-sdl
+  # same spatial/channel args as above
+  noise_scale: 0.1          # amplitude of injected latent noise
+```
+
+`crossformer-style` is a legacy alias for `wxformer-sdl` — kept for backward
+compatibility with old scheduler configs.
+
 ## Validation status
 
 **Trained and evaluated against ERA5.** This is the production model. Results

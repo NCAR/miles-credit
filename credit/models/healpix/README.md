@@ -48,6 +48,27 @@ Reprojection correctness and face-adjacency handling are simplified — medium
 confidence. Loss convergence will validate.
 
 Install healpy: `pip install healpy` or `conda install -c conda-forge healpy`.
+(Already installed in `credit-casper` env as of 2026-03-27.)
+
+## CREDIT config
+
+```yaml
+model:
+  type: healpix
+  in_channels: 70
+  out_channels: 69
+  img_size: [192, 288]    # input lat/lon grid
+  nside: 64               # HEALPix resolution: 12*64²=49152 pixels ≈ 1.5°
+  embed_dim: 128          # base channel dim (doubles per stage)
+  depth: 2                # HEALPixBlocks per encoder/decoder stage
+  n_stages: 3             # U-Net depth (3 = 8× spatial reduction)
+  lat_range: [-90.0, 90.0]
+  lon_range: [0.0, 360.0]
+```
+
+Reprojection index buffers (`hp_to_ll`, `ll_to_hp`) are built at construction
+and saved in the state_dict — first init is slow (~30s at nside=64), subsequent
+loads are instant.
 
 ## Known caveats
 

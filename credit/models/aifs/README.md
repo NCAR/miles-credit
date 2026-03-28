@@ -47,6 +47,31 @@ The lat/lon transformer is a reasonable approximation of the AIFS processing
 stage but is not structurally identical to ECMWF's production system.
 Not weight-compatible with ECMWF's checkpoint (also proprietary/restricted).
 
+## CREDIT config
+
+AIFS uses named variable lists, not `in_channels`. Channel layout is
+`[surf_vars | atmos_vars × levels | static_vars]`.
+
+```yaml
+model:
+  type: aifs
+  surf_vars: ["2t", "10u", "10v", "msl"]
+  atmos_vars: ["z", "u", "v", "t", "q"]
+  static_vars: ["lsm", "z", "slt"]
+  atmos_levels: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+  # aifs_kwargs forwarded to AIFSProcessor(...):
+  aifs_kwargs:
+    hidden_dim: 512
+    num_layers: 16
+    num_heads: 16
+    mlp_ratio: 4.0
+    window_size: 0        # 0 = full attention; set >0 for windowed (memory efficient)
+```
+
+**Memory warning**: full self-attention is O(N²) in the number of grid nodes.
+At 1° resolution (N ≈ 55k) this is ~12 GB per batch element. Use a
+coarser grid or set `window_size > 0` for windowed attention.
+
 ## Known caveats
 
 - Production AIFS runs on ECMWF's proprietary reduced Gaussian grid with a

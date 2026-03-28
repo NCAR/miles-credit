@@ -51,6 +51,24 @@ Differences from reference:
 **Architectural smoke test only.** Not yet trained to convergence.
 U-Net structure and SNO blocks confirmed correct (shape, no NaN, gradients).
 
+## CREDIT config
+
+```yaml
+model:
+  type: fourcastnet3
+  in_channels: 70
+  out_channels: 69
+  img_size: [192, 288]
+  base_dim: 128          # channels at stage 0; doubles per stage
+  depth: 2               # SNOBlocks per encoder/decoder stage
+  n_stages: 3            # U-Net depth (H/W must be divisible by 2^n_stages)
+  n_modes: 96            # spectral truncation; defaults to min(H, W//2+1)
+  drop_rate: 0.0
+```
+
+Install `torch-harmonics` for true SHT (spherical equivariance):
+`pip install torch-harmonics`. rfft2 fallback is automatic and still trains.
+
 ## Known caveats
 
 - `H` and `W` must be divisible by `2^n_stages` for the U-Net downsampling.

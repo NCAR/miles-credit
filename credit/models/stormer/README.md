@@ -31,8 +31,26 @@ Differences from reference:
 Not yet trained to convergence or compared against published WB2 scores.
 Loss-curve sanity check pending. Confidence will build after a short training run.
 
+## CREDIT config
+
+```yaml
+model:
+  type: stormer
+  in_channels: 70        # total input channels (atmos + surface + static)
+  out_channels: 69       # total output channels
+  img_size: [192, 288]   # (H, W) of your lat/lon grid
+  patch_size: 4          # spatial patch size — 4 recommended at 1°
+  embed_dim: 1024        # ViT width; 768–1024 for production runs
+  depth: 12              # transformer depth; 8–16 typical
+  num_heads: 16          # attention heads; embed_dim // 64 is a good rule
+  drop_rate: 0.0
+```
+
+Suggested production config: `embed_dim=1024, depth=12, num_heads=16` (~307M params at 192×288).
+
 ## Known caveats
 
-- Global attention is O(N²) in sequence length. Slow at full ERA5 resolution
-  (N = H/p × W/p). Use `patch_size ≥ 4` at 1° resolution.
+- Global attention is O(N²) in sequence length. At 1° (192×288) with `patch_size=4`
+  you get N=3456 tokens — manageable on A100-80GB at batch size 1–2.
+  Use `patch_size ≥ 4`; smaller patches hit memory fast.
 - No masking for land/sea or pole weighting — add in the loss, not the model.

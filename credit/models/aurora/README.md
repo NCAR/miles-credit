@@ -41,6 +41,30 @@ Use `aurora_kwargs` to scale down (e.g. `embed_dim=256, depth=8`).
 2 levels). Production-scale default untested end-to-end at ERA5 resolution.
 Not weight-compatible with Microsoft's pretrained Aurora checkpoint.
 
+## CREDIT config
+
+Aurora uses named variable lists, not `in_channels`. Channel layout is
+`[surf_vars | atmos_vars × levels | static_vars]`.
+
+```yaml
+model:
+  type: aurora
+  surf_vars: ["2t", "10u", "10v", "msl"]
+  atmos_vars: ["z", "u", "v", "t", "q"]
+  static_vars: ["lsm", "z", "slt"]
+  atmos_levels: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+  n_lat: 192              # set explicitly to avoid auto-inference from buffers
+  n_lon: 288
+  # aurora_kwargs forwarded to Aurora(...):
+  aurora_kwargs:
+    embed_dim: 256        # default is large (~1.3B); scale down for ablations
+    num_heads: 8
+    depth: 8
+```
+
+Default constructor produces a ~1.3B param model. Always pass `aurora_kwargs`
+to scale down for training from scratch on limited compute.
+
 ## Known caveats
 
 - Default config is very large. Pass small `aurora_kwargs` for ablation runs.

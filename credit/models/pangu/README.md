@@ -42,6 +42,31 @@ Channel layout: `[surf_vars | atmos_vars × levels | static_vars]`
 2 levels). Not weight-compatible with Huawei's pretrained Pangu checkpoint
 (different normalisation, variable set, and model structure details).
 
+## CREDIT config
+
+Pangu uses named variable lists, not `in_channels`. Channel layout is
+`[surf_vars | atmos_vars × levels | static_vars]`.
+
+```yaml
+model:
+  type: pangu
+  surf_vars: ["2t", "10u", "10v", "msl"]
+  atmos_vars: ["z", "u", "v", "t", "q"]
+  static_vars: ["lsm", "z", "slt"]
+  atmos_levels: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+  # pangu_kwargs forwarded to PanguModel(...):
+  pangu_kwargs:
+    embed_dim: 192
+    patch_size: [2, 4, 4]      # [level_patch, lat_patch, lon_patch]
+    window_size: [2, 6, 12]    # 3D attention window; n_levels must be divisible by window_size[0]
+    depths: [2, 6, 6, 2]
+    num_heads: [6, 12, 12, 6]
+```
+
+`n_levels` (len of `atmos_levels`) must be divisible by `patch_size[0]` and
+`window_size[0]`. The default 13-level ERA5 setup requires `patch_size[0]=1`
+or `window_size[0]=1` unless levels are subsampled.
+
 ## Known caveats
 
 - Pangu's pretrained weights are under a restrictive non-commercial license.

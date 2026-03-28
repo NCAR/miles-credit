@@ -47,6 +47,26 @@ Window attention and shift logic written from scratch — medium confidence in
 correctness of relative position bias indexing at edge cases. A short training
 run with loss convergence will build confidence.
 
+## CREDIT config
+
+```yaml
+model:
+  type: swinrnn
+  in_channels: 70
+  out_channels: 69
+  img_size: [192, 288]
+  patch_size: 4          # feature map is (H/4, W/4) = (48, 72) at 1°
+  embed_dim: 128
+  depths: [2, 2, 6, 2]  # blocks per stage; [2,2,6,2] is the Swin-T recipe
+  num_heads: [4, 8, 16, 32]
+  window_size: 6         # must divide feature map at every stage
+  drop_rate: 0.0
+```
+
+Window size constraint: at 1° with `patch_size=4`, stage-0 grid is 48×72.
+`window_size=6` divides both. At 0.25° (720×1440) with `patch_size=4`, grid
+is 180×360 and `window_size=6` still works.
+
 ## Known caveats
 
 - `img_size` after patch embed must be divisible by `window_size` at every

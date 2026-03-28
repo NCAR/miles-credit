@@ -41,6 +41,21 @@ Differences from reference:
 **Architectural smoke test only.** Not yet trained to convergence.
 The AFNO forward/backward is confirmed correct after the einsum fix.
 
+## CREDIT config
+
+```yaml
+model:
+  type: fourcastnet
+  in_channels: 70
+  out_channels: 69
+  img_size: [192, 288]
+  patch_size: 8          # FourCastNet v1 uses patch_size=8 at 0.25°; 4–8 at 1°
+  embed_dim: 768
+  depth: 12
+  n_blocks: 8            # must divide embed_dim; default 8
+  drop_rate: 0.0
+```
+
 ## Known caveats
 
 - `n_blocks` must divide `embed_dim`. Default `n_blocks=8`.

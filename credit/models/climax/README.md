@@ -37,6 +37,24 @@ Differences from reference:
 **Architectural smoke test only.** Not yet trained to convergence.
 Loss-curve sanity check pending.
 
+## CREDIT config
+
+```yaml
+model:
+  type: climax
+  in_channels: 70
+  out_channels: 69
+  img_size: [192, 288]
+  patch_size: 4          # larger = cheaper aggregation step
+  embed_dim: 1024
+  depth: 8
+  num_heads: 16
+  agg_depth: 2           # 0 = skip aggregation (pure mean), 1–2 typical
+  drop_rate: 0.0
+```
+
+Set `agg_depth: 0` for a cheaper model that still uses the per-variable embeddings — the aggregation transformer is optional.
+
 ## Known caveats
 
 - Memory scales as O(B × C × N) in the aggregation step. With large C (many
