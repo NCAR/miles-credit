@@ -489,6 +489,9 @@ class CREDITHEALPix(nn.Module):
         return ll_flat.reshape(B, C, self.H, self.W)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
+            B, C, T, H, W = x.shape
+            x = x.reshape(B, C * T, H, W)
         faces = self._ll_to_faces(x)
         out = self.unet(faces)
         return self._faces_to_ll(out)

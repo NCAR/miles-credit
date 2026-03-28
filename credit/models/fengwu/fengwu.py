@@ -340,6 +340,9 @@ class CREDITFengWu(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
+            B, C, T, H, W = x.shape
+            x = x.reshape(B, C * T, H, W)
         if self.pad_H > 0 or self.pad_W > 0:
             x = F.pad(x, (0, self.pad_W, 0, self.pad_H))
         out = self.model(x)

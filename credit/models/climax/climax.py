@@ -274,6 +274,9 @@ class CREDITClimaX(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
+            B, C, T, H, W = x.shape
+            x = x.reshape(B, C * T, H, W)
         return self.model(x)
 
     @classmethod
