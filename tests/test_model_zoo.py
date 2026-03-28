@@ -249,7 +249,7 @@ def make_wxformer():
         input_only_channels=1,
         output_only_channels=0,
         levels=2,
-        dim=(16, 32, 32, 32),
+        dim=(4, 8, 16, 32),
         depth=(2, 2, 2, 2),
         global_window_size=(2, 2, 1, 1),
         local_window_size=4,
