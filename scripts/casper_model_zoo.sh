@@ -9,7 +9,10 @@
 
 REPO=/glade/work/schreck/repos/miles-credit-main
 PYTHON=/glade/u/home/schreck/.conda/envs/credit-casper/bin/python
-BRANCH=${BRANCH:-model-zoo}
+
+# Put the repo first so local (model-zoo) credit package takes precedence
+# over any older installed version in the conda env.
+export PYTHONPATH="${REPO}:${PYTHONPATH}"
 
 echo "=== model zoo smoke + train test ==="
 echo "Node   : $(hostname)"
