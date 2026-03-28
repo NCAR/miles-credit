@@ -23,19 +23,21 @@ scale to produce ensemble members without separate forward passes.
 
 ## Lineage
 
-**Paper:** Zhang et al., "CrossFormer: A Versatile Vision Transformer Hinging on Cross-scale Attention," 2021.
+**WXFormer author:** John Schreck (NCAR/MILES).
+
+**CrossFormer backbone paper:** Zhang et al., "CrossFormer: A Versatile Vision Transformer Hinging on Cross-scale Attention," 2021.
 https://arxiv.org/abs/2108.01072
 
-**Implementation credit:** Phil Wang (lucidrains) — PyTorch implementation that
-CREDIT's `crossformer.py` is directly based on. Original GitHub repo has been
-taken down; work is now available on GitLab under the same username:
+**CrossFormer backbone implementation:** Phil Wang (lucidrains) — PyTorch
+implementation that `crossformer.py` is based on. Original GitHub repo has
+been taken down; work is now available on GitLab under the same username:
 https://gitlab.com/lucidrains
 
-NCAR/MILES adapted the architecture for weather forecasting: replaced the
-classification head with an encoder-decoder structure, added the SDL noise
-injection layer for ensemble generation, and integrated CREDIT's variable
-channel conventions. WXFormer v1 was used to produce the MILES ensemble
-results reported in internal papers/campaigns.
+John Schreck adapted the CrossFormer backbone for weather forecasting:
+encoder-decoder structure replacing the classification head, SDL noise
+injection layer for ensemble generation, CREDIT variable channel conventions.
+WXFormer v1 was used to produce the MILES ensemble results reported in
+internal papers/campaigns.
 
 ## CREDIT config
 
