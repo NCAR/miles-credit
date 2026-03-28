@@ -205,6 +205,19 @@ def predict(rank, world_size, conf, backend=None, p=None):
 
     model.eval()
 
+    # Apply noise_scale override for SDL ensemble models.
+    noise_scale = conf["predict"].get("noise_scale", None)
+    if noise_scale is not None and noise_scale != 1.0:
+        from credit.models.wxformer.stochastic_decomposition_layer import StochasticDecompositionLayer
+
+        n_scaled = 0
+        for m in model.modules():
+            if isinstance(m, StochasticDecompositionLayer):
+                m.noise_factor.data.mul_(noise_scale)
+                n_scaled += 1
+        if n_scaled:
+            logger.info(f"noise_scale={noise_scale}: scaled {n_scaled} SDL noise layers")
+
     # Set up metrics and containers
     if "climatology" in conf["predict"]:
         metrics = LatWeightedMetricsClimatology(conf, climatology=xr.open_dataset(conf["predict"]["climatology"]))
