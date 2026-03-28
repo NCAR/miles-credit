@@ -17,10 +17,14 @@ python plot_weatherbench.py --scores wb2_scores.csv --label "WXFormer v2" --out 
 import argparse
 import logging
 import os
+from concurrent.futures import ProcessPoolExecutor
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+matplotlib.use("Agg")  # non-interactive backend; safe for multiprocessing
 
 from credit.verification.wb2_references import WB2_SCORES, WB2_STYLE
 
@@ -74,71 +78,22 @@ def _add_ref_lines(ax, varname, metric, label_refs=True):
         )
 
 
-def plot_rmse(df, out_dir, label="CREDIT", show_refs=True):
-    """RMSE vs lead time for each variable — one panel per variable."""
+def plot_rmse(df, out_dir, label="CREDIT", show_refs=True, workers=None):
+    """RMSE vs lead time for each variable — one panel per variable, parallel."""
     os.makedirs(out_dir, exist_ok=True)
-    for var, meta in PLOT_VARS.items():
-        col = f"rmse_{var}"
-        if col not in df.columns:
-            continue
-
-        fig, ax = plt.subplots(figsize=(8, 5))
-        lt = df["lead_time_hours"].values
-        ax.plot(lt, df[col].values, "k-o", linewidth=2, markersize=4, label=label, zorder=5)
-
-        if show_refs:
-            _add_ref_lines(ax, var, "rmse")
-
-        max_lt = lt.max()
-        _day_ticks(ax, max_lt)
-        ax.set_xlabel("Lead time")
-        ax.set_ylabel(f"RMSE [{meta['rmse_unit']}]")
-        ax.set_title(f"{meta['title']} — RMSE")
-        ax.legend(loc="upper left", fontsize=9)
-        ax.grid(True, alpha=0.3)
-        ax.set_xlim(0, max_lt + 12)
-        ax.set_ylim(bottom=0)
-
-        path = os.path.join(out_dir, f"rmse_{var}.png")
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"Saved {path}")
+    df_dict = df.to_dict(orient="list")
+    tasks = [(var, meta, df_dict, out_dir, label, show_refs) for var, meta in PLOT_VARS.items()]
+    with ProcessPoolExecutor(max_workers=workers or os.cpu_count()) as pool:
+        list(pool.map(_plot_rmse_worker, tasks))
 
 
-def plot_acc(df, out_dir, label="CREDIT", show_refs=True):
-    """ACC vs lead time for variables where ACC is in the scores CSV."""
+def plot_acc(df, out_dir, label="CREDIT", show_refs=True, workers=None):
+    """ACC vs lead time for variables where ACC is in the scores CSV, parallel."""
     os.makedirs(out_dir, exist_ok=True)
-    for var, meta in PLOT_VARS.items():
-        if not meta["acc"]:
-            continue
-        col = f"acc_{var}"
-        if col not in df.columns:
-            continue
-
-        fig, ax = plt.subplots(figsize=(8, 5))
-        lt = df["lead_time_hours"].values
-        ax.plot(lt, df[col].values, "k-o", linewidth=2, markersize=4, label=label, zorder=5)
-
-        if show_refs:
-            _add_ref_lines(ax, var, "acc")
-
-        # ACC = 0.6 is a common "skill limit" line
-        max_lt = lt.max()
-        ax.axhline(0.6, color="gray", linestyle="--", linewidth=1, alpha=0.7, label="ACC = 0.6")
-
-        _day_ticks(ax, max_lt)
-        ax.set_xlabel("Lead time")
-        ax.set_ylabel("ACC")
-        ax.set_title(f"{meta['title']} — Anomaly Correlation Coefficient")
-        ax.legend(loc="upper right", fontsize=9)
-        ax.grid(True, alpha=0.3)
-        ax.set_xlim(0, max_lt + 12)
-        ax.set_ylim(0.4, 1.02)
-
-        path = os.path.join(out_dir, f"acc_{var}.png")
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"Saved {path}")
+    df_dict = df.to_dict(orient="list")
+    tasks = [(var, meta, df_dict, out_dir, label, show_refs) for var, meta in PLOT_VARS.items()]
+    with ProcessPoolExecutor(max_workers=workers or os.cpu_count()) as pool:
+        list(pool.map(_plot_acc_worker, tasks))
 
 
 def plot_bias(df, out_dir, label="CREDIT"):
@@ -242,49 +197,114 @@ def plot_scorecard(df, out_dir, label="CREDIT"):
     logger.info(f"Saved {path}")
 
 
-def plot_regional_rmse(df, out_dir, label="CREDIT"):
-    """Regional RMSE breakdown: one figure per variable, four lines for regions."""
+def plot_regional_rmse(df, out_dir, label="CREDIT", workers=None):
+    """Regional RMSE breakdown: one figure per variable, four lines for regions, parallel."""
     os.makedirs(out_dir, exist_ok=True)
+    df_dict = df.to_dict(orient="list")
+    tasks = [(var, meta, df_dict, out_dir, label) for var, meta in PLOT_VARS.items()]
+    with ProcessPoolExecutor(max_workers=workers or os.cpu_count()) as pool:
+        list(pool.map(_plot_regional_rmse_worker, tasks))
+
+
+def _plot_rmse_worker(args):
+    var, meta, df_dict, out_dir, label, show_refs = args
+    df = pd.DataFrame(df_dict)
+    col = f"rmse_{var}"
+    if col not in df.columns:
+        return
+    fig, ax = plt.subplots(figsize=(8, 5))
+    lt = df["lead_time_hours"].values
+    ax.plot(lt, df[col].values, "k-o", linewidth=2, markersize=4, label=label, zorder=5)
+    if show_refs:
+        _add_ref_lines(ax, var, "rmse")
+    max_lt = lt.max()
+    _day_ticks(ax, max_lt)
+    ax.set_xlabel("Lead time")
+    ax.set_ylabel(f"RMSE [{meta['rmse_unit']}]")
+    ax.set_title(f"{meta['title']} — RMSE")
+    ax.legend(loc="upper left", fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(0, max_lt + 12)
+    ax.set_ylim(bottom=0)
+    path = os.path.join(out_dir, f"rmse_{var}.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_acc_worker(args):
+    var, meta, df_dict, out_dir, label, show_refs = args
+    if not meta["acc"]:
+        return
+    df = pd.DataFrame(df_dict)
+    col = f"acc_{var}"
+    if col not in df.columns:
+        return
+    fig, ax = plt.subplots(figsize=(8, 5))
+    lt = df["lead_time_hours"].values
+    ax.plot(lt, df[col].values, "k-o", linewidth=2, markersize=4, label=label, zorder=5)
+    if show_refs:
+        _add_ref_lines(ax, var, "acc")
+    max_lt = lt.max()
+    ax.axhline(0.6, color="gray", linestyle="--", linewidth=1, alpha=0.7, label="ACC = 0.6")
+    _day_ticks(ax, max_lt)
+    ax.set_xlabel("Lead time")
+    ax.set_ylabel("ACC")
+    ax.set_title(f"{meta['title']} — Anomaly Correlation Coefficient")
+    ax.legend(loc="upper right", fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(0, max_lt + 12)
+    ax.set_ylim(0.4, 1.02)
+    path = os.path.join(out_dir, f"acc_{var}.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_regional_rmse_worker(args):
+    var, meta, df_dict, out_dir, label = args
+    df = pd.DataFrame(df_dict)
     colors = {"global": "black", "tropics": "#d62728", "n_extratropics": "#1f77b4", "s_extratropics": "#9467bd"}
-
-    for var in PLOT_VARS:
-        # Check if regional columns exist
-        region_cols = [f"rmse_{var}_{r}" for r in REGIONS]
-        if not any(c in df.columns for c in region_cols):
+    region_cols = [f"rmse_{var}_{r}" for r in REGIONS]
+    if not any(c in df.columns for c in region_cols):
+        return
+    fig, ax = plt.subplots(figsize=(8, 5))
+    lt = df["lead_time_hours"].values
+    for region in REGIONS:
+        col = f"rmse_{var}_{region}"
+        if col not in df.columns:
             continue
-
-        fig, ax = plt.subplots(figsize=(8, 5))
-        lt = df["lead_time_hours"].values
-        for region in REGIONS:
-            col = f"rmse_{var}_{region}"
-            if col not in df.columns:
-                continue
-            ax.plot(lt, df[col].values, label=REGION_LABELS[region], color=colors[region], linewidth=1.8)
-
-        meta = PLOT_VARS.get(var, {})
-        _day_ticks(ax, lt.max())
-        ax.set_xlabel("Lead time")
-        ax.set_ylabel(f"RMSE [{meta.get('rmse_unit', '')}]")
-        ax.set_title(f"{label} — {meta.get('title', var)} RMSE by Region")
-        ax.legend(fontsize=9)
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(bottom=0)
-
-        path = os.path.join(out_dir, f"regional_rmse_{var}.png")
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"Saved {path}")
+        ax.plot(lt, df[col].values, label=REGION_LABELS[region], color=colors[region], linewidth=1.8)
+    _day_ticks(ax, lt.max())
+    ax.set_xlabel("Lead time")
+    ax.set_ylabel(f"RMSE [{meta.get('rmse_unit', '')}]")
+    ax.set_title(f"{label} — {meta.get('title', var)} RMSE by Region")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
+    path = os.path.join(out_dir, f"regional_rmse_{var}.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
-def plot_all(scores_csv, out_dir, label="CREDIT", show_refs=True):
+def plot_all(scores_csv, out_dir, label="CREDIT", show_refs=True, workers=None):
     df = pd.read_csv(scores_csv)
     logger.info(f"Loaded {len(df)} lead-time rows from {scores_csv}")
+    os.makedirs(out_dir, exist_ok=True)
 
-    plot_rmse(df, out_dir, label=label, show_refs=show_refs)
-    plot_acc(df, out_dir, label=label, show_refs=show_refs)
+    df_dict = df.to_dict(orient="list")  # serializable for workers
+    n_workers = workers or os.cpu_count() or 1
+
+    rmse_tasks = [(var, meta, df_dict, out_dir, label, show_refs) for var, meta in PLOT_VARS.items()]
+    acc_tasks = [(var, meta, df_dict, out_dir, label, show_refs) for var, meta in PLOT_VARS.items()]
+    regional_tasks = [(var, meta, df_dict, out_dir, label) for var, meta in PLOT_VARS.items()]
+
+    with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        list(pool.map(_plot_rmse_worker, rmse_tasks))
+        list(pool.map(_plot_acc_worker, acc_tasks))
+        list(pool.map(_plot_regional_rmse_worker, regional_tasks))
+
+    # bias and scorecard are single figures — run in main process
     plot_bias(df, out_dir, label=label)
     plot_scorecard(df, out_dir, label=label)
-    plot_regional_rmse(df, out_dir, label=label)
 
     logger.info(f"All figures saved to {out_dir}/")
 
@@ -295,6 +315,9 @@ def main():
     parser.add_argument("--out", default="wb2_figures", help="Output directory for PNG figures")
     parser.add_argument("--label", default="CREDIT", help="Model label for legend")
     parser.add_argument("--no-refs", action="store_true", help="Omit IFS/Pangu/GraphCast reference lines")
+    parser.add_argument(
+        "--workers", type=int, default=None, help="Parallel workers for figure generation (default: os.cpu_count())"
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -303,7 +326,7 @@ def main():
         format="%(levelname)s:%(name)s:%(message)s",
     )
 
-    plot_all(args.scores, args.out, label=args.label, show_refs=not args.no_refs)
+    plot_all(args.scores, args.out, label=args.label, show_refs=not args.no_refs, workers=args.workers)
 
 
 if __name__ == "__main__":
