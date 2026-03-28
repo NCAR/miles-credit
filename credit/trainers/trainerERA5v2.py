@@ -80,7 +80,7 @@ class Trainer(BaseTrainer):
 
         # ---- Data schema extraction (new nested schema) ----
         data_conf = conf["data"]
-        source = data_conf["source"]["ERA5"]
+        source = next(iter(data_conf["source"].values()))
         vars_conf = source["variables"]
         prog = vars_conf.get("prognostic") or {}
         diag = vars_conf.get("diagnostic") or {}
