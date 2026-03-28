@@ -42,6 +42,12 @@ injection layer for ensemble generation, CREDIT variable channel conventions.
 WXFormer v1 was used to produce the MILES ensemble results reported in
 internal papers/campaigns.
 
+**Pixel-shuffle upsampling (`upsample_with_ps`):** Will Chapman (NCAR/MILES).
+Replaces the transposed-conv decoder with sub-pixel convolution (pixel shuffle),
+which partially resolves the checkerboard/grid artefact problem present in
+the original transposed-conv upsampling path. Enable with `upsample_with_ps: true`
+in the model config.
+
 ## CREDIT config
 
 Deterministic backbone (`wxformer`):
