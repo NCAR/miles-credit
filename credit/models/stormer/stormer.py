@@ -13,6 +13,7 @@ import sys
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 
 
@@ -242,8 +243,14 @@ class CREDITStormer(nn.Module):
         drop_rate=0.0,
     ):
         super().__init__()
+        H, W = img_size
+        self.H, self.W = H, W
+        # Pad to next multiple of patch_size so the ViT assertion always passes
+        pad_H = (patch_size - H % patch_size) % patch_size
+        pad_W = (patch_size - W % patch_size) % patch_size
+        self.pad_H, self.pad_W = pad_H, pad_W
         self.model = StormerViT(
-            img_size=img_size,
+            img_size=(H + pad_H, W + pad_W),
             patch_size=patch_size,
             in_channels=in_channels,
             out_channels=out_channels,
@@ -255,7 +262,12 @@ class CREDITStormer(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+        if self.pad_H > 0 or self.pad_W > 0:
+            x = F.pad(x, (0, self.pad_W, 0, self.pad_H))
+        out = self.model(x)
+        if self.pad_H > 0 or self.pad_W > 0:
+            out = out[:, :, : self.H, : self.W]
+        return out
 
     @classmethod
     def load_model(cls, conf):

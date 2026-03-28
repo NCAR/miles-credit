@@ -35,6 +35,7 @@ model:
     in_channels: 80
     out_channels: 84
     img_size: [181, 360]
+    levels: 18
     patch_size: 4
     embed_dim: 512
     depth: 6
@@ -69,6 +70,7 @@ predict:
 trainer:
     type: era5
     mode: ddp
+    activation_checkpoint: False
     compile: False
     load_weights: False
     load_optimizer: False

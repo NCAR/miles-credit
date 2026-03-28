@@ -40,6 +40,9 @@ def build_knn_edge_index(lat: torch.Tensor, lon: torch.Tensor, k: int) -> torch.
     """
     Build k-nearest-neighbour edge index on a lat/lon grid (great-circle distance).
 
+    Uses a KDTree on 3-D unit-sphere XYZ coordinates to avoid the O(N²) pairwise
+    distance matrix, which OOMs for large grids (e.g. 181×360 ≈ 65 k nodes).
+
     Parameters
     ----------
     lat, lon : (N,) in degrees
@@ -49,23 +52,32 @@ def build_knn_edge_index(lat: torch.Tensor, lon: torch.Tensor, k: int) -> torch.
     -------
     edge_index : (2, N*k)  — (src, dst) pairs
     """
-    N = lat.shape[0]
-    lat_r = torch.deg2rad(lat.double())
-    lon_r = torch.deg2rad(lon.double())
+    import numpy as np
+    from scipy.spatial import cKDTree
 
-    # Haversine pairwise: (N, N)
-    dlat = lat_r[:, None] - lat_r[None, :]
-    dlon = lon_r[:, None] - lon_r[None, :]
-    a = torch.sin(dlat / 2) ** 2 + torch.cos(lat_r[:, None]) * torch.cos(lat_r[None, :]) * torch.sin(dlon / 2) ** 2
-    dist = 2 * torch.asin(torch.clamp(torch.sqrt(a), 0, 1))  # (N, N)
+    lat_np = lat.cpu().numpy().astype(np.float64)
+    lon_np = lon.cpu().numpy().astype(np.float64)
 
-    # zero out self-loops for topk
-    dist.fill_diagonal_(float("inf"))
-    _, nbrs = torch.topk(dist, k, dim=1, largest=False)  # (N, k)
+    # Convert to unit-sphere XYZ (Euclidean chord distance ≈ great-circle for kNN)
+    lat_r = np.deg2rad(lat_np)
+    lon_r = np.deg2rad(lon_np)
+    x = np.cos(lat_r) * np.cos(lon_r)
+    y = np.cos(lat_r) * np.sin(lon_r)
+    z = np.sin(lat_r)
+    xyz = np.stack([x, y, z], axis=1)  # (N, 3)
 
-    src = torch.arange(N, device=lat.device).unsqueeze(1).expand(-1, k).reshape(-1)
-    dst = nbrs.reshape(-1)
-    return torch.stack([src.long(), dst.long()], dim=0)  # (2, N*k)
+    tree = cKDTree(xyz)
+    # k+1 because the nearest neighbour of each point is itself
+    _, nbrs = tree.query(xyz, k=k + 1, workers=-1)  # (N, k+1)
+    nbrs = nbrs[:, 1:]  # drop self (column 0)
+
+    N = xyz.shape[0]
+    src = np.repeat(np.arange(N, dtype=np.int64), k)
+    dst = nbrs.reshape(-1).astype(np.int64)
+
+    src_t = torch.from_numpy(src)
+    dst_t = torch.from_numpy(dst)
+    return torch.stack([src_t, dst_t], dim=0)  # (2, N*k)
 
 
 # ---------------------------------------------------------------------------
