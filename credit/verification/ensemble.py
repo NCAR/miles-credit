@@ -83,16 +83,12 @@ def rank_histogram_apply(da_pred, da_true, w_lat=None):
     """
 
     ensemble_size = len(da_pred.ensemble_member_label)
-    rank_hist = np.zeros(ensemble_size + 1)
 
-    da_pred = da_pred.transpose("ensemble_member_label", ...)
+    # Vectorize: reshape (ensemble, time, lat, lon) → (ensemble, time*lat*lon)
+    # and (time, lat, lon) → (time*lat*lon,) so rankhist processes all grid points at once.
+    pred_arr = da_pred.transpose("ensemble_member_label", "time", "latitude", "longitude").values
+    true_arr = da_true.transpose("time", "latitude", "longitude").values
+    pred_flat = pred_arr.reshape(ensemble_size, -1)
+    true_flat = true_arr.reshape(-1)
 
-    # TODO: vectorize this computation
-    for time in da_pred.time:
-        rank_hist += rankhist(
-            da_pred.sel(time=time).values,  # requires ensemble_member_label to be first dim after removing time
-            da_true.sel(time=time).values,
-            normalize=False,
-        )
-
-    return rank_hist
+    return rankhist(pred_flat, true_flat, normalize=False)
