@@ -243,12 +243,12 @@ def make_wxformer():
         input_only_channels=1,
         output_only_channels=0,
         levels=2,
-        dim=(16, 32),
-        depth=(2, 2),
-        global_window_size=(2, 1),
+        dim=(16, 32, 32, 32),
+        depth=(2, 2, 2, 2),
+        global_window_size=(2, 2, 1, 1),
         local_window_size=4,
-        cross_embed_kernel_sizes=((2, 4), (2, 4)),
-        cross_embed_strides=(2, 2),
+        cross_embed_kernel_sizes=((2, 4), (2, 4), (2, 4), (2, 4)),
+        cross_embed_strides=(2, 2, 2, 2),
         use_spectral_norm=True,
     ).to(device)
     return m, C_IN, C_OUT, FRAMES
