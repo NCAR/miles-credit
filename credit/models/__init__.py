@@ -275,6 +275,8 @@ def load_model(conf, load_weights=False, model_name=False):
                 return model.load_model_name(conf, model_name=model_name)
             else:
                 return model.load_model(conf)
+        # Pop pretrained_weights before filtering so it isn't passed to __init__
+        pretrained_weights = model_conf.pop("pretrained_weights", None)
         # Filter kwargs to only those accepted by the constructor (handles models
         # that don't accept parser-only keys like 'levels').
         sig = inspect.signature(model.__init__)
@@ -283,7 +285,18 @@ def load_model(conf, load_weights=False, model_name=False):
             filtered_conf = model_conf  # accepts **kwargs — pass everything
         else:
             filtered_conf = {k: v for k, v in model_conf.items() if k in params}
-        return model(**filtered_conf)
+        model_instance = model(**filtered_conf)
+        if pretrained_weights:
+            import torch
+
+            ckpt_path = os.path.expandvars(pretrained_weights)
+            ckpt = torch.load(ckpt_path, map_location="cpu")
+            state = ckpt.get("model_state_dict", ckpt)
+            missing, unexpected = model_instance.load_state_dict(state, strict=False)
+            logger.info(
+                f"Loaded pretrained weights from {ckpt_path}: {len(missing)} missing, {len(unexpected)} unexpected keys"
+            )
+        return model_instance
     else:
         msg = f"Model type {model_type} not supported. Exiting."
         logger.warning(msg)
