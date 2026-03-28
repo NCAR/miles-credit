@@ -24,6 +24,7 @@ import glob
 import logging
 import os
 import re
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -248,9 +249,110 @@ def open_era5_year(era5_glob, year):
     return ds
 
 
-def compute_netcdf_scores(forecast_dir, era5_glob, clim_path=None, lead_time_hours=6, max_inits=None):
+def _score_step_worker(args):
+    """
+    Top-level worker for ProcessPoolExecutor (must be picklable).
+
+    Scores all forecasts at a single lead-time step against ERA5.
+
+    Parameters
+    ----------
+    args : tuple
+        (step, files, era5_glob, clim_path)
+
+    Returns
+    -------
+    dict  Row of WB2 scores for this step, or None on failure.
+    """
+    import logging as _logging
+
+    _log = _logging.getLogger(__name__)
+
+    step, files, era5_glob, clim_path = args
+    lead_h = step  # filename suffix is already lead-time hours
+
+    # Load climatology inside worker (no shared state across processes)
+    ds_clim = None
+    try:
+        ds_clim = load_climatology(clim_path)
+    except Exception as e:
+        _log.warning(f"Step {step}: could not load climatology ({e}); ACC skipped")
+
+    # Per-worker ERA5 cache (keyed by year; at most 2 years per step in practice)
+    era5_cache = {}
+
+    pred_list, true_list = [], []
+    for f in files:
+        try:
+            ds_pred = xr.open_dataset(f)
+        except Exception as e:
+            _log.warning(f"Step {step}: failed to open {f}: {e}")
+            continue
+        if "ensemble" in ds_pred.dims:
+            ds_pred = ds_pred.mean(dim="ensemble")
+        valid_time = ds_pred.time.values[0]
+        year = pd.Timestamp(valid_time).year
+
+        if year not in era5_cache:
+            era5_cache[year] = open_era5_year(era5_glob, year)
+            if len(era5_cache) > 2:
+                del era5_cache[min(era5_cache.keys())]
+
+        ds_true = era5_cache[year].sel(time=valid_time, method="nearest")
+        pred_list.append(ds_pred)
+        true_list.append(ds_true)
+
+    if not pred_list:
+        return None
+
+    ds_pred_all = xr.concat(pred_list, dim="time")
+    ds_true_all = xr.concat(true_list, dim="time")
+
+    row = {"lead_time_hours": lead_h, "forecast_step": step, "n_inits": len(pred_list)}
+    valid_times = ds_pred_all.time.values
+
+    # upper-air
+    for label, (era5_var, credit_var, era5_level, credit_coord, credit_level) in WB2_TARGET_LEVELS.items():
+        if era5_var not in ds_true_all or credit_var not in ds_pred_all:
+            continue
+        da_pred = ds_pred_all[credit_var].sel({credit_coord: credit_level}, method="nearest")
+        da_true = ds_true_all[era5_var].sel(level=era5_level, method="nearest")
+        if da_true.latitude.shape != da_pred.latitude.shape or not np.allclose(
+            da_true.latitude.values, da_pred.latitude.values, atol=0.1
+        ):
+            da_true = da_true.interp(latitude=da_pred.latitude, longitude=da_pred.longitude, method="linear")
+        da_clim_var = None
+        if ds_clim is not None and era5_var in ds_clim:
+            da_clim_var = select_clim(ds_clim, valid_times, era5_var, level=era5_level)
+            da_clim_var = da_clim_var.interp(latitude=da_pred.latitude, longitude=da_pred.longitude)
+        _add_scores(row, da_pred, da_true, label, da_clim=da_clim_var)
+
+    # surface
+    surface_map = {"t2m": ("VAR_2T", "2m_temperature"), "SP": ("SP", "SP")}
+    for credit_var, (era5_var, clim_var) in surface_map.items():
+        if credit_var not in ds_pred_all or era5_var not in ds_true_all:
+            continue
+        da_pred = ds_pred_all[credit_var]
+        da_true = ds_true_all[era5_var]
+        if da_true.latitude.shape != da_pred.latitude.shape or not np.allclose(
+            da_true.latitude.values, da_pred.latitude.values, atol=0.1
+        ):
+            da_true = da_true.interp(latitude=da_pred.latitude, longitude=da_pred.longitude, method="linear")
+        da_clim_var = None
+        if ds_clim is not None and clim_var in ds_clim:
+            da_clim_var = select_clim(ds_clim, valid_times, clim_var)
+            da_clim_var = da_clim_var.interp(latitude=da_pred.latitude, longitude=da_pred.longitude)
+        _add_scores(row, da_pred, da_true, credit_var, da_clim=da_clim_var)
+
+    _log.info(f"Step {step} ({lead_h}h): done ({len(pred_list)} inits)")
+    return row
+
+
+def compute_netcdf_scores(forecast_dir, era5_glob, clim_path=None, lead_time_hours=6, max_inits=None, workers=None):
     """
     Compute WB2 deterministic scores from forecast netCDFs against ERA5.
+
+    Each lead-time step is scored in parallel via ProcessPoolExecutor.
 
     Expects forecast_dir structured as:
         forecast_dir/{init_datetime}/pred_{init}_{step:03d}.nc
@@ -262,9 +364,11 @@ def compute_netcdf_scores(forecast_dir, era5_glob, clim_path=None, lead_time_hou
     era5_glob : str
         Glob pattern for ERA5 zarr files.
     lead_time_hours : int
-        Hours per step.
+        Hours per step (kept for signature compatibility; step suffix is authoritative).
     max_inits : int, optional
         Limit number of init dates (for testing).
+    workers : int, optional
+        Number of parallel workers.  Defaults to os.cpu_count().
 
     Returns
     -------
@@ -277,104 +381,31 @@ def compute_netcdf_scores(forecast_dir, era5_glob, clim_path=None, lead_time_hou
         init_dirs = init_dirs[:max_inits]
     logger.info(f"Found {len(init_dirs)} init dates in {forecast_dir}")
 
-    # load climatology once
-    ds_clim = None
-    try:
-        ds_clim = load_climatology(clim_path)
-        logger.info("Climatology loaded — will compute true anomaly ACC")
-    except Exception as e:
-        logger.warning(f"Could not load climatology ({e}); ACC will be skipped in netcdf mode")
-
-    # collect all forecast files, grouped by step
+    # collect forecast files grouped by step
     step_files = {}
     for init_dir in init_dirs:
         for f in sorted(init_dir.glob("pred_*.nc")):
-            # extract step from filename: pred_INIT_SSS.nc
             parts = f.stem.split("_")
             step = int(parts[-1])
             step_files.setdefault(step, []).append(f)
 
+    n_steps = len(step_files)
+    n_workers = workers or os.cpu_count() or 1
+    logger.info(f"Scoring {n_steps} steps with {n_workers} workers")
+
+    work_items = [(step, files, era5_glob, clim_path) for step, files in sorted(step_files.items())]
+
     all_records = []
-    era5_cache = {}
-
-    for step in sorted(step_files.keys()):
-        files = step_files[step]
-        lead_h = step  # filename suffix is already lead-time hours (e.g. _006.nc = 6h)
-        logger.info(f"Step {step} ({lead_h}h): {len(files)} forecasts")
-
-        pred_list, true_list = [], []
-        for f in files:
-            ds_pred = xr.open_dataset(f)
-            # collapse ensemble dim if present — use ensemble mean for deterministic scores
-            if "ensemble" in ds_pred.dims:
-                ds_pred = ds_pred.mean(dim="ensemble")
-            valid_time = ds_pred.time.values[0]
-            year = pd.Timestamp(valid_time).year
-
-            # load/cache ERA5 for this year
-            if year not in era5_cache:
-                logger.info(f"Opening ERA5 for {year}")
-                era5_cache[year] = open_era5_year(era5_glob, year)
-                # keep cache small
-                if len(era5_cache) > 2:
-                    oldest = min(era5_cache.keys())
-                    del era5_cache[oldest]
-
-            ds_true = era5_cache[year].sel(time=valid_time, method="nearest")
-            pred_list.append(ds_pred)
-            true_list.append(ds_true)
-
-        if not pred_list:
-            continue
-
-        # concatenate over init dates as "time" axis
-        ds_pred_all = xr.concat(pred_list, dim="time")
-        ds_true_all = xr.concat(true_list, dim="time")
-
-        row = {"lead_time_hours": lead_h, "forecast_step": step, "n_inits": len(files)}
-
-        valid_times = ds_pred_all.time.values
-
-        # score upper-air variables at WB2 target levels
-        for label, (era5_var, credit_var, era5_level, credit_coord, credit_level) in WB2_TARGET_LEVELS.items():
-            if era5_var not in ds_true_all:
-                logger.debug(f"Skipping {label}: ERA5 var '{era5_var}' not in dataset")
-                continue
-            if credit_var not in ds_pred_all:
-                logger.debug(f"Skipping {label}: forecast var '{credit_var}' not in dataset")
-                continue
-            da_pred = ds_pred_all[credit_var].sel({credit_coord: credit_level}, method="nearest")
-            da_true = ds_true_all[era5_var].sel(level=era5_level, method="nearest")
-            # Regrid ERA5 to forecast grid if coordinates differ (e.g. 192x288 vs 181x360)
-            if da_true.latitude.shape != da_pred.latitude.shape or not np.allclose(
-                da_true.latitude.values, da_pred.latitude.values, atol=0.1
-            ):
-                da_true = da_true.interp(latitude=da_pred.latitude, longitude=da_pred.longitude, method="linear")
-            da_clim_var = None
-            if ds_clim is not None and era5_var in ds_clim:
-                da_clim_var = select_clim(ds_clim, valid_times, era5_var, level=era5_level)
-                da_clim_var = da_clim_var.interp(latitude=da_pred.latitude, longitude=da_pred.longitude)
-            _add_scores(row, da_pred, da_true, label, da_clim=da_clim_var)
-
-        # score surface variables
-        surface_map = {"t2m": ("VAR_2T", "2m_temperature"), "SP": ("SP", "SP")}
-        for credit_var, (era5_var, clim_var) in surface_map.items():
-            if credit_var not in ds_pred_all or era5_var not in ds_true_all:
-                continue
-            da_pred = ds_pred_all[credit_var]
-            da_true = ds_true_all[era5_var]
-            # Regrid ERA5 to forecast grid if needed
-            if da_true.latitude.shape != da_pred.latitude.shape or not np.allclose(
-                da_true.latitude.values, da_pred.latitude.values, atol=0.1
-            ):
-                da_true = da_true.interp(latitude=da_pred.latitude, longitude=da_pred.longitude, method="linear")
-            da_clim_var = None
-            if ds_clim is not None and clim_var in ds_clim:
-                da_clim_var = select_clim(ds_clim, valid_times, clim_var)
-                da_clim_var = da_clim_var.interp(latitude=da_pred.latitude, longitude=da_pred.longitude)
-            _add_scores(row, da_pred, da_true, credit_var, da_clim=da_clim_var)
-
-        all_records.append(row)
+    with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        futures = {pool.submit(_score_step_worker, item): item[0] for item in work_items}
+        for fut in as_completed(futures):
+            step = futures[fut]
+            try:
+                row = fut.result()
+                if row is not None:
+                    all_records.append(row)
+            except Exception as exc:
+                logger.error(f"Step {step} raised: {exc}")
 
     result = pd.DataFrame(all_records).sort_values("lead_time_hours").reset_index(drop=True)
     return result
@@ -471,6 +502,12 @@ def main():
         "--label", type=str, default="CREDIT", help="Model label used in plot legends (default: CREDIT)"
     )
     parser.add_argument("--no-refs", action="store_true", help="Omit IFS/Pangu/GraphCast reference lines in plots")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Parallel workers for --netcdf mode (default: os.cpu_count())",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -491,6 +528,7 @@ def main():
             clim_path=args.clim,
             lead_time_hours=args.lead_time_hours,
             max_inits=args.max_inits,
+            workers=args.workers,
         )
 
     scores.to_csv(args.out, index=False)
