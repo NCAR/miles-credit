@@ -3,8 +3,9 @@
 **Paper:** Chen et al., "FengWu: Pushing the Skillful Global Medium-range Weather Forecast beyond 10 Days Lead," 2023.
 https://arxiv.org/abs/2304.02948
 
-**Original code:** Partial reference in NVIDIA PhysicsNeMo
-https://github.com/NVIDIA/physicsnemo (Apache 2.0)
+**Original code:** Shanghai AI Lab / Shanghai Jiao Tong University / Microsoft Research Asia.
+No official public repo from authors. Architecture reference from:
+NVIDIA PhysicsNeMo — https://github.com/NVIDIA/physicsnemo (Apache 2.0)
 
 ## Architecture
 
