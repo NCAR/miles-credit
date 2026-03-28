@@ -51,7 +51,7 @@ def estimate_dataloader_memory_gb(conf: dict) -> float:
         trainer_conf = conf.get("trainer", {})
         data_conf = conf.get("data", {})
         model_conf = conf.get("model", {})
-        src = data_conf.get("source", {}).get("ERA5", {})
+        src = next(iter(data_conf.get("source", {}).values()), {})
         v = src.get("variables", {})
         prog = v.get("prognostic") or {}
         diag = v.get("diagnostic") or {}

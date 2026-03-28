@@ -35,7 +35,7 @@ class ERA5Normalizer(nn.Module):
     def __init__(self, conf: dict) -> None:
         super().__init__()
         data_conf = conf["data"]
-        src_cfg = data_conf["source"]["ERA5"]
+        src_cfg = next(iter(data_conf["source"].values()))
 
         self.level_coord: str = src_cfg["level_coord"]
         self.levels = src_cfg["levels"]
