@@ -1,6 +1,7 @@
 import os
 import sys
 import copy
+import inspect
 import logging
 
 # Import model classes
@@ -274,7 +275,15 @@ def load_model(conf, load_weights=False, model_name=False):
                 return model.load_model_name(conf, model_name=model_name)
             else:
                 return model.load_model(conf)
-        return model(**model_conf)
+        # Filter kwargs to only those accepted by the constructor (handles models
+        # that don't accept parser-only keys like 'levels').
+        sig = inspect.signature(model.__init__)
+        params = sig.parameters
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            filtered_conf = model_conf  # accepts **kwargs — pass everything
+        else:
+            filtered_conf = {k: v for k, v in model_conf.items() if k in params}
+        return model(**filtered_conf)
     else:
         msg = f"Model type {model_type} not supported. Exiting."
         logger.warning(msg)
