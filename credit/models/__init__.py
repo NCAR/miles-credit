@@ -4,16 +4,34 @@ import copy
 import inspect
 import logging
 
-# Import model classes
-from credit.models.crossformer import CrossFormer
-from credit.models.camulator import Camulator
-from credit.models.unet import SegmentationModel
-from credit.models.fuxi import Fuxi
-from credit.models.swin import SwinTransformerV2Cr
-from credit.models.graph import GraphResTransfGRU
-from credit.models.debugger_model import DebuggerModel
-from credit.models.wxformer.crossformer import CrossFormer as WXFormer
-from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
+# Legacy model imports — wrapped in try/except because their transitive dependencies
+# (bridgescaler → numba) may conflict with newer NumPy (≥2.3) environments.
+# Zoo models (below) have no such dependency and always load cleanly.
+try:
+    from credit.models.crossformer.crossformer import CrossFormer
+    from credit.models.camulator import Camulator
+    from credit.models.unet import SegmentationModel
+    from credit.models.fuxi import Fuxi
+    from credit.models.swin import SwinTransformerV2Cr
+    from credit.models.graph import GraphResTransfGRU
+    from credit.models.debugger_model import DebuggerModel
+    from credit.models.wxformer.crossformer import CrossFormer as WXFormer
+    from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
+    from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
+    from credit.models.unet_downscaling import DownscalingSegmentationModel
+    from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
+    from credit.models.unet_diffusion import UnetDiffusion
+    from credit.diffusion import ModifiedGaussianDiffusion
+    from credit.models.swin_wrf import WRFTransformer
+    from credit.models.dscale_wrf import DscaleTransformer
+
+    _LEGACY_MODELS_AVAILABLE = True
+except ImportError as _legacy_import_err:
+    logging.warning(
+        f"Legacy model imports unavailable (numba/NumPy conflict or missing dep): {_legacy_import_err}. "
+        "Crossformer/WXFormer/FuXi/UNet family will not be loadable in this environment."
+    )
+    _LEGACY_MODELS_AVAILABLE = False
 
 try:
     from credit.models.wxformer.wxformer_v2_ensemble import CrossFormerV2WithNoise
@@ -21,13 +39,6 @@ try:
     _WXFORMER_V2_SDL = True
 except ImportError:
     _WXFORMER_V2_SDL = False
-from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
-from credit.models.unet_downscaling import DownscalingSegmentationModel
-from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
-from credit.models.unet_diffusion import UnetDiffusion
-from credit.diffusion import ModifiedGaussianDiffusion
-from credit.models.swin_wrf import WRFTransformer
-from credit.models.dscale_wrf import DscaleTransformer
 from credit.models.aurora.model import CREDITAurora
 from credit.models.pangu.pangu import CREDITPangu
 from credit.models.aifs.aifs import CREDITAifs
@@ -40,67 +51,17 @@ from credit.models.fengwu.fengwu import CREDITFengWu
 from credit.models.graphcast.graphcast import CREDITGraphCast
 from credit.models.healpix.healpix import CREDITHEALPix
 from credit.models.fourcastnet3.fcn3 import CREDITFourCastNetV3
+from credit.models.itransformer.itransformer import CREDITiTransformer
+from credit.models.fuxi_ens.fuxi_ens import CREDITFuXiENS
+from credit.models.arches.arches import CREDITArchesWeather
+from credit.models.mambavision.mambavision import CREDITMambaVision
+from credit.models.corrdiff.corrdiff import CREDITCorrDiff
 
 
 logger = logging.getLogger(__name__)
 
 # Define model types and their corresponding classes
 model_types = {
-    "crossformer": (
-        CrossFormer,
-        "Loading the CrossFormer model with a conv decoder head and skip connections ...",
-    ),
-    "camulator": (
-        Camulator,
-        "Loading the CAMulator model with a conv decoder head and skip connections ...",
-    ),
-    "crossformer-diffusion": (
-        CrossFormerDiffusion,
-        "Loading A DDPM model with CrossFormer Backbone ...",
-    ),
-    "unet-diffusion": (
-        UnetDiffusion,
-        "Loading A DDPM model with UNET Backbone ...",
-    ),
-    "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
-    "crossformer-ensemble": (
-        CrossFormerWithNoise,
-        "Loading the WXFormer v1 SDL ensemble model (noise injection at each transformer scale) ...",
-    ),
-    # wxformer-sdl: canonical name for SDL ensemble (v1 backbone)
-    "wxformer-sdl": (
-        CrossFormerWithNoise,
-        "Loading the WXFormer SDL ensemble model (noise injection at each transformer scale) ...",
-    ),
-    # crossformer-style: legacy alias — keep so existing configs don't break
-    "crossformer-style": (
-        CrossFormerWithNoise,
-        "Loading the WXFormer SDL ensemble model (legacy alias for wxformer-sdl) ...",
-    ),
-    # wxformer-v2-sdl: SDL on v2 backbone; supports freeze + pretrained_weights
-    # (only available when wxformer_v2.py exists)
-    **(
-        {
-            "wxformer-v2-sdl": (
-                CrossFormerV2WithNoise,
-                "Loading the WXFormer v2 SDL ensemble model ...",
-            )
-        }
-        if _WXFORMER_V2_SDL
-        else {}
-    ),
-    "unet": (SegmentationModel, "Loading a unet model"),
-    "fuxi": (Fuxi, "Loading Fuxi model"),
-    "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
-    "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
-    "debugger": (DebuggerModel, "Loading the debugger model"),
-    "wrf": (WRFTransformer, "Loading WRF Transformer"),
-    "dscale": (DscaleTransformer, "Loading downscaling Transformer"),
-    "crossformer_downscaling": (
-        DownscalingCrossFormer,
-        "Loading downscaling crossformer model",
-    ),
-    "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
     # ── Model zoo ──────────────────────────────────────────────────────────
     "aurora": (CREDITAurora, "Loading Aurora (Perceiver3D + Swin3D backbone) ..."),
     "pangu": (CREDITPangu, "Loading Pangu-Weather (3D Earth Transformer) ..."),
@@ -114,7 +75,67 @@ model_types = {
     "graphcast": (CREDITGraphCast, "Loading GraphCast (kNN GNN encoder-processor-decoder) ..."),
     "healpix": (CREDITHEALPix, "Loading DLWP-HEALPix (HEALPix U-Net with lat/lon reprojection) ..."),
     "fourcastnet3": (CREDITFourCastNetV3, "Loading FourCastNet3 (spherical neural operator U-Net) ..."),
+    "itransformer": (CREDITiTransformer, "Loading iTransformer (inverted attention across variables) ..."),
+    "fuxi_ens": (CREDITFuXiENS, "Loading FuXi-ENS (ViT + VAE ensemble perturbation head) ..."),
+    "arches": (CREDITArchesWeather, "Loading ArchesWeather (window + column attention) ..."),
+    "mambavision": (CREDITMambaVision, "Loading MambaVision (hybrid Mamba + attention U-Net) ..."),
+    "corrdiff": (CREDITCorrDiff, "Loading CorrDiff (score-based conditional diffusion) ..."),
 }
+
+# ── Legacy models (crossformer family, fuxi, unet, swin, graph) ────────────
+# Only registered when their imports succeeded (numba/NumPy compat required).
+if _LEGACY_MODELS_AVAILABLE:
+    model_types.update(
+        {
+            "crossformer": (
+                CrossFormer,
+                "Loading the CrossFormer model with a conv decoder head and skip connections ...",
+            ),
+            "camulator": (
+                Camulator,
+                "Loading the CAMulator model with a conv decoder head and skip connections ...",
+            ),
+            "crossformer-diffusion": (
+                CrossFormerDiffusion,
+                "Loading A DDPM model with CrossFormer Backbone ...",
+            ),
+            "unet-diffusion": (
+                UnetDiffusion,
+                "Loading A DDPM model with UNET Backbone ...",
+            ),
+            "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
+            "crossformer-ensemble": (
+                CrossFormerWithNoise,
+                "Loading the WXFormer v1 SDL ensemble model (noise injection at each transformer scale) ...",
+            ),
+            "wxformer-sdl": (
+                CrossFormerWithNoise,
+                "Loading the WXFormer SDL ensemble model (noise injection at each transformer scale) ...",
+            ),
+            "crossformer-style": (
+                CrossFormerWithNoise,
+                "Loading the WXFormer SDL ensemble model (legacy alias for wxformer-sdl) ...",
+            ),
+            "unet": (SegmentationModel, "Loading a unet model"),
+            "fuxi": (Fuxi, "Loading Fuxi model"),
+            "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
+            "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
+            "debugger": (DebuggerModel, "Loading the debugger model"),
+            "wrf": (WRFTransformer, "Loading WRF Transformer"),
+            "dscale": (DscaleTransformer, "Loading downscaling Transformer"),
+            "crossformer_downscaling": (
+                DownscalingCrossFormer,
+                "Loading downscaling crossformer model",
+            ),
+            "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
+        }
+    )
+
+if _WXFORMER_V2_SDL:
+    model_types["wxformer-v2-sdl"] = (
+        CrossFormerV2WithNoise,
+        "Loading the WXFormer v2 SDL ensemble model ...",
+    )
 
 
 # Define FSDP sharding and/or checkpointing policy

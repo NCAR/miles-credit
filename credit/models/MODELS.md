@@ -90,6 +90,11 @@ See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full d
 | `aurora` | Aurora (Perceiver3D + Swin3D) | ✓ | ✓ | ✓ | ✓ |
 | `pangu` | Pangu-Weather (3D Earth Transformer) | ✓ | ✓ | ✓ | ✓ |
 | `aifs` | AIFS (lat/lon Transformer) | ✓ | ✓ | ✓ | ✓ |
+| `itransformer` | iTransformer (inverted variable attention) | ✓ | ✓ | ✓ | ✓ |
+| `fuxi_ens` | FuXi-ENS (ViT + VAE ensemble head) | ✓ | ✓ | ✓ | ✓ |
+| `arches` | ArchesWeather (window + column attention) | ✓ | ✓ | ✓ | ✓ |
+| `mambavision` | MambaVision (Mamba + attention U-Net) | ✓ | ✓ | ✓ | ✓ |
+| `corrdiff` | CorrDiff (score-based conditional diffusion) | ✓ | ✓ | ✓ | ✓ |
 
 **Notes on FSDP / activation checkpointing:**
 Legacy WXFormer-family models (`wxformer`, `crossformer`, `unet`, `swin`, `fuxi`) use explicit fine-grained wrap policies (attention + feedforward blocks).  All other models use automatic policy discovery — CREDIT scans the live model for repeating `nn.Module` subtypes and uses those as the wrap/checkpoint units. Pass `activation_checkpoint: true` in the `trainer:` section to enable.

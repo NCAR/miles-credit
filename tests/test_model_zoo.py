@@ -263,6 +263,87 @@ def make_wxformer():
     return m, torch.randn(B, C_IN, FRAMES, HW, HW, device=device), (B, C_OUT, 1, HW, HW)
 
 
+def make_itransformer():
+    from credit.models.itransformer.itransformer import CREDITiTransformer
+
+    C_IN, C_OUT = 20, 18
+    m = CREDITiTransformer(
+        in_channels=C_IN,
+        out_channels=C_OUT,
+        img_size=(H, W),
+        d_model=64,
+        depth=2,
+        num_heads=4,
+    ).to(device)
+    return m, torch.randn(B, C_IN, H, W, device=device), (B, C_OUT, H, W)
+
+
+def make_fuxi_ens():
+    from credit.models.fuxi_ens.fuxi_ens import CREDITFuXiENS
+
+    C_IN, C_OUT = 20, 18
+    m = CREDITFuXiENS(
+        in_channels=C_IN,
+        out_channels=C_OUT,
+        img_size=(H, W),
+        embed_dim=64,
+        depth=2,
+        num_heads=4,
+        use_vae=True,
+        z_dim=16,
+    ).to(device)
+    return m, torch.randn(B, C_IN, H, W, device=device), (B, C_OUT, H, W)
+
+
+def make_arches():
+    from credit.models.arches.arches import CREDITArchesWeather
+
+    C_IN, C_OUT = 20, 18
+    m = CREDITArchesWeather(
+        in_channels=C_IN,
+        out_channels=C_OUT,
+        img_size=(H, W),
+        patch_size=4,
+        d_model=64,
+        depth=4,
+        num_heads=4,
+        window_size=4,
+        n_col_tokens=4,
+    ).to(device)
+    return m, torch.randn(B, C_IN, H, W, device=device), (B, C_OUT, H, W)
+
+
+def make_mambavision():
+    from credit.models.mambavision.mambavision import CREDITMambaVision
+
+    C_IN, C_OUT = 20, 18
+    m = CREDITMambaVision(
+        in_channels=C_IN,
+        out_channels=C_OUT,
+        img_size=(H, W),
+        stem_dim=16,
+        stage_depths=(1, 1, 2, 1),
+        num_heads=4,
+    ).to(device)
+    return m, torch.randn(B, C_IN, H, W, device=device), (B, C_OUT, H, W)
+
+
+def make_corrdiff():
+    from credit.models.corrdiff.corrdiff import CREDITCorrDiff
+
+    C_IN, C_OUT = 20, 18
+    m = CREDITCorrDiff(
+        in_channels=C_IN,
+        out_channels=C_OUT,
+        img_size=(H, W),
+        base_ch=16,
+        ch_mult=(1, 2),
+        n_res_per_level=1,
+        emb_dim=32,
+    ).to(device)
+    return m, torch.randn(B, C_IN, H, W, device=device), (B, C_OUT, H, W)
+
+
 MODELS = {
     "wxformer": make_wxformer,
     "stormer": make_stormer,
@@ -277,6 +358,11 @@ MODELS = {
     "aurora": make_aurora,
     "pangu": make_pangu,
     "aifs": make_aifs,
+    "itransformer": make_itransformer,
+    "fuxi_ens": make_fuxi_ens,
+    "arches": make_arches,
+    "mambavision": make_mambavision,
+    "corrdiff": make_corrdiff,
 }
 
 
