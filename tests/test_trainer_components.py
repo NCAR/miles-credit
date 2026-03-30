@@ -1,8 +1,10 @@
-"""Unit tests for trainer components: EMATracker, BaseTrainer.__init__, LinearWarmupCosineScheduler.
+"""Unit tests for trainer components: EMATracker, BaseTrainer.__init__, LinearWarmupCosineScheduler,
+and the load_trainer() factory.
 
 All tests run on CPU with no data files required.
 """
 
+import pytest
 import torch
 import torch.nn as nn
 
@@ -555,3 +557,55 @@ class TestERA5v2MultiStepTraining:
         assert captured["last_x"] is not None
         expected = x_at_step1_out[0]  # y_pred at t=1 = model(x_t1) = x_t1 * 1.0 ≈ x_t1
         torch.testing.assert_close(captured["last_x"], expected, atol=1e-5, rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# load_trainer — factory function
+# ---------------------------------------------------------------------------
+
+
+class TestLoadTrainer:
+    """Tests for credit.trainers.load_trainer()."""
+
+    def test_valid_era5_type_returns_class(self):
+        from credit.trainers import load_trainer
+        from credit.trainers.trainerERA5 import Trainer
+
+        result = load_trainer({"trainer": {"type": "era5"}})
+        assert result is Trainer
+
+    def test_valid_era5v2_type_returns_class(self):
+        from credit.trainers import load_trainer
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        result = load_trainer({"trainer": {"type": "era5-v2"}})
+        assert result is Trainer
+
+    def test_all_registered_types_return_a_class(self):
+        """Every key in trainer_types must resolve to a callable without error."""
+        from credit.trainers import load_trainer, trainer_types
+
+        for name in trainer_types:
+            result = load_trainer({"trainer": {"type": name}})
+            assert callable(result), f"load_trainer('{name}') did not return a callable"
+
+    def test_missing_type_key_raises_value_error(self):
+        from credit.trainers import load_trainer
+
+        with pytest.raises(ValueError, match="type"):
+            load_trainer({"trainer": {}})
+
+    def test_invalid_type_raises_value_error(self):
+        from credit.trainers import load_trainer
+
+        with pytest.raises(ValueError, match="not supported"):
+            load_trainer({"trainer": {"type": "nonexistent-trainer-xyz"}})
+
+    def test_original_conf_not_mutated(self):
+        """load_trainer deep-copies conf internally; the caller's dict must be unchanged."""
+        from credit.trainers import load_trainer
+
+        conf = {"trainer": {"type": "era5", "extra_key": 99}}
+        load_trainer(conf)
+        assert conf["trainer"]["type"] == "era5"
+        assert conf["trainer"]["extra_key"] == 99
