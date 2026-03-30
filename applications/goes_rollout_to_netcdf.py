@@ -61,6 +61,7 @@ def get_rollout_init_times(conf):
     
     if forecast_conf["type"] == "debugger":
         init_times_str = [
+                            "2022-05-21T17:55:06", # NA spring case
                             "2022-06-30T23:55:06", 
                             "2022-07-01T14:55:06", # NA convective case
                             "2022-12-02T11:55:06", 
@@ -72,15 +73,15 @@ def get_rollout_init_times(conf):
         return rollout_init_times
     
     elif forecast_conf["type"] == "standard":
-        start_dt = pd.Timestamp(year=2022, month=7, day=1, hour=0)
+        start_dt = pd.Timestamp(year=2022, month=7, day=1, hour=6)
         ic_interval = pd.Timedelta(2, "w")
         num_inits = 13
         rollout_init_times = [start_dt + k * ic_interval for k in range(num_inits)]
-        rollout_init_times += [t + pd.Timedelta("12h") for t in rollout_init_times[-2:]] # 12h to last two SA convection
-        rollout_init_times = ([pd.Timestamp("2022-01-01")] 
-                              + [pd.Timestamp("2022-07-01") + pd.Timedelta("30m")] # check 30m offset case
-                              + [pd.Timestamp("2022-07-01") +  pd.Timedelta("15h")] # NA convection case
-                              + rollout_init_times)
+        rollout_init_times += [t + pd.Timedelta("12h") for t in rollout_init_times] # 18z inits
+        # rollout_init_times = ([pd.Timestamp("2022-01-01")] 
+        #                       + [pd.Timestamp("2022-07-01") + pd.Timedelta("30m")] # check 30m offset case
+        #                       + [pd.Timestamp("2022-07-01") +  pd.Timedelta("15h")] # NA convection case
+                            #   + rollout_init_times)
         return rollout_init_times
     
     elif forecast_conf["type"] == "custom":

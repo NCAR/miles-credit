@@ -20,16 +20,14 @@ from credit.pbs import launch_script, launch_script_mpi, get_num_cpus
 from credit.verification import load_verification
 from credit.datasets.goes_load_dataset_and_dataloader import load_verification_dataset
 
+from dateutil.parser import parse, ParserError
 
-def check_forecast_dir(forecast_save_loc):
-    """ simple check to ensure only directories with timestamps as names are in the save_loc """
-    lengths = [
-            len(p.name)
-            for p in Path(forecast_save_loc).iterdir()
-            if p.is_dir()
-    ]
-    if not all([l == lengths[0] for l in lengths]):
-        raise ValueError(f"subdirectories of {forecast_save_loc} may not be named correctly (need to all be time strings)")
+def is_timestamp(s):
+    try:
+        parse(s)
+        return True
+    except (ParserError, TypeError):
+        return False
 
 if __name__ == "__main__":
     description = "evaluate ensemble rollouts"
@@ -99,7 +97,10 @@ if __name__ == "__main__":
     assert not os.path.isfile(eval_save_loc), (
             f'''{conf["save_filename"]} results already exists at {eval_save_loc}, aborting. 
             Move or rename the existing file to run this script''')
-    check_forecast_dir(forecast_save_loc)
+
+    # get forecast dirs
+    dirs = [d for d in Path(forecast_save_loc).iterdir() if d.is_dir() and is_timestamp(d.name)]
+    logging.info(f"in these dirs: {[d.name for d in dirs]}")
 
     # load the verification
     verification = load_verification(conf)
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     dataset = load_verification_dataset(model_conf)
     climo = xr.open_dataset(conf["climo_file"])["mean"]
 
-    dirs = [d for d in Path(forecast_save_loc).iterdir() if d.is_dir()]
+
     with mp.Pool(num_process) as p:
         # process each forecast separately:
         df_dict = {}
