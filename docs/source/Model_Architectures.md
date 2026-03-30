@@ -121,14 +121,67 @@ padding_conf:
     pad_lon: 48
 ```
 
-## Graph Transformer 
+## Graph Transformer
 
-Arnold to add discussion. 
+Arnold to add discussion.
 
-## Unet 
+## Unet
 
-Add Discussion 
+Add Discussion
 
-## WxFormer Diffusion 
+## WxFormer Diffusion
 
-Will to add discussion. 
+Will to add discussion.
+
+---
+
+## `torch.compile` Compatibility
+
+`torch.compile` can significantly speed up both training and inference by fusing ops and reducing Python overhead.
+Not all models in the zoo are compatible — the main blocker is `torch.nn.utils.spectral_norm`.
+
+### Why spectral norm blocks compilation
+
+`spectral_norm` works by registering a forward hook that recomputes a normalized weight on every call.
+`torch.compile`'s graph tracer cannot see through these hooks and raises a graph break (or errors out in `fullgraph=True` mode).
+Spectral norm is used **intentionally** in several CREDIT models to prevent rollout explosions — do not remove it.
+
+### Quick reference
+
+| Model | Compiles? | What to do |
+|-------|:---------:|------------|
+| `wxformer` / `wxformer-sdl` / `wxformer-v2-sdl` | ⚠ | Set `upsamplePS: true` in `model:` config |
+| `crossformer` | ✗ | Not supported — spectral norm in decoder |
+| `fuxi` | ✗ | Not supported — spectral norm throughout |
+| `swin` | ✗ | Not supported — spectral norm throughout |
+| `camulator` | ✗ | Not supported — spectral norm throughout |
+| `graph` | ✗ | Not supported — spectral norm throughout |
+| `sfno` / `fourcastnet3` | ⚠ | Don't install `torch-harmonics`; rfft2 fallback compiles |
+| `graphcast` | ⚠ | Use `torch.compile(model, dynamic=True)` |
+| All others | ✓ | Works out of the box |
+
+### WXFormer: enabling compilation with `upsamplePS`
+
+The default WXFormer decoder uses transposed-conv upsampling with spectral norm.
+Switching to the PixelShuffle upsampler removes spectral norm from the decoder entirely:
+
+```yaml
+model:
+  type: wxformer
+  upsamplePS: true   # ← enables PixelShuffle upsampler; required for torch.compile
+```
+
+Then compile as usual:
+
+```python
+model = torch.compile(model)
+```
+
+`upsamplePS: true` is the recommended setting for long autoregressive rollouts regardless of compilation,
+as it produces a cleaner gradient signal without the norm constraint on upsampling layers.
+
+### SFNO / FourCastNet3: disabling torch-harmonics
+
+When `torch-harmonics` is installed, these models use Spherical Harmonic Transforms (SHTs) whose CUDA
+kernels cause graph breaks under `torch.compile`. To use the rfft2 fallback (which compiles cleanly),
+simply do not install `torch-harmonics` in your environment. 
