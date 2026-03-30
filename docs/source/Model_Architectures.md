@@ -150,25 +150,20 @@ Spectral norm is used **intentionally** in several CREDIT models to prevent roll
 
 | Model | Compiles? | What to do |
 |-------|:---------:|------------|
-| `wxformer` / `wxformer-sdl` / `wxformer-v2-sdl` | ⚠ | Set `upsamplePS: true` in `model:` config |
-| `crossformer` | ✗ | Not supported — spectral norm in decoder |
-| `fuxi` | ✗ | Not supported — spectral norm throughout |
-| `swin` | ✗ | Not supported — spectral norm throughout |
-| `camulator` | ✗ | Not supported — spectral norm throughout |
-| `graph` | ✗ | Not supported — spectral norm throughout |
+| `wxformer` / `wxformer-sdl` / `wxformer-v2-sdl` | ✗ default | Set `use_spectral_norm: false` in `model:` config |
+| `crossformer` / `fuxi` / `swin` / `camulator` / `graph` | ✗ default | Set `use_spectral_norm: false` in `model:` config |
 | `sfno` / `fourcastnet3` | ⚠ | Don't install `torch-harmonics`; rfft2 fallback compiles |
 | `graphcast` | ⚠ | Use `torch.compile(model, dynamic=True)` |
 | All others | ✓ | Works out of the box |
 
-### WXFormer: enabling compilation with `upsamplePS`
+### Disabling spectral norm to enable compilation
 
-The default WXFormer decoder uses transposed-conv upsampling with spectral norm.
-Switching to the PixelShuffle upsampler removes spectral norm from the decoder entirely:
+All CREDIT-native models that use spectral norm expose a `use_spectral_norm` config flag:
 
 ```yaml
 model:
   type: wxformer
-  upsamplePS: true   # ← enables PixelShuffle upsampler; required for torch.compile
+  use_spectral_norm: false   # ← disables spectral norm; required for torch.compile
 ```
 
 Then compile as usual:
@@ -177,8 +172,10 @@ Then compile as usual:
 model = torch.compile(model)
 ```
 
-`upsamplePS: true` is the recommended setting for long autoregressive rollouts regardless of compilation,
-as it produces a cleaner gradient signal without the norm constraint on upsampling layers.
+> **Warning:** Spectral norm is on by default because it is critical for long-rollout stability.
+> Disabling it can cause divergence after tens of autoregressive steps.
+> Only set `use_spectral_norm: false` if you have verified that your model remains stable without it.
+> Native `torch.compile` support while keeping spectral norm is planned for a future release.
 
 ### SFNO / FourCastNet3: disabling torch-harmonics
 

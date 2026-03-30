@@ -50,6 +50,15 @@ data:
 
 **Default config ✓** — preset bundles a full working config; only `save_loc` is required from the user.
 
+**Why partial key match for Stormer, ClimaX, Aurora?**
+These models were trained outside CREDIT with their own data pipelines and variable orderings.
+CREDIT assumes its own input structure (channel ordering, normalization, surface/upper-air layout),
+so the input embedding and output projection layers cannot transfer directly — they are re-initialized
+and must be fine-tuned on CREDIT-format ERA5 data.
+The backbone transformer weights (attention, MLP, normalization layers) do transfer and provide a
+strong initialization for fine-tuning.
+These presets are intended as **transfer learning starting points**, not drop-in inference checkpoints.
+
 Preset files live in [`credit/models/presets/`](presets/).
 Add a new `.yml` file there to register a new preset — no code changes needed.
 See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full documentation.
@@ -60,15 +69,15 @@ See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full d
 
 | Key | Model | DDP | FSDP | Act. Ckpt | `torch.compile` |
 |-----|-------|:---:|:----:|:---------:|:---------------:|
-| `wxformer` | WXFormer (CrossFormer backbone) | ✓ | ✓ | ✓ | ⚠ `upsamplePS: true` required |
-| `wxformer-sdl` | WXFormer SDL ensemble (noise injection) | ✓ | ✓ | ✓ | ⚠ `upsamplePS: true` required |
-| `wxformer-v2-sdl` | WXFormer v2 SDL ensemble | ✓ | ✓ | ✓ | ⚠ `upsamplePS: true` required |
-| `crossformer` | CrossFormer (conv decoder + skip) | ✓ | ✓ | ✓ | ✗ spectral norm |
+| `wxformer` | WXFormer (CrossFormer backbone) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `wxformer-sdl` | WXFormer SDL ensemble (noise injection) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `wxformer-v2-sdl` | WXFormer v2 SDL ensemble | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `crossformer` | CrossFormer (conv decoder + skip) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
 | `unet` | U-Net segmentation model | ✓ | ✓ | ✓ | ✓ |
-| `fuxi` | FuXi (Swin v2 backbone) | ✓ | ✓ | ✓ | ✗ spectral norm |
-| `swin` | Swin Transformer V2 Cr | ✓ | ✓ | ✓ | ✗ spectral norm |
-| `camulator` | CAMulator (CAM emulator) | ✓ | ✓ | ✓ | ✗ spectral norm |
-| `graph` | Graph Residual Transformer GRU | ✓ | ✓ | ✓ | ✗ spectral norm |
+| `fuxi` | FuXi (Swin v2 backbone) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `swin` | Swin Transformer V2 Cr | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `camulator` | CAMulator (CAM emulator) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `graph` | Graph Residual Transformer GRU | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
 | `stormer` | Stormer (plain ViT) | ✓ | ✓ | ✓ | ✓ |
 | `climax` | ClimaX (per-variable ViT) | ✓ | ✓ | ✓ | ✓ |
 | `fourcastnet` | FourCastNet v1 (AFNO ViT) | ✓ | ✓ | ✓ | ✓ |
@@ -86,8 +95,7 @@ See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full d
 Legacy WXFormer-family models (`wxformer`, `crossformer`, `unet`, `swin`, `fuxi`) use explicit fine-grained wrap policies (attention + feedforward blocks).  All other models use automatic policy discovery — CREDIT scans the live model for repeating `nn.Module` subtypes and uses those as the wrap/checkpoint units. Pass `activation_checkpoint: true` in the `trainer:` section to enable.
 
 **Notes on `torch.compile`:**
-- **✗ spectral norm** — `torch.nn.utils.spectral_norm` wraps parameters with hooks that are incompatible with `torch.compile`. These models use spectral norm intentionally to prevent rollout explosions; do not remove it.
-- **⚠ `upsamplePS: true` required** — WXFormer's default transposed-conv upsampler contains spectral-normed layers. Setting `upsamplePS: true` in the `model:` config switches to a PixelShuffle upsampler that compiles cleanly. This is the recommended setting when using `torch.compile` for long rollouts.
+- **✗ spectral norm (default)** — `torch.nn.utils.spectral_norm` is enabled by default on these models to prevent rollout explosions. It wraps weight parameters with forward hooks that `torch.compile` cannot trace through. To enable compilation, set `use_spectral_norm: false` in the `model:` config block. **Only do this if you have verified long-rollout stability without it** — removing spectral norm is likely to cause divergence after tens of steps. Native compile support without spectral norm is planned for a future release.
 - **⚠ rfft2 fallback only** — `sfno` and `fourcastnet3` use `torch-harmonics` Spherical Harmonic Transforms when the package is installed. The SHT CUDA kernels cause graph breaks under `torch.compile`; skip installing `torch-harmonics` to use the rfft2 fallback, which compiles without issues.
 - **⚠ GraphCast `dynamic=True`** — the icosahedral graph uses `scatter_add_` with dynamic edge counts. Pass `torch.compile(model, dynamic=True)` or `fullgraph=False` to avoid excessive recompilation.
 
