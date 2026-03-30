@@ -128,6 +128,11 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `aurora` | ✓ cached | ✓ ~74% | `aurora-0.1deg` | Full 1B-param Perceiver3D + Swin3D backbone; LoRA adapter layers (224 keys) initialized fresh | `net.` prefix auto-remapped to `aurora.`; missing keys are LoRA (expected) |
 | `pangu` | — | — | — | — | ONNX only |
 | `aifs` | — | — | — | — | Restricted access |
+| `itransformer` | — | — | — | — | No public weather weights |
+| `fuxi_ens` | — | — | — | — | No public weights |
+| `arches` | — | — | — | — | No public weights |
+| `mambavision` | — | — | — | — | No public weather weights |
+| `corrdiff` | — | — | — | — | No public weights |
 
 ---
 
@@ -156,6 +161,11 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `aurora` | [arXiv:2405.13063](https://arxiv.org/abs/2405.13063) | [microsoft/aurora](https://github.com/microsoft/aurora) | MIT | [HuggingFace](https://huggingface.co/microsoft/aurora) | Chen et al. 2024, Microsoft Research |
 | `pangu` | [Nature 2023](https://doi.org/10.1038/s41586-023-06185-3) | [198808eric/Pangu-Weather](https://github.com/198808eric/Pangu-Weather) | Non-commercial | ONNX only | Bi et al. 2023, Huawei |
 | `aifs` | [arXiv:2406.01465](https://arxiv.org/abs/2406.01465) | [ecmwf/anemoi-models](https://github.com/ecmwf/anemoi-models) | Apache-2.0 | Restricted (ECMWF) | Lang et al. 2024, ECMWF |
+| `itransformer` | [arXiv:2310.06625](https://arxiv.org/abs/2310.06625) | [thuml/iTransformer](https://github.com/thuml/iTransformer) | MIT | — | Liu et al. 2024, Tsinghua / Ant Group |
+| `fuxi_ens` | [arXiv:2405.05925](https://arxiv.org/abs/2405.05925) | — | — | — | Zhong et al. 2024, Fudan |
+| `arches` | [arXiv:2405.14527](https://arxiv.org/abs/2405.14527) | [gcouairon/ArchesWeather](https://github.com/gcouairon/ArchesWeather) | MIT | — | Couairon et al. 2024 |
+| `mambavision` | [arXiv:2407.08083](https://arxiv.org/abs/2407.08083) | [NVlabs/MambaVision](https://github.com/NVlabs/MambaVision) | Apache-2.0 | — | Hatamizadeh & Kautz 2024, NVIDIA |
+| `corrdiff` | [arXiv:2309.15214](https://arxiv.org/abs/2309.15214) | [NVIDIA/modulus](https://github.com/NVIDIA/modulus) | Apache-2.0 | — | Mardani et al. 2023, NVIDIA / Stanford |
 
 ---
 
@@ -357,6 +367,65 @@ Original code: [ecmwf/anemoi-models](https://github.com/ecmwf/anemoi-models)
 Pretrained weights: restricted access (ECMWF)
 
 Lat/lon Transformer processor; ECMWF operational NWP replacement.
+
+#### iTransformer
+Key: `itransformer`
+Config: [`config/model_zoo/itransformer.yml`](../../config/model_zoo/itransformer.yml)
+
+Liu et al. 2024, Tsinghua University / Ant Group.
+Paper: [arXiv:2310.06625](https://arxiv.org/abs/2310.06625)
+Source: [`credit/models/itransformer/itransformer.py`](itransformer/itransformer.py)
+Original code: [thuml/iTransformer](https://github.com/thuml/iTransformer)
+Pretrained weights: none for weather
+
+Inverts the standard Transformer: each input channel becomes one token (spatial H×W flattened → d_model), and attention operates across the variable dimension.  Directly models cross-variable dependencies without spatial downsampling.
+
+#### FuXi-ENS
+Key: `fuxi_ens`
+Config: [`config/model_zoo/fuxi_ens.yml`](../../config/model_zoo/fuxi_ens.yml)
+
+Zhong et al. 2024, Fudan University.
+Paper: [arXiv:2405.05925](https://arxiv.org/abs/2405.05925)
+Source: [`credit/models/fuxi_ens/fuxi_ens.py`](fuxi_ens/fuxi_ens.py)
+Pretrained weights: none publicly available
+
+ViT backbone with a VAE bottleneck for ensemble generation.  Patch-embedded tokens are passed through transformer blocks, projected to (μ, log σ²), reparameterization-sampled during training, and decoded back.  Set `use_vae: false` for a deterministic ViT without the KL term.  The KL loss is stored as `model.last_kl_loss` after each forward pass.
+
+#### ArchesWeather
+Key: `arches`
+Config: [`config/model_zoo/arches.yml`](../../config/model_zoo/arches.yml)
+
+Couairon et al. 2024.
+Paper: [arXiv:2405.14527](https://arxiv.org/abs/2405.14527)
+Source: [`credit/models/arches/arches.py`](arches/arches.py)
+Original code: [gcouairon/ArchesWeather](https://github.com/gcouairon/ArchesWeather)
+Pretrained weights: none publicly available
+
+Alternates `WindowAttentionBlock` (local spatial attention within ws×ws patches) and `ColumnAttentionBlock` (attention across `n_col_tokens` sub-vectors at each spatial position, approximating vertical coupling).  Decoded with PixelShuffle upsampling.  `n_col_tokens` must divide `d_model`.
+
+#### MambaVision
+Key: `mambavision`
+Config: [`config/model_zoo/mambavision.yml`](../../config/model_zoo/mambavision.yml)
+
+Hatamizadeh & Kautz 2024, NVIDIA.
+Paper: [arXiv:2407.08083](https://arxiv.org/abs/2407.08083)
+Source: [`credit/models/mambavision/mambavision.py`](mambavision/mambavision.py)
+Original code: [NVlabs/MambaVision](https://github.com/NVlabs/MambaVision)
+Pretrained weights: none for weather
+
+4-stage hierarchical U-Net that combines SSM (Mamba) and attention.  Stages 0–1 use residual depthwise-separable `ConvBlock`s; stages 2–3 use `MambaAttentionBlock` with an SSM + multi-head attention + FFN.  Pure-PyTorch `MambaApprox` (depthwise conv + gating) is used automatically when `mamba_ssm` is not installed.  Input spatial dims must be divisible by 8.
+
+#### CorrDiff
+Key: `corrdiff`
+Config: [`config/model_zoo/corrdiff.yml`](../../config/model_zoo/corrdiff.yml)
+
+Mardani et al. 2023, NVIDIA / Stanford.
+Paper: [arXiv:2309.15214](https://arxiv.org/abs/2309.15214)
+Source: [`credit/models/corrdiff/corrdiff.py`](corrdiff/corrdiff.py)
+Original code: [NVIDIA/modulus](https://github.com/NVIDIA/modulus)
+Pretrained weights: none publicly available
+
+EDM-preconditioned (Karras et al. 2022) score-based diffusion model.  A `CondEncoder` extracts multi-scale features from the coarse conditioning input and injects them into a `SongUNet` denoiser via channel concatenation.  `forward()` performs a single denoising step at σ=1 (suitable for training); `model.sample(x_cond)` runs the full 18-step Heun ODE sampler.
 
 ---
 
