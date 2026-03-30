@@ -273,3 +273,188 @@ class TestForecastRoundTrip:
                 },
             )
         assert resp.status_code == 500
+
+    def test_initial_state_load_failure_raises_422(self, patched_client, tmp_path):
+        """dataset[(init_time, 0)] failure → 422."""
+        mock_dataset = MagicMock()
+        mock_dataset.__getitem__ = MagicMock(side_effect=KeyError("missing init time"))
+
+        with patch("applications.api.ERA5Dataset", return_value=mock_dataset):
+            resp = patched_client.post(
+                "/forecast",
+                json={
+                    "init_time": "2024-01-15T00",
+                    "steps": 1,
+                    "save_dir": str(tmp_path),
+                },
+            )
+        assert resp.status_code == 422
+
+    def test_with_postblocks_mass_water_energy(self, tmp_path):
+        """Exercise postblock activation branches (lines 259-295).
+
+        Use steps=2 so that step==1 triggers the x_init clone (mass fixer branch)
+        and step==2 exercises the subsequent application. n_prog=4, c_out=4, n_dyn=1
+        so tensor shapes stay consistent throughout the rollout.
+        """
+        # Build state with matching channel counts:
+        #   input x: (1, n_prog+n_dyn, 1, H, W) = (1, 5, 1, 4, 8)
+        #   model output y_pred: (1, c_out=4, 1, 4, 8)
+        #   n_prog=4, n_dyn=1  → x[:, :4] ← y_pred[:, :4], x[:, 4:5] ← x_frc
+        mock_state = _make_mock_state(n_prog=4, n_dyn=1, c_out=4)
+
+        # Enable all three postblock fixers
+        mock_state["conf"]["model"]["post_conf"] = {
+            "activate": True,
+            "global_mass_fixer": {"activate_outside_model": True},
+            "global_water_fixer": {"activate_outside_model": True},
+            "global_energy_fixer": {"activate_outside_model": True},
+        }
+
+        fake_sample = {"input": {"era5": torch.zeros(5, 1, 4, 8)}, "metadata": {}}
+        mock_dataset = MagicMock()
+        mock_dataset.__getitem__ = MagicMock(return_value=fake_sample)
+
+        # Fixer mocks: each one is a callable that returns {"y_pred": y_pred}
+        def _noop_fixer(batch):
+            return {"y_pred": batch["y_pred"]}
+
+        mock_mass = MagicMock(side_effect=_noop_fixer)
+        mock_water = MagicMock(side_effect=_noop_fixer)
+        mock_energy = MagicMock(side_effect=_noop_fixer)
+
+        call_count = {"n": 0}
+
+        def _preblocks(preblocks, batch):
+            # First call: full state (1, 5, 1, 4, 8)
+            # Subsequent calls: dynamic forcing only (1, 1, 1, 4, 8) for the slice x[:, n_dyn]
+            if call_count["n"] == 0:
+                t = torch.zeros(1, 5, 1, 4, 8)
+            else:
+                t = torch.zeros(1, 1, 1, 4, 8)
+            call_count["n"] += 1
+            return {"x": t}
+
+        with patch.dict("applications.api._STATE", mock_state, clear=False):
+            with (
+                patch("applications.api.ERA5Dataset", return_value=mock_dataset),
+                patch("applications.api.apply_preblocks", side_effect=_preblocks),
+                patch("applications.api._save_worker"),
+                patch("applications.api.GlobalMassFixer", return_value=mock_mass),
+                patch("applications.api.GlobalWaterFixer", return_value=mock_water),
+                patch("applications.api.GlobalEnergyFixer", return_value=mock_energy),
+                patch("multiprocessing.pool.Pool.apply_async", return_value=MagicMock(get=lambda: None)),
+            ):
+                client = TestClient(app, raise_server_exceptions=True)
+                resp = client.post(
+                    "/forecast",
+                    json={
+                        "init_time": "2024-01-15T00",
+                        "steps": 2,
+                        "save_dir": str(tmp_path),
+                    },
+                )
+        assert resp.status_code == 200
+        # All three fixers should have been called
+        assert mock_mass.call_count >= 1
+        assert mock_water.call_count >= 1
+        assert mock_energy.call_count >= 1
+
+    def test_save_dir_defaults_to_config_path(self, patched_client, tmp_path):
+        """When save_dir is omitted, conf.predict.save_forecast is used."""
+        fake_sample = {"input": {"era5": torch.zeros(5, 1, 4, 8)}, "metadata": {}}
+        mock_dataset = MagicMock()
+        mock_dataset.__getitem__ = MagicMock(return_value=fake_sample)
+
+        with (
+            patch("applications.api.ERA5Dataset", return_value=mock_dataset),
+            patch("applications.api.apply_preblocks", return_value={"x": torch.zeros(1, 5, 1, 4, 8)}),
+            patch("applications.api._save_worker"),
+            patch("multiprocessing.pool.Pool.apply_async", return_value=MagicMock(get=lambda: None)),
+        ):
+            data = patched_client.post(
+                "/forecast",
+                json={"init_time": "2024-01-15T00", "steps": 1},
+            ).json()
+
+        # _make_mock_state sets predict.save_forecast to /tmp/credit_test_fcst
+        assert "/tmp/credit_test_fcst" in data["save_dir"]
+
+
+# ---------------------------------------------------------------------------
+# lifespan — startup error path
+# ---------------------------------------------------------------------------
+
+
+class TestLifespan:
+    """Cover the lifespan function error path (lines 75-138)."""
+
+    def test_missing_credit_config_env_raises(self, monkeypatch):
+        """If CREDIT_CONFIG is not set, lifespan must raise RuntimeError on startup."""
+        monkeypatch.delenv("CREDIT_CONFIG", raising=False)
+        # TestClient triggers lifespan when used as a context manager
+        from fastapi.testclient import TestClient as _TC
+
+        with pytest.raises(Exception):
+            with _TC(app, raise_server_exceptions=True) as _client:
+                pass  # lifespan should raise before we get here
+
+    def test_lifespan_startup_with_mocked_deps(self, monkeypatch, tmp_path):
+        """Cover the lifespan success path by mocking all heavy dependencies."""
+        import yaml
+
+        # Write a minimal config
+        conf_data = {
+            "save_loc": str(tmp_path),
+            "data": {
+                "scaler_type": "std_new",
+                "source": {
+                    "ERA5": {
+                        "levels": [500, 850],
+                        "level_coord": "level",
+                        "variables": {
+                            "prognostic": {"vars_3D": ["T"], "vars_2D": ["SP"]},
+                            "diagnostic": {"vars_2D": []},
+                            "dynamic_forcing": {"vars_2D": ["cos_lat"]},
+                        },
+                    }
+                },
+                "mean_path": "/fake/mean.nc",
+                "std_path": "/fake/std.nc",
+            },
+            "model": {"post_conf": {"activate": False}},
+            "predict": {"save_forecast": str(tmp_path)},
+            "loss": {"latitude_weights": "/fake/latlons.nc"},
+        }
+        cfg_path = tmp_path / "config.yml"
+        cfg_path.write_text(yaml.dump(conf_data))
+        monkeypatch.setenv("CREDIT_CONFIG", str(cfg_path))
+
+        # Mock all external calls
+        import xarray as xr
+        import numpy as np
+
+        fake_latlons = xr.Dataset(
+            {
+                "latitude": xr.DataArray(np.linspace(90, -90, 4), dims=["latitude"]),
+                "longitude": xr.DataArray(np.linspace(0, 360, 8, endpoint=False), dims=["longitude"]),
+            }
+        )
+
+        tiny_model = torch.nn.Linear(4, 4)
+
+        with (
+            patch("applications.api.load_model", return_value=tiny_model),
+            patch("applications.api._inject_flat_schema"),
+            patch("applications.api._inject_tracer_inds"),
+            patch("applications.api._build_output_denorm", return_value=(torch.zeros(1), torch.ones(1))),
+            patch("applications.api.xr.open_dataset", return_value=fake_latlons),
+            patch("applications.api.load_metadata", return_value={}),
+            patch("applications.api.ERA5Normalizer", return_value=torch.nn.Identity()),
+        ):
+            from fastapi.testclient import TestClient as _TC
+
+            with _TC(app, raise_server_exceptions=True) as _client:
+                resp = _client.get("/health")
+                assert resp.status_code == 200
+                assert resp.json()["model_loaded"] is True

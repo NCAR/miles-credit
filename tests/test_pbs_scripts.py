@@ -752,3 +752,320 @@ class TestCreditAgent:
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._agent_args())
         assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# _resolve_pbs_opts — fills defaults from pbs_cfg and cluster defaults
+# ---------------------------------------------------------------------------
+
+
+class TestResolvePbsOpts:
+    def _base_args(self, cluster="casper", **overrides):
+        defaults = dict(
+            cluster=cluster,
+            gpus=None,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            walltime=None,
+            queue=None,
+            gpu_type=None,
+            torchrun=None,
+            conda_env=None,
+            account=None,
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_casper_defaults_filled(self):
+        from credit.cli import _resolve_pbs_opts
+
+        args = _resolve_pbs_opts(self._base_args(cluster="casper"), {})
+        assert args.gpus == 4
+        assert args.cpus == 8
+        assert args.mem == "128GB"
+        assert args.queue == "casper"
+        assert args.walltime == "12:00:00"
+        assert args.account == "NAML0001"
+
+    def test_derecho_defaults_filled(self):
+        from credit.cli import _resolve_pbs_opts
+
+        args = _resolve_pbs_opts(self._base_args(cluster="derecho"), {})
+        assert args.cpus == 64
+        assert args.mem == "480GB"
+        assert args.queue == "main"
+
+    def test_pbs_cfg_overrides_defaults(self):
+        from credit.cli import _resolve_pbs_opts
+
+        pbs_cfg = {"walltime": "06:00:00", "project": "MYPROJ0001", "ngpus": 2}
+        args = _resolve_pbs_opts(self._base_args(cluster="casper"), pbs_cfg)
+        assert args.walltime == "06:00:00"
+        assert args.account == "MYPROJ0001"
+        assert args.gpus == 2
+
+    def test_cli_flag_overrides_pbs_cfg(self):
+        from credit.cli import _resolve_pbs_opts
+
+        pbs_cfg = {"walltime": "06:00:00", "ngpus": 2}
+        args = _resolve_pbs_opts(self._base_args(cluster="casper", gpus=8, walltime="24:00:00"), pbs_cfg)
+        assert args.gpus == 8
+        assert args.walltime == "24:00:00"
+
+    def test_conda_env_from_pbs_cfg(self):
+        from credit.cli import _resolve_pbs_opts
+
+        pbs_cfg = {"conda": "/my/env/path"}
+        args = _resolve_pbs_opts(self._base_args(cluster="derecho"), pbs_cfg)
+        assert args.conda_env == "/my/env/path"
+
+    def test_job_name_from_pbs_cfg(self):
+        from credit.cli import _resolve_pbs_opts
+
+        pbs_cfg = {"job_name": "my_experiment"}
+        args = _resolve_pbs_opts(self._base_args(cluster="casper"), pbs_cfg)
+        assert args.job_name == "my_experiment"
+
+    def test_account_alias_project_or_account(self):
+        from credit.cli import _resolve_pbs_opts
+
+        # "account" alias also works
+        pbs_cfg = {"account": "PROJ9999"}
+        args = _resolve_pbs_opts(self._base_args(cluster="casper"), pbs_cfg)
+        assert args.account == "PROJ9999"
+
+
+# ---------------------------------------------------------------------------
+# _load_pbs_config — reads pbs: section from a config file
+# ---------------------------------------------------------------------------
+
+
+class TestLoadPbsConfig:
+    def test_returns_pbs_section(self, tmp_path):
+        import yaml
+        from credit.cli import _load_pbs_config
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"pbs": {"walltime": "04:00:00", "project": "NAML0001"}, "trainer": {}}))
+        result = _load_pbs_config(str(cfg))
+        assert result["walltime"] == "04:00:00"
+
+    def test_returns_empty_dict_when_no_pbs_section(self, tmp_path):
+        import yaml
+        from credit.cli import _load_pbs_config
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"trainer": {}}))
+        assert _load_pbs_config(str(cfg)) == {}
+
+    def test_returns_empty_dict_when_file_missing(self, tmp_path):
+        from credit.cli import _load_pbs_config
+
+        assert _load_pbs_config(str(tmp_path / "nope.yml")) == {}
+
+
+# ---------------------------------------------------------------------------
+# _build_rollout_pbs_script — ensemble rollout scripts
+# ---------------------------------------------------------------------------
+
+
+class TestBuildRolloutPbsScript:
+    def _rollout_args(self, cluster="casper", gpus=1, **kw):
+        from credit.cli import _resolve_pbs_opts
+
+        defaults = dict(
+            cluster=cluster,
+            gpus=gpus,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            walltime=None,
+            queue=None,
+            gpu_type=None,
+            torchrun=None,
+            conda_env=None,
+            account=None,
+        )
+        defaults.update(kw)
+        ns = argparse.Namespace(**defaults)
+        return _resolve_pbs_opts(ns, {})
+
+    def test_casper_rollout_has_subset_args(self):
+        from credit.cli import _build_rollout_pbs_script
+
+        script = _build_rollout_pbs_script(self._rollout_args(), FAKE_CONFIG, FAKE_REPO, subset=2, n_subsets=5)
+        assert "--subset 2" in script
+        assert "--no_subset 5" in script
+
+    def test_casper_rollout_has_standalone(self):
+        from credit.cli import _build_rollout_pbs_script
+
+        script = _build_rollout_pbs_script(self._rollout_args(), FAKE_CONFIG, FAKE_REPO, subset=1, n_subsets=3)
+        assert "--standalone" in script
+
+    def test_casper_rollout_job_name_includes_subset(self):
+        from credit.cli import _build_rollout_pbs_script
+
+        script = _build_rollout_pbs_script(self._rollout_args(), FAKE_CONFIG, FAKE_REPO, subset=3, n_subsets=10)
+        assert "03of10" in script
+
+    def test_derecho_rollout_has_subset_args(self):
+        from credit.cli import _build_rollout_pbs_script
+
+        args = self._rollout_args(cluster="derecho")
+        script = _build_rollout_pbs_script(args, FAKE_CONFIG, FAKE_REPO, subset=1, n_subsets=4)
+        assert "--subset 1" in script
+        assert "--no_subset 4" in script
+
+    def test_derecho_rollout_has_standalone(self):
+        """Rollout is always single-node, even on Derecho."""
+        from credit.cli import _build_rollout_pbs_script
+
+        args = self._rollout_args(cluster="derecho")
+        script = _build_rollout_pbs_script(args, FAKE_CONFIG, FAKE_REPO, subset=1, n_subsets=2)
+        assert "--standalone" in script
+
+
+# ---------------------------------------------------------------------------
+# _submit dry-run — exercises the dry_run branch of _submit
+# ---------------------------------------------------------------------------
+
+
+class TestSubmitDryRun:
+    def _submit_args(self, cluster="casper", nodes=1, chain=1, dry_run=True, reload=False):
+        return argparse.Namespace(
+            cluster=cluster,
+            gpus=4,
+            nodes=nodes,
+            cpus=None,
+            mem=None,
+            walltime="12:00:00",
+            queue=None,
+            gpu_type=None,
+            torchrun=None,
+            conda_env=None,
+            account=FAKE_ACCOUNT,
+            chain=chain,
+            dry_run=dry_run,
+            reload=reload,
+            config=None,  # set per test
+        )
+
+    def test_dry_run_single_job_prints_script(self, tmp_path, capsys):
+        import yaml
+        from credit.cli import _submit
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "save_loc": str(tmp_path),
+                    "trainer": {"epochs": 5, "num_epoch": 5},
+                }
+            )
+        )
+        args = self._submit_args(chain=1)
+        args.config = str(cfg)
+        _submit(args)
+        out = capsys.readouterr().out
+        assert "Job 1/1" in out
+        assert "#PBS" in out
+
+    def test_dry_run_multi_job_prints_both_scripts(self, tmp_path, capsys):
+        import yaml
+        from credit.cli import _submit
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "save_loc": str(tmp_path),
+                    "trainer": {"epochs": 10, "num_epoch": 5},
+                }
+            )
+        )
+        args = self._submit_args(chain=2)
+        args.config = str(cfg)
+        _submit(args)
+        out = capsys.readouterr().out
+        assert "Job 1/2" in out
+        assert "Jobs 2..2/2" in out
+        assert "afterok" in out
+
+    def test_dry_run_with_reload_uses_reload_config(self, tmp_path, capsys):
+        import yaml
+        from credit.cli import _submit
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "save_loc": str(tmp_path),
+                    "trainer": {"epochs": 5, "num_epoch": 5},
+                }
+            )
+        )
+        args = self._submit_args(chain=1, reload=True)
+        args.config = str(cfg)
+        _submit(args)
+        # reload config should have been written
+        assert (tmp_path / "config_reload.yml").exists()
+
+
+# ---------------------------------------------------------------------------
+# _find_torchrun — returns a usable string
+# ---------------------------------------------------------------------------
+
+
+class TestFindTorchrun:
+    def test_returns_string(self):
+        from credit.cli import _find_torchrun
+
+        result = _find_torchrun()
+        assert isinstance(result, str)
+        assert "torchrun" in result
+
+    def test_returns_on_path_when_available(self, monkeypatch):
+        from credit.cli import _find_torchrun
+
+        monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/torchrun")
+        result = _find_torchrun()
+        assert result == "/usr/bin/torchrun"
+
+    def test_falls_back_when_not_on_path(self, monkeypatch):
+        import shutil as _shutil
+        from credit.cli import _find_torchrun
+
+        monkeypatch.setattr(_shutil, "which", lambda _: None)
+        result = _find_torchrun()
+        # Should be either the fallback path or the bare "torchrun" string
+        assert "torchrun" in result
+
+
+# ---------------------------------------------------------------------------
+# _is_ncar_system — hostname detection
+# ---------------------------------------------------------------------------
+
+
+class TestIsNcarSystem:
+    def test_casper_hostname_detected(self, monkeypatch):
+        import socket
+        from credit.cli import _is_ncar_system
+
+        monkeypatch.setattr(socket, "gethostname", lambda: "casper42.hpc.ucar.edu")
+        assert _is_ncar_system() is True
+
+    def test_derecho_hostname_detected(self, monkeypatch):
+        import socket
+        from credit.cli import _is_ncar_system
+
+        monkeypatch.setattr(socket, "gethostname", lambda: "derecho01.ucar.edu")
+        assert _is_ncar_system() is True
+
+    def test_unknown_hostname_is_false(self, monkeypatch):
+        import socket
+        from credit.cli import _is_ncar_system
+
+        monkeypatch.setattr(socket, "gethostname", lambda: "workstation.example.com")
+        assert _is_ncar_system() is False
