@@ -1,9 +1,9 @@
 # common config for eval.py
 
-config: "/glade/derecho/scratch/dkimpara/goes_10km_train/wx_big/model.yml"
+config: "/glade/derecho/scratch/dkimpara/goes_10km_train/10m_big/model.yml"
 
 # [Optional] location of forecast data. default: model config's save_forecast location (above)
-save_forecast: "/glade/derecho/scratch/dkimpara/goes_10km_train/baselines/persistence_forecasts/"
+save_forecast: "/glade/derecho/scratch/dkimpara/goes_10km_train/10m_big/test_forecasts"
 
 # [Optional] filename to save eval results filename default: ensemble_eval.parquet
 # will save to save_forecast, or the default value of save_forecast
@@ -14,6 +14,15 @@ verification_type: "goes-10km"
 ############ custom eval configs ############
 climo_file: "/glade/derecho/scratch/dkimpara/goes_10km_train/baselines/climo/data_stats.nc"
 
+compute_fss: True
+C13_thresholds: [260, 235]
+sky_categories: 
+    high: [0, 210,]
+    medium: [210, 235]
+    low: [235, 260]
+    none: [260, 1000]
+fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 18, 20, 30, 40, 50, 60, 70, 80, 90, 100, 150, 200, 250] #synoptic scale at 2500km
+# fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 #############################################
 
@@ -23,10 +32,10 @@ pbs:
     conda: "~/credit"
     job_name: 'ensemble_eval'
     nodes: 1
-    ncpus: 32
+    ncpus: 16
     ngpus: 0
-    mem: '128GB'
+    mem: '64GB'
     walltime: '01:00:00'
     gpu_type: 'none'
-    project: 'NAML0001'
+    project: 'NMMM0015'
     queue: 'casper'

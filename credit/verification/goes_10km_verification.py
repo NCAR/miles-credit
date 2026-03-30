@@ -8,6 +8,7 @@ import pandas as pd
 import xarray as xr
 
 from credit.verification.standard import radial_fft_spectrum
+from scores.spatial import fss_2d, fss_2d_binary
 
 
 
@@ -38,12 +39,12 @@ def verification(forecast_save_loc, p, conf, model_conf, dataset, climo, **kwarg
     forecast_files = sorted([f for f in Path(forecast_save_loc).iterdir() if '.nc' in f.name])
     step_file_tuples = enumerate(forecast_files, start=1)
 
-    f = partial(verification_per_timestep, dataset, climo)
+    f = partial(verification_per_timestep, dataset, climo, conf)
     result = p.map(f, step_file_tuples)
 
     return result
 
-def verification_per_timestep(dataset, climo, step_file_tuple):
+def verification_per_timestep(dataset, climo, eval_conf, step_file_tuple):
     """
     Compute verification metrics for a single forecast hour.
     
@@ -113,6 +114,14 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
     result_dict = {"forecast_step": step}
     
     pred_da = xr.open_dataset(file)["BT_or_R"] # BT_or_R with t channel lat lon
+    # if "ensemble_member_label" in pred_da.coordinates:
+    #     # do ensemble verification
+    #     # spread
+
+
+    #     pred_da = pred_da.mean("ensemble_member_labels")
+
+
     true_da = dataset[pred_da.t[0], "y"]["y"]
 
     w_lat = np.cos(np.deg2rad(pred_da.latitude))
@@ -127,9 +136,9 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
     mae = np.abs(diff).mean(dim=["t", "latitude", "longitude"])
     result_dict = result_dict | unpack_da_to_dict(mae, "MAE")
 
-    # MSE (mean then sqrt)
+    # RMSE (mean then sqrt)
     mse = np.sqrt((diff ** 2).mean(dim=["t", "latitude", "longitude"]))
-    result_dict = result_dict | unpack_da_to_dict(mse, "MSE")
+    result_dict = result_dict | unpack_da_to_dict(mse, "RMSE")
 
     # 2D FFT
     fft_pred = radial_fft_spectrum(pred_da, 10.0)
@@ -143,7 +152,39 @@ def verification_per_timestep(dataset, climo, step_file_tuple):
     maess = (mae - mae_climo) / (-1 * mae_climo)
     result_dict = result_dict | unpack_da_to_dict(maess, "MAESS")
 
-    # FSS?
+    # FSS for channel 13
+    if eval_conf["compute_fss"]:
+        channel = 13
+        pred_da = pred_da.isel(t=0).sel(channel=channel) 
+        target_da = true_da.sel(channel=channel)
+
+        def is_in_bin(da, bin_edges):
+            """
+            outputs a masked dataarray of where the values are within the bin_edges
+            """
+            return (bin_edges[0] < da) & (da <= bin_edges[1])
+
+        for window_size in eval_conf["fss_window_sizes"]:
+            # binary threshold fss
+            for threshold in eval_conf["C13_thresholds"]:
+                fss = fss_2d(pred_da, target_da,
+                            event_threshold=threshold,
+                            window_size=(window_size, window_size),
+                            spatial_dims=("latitude", "longitude"),
+                            threshold_operator=np.less
+                            )
+                result_dict = result_dict | {f"FSS_WS{window_size}_C13_T{threshold}": float(fss.values)}
+
+            # categorical fss
+            for category_name, bin in eval_conf["sky_categories"].items():
+                pred_binary = is_in_bin(pred_da, bin)
+                target_binary = is_in_bin(target_da, bin)
+                
+                fss = fss_2d_binary(pred_binary, target_binary,
+                        window_size=(window_size, window_size),
+                        spatial_dims=("latitude", "longitude"),
+                        )
+                result_dict = result_dict | {f"FSS_WS{window_size}_C13_{category_name}": float(fss.values)}
 
     return result_dict
 
