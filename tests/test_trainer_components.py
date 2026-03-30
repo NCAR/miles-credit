@@ -609,3 +609,502 @@ class TestLoadTrainer:
         load_trainer(conf)
         assert conf["trainer"]["type"] == "era5"
         assert conf["trainer"]["extra_key"] == 99
+
+
+# ---------------------------------------------------------------------------
+# EMATracker — additional edge-case coverage
+# ---------------------------------------------------------------------------
+
+
+class TestEMATrackerEdgeCases:
+    def test_ema_every_step_default_updates_every_call(self):
+        """EMATracker.update() always updates shadow on every call (step always increments)."""
+        model = _tiny_model()
+        ema = EMATracker(model, decay=0.9)
+
+        initial = {k: v.clone() for k, v in ema.shadow.items()}
+        # Fill model with 1s so the update definitely moves the shadow
+        with torch.no_grad():
+            for p in model.parameters():
+                p.fill_(1.0)
+        ema.update(model)
+
+        for k in ema.shadow:
+            assert not torch.equal(ema.shadow[k], initial[k])
+
+    def test_swap_with_module_wrapper(self):
+        """EMATracker.swap() handles models wrapped in a .module attribute (lines 93-96)."""
+
+        class _WrappedModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module = nn.Linear(4, 2)
+
+            def state_dict(self):
+                return self.module.state_dict()
+
+            def load_state_dict(self, sd, **kw):
+                self.module.load_state_dict(sd, **kw)
+
+        # Fill the wrapped model with 1s
+        wrapped = _WrappedModel()
+        with torch.no_grad():
+            for p in wrapped.module.parameters():
+                p.fill_(1.0)
+
+        ema = EMATracker(wrapped, decay=0.9)
+        # Force shadow to zeros
+        for k in ema.shadow:
+            ema.shadow[k].zero_()
+
+        # swap should move zeros into model, ones into shadow
+        ema.swap(wrapped)
+        for p in wrapped.module.parameters():
+            assert torch.allclose(p, torch.zeros_like(p))
+
+    def test_load_state_dict_missing_step_defaults_to_zero(self):
+        """load_state_dict handles missing 'step' key (line 104: d.get('step', 0))."""
+        model = _tiny_model()
+        ema = EMATracker(model, decay=0.9)
+        # Simulate old checkpoint without 'step'
+        old_state = {"shadow": ema.shadow, "decay": 0.5}
+        ema.load_state_dict(old_state)
+        assert ema.step == 0
+        assert ema.decay == 0.5
+
+    def test_update_increments_step(self):
+        """update() should increment self.step each call."""
+        model = _tiny_model()
+        ema = EMATracker(model, decay=0.9)
+        assert ema.step == 0
+        ema.update(model)
+        assert ema.step == 1
+        ema.update(model)
+        assert ema.step == 2
+
+
+# ---------------------------------------------------------------------------
+# BaseTrainer — additional init / property coverage
+# ---------------------------------------------------------------------------
+
+
+class TestBaseTrainerAdditionalInit:
+    def test_direction_max(self, tmp_path):
+        """training_metric_direction='max' sets self.direction to max (line 160)."""
+        conf = _minimal_conf(training_metric_direction="max")
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+        assert trainer.direction is max
+
+    def test_distributed_true_for_ddp_mode(self, tmp_path):
+        """mode='ddp' should set distributed=True (line 137)."""
+        conf = _minimal_conf(mode="ddp")
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+        assert trainer.distributed is True
+
+    def test_distributed_true_for_fsdp_mode(self, tmp_path):
+        """mode='fsdp' should set distributed=True."""
+        conf = _minimal_conf(mode="fsdp")
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+        assert trainer.distributed is True
+
+    def test_ema_loaded_from_checkpoint(self, tmp_path):
+        """When checkpoint_ema.pt exists, EMA state should be restored (lines 170-173)."""
+        import os
+
+        # First build an EMA and save its state_dict to disk
+        model = _tiny_model()
+        ema = EMATracker(model, decay=0.999)
+        ema.step = 77
+        ema_state = {"model_state_dict": ema.state_dict()}
+        ema_path = os.path.join(str(tmp_path), "checkpoint_ema.pt")
+        torch.save(ema_state, ema_path)
+
+        # Now build the trainer; it should load that EMA state
+        conf = _minimal_conf(use_ema=True, ema_decay=0.999)
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+        assert trainer.ema is not None
+        assert trainer.ema.step == 77
+
+    def test_tb_writer_none_for_nonzero_rank(self, tmp_path):
+        """use_tensorboard=True but rank != 0 → tb_writer stays None (lines 181-194)."""
+        conf = _minimal_conf(use_tensorboard=True)
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=1, conf=conf)
+        assert trainer.tb_writer is None
+
+    def test_model_state_dict_with_module_wrapper(self):
+        """_model_state_dict unwraps DDP .module (lines 203, 208-211)."""
+
+        class _Wrapped(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module = nn.Linear(4, 2)
+
+            def state_dict(self):
+                return self.module.state_dict()
+
+        wrapped = _Wrapped()
+        sd = BaseTrainer._model_state_dict(wrapped)
+        # Should return the underlying module's state dict
+        assert any("weight" in k for k in sd)
+
+    def test_load_model_state_dict_with_module_wrapper(self):
+        """_load_model_state_dict loads into DDP .module (lines 208-211)."""
+
+        class _Wrapped(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module = nn.Linear(4, 2)
+
+            def state_dict(self):
+                return self.module.state_dict()
+
+            def load_state_dict(self, sd, **kw):
+                # DDP wrapper doesn't have load_state_dict, the .module does
+                pass
+
+        wrapped = _Wrapped()
+        sd = wrapped.module.state_dict()
+        # Should not raise
+        BaseTrainer._load_model_state_dict(wrapped, sd)
+
+    def test_training_metric_explicit_override(self, tmp_path):
+        """Explicit training_metric key in conf overrides default (lines 157-158)."""
+        conf = _minimal_conf(training_metric="my_custom_metric")
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+        assert trainer.training_metric == "my_custom_metric"
+
+    def test_stop_after_epoch_flag(self, tmp_path):
+        """stop_after_epoch flag is read from conf (line 152)."""
+        conf = _minimal_conf(stop_after_epoch=True)
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+        assert trainer.stop_after_epoch is True
+
+    def test_save_metric_vars_list(self, tmp_path):
+        """save_metric_vars can be a list of variable names (line 154)."""
+        conf = _minimal_conf(save_metric_vars=["temperature", "wind"])
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+        assert trainer.save_metric_vars == ["temperature", "wind"]
+
+    def test_grad_max_norm_nonzero(self, tmp_path):
+        """grad_max_norm extracted correctly from conf (line 144)."""
+        conf = _minimal_conf(grad_max_norm=1.0)
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+        assert trainer.grad_max_norm == 1.0
+
+
+# ---------------------------------------------------------------------------
+# BaseTrainer._save_checkpoint — non-fsdp branch
+# ---------------------------------------------------------------------------
+
+
+class TestSaveCheckpoint:
+    def _build_trainer(self, tmp_path, **trainer_overrides):
+        conf = _minimal_conf(**trainer_overrides)
+        conf["save_loc"] = str(tmp_path)
+        return _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+
+    def test_saves_checkpoint_file(self, tmp_path):
+        """_save_checkpoint writes checkpoint.pt for rank-0, non-fsdp."""
+        import os
+
+        trainer = self._build_trainer(tmp_path)
+        os.makedirs(str(tmp_path), exist_ok=True)
+
+        model = _tiny_model()
+        optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        trainer._save_checkpoint(epoch=0, optimizer=optimizer, scheduler=None, scaler=scaler)
+
+        ckpt_path = tmp_path / "checkpoint.pt"
+        assert ckpt_path.exists()
+        ckpt = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
+        assert ckpt["epoch"] == 0
+        assert "model_state_dict" in ckpt
+        assert "optimizer_state_dict" in ckpt
+
+    def test_saves_ema_checkpoint_when_ema_enabled(self, tmp_path):
+        """When EMA is active, checkpoint_ema.pt is written alongside checkpoint.pt."""
+        import os
+
+        trainer = self._build_trainer(tmp_path, use_ema=True, ema_decay=0.999)
+        os.makedirs(str(tmp_path), exist_ok=True)
+
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        trainer._save_checkpoint(epoch=5, optimizer=optimizer, scheduler=None, scaler=scaler)
+
+        assert (tmp_path / "checkpoint_ema.pt").exists()
+        ema_ckpt = torch.load(str(tmp_path / "checkpoint_ema.pt"), map_location="cpu", weights_only=False)
+        assert "model_state_dict" in ema_ckpt
+        assert ema_ckpt["epoch"] == 5
+
+    def test_save_every_epoch_copies_checkpoint(self, tmp_path):
+        """save_every_epoch=True should call copy_checkpoint (lines 272-273)."""
+        import os
+        from unittest.mock import patch
+
+        trainer = self._build_trainer(tmp_path, save_every_epoch=True)
+        os.makedirs(str(tmp_path), exist_ok=True)
+
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        with patch("credit.trainers.base_trainer.copy_checkpoint") as mock_copy:
+            trainer._save_checkpoint(epoch=3, optimizer=optimizer, scheduler=None, scaler=scaler)
+            mock_copy.assert_called_once()
+            args = mock_copy.call_args[0]
+            assert args[1] == 3  # epoch passed to copy_checkpoint
+
+    def test_use_scheduler_false_passes_none_sched_state(self, tmp_path):
+        """When use_scheduler=False, scheduler_state_dict in checkpoint is None (line 252)."""
+        import os
+
+        trainer = self._build_trainer(tmp_path, use_scheduler=False)
+        os.makedirs(str(tmp_path), exist_ok=True)
+
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        trainer._save_checkpoint(epoch=0, optimizer=optimizer, scheduler=None, scaler=scaler)
+
+        ckpt = torch.load(str(tmp_path / "checkpoint.pt"), map_location="cpu", weights_only=False)
+        assert ckpt["scheduler_state_dict"] is None
+
+    def test_nonzero_rank_does_not_write_checkpoint(self, tmp_path):
+        """Non-rank-0 processes must not write checkpoint files (lines 255-296)."""
+        import os
+
+        conf = _minimal_conf()
+        conf["save_loc"] = str(tmp_path)
+        # Create trainer at rank=1
+        trainer = _ConcreteTrainer(_tiny_model(), rank=1, conf=conf)
+        os.makedirs(str(tmp_path), exist_ok=True)
+
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        trainer._save_checkpoint(epoch=0, optimizer=optimizer, scheduler=None, scaler=scaler)
+
+        # File should NOT exist since rank != 0
+        assert not (tmp_path / "checkpoint.pt").exists()
+
+
+# ---------------------------------------------------------------------------
+# TrainerERA5v2 — additional coverage
+# ---------------------------------------------------------------------------
+
+
+class TestTrainerERA5v2AdditionalCoverage:
+    """Cover trainerERA5v2 init branches and validate loop."""
+
+    def test_backprop_on_timestep_explicit(self, tmp_path):
+        """Explicit backprop_on_timestep in data conf is used directly (lines 102-103)."""
+        from unittest.mock import patch
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        conf = _era5_v2_multistep_conf(forecast_len=3, tmp_path=tmp_path)
+        conf["data"]["backprop_on_timestep"] = [2, 3]
+
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            t = Trainer(_tiny_model(), rank=0, conf=conf)
+
+        assert t.backprop_on_timestep == [2, 3]
+
+    def test_data_clamp_sets_flags(self, tmp_path):
+        """data_clamp in conf sets flag_clamp, clamp_min, clamp_max (lines 107-115)."""
+        from unittest.mock import patch
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf["data"]["data_clamp"] = [-5.0, 5.0]
+
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            t = Trainer(_tiny_model(), rank=0, conf=conf)
+
+        assert t.flag_clamp is True
+        assert t.clamp_min == -5.0
+        assert t.clamp_max == 5.0
+
+    def test_data_valid_overrides_valid_forecast_len(self, tmp_path):
+        """data_valid block used when present (lines 118-120)."""
+        from unittest.mock import patch
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        conf["data_valid"] = {"forecast_len": 4, "history_len": 2}
+
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            t = Trainer(_tiny_model(), rank=0, conf=conf)
+
+        assert t.valid_forecast_len == 4
+        assert t.valid_history_len == 2
+
+    def test_retain_graph_flag(self, tmp_path):
+        """retain_graph flag extracted from conf (line 98)."""
+        from unittest.mock import patch
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf["data"]["retain_graph"] = True
+
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            t = Trainer(_tiny_model(), rank=0, conf=conf)
+
+        assert t.retain_graph is True
+
+    def test_validate_one_epoch_runs(self, tmp_path):
+        """validate() completes on CPU with toy data and returns valid_loss."""
+        from unittest.mock import patch
+
+        B, C, H, W = 1, 4, 4, 4
+
+        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            from credit.trainers.trainerERA5v2 import Trainer
+
+            trainer = Trainer(model, rank=0, conf=conf)
+
+        loader = _FakeLoader(B, C, H, W, n_batches=1)
+
+        def _metrics(pred, y):
+            return {"acc": 0.5, "mae": 0.1}
+
+        criterion = nn.MSELoss()
+
+        results = trainer.validate(
+            epoch=0,
+            valid_loader=loader,
+            criterion=criterion,
+            metrics=_metrics,
+        )
+
+        assert "valid_loss" in results
+        assert len(results["valid_loss"]) == 1
+        assert torch.isfinite(torch.tensor(results["valid_loss"][0]))
+
+    def test_train_with_ema_update(self, tmp_path):
+        """EMA update is called when ema is not None (line 252-253)."""
+        from unittest.mock import patch
+
+        B, C, H, W = 1, 4, 4, 4
+
+        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf["trainer"]["use_ema"] = True
+        conf["trainer"]["ema_decay"] = 0.999
+
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            from credit.trainers.trainerERA5v2 import Trainer
+
+            trainer = Trainer(model, rank=0, conf=conf)
+
+        assert trainer.ema is not None
+        initial_step = trainer.ema.step
+
+        loader = _FakeLoader(B, C, H, W, n_batches=1)
+
+        def _metrics(pred, y):
+            return {"acc": 0.0, "mae": 0.0}
+
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
+        criterion = nn.MSELoss()
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        trainer.train_one_epoch(
+            epoch=0,
+            trainloader=loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            scaler=scaler,
+            scheduler=None,
+            metrics=_metrics,
+        )
+
+        assert trainer.ema.step == initial_step + 1
+
+    def test_grad_max_norm_clipping(self, tmp_path):
+        """grad_max_norm > 0 triggers gradient clipping (lines 245-246)."""
+        from unittest.mock import patch
+
+        B, C, H, W = 1, 4, 4, 4
+
+        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf["trainer"]["grad_max_norm"] = 0.01  # very small to actually clip
+
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            from credit.trainers.trainerERA5v2 import Trainer
+
+            trainer = Trainer(model, rank=0, conf=conf)
+
+        loader = _FakeLoader(B, C, H, W, n_batches=1)
+
+        def _metrics(pred, y):
+            return {"acc": 0.0, "mae": 0.0}
+
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
+        criterion = nn.MSELoss()
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        # Should complete without error even with aggressive clipping
+        results = trainer.train_one_epoch(
+            epoch=0,
+            trainloader=loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            scaler=scaler,
+            scheduler=None,
+            metrics=_metrics,
+        )
+        assert "train_loss" in results
+
+    def test_scheduler_lambda_step_called(self, tmp_path):
+        """lambda scheduler steps once per epoch at epoch start (lines 146-147)."""
+        from unittest.mock import patch, MagicMock
+        from credit.trainers.trainerERA5v2 import Trainer
+
+        B, C, H, W = 1, 4, 4, 4
+
+        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf["trainer"]["use_scheduler"] = True
+        conf["trainer"]["scheduler"] = {"scheduler_type": "lambda"}
+
+        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            trainer = Trainer(model, rank=0, conf=conf)
+
+        mock_scheduler = MagicMock()
+        loader = _FakeLoader(B, C, H, W, n_batches=1)
+
+        def _metrics(pred, y):
+            return {"acc": 0.0, "mae": 0.0}
+
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
+        criterion = nn.MSELoss()
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+        trainer.train_one_epoch(
+            epoch=0,
+            trainloader=loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            scaler=scaler,
+            scheduler=mock_scheduler,
+            metrics=_metrics,
+        )
+
+        # Lambda scheduler should have been called at epoch start
+        mock_scheduler.step.assert_called()
