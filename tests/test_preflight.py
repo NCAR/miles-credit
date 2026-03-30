@@ -126,6 +126,27 @@ class TestEstimateDataloaderMemoryGb:
         est = estimate_dataloader_memory_gb(conf)
         assert est > 0.0
 
+    def test_raises_internally_returns_zero(self):
+        """A config that triggers an internal exception returns 0.0 (lines 81-82)."""
+        # levels is not iterable — len() will raise, hitting the except branch
+        bad_conf = {
+            "trainer": {"thread_workers": 4, "prefetch_factor": 4, "train_batch_size": 1},
+            "model": {"image_height": 721, "image_width": 1440},
+            "data": {
+                "source": {
+                    "ERA5": {
+                        "levels": None,  # len(None) raises TypeError
+                        "variables": {
+                            "prognostic": {"vars_3D": ["T"], "vars_2D": ["SP"]},
+                            "diagnostic": {"vars_2D": []},
+                        },
+                    }
+                }
+            },
+        }
+        result = estimate_dataloader_memory_gb(bad_conf)
+        assert result == 0.0
+
 
 # ---------------------------------------------------------------------------
 # check_dataloader_startup — integration / side-effect tests
