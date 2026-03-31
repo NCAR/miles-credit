@@ -29,14 +29,13 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: '3.11'
           cache: 'pip'
       - name: Install dependencies
         run: | 
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install . 
-          pip install ruff pytest pytest-cov
+          pip install pytest pytest-cov
       - name: Run tests
         run: |
           pytest --cov=credit --cov-branch --cov-report=xml
