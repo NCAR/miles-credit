@@ -14,6 +14,7 @@ import os
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 import xarray as xr
 
 from credit.verification.deterministic import (
@@ -594,3 +595,214 @@ class TestClimatologyLoading:
 
         sample = float(ds[var].isel(dayofyear=0, hour=0).mean())
         assert 180 < sample < 330, f"Mean 2m_temperature = {sample:.1f} K, seems wrong"
+
+
+# ===========================================================================
+# credit.verification.wb2_references
+# ===========================================================================
+
+
+class TestWB2References:
+    """Structural sanity tests for WB2_SCORES and WB2_STYLE."""
+
+    def test_models_present(self):
+        from credit.verification.wb2_references import WB2_SCORES
+
+        for model in ("IFS HRES", "Pangu-Weather", "GraphCast"):
+            assert model in WB2_SCORES, f"Missing model: {model}"
+
+    def test_standard_variables_present(self):
+        from credit.verification.wb2_references import WB2_SCORES
+
+        for model, scores in WB2_SCORES.items():
+            for var in ("Z500", "T850", "t2m", "U850"):
+                assert var in scores, f"Model {model!r} missing variable {var!r}"
+
+    def test_rmse_acc_keys_present(self):
+        from credit.verification.wb2_references import WB2_SCORES
+
+        for model, scores in WB2_SCORES.items():
+            for var, data in scores.items():
+                assert "rmse" in data, f"{model}/{var} missing 'rmse'"
+                assert "acc" in data, f"{model}/{var} missing 'acc'"
+
+    def test_ifs_z500_rmse_is_list_of_tuples(self):
+        from credit.verification.wb2_references import WB2_SCORES
+
+        rmse = WB2_SCORES["IFS HRES"]["Z500"]["rmse"]
+        assert rmse is not None
+        assert len(rmse) == 10, f"Expected 10 lead times, got {len(rmse)}"
+        for lt, val in rmse:
+            assert isinstance(lt, (int, float)), f"Lead time should be numeric: {lt}"
+            assert isinstance(val, (int, float)), f"RMSE value should be numeric: {val}"
+
+    def test_lead_times_monotonically_increasing(self):
+        from credit.verification.wb2_references import WB2_SCORES
+
+        rmse = WB2_SCORES["IFS HRES"]["Z500"]["rmse"]
+        lead_times = [lt for lt, _ in rmse]
+        assert lead_times == sorted(lead_times), "Lead times should be monotonically increasing"
+
+    def test_rmse_monotonically_increasing(self):
+        """RMSE should generally increase with lead time."""
+        from credit.verification.wb2_references import WB2_SCORES
+
+        rmse = WB2_SCORES["IFS HRES"]["Z500"]["rmse"]
+        values = [v for _, v in rmse]
+        assert values[0] < values[-1], "RMSE should increase from day 1 to day 10"
+
+    def test_acc_monotonically_decreasing(self):
+        """ACC should generally decrease with lead time."""
+        from credit.verification.wb2_references import WB2_SCORES
+
+        acc_curve = WB2_SCORES["IFS HRES"]["Z500"]["acc"]
+        values = [v for _, v in acc_curve]
+        assert values[0] > values[-1], "ACC should decrease from day 1 to day 10"
+
+    def test_acc_bounded(self):
+        """All ACC values should be in (-1, 1]."""
+        from credit.verification.wb2_references import WB2_SCORES
+
+        for model, scores in WB2_SCORES.items():
+            for var, data in scores.items():
+                if data["acc"] is None:
+                    continue
+                for lt, val in data["acc"]:
+                    assert -1.0 <= val <= 1.0, f"{model}/{var} ACC={val} out of range at lt={lt}"
+
+    def test_rmse_positive(self):
+        """All RMSE values must be positive."""
+        from credit.verification.wb2_references import WB2_SCORES
+
+        for model, scores in WB2_SCORES.items():
+            for var, data in scores.items():
+                if data["rmse"] is None:
+                    continue
+                for lt, val in data["rmse"]:
+                    assert val > 0, f"{model}/{var} RMSE={val} at lt={lt} is not positive"
+
+    def test_wb2_style_keys_match_scores(self):
+        from credit.verification.wb2_references import WB2_SCORES, WB2_STYLE
+
+        for model in WB2_SCORES:
+            assert model in WB2_STYLE, f"WB2_STYLE missing entry for {model!r}"
+
+    def test_wb2_style_has_required_fields(self):
+        from credit.verification.wb2_references import WB2_STYLE
+
+        for model, style in WB2_STYLE.items():
+            for field in ("color", "linestyle", "linewidth"):
+                assert field in style, f"WB2_STYLE[{model!r}] missing {field!r}"
+
+
+# ===========================================================================
+# credit.metrics — LatWeightedMetrics
+# ===========================================================================
+
+
+class TestLatWeightedMetrics:
+    """Tests for LatWeightedMetrics on CPU with synthetic tensors."""
+
+    @staticmethod
+    def _minimal_conf(n_atmos=2, n_levels=2, n_surface=1, n_diag=0, use_lat_weights=False):
+        """Build the minimal conf dict LatWeightedMetrics expects."""
+        return {
+            "data": {
+                "variables": [f"V{i}" for i in range(n_atmos)],
+                "surface_variables": [f"S{i}" for i in range(n_surface)],
+                "diagnostic_variables": [f"D{i}" for i in range(n_diag)],
+            },
+            "model": {"levels": n_levels},
+            "loss": {"use_latitude_weights": use_lat_weights},
+            "trainer": {"ensemble_size": 1},
+            "predict": {"ensemble_size": 1},
+        }
+
+    def test_init_no_lat_weights(self):
+        from credit.metrics import LatWeightedMetrics
+
+        conf = self._minimal_conf()
+        m = LatWeightedMetrics(conf)
+        assert m.w_lat is None
+        assert m.w_var is None
+
+    def test_var_list_construction(self):
+        """Variable list should be atmos × levels + surface + diag."""
+        from credit.metrics import LatWeightedMetrics
+
+        conf = self._minimal_conf(n_atmos=2, n_levels=3, n_surface=2, n_diag=1)
+        m = LatWeightedMetrics(conf)
+        # 2 atmos × 3 levels = 6, + 2 surface + 1 diag = 9 total
+        assert len(m.vars) == 9
+
+    def test_call_returns_loss_dict(self):
+        """__call__ should return a dict with acc/rmse/mse/mae per variable."""
+        from credit.metrics import LatWeightedMetrics
+
+        n_atmos, n_levels, n_surface = 2, 2, 1
+        conf = self._minimal_conf(n_atmos=n_atmos, n_levels=n_levels, n_surface=n_surface)
+        m = LatWeightedMetrics(conf)
+
+        C = n_atmos * n_levels + n_surface  # 5 channels
+        pred = torch.randn(1, C, 1, 8, 16)
+        truth = torch.randn(1, C, 1, 8, 16)
+
+        result = m(pred, truth)
+        assert isinstance(result, dict)
+        for var in m.vars:
+            assert f"acc_{var}" in result, f"Missing acc_{var}"
+            assert f"rmse_{var}" in result, f"Missing rmse_{var}"
+            assert f"mse_{var}" in result, f"Missing mse_{var}"
+            assert f"mae_{var}" in result, f"Missing mae_{var}"
+
+    def test_perfect_forecast_zero_rmse(self):
+        """pred == truth → rmse and mse are 0 for all variables."""
+        from credit.metrics import LatWeightedMetrics
+
+        conf = self._minimal_conf(n_atmos=2, n_levels=2, n_surface=1)
+        m = LatWeightedMetrics(conf)
+        C = 5
+        x = torch.randn(1, C, 1, 8, 16)
+
+        result = m(x, x)
+        for var in m.vars:
+            assert result[f"rmse_{var}"].item() == pytest.approx(0.0, abs=1e-5), (
+                f"rmse_{var} should be 0 for perfect forecast"
+            )
+            assert result[f"mse_{var}"].item() == pytest.approx(0.0, abs=1e-5), (
+                f"mse_{var} should be 0 for perfect forecast"
+            )
+
+    def test_mae_nonneg(self):
+        from credit.metrics import LatWeightedMetrics
+
+        conf = self._minimal_conf()
+        m = LatWeightedMetrics(conf)
+        C = 5
+        pred = torch.randn(1, C, 1, 8, 16)
+        truth = torch.randn(1, C, 1, 8, 16)
+        result = m(pred, truth)
+        for var in m.vars:
+            assert result[f"mae_{var}"].item() >= 0.0, f"mae_{var} should be ≥ 0"
+
+    def test_acc_bounded(self):
+        from credit.metrics import LatWeightedMetrics
+
+        conf = self._minimal_conf()
+        m = LatWeightedMetrics(conf)
+        C = 5
+        pred = torch.randn(1, C, 1, 8, 16)
+        truth = torch.randn(1, C, 1, 8, 16)
+        result = m(pred, truth)
+        for var in m.vars:
+            val = result[f"acc_{var}"].item()
+            assert -1.0 <= val <= 1.0 + 1e-5, f"acc_{var}={val} out of [-1,1]"
+
+    def test_predict_mode_uses_predict_ensemble_size(self):
+        """In non-training mode, ensemble_size comes from predict conf."""
+        from credit.metrics import LatWeightedMetrics
+
+        conf = self._minimal_conf()
+        conf["predict"]["ensemble_size"] = 3
+        m = LatWeightedMetrics(conf, training_mode=False)
+        assert m.ensemble_size == 3
