@@ -1780,6 +1780,49 @@ def _plot(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+def _metrics(args: argparse.Namespace) -> None:
+    """Run WeatherBench2-style evaluation and optionally generate scorecard plots."""
+    import subprocess
+
+    script = os.path.join(_repo_root(), "applications", "eval_weatherbench.py")
+    if not os.path.exists(script):
+        print(
+            "eval_weatherbench.py not found. This command requires the v2.1/weatherbench branch to be merged.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    cmd = [sys.executable, script]
+
+    if args.csv:
+        cmd += ["--csv", args.csv]
+    elif args.netcdf:
+        cmd += ["--netcdf", args.netcdf]
+
+    if args.era5:
+        cmd += ["--era5", args.era5]
+    if args.clim:
+        cmd += ["--clim", args.clim]
+    if args.out:
+        cmd += ["--out", args.out]
+    if args.lead_time_hours:
+        cmd += ["--lead-time-hours", str(args.lead_time_hours)]
+    if args.max_inits:
+        cmd += ["--max-inits", str(args.max_inits)]
+    if args.plot_dir:
+        cmd += ["--plot", args.plot_dir]
+    if args.label:
+        cmd += ["--label", args.label]
+    if args.no_refs:
+        cmd += ["--no-refs"]
+    if args.workers:
+        cmd += ["--workers", str(args.workers)]
+    if args.verbose:
+        cmd += ["-v"]
+
+    sys.exit(subprocess.call(cmd))
+
+
 # CLI definition
 # ---------------------------------------------------------------------------
 
@@ -2073,6 +2116,68 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", default=None, metavar="OUTPUT", help="Output path (default: <input>_v2.yml)")
 
     # ---- init ----
+    # ---- metrics ----
+    p = sub.add_parser(
+        "metrics",
+        help="WeatherBench2-style evaluation: RMSE, ACC, and scorecard plots vs IFS/Pangu/GraphCast baselines",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Run WeatherBench2-style verification on CREDIT forecast output.
+
+            Computes RMSE and ACC vs ERA5 ground truth across lead times, optionally
+            comparing against IFS, Pangu-Weather, and GraphCast reference baselines.
+            Requires the v2.1/weatherbench branch (eval_weatherbench.py).
+
+            Input modes (one required):
+              --csv     Directory of per-init CSV files (fast path, already scored)
+              --netcdf  Directory of forecast netCDF files (full scoring pipeline)
+
+            Examples:
+              credit metrics --netcdf /path/to/forecasts --out scores.csv
+              credit metrics --csv /path/to/csv_dir --plot figures/ --label WXFormer-v2
+              credit metrics --netcdf /path/to/forecasts --plot figures/ --no-refs
+        """),
+    )
+    input_group = p.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--csv", type=str, metavar="DIR", help="Directory of per-init metrics CSVs (fast path)")
+    input_group.add_argument("--netcdf", type=str, metavar="DIR", help="Directory of forecast netCDFs (full path)")
+    p.add_argument(
+        "--era5",
+        type=str,
+        default=None,
+        metavar="GLOB",
+        help="Glob pattern for ERA5 zarr files (required for --netcdf mode)",
+    )
+    p.add_argument("--clim", type=str, default=None, metavar="FILE", help="ERA5 climatology netCDF for true ACC")
+    p.add_argument(
+        "--out", type=str, default="wb2_scores.csv", metavar="FILE", help="Output scores CSV (default: wb2_scores.csv)"
+    )
+    p.add_argument(
+        "--lead-time-hours", type=int, default=6, dest="lead_time_hours", help="Hours per forecast step (default: 6)"
+    )
+    p.add_argument(
+        "--max-inits",
+        type=int,
+        default=None,
+        dest="max_inits",
+        metavar="N",
+        help="Limit number of init dates (for testing)",
+    )
+    p.add_argument(
+        "--plot",
+        type=str,
+        default=None,
+        metavar="DIR",
+        dest="plot_dir",
+        help="If set, generate WB2 scorecard figures in this directory",
+    )
+    p.add_argument("--label", type=str, default="CREDIT", help="Model label for plot legends (default: CREDIT)")
+    p.add_argument(
+        "--no-refs", action="store_true", dest="no_refs", help="Omit IFS/Pangu/GraphCast reference lines from plots"
+    )
+    p.add_argument("--workers", type=int, default=None, help="Parallel workers for --netcdf mode (default: cpu count)")
+    p.add_argument("-v", "--verbose", action="store_true")
+
     p = sub.add_parser("init", help="Generate a starter config from a built-in template")
     p.add_argument(
         "--grid", choices=["0.25deg", "1deg"], default="0.25deg", help="Horizontal grid resolution (default: 0.25deg)"
@@ -2111,6 +2216,7 @@ def main() -> None:
         "init": _init,
         "plot": _plot,
         "ask": _ask,
+        "metrics": _metrics,
     }
     dispatch[args.command](args)
 
