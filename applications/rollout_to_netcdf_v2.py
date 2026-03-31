@@ -380,6 +380,14 @@ def main():
         metavar="M",
         help="Total number of subsets to split init times across (one per PBS job).",
     )
+    parser.add_argument(
+        "--ensemble-size",
+        type=int,
+        default=None,
+        metavar="N",
+        dest="ensemble_size",
+        help="Override predict.ensemble_size from config. N=1 is deterministic; N>1 saves ensemble to NetCDF.",
+    )
     args = parser.parse_args()
 
     root = logging.getLogger()
@@ -405,6 +413,9 @@ def main():
 
     if args.mode in ["none", "ddp", "fsdp"]:
         conf["predict"]["mode"] = args.mode
+
+    if args.ensemble_size is not None:
+        conf.setdefault("predict", {})["ensemble_size"] = args.ensemble_size
 
     if args.launch:
         script_path = Path(__file__).absolute()

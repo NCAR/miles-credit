@@ -71,7 +71,7 @@ def _train(args: argparse.Namespace) -> None:
 def _rollout(args: argparse.Namespace) -> None:
     from credit.applications.rollout_to_netcdf_v2 import main
 
-    sys.argv = [
+    argv = [
         "credit-rollout",
         "-c",
         args.config,
@@ -80,6 +80,9 @@ def _rollout(args: argparse.Namespace) -> None:
         "-cpus",
         str(args.procs),
     ]
+    if getattr(args, "ensemble_size", None) is not None:
+        argv += ["--ensemble-size", str(args.ensemble_size)]
+    sys.argv = argv
     main()
 
 
@@ -1879,6 +1882,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
     p.add_argument("-m", "--mode", default="none", help="Distributed mode: none | ddp | fsdp (default: none)")
     p.add_argument("-p", "--procs", type=int, default=4, help="CPU workers for async NetCDF save (default: 4)")
+    p.add_argument(
+        "--ensemble-size",
+        type=int,
+        default=None,
+        metavar="N",
+        dest="ensemble_size",
+        help="Override predict.ensemble_size from config. N=1 deterministic; N>1 saves ensemble members to NetCDF.",
+    )
 
     # ---- rollout-ensemble ----
     p = sub.add_parser(
