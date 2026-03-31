@@ -1021,3 +1021,99 @@ class TestScalerPreblock:
         with patch("credit.preblock.scaler.load_scaler", return_value=MagicMock()):
             s = Scaler("/fake/path.json", inverse=True)
             assert s.inverse is True
+
+
+# ---------------------------------------------------------------------------
+# Additional edge-case tests to close coverage gaps
+# ---------------------------------------------------------------------------
+
+
+class TestNormEdgeCases:
+    """Cover norm.py lines 75 (non-dict source) and 78 (missing split key)."""
+
+    def test_non_dict_source_data_skipped(self, tmp_path):
+        """Line 75: source_data values that are not dicts are skipped silently."""
+        from credit.preblock.norm import ERA5Normalizer
+
+        levels = [500, 850]
+        mean_path = str(tmp_path / "mean.nc")
+        std_path = str(tmp_path / "std.nc")
+        data_vars = {
+            "temperature": xr.DataArray(np.ones(len(levels)), dims=["level"], coords={"level": list(levels)}),
+            "SP": xr.DataArray(np.array(1.0)),
+        }
+        xr.Dataset(data_vars).to_netcdf(mean_path)
+        xr.Dataset(data_vars).to_netcdf(std_path)
+        conf = _make_norm_conf(mean_path, std_path, levels)
+        norm = ERA5Normalizer(conf)
+
+        t = torch.zeros(1, 1, 1, 4, 4)
+        batch = {
+            "era5": {"input": {"era5/prognostic/3d/temperature": t.clone()}, "target": {}},
+            "metadata": "this_is_a_string",  # non-dict -> hits line 75 continue
+        }
+        out = norm(batch)  # must not raise
+        assert "metadata" in out
+
+    def test_missing_split_key_skipped(self, tmp_path):
+        """Line 78: source_data dict without 'input'/'target' keys is skipped."""
+        from credit.preblock.norm import ERA5Normalizer
+
+        levels = [500, 850]
+        mean_path = str(tmp_path / "mean.nc")
+        std_path = str(tmp_path / "std.nc")
+        data_vars = {
+            "temperature": xr.DataArray(np.ones(len(levels)), dims=["level"], coords={"level": list(levels)}),
+            "SP": xr.DataArray(np.array(1.0)),
+        }
+        xr.Dataset(data_vars).to_netcdf(mean_path)
+        xr.Dataset(data_vars).to_netcdf(std_path)
+        conf = _make_norm_conf(mean_path, std_path, levels)
+        norm = ERA5Normalizer(conf)
+
+        t = torch.zeros(1, 1, 1, 4, 4)
+        # Only has 'other', neither 'input' nor 'target' -> both splits hit line 78 continue
+        batch = {"era5": {"other": {"era5/prognostic/3d/temperature": t.clone()}}}
+        out = norm(batch)  # must not raise
+
+
+class TestSchedulerEdgeCases:
+    """Cover scheduler.py line 67 (FSDPOptimizerWrapper unwrap) and line 164 (step_in_cycle==-1)."""
+
+    def _simple_optimizer(self):
+        model = torch.nn.Linear(2, 2)
+        return torch.optim.SGD(model.parameters(), lr=0.01)
+
+    def test_fsdp_wrapper_unwrapped(self):
+        """Line 67: optimizer wrapped in FSDPOptimizerWrapper is unwrapped before scheduling."""
+        from unittest.mock import patch
+        from credit.scheduler import load_scheduler
+
+        inner_opt = self._simple_optimizer()
+
+        # Create a fake wrapper class so isinstance check passes
+        class _FakeWrapper:
+            def __init__(self, optim):
+                self.optim = optim
+
+        wrapper = _FakeWrapper(inner_opt)
+        conf = {
+            "trainer": {
+                "use_scheduler": True,
+                "scheduler": {"scheduler_type": "cosine-annealing", "T_max": 10, "eta_min": 1e-6},
+            }
+        }
+        with patch("credit.scheduler.FSDPOptimizerWrapper", _FakeWrapper):
+            sched = load_scheduler(wrapper, conf)
+        assert sched is not None
+
+    def test_cosine_get_lr_step_in_cycle_minus1(self):
+        """Line 164: get_lr() returns base_lrs when step_in_cycle == -1."""
+        from credit.scheduler import CosineAnnealingWarmupRestarts
+
+        opt = self._simple_optimizer()
+        sched = CosineAnnealingWarmupRestarts(opt, first_cycle_steps=10, warmup_steps=2, max_lr=0.01, min_lr=1e-4)
+        # Manually reset step_in_cycle to -1 to exercise that branch directly
+        sched.step_in_cycle = -1
+        lrs = sched.get_lr()
+        assert lrs == sched.base_lrs

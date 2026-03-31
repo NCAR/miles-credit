@@ -1,5 +1,9 @@
 import torch.nn as nn
-from bridgescaler import load_scaler
+
+try:
+    from bridgescaler import load_scaler
+except (ImportError, Exception):
+    load_scaler = None
 
 
 class Scaler(nn.Module):
