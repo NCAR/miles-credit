@@ -87,6 +87,8 @@ class WRF_Dataset(torch.utils.data.Dataset):
         self.list_surf_ds = list_surf_ds
         self.list_dyn_forcing_ds = list_dyn_forcing_ds
         self.list_diag_ds = list_diag_ds
+        self.varname_upper_air = varname_upper_air
+        self.varname_surface = varname_surface
         self.history_len = param_interior["history_len"]
         self.forecast_len = param_interior["forecast_len"]
         self.total_seq_len = self.history_len + self.forecast_len
@@ -153,6 +155,8 @@ class WRF_Dataset(torch.utils.data.Dataset):
 
         self.list_upper_ds_outside = list_upper_ds_outside
         self.list_surf_ds_outside = list_surf_ds_outside
+        self.varname_upper_air_outside = varname_upper_air_outside
+        self.varname_surface_outside = varname_surface_outside
         self.history_len_outside = param_outside["history_len"]
         self.forecast_len_outside = param_outside["forecast_len"]
         self.total_seq_len = self.history_len_outside + self.forecast_len_outside

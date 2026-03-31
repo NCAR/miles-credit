@@ -109,13 +109,15 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     dataset_type = conf["data"].get("dataset_type", None)
     if isinstance(dataset_type, str):
         is_ocean = "Ocean" in dataset_type
+        is_regional = dataset_type in ("wrf_singlestep", "wrf_multistep", "dscale_singlestep")
     else:
         is_ocean = False
+        is_regional = False
 
     assert "save_loc" in conf, "save location of the CREDIT project ('save_loc') is missing from conf"
     assert "data" in conf, "data section ('data') is missing from conf"
     assert "model" in conf, "model section ('model') is missing from conf"
-    if not is_downscaling:
+    if not is_downscaling and not is_regional:
         assert "latitude_weights" in conf["loss"], "lat / lon file ('latitude_weights') is missing from conf['loss']"
 
     if parse_training:
@@ -982,7 +984,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     if parse_training:
         assert "training_loss" in conf["loss"], "Training loss ('training_loss') is missing from conf['loss']"
 
-        if is_downscaling:
+        if is_downscaling or is_regional:
             pass
         else:
             assert "use_latitude_weights" in conf["loss"], "must specify 'use_latitude_weights' in conf['loss']"

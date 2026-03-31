@@ -7,7 +7,7 @@ from credit.datasets.multi_source import MultiSourceDataset
 from credit.datasets.era5 import ERA5Dataset, ARCOERA5Dataset
 from credit.datasets.MRMS import MRMSDataset
 
-__all__ = ["MultiSourceDataset", "ERA5Dataset", "MRMSDataset", "ARCOERA5Dataset"]
+__all__ = ["MultiSourceDataset", "ERA5Dataset", "MRMSDataset", "ARCOERA5Dataset", "setup_boundary_data_loading"]
 
 
 logger = logging.getLogger(__name__)
@@ -72,6 +72,17 @@ def setup_data_loading(conf):
     """
 
     all_ERA_files = sorted(glob.glob(conf["data"]["save_loc"]))
+
+    # Defaults — overridden below for std_new scaler type
+    surface_files = None
+    dyn_forcing_files = None
+    diagnostic_files = None
+    train_surface_files = None
+    valid_surface_files = None
+    train_dyn_forcing_files = None
+    valid_dyn_forcing_files = None
+    train_diagnostic_files = None
+    valid_diagnostic_files = None
 
     # <------------------------------------------ std_new
     if conf["data"]["scaler_type"] == "std_new":
@@ -277,3 +288,67 @@ def setup_data_loading(conf):
     }
 
     return data_config
+
+
+def setup_boundary_data_loading(conf):
+    """
+    Sets up data loading configuration for the boundary/coarse domain stored under
+    conf["data"]["boundary"].  Mirrors the file-globbing and year-filtering logic of
+    setup_data_loading but requires only the keys present in the boundary sub-dict.
+
+    Parameters:
+        conf (dict): Full configuration dictionary.  The boundary domain is read from
+            conf["data"]["boundary"].  Train/valid year ranges are read from
+            conf["data"]["train_years"] and conf["data"]["valid_years"] (same as the
+            interior domain).
+
+    Returns:
+        dict with keys:
+            train_files, valid_files               -- upper-air file lists
+            train_surface_files, valid_surface_files -- surface file lists (empty list if
+                                                        no save_loc_surface is configured)
+    """
+    boundary = conf["data"]["boundary"]
+
+    # --- upper-air files -------------------------------------------------------
+    all_files = sorted(glob.glob(boundary["save_loc"]))
+
+    # --- surface files (optional) ----------------------------------------------
+    save_loc_surface = boundary.get("save_loc_surface")
+    if save_loc_surface:
+        all_surface_files = sorted(glob.glob(save_loc_surface))
+    else:
+        all_surface_files = []
+
+    # --- year ranges (inherited from the interior domain) ----------------------
+    if "train_years" in conf["data"]:
+        train_years_range = conf["data"]["train_years"]
+    else:
+        train_years_range = [1979, 2014]
+
+    if "valid_years" in conf["data"]:
+        valid_years_range = conf["data"]["valid_years"]
+    else:
+        valid_years_range = [2014, 2018]
+
+    train_years = [str(year) for year in range(train_years_range[0], train_years_range[1])]
+    valid_years = [str(year) for year in range(valid_years_range[0], valid_years_range[1])]
+
+    # --- filter upper-air files ------------------------------------------------
+    train_files = [f for f in all_files if any(year in f for year in train_years)]
+    valid_files = [f for f in all_files if any(year in f for year in valid_years)]
+
+    # --- filter surface files --------------------------------------------------
+    if all_surface_files:
+        train_surface_files = [f for f in all_surface_files if any(year in f for year in train_years)]
+        valid_surface_files = [f for f in all_surface_files if any(year in f for year in valid_years)]
+    else:
+        train_surface_files = []
+        valid_surface_files = []
+
+    return {
+        "train_files": train_files,
+        "valid_files": valid_files,
+        "train_surface_files": train_surface_files,
+        "valid_surface_files": valid_surface_files,
+    }

@@ -13,7 +13,10 @@ from credit.datasets.om4_multistep_batcher import (
     Ocean_Tensor_Batcher,
 )
 from credit.datasets.downscaling_dataset import DownscalingDataset
-from credit.datasets import setup_data_loading
+from credit.datasets import setup_data_loading, setup_boundary_data_loading
+from credit.datasets.wrf_singlestep import WRF_Dataset
+from credit.datasets.wrf_multistep import WRF_MultiStep
+from credit.datasets.dscale_singlestep import Dscale_Dataset
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from credit.transforms import load_transforms
@@ -399,6 +402,136 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
             shuffle=shuffle,
         )
 
+    elif dataset_type == "wrf_singlestep":
+        boundary_config = setup_boundary_data_loading(conf)
+        boundary = conf["data"]["boundary"]
+        # For std-wrf scaler, surface vars are in the same zarr as upper-air.
+        # Fall back to the main files when surface files weren't separately globbed.
+        _interior_files = data_config[f"{training_type}_files"]
+        _surface_files = data_config[f"{training_type}_surface_files"]
+        if _surface_files is None and conf["data"].get("surface_variables"):
+            _surface_files = _interior_files
+        _bnd_surface_files = boundary_config.get(f"{training_type}_surface_files") or None
+        if _bnd_surface_files is None and boundary.get("surface_variables"):
+            _bnd_surface_files = boundary_config[f"{training_type}_files"]
+        param_interior = {
+            "varname_upper_air": conf["data"]["variables"],
+            "varname_surface": conf["data"]["surface_variables"],
+            "varname_dyn_forcing": conf["data"].get("dynamic_forcing_variables", []),
+            "varname_forcing": conf["data"].get("forcing_variables", []),
+            "varname_static": conf["data"].get("static_variables", []),
+            "varname_diagnostic": conf["data"].get("diagnostic_variables", []),
+            "filenames": _interior_files,
+            "filename_surface": _surface_files,
+            "filename_dyn_forcing": data_config.get(f"{training_type}_dyn_forcing_files"),
+            "filename_forcing": conf["data"].get("save_loc_forcing"),
+            "filename_static": conf["data"].get("save_loc_static"),
+            "filename_diagnostic": data_config.get(f"{training_type}_diagnostic_files"),
+            "history_len": history_len,
+            "forecast_len": forecast_len,
+        }
+        param_outside = {
+            "varname_upper_air": boundary["variables"],
+            "varname_surface": boundary.get("surface_variables", []),
+            "filenames": boundary_config[f"{training_type}_files"],
+            "filename_surface": _bnd_surface_files,
+            "history_len": boundary.get("history_len", history_len),
+            "forecast_len": boundary.get("forecast_len", forecast_len),
+            "lead_time_periods": boundary.get("lead_time_periods", 1),
+        }
+        dataset = WRF_Dataset(
+            param_interior=param_interior,
+            param_outside=param_outside,
+            transform=load_transforms(conf),
+            seed=seed,
+        )
+    elif dataset_type == "wrf_multistep":
+        boundary_config = setup_boundary_data_loading(conf)
+        boundary = conf["data"]["boundary"]
+        _interior_files = data_config[f"{training_type}_files"]
+        _surface_files = data_config[f"{training_type}_surface_files"]
+        if _surface_files is None and conf["data"].get("surface_variables"):
+            _surface_files = _interior_files
+        _bnd_surface_files = boundary_config.get(f"{training_type}_surface_files") or None
+        if _bnd_surface_files is None and boundary.get("surface_variables"):
+            _bnd_surface_files = boundary_config[f"{training_type}_files"]
+        param_interior = {
+            "varname_upper_air": conf["data"]["variables"],
+            "varname_surface": conf["data"]["surface_variables"],
+            "varname_dyn_forcing": conf["data"].get("dynamic_forcing_variables", []),
+            "varname_forcing": conf["data"].get("forcing_variables", []),
+            "varname_static": conf["data"].get("static_variables", []),
+            "varname_diagnostic": conf["data"].get("diagnostic_variables", []),
+            "filenames": _interior_files,
+            "filename_surface": _surface_files,
+            "filename_dyn_forcing": data_config.get(f"{training_type}_dyn_forcing_files"),
+            "filename_forcing": conf["data"].get("save_loc_forcing"),
+            "filename_static": conf["data"].get("save_loc_static"),
+            "filename_diagnostic": data_config.get(f"{training_type}_diagnostic_files"),
+            "history_len": history_len,
+            "forecast_len": forecast_len,
+        }
+        param_outside = {
+            "varname_upper_air": boundary["variables"],
+            "varname_surface": boundary.get("surface_variables", []),
+            "filenames": boundary_config[f"{training_type}_files"],
+            "filename_surface": _bnd_surface_files,
+            "history_len": boundary.get("history_len", history_len),
+            "forecast_len": boundary.get("forecast_len", forecast_len),
+            "lead_time_periods": boundary.get("lead_time_periods", 1),
+        }
+        dataset = WRF_MultiStep(
+            param_interior=param_interior,
+            param_outside=param_outside,
+            transform=load_transforms(conf),
+            seed=seed,
+            rank=rank,
+            world_size=world_size,
+        )
+    elif dataset_type == "dscale_singlestep":
+        boundary_config = setup_boundary_data_loading(conf)
+        boundary = conf["data"]["boundary"]
+        _interior_files = data_config[f"{training_type}_files"]
+        _surface_files = data_config[f"{training_type}_surface_files"]
+        if _surface_files is None and conf["data"].get("surface_variables"):
+            _surface_files = _interior_files
+        _bnd_surface_files = boundary_config.get(f"{training_type}_surface_files") or None
+        if _bnd_surface_files is None and boundary.get("surface_variables"):
+            _bnd_surface_files = boundary_config[f"{training_type}_files"]
+        param_HR = {
+            "varname_upper_air": conf["data"]["variables"],
+            "varname_surface": conf["data"]["surface_variables"],
+            "varname_dyn_forcing": conf["data"].get("dynamic_forcing_variables", []),
+            "varname_forcing": conf["data"].get("forcing_variables", []),
+            "varname_static": conf["data"].get("static_variables", []),
+            "varname_diagnostic": conf["data"].get("diagnostic_variables", []),
+            "filenames": _interior_files,
+            "filename_surface": _surface_files,
+            "filename_dyn_forcing": data_config.get(f"{training_type}_dyn_forcing_files"),
+            "filename_forcing": conf["data"].get("save_loc_forcing"),
+            "filename_static": conf["data"].get("save_loc_static"),
+            "filename_diagnostic": data_config.get(f"{training_type}_diagnostic_files"),
+            "history_len": history_len,
+            "forecast_len": forecast_len,
+            "levels": conf["data"].get("levels", 1),
+            "level_pick": conf["data"].get("level_pick"),
+        }
+        param_LR = {
+            "varname_upper_air": boundary["variables"],
+            "varname_surface": boundary.get("surface_variables", []),
+            "filenames": boundary_config[f"{training_type}_files"],
+            "filename_surface": _bnd_surface_files,
+            "history_len": boundary.get("history_len", history_len),
+            "forecast_len": boundary.get("forecast_len", forecast_len),
+            "levels": boundary.get("levels", 1),
+            "level_pick": boundary.get("level_pick"),
+        }
+        dataset = Dscale_Dataset(
+            param_HR=param_HR,
+            param_LR=param_LR,
+            transform=load_transforms(conf),
+            seed=seed,
+        )
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
