@@ -15,7 +15,12 @@ import pandas as pd
 import xarray as xr
 
 import torch
-from bridgescaler import read_scaler
+
+try:
+    from bridgescaler import read_scaler
+except (ImportError, Exception):
+    read_scaler = None
+
 from credit.data import Sample, device_compatible_to
 
 logger = logging.getLogger(__name__)
