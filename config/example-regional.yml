@@ -1,0 +1,189 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# WRF experiments
+# --------------------------------------------------------------------------------------------------------------------- #
+
+save_loc: '/glade/work/ksha/DWC_runs/CONUS_GP_clean/'
+seed: 1000
+
+data:
+    boundary:
+        lead_time_periods: 3
+        variables: ['U', 'V', 'T', 'Q']
+        save_loc: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/dscale_3h/*.zarr'
+
+        surface_variables: ['MSL', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+        save_loc_surface: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/dscale_3h/*.zarr'
+
+        all_varnames: ['U', 'V', 'T', 'Q', 'MSL', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+        levels: 11
+
+        mean_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/ERA5_3h_mean_1980_2019.nc'
+        std_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/ERA5_3h_std_1980_2019.nc'
+
+        history_len: 2
+        valid_history_len: 2
+
+        forecast_len: 0
+        valid_forecast_len: 0
+
+    levels: 12
+    variables: ['WRF_P', 'WRF_U', 'WRF_V', 'WRF_T', 'WRF_Q_tot_05']
+    save_loc: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/C404/C404_GP_*.zarr'
+
+    surface_variables: ['WRF_SP', 'WRF_MSLP', 'WRF_T2', 'WRF_TD2', 'WRF_U10', 'WRF_V10', 'WRF_PWAT_05']
+    save_loc_surface: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/C404/C404_GP_*.zarr'
+
+    #diagnostic_variables: ['WRF_precip_025']
+    #save_loc_diagnostic: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/C404/C404_GP_*.zarr'
+
+    static_variables: ['z_norm', 'var_norm', 'lu_norm', 'LANDMASK']
+    save_loc_static: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/static/C404_GP_static.zarr'
+
+    history_len: 1
+    valid_history_len: 1
+
+    forecast_len: 0
+    valid_forecast_len: 0
+
+    # mean / std path
+    mean_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/C404_mean_1980_2019_12lev.nc'
+    std_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/C404_std_residual_1980_2019_12lev_clean.nc'
+
+    # train / validation split
+    train_years: [1980, 2019]
+    valid_years: [2019, 2020]
+    test_years: [2020, 2022]
+
+    # data workflow
+    scaler_type: 'std-wrf'
+
+    one_shot: False
+    lead_time_periods: 1
+    skip_periods: null
+    static_first: True
+
+
+trainer:
+    type: standard-wrf
+    
+    mode: fsdp
+    cpu_offload: False
+    activation_checkpoint: True
+    
+    load_weights: True
+    load_optimizer: True
+    load_scaler: True
+    load_sheduler: True
+    num_epoch: 7
+    
+    skip_validation: False
+    update_learning_rate: False
+    
+    save_backup_weights: True
+    save_best_weights: True
+    save_metric_vars: True
+    
+    learning_rate: 1.0e-03
+    weight_decay: 1.0e-06
+    
+    train_batch_size: 1
+    valid_batch_size: 1
+    
+    batches_per_epoch: 3000
+    valid_batches_per_epoch: 10
+    stopping_patience: 999
+    
+    start_epoch: 0
+
+    reload_epoch: True
+    epochs: &epochs 126
+    
+    use_scheduler: True
+    scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
+    
+    amp: False
+    grad_accum_every: 1 
+    grad_max_norm: 32.0
+    thread_workers: 4
+    valid_thread_workers: 0
+
+
+model:
+    type: "wrf"
+    levels: 12 # output upper air levels
+
+    param_interior:
+        frames: 1                # number of input states
+        image_height: 336        # number of latitude grids
+        image_width: 336         # number of longitude grids
+        levels: 12               # number of upper-air variable levels
+        channels: 5              # upper-air variable channels
+        surface_channels: 7      # surface variable channels
+        input_only_channels: 4   # dynamic forcing, forcing, static channels
+        output_only_channels: 0  # diagnostic variable channels
+        patch_height: 4          # number of latitude grids in each 3D patch
+        patch_width: 4           # number of longitude grids in each 3D patch
+        frame_patch_size: 1      # number of input states in each 3D patch
+        dim: 1280
+
+    param_outside:
+        frames: 2                # number of input states
+        image_height: 336         # number of latitude grids
+        image_width: 336         # number of longitude grids
+        levels: 11               # number of upper-air variable levels
+        channels: 4              # upper-air variable channels
+        surface_channels: 4      # surface variable channels
+        patch_height: 4
+        patch_width: 4
+        frame_patch_size: 2
+        dim: 1280
+
+    # hidden layers
+    time_encode_dim: 16
+    num_groups: 32          # number of groups (default: 32)
+    num_heads: 8            # number of heads (default: 8)
+    window_size: 7          # window size (default: 7)
+    depth: 36               # number of swin transformers
+
+    use_spectral_norm: True
+    interp: False
+
+    padding_conf:
+        activate: False
+
+    post_conf:
+        activate: True
+
+        tracer_fixer:
+            activate: True
+            denorm: True
+            tracer_name: ['WRF_Q_tot_05', 'WRF_PWAT_05']
+            tracer_thres: [0, 0]
+
+    
+loss: 
+    # the main training loss
+    training_loss: "mse"
+   
+    use_power_loss: False 
+    use_spectral_loss: False
+
+    use_latitude_weights: False
+    latitude_weights: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/static/C404_GP_static.zarr'
+
+    use_variable_weights: True
+    variable_weights:
+        WRF_P: [0.13636983931064606, 0.12900586426258087, 0.1247783973813057, 0.11823264509439468, 0.10909587144851685, 0.09750442951917648, 0.0831855982542038, 0.06818491965532303, 0.057275332510471344, 0.038183555006980896, 0.02454657107591629, 0.013636983931064606]
+        WRF_U: [0.13636983931064606, 0.12900586426258087, 0.1247783973813057, 0.11823264509439468, 0.10909587144851685, 0.09750442951917648, 0.0831855982542038, 0.06818491965532303, 0.057275332510471344, 0.038183555006980896, 0.02454657107591629, 0.013636983931064606]
+        WRF_V: [0.13636983931064606, 0.12900586426258087, 0.1247783973813057, 0.11823264509439468, 0.10909587144851685, 0.09750442951917648, 0.0831855982542038, 0.06818491965532303, 0.057275332510471344, 0.038183555006980896, 0.02454657107591629, 0.013636983931064606]
+        WRF_T: [0.13636983931064606, 0.12900586426258087, 0.1247783973813057, 0.11823264509439468, 0.10909587144851685, 0.09750442951917648, 0.0831855982542038, 0.06818491965532303, 0.057275332510471344, 0.038183555006980896, 0.02454657107591629, 0.013636983931064606]
+        WRF_W: [0.13636983931064606, 0.12900586426258087, 0.1247783973813057, 0.11823264509439468, 0.10909587144851685, 0.09750442951917648, 0.0831855982542038, 0.06818491965532303, 0.057275332510471344, 0.038183555006980896, 0.02454657107591629, 0.013636983931064606]
+        WRF_Q_tot_05: [0.13636983931064606, 0.12900586426258087, 0.1247783973813057, 0.11823264509439468, 0.10909587144851685, 0.09750442951917648, 0.0831855982542038, 0.06818491965532303, 0.057275332510471344, 0.038183555006980896, 0.02454657107591629, 0.013636983931064606]
+        WRF_SP: 0.14
+        WRF_MSLP: 0.14
+        WRF_T2: 0.14
+        WRF_TD2: 0.14
+        WRF_U10: 0.14
+        WRF_V10: 0.14
+        WRF_PWAT_05: 0.14
+
