@@ -7,6 +7,9 @@ Covers:
   - SphericalNoise
   - TemporalNoise
   - crps_spatial_avg (credit.verification.ensemble)
+  - add_spatially_correlated_noise, hemispheric_rescale (credit.ensemble.utils)
+  - calculate_crps_per_channel (credit.ensemble.crps)
+  - BredVector init (credit.ensemble.bred_vector)
 
 These tests run on CPU and do not require a GPU or any data files.
 """
@@ -301,3 +304,248 @@ class TestCRPSSpatialAvg:
         )
         assert isinstance(crps, float)
         assert isinstance(spread, float)
+
+
+# ===========================================================================
+# credit.ensemble.utils
+# ===========================================================================
+
+
+class TestEnsembleUtils:
+    """Tests for add_spatially_correlated_noise and hemispheric_rescale."""
+
+    from credit.ensemble.utils import add_spatially_correlated_noise, hemispheric_rescale
+
+    SHAPE = (1, 2, 1, 16, 32)  # (B, C, T, H, W)
+
+    def test_correlated_noise_output_shape(self):
+        from credit.ensemble.utils import add_spatially_correlated_noise
+
+        x = torch.zeros(*self.SHAPE)
+        out = add_spatially_correlated_noise(x, correlation_scale=2)
+        assert out.shape == x.shape
+
+    def test_correlated_noise_is_nonzero(self):
+        from credit.ensemble.utils import add_spatially_correlated_noise
+
+        x = torch.zeros(*self.SHAPE)
+        out = add_spatially_correlated_noise(x, correlation_scale=2)
+        assert not torch.allclose(out, x), "Noise should be non-zero"
+
+    def test_correlated_noise_is_finite(self):
+        from credit.ensemble.utils import add_spatially_correlated_noise
+
+        x = torch.zeros(*self.SHAPE)
+        out = add_spatially_correlated_noise(x, correlation_scale=2)
+        assert torch.isfinite(out).all()
+
+    def test_higher_scale_smoother(self):
+        """Higher correlation_scale → lower pointwise variance (smoother noise)."""
+        torch.manual_seed(0)
+        x = torch.zeros(1, 1, 1, 32, 64)
+        from credit.ensemble.utils import add_spatially_correlated_noise
+
+        rough = add_spatially_correlated_noise(x, correlation_scale=1)
+        smooth = add_spatially_correlated_noise(x, correlation_scale=10)
+        hf_rough = (rough[..., 1:] - rough[..., :-1]).var().item()
+        hf_smooth = (smooth[..., 1:] - smooth[..., :-1]).var().item()
+        assert hf_smooth < hf_rough, (
+            f"Higher correlation_scale should be smoother: rough={hf_rough:.4f}, smooth={hf_smooth:.4f}"
+        )
+
+    def test_hemispheric_rescale_unity(self):
+        """north_scale=south_scale=1 → output equals input."""
+        from credit.ensemble.utils import hemispheric_rescale
+
+        x = torch.ones(1, 2, 1, 8, 16)
+        lats = torch.linspace(90, -90, 8)
+        out = hemispheric_rescale(x, lats, north_scale=1.0, south_scale=1.0)
+        assert torch.allclose(out, x)
+
+    def test_hemispheric_rescale_shape(self):
+        from credit.ensemble.utils import hemispheric_rescale
+
+        x = torch.ones(*self.SHAPE)
+        lats = torch.linspace(90, -90, self.SHAPE[3])
+        out = hemispheric_rescale(x, lats)
+        assert out.shape == x.shape
+
+    def test_hemispheric_rescale_polarity(self):
+        """north_scale=2, south_scale=0.5 → north pixels ≈ 2, south pixels ≈ 0.5."""
+        from credit.ensemble.utils import hemispheric_rescale
+
+        H = 16
+        x = torch.ones(1, 1, 1, H, 4)
+        lats = torch.linspace(90, -90, H)  # lat[0]=90 (north), lat[-1]=-90 (south)
+        out = hemispheric_rescale(x, lats, north_scale=2.0, south_scale=0.5)
+        # First row is lat=90 → north → scale=2
+        assert torch.allclose(out[:, :, :, 0, :], torch.full_like(out[:, :, :, 0, :], 2.0))
+        # Last row is lat=-90 → south → scale=0.5
+        assert torch.allclose(out[:, :, :, -1, :], torch.full_like(out[:, :, :, -1, :], 0.5))
+
+    def test_hemispheric_rescale_finite(self):
+        from credit.ensemble.utils import hemispheric_rescale
+
+        x = torch.randn(*self.SHAPE)
+        lats = torch.linspace(90, -90, self.SHAPE[3])
+        out = hemispheric_rescale(x, lats, north_scale=1.5, south_scale=0.8)
+        assert torch.isfinite(out).all()
+
+
+# ===========================================================================
+# credit.ensemble.crps
+# ===========================================================================
+
+
+class TestCalculateCRPSPerChannel:
+    """Tests for calculate_crps_per_channel."""
+
+    # ensemble_predictions: [ensemble_size, 1, channels, 1, H, W]
+    # y_true:               [1, channels, 1, H, W]
+
+    @staticmethod
+    def _make(ensemble_size=10, channels=3, H=8, W=16, fill=None, rng_seed=None):
+        """Build synthetic ensemble and truth tensors."""
+        if rng_seed is not None:
+            torch.manual_seed(rng_seed)
+        if fill is not None:
+            ens = torch.full((ensemble_size, 1, channels, 1, H, W), float(fill))
+            truth = torch.full((1, channels, 1, H, W), float(fill))
+        else:
+            ens = torch.randn(ensemble_size, 1, channels, 1, H, W)
+            truth = torch.randn(1, channels, 1, H, W)
+        return ens, truth
+
+    def test_output_shape(self):
+        from credit.ensemble.crps import calculate_crps_per_channel
+
+        ens, truth = self._make(ensemble_size=8, channels=5)
+        out = calculate_crps_per_channel(ens, truth)
+        assert out.shape == (1, 5), f"Expected (1, 5), got {out.shape}"
+
+    def test_perfect_forecast_zero_crps(self):
+        """All ensemble members equal truth → CRPS ≈ 0 for every channel."""
+        from credit.ensemble.crps import calculate_crps_per_channel
+
+        ens, truth = self._make(fill=3.14)
+        out = calculate_crps_per_channel(ens, truth)
+        assert torch.allclose(out, torch.zeros_like(out), atol=1e-5), f"Perfect forecast should give CRPS≈0, got {out}"
+
+    def test_crps_nonnegative(self):
+        from credit.ensemble.crps import calculate_crps_per_channel
+
+        ens, truth = self._make(rng_seed=42)
+        out = calculate_crps_per_channel(ens, truth)
+        assert (out >= 0).all(), f"CRPS must be ≥ 0, got {out}"
+
+    def test_crps_finite(self):
+        from credit.ensemble.crps import calculate_crps_per_channel
+
+        ens, truth = self._make(rng_seed=7)
+        out = calculate_crps_per_channel(ens, truth)
+        assert torch.isfinite(out).all()
+
+    def test_larger_ensemble_lower_crps(self):
+        """Well-calibrated unit-normal ensemble: more members → lower or equal CRPS."""
+        from credit.ensemble.crps import calculate_crps_per_channel
+
+        torch.manual_seed(0)
+        truth = torch.zeros(1, 1, 1, 8, 16)
+        ens_small = torch.randn(5, 1, 1, 1, 8, 16)
+        ens_large = torch.randn(200, 1, 1, 1, 8, 16)
+        crps_small = calculate_crps_per_channel(ens_small, truth).mean().item()
+        crps_large = calculate_crps_per_channel(ens_large, truth).mean().item()
+        assert crps_large <= crps_small + 0.1, (
+            f"Larger ensemble should give ≤ CRPS: small={crps_small:.4f}, large={crps_large:.4f}"
+        )
+
+
+# ===========================================================================
+# credit.ensemble.bred_vector — BredVector init
+# ===========================================================================
+
+
+class TestBredVectorInit:
+    """Tests for BredVector.__init__ with a simple toy model.
+
+    BredVector requires a real model forward pass for __call__; we only test
+    __init__ here (which is all CPU, no data required).
+    """
+
+    INPUT_STATIC_DIM = 3
+
+    @staticmethod
+    def _identity_model(x):
+        """Mock model: return only dynamic channels (strips last INPUT_STATIC_DIM channels)."""
+        return x[:, : -TestBredVectorInit.INPUT_STATIC_DIM, ...]
+
+    def test_default_attributes(self):
+        from credit.ensemble.bred_vector import BredVector
+
+        bv = BredVector(model=self._identity_model)
+        assert bv.noise_amplitude == 0.15
+        assert bv.num_cycles == 5
+        assert bv.integration_steps == 1
+        assert bv.clamp is False
+        assert bv.flag_mass_conserve is False
+        assert bv.flag_water_conserve is False
+        assert bv.flag_energy_conserve is False
+        assert bv.use_post_block is False
+
+    def test_custom_attributes(self):
+        from credit.ensemble.bred_vector import BredVector
+
+        bv = BredVector(
+            model=self._identity_model,
+            noise_amplitude=0.05,
+            num_cycles=3,
+            integration_steps=2,
+            clamp=True,
+            clamp_min=-1.0,
+            clamp_max=1.0,
+        )
+        assert bv.noise_amplitude == 0.05
+        assert bv.num_cycles == 3
+        assert bv.integration_steps == 2
+        assert bv.clamp is True
+        assert bv.clamp_min == -1.0
+        assert bv.clamp_max == 1.0
+
+    def test_empty_post_conf_no_postblock(self):
+        from credit.ensemble.bred_vector import BredVector
+
+        bv = BredVector(model=self._identity_model, post_conf={})
+        assert bv.use_post_block is False
+
+    def test_hemispheric_rescale_false_by_default(self):
+        from credit.ensemble.bred_vector import BredVector
+
+        bv = BredVector(model=self._identity_model)
+        # When hemispheric_rescale=False the attribute is set to False (not the fn)
+        assert bv.hemispheric_rescale is False
+
+    def test_perturb_output_shape(self):
+        """perturb() returns a perturbation for dynamic channels only (C - input_static_dim)."""
+        from credit.ensemble.bred_vector import BredVector
+
+        C, static = 8, self.INPUT_STATIC_DIM
+        bv = BredVector(model=self._identity_model, noise_amplitude=0.1, input_static_dim=static)
+        x = torch.zeros(1, C, 1, 16, 32)
+        out = bv.perturb(x)
+        expected_C = C - static
+        assert out.shape == (1, expected_C, 1, 16, 32), f"Expected {(1, expected_C, 1, 16, 32)}, got {out.shape}"
+
+    def test_perturb_is_noisy(self):
+        """perturb() perturbation should be non-zero for a non-zero state.
+
+        Note: gamma_final = ||x_dyn|| / (||x_dyn + dx|| + eps), so an all-zero
+        input state would collapse gamma to 0. Use randn input instead.
+        """
+        from credit.ensemble.bred_vector import BredVector
+
+        torch.manual_seed(0)
+        C, static = 8, self.INPUT_STATIC_DIM
+        bv = BredVector(model=self._identity_model, noise_amplitude=0.5, input_static_dim=static)
+        x = torch.randn(1, C, 1, 8, 16)
+        out = bv.perturb(x)
+        assert not torch.allclose(out, torch.zeros_like(out)), "perturb() should produce non-zero perturbation"

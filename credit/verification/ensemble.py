@@ -130,3 +130,36 @@ def rank_histogram_apply(da_pred, da_true, w_lat=None):
     true_flat = true_arr.reshape(-1)
 
     return rankhist(pred_flat, true_flat, normalize=False)
+
+
+def crps_spatial_avg(pred, truth, w_lat):
+    """Spatially-weighted CRPS and ensemble spread for a numpy ensemble.
+
+    Parameters
+    ----------
+    pred : np.ndarray, shape (n_members, lat, lon)
+        Ensemble forecast.
+    truth : np.ndarray, shape (lat, lon)
+        Verification field.
+    w_lat : np.ndarray, shape (lat,)
+        Latitude weights (should be normalized; e.g. cos(lat) / mean(cos(lat))).
+
+    Returns
+    -------
+    crps_val : float
+        Spatially-weighted mean CRPS.
+    spread_val : float
+        Spatially-weighted mean ensemble standard deviation.
+    """
+    n_members, lat, lon = pred.shape
+
+    obs_flat = truth.reshape(-1)
+    fcst_flat = pred.reshape(n_members, -1).T  # (lat*lon, n_members)
+    crps_map = crps_ensemble(obs_flat, fcst_flat).reshape(lat, lon)
+
+    crps_val = float((crps_map * w_lat[:, None]).sum() / (lat * lon))
+
+    spread_map = pred.std(axis=0)
+    spread_val = float((spread_map * w_lat[:, None]).sum() / (lat * lon))
+
+    return crps_val, spread_val
