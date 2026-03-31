@@ -559,6 +559,10 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
 
 def _submit(args: argparse.Namespace) -> None:
     """Generate and optionally submit PBS batch scripts, with optional chaining."""
+    if getattr(args, "rollout", False):
+        _do_submit_rollout(args)
+        return
+
     repo = _repo_root()
     pbs_cfg = _load_pbs_config(args.config)
     args = _resolve_pbs_opts(args, pbs_cfg)
@@ -694,7 +698,25 @@ def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_foreca
 
 
 def _rollout_ensemble(args: argparse.Namespace) -> None:
-    """Submit N parallel PBS jobs to cover all ensemble rollout init times."""
+    """Deprecated: use ``credit submit --rollout`` instead."""
+    print(
+        "WARNING: credit rollout-ensemble is deprecated.\n"
+        "Use instead:\n"
+        "  credit submit --cluster <casper|derecho> --rollout --jobs N -c config.yml\n",
+        file=sys.stderr,
+    )
+    args.rollout = True
+    if not hasattr(args, "reload"):
+        args.reload = False
+    if not hasattr(args, "chain"):
+        args.chain = None
+    if not hasattr(args, "nodes"):
+        args.nodes = None
+    _submit(args)
+
+
+def _do_submit_rollout(args: argparse.Namespace) -> None:
+    """Submit N parallel PBS rollout jobs to cover all init times."""
     import yaml
 
     repo = _repo_root()
@@ -1837,8 +1859,8 @@ def _build_parser() -> argparse.ArgumentParser:
               credit train -c config.yml
               credit realtime -c config.yml --init-time 2024-01-15T00 --steps 40
               credit rollout  -c config.yml
-              credit rollout-ensemble --cluster casper -c config.yml --jobs 10
               credit submit   --cluster casper  -c config.yml --gpus 1
+              credit submit   --cluster casper  -c config.yml --rollout --jobs 10
               credit submit   --cluster derecho -c config.yml --gpus 4 --nodes 2
               credit init     --grid 0.25deg -o my_config.yml
         """),
@@ -1921,7 +1943,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- submit ----
     p = sub.add_parser(
         "submit",
-        help="Generate and submit a PBS training job",
+        help="Generate and submit a PBS training or rollout job",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent("""\
             Generate a PBS batch script and optionally submit it via qsub.
@@ -1929,11 +1951,17 @@ def _build_parser() -> argparse.ArgumentParser:
             Use --reload to resume from the latest checkpoint automatically.
             Use --chain N to submit N back-to-back jobs via PBS afterok dependencies.
 
+            For rollout (ensemble or deterministic), use --rollout --jobs N to split
+            init times across N parallel independent PBS jobs (no afterok chain).
+            Ensemble behaviour is controlled by predict.ensemble_size in the config.
+
             Examples:
               credit submit --cluster casper  -c config.yml --gpus 1 --walltime 04:00:00
               credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2 --dry-run
               credit submit --cluster casper  -c config.yml --gpus 4 --reload
               credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --chain 10
+              credit submit --cluster casper  -c config.yml --rollout --jobs 10
+              credit submit --cluster derecho -c config.yml --rollout --jobs 20 --gpus 1
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG")
@@ -1965,6 +1993,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Conda environment path for derecho (default: credit-derecho-torch28-nccl221)",
     )
     p.add_argument("--dry-run", action="store_true", help="Print the PBS script without submitting")
+    p.add_argument(
+        "--rollout",
+        action="store_true",
+        help="Submit parallel rollout jobs instead of a training job. "
+        "Use with --jobs N to split init times across N independent PBS jobs. "
+        "Ensemble behaviour is controlled by predict.ensemble_size in the config.",
+    )
+    p.add_argument(
+        "--jobs",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Number of parallel PBS rollout jobs when using --rollout (default: 10)",
+    )
     p.add_argument(
         "--reload",
         action="store_true",
