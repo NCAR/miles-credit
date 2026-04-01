@@ -216,6 +216,20 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
+    """
+    Attention module for the CrossFormer model.
+
+    This module performs either short-range or long-range attention on the input tensor.
+    It uses a dynamic positional bias to incorporate relative positional information.
+
+    Args:
+        dim (int): Input dimension.
+        attn_type (str): Type of attention, either "short" or "long".
+        window_size (int): Size of the attention window.
+        dim_head (int, optional): Dimension of each attention head. Defaults to 32.
+        dropout (float, optional): Dropout rate. Defaults to 0.0.
+    """
+
     def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0):
         super().__init__()
         assert attn_type in {
@@ -253,6 +267,15 @@ class Attention(nn.Module):
         self.register_buffer("rel_pos_indices", rel_pos_indices, persistent=False)
 
     def forward(self, x):
+        """
+        Forward pass of the Attention module.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch, dim, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of the same shape as input.
+        """
         *_, height, width, heads, wsz, device = (
             *x.shape,
             self.heads,

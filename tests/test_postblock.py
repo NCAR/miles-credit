@@ -11,7 +11,7 @@ import logging
 import torch
 from credit.postblock import GlobalWaterFixer, PostBlock
 from credit.skebs import BackscatterFCNN
-from credit.postblock import TracerFixer, GlobalMassFixer, GlobalEnergyFixer
+from credit.postblock import TracerFixer, GlobalMassFixer, GlobalEnergyFixer, GlobalEnergyFixerUpDown
 from credit.parser import credit_main_parser
 
 
@@ -210,6 +210,53 @@ def test_GlobalEnergyFixer_rand():
     input_dict = {"y_pred": y_pred, "x": x}
     # corrected output
     y_pred_fix = postblock(input_dict)
+
+    assert y_pred_fix.shape == y_pred.shape
+
+
+def test_GlobalEnergyFixerUpDown_rand():
+    """Provides an I/O size and registration test on GlobalEnergyFixerUpDown."""
+    # demo grid: 7 pressure levels, midpoint=True → 6 midpoint levels
+    LEV = 6
+
+    conf = {"post_conf": {"skebs": {"activate": False}}}
+    conf["post_conf"]["tracer_fixer"] = {"activate": False}
+    conf["post_conf"]["global_mass_fixer"] = {"activate": False}
+    conf["post_conf"]["global_water_fixer"] = {"activate": False}
+    conf["post_conf"]["global_energy_fixer"] = {"activate": False}
+
+    conf["post_conf"]["global_energy_fixer_updown"] = {
+        "activate": True,
+        "activate_outside_model": False,
+        "simple_demo": True,
+        "midpoint": True,
+        "denorm": False,
+        "T_inds": [0, LEV - 1],
+        "q_inds": [LEV, 2 * LEV - 1],
+        "U_inds": [2 * LEV, 3 * LEV - 1],
+        "V_inds": [3 * LEV, 4 * LEV - 1],
+        "TOA_down_solar_ind": 4 * LEV,
+        "TOA_up_solar_ind": 4 * LEV + 1,
+        "TOA_up_OLR_ind": 4 * LEV + 2,
+        "surf_down_solar_ind": 4 * LEV + 3,
+        "surf_up_solar_ind": 4 * LEV + 4,
+        "surf_down_LW_ind": 4 * LEV + 5,
+        "surf_up_LW_ind": 4 * LEV + 6,
+        "surf_SH_ind": 4 * LEV + 7,
+        "surf_LH_ind": 4 * LEV + 8,
+    }
+
+    conf["post_conf"]["data"] = {"lead_time_periods": 6}
+
+    postblock = PostBlock(**conf)
+
+    assert any([isinstance(m, GlobalEnergyFixerUpDown) for m in postblock.modules()])
+
+    N_VARS = 4 * LEV + 9
+    x = torch.randn((1, 4 * LEV, 2, 10, 18))
+    y_pred = torch.randn((1, N_VARS, 1, 10, 18))
+
+    y_pred_fix = postblock({"y_pred": y_pred, "x": x})
 
     assert y_pred_fix.shape == y_pred.shape
 

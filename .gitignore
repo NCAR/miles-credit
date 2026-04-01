@@ -168,3 +168,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 climate/Look_at_Tens.ipynb
+
+# local dev / HPC-specific test scripts
+test_energy_fixer_updown.py

@@ -76,7 +76,7 @@ def patch_era5_io_multiyear(monkeypatch, annual_xr_dataset):
 def minimal_config():
     return {
         "timestep": "6h",
-        "forecast_len": 5,
+        "forecast_len": 6,
         "start_datetime": "2022-12-25",
         "end_datetime": "2023-01-05",
         "source": {
@@ -112,7 +112,12 @@ def test_sampler_multistep(minimal_config, patch_era5_io_multiyear):
     dataset = ERA5Dataset(minimal_config, return_target=True)
     batch_size = 4
     sampler = DistributedMultiStepBatchSampler(
-        dataset=dataset, batch_size=batch_size, rank=0, num_replicas=1, shuffle=True
+        dataset=dataset,
+        batch_size=batch_size,
+        num_forecast_steps=minimal_config["forecast_len"],
+        rank=0,
+        num_replicas=1,
+        shuffle=True,
     )
     loader = iter(DataLoader(dataset=dataset, batch_sampler=sampler, num_workers=0, pin_memory=True))
     time_steps = []
