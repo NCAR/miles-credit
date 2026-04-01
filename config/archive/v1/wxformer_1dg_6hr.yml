@@ -90,10 +90,22 @@ trainer:
     num_epoch: 5
     reload_epoch: False
     epochs: &epochs 70
-     
+
+    # EMA: maintain shadow weights for validation/checkpointing
+    use_ema: True
+    ema_decay: 0.9999
+
     use_scheduler: True
-    scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
-    
+    # linear-warmup-cosine updates per batch (not per epoch)
+    # total_steps = batches_per_epoch * epochs (approx 7120 * 70 = ~498k for 6h ERA5)
+    # warmup_steps: ramp from min_lr -> peak lr over first ~1000 steps
+    # min_lr: floor lr at end of cosine decay
+    scheduler:
+        scheduler_type: linear-warmup-cosine
+        warmup_steps: 1000
+        total_steps: 500000
+        min_lr: 1.0e-5
+
     # Automatic Mixed Precision: False
     amp: False
     
