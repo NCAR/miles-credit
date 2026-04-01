@@ -4,10 +4,10 @@
 
 # Contents
 #     - data
-#     - trainer
 #     - model
 #     - loss
 #     - predict
+#     - trainer
 #     - pbs
 
 # This file will run on Casper or Derecho to generate an example model. You will need to modify save_loc, metadata,
@@ -26,7 +26,7 @@ data:
     # upper-air variables, must be YEARLY zarr or nc with (time, level, latitude, longitude) dims
     # files must have the listed variable names 
     # upper-air variables will be normalized by the dataloader, users do not need to normalize them
-    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+    variables: &prog_vars_3d ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
     save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
     level_ids: [1., 9., 19.,  29.,  39.,  49.,  59.,  69.,  79.,  89.,  97., 104.,
            111., 116., 122., 126., 131., 136.]
@@ -212,7 +212,7 @@ model:
     # map boundary padding
     padding_conf:
         activate: True
-        mode: earth
+        mode: "earth"
         pad_lat: [37, 38]
         pad_lon: [76, 76]
 
@@ -321,6 +321,37 @@ model:
             #     net latent heat flux on the surface [J/m^2]
             surface_energy_flux_name: ['surface_sensible_heat_flux', 'surface_latent_heat_flux',]
 
+        # Global energy fixer using explicit up/down flux decomposition.
+        # Use this instead of global_energy_fixer when the model predicts separate
+        # downwelling and upwelling fluxes (e.g. FSDS_J, FSUS, FLDS_J, FLUS).
+        # Only one of global_energy_fixer / global_energy_fixer_updown should be active.
+        global_energy_fixer_updown:
+            activate: False
+            activate_outside_model: False
+            simple_demo: False
+            denorm: True
+            grid_type: 'sigma'
+            midpoint: True
+            lon_lat_level_name: ['lon2d', 'lat2d', 'coef_a', 'coef_b']
+            surface_pressure_name: ['SP']
+            surface_geopotential_name: ['geopotential_at_surface']
+            air_temperature_name: ['temperature']
+            specific_total_water_name: ['specific_total_water']
+            u_wind_name: ['u_component_of_wind']
+            v_wind_name: ['v_component_of_wind']
+            # TOA fluxes — all in J/m² per timestep (same units as other output vars)
+            TOA_down_solar_name: ['FSDS_TOA']        # incident SW at TOA (SOLIN × DT)
+            TOA_up_solar_name:   ['FSUS_TOA']        # reflected SW at TOA (FSUTOA × DT)
+            TOA_up_OLR_name:     ['FLUT_J']          # outgoing LW at TOA (FLUT × DT)
+            # Surface fluxes — all in J/m² per timestep
+            surf_down_solar_name: ['FSDS_J']         # downwelling SW at surface
+            surf_up_solar_name:   ['FSUS']           # upwelling SW at surface
+            surf_down_LW_name:    ['FLDS_J']         # downwelling LW at surface
+            surf_up_LW_name:      ['FLUS']           # upwelling LW at surface
+            # Turbulent fluxes — positive-upward, J/m² per timestep
+            surf_SH_name: ['SHFLX_J']               # sensible heat flux (positive = surface → atm)
+            surf_LH_name: ['LHFLX_J']               # latent heat flux   (positive = surface → atm)
+
 
 loss: 
     # the main training loss
@@ -383,7 +414,7 @@ predict:
 
     # Set the batch_size for the prediction inference mode (default is 1)
     # this batches init_datetimes together so that we are fully utilizing the GPUs 
-    batch_size: 16
+    batch_size: 1
 
     forecasts:
         type: "custom"       # keep it as "custom". See also credit.forecast
@@ -391,12 +422,12 @@ predict:
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 1152       # number of days to initialize from, starting from the (year, mon, day) above
+        duration: 1       # number of days to initialize from, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         # [Optional] defaults to 1
         ic_interval_days: 1   # spacing between init days. defaults to 1 total number of ICs will be duration // ic_interval_days
-        days: 10             # forecast lead time as days (1 means 24-hour forecast)
+        days: 2             # forecast lead time as days (1 means 24-hour forecast)
 
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables
@@ -418,10 +449,16 @@ predict:
 
     # Optional: Interpolate data field from hybrid sigma-pressure vertical coordinates to pressure levels.
     # Used with rollout_to_netcdf.py
-
     interp_pressure:
       pressure_levels: [500.0, 850.0, 925.0]
+      interp_fields: *prog_vars_3d
+      q_var: "specific_total_water"
+      temperature_var: "temperature"
+      surface_geopotential_var: "geopotential_at_surface"
 
+    static_fields: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    
+    # Attributes for compresing and chunking output netCDF files.
     ua_var_encoding:
       zlib: True
       complevel: 1
@@ -432,7 +469,7 @@ predict:
       zlib: True
       complevel: 1
       shuffle: True
-      chunksizes: [ 1, 4, *height, *width]
+      chunksizes: [ 1, 3, *height, *width]
 
     surface_var_encoding:
       zlib: True
@@ -498,15 +535,15 @@ trainer:
 
     # define training and validation batch size
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 16
-    valid_batch_size: 16
+    train_batch_size: 4
+    valid_batch_size: 4
     ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
     # set to 0 to use all available training samples e.g. `len(dataloader)`
     # if the number is larger than all training samples, all available training samples will be used
-    batches_per_epoch: 1000
-    valid_batches_per_epoch: 20
+    batches_per_epoch: 10
+    valid_batches_per_epoch: 2
     # early stopping
     stopping_patience: 50
     # True: do not validate, always save weights
@@ -543,9 +580,9 @@ trainer:
     # Many different precision types are supported. See credit.mixed_precision
     # If commented out, the default is float32.
     mixed_precision:
-        param_dtype: "float32"
-        reduce_dtype: "float32"
-        buffer_dtype: "float32"
+        param_dtype: "bfloat16"
+        reduce_dtype: "bfloat16"
+        buffer_dtype: "bfloat16"
 
     # rescale loss as loss = loss / grad_accum_every -- currently is not being used
     grad_accum_every: 1
