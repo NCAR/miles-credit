@@ -1,0 +1,443 @@
+# yaml file for the conus404 dataset
+
+#---------------------
+# CONUS404 data is (assumed to be) hourly data stored in daily netcdf
+# files organized by year.  Each file contains 24 timesteps and all
+# variables of the appropriate dimensionality.  Data has been
+# compressed with lossy compression, and is chunked so that each file
+# is a single chunk (i.e., 1 chunk = all space, 24 timesteps).
+# 
+# Naming convention: $path/YYYY/conus404.Nd.YYYY-MM-DD.nc
+#
+# data is normalized (using functions in transforms.py) in the
+# dataloader in applications/train.py; no need for users to normalize
+# them by hand.
+#---------------------
+
+# the location to save your workspace, it will have (1) pbs script,
+# (2) a copy of this config, (3) model weights, (4) training_log.csv
+# if save_loc does not exist, it will be created automatically
+
+save_loc: /glade/work/$USER/CREDIT_runs/wxf_c404/
+seed: 2222  # RNG seed
+
+
+## To avoid errors / incompatibilities, declare options that are used
+## repeatedly once, at the top level where they apply, and inherit
+## them at the levels where they are used using the <<: pattern.  We
+## could propagate configuration info downward in code, but inheriting
+## it here dramatically simplifies things.
+
+sampling: &samples
+    history_len:  1
+    forecast_len: 1
+
+image_size: &imsize  # round up to multiples of 128
+    image_width:  256 # sgp subset # was 1408  # originally 1367 
+    image_height: 256 # sgp subset # was 1024  # originally 1015
+    
+# A downscaling model is trained on two datasets, one for the
+# high-resolution output from the model being emulated, and one for
+# the low-resolution driving data (boundary conditions coming from a
+# reanalysis or GCM).  All data needs to have the same dimensions in X
+# & Y, and we want geographic features to align, so we interpolate the
+# low-res data onto a coarsened version of the high-res grid.  The
+# DownscalingDataset class then handles resizing it to match by adding
+# 'expand' and 'pad' transforms that stretch it out to match the
+# actual high-res grid.
+
+# (Interpolating onto a coarsened grid saves us from needing to store
+# a high-res of the driver data that would be 25x bigger and blow up
+# our scratch quota.  We don't need to worry about the Z dimension
+# because it gets concatenated along the 'variable' dimension; i.e.,
+# different levels of a 3D variable are treated as different
+# variables.)
+
+# 'boundary' variables are input-only, used in both training and
+#  inference
+
+# 'diagnostic' variables are output-only
+
+# 'prognostic' variables are input-output; the value predicted as an
+#  output for time T is recycled as an input for predicting time T+1 in
+#  inference
+
+# 'unused' variables don't actually need to be listed in the yaml
+# file, but if you include them, the output writer will know to skip
+# over them, which allows you to create general-purpose output
+# templates by extracting a single timestep from the input files.
+# Including them also provides a handy reference for what's available
+# and makes it easier to change around the model configuration.
+
+# listing variables in the order they appear in the netcdf file should
+# result in faster reads from disk.  By default, NCO commands that
+# rewrite their outputs alphabetize variables.
+
+
+# The 'data', 'dataset', and 'transforms' sections below are used to
+# initialize DownscalingDataset, DataMap, and DataTransform objects,
+# respectively.  You pass **config['data'] (etc.) to the constructor,
+# so the options here correspond to constructor arguments.
+
+# N.B.: variable and dataset names must not have a '.' in them!
+
+data_defaults: &ddefault
+    <<: *samples
+
+    # file globs are defined relative to the top-level data rootpath
+    rootpath: "/glade/derecho/scratch/mcginnis/credit/sgp256"
+
+    first_date:   "1980-01-02"  ## first timestep of CONUS404 is bad
+    last_date:    "2010-12-31"
+
+    # note: first_date and last_date must be quoted so that they
+    # remain strings; otherwise the yaml parser converts them to
+    # datetime objects, which can't handle non-standard GCM calendars.
+    
+data:
+    <<: *imsize
+    <<: *ddefault
+
+    datasets:
+        ## hires component:
+        ## CONUS404 data on native 4km grid; hourly, 1979-10 to 2022-09
+
+        ## static WRF fields extracted from 'wrfconstants_usgs404.nc'
+        conus404_static:
+            <<: *ddefault
+            glob: 'conus404/conus404.static.nc'
+            dim: static
+            normalize: True   # scale min,max == [0,1] iff dim = static
+            variables:
+                boundary:
+                    - COSALPHA  # local cosine of map rotation
+                    - E         # coriolis cosine latitude term
+                    - F         # coriolis sine latitude term
+                    - HGT       # terrain height / orography
+                    - LANDMASK  # land/sea mask (0=water, 1=land)
+                    - SINALPHA  # local sine of map rotation
+                    - VAR       # orographic variance
+                    - VAR_SSO   # variance of subgrid-scale orography
+                unused:
+                    - XLAT      # latitude
+                    - XLONG     # longitude
+            transforms:
+                default: none   # scaled during load; nothing further needed
+
+
+        ## NOTE that U and V are on staggered grids that are 1 larger in
+        ## the x- and y- dimensions (respectively) than the other
+        ## variables; they have been trimmed by 1 on the western and
+        ## southern edges (respectively) to match the dimensionality of
+        ## the non-staggered grids.
+
+        conus404_3D:
+            <<: *ddefault
+            glob: 'conus404/3d/*/conus404.3d.*.nc'
+            dim: 3D
+            variables:
+                prognostic:
+                    - P       # total pressure (dataset uses hybrid sigma coordinates)
+                    - QVAPOR  # water vapor mixing ratio
+                    - TK      # air temperature
+                    - U       # U-component of wind *with respect to model grid*
+                    - V       # V-component of wind *with respect to model grid*
+                diagnostic:
+                    - Z       # geopotential height
+                unused:
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.conus404_3d.nc'
+                    mmax: 'norms/max.conus404_3d.nc'
+                default:
+                    minmax: paramfile
+
+
+        conus404_2D:
+            <<: *ddefault
+            glob: 'conus404/2d/*/conus404.2d.*.nc'
+            dim: 2D
+            variables:
+                boundary:
+                    - COSZEN  # cosine of solar zenith angle
+                prognostic:
+                    - PSFC    # surface pressure
+                    - Q2      # water vapor mixing ratio at 2 meters
+                    - T2      # 2-meter air temperature
+                    - TD2     # 2-d dewpoint temperature
+                    - U10     # u-wind at 10 meters
+                    - V10     # v-wind at 10 meters
+                diagnostic:
+                    - PREC_ACC_NC # total precip (mm) over previous (1-hr) timestep
+                    - SWDNB       # shortwave downwelling at bottom (instantaneous)
+                    - totalVap    # column-integrated water vapor content
+                unused:
+                    - SNOW       # snow water equivalent
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.conus404_2d.nc'
+                    mmax: 'norms/max.conus404_2d.nc'
+                default:
+                    minmax: paramfile
+                PREC_ACC_NC:
+                    clip:
+                        cmin: 0
+                    minmax: paramfile
+                    power:
+                        exponent: 0.25
+
+
+
+        ## lores component:
+        ## driving ERA5 & TOA solar data on coarsened version of CONUS404 grid
+
+        ## insolation data calculated using miles-credit applications
+        ## script calc_global_solar.py, regridded to coarsened
+        ## CONUS404 grid; hourly, 1979-2024
+
+        solar:
+            <<: *ddefault
+            glob: 'solar/tisr.20km.*.nc'
+            dim: 2D
+            variables:
+                boundary:
+                    - tisr      # TOA incident solar radiation (J/m^2, integral dt)
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.solar.nc'
+                    mmax: 'norms/max.solar.nc'
+                tisr:
+                    minmax: paramfile
+
+
+          ## ERA5 data regridded to coarsened CONUS404 grid.  Source
+          ## data is interpolated to pressure levels and global 0.25
+          ## degree grid.  (Variables are in alphabetical order except
+          ## for R, which is last.)  hourly, 1979-2023
+
+        era5_3D:
+            <<: *ddefault
+            glob: 'era5/3d/*/era5.3d.*.nc'
+            dim: 3D
+            zstride: 3
+            variables:
+                boundary:
+                    - T   # temperature
+                    - U   # u-winds
+                    - V   # v-winds
+                    - Z   # geopotential
+                    - R   # humidity
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.era5_3d.nc'
+                    mmax: 'norms/max.era5_3d.nc'
+                default:
+                    minmax: paramfile
+
+        era5_2D:
+            <<: *ddefault
+            glob: 'era5/2d/*/era5.2d.*.nc'
+            dim: 2D
+            variables:
+                boundary:
+                    - SP       # surface pressure
+                    - MSL      # mean sea-level pressure
+                    - VAR_2T   # 2-meter temperature
+                    - TCWV     # total column water vapor
+                    - VAR_10U  # 10-meter u-wind
+                    - VAR_10V  # 10-meter v-wind
+            transforms:
+                paramfiles:
+                    mmin: 'norms/min.era5_2d.nc'
+                    mmax: 'norms/max.era5_2d.nc'
+                default:
+                    minmax: paramfile
+
+
+model:
+    type: "crossformer_downscaling"
+    <<: *imsize
+    frames: 1     # todo: if crossformer, history_len == frames == 1
+    global_window_size: [4, 4, 2, 1]
+    local_window_size: 4
+    # channels parameter gets set by calling count_channels() in parser.py
+    # all other parameters use default values
+
+
+trainer:
+    type: "conus404"
+    mode: none # ddp # none, ddp, fsdp
+    
+    # fsdp-specific optimization options go here
+
+    # compile: False
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    save_backup_weights: True
+    save_best_weights: False # True only works if skip_validation = False
+    save_metric_vars: True # True = save for each predictand separately
+
+    update_learning_rate: False  # false if using scheduler
+    learning_rate: 1.0e-04
+    weight_decay: 1.0e-05
+
+    # batch_size = number of samples per batch; loss is accumulated
+    # and weights updated after each batch.  For ddp & fsdp, actual
+    # number of samples = batch_size * number of GPUs
+    
+    train_batch_size: 1
+    valid_batch_size: 1
+    ensemble_size: 1
+
+    # After each epoch, the trainer saves and checkpoints the model.
+    # If validation is on, it will rollout on v_b_p_e samples and
+    # calculate error metrics, and will only checkpoint if the results
+    # are better than the previous checkpoint (I believe)
+    
+    batches_per_epoch: 100 # Set to 0 to use len(dataloader)
+    valid_batches_per_epoch: 30
+    stopping_patience: 50
+    skip_validation: True  # don't validate, always save weights
+    # (also validation not implemented yet)
+
+    # To avoid hitting wallclock limits, trainer can stop every
+    # so often and launch a new job that reloads from the last
+    # checkpoint.  So num_epochs is the number of epochs per job,
+    # while epochs is the total number to train for.
+
+    # if running interactively, set both to the same value
+
+    start_epoch: 0
+    num_epoch: 201
+    reload_epoch: True
+    epochs: 201
+    # 30 years hourly = 262,980; 66 x 1000-batch epoch =~ 1 full pass
+
+    
+    # the trainer can save the last target and prediction to netcdf
+    # every so often for progress evaluation.  Set save_data to None
+    # or False to disable
+
+    save_data:
+        frequency: 10  # save every N epochs
+        output:
+            # see predict section for details; same structure
+            output_dir: "/glade/derecho/scratch/$USER/emulation-output/wxf-training-progress"
+            templates:
+                dir: "/glade/derecho/scratch/mcginnis/credit/sgp256/templates"
+                files:
+                    conus404_3D: "conus404.3d.template.nc"
+                    conus404_2D: "conus404.2d.template.nc"
+
+
+    use_scheduler: False
+    scheduler: {'scheduler_type': 'lambda'}
+
+    # Pytorch automatic mixed precision
+    amp: False
+
+    grad_accum_every: 1
+    grad_max_norm: 'dynamic' #1.0
+
+    thread_workers: 4
+    valid_thread_workers: 0
+
+    # prefetch_factor: 4
+
+    # teacher_forcing_ratio: 0.5 #0.9886539666794065
+    # stop_rollout: 0.9
+    # update_learning_rate: True
+
+loss:
+    # primary training loss
+    # options: mse, msle, mae, huber, logcosh, xtanh, xsigmoid
+    training_loss: "mse"
+    training_loss_parameters: {}
+
+    # not yet implemented for downscaling:
+    use_power_loss: False
+    use_spectral_loss: False
+    spectral_lambda_reg: 0.1
+    spectral_wavenum_init: 20
+
+    # lat-weighting is not appliable for RCM downscaling
+    use_latitude_weights: False
+    # latitude_weights: <path>
+
+    # not yet implemented for downscaling
+    use_variable_weights: False
+    # variable_weights:
+    #     <dataset>:
+    #         <2dvar>: 1.0
+    #         <3dvar>: [0.1, 0.2, 0.3, 0.4, 0.5]
+
+predict:
+
+    # GPU usage
+    mode: none  # options: none, ddp, fsdp
+
+    # batching = running multiple predictions in parallel to fully use
+    # GPU.  Only makes sense for downscaling if you're doing timeslices
+    batch_size: 1
+    # ensembles not yet implemented
+    ensemble_size: 1
+
+    downscaling:
+        driver: "test"  # test = use same dataset as for training
+        # otherwise, we'd need to define a new driver dataset here
+        
+        start: "2017-01-01 00:00:00"
+        finish: "2017-01-31 23:00:00"
+
+        # name of dataset to pull time coordinates from
+        # defaults to first non-static dataset with only boundary variables
+        get_time_from: "era5_2D"
+
+    output:
+        # location to save output
+        output_dir: "/glade/derecho/scratch/$USER/wxf-emulation-output"
+
+        # save files are named dataset_YYYY-MM-DD_HH:MM:SS.nc
+        # options for specifying filenames would go here
+
+
+        # instead of using yaml metadata, the downscaling data
+        # pipeline uses template netcdf files.  It reads in the file
+        # via xarray, replaces the data in the template with the model
+        # results, and writes it to a new file.  This makes it easy to
+        # get ancillary data and metadata correct.
+
+        # You need one template file for each dataset that has output
+        # variables (prognostic or diagnostic) in it.  TODO: use the
+        # first file of the corresponding dataset as a default if
+        # templates are not provided.
+
+        templates:
+            dir: "/glade/derecho/scratch/mcginnis/credit/sgp256/templates"
+            files:
+                conus404_3D: "conus404.3d.template.nc"
+                conus404_2D: "conus404.2d.template.nc"
+
+        # save_vars: []  # empty list & undefined both mean "all vars"
+        # todo: subsetting output variables not yet implemented
+    
+    # # optional; uses anomaly in metrics if provided
+    # climatology:
+    #     - "path/to/climatology/file.2d.nc"
+    #     - "path/to/climatology/file.3d.nc"
+
+pbs: # casper
+    conda: "credit"
+    job_name: 'downscaling-wxf'
+    nodes: 1
+    ncpus: 8
+    ngpus: 1
+    mem: '128GB'
+    walltime: '4:00:00'
+    gpu_type: 'a100'
+    project: 'NRIS0001'
+    queue: 'casper'
