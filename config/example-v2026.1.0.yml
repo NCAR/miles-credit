@@ -26,7 +26,7 @@ data:
     # upper-air variables, must be YEARLY zarr or nc with (time, level, latitude, longitude) dims
     # files must have the listed variable names 
     # upper-air variables will be normalized by the dataloader, users do not need to normalize them
-    variables: &prog_vars_3d ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
     save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
     level_ids: [1., 9., 19.,  29.,  39.,  49.,  59.,  69.,  79.,  89.,  97., 104.,
            111., 116., 122., 126., 131., 136.]
@@ -254,7 +254,7 @@ model:
             tracer_thres: [1e-10, 0]
 
         global_mass_fixer:
-            activate: True
+            activate: False
             activate_outside_model: False
             simple_demo: False
             denorm: True
@@ -432,7 +432,10 @@ predict:
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables
     # remove save_vars from config will save ALL variables
-    metadata: '/glade/u/home/$USER/miles-credit/credit/metadata/era5.yaml'
+
+    # Metadata file adds units and long names to each variable. If no path is provided, the parser
+    # assumes that the file is in credit.metadata. Will now work when CREDIT is installed from PyPI or pip.
+    metadata: 'era5.yaml'
     
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
@@ -451,7 +454,7 @@ predict:
     # Used with rollout_to_netcdf.py
     interp_pressure:
       pressure_levels: [500.0, 850.0, 925.0]
-      interp_fields: *prog_vars_3d
+      interp_fields: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
       q_var: "specific_total_water"
       temperature_var: "temperature"
       surface_geopotential_var: "geopotential_at_surface"
@@ -580,9 +583,9 @@ trainer:
     # Many different precision types are supported. See credit.mixed_precision
     # If commented out, the default is float32.
     mixed_precision:
-        param_dtype: "bfloat16"
-        reduce_dtype: "bfloat16"
-        buffer_dtype: "bfloat16"
+        param_dtype: "float32"
+        reduce_dtype: "float32"
+        buffer_dtype: "float32"
 
     # rescale loss as loss = loss / grad_accum_every -- currently is not being used
     grad_accum_every: 1
@@ -605,13 +608,13 @@ pbs:
     project: "NAML0001"
     job_name: "train_model"
     walltime: "12:00:00"
-    nodes: 8
+    nodes: 1
     ncpus: 64
     ngpus: 4
     mem: '480GB'
     queue: 'main'
     
-    # examaple for casper
+    # example for casper
     # conda: "credit"
     # job_name: 'train_model'
     # nodes: 1
@@ -620,5 +623,5 @@ pbs:
     # mem: '128GB'
     # walltime: '4:00:00'
     # gpu_type: 'v100'
-    # project: 'NRIS0001'
+    # project: 'NAML0001'
     # queue: 'casper'

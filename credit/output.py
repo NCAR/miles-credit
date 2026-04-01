@@ -16,6 +16,7 @@ from credit.data import drop_var_from_dataset
 from credit.interp import full_state_pressure_interpolation
 from inspect import signature
 from credit.transforms import Normalize_ERA5_and_Forcing
+from importlib.resources import files
 from os.path import expandvars
 
 logger = logging.getLogger(__name__)
@@ -23,16 +24,28 @@ logger = logging.getLogger(__name__)
 
 def load_metadata(conf):
     """
-    Load metadata attributes from yaml file in credit/metadata directory
+    Load metadata attributes from yaml file in credit/metadata directory.
+
+    If the configured path is a bare filename (no directory separators), it is
+    resolved against the installed ``credit.metadata`` package directory so
+    users don't need to hard-code absolute paths.
+
+    By default the function will assume era5.yaml as the default metadata file.
     """
-    # set priorities for user-specified metadata
     if conf["predict"]["metadata"]:
         meta_file = expandvars(conf["predict"]["metadata"])
+        # If no directory component, look inside the installed package
+        if not os.path.dirname(meta_file):
+            meta_file = str(files("credit.metadata").joinpath(meta_file))
         with open(meta_file) as f:
             meta_data = yaml.load(f, Loader=yaml.SafeLoader)
     else:
-        print("conf['predict']['metadata'] not given. Skip.")
-        meta_data = False
+        meta_file = expandvars("era5.yaml")
+        # If no directory component, look inside the installed package
+        if not os.path.dirname(meta_file):
+            meta_file = str(files("credit.metadata").joinpath(meta_file))
+        with open(meta_file) as f:
+            meta_data = yaml.load(f, Loader=yaml.SafeLoader)
 
     return meta_data
 

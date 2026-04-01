@@ -14,9 +14,9 @@ conda activate credit
 
 :::{important}
 When installing PyTorch on Linux, the default option (v2.11) uses CUDA 13, which is currently not
-compatible with the CUDA driver on Casper. Add `--extra-index-url https://download.pytorch.org/whl/cu129` 
-to your pip install commands to install a PyTorch version compiled with CUDA 12.9. You can replace 
-`cu129` with `cu126` for CUDA 12.6 if necessary. 
+compatible with the CUDA driver on Casper. Add `--extra-index-url https://download.pytorch.org/whl/cu126` 
+to your pip install commands to install a PyTorch version compiled with CUDA 12.6, which will work
+on Casper NVIDIA GPUs from the V100s to the H100s. 
 
 If you want to install the CPU-only version of PyTorch, use `--extra-index-url https://download.pytorch.org/whl/cpu`.
 :::
@@ -26,15 +26,26 @@ If you want to install the latest stable release from PyPI:
 pip install miles-credit
 ```
 
-If you want to install the main development branch (recommended):
+If you want to install the main development branch:
 ```bash
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
-pip install -e . --extra-index-url https://download.pytorch.org/whl/cu129
+# Linux with NVIDIA GPU support
+pip install -e . --extra-index-url https://download.pytorch.org/whl/cu126
+# Mac
+pip install -e .
+```
+
+If you plan to perform development work on CREDIT, install additional
+dependencies for development.
+```bash
+pip install -e .[develop]
 ```
 
 :::{important}
-macOS users will need to ensure that the required compilers are present and properly configured before installing miles-credit for versions requiring pySTEPS (miles-credit > 2025.2.0).  See this [note in the pySTEPS documentation](https://pysteps.readthedocs.io/en/latest/user_guide/install_pysteps.html#osx-users-gcc-compiler) for details.
+macOS users will need to ensure that the required compilers are present and properly configured before installing 
+miles-credit for versions requiring pySTEPS (miles-credit > 2025.2.0).  
+See this [note in the pySTEPS documentation](https://pysteps.readthedocs.io/en/latest/user_guide/install_pysteps.html#osx-users-gcc-compiler) for details.
 :::
 
 ## Installation on Derecho
