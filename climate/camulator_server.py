@@ -1051,7 +1051,10 @@ def main():
         # Enable with --flnsd_diag. Validated 2026-03: TS gives ~331 W/m² vs CAM6 ref 336.9 W/m².
         if args.flnsd_diag:
             _cam_w = _cam_lat_w if not cam_flip else _cam_lat_w[::-1]
-            _wmean = lambda f: np.average(f, weights=np.broadcast_to(_cam_w, f.shape))
+
+            def _wmean(f):
+                return np.average(f, weights=np.broadcast_to(_cam_w, f.shape))
+
             _sb_trefht = 0.99 * 5.670374419e-8 * TREFHT_cam**4
             _sb_tbot = 0.99 * 5.670374419e-8 * T_bot_cam**4
             logger.info(
