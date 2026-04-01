@@ -14,7 +14,6 @@ try:
     from credit.models.graph import GraphResTransfGRU
     from credit.models.debugger_model import DebuggerModel
     from credit.models.wxformer.crossformer import CrossFormer as WXFormer
-    from credit.models.wxformer.wxformer_v2 import CrossFormer as WXFormerV2
     from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
     from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
     from credit.models.unet_downscaling import DownscalingSegmentationModel
@@ -54,10 +53,6 @@ if _LEGACY_MODELS_AVAILABLE:
             "crossformer-diffusion": (CrossFormerDiffusion, "Loading A DDPM model with CrossFormer Backbone ..."),
             "unet-diffusion": (UnetDiffusion, "Loading A DDPM model with UNET Backbone ..."),
             "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
-            "wxformer_v2": (
-                WXFormerV2,
-                "Loading the WXFormer v2 model (PixelShuffle + SwiGLU + shifted/grid attention) ...",
-            ),
             "crossformer-ensemble": (
                 CrossFormerWithNoise,
                 "Loading the ensemble CrossFormer model with a noise injection scheme ...",
