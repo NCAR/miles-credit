@@ -13,14 +13,23 @@ REPO=/glade/work/schreck/repos/miles-credit-main
 BASE_CONFIG=${REPO}/config/wxformer_v2_025deg_pilot.yml
 ACCOUNT=${PBS_ACCOUNT:-NAML0001}
 CONDA_ENV=/glade/work/schreck/conda-envs/credit-main-casper
+QUEUE=${DERECHO_QUEUE:-develop}   # develop for fast turnaround; swap to main for production
 
-# Parse optional --account flag
+# Parse optional --account / --queue flags
 while [[ $# -gt 0 ]]; do
     case $1 in
         --account) ACCOUNT="$2"; shift 2 ;;
+        --queue)   QUEUE="$2";   shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
+
+# develop queue is capped at 1 hr; main can run longer
+if [[ "${QUEUE}" == "develop" ]]; then
+    WALLTIME="01:00:00"
+else
+    WALLTIME="04:00:00"
+fi
 
 # ── parallelism configs ──────────────────────────────────────────────────────
 # NAME           DP_MODE  TP  DOMAIN  NGPUS  NNODES
@@ -63,9 +72,9 @@ PYEOF
 #!/bin/bash -l
 #PBS -N ${jobname}
 #PBS -l select=${nnodes}:ncpus=32:ngpus=${ngpus}:mem=480GB
-#PBS -l walltime=04:00:00
+#PBS -l walltime=${WALLTIME}
 #PBS -A ${ACCOUNT}
-#PBS -q main
+#PBS -q ${QUEUE}
 #PBS -j oe
 #PBS -k eod
 #PBS -o ${save_loc}/job.log
@@ -110,6 +119,7 @@ PBSEOF
 echo "=== 0.25-deg WXFormer v2 pilot sweep ==="
 echo "Base config : ${BASE_CONFIG}"
 echo "Account     : ${ACCOUNT}"
+echo "Queue       : ${QUEUE}  (walltime: ${WALLTIME})"
 echo ""
 
 for i in "${!NAMES[@]}"; do
