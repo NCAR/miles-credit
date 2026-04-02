@@ -96,15 +96,37 @@ def _fix_spectral_norm_dtype(model: nn.Module, param_dtype: torch.dtype) -> None
 
 
 def _build_mp_policy(conf: dict):
-    """Build FSDP2 MixedPrecision policy from config."""
+    """Build FSDP2 MixedPrecision policy from config.
+
+    SpectralNorm registers weight_orig as a parameter and performs power
+    iteration using fp32 u/v buffers. Any MixedPrecisionPolicy that casts
+    parameters or inputs creates a dtype conflict inside torch.autocast
+    (at::autocast::prioritize fails on mixed fp32/bf16 tensors in torch.mv).
+
+    Strategy:
+    - use_spectral_norm=True: return None (no policy). FSDP2 sharding still
+      provides memory savings; the trainer disables manual autocast for fsdp2
+      mode, so all compute runs in fp32. Override via fsdp2_mp_policy to opt in.
+    - use_spectral_norm=False: use bfloat16 MixedPrecisionPolicy (full AMP).
+    """
     from torch.distributed._composable.fsdp import MixedPrecisionPolicy
 
     trainer = conf.get("trainer", {})
     if not trainer.get("amp", False):
         return None
 
-    # Default bfloat16 policy; user can override via trainer.fsdp2_mp_policy
     mp_conf = trainer.get("fsdp2_mp_policy", {})
+    has_spectral_norm = conf.get("model", {}).get("use_spectral_norm", False)
+
+    # If spectral norm is present and user hasn't explicitly overridden, skip
+    # MixedPrecisionPolicy entirely. fp32 compute + sharding for memory.
+    if has_spectral_norm and not mp_conf:
+        logger.info(
+            "SpectralNorm detected: MixedPrecisionPolicy disabled for FSDP2 "
+            "(fp32 compute with sharding). Set trainer.fsdp2_mp_policy to override."
+        )
+        return None
+
     param_dtype = _parse_dtype(mp_conf.get("param_dtype", "bfloat16"))
     reduce_dtype = _parse_dtype(mp_conf.get("reduce_dtype", "float32"))
     output_dtype = _parse_dtype(mp_conf.get("output_dtype", "bfloat16"))
@@ -113,6 +135,7 @@ def _build_mp_policy(conf: dict):
         param_dtype=param_dtype,
         reduce_dtype=reduce_dtype,
         output_dtype=output_dtype,
+        cast_forward_inputs=True,
     )
 
 

@@ -246,7 +246,10 @@ class Trainer(BaseTrainer):
                 if self.flag_clamp:
                     x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
 
-                with torch.autocast(device_type="cuda", enabled=self.amp):
+                # FSDP2 uses MixedPrecisionPolicy for dtype management; manual
+                # autocast conflicts with SpectralNorm's power-iteration buffers.
+                _amp = self.amp and self.mode != "fsdp2"
+                with torch.autocast(device_type="cuda", enabled=_amp):
                     y_pred = self.model(x)
 
                 # postblock opts outside of model
@@ -274,7 +277,7 @@ class Trainer(BaseTrainer):
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
-                    with torch.autocast(device_type="cuda", enabled=self.amp):
+                    with torch.autocast(device_type="cuda", enabled=_amp):
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()
                     accum_log(logs, {"loss": loss.item()})
                     scaler.scale(loss).backward(retain_graph=self.retain_graph)
