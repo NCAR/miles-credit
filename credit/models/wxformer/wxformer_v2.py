@@ -439,7 +439,8 @@ class FeedForwardSwiGLU(nn.Module):
 
     def __init__(self, dim, mult=4, dropout=0.0):
         super().__init__()
-        hidden = int(dim * mult * 2 / 3)
+        # Round up to nearest multiple of 8 for tensor-parallel and matmul alignment
+        hidden = (int(dim * mult * 2 / 3) + 7) // 8 * 8
         self.norm = LayerNorm(dim)
         self.proj_up = nn.Conv2d(dim, hidden * 2, 1)  # produces gate + value
         self.proj_out = nn.Conv2d(hidden, dim, 1)
