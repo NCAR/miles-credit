@@ -12,6 +12,7 @@ single-GPU nn.ConvTranspose3d, covering:
 
 import os
 import sys
+import pytest
 import torch
 import torch.nn as nn
 import torch.distributed as dist
@@ -24,6 +25,8 @@ def setup_distributed():
     return local_rank, dist.get_rank(), dist.get_world_size()
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_pangu_patch_recovery_passthrough():
     """Pangu PatchRecovery: kernel==stride=(2,4,4), halo_width=0.
 
@@ -80,6 +83,8 @@ def test_pangu_patch_recovery_passthrough():
     torch.backends.cuda.matmul.allow_tf32 = prev_cuda_tf32
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_conv_transpose3d_with_halo():
     """General ConvTranspose3d: kernel=(2,4,4), stride=(2,2,2), padding=(0,1,1).
 
@@ -138,6 +143,8 @@ def test_conv_transpose3d_with_halo():
     torch.backends.cuda.matmul.allow_tf32 = prev_cuda_tf32
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_backward_gradients_passthrough():
     """Backward through the passthrough (halo_width=0) case."""
     from credit.domain_parallel.manager import initialize_domain_parallel
@@ -191,6 +198,8 @@ def test_backward_gradients_passthrough():
     torch.backends.cuda.matmul.allow_tf32 = prev_cuda_tf32
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_backward_gradients_with_halo():
     """Backward through the halo-exchange case."""
     from credit.domain_parallel.manager import initialize_domain_parallel

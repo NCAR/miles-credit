@@ -7,6 +7,7 @@ Verifies that a simple model produces the same output when run with
 domain parallelism (sharded across 2 GPUs) vs single-GPU baseline.
 """
 
+import pytest
 import torch
 import torch.nn as nn
 import torch.distributed as dist
@@ -22,6 +23,8 @@ def setup_distributed():
     return local_rank, dist.get_rank(), dist.get_world_size()
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_halo_exchange():
     """Test that halo exchange correctly pads boundaries."""
     from credit.domain_parallel.halo_exchange import HaloExchange
@@ -67,6 +70,8 @@ def test_halo_exchange():
         print("  PASSED: test_halo_exchange")
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_domain_parallel_conv2d():
     """Test that DomainParallelConv2d matches single-GPU Conv2d."""
     from credit.domain_parallel.manager import initialize_domain_parallel
@@ -111,6 +116,8 @@ def test_domain_parallel_conv2d():
         print("  PASSED: test_domain_parallel_conv2d")
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_domain_parallel_groupnorm():
     """Test that DomainParallelGroupNorm matches single-GPU GroupNorm."""
     from credit.domain_parallel.manager import initialize_domain_parallel
@@ -153,6 +160,8 @@ def test_domain_parallel_groupnorm():
         print("  PASSED: test_domain_parallel_groupnorm")
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_model_conversion_forward():
     """Test that a converted model produces the same output as the original."""
     from credit.domain_parallel.manager import initialize_domain_parallel
@@ -239,6 +248,8 @@ def test_model_conversion_forward():
     torch.backends.cuda.matmul.allow_tf32 = prev_cuda_tf32
 
 
+@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
+                    reason="Distributed process group not initialized")
 def test_backward_gradients():
     """Test that gradients flow correctly through domain-parallel layers."""
     from credit.domain_parallel.manager import initialize_domain_parallel
