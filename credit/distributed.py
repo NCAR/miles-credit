@@ -177,6 +177,12 @@ def distributed_model_wrapper(conf, neural_network, device):
 
     # ── Domain parallelism setup ──────────────────────────────────────────
     domain_parallel_size = conf["trainer"].get("domain_parallel_size", 1)
+
+    if mode in ["domain_parallel", "fsdp+domain_parallel"] and domain_parallel_size <= 1:
+        raise ValueError(
+            f"mode='{mode}' requires trainer.domain_parallel_size > 1 in config"
+        )
+
     use_domain_parallel = mode in ["domain_parallel", "fsdp+domain_parallel"] or domain_parallel_size > 1
     domain_manager = None
 
