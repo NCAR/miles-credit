@@ -70,7 +70,7 @@ def apply_fsdp2(model: nn.Module, dp_mesh, conf: dict) -> nn.Module:
 
 def _build_mp_policy(conf: dict):
     """Build FSDP2 MixedPrecision policy from config."""
-    from torch.distributed._composable.fsdp import MixedPrecision
+    from torch.distributed._composable.fsdp import MixedPrecisionPolicy
 
     trainer = conf.get("trainer", {})
     if not trainer.get("amp", False):
@@ -82,7 +82,7 @@ def _build_mp_policy(conf: dict):
     reduce_dtype = _parse_dtype(mp_conf.get("reduce_dtype", "float32"))
     output_dtype = _parse_dtype(mp_conf.get("output_dtype", "bfloat16"))
 
-    return MixedPrecision(
+    return MixedPrecisionPolicy(
         param_dtype=param_dtype,
         reduce_dtype=reduce_dtype,
         output_dtype=output_dtype,
