@@ -129,7 +129,7 @@ trainer:
 
     use_ema: False
     use_scheduler: False
-    amp: True
+    amp: False  # spectral norm u/v vectors are fp32; FSDP2 bf16 param cast conflicts — fix before enabling
 
     grad_accum_every: 1
     grad_max_norm: 1.0
