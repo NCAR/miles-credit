@@ -33,7 +33,7 @@ def _shard_spatial(tensor, manager):
         return tensor
     from credit.domain_parallel.sharding import shard_tensor
 
-    return shard_tensor(tensor, manager.domain_rank, manager.domain_parallel_size, dim=-2)
+    return shard_tensor(tensor, dim=-2, manager=manager)
 
 
 def _sync_domain_gradients(model, manager):
