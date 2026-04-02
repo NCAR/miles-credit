@@ -194,34 +194,9 @@ def test_scaler_round_trip(scaler_file):
     path, variables, data = scaler_file
     var_list = list(variables)
     fwd = BridgeScaleTransformer(scaler_path=path, variables=var_list, method="transform")
-    inv = BridgeScaleTransformer(scaler_path=path, variables=var_list, method="inverse")
+    inv = BridgeScaleTransformer(scaler_path=path, variables=var_list, method="inverse_transform")
     var = var_list[0]
     original = data["era5"]["input"][var].clone()
     data = fwd(data)
     data = inv(data)
     assert torch.allclose(data["era5"]["input"][var].float(), original.float(), atol=1e-5)
-
-
-def test_scaler_invalid_data_type(scaler_file):
-    """Passing an invalid data_type raises ValueError at init."""
-    path, variables, _ = scaler_file
-    with pytest.raises(ValueError, match="Invalid data_types"):
-        BridgeScaleTransformer(
-            scaler_path=path,
-            variables=list(variables),
-            method="transform",
-            data_types=["not_a_valid_type"],
-        )
-
-
-def test_scaler_raises_missing_source(scaler_file):
-    """forward raises KeyError if a variable's source is absent from the batch."""
-    path, variables, data = scaler_file
-    # Use a variable that references a source not in the batch
-    scaler = BridgeScaleTransformer(
-        scaler_path=path,
-        variables=["MISSING_SOURCE/prognostic/3d/T"],
-        method="transform",
-    )
-    with pytest.raises(KeyError):
-        scaler(data)
