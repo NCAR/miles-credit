@@ -1,0 +1,190 @@
+# CREDIT v2 — WXFormer v2 @ 0.25 deg, 6-hr timestep
+# 640×1280 grid (wchapman MLWPS ERA5 zarr, 16 model levels)
+#
+# Parallelism examples (4 GPUs per node on Derecho):
+#
+#   FSDP2 only (4 GPUs):
+#     parallelism: {data: fsdp2, tensor: 1, domain: 1}
+#
+#   FSDP2 + TP=2 (8 GPUs → dp=4, tp=2):
+#     parallelism: {data: fsdp2, tensor: 2, domain: 1}
+#
+#   FSDP2 + domain=2 (8 GPUs → dp=4, domain=2):
+#     parallelism: {data: fsdp2, tensor: 1, domain: 2}
+
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_v2_025deg_6hr'
+seed: 1000
+
+data:
+    source:
+        ERA5:
+            level_coord: "level"
+            levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+            variables:
+                prognostic:
+                    vars_3D: ['U', 'V', 'T', 'Q']
+                    vars_2D: ['SP', 't2m', 'U500', 'V500', 'T500', 'Z500', 'Q500']
+                    path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_y_TOTAL_*_staged.zarr'
+
+                diagnostic: null
+
+                dynamic_forcing:
+                    vars_2D: ['tsi']
+                    path: '/glade/derecho/scratch/dgagne/credit_solar_nc_6h_0.25deg/*.nc'
+
+                static:
+                    vars_2D: ['Z_GDS4_SFC', 'LSM']
+                    path: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
+
+    start_datetime: "1979-01-01"
+    end_datetime: "2018-12-31"
+    timestep: "6h"
+    history_len: 1
+    forecast_len: 1
+    one_shot: True
+    lead_time_periods: 6
+    skip_periods: null
+    static_first: True
+    scaler_type: 'std_new'
+
+    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_6h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_6h_1979_2018_16lev_0.25deg.nc'
+
+data_valid:
+    source:
+        ERA5:
+            level_coord: "level"
+            levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+            variables:
+                prognostic:
+                    vars_3D: ['U', 'V', 'T', 'Q']
+                    vars_2D: ['SP', 't2m', 'U500', 'V500', 'T500', 'Z500', 'Q500']
+                    path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/SixHourly_y_TOTAL_*_staged.zarr'
+
+                diagnostic: null
+
+                dynamic_forcing:
+                    vars_2D: ['tsi']
+                    path: '/glade/derecho/scratch/dgagne/credit_solar_nc_6h_0.25deg/*.nc'
+
+                static:
+                    vars_2D: ['Z_GDS4_SFC', 'LSM']
+                    path: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
+
+    start_datetime: "2019-01-01"
+    end_datetime: "2020-12-31"
+    timestep: "6h"
+    history_len: 1
+    forecast_len: 1
+    one_shot: True
+    lead_time_periods: 6
+    skip_periods: null
+    static_first: True
+    scaler_type: 'std_new'
+
+    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_6h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_6h_1979_2018_16lev_0.25deg.nc'
+
+trainer:
+    type: era5-v2
+    # ── V2 parallelism block ──────────────────────────────────────────────
+    parallelism:
+        data: fsdp2   # fsdp2 | ddp | none
+        tensor: 1     # TP degree (1 = disabled)
+        domain: 1     # spatial H-shards (1 = disabled)
+
+    activation_checkpoint: True
+    cpu_offload: False
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    skip_validation: False
+    update_learning_rate: False
+
+    save_backup_weights: True
+    save_best_weights: True
+
+    learning_rate: 1.0e-04
+    weight_decay: 1.0e-05
+
+    train_batch_size: 1
+    valid_batch_size: 1
+
+    batches_per_epoch: 1000
+    valid_batches_per_epoch: 50
+    stopping_patience: 20
+
+    start_epoch: 0
+    num_epoch: 50
+    reload_epoch: False
+    epochs: &epochs 50
+
+    use_ema: False
+    use_scheduler: True
+    scheduler:
+        scheduler_name: 'cosine-annealing'
+        T_max: *epochs
+        eta_min: 1.0e-06
+
+    amp: True
+
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+
+    thread_workers: 4
+    valid_thread_workers: 2
+
+model:
+    type: "wxformer_v2"
+    frames: 1
+    image_height: 640
+    image_width: 1280
+    levels: 16
+    channels: 4      # 3D prognostic vars
+    surface_channels: 7   # 2D prognostic vars
+    input_only_channels: 3  # tsi + Z_GDS4_SFC + LSM
+    output_only_channels: 0
+
+    dim: [128, 256, 512, 1024]
+    depth: [2, 2, 6, 2]
+    global_window_size: [8, 4, 2, 1]
+    local_window_size: 3
+
+    upsample_with_ps: True      # PixelShuffle decoder
+    use_swiglu: True
+    use_shifted_windows: True
+    use_deformable: False
+    use_spectral_norm: True
+
+    padding_conf:
+        activate: True
+        mode: earth
+        # strides=[4,2,2,2] → total 32; need (H+pad)//32 divisible by local_window_size=3
+        # H=640: 640//32=20, 20%3=2 → need 21*32=672 → pad_lat=[16,16]
+        # W=1280: 1280//32=40, 40%3=1 → need 42*32=1344 → pad_lon=[32,32]
+        pad_lat: [16, 16]   # 640+32=672; 672//32=21, 21%3=0 ✓
+        pad_lon: [32, 32]   # 1280+64=1344; 1344//32=42, 42%3=0 ✓
+
+    post_conf:
+        activate: False
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+    use_latitude_weights: True
+
+predict:
+    mode: none
+    batch_size: 1
+
+pbs:
+    project: "$PBS_ACCOUNT"
+    ngpus: 4
+    ncpus: 32
+    mem: "480GB"
+    walltime: "12:00:00"
+    queue: "main"
+    gpu_type: "h100"
