@@ -74,7 +74,7 @@ PYEOF
 #PBS -l select=${nnodes}:ncpus=32:ngpus=${ngpus}:mem=480GB
 #PBS -l walltime=${WALLTIME}
 #PBS -A ${ACCOUNT}
-#PBS -q ${QUEUE}
+#PBS -q ${QUEUE}@desched1
 #PBS -j oe
 #PBS -k eod
 #PBS -o ${save_loc}/job.log
