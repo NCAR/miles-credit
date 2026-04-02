@@ -133,7 +133,11 @@ class BaseTrainer(ABC):
         trainer_conf = conf["trainer"]
         self.save_loc = os.path.expandvars(conf["save_loc"])
         self.mode = trainer_conf.get("mode", "none")
-        self.distributed = self.mode in ("fsdp", "ddp")
+        # V2 parallelism block: promote mode to "fsdp2" so checkpoint uses DCP path
+        _p = trainer_conf.get("parallelism", {})
+        if _p.get("data") == "fsdp2":
+            self.mode = "fsdp2"
+        self.distributed = self.mode in ("fsdp", "ddp", "fsdp2")
         self.start_epoch = trainer_conf.get("start_epoch", 0)
         self.epochs = trainer_conf.get("epochs", 70)
         self.skip_validation = trainer_conf.get("skip_validation", False)
@@ -251,7 +255,24 @@ class BaseTrainer(ABC):
         """Save model, optimizer, scheduler, and scaler state."""
         sched_state = scheduler.state_dict() if self.use_scheduler and scheduler is not None else None
 
-        if self.mode != "fsdp":
+        if self.mode == "fsdp2":
+            from credit.parallel.fsdp2 import fsdp2_state_dict
+
+            # FSDP2: all ranks gather full state dict, rank 0 saves
+            logger.info(f"Saving FSDP2 checkpoint to {self.save_loc}")
+            model_sd = fsdp2_state_dict(self.model)
+            if self.rank == 0:
+                state_dict = {
+                    "epoch": epoch,
+                    "model_state_dict": model_sd,
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": sched_state,
+                    "scaler_state_dict": scaler.state_dict(),
+                }
+                torch.save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
+                if self.save_every_epoch:
+                    copy_checkpoint(os.path.join(self.save_loc, "checkpoint.pt"), epoch)
+        elif self.mode != "fsdp":
             if self.rank == 0:
                 logger.info(f"Saving checkpoint to {self.save_loc}")
                 state_dict = {
