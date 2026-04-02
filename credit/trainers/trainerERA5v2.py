@@ -19,6 +19,39 @@ from credit.trainers.utils import accum_log, cycle
 logger = logging.getLogger(__name__)
 
 
+def _get_domain_manager(model):
+    """Retrieve DomainParallelManager stored on model (FSDP2/DDP-wrapped or raw)."""
+    for candidate in (model, getattr(model, "module", None)):
+        if candidate is not None and hasattr(candidate, "_domain_parallel_manager"):
+            return candidate._domain_parallel_manager
+    return None
+
+
+def _shard_spatial(tensor, manager):
+    """Shard tensor along H (dim=-2) according to this rank's domain slice."""
+    if manager is None or manager.domain_parallel_size <= 1:
+        return tensor
+    from credit.domain_parallel.sharding import shard_tensor
+
+    return shard_tensor(tensor, manager.domain_rank, manager.domain_parallel_size, dim=-2)
+
+
+def _sync_domain_gradients(model, manager):
+    """All-reduce gradients across the domain group (missing piece from PR #320).
+
+    After loss.backward(), halo exchange gives approximate boundary gradients
+    but does NOT sync the parameter gradients across domain ranks. This
+    all_reduce ensures all domain ranks see the same gradient before the
+    optimizer step.
+    """
+    if manager is None or manager.domain_parallel_size <= 1:
+        return
+    group = manager.domain_group
+    for p in model.parameters():
+        if p.grad is not None:
+            dist.all_reduce(p.grad, op=dist.ReduceOp.AVG, group=group)
+
+
 class Trainer(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
@@ -39,6 +72,9 @@ class Trainer(BaseTrainer):
         """
         super().__init__(model, rank, conf)
         logger.info("Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)")
+
+        # Domain parallel manager (None if not using domain parallel)
+        self.domain_manager = _get_domain_manager(model)
 
         # ---- Preblock: normalize then assemble batch field tensors into x and y ----
         preblocks = {}
@@ -182,11 +218,13 @@ class Trainer(BaseTrainer):
                     x = batch["x"].to(self.device).float()
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                    x = _shard_spatial(x, self.domain_manager)
                 else:
                     # Roll x forward: take new batch's forcing/static, replace prog with y_pred
                     x_new = batch["x"].to(self.device).float()
                     if self.ensemble_size > 1:
                         x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
+                    x_new = _shard_spatial(x_new, self.domain_manager)
                     n_prog = x_new.shape[1] - self.static_dim_size
                     y_pred_prog = y_pred[:, :n_prog, ...]
                     if not self.retain_graph:
@@ -221,6 +259,7 @@ class Trainer(BaseTrainer):
                 # backprop on specified timesteps
                 if t in self.backprop_on_timestep:
                     y = batch["y"].to(self.device).float()
+                    y = _shard_spatial(y, self.domain_manager)
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
@@ -228,6 +267,8 @@ class Trainer(BaseTrainer):
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()
                     accum_log(logs, {"loss": loss.item()})
                     scaler.scale(loss).backward(retain_graph=self.retain_graph)
+                    # Sync gradients across domain group (critical — see PR #320 review)
+                    _sync_domain_gradients(self.model, self.domain_manager)
 
                 if self.distributed:
                     torch.distributed.barrier()

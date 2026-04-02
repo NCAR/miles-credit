@@ -3,6 +3,25 @@ import sys
 import copy
 import logging
 
+# WXFormer v2 — no heavy legacy deps (pure PyTorch + einops), always available.
+try:
+    from credit.models.wxformer.wxformer_v2 import CrossFormer as WXFormerV2
+
+    _WXFORMER_V2 = True
+except (ImportError, Exception) as _wxv2_err:
+    logging.warning(f"wxformer_v2 unavailable: {_wxv2_err}")
+    WXFormerV2 = None
+    _WXFORMER_V2 = False
+
+# WXFormer v2 ensemble (SDL noise layers)
+try:
+    from credit.models.wxformer.wxformer_v2_ensemble import CrossFormerV2WithNoise
+
+    _WXFORMER_V2_SDL = True
+except ImportError:
+    CrossFormerV2WithNoise = None
+    _WXFORMER_V2_SDL = False
+
 # Legacy model imports — wrapped in try/except because their transitive dependencies
 # (bridgescaler → numba) may conflict with newer NumPy (≥2.3) environments.
 try:
@@ -27,14 +46,6 @@ try:
 except (ImportError, Exception) as _legacy_import_err:
     logging.warning(f"Legacy model imports unavailable (numba/NumPy conflict or missing dep): {_legacy_import_err}.")
     _LEGACY_MODELS_AVAILABLE = False
-
-try:
-    from credit.models.wxformer.wxformer_v2_ensemble import CrossFormerV2WithNoise
-
-    _WXFORMER_V2_SDL = True
-except ImportError:
-    CrossFormerV2WithNoise = None
-    _WXFORMER_V2_SDL = False
 
 
 logger = logging.getLogger(__name__)
@@ -72,6 +83,9 @@ if _LEGACY_MODELS_AVAILABLE:
             "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
         }
     )
+
+if _WXFORMER_V2:
+    model_types["wxformer_v2"] = (WXFormerV2, "Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...")
 
 if _WXFORMER_V2_SDL:
     model_types["wxformer_v2_ensemble"] = (

@@ -319,3 +319,126 @@ def distributed_model_wrapper(conf, neural_network, device):
     torch.distributed.barrier()
 
     return model
+
+
+# ===========================================================================
+# V2 distributed wrapper — FSDP2 + Tensor Parallel + Domain Parallel
+# ===========================================================================
+
+
+def distributed_model_wrapper_v2(conf: dict, model, device):
+    """Wrap a model for V2 distributed training.
+
+    Reads trainer.parallelism (or falls back to trainer.mode for legacy configs)
+    and applies, in order:
+      1. Domain parallelism (spatial H-shard, Negin's layer swap)
+      2. Tensor parallelism (Col/Row linear split across TP group)
+      3. FSDP2 or DDP over the data-parallel group
+
+    V1 trainer code still calls distributed_model_wrapper — this is V2 only.
+
+    Args:
+        conf: Full training config.
+        model: Raw nn.Module.
+        device: torch.device for this rank.
+
+    Returns:
+        Wrapped model (and stores domain_manager on it if domain > 1).
+    """
+    from credit.parallel.mesh import build_device_mesh, parse_parallelism_conf
+
+    conf["save_loc"] = os.path.expandvars(conf["save_loc"])
+    p = parse_parallelism_conf(conf)
+    data_mode = p["data"]
+    tp_size = int(p.get("tensor", 1))
+    domain_size = int(p.get("domain", 1))
+
+    # Validation
+    if domain_size > 1 and data_mode == "none" and tp_size == 1:
+        logging.warning(
+            "domain > 1 with data=none and tensor=1: gradients will NOT sync "
+            "across data-parallel replicas. Wrap with data=ddp or data=fsdp2."
+        )
+
+    # Build DeviceMesh
+    mesh, submeshes = build_device_mesh(p, device="cuda")
+
+    # ── 1. Domain parallelism ─────────────────────────────────────────────
+    domain_manager = None
+    if domain_size > 1:
+        from credit.domain_parallel import initialize_domain_parallel, convert_to_domain_parallel
+
+        world_size = dist.get_world_size()
+        domain_manager = initialize_domain_parallel(
+            world_size=world_size,
+            domain_parallel_size=domain_size,
+            shard_dim=-2,
+        )
+        model = convert_to_domain_parallel(model, domain_manager)
+        model._domain_parallel_manager = domain_manager
+        logging.info(
+            f"[V2] Domain parallelism: {domain_size} shards, {world_size // domain_size} data-parallel replicas"
+        )
+
+    # ── 2. Tensor parallelism ─────────────────────────────────────────────
+    if tp_size > 1:
+        from credit.parallel import apply_tensor_parallel
+
+        tp_mesh = submeshes.get("tp")
+        if tp_mesh is None:
+            raise ValueError("TP mesh not found — check tensor > 1 and world_size")
+        model = apply_tensor_parallel(model, tp_mesh)
+        logging.info(f"[V2] Tensor parallelism: degree={tp_size}")
+
+    # ── 3. Data parallelism ───────────────────────────────────────────────
+    dp_mesh = submeshes.get("dp")
+
+    if data_mode == "fsdp2":
+        from credit.parallel import apply_fsdp2
+
+        model = apply_fsdp2(model, dp_mesh, conf)
+        if domain_manager is not None:
+            model._domain_parallel_manager = domain_manager
+        logging.info("[V2] FSDP2 applied over dp_mesh")
+
+    elif data_mode == "ddp":
+        dp_group = dp_mesh.get_group() if dp_mesh is not None else None
+        ddp_kwargs = dict(device_ids=[device], find_unused_parameters=False)
+        if dp_group is not None:
+            ddp_kwargs["process_group"] = dp_group
+        model = torch.nn.parallel.DistributedDataParallel(model, **ddp_kwargs)
+        if domain_manager is not None:
+            model._domain_parallel_manager = domain_manager
+        logging.info("[V2] DDP applied")
+
+    # Apply activation checkpointing if requested and FSDP2 didn't do it
+    if conf.get("trainer", {}).get("activation_checkpoint", False) and data_mode != "fsdp2":
+        _apply_activation_checkpointing_v2(model, conf)
+
+    torch.distributed.barrier()
+    return model
+
+
+def _apply_activation_checkpointing_v2(model, conf):
+    """Apply no-reentrant AC to transformer-like blocks (non-FSDP2 path)."""
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+        checkpoint_wrapper,
+        CheckpointImpl,
+        apply_activation_checkpointing,
+    )
+    import functools
+
+    try:
+        from credit.models.wxformer.wxformer_v2 import Transformer, UpBlock, UpBlockPS
+
+        block_types = (Transformer, UpBlock, UpBlockPS)
+    except ImportError:
+        return
+
+    wrapper = functools.partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
+    apply_activation_checkpointing(
+        model,
+        checkpoint_wrapper_fn=wrapper,
+        check_fn=lambda m: isinstance(m, block_types),
+    )
+    logging.info("[V2] Activation checkpointing applied")
