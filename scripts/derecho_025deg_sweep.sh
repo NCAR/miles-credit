@@ -86,7 +86,8 @@ echo "Node   : \$(hostname)"
 echo "Date   : \$(date)"
 
 module --force purge
-module load ncarenv/24.12 gcc/14.2.0 cuda/12.4 nccl openmpi
+module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 \
+            cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
 
 conda activate ${CONDA_ENV}
 export PYTHONPATH="${REPO}:\${PYTHONPATH}"

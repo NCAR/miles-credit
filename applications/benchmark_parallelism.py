@@ -114,13 +114,19 @@ def main():
 
     criterion = torch.nn.MSELoss()
 
-    # Warmup
-    for _ in range(args.warmup):
+    def step():
         optimizer.zero_grad()
         pred = model(x)
+        # Model may return [B, C, T, H, W]; collapse T if present
+        if pred.dim() == 5:
+            pred = pred.squeeze(2)
         loss = criterion(pred, y.to(pred.dtype))
         loss.backward()
         optimizer.step()
+
+    # Warmup
+    for _ in range(args.warmup):
+        step()
 
     torch.cuda.synchronize()
     torch.cuda.reset_peak_memory_stats(device)
@@ -128,11 +134,7 @@ def main():
     # Timed steps
     t0 = time.perf_counter()
     for _ in range(args.steps):
-        optimizer.zero_grad()
-        pred = model(x)
-        loss = criterion(pred, y.to(pred.dtype))
-        loss.backward()
-        optimizer.step()
+        step()
     torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
 
