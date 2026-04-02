@@ -283,8 +283,15 @@ def distributed_model_wrapper(conf, neural_network, device):
         model = DDP(neural_network, device_ids=[device], find_unused_parameters=True)
 
     elif mode == "domain_parallel":
-        # Domain parallel only (no FSDP/DDP)
-        model = neural_network
+        if domain_manager is not None and domain_manager.data_parallel_size > 1:
+            # Wrap with DDP using the data-parallel subgroup so gradients are
+            # synced across data-parallel replicas (domain_group handles halo exchange)
+            model = DDP(neural_network, device_ids=[device],
+                        process_group=domain_manager.data_parallel_group,
+                        find_unused_parameters=False)
+            model._domain_parallel_manager = domain_manager
+        else:
+            model = neural_network
 
     else:
         model = neural_network

@@ -330,6 +330,15 @@ class Trainer(BaseTrainer):
 
             # Grad norm clipping
             scaler.unscale_(optimizer)
+
+            # Sync gradients across domain-parallel ranks (boundary grads are approximate
+            # after halo exchange; average across the domain group to keep params in sync)
+            if use_domain_parallel:
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        dist.all_reduce(p.grad, op=dist.ReduceOp.AVG,
+                                        group=domain_manager.domain_group)
+
             if grad_max_norm == "dynamic":
                 # Compute local L2 norm
                 local_norm = torch.norm(
