@@ -34,10 +34,7 @@ def shard_tensor(x, dim=-2, manager=None):
     rank = manager.domain_rank
 
     if size % n != 0:
-        raise ValueError(
-            f"Cannot shard dim {dim} of size {size} evenly across "
-            f"{n} domain-parallel ranks"
-        )
+        raise ValueError(f"Cannot shard dim {dim} of size {size} evenly across {n} domain-parallel ranks")
 
     chunk_size = size // n
     start = rank * chunk_size

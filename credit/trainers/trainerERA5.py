@@ -73,7 +73,9 @@ class Trainer(BaseTrainer):
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_max_norm = conf["trainer"].get("grad_max_norm", 0.0)
         amp = conf["trainer"]["amp"]
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"] else False
+        distributed = (
+            True if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"] else False
+        )
 
         # Domain parallelism: detect manager from model
         domain_manager = getattr(self.model, "_domain_parallel_manager", None)
@@ -336,8 +338,7 @@ class Trainer(BaseTrainer):
             if use_domain_parallel:
                 for p in self.model.parameters():
                     if p.grad is not None:
-                        dist.all_reduce(p.grad, op=dist.ReduceOp.AVG,
-                                        group=domain_manager.domain_group)
+                        dist.all_reduce(p.grad, op=dist.ReduceOp.AVG, group=domain_manager.domain_group)
 
             if grad_max_norm == "dynamic":
                 # Compute local L2 norm
@@ -447,7 +448,9 @@ class Trainer(BaseTrainer):
         )
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
 
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"] else False
+        distributed = (
+            True if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"] else False
+        )
 
         # Domain parallelism: detect manager from model
         domain_manager = getattr(self.model, "_domain_parallel_manager", None)

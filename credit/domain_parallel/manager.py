@@ -11,7 +11,6 @@ Example with 8 GPUs and domain_parallel_size=2:
 """
 
 import logging
-import torch
 import torch.distributed as dist
 
 logger = logging.getLogger(__name__)
@@ -33,8 +32,7 @@ class DomainParallelManager:
     def __init__(self, world_size, domain_parallel_size, shard_dim=-2):
         if world_size % domain_parallel_size != 0:
             raise ValueError(
-                f"world_size ({world_size}) must be divisible by "
-                f"domain_parallel_size ({domain_parallel_size})"
+                f"world_size ({world_size}) must be divisible by domain_parallel_size ({domain_parallel_size})"
             )
 
         self.world_size = world_size
@@ -126,11 +124,7 @@ class DomainParallelManager:
         base = self._domain_group_idx * self.domain_parallel_size
 
         prev_rank = (base + self._domain_rank - 1) if self._domain_rank > 0 else None
-        next_rank = (
-            (base + self._domain_rank + 1)
-            if self._domain_rank < self.domain_parallel_size - 1
-            else None
-        )
+        next_rank = (base + self._domain_rank + 1) if self._domain_rank < self.domain_parallel_size - 1 else None
         return prev_rank, next_rank
 
 

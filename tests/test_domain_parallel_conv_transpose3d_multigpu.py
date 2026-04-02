@@ -25,8 +25,9 @@ def setup_distributed():
     return local_rank, dist.get_rank(), dist.get_world_size()
 
 
-@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
-                    reason="Distributed process group not initialized")
+@pytest.mark.skipif(
+    not dist.is_available() or not dist.is_initialized(), reason="Distributed process group not initialized"
+)
 def test_pangu_patch_recovery_passthrough():
     """Pangu PatchRecovery: kernel==stride=(2,4,4), halo_width=0.
 
@@ -83,8 +84,9 @@ def test_pangu_patch_recovery_passthrough():
     torch.backends.cuda.matmul.allow_tf32 = prev_cuda_tf32
 
 
-@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
-                    reason="Distributed process group not initialized")
+@pytest.mark.skipif(
+    not dist.is_available() or not dist.is_initialized(), reason="Distributed process group not initialized"
+)
 def test_conv_transpose3d_with_halo():
     """General ConvTranspose3d: kernel=(2,4,4), stride=(2,2,2), padding=(0,1,1).
 
@@ -110,9 +112,7 @@ def test_conv_transpose3d_with_halo():
     manager = initialize_domain_parallel(world_size, world_size)
 
     torch.manual_seed(42)
-    conv = nn.ConvTranspose3d(
-        8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1)
-    ).to(device)
+    conv = nn.ConvTranspose3d(8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1)).to(device)
     dp_conv = DomainParallelConvTranspose3d(conv, shard_dim=3)
 
     assert dp_conv.halo_width == 1, f"Expected halo_width=1, got {dp_conv.halo_width}"
@@ -143,8 +143,9 @@ def test_conv_transpose3d_with_halo():
     torch.backends.cuda.matmul.allow_tf32 = prev_cuda_tf32
 
 
-@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
-                    reason="Distributed process group not initialized")
+@pytest.mark.skipif(
+    not dist.is_available() or not dist.is_initialized(), reason="Distributed process group not initialized"
+)
 def test_backward_gradients_passthrough():
     """Backward through the passthrough (halo_width=0) case."""
     from credit.domain_parallel.manager import initialize_domain_parallel
@@ -198,8 +199,9 @@ def test_backward_gradients_passthrough():
     torch.backends.cuda.matmul.allow_tf32 = prev_cuda_tf32
 
 
-@pytest.mark.skipif(not dist.is_available() or not dist.is_initialized(),
-                    reason="Distributed process group not initialized")
+@pytest.mark.skipif(
+    not dist.is_available() or not dist.is_initialized(), reason="Distributed process group not initialized"
+)
 def test_backward_gradients_with_halo():
     """Backward through the halo-exchange case."""
     from credit.domain_parallel.manager import initialize_domain_parallel
@@ -218,12 +220,8 @@ def test_backward_gradients_with_halo():
     manager = initialize_domain_parallel(world_size, world_size)
 
     torch.manual_seed(42)
-    conv_ref = nn.ConvTranspose3d(
-        8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1)
-    ).to(device)
-    conv_dp = nn.ConvTranspose3d(
-        8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1)
-    ).to(device)
+    conv_ref = nn.ConvTranspose3d(8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1)).to(device)
+    conv_dp = nn.ConvTranspose3d(8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1)).to(device)
     conv_dp.load_state_dict(conv_ref.state_dict())
     dp_conv = DomainParallelConvTranspose3d(conv_dp, shard_dim=3)
 
@@ -266,9 +264,9 @@ def main():
 
     tests = [
         ("Pangu PatchRecovery passthrough (kernel==stride)", test_pangu_patch_recovery_passthrough),
-        ("ConvTranspose3d with halo (kernel>stride)",        test_conv_transpose3d_with_halo),
-        ("Backward gradients — passthrough",                 test_backward_gradients_passthrough),
-        ("Backward gradients — with halo",                   test_backward_gradients_with_halo),
+        ("ConvTranspose3d with halo (kernel>stride)", test_conv_transpose3d_with_halo),
+        ("Backward gradients — passthrough", test_backward_gradients_passthrough),
+        ("Backward gradients — with halo", test_backward_gradients_with_halo),
     ]
 
     passed = 0
@@ -282,6 +280,7 @@ def main():
         except Exception as e:
             if rank == 0:
                 import traceback
+
                 print(f"  FAILED: {e}")
                 traceback.print_exc()
             failed += 1

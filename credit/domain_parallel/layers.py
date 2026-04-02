@@ -7,7 +7,6 @@ Layers that are purely local (1x1 convolutions, channel-wise normalization,
 activations, etc.) do not need wrappers and are left unchanged.
 """
 
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
@@ -418,7 +417,7 @@ class DomainParallelPeriodicConv2d(nn.Module):
 
     def __init__(self, periodic_conv, shard_dim=-2):
         super().__init__()
-        self.conv = periodic_conv.conv   # inner nn.Conv2d(padding=0)
+        self.conv = periodic_conv.conv  # inner nn.Conv2d(padding=0)
         self.padding = periodic_conv.padding
         self.shard_dim = shard_dim
         self.halo_exchange = HaloExchange(self.padding, dim=shard_dim)

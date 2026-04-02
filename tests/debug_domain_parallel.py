@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 import os
-import sys
 
 
 def setup_distributed():
@@ -204,23 +203,23 @@ def debug_backward():
             max_idx = max_idx // s
         max_pos.reverse()
         print(f"  Max diff at position: {max_pos}")
-        print(f"  Boundary row (rank0 last / rank1 first): row 3 and 4")
+        print("  Boundary row (rank0 last / rank1 first): row 3 and 4")
 
         # Row-by-row gradient comparison
-        print(f"\n  Row-by-row gradient max diff (H dim):")
+        print("\n  Row-by-row gradient max diff (H dim):")
         for h in range(ref_input.grad.shape[2]):
             row_diff = (ref_input.grad[:, :, h, :] - dp_grad[:, :, h, :]).abs().max().item()
             marker = " <-- boundary" if h in [3, 4] else ""
             print(f"    Row {h}: {row_diff:.6e}{marker}")
 
         # Check DP output matches reference (sanity check for forward)
-        print(f"\n  DP output per-row max diff from ref:")
+        print("\n  DP output per-row max diff from ref:")
         for h in range(ref_output.shape[2]):
             row_diff = (ref_output.detach()[:, :, h, :] - dp_output_gathered[:, :, h, :]).abs().max().item()
             print(f"    Row {h}: {row_diff:.6e}")
 
         # Weight gradient comparison
-        print(f"\n  Weight gradient comparison:")
+        print("\n  Weight gradient comparison:")
         ref_w_grad = model_ref.conv.weight.grad
         dp_w_grad = model_dp.conv.conv.weight.grad
         print(f"  Weight grad shape ref: {ref_w_grad.shape}")
@@ -240,6 +239,7 @@ def main():
     except Exception as e:
         if rank == 0:
             import traceback
+
             print(f"Forward debug error: {e}")
             traceback.print_exc()
 
@@ -250,6 +250,7 @@ def main():
     except Exception as e:
         if rank == 0:
             import traceback
+
             print(f"Backward debug error: {e}")
             traceback.print_exc()
 

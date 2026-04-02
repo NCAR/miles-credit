@@ -330,6 +330,7 @@ class TestConvertToModelConvTranspose3d:
         convert_to_domain_parallel(model, manager)
 
         from credit.domain_parallel.layers import DomainParallelConv3d
+
         assert isinstance(model.embed, DomainParallelConv3d)
         assert isinstance(model.recover, nn.ConvTranspose3d)  # unchanged
 
@@ -337,6 +338,7 @@ class TestConvertToModelConvTranspose3d:
 # ---------------------------------------------------------------------------
 # PeriodicConv2d / custom_converters
 # ---------------------------------------------------------------------------
+
 
 class TestPeriodicConv2dConversion:
     """Test DomainParallelPeriodicConv2d and custom_converters mechanism."""
@@ -352,6 +354,7 @@ class TestPeriodicConv2dConversion:
 
             def forward(self, x):
                 import torch.nn.functional as F
+
                 x = F.pad(x, (self.padding, self.padding, 0, 0), mode="circular")
                 x = F.pad(x, (0, 0, self.padding, self.padding), mode="reflect")
                 return self.conv(x)
@@ -393,7 +396,8 @@ class TestPeriodicConv2dConversion:
         manager.domain_parallel_size = 2
 
         convert_to_domain_parallel(
-            model, manager,
+            model,
+            manager,
             custom_converters={PeriodicConv2dClass: DomainParallelPeriodicConv2d},
         )
 
@@ -416,7 +420,8 @@ class TestPeriodicConv2dConversion:
         manager.domain_parallel_size = 2
 
         convert_to_domain_parallel(
-            model, manager,
+            model,
+            manager,
             custom_converters={PeriodicConv2dClass: DomainParallelPeriodicConv2d},
         )
 

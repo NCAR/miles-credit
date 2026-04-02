@@ -15,7 +15,6 @@ from credit.domain_parallel.layers import (
     DomainParallelConvTranspose3d,
     DomainParallelGroupNorm,
 )
-from credit.domain_parallel.manager import DomainParallelManager
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +115,12 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
         The model with replaced layers (modified in-place).
     """
     counts = {
-        "conv2d": 0, "conv3d": 0,
-        "conv_transpose2d": 0, "conv_transpose3d": 0,
-        "group_norm": 0, "custom": 0,
+        "conv2d": 0,
+        "conv3d": 0,
+        "conv_transpose2d": 0,
+        "conv_transpose3d": 0,
+        "group_norm": 0,
+        "custom": 0,
     }
 
     # For Conv3d, the shard_dim in 5D tensor is different
@@ -160,15 +162,11 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
 
             # --- Built-in rules ---
             if isinstance(module, nn.Conv2d) and _needs_halo_conv2d(module):
-                replacements.append(
-                    (parent_module, name, DomainParallelConv2d(module, shard_dim=shard_dim))
-                )
+                replacements.append((parent_module, name, DomainParallelConv2d(module, shard_dim=shard_dim)))
                 counts["conv2d"] += 1
 
             elif isinstance(module, nn.Conv3d) and _needs_halo_conv3d(module):
-                replacements.append(
-                    (parent_module, name, DomainParallelConv3d(module, shard_dim=shard_dim_5d))
-                )
+                replacements.append((parent_module, name, DomainParallelConv3d(module, shard_dim=shard_dim_5d)))
                 counts["conv3d"] += 1
 
             elif isinstance(module, nn.ConvTranspose3d) and _needs_halo_conv_transpose3d(module):
@@ -192,9 +190,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
                 counts["conv_transpose2d"] += 1
 
             elif isinstance(module, nn.GroupNorm):
-                replacements.append(
-                    (parent_module, name, DomainParallelGroupNorm(module))
-                )
+                replacements.append((parent_module, name, DomainParallelGroupNorm(module)))
                 counts["group_norm"] += 1
 
     # Apply replacements

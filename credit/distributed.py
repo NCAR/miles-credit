@@ -179,9 +179,7 @@ def distributed_model_wrapper(conf, neural_network, device):
     domain_parallel_size = conf["trainer"].get("domain_parallel_size", 1)
 
     if mode in ["domain_parallel", "fsdp+domain_parallel"] and domain_parallel_size <= 1:
-        raise ValueError(
-            f"mode='{mode}' requires trainer.domain_parallel_size > 1 in config"
-        )
+        raise ValueError(f"mode='{mode}' requires trainer.domain_parallel_size > 1 in config")
 
     use_domain_parallel = mode in ["domain_parallel", "fsdp+domain_parallel"] or domain_parallel_size > 1
     domain_manager = None
@@ -286,9 +284,12 @@ def distributed_model_wrapper(conf, neural_network, device):
         if domain_manager is not None and domain_manager.data_parallel_size > 1:
             # Wrap with DDP using the data-parallel subgroup so gradients are
             # synced across data-parallel replicas (domain_group handles halo exchange)
-            model = DDP(neural_network, device_ids=[device],
-                        process_group=domain_manager.data_parallel_group,
-                        find_unused_parameters=False)
+            model = DDP(
+                neural_network,
+                device_ids=[device],
+                process_group=domain_manager.data_parallel_group,
+                find_unused_parameters=False,
+            )
             model._domain_parallel_manager = domain_manager
         else:
             model = neural_network

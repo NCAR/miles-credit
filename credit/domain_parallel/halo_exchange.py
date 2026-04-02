@@ -108,17 +108,11 @@ class _HaloExchangeFunction(torch.autograd.Function):
 
         # Halo gradients to send back
         grad_halo_prev = grad_output.narrow(dim, 0, halo_width).contiguous() if has_prev else None
-        grad_halo_next = (
-            grad_output.narrow(dim, total_size - halo_width, halo_width).contiguous()
-            if has_next
-            else None
-        )
+        grad_halo_next = grad_output.narrow(dim, total_size - halo_width, halo_width).contiguous() if has_next else None
 
         # Buffers for receiving gradient contributions from neighbors
         recv_from_prev = torch.zeros_like(grad_local.narrow(dim, 0, halo_width))
-        recv_from_next = torch.zeros_like(
-            grad_local.narrow(dim, local_size - halo_width, halo_width)
-        )
+        recv_from_next = torch.zeros_like(grad_local.narrow(dim, local_size - halo_width, halo_width))
 
         ops = []
 
