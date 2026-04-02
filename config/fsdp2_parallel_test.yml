@@ -162,8 +162,8 @@ model:
     padding_conf:
         activate: True
         mode: earth
-        pad_lat: [30, 30]
-        pad_lon: [12, 12]
+        pad_lat: [6, 5]    # 181+11=192; 192//32=6, divisible by local_window_size=3
+        pad_lon: [12, 12]  # 360+24=384; 384//32=12, divisible by 3
 
     post_conf:
         activate: False
