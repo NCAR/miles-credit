@@ -28,11 +28,22 @@ def _get_domain_manager(model):
 
 
 def _shard_spatial(tensor, manager):
-    """Shard tensor along H (dim=-2) according to this rank's domain slice."""
+    """Shard tensor along H (dim=-2) according to this rank's domain slice.
+
+    Requires image_height to be divisible by domain_parallel_size.
+    """
     if manager is None or manager.domain_parallel_size <= 1:
         return tensor
     from credit.domain_parallel.sharding import shard_tensor
 
+    n = manager.domain_parallel_size
+    h = tensor.shape[-2]
+    if h % n != 0:
+        raise ValueError(
+            f"Domain parallel requires image_height ({h}) to be divisible by "
+            f"domain_parallel_size ({n}). Adjust model.image_height or the padding "
+            "so that H is divisible by the domain degree."
+        )
     return shard_tensor(tensor, dim=-2, manager=manager)
 
 
