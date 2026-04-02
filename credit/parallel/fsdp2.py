@@ -65,7 +65,34 @@ def apply_fsdp2(model: nn.Module, dp_mesh, conf: dict) -> nn.Module:
     # Outermost shard
     fully_shard(model, **kwargs)
     logger.info(f"FSDP2: sharded {count} submodules + top-level model")
+
+    # SpectralNorm registers weight_u / weight_v as fp32 buffers but FSDP2
+    # casts weight_orig (the parameter) to param_dtype. The power-iteration
+    # hook then fails with a dtype mismatch when computing torch.mv(weight_mat, v).
+    # Fix: cast all spectral-norm buffers to match param_dtype after sharding.
+    if mp_policy is not None:
+        _fix_spectral_norm_dtype(model, mp_policy.param_dtype)
+
     return model
+
+
+def _fix_spectral_norm_dtype(model: nn.Module, param_dtype: torch.dtype) -> None:
+    """Cast spectral norm u/v buffers to match the FSDP2 parameter dtype.
+
+    SpectralNorm registers `weight_u` and `weight_v` as fp32 buffers.
+    When FSDP2 casts `weight_orig` to bfloat16, the power-iteration
+    `torch.mv(weight_mat, v)` fails with a dtype mismatch.
+    This walks all modules and casts matching buffers in-place.
+    """
+    sn_buffer_names = {"weight_u", "weight_v"}
+    count = 0
+    for module in model.modules():
+        for buf_name in list(module._buffers):
+            if buf_name in sn_buffer_names and module._buffers[buf_name] is not None:
+                module._buffers[buf_name] = module._buffers[buf_name].to(param_dtype)
+                count += 1
+    if count:
+        logger.info(f"SpectralNorm: cast {count} u/v buffers to {param_dtype}")
 
 
 def _build_mp_policy(conf: dict):
