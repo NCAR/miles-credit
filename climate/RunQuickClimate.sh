@@ -34,7 +34,7 @@ conda activate /glade/work/wchapman/conda-envs/credit-casper-modern
 # Configuration
 # ============================================================================
 CONFIG=./camulator_config.yml
-SCRIPT=./Quick_Climate.py
+SCRIPT=./Get_Coupling_Vars.py
 FOLD_OUT=test_00091                    # UPDATE: Unique experiment identifier
 MODEL_NAME=checkpoint.pt00091.pt       # UPDATE: Your model checkpoint name
 
