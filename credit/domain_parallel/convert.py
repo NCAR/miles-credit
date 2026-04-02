@@ -12,6 +12,7 @@ from credit.domain_parallel.layers import (
     DomainParallelConv2d,
     DomainParallelConv3d,
     DomainParallelConvTranspose2d,
+    DomainParallelConvTranspose3d,
     DomainParallelGroupNorm,
 )
 from credit.domain_parallel.manager import DomainParallelManager
@@ -35,6 +36,21 @@ def _needs_halo_conv3d(conv):
     else:
         k_h = conv.kernel_size[1]  # (T, H, W) -> H is index 1
     return k_h > 1
+
+
+def _needs_halo_conv_transpose3d(conv):
+    """Check if a ConvTranspose3d needs halo exchange (kernel > stride along H)."""
+    if isinstance(conv.kernel_size, int):
+        k_h = conv.kernel_size
+    else:
+        k_h = conv.kernel_size[1]  # H in (Kz, Kh, Kw)
+
+    if isinstance(conv.stride, int):
+        s_h = conv.stride
+    else:
+        s_h = conv.stride[1]
+
+    return k_h > s_h
 
 
 def _needs_halo_conv_transpose2d(conv):
@@ -81,7 +97,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2):
     Returns:
         The model with replaced layers (modified in-place).
     """
-    counts = {"conv2d": 0, "conv3d": 0, "conv_transpose2d": 0, "group_norm": 0}
+    counts = {"conv2d": 0, "conv3d": 0, "conv_transpose2d": 0, "conv_transpose3d": 0, "group_norm": 0}
 
     # For Conv3d, the shard_dim in 5D tensor is different
     shard_dim_5d = 3  # H in (B, C, T, H, W)
@@ -103,6 +119,16 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2):
                     (parent_module, name, DomainParallelConv3d(module, shard_dim=shard_dim_5d))
                 )
                 counts["conv3d"] += 1
+
+            elif isinstance(module, nn.ConvTranspose3d) and _needs_halo_conv_transpose3d(module):
+                replacements.append(
+                    (
+                        parent_module,
+                        name,
+                        DomainParallelConvTranspose3d(module, shard_dim=shard_dim_5d),
+                    )
+                )
+                counts["conv_transpose3d"] += 1
 
             elif isinstance(module, nn.ConvTranspose2d) and _needs_halo_conv_transpose2d(module):
                 replacements.append(
@@ -127,6 +153,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2):
     logger.info(
         f"Domain-parallel conversion: replaced {counts['conv2d']} Conv2d, "
         f"{counts['conv3d']} Conv3d, {counts['conv_transpose2d']} ConvTranspose2d, "
+        f"{counts['conv_transpose3d']} ConvTranspose3d, "
         f"{counts['group_norm']} GroupNorm layers"
     )
 

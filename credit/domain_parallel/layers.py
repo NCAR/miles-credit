@@ -230,14 +230,92 @@ class DomainParallelConvTranspose2d(nn.Module):
             self.conv.dilation,
         )
 
-        # Trim extra output rows caused by the halo
-        # For stride=s, halo_width input rows produce halo_width*s output rows
+        # Trim extra output rows caused by (a) the halo input rows and
+        # (b) removing padding_h from the convolution.
+        # Each halo input row contributes stride_h output rows, and removing
+        # padding_h adds padding_h more rows per side, so:
+        #   trim = halo_width * stride_h + padding_h
+        # Since halo_width == padding_h this simplifies to halo_width * (stride_h + 1).
         if isinstance(self.conv.stride, int):
             s_h = self.conv.stride
         else:
             s_h = self.conv.stride[0]
 
-        trim = self.halo_width * s_h
+        trim = self.halo_width * (s_h + 1)
+        if trim > 0:
+            dim = self.shard_dim % out.ndim
+            out = HaloExchange.trim(out, trim, trim, dim=dim)
+
+        return out
+
+
+class DomainParallelConvTranspose3d(nn.Module):
+    """Domain-parallel ConvTranspose3d with halo exchange along the lat dimension.
+
+    For kernel==stride (e.g. Pangu PatchRecovery with patch_size=(2,4,4)):
+    no halo needed — purely local upsampling.
+    For kernel>stride in H: halo exchange required.
+
+    Args:
+        conv: An existing nn.ConvTranspose3d module to wrap.
+        shard_dim: Spatial dimension being sharded (3 for H in BCZHW).
+    """
+
+    def __init__(self, conv, shard_dim=3):
+        super().__init__()
+        self.conv = conv
+        self.shard_dim = shard_dim
+
+        # kernel_size is (Kz, Kh, Kw) for ConvTranspose3d; H is index 1
+        if isinstance(conv.kernel_size, int):
+            k_h = conv.kernel_size
+        else:
+            k_h = conv.kernel_size[1]
+
+        if isinstance(conv.stride, int):
+            s_h = conv.stride
+        else:
+            s_h = conv.stride[1]
+
+        if isinstance(conv.padding, int):
+            p_h = conv.padding
+        else:
+            p_h = conv.padding[1]
+
+        self.halo_width = p_h if k_h > s_h else 0
+        self.halo_exchange = HaloExchange(self.halo_width, dim=shard_dim)
+
+    def forward(self, x):
+        if self.halo_width == 0:
+            return self.conv(x)
+
+        x_padded = self.halo_exchange(x)
+
+        # Zero out H-dimension padding; keep Z and W padding unchanged
+        orig_padding = self.conv.padding
+        if isinstance(orig_padding, int):
+            new_padding = (orig_padding, 0, orig_padding)
+        else:
+            new_padding = (orig_padding[0], 0, orig_padding[2])
+
+        out = F.conv_transpose3d(
+            x_padded,
+            self.conv.weight,
+            self.conv.bias,
+            self.conv.stride,
+            new_padding,
+            self.conv.output_padding,
+            self.conv.groups,
+            self.conv.dilation,
+        )
+
+        # Same trim logic as ConvTranspose2d: halo_width * (stride_h + 1).
+        if isinstance(self.conv.stride, int):
+            s_h = self.conv.stride
+        else:
+            s_h = self.conv.stride[1]
+
+        trim = self.halo_width * (s_h + 1)
         if trim > 0:
             dim = self.shard_dim % out.ndim
             out = HaloExchange.trim(out, trim, trim, dim=dim)
