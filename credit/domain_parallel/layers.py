@@ -399,6 +399,46 @@ class DomainParallelGroupNorm(nn.Module):
         return x_norm
 
 
+class DomainParallelPeriodicConv2d(nn.Module):
+    """Domain-parallel wrapper for PeriodicConv2d.
+
+    PeriodicConv2d manually pads W with circular (longitude) and H with
+    reflect (latitude) before calling an inner nn.Conv2d(padding=0).
+    With domain-sharded H, reflect padding on H is wrong — boundary ranks
+    would reflect against the shard edge instead of the true pole.
+
+    This wrapper replaces the reflect padding on H with halo exchange,
+    while keeping the circular padding on W unchanged.
+
+    Args:
+        periodic_conv: An existing PeriodicConv2d module to wrap.
+            Must have a `.conv` (nn.Conv2d) and `.padding` (int) attribute.
+        shard_dim: Spatial dimension being sharded (-2 for H in BCHW).
+    """
+
+    def __init__(self, periodic_conv, shard_dim=-2):
+        super().__init__()
+        self.conv = periodic_conv.conv   # inner nn.Conv2d(padding=0)
+        self.padding = periodic_conv.padding
+        self.shard_dim = shard_dim
+        self.halo_exchange = HaloExchange(self.padding, dim=shard_dim)
+
+    def forward(self, x):
+        # Circular padding on W (longitude) — same as original
+        x = F.pad(x, (self.padding, self.padding, 0, 0), mode="circular")
+        # Halo exchange on H (latitude) — replaces the reflect padding
+        x = self.halo_exchange(x)
+        return self.conv(x)
+
+    @property
+    def weight(self):
+        return self.conv.weight
+
+    @property
+    def bias(self):
+        return self.conv.bias
+
+
 class DomainParallelInterpolate(nn.Module):
     """Domain-parallel bilinear interpolation.
 

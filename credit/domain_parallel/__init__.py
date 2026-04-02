@@ -32,8 +32,10 @@ from credit.domain_parallel.layers import (
     DomainParallelConv2d,
     DomainParallelConv3d,
     DomainParallelConvTranspose2d,
+    DomainParallelConvTranspose3d,
     DomainParallelGroupNorm,
     DomainParallelInterpolate,
+    DomainParallelPeriodicConv2d,
 )
 from credit.domain_parallel.convert import (
     convert_to_domain_parallel,
@@ -53,8 +55,10 @@ __all__ = [
     "DomainParallelConv2d",
     "DomainParallelConv3d",
     "DomainParallelConvTranspose2d",
+    "DomainParallelConvTranspose3d",
     "DomainParallelGroupNorm",
     "DomainParallelInterpolate",
+    "DomainParallelPeriodicConv2d",
     "convert_to_domain_parallel",
     "validate_sharding_constraints",
     "shard_tensor",

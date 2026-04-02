@@ -17,6 +17,7 @@ from credit.domain_parallel.layers import (
     DomainParallelConv2d,
     DomainParallelConvTranspose2d,
     DomainParallelGroupNorm,
+    DomainParallelPeriodicConv2d,
 )
 from credit.domain_parallel.convert import (
     convert_to_domain_parallel,
@@ -235,3 +236,207 @@ class TestShardGatherRoundtrip:
         x = torch.randn(2, 8, 100, 200)
         result = shard_tensor(x, dim=-2, manager=None)
         assert result is x
+
+
+# ---------------------------------------------------------------------------
+# ConvTranspose3d
+# ---------------------------------------------------------------------------
+
+from credit.domain_parallel.layers import DomainParallelConvTranspose3d
+from credit.domain_parallel.convert import _needs_halo_conv_transpose3d
+
+
+class TestNeedsHaloConvTranspose3d:
+    """Test halo requirement detection for ConvTranspose3d."""
+
+    def test_pangu_patch_recovery_no_halo(self):
+        """Pangu PatchRecovery: kernel==stride, no halo needed."""
+        conv = nn.ConvTranspose3d(192, 13, kernel_size=(2, 4, 4), stride=(2, 4, 4))
+        assert not _needs_halo_conv_transpose3d(conv)
+
+    def test_int_kernel_equal_stride_no_halo(self):
+        conv = nn.ConvTranspose3d(8, 4, kernel_size=2, stride=2)
+        assert not _needs_halo_conv_transpose3d(conv)
+
+    def test_kernel_greater_than_stride_needs_halo(self):
+        conv = nn.ConvTranspose3d(8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1))
+        assert _needs_halo_conv_transpose3d(conv)
+
+
+class TestDomainParallelConvTranspose3dHaloWidth:
+    """Test halo width computation for DomainParallelConvTranspose3d."""
+
+    def test_pangu_patch_recovery_halo_zero(self):
+        """Pangu PatchRecovery kernel==stride: halo_width should be 0."""
+        conv = nn.ConvTranspose3d(192, 13, kernel_size=(2, 4, 4), stride=(2, 4, 4))
+        dp_conv = DomainParallelConvTranspose3d(conv)
+        assert dp_conv.halo_width == 0
+
+    def test_kernel_greater_stride_halo_from_padding(self):
+        """kernel=(2,4,4), stride=(2,2,2), padding=(0,1,1): halo_width = p_h = 1."""
+        conv = nn.ConvTranspose3d(8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1))
+        dp_conv = DomainParallelConvTranspose3d(conv)
+        assert dp_conv.halo_width == 1
+
+    def test_int_kernel_equal_stride_halo_zero(self):
+        conv = nn.ConvTranspose3d(8, 4, kernel_size=2, stride=2)
+        dp_conv = DomainParallelConvTranspose3d(conv)
+        assert dp_conv.halo_width == 0
+
+
+class TestConvertToModelConvTranspose3d:
+    """Test that convert_to_domain_parallel handles ConvTranspose3d correctly."""
+
+    def test_pangu_patch_recovery_not_replaced(self):
+        """kernel==stride should NOT be replaced (no halo needed)."""
+        model = nn.Sequential(
+            nn.ConvTranspose3d(192, 13, kernel_size=(2, 4, 4), stride=(2, 4, 4)),
+        )
+        manager = MagicMock()
+        manager.domain_parallel_size = 2
+        convert_to_domain_parallel(model, manager)
+        assert isinstance(model[0], nn.ConvTranspose3d)
+
+    def test_conv_transpose3d_with_halo_replaced(self):
+        """kernel>stride should be replaced with DomainParallelConvTranspose3d."""
+        model = nn.Sequential(
+            nn.ConvTranspose3d(8, 4, kernel_size=(2, 4, 4), stride=(2, 2, 2), padding=(0, 1, 1)),
+        )
+        manager = MagicMock()
+        manager.domain_parallel_size = 2
+        convert_to_domain_parallel(model, manager)
+        assert isinstance(model[0], DomainParallelConvTranspose3d)
+
+    def test_mixed_3d_model(self):
+        """Conv3d (embed) replaced, ConvTranspose3d (recover, kernel==stride) not replaced."""
+
+        class PanguPatchBlocks(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = nn.Conv3d(13, 192, kernel_size=(2, 4, 4), stride=(2, 4, 4))
+                self.recover = nn.ConvTranspose3d(192, 13, kernel_size=(2, 4, 4), stride=(2, 4, 4))
+
+            def forward(self, x):
+                return self.recover(self.embed(x))
+
+        model = PanguPatchBlocks()
+        manager = MagicMock()
+        manager.domain_parallel_size = 2
+        convert_to_domain_parallel(model, manager)
+
+        from credit.domain_parallel.layers import DomainParallelConv3d
+        assert isinstance(model.embed, DomainParallelConv3d)
+        assert isinstance(model.recover, nn.ConvTranspose3d)  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# PeriodicConv2d / custom_converters
+# ---------------------------------------------------------------------------
+
+class TestPeriodicConv2dConversion:
+    """Test DomainParallelPeriodicConv2d and custom_converters mechanism."""
+
+    def _make_periodic_conv(self, dim_in=8, dim_out=16, kernel_size=3, padding=1):
+        """Create a minimal PeriodicConv2d-like module (no model-zoo import needed)."""
+
+        class PeriodicConv2d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.padding = padding
+                self.conv = nn.Conv2d(dim_in, dim_out, kernel_size, padding=0)
+
+            def forward(self, x):
+                import torch.nn.functional as F
+                x = F.pad(x, (self.padding, self.padding, 0, 0), mode="circular")
+                x = F.pad(x, (0, 0, self.padding, self.padding), mode="reflect")
+                return self.conv(x)
+
+        return PeriodicConv2d()
+
+    def test_wraps_inner_conv_and_padding(self):
+        """DomainParallelPeriodicConv2d should hold the inner conv and padding."""
+        pc = self._make_periodic_conv()
+        dp = DomainParallelPeriodicConv2d(pc)
+        assert dp.conv is pc.conv
+        assert dp.padding == 1
+        assert dp.halo_exchange.halo_width == 1
+
+    def test_custom_converter_replaces_whole_module(self):
+        """custom_converters should replace PeriodicConv2d, not its inner conv."""
+        PeriodicConv2d = self._make_periodic_conv().__class__
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pc = PeriodicConv2d()
+
+            def forward(self, x):
+                return self.pc(x)
+
+        # Rebuild with the class, not the instance
+        class PeriodicConv2dClass(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.padding = 1
+                self.conv = nn.Conv2d(8, 16, 3, padding=0)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        model = nn.Sequential(PeriodicConv2dClass())
+        manager = MagicMock()
+        manager.domain_parallel_size = 2
+
+        convert_to_domain_parallel(
+            model, manager,
+            custom_converters={PeriodicConv2dClass: DomainParallelPeriodicConv2d},
+        )
+
+        assert isinstance(model[0], DomainParallelPeriodicConv2d)
+
+    def test_inner_conv_not_double_replaced(self):
+        """Inner nn.Conv2d of a custom-converted module must not also be replaced."""
+
+        class PeriodicConv2dClass(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.padding = 1
+                self.conv = nn.Conv2d(8, 16, 3, padding=0)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        model = nn.Sequential(PeriodicConv2dClass())
+        manager = MagicMock()
+        manager.domain_parallel_size = 2
+
+        convert_to_domain_parallel(
+            model, manager,
+            custom_converters={PeriodicConv2dClass: DomainParallelPeriodicConv2d},
+        )
+
+        # The wrapper should exist; its inner .conv must still be nn.Conv2d
+        dp = model[0]
+        assert isinstance(dp, DomainParallelPeriodicConv2d)
+        assert isinstance(dp.conv, nn.Conv2d), "Inner conv was double-replaced"
+
+    def test_without_custom_converters_inner_conv_replaced(self):
+        """Without custom_converters the inner Conv2d gets replaced (old behavior, now avoidable)."""
+
+        class PeriodicConv2dClass(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.padding = 1
+                self.conv = nn.Conv2d(8, 16, 3, padding=0)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        model = nn.Sequential(PeriodicConv2dClass())
+        manager = MagicMock()
+        manager.domain_parallel_size = 2
+
+        # No custom_converters — the inner conv still gets replaced
+        convert_to_domain_parallel(model, manager)
+
+        assert isinstance(model[0].conv, DomainParallelConv2d)
