@@ -96,48 +96,54 @@ def load_model_states_and_optimizer(conf, model, device):
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
         )
-        if conf["trainer"]["mode"] == "fsdp":
+        if conf["trainer"].get("mode", "none") == "fsdp":
             opt = FSDPOptimizerWrapper(opt, model)
         return opt
 
     if not load_weights:
         optimizer = _make_optimizer(model)
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp) if conf["trainer"].get("mode", "none") == "fsdp" else GradScaler(enabled=amp)
+        )
 
     elif load_weights and not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
         optimizer = _make_optimizer(model)
-        if conf["trainer"]["mode"] == "fsdp":
+        if conf["trainer"].get("mode", "none") == "fsdp":
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
         else:
             ckpt = torch.load(os.path.join(save_loc, "checkpoint.pt"), map_location=device)
-            load_msg = (model.module if conf["trainer"]["mode"] == "ddp" else model).load_state_dict(
+            load_msg = (model.module if conf["trainer"].get("mode", "none") == "ddp" else model).load_state_dict(
                 ckpt["model_state_dict"], strict=False
             )
             load_state_dict_error_handler(load_msg)
             if conf["trainer"].get("reload_epoch") and os.path.exists(os.path.join(save_loc, "training_log.csv")):
                 conf["trainer"]["start_epoch"] = ckpt["epoch"] + 1
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp) if conf["trainer"].get("mode", "none") == "fsdp" else GradScaler(enabled=amp)
+        )
 
     else:
         ckpt = torch.load(os.path.join(save_loc, "checkpoint.pt"), map_location=device)
         optimizer = _make_optimizer(model)
-        if conf["trainer"]["mode"] == "fsdp":
+        if conf["trainer"].get("mode", "none") == "fsdp":
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
             if load_optimizer_conf:
                 checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
         else:
-            load_msg = (model.module if conf["trainer"]["mode"] == "ddp" else model).load_state_dict(
+            load_msg = (model.module if conf["trainer"].get("mode", "none") == "ddp" else model).load_state_dict(
                 ckpt["model_state_dict"], strict=False
             )
             load_state_dict_error_handler(load_msg)
             if load_optimizer_conf:
                 optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler = load_scheduler(optimizer, conf)
-        scaler = ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        scaler = (
+            ShardedGradScaler(enabled=amp) if conf["trainer"].get("mode", "none") == "fsdp" else GradScaler(enabled=amp)
+        )
         if conf["trainer"].get("reload_epoch"):
             conf["trainer"]["start_epoch"] = ckpt["epoch"] + 1
         if conf["trainer"]["start_epoch"] > 0:
