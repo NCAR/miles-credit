@@ -13,6 +13,12 @@ import torch
 import torch.nn as nn
 from unittest.mock import MagicMock, patch
 
+# Applied to any test that actually spawns processes or calls dist.*
+requires_multi_gpu = pytest.mark.skipif(
+    torch.cuda.device_count() < 2,
+    reason="requires ≥2 GPUs",
+)
+
 from credit.domain_parallel.layers import (
     DomainParallelConv2d,
     DomainParallelConvTranspose2d,
