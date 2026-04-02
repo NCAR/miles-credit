@@ -85,19 +85,7 @@ def get_rollout_init_times(conf):
         return rollout_init_times
     
     elif forecast_conf["type"] == "custom":
-        start_dts = [pd.Timestamp(year=forecast_conf["start_year"],
-                                month=forecast_conf["start_month"],
-                                day=forecast_conf["start_day"],
-                                hour=hour)
-                                for hour in forecast_conf["start_hours"]
-        ]
-        ic_interval_days = pd.Timedelta(forecast_conf["ic_interval_days"], "d")
-        num_inits = forecast_conf["num_inits"]
-
-        rollout_init_times = []
-        for k in range(num_inits):
-            rollout_init_times += [start + k * ic_interval_days for start in start_dts]
-        
+        rollout_init_times = [pd.Timestamp(time) for time in forecast_conf["init_times"]]
         return rollout_init_times
 
     raise ValueError(f"{forecast_conf['type']} is not a valid rollout type")

@@ -55,7 +55,7 @@ class GOES10kmDataset(Dataset):
         if not self.evaluate:
             self.init_times = self._timestamps() # will generate valid init times if needed
             logger.info(f"initializing GOES10kmDataset with timestep [{self.timestep}] with {self.num_forecast_steps} steps")
-        else:
+        else: # don't need to handle init times, this is handled by rollout already
             self.init_times = self.ds.t
             logger.warning("loading dataset for with 0 forecast steps! only for eval")
         
@@ -79,17 +79,16 @@ class GOES10kmDataset(Dataset):
         
         logger.info(f"selecting rollout times with time tolerance {time_tol}")
         self.init_times = self.init_times.sel(t=rollout_init_times, method="nearest",
-                                              tolerance=pd.Timedelta(time_tol[0], time_tol[1])
+                                              tolerance=pd.Timedelta(*time_tol)
                                               )
 
     def _generate_valid_init_times(self, valid_init_filepath):
         # due to missing data, need to have a different list of valid init times
         def check_valid_forecast_times(t_init, timestep, num_forecast_steps):
-            time_tolerance = pd.Timedelta(11, "m")
+            time_tolerance = pd.Timedelta(3, "m")
             target_times = [t_init.values + timestep * step for step in range(1, num_forecast_steps + 1)]
             zarr_times = self.ds.t.sel(t=target_times, method="nearest")
-            within_tol = (zarr_times.values - np.array(target_times).astype(zarr_times.dtype)) < time_tolerance
-
+            within_tol = np.abs(zarr_times.values - np.array(target_times).astype(zarr_times.dtype)) < time_tolerance
             return all(within_tol)
 
         logger.info(f"generating valid init times and saving to {valid_init_filepath}. will take around 5 min")
@@ -154,9 +153,9 @@ class GOES10kmDataset(Dataset):
             return da.fillna(0.0)
 
     def __getitem__(self, args):
-        # default: load target state
         ts, mode = args
-
+        
+        # TODO: rollout needs to pick from valid_init_times
         ds = self.ds.sel(t=ts, method="nearest")
         # no need to check time tolerance, should be taken care of by init time generation
         

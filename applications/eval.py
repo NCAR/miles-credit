@@ -159,7 +159,7 @@ if __name__ == "__main__":
     )
     df.attrs["init_times"] = list(df_dict.keys())
 
-    result.sort(key= lambda x: x["forecast_step"]) # sort of forecast hours are in order
+    # df.sort(key= lambda x: x["forecast_step"]) # sort of forecast hours are in order
     df.to_parquet(eval_save_loc) # parquet keeps all the dtypes, don't have to split up np arrays in the entries
     logging.info(f"saved verification to {eval_save_loc}")
 
