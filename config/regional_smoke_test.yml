@@ -1,0 +1,160 @@
+# CREDIT V2 regional smoke test — quick train to confirm MSE drops and ACC rises.
+# Trimmed to 5 train batches + 2 val batches x 2 epochs.
+
+save_loc: '/glade/derecho/scratch/schreck/CREDIT_runs/regional_smoke'
+seed: 1000
+
+data:
+    dataset_type: "wrf_singlestep"
+
+    variables: ['WRF_P', 'WRF_U', 'WRF_V', 'WRF_T', 'WRF_Q_tot_05']
+    save_loc: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/C404_new/C404_GP_*.zarr'
+
+    surface_variables: ['WRF_SP', 'WRF_MSLP', 'WRF_T2', 'WRF_TD2', 'WRF_U10', 'WRF_V10', 'WRF_PWAT_05']
+    save_loc_surface: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/C404_new/C404_GP_*.zarr'
+
+    static_variables: ['z_norm', 'var_norm', 'lu_norm', 'LANDMASK']
+    save_loc_static: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/static/C404_GP_static.zarr'
+
+    levels: 12
+
+    mean_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/C404_mean_1980_2019_12lev.nc'
+    std_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/C404_std_residual_1980_2019_12lev_clean.nc'
+
+    train_years: [1980, 2019]
+    valid_years: [2019, 2020]
+
+    scaler_type: 'std-wrf'
+
+    history_len: 1
+    valid_history_len: 1
+    forecast_len: 0
+    valid_forecast_len: 0
+    one_shot: False
+    lead_time_periods: 1
+    skip_periods: null
+    static_first: True
+
+    boundary:
+        variables: ['U', 'V', 'T', 'Q']
+        save_loc: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/dscale_3h/*.zarr'
+
+        surface_variables: ['MSL', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+        save_loc_surface: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/dscale_3h/*.zarr'
+
+        levels: 11
+
+        mean_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/ERA5_3h_mean_1980_2019.nc'
+        std_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/ERA5_3h_std_1980_2019.nc'
+
+        history_len: 2
+        forecast_len: 0
+        lead_time_periods: 3
+
+
+trainer:
+    type: standard-wrf
+
+    mode: fsdp
+    cpu_offload: False
+    activation_checkpoint: False
+    checkpoint_all_layers: False
+    compile: False
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    save_backup_weights: False
+    save_best_weights: True
+    save_metric_vars: True
+
+    learning_rate: 1.0e-03
+    weight_decay: 1.0e-06
+
+    train_batch_size: 1
+    valid_batch_size: 1
+
+    batches_per_epoch: 5
+    valid_batches_per_epoch: 2
+    stopping_patience: 999
+    skip_validation: False
+
+    start_epoch: 0
+    epochs: 2
+
+    use_scheduler: True
+    scheduler:
+        scheduler_type: 'cosine-annealing'
+        T_max: 2
+        last_epoch: -1
+
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 32.0
+
+    thread_workers: 2
+    valid_thread_workers: 0
+    prefetch_factor: 2
+
+
+model:
+    type: "wrf"
+    levels: 12
+
+    param_interior:
+        frames: 1
+        image_height: 336
+        image_width: 336
+        levels: 12
+        channels: 5
+        surface_channels: 7
+        input_only_channels: 4
+        output_only_channels: 0
+        patch_height: 4
+        patch_width: 4
+        frame_patch_size: 1
+        dim: 1280
+
+    param_outside:
+        frames: 2
+        image_height: 336
+        image_width: 336
+        levels: 11
+        channels: 4
+        surface_channels: 4
+        patch_height: 4
+        patch_width: 4
+        frame_patch_size: 2
+        dim: 1280
+
+    time_encode_dim: 16
+    num_groups: 32
+    num_heads: 8
+    window_size: 7
+    depth: 36
+
+    use_spectral_norm: True
+    interp: False
+
+    padding_conf:
+        activate: False
+
+    post_conf:
+        activate: True
+        tracer_fixer:
+            activate: True
+            denorm: True
+            tracer_name: ['WRF_Q_tot_05', 'WRF_PWAT_05']
+            tracer_thres: [0, 0]
+
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+    use_power_loss: False
+    use_spectral_loss: False
+    latitude_weights: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/static/C404_GP_static.zarr'
+    use_latitude_weights: False
+    use_variable_weights: False

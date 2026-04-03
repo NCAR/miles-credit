@@ -248,7 +248,7 @@ def setup_data_loading(conf):
     else:
         one_shot = conf["data"]["one_shot"]
 
-    if conf["data"]["sst_forcing"]["activate"]:
+    if conf["data"].get("sst_forcing", {}).get("activate", False):
         sst_forcing = {
             "varname_skt": conf["data"]["sst_forcing"]["varname_skt"],
             "varname_ocean_mask": conf["data"]["sst_forcing"]["varname_ocean_mask"],
