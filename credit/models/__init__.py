@@ -8,7 +8,7 @@ import logging
 # (bridgescaler → numba) may conflict with newer NumPy (≥2.3) environments.
 # Zoo models (below) have no such dependency and always load cleanly.
 try:
-    from credit.models.crossformer.crossformer import CrossFormer
+    from credit.models.crossformer import CrossFormer
     from credit.models.camulator import Camulator
     from credit.models.unet import SegmentationModel
     from credit.models.fuxi import Fuxi
