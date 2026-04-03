@@ -121,14 +121,64 @@ padding_conf:
     pad_lon: 48
 ```
 
-## Graph Transformer 
+## Graph Transformer
 
-Arnold to add discussion. 
+Arnold to add discussion.
 
-## Unet 
+## Unet
 
-Add Discussion 
+Add Discussion
 
-## WxFormer Diffusion 
+## WxFormer Diffusion
 
-Will to add discussion. 
+Will to add discussion.
+
+---
+
+## `torch.compile` Compatibility
+
+`torch.compile` can significantly speed up both training and inference by fusing ops and reducing Python overhead.
+Not all models in the zoo are compatible — the main blocker is `torch.nn.utils.spectral_norm`.
+
+### Why spectral norm blocks compilation
+
+`spectral_norm` works by registering a forward hook that recomputes a normalized weight on every call.
+`torch.compile`'s graph tracer cannot see through these hooks and raises a graph break (or errors out in `fullgraph=True` mode).
+Spectral norm is used **intentionally** in several CREDIT models to prevent rollout explosions — do not remove it.
+
+### Quick reference
+
+| Model | Compiles? | What to do |
+|-------|:---------:|------------|
+| `wxformer` / `wxformer-sdl` / `wxformer-v2-sdl` | ✗ default | Set `use_spectral_norm: false` in `model:` config |
+| `crossformer` / `fuxi` / `swin` / `camulator` / `graph` | ✗ default | Set `use_spectral_norm: false` in `model:` config |
+| `sfno` / `fourcastnet3` | ⚠ | Don't install `torch-harmonics`; rfft2 fallback compiles |
+| `graphcast` | ⚠ | Use `torch.compile(model, dynamic=True)` |
+| All others | ✓ | Works out of the box |
+
+### Disabling spectral norm to enable compilation
+
+All CREDIT-native models that use spectral norm expose a `use_spectral_norm` config flag:
+
+```yaml
+model:
+  type: wxformer
+  use_spectral_norm: false   # ← disables spectral norm; required for torch.compile
+```
+
+Then compile as usual:
+
+```python
+model = torch.compile(model)
+```
+
+> **Warning:** Spectral norm is on by default because it is critical for long-rollout stability.
+> Disabling it can cause divergence after tens of autoregressive steps.
+> Only set `use_spectral_norm: false` if you have verified that your model remains stable without it.
+> Native `torch.compile` support while keeping spectral norm is planned for a future release.
+
+### SFNO / FourCastNet3: disabling torch-harmonics
+
+When `torch-harmonics` is installed, these models use Spherical Harmonic Transforms (SHTs) whose CUDA
+kernels cause graph breaks under `torch.compile`. To use the rfft2 fallback (which compiles cleanly),
+simply do not install `torch-harmonics` in your environment. 

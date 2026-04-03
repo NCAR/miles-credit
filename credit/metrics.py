@@ -199,11 +199,15 @@ class LatWeightedMetricsClimatology:
         anomalies_pred = torch.stack(anomalies_pred, dim=1)
         anomalies_y = torch.stack(anomalies_y, dim=1)
 
-        for i, var in enumerate(self.acc_vars):
-            pred_prime = anomalies_pred[:, i] - torch.mean(anomalies_pred[:, i])
-            y_prime = anomalies_y[:, i] - torch.mean(anomalies_y[:, i])
+        # Iterate over ordered_acc_vars so indices into anomalies_pred/y are correct.
+        # Standard ACC (WB2/WMO): latitude-weighted correlation of (forecast - clim)
+        # vs (obs - clim).  No additional mean removal — the climatology subtraction
+        # already centres the anomalies.
+        for i, var in enumerate(ordered_acc_vars):
+            pred_prime = anomalies_pred[:, i]
+            y_prime = anomalies_y[:, i]
 
-            # Offset the denominator incase its zero.
+            # Offset the denominator in case it's zero.
             denominator = torch.sqrt(torch.sum(w_var * w_lat * pred_prime**2) * torch.sum(w_var * w_lat * y_prime**2))
             denominator = torch.maximum(denominator, torch.tensor(1e-8, device=denominator.device))
             loss_dict[f"acc_{var}"] = torch.sum(w_var * w_lat * pred_prime * y_prime) / denominator
