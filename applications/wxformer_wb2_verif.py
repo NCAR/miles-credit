@@ -1,9 +1,9 @@
 """
-WXFormer v2 WeatherBench-style ACC and RMSE verification.
+WXFormer WeatherBench-style ACC and RMSE verification.
 
 Output format matches the CREDIT-arXiv verification files exactly:
-  ACC_006h_240h_wxformer_v2.nc  : dims (days, time=40), vars Z500/T500/U500/V500/Q500/SP/t2m
-  RMSE_006h_240h_wxformer_v2.nc : same 2D vars + U/V/T/Q at level=120
+  ACC_006h_240h_wxformer.nc  : dims (days, time=40), vars Z500/T500/U500/V500/Q500/SP/t2m
+  RMSE_006h_240h_wxformer.nc : same 2D vars + U/V/T/Q at level=120
 
 Methodology:
   - Spatial average: da.weighted(cos(lat)/mean(cos(lat))).mean(['latitude','longitude'])
@@ -42,7 +42,7 @@ DEFAULT_CESM_GLOB = (
     "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr"
 )
 DEFAULT_CLIM_PATH = "/glade/campaign/cisl/aiml/ksha/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc"
-DEFAULT_OUT = "/glade/work/schreck/CREDIT_verif/wxformer_v2"
+DEFAULT_OUT = "/glade/work/schreck/CREDIT_verif/wxformer"
 
 # 40 lead times: 6h...240h (matches CREDIT-arXiv convention)
 LEAD_HOURS = list(range(6, 241, 6))
@@ -178,7 +178,7 @@ def _build_dataset(results_list, kind):
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="WXFormer v2 WeatherBench ACC+RMSE verification")
+    parser = argparse.ArgumentParser(description="WXFormer WeatherBench ACC+RMSE verification")
     parser.add_argument("--forecast", required=True, help="Root dir of forecast NetCDFs (one subdir per init date)")
     parser.add_argument("--out", default=DEFAULT_OUT)
     parser.add_argument("--cesm", default=DEFAULT_CESM_GLOB)
@@ -347,8 +347,8 @@ def main():
     ds_acc = _build_dataset(results, "acc")
     ds_rmse = _build_dataset(results, "rmse")
 
-    acc_path = os.path.join(args.out, "ACC_006h_240h_wxformer_v2.nc")
-    rmse_path = os.path.join(args.out, "RMSE_006h_240h_wxformer_v2.nc")
+    acc_path = os.path.join(args.out, "ACC_006h_240h_wxformer.nc")
+    rmse_path = os.path.join(args.out, "RMSE_006h_240h_wxformer.nc")
     ds_acc.to_netcdf(acc_path)
     ds_rmse.to_netcdf(rmse_path)
     logger.info(f"ACC  → {acc_path}")
@@ -360,10 +360,10 @@ def main():
         end = min(start + 100, n)
         batch = results[start:end]
         _build_dataset(batch, "acc").to_netcdf(
-            os.path.join(args.out, f"combined_acc_{start:04d}_{end:04d}_006h_240h_wxformer_v2.nc")
+            os.path.join(args.out, f"combined_acc_{start:04d}_{end:04d}_006h_240h_wxformer.nc")
         )
         _build_dataset(batch, "rmse").to_netcdf(
-            os.path.join(args.out, f"combined_rmse_{start:04d}_{end:04d}_006h_240h_wxformer_v2.nc")
+            os.path.join(args.out, f"combined_rmse_{start:04d}_{end:04d}_006h_240h_wxformer.nc")
         )
 
     logger.info("Done.")

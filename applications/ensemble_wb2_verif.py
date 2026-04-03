@@ -139,7 +139,7 @@ def main():
     parser.add_argument("--out", default=DEFAULT_OUT)
     parser.add_argument("--cesm", default=DEFAULT_CESM_GLOB)
     parser.add_argument("--clim", default=DEFAULT_CLIM_PATH)
-    parser.add_argument("--tag", default="ensemble", help="Tag appended to output filenames (e.g. 'wxformer_v2_ens')")
+    parser.add_argument("--tag", default="ensemble", help="Tag appended to output filenames (e.g. 'wxformer_ens')")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 

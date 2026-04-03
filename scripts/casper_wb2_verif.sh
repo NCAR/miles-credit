@@ -12,11 +12,11 @@ PYTHON=/glade/u/home/schreck/.conda/envs/credit-casper/bin/python
 FORECAST=/glade/derecho/scratch/schreck/CREDIT_runs/ensemble/production/sixteen_tune/netcdf
 CESM="/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr"
 CLIM="/glade/campaign/cisl/aiml/ksha/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc"
-OUT=/glade/work/schreck/CREDIT_verif/wxformer_v2
+OUT=/glade/work/schreck/CREDIT_verif/wxformer
 
 export PYTHONPATH="${REPO}:${PYTHONPATH}"
 
-echo "=== WXFormer v2 WB verification ==="
+echo "=== WXFormer WB verification ==="
 echo "Node   : $(hostname)"
 echo "Date   : $(date)"
 echo "Branch : $(git -C ${REPO} rev-parse --abbrev-ref HEAD)"
