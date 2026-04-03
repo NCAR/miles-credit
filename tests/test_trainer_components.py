@@ -9,6 +9,7 @@ import pytest
 
 try:
     from credit.trainers.base_trainer import EMATracker, BaseTrainer
+    from credit.scheduler import LinearWarmupCosineScheduler
 
     _TRAINER_V2_AVAILABLE = True
 except ImportError:
@@ -16,10 +17,8 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(
     not _TRAINER_V2_AVAILABLE,
-    reason="EMATracker not available until v2/trainer-preblocks is merged",
+    reason="EMATracker / LinearWarmupCosineScheduler not available until v2/trainer-preblocks is merged",
 )
-
-from credit.scheduler import LinearWarmupCosineScheduler  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
