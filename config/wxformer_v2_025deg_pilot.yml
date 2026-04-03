@@ -151,7 +151,7 @@ model:
     padding_conf:
         activate: True
         mode: earth
-        pad_lat: [16, 16]   # 640+32=672; 672//32=21, 21%3=0 ✓
+        pad_lat: [64, 64]   # 640+128=768; domain=2: shard=384; 384/4=96/2=48/2=24/2=12; 12%3=0 ✓
         pad_lon: [32, 32]   # 1280+64=1344; 1344//32=42, 42%3=0 ✓
 
     post_conf:
@@ -160,7 +160,7 @@ model:
 loss:
     training_loss: "mse"
     validation_loss: "mse"
-    use_latitude_weights: True
+    use_latitude_weights: False
 
 predict:
     mode: none
