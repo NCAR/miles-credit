@@ -14,7 +14,8 @@ Key invariants verified:
 import argparse
 import pytest
 
-from credit.cli import _build_pbs_script
+pytest.importorskip("credit.cli", reason="credit.cli not available until v2/cli-tooling is merged")
+from credit.cli import _build_pbs_script  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

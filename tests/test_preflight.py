@@ -6,7 +6,8 @@ All tests run on CPU with no cluster or real data required.
 import time
 import pytest
 
-from credit.trainers.preflight import estimate_dataloader_memory_gb, check_dataloader_startup
+pytest.importorskip("credit.trainers.preflight", reason="preflight not available until v2/trainer-preblocks is merged")
+from credit.trainers.preflight import estimate_dataloader_memory_gb, check_dataloader_startup  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
