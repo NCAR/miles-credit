@@ -33,12 +33,6 @@ except ImportError as _legacy_import_err:
     )
     _LEGACY_MODELS_AVAILABLE = False
 
-try:
-    from credit.models.wxformer.wxformer_v2_ensemble import CrossFormerV2WithNoise
-
-    _WXFORMER_V2_SDL = True
-except ImportError:
-    _WXFORMER_V2_SDL = False
 from credit.models.aurora.model import CREDITAurora
 from credit.models.pangu.pangu import CREDITPangu
 from credit.models.aifs.aifs import CREDITAifs
@@ -129,12 +123,6 @@ if _LEGACY_MODELS_AVAILABLE:
             ),
             "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
         }
-    )
-
-if _WXFORMER_V2_SDL:
-    model_types["wxformer-v2-sdl"] = (
-        CrossFormerV2WithNoise,
-        "Loading the WXFormer v2 SDL ensemble model ...",
     )
 
 

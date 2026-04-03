@@ -11,7 +11,6 @@ https://doi.org/10.1038/s41612-025-01125-6
 |---|---|---|---|
 | `crossformer.py` | `CrossFormer` | `wxformer` | Deterministic backbone |
 | `crossformer_ensemble.py` | `CrossFormerWithNoise` | `wxformer-sdl` | SDL ensemble (v1 backbone) |
-| `wxformer_v2_ensemble.py` | `CrossFormerV2WithNoise` | `wxformer-v2-sdl` | SDL ensemble (v2 backbone, WIP) |
 
 Legacy alias: `crossformer-style` → same as `wxformer-sdl` (kept so old scheduler configs don't break).
 
