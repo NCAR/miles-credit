@@ -5,10 +5,17 @@ config: "/glade/derecho/scratch/dkimpara/goes_10km_train/10m_big/model.yml"
 # [Optional] location of forecast data. default: model config's save_forecast location (above)
 save_forecast: "/glade/derecho/scratch/dkimpara/goes_10km_train/10m_big/test_forecasts"
 
+<<<<<<< HEAD
 # [Optional] filename to save eval results filename default: ensemble_eval.parquet
 # will save to save_forecast, or the default value of save_forecast
 save_filename: "verif.parquet"
 
+=======
+# [Optional] filename to save eval results filename default: verif.parquet
+# will save to directory save_forecast, or the default value of save_forecast
+save_filename: "verif.parquet"
+overwrite: True
+>>>>>>> upstream/goes10km
 verification_type: "goes-10km"
 
 ############ custom eval configs ############
@@ -21,7 +28,11 @@ sky_categories:
     medium: [210, 235]
     low: [235, 260]
     none: [260, 1000]
+<<<<<<< HEAD
 fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 18, 20, 30, 40, 50, 60, 70, 80, 90, 100, 150, 200, 250] #synoptic scale at 2500km
+=======
+fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 18, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 150, 200, 250] #synoptic scale at 2500km
+>>>>>>> upstream/goes10km
 # fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 #############################################

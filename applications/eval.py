@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import multiprocessing as mp
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -98,9 +99,12 @@ if __name__ == "__main__":
     conf["save_filename"] = conf.get("save_filename", "verif.parquet")
     # check that we are not overwriting an existing eval file
     eval_save_loc = join(forecast_save_loc, conf["save_filename"])
-    assert not os.path.isfile(eval_save_loc), (
-            f'''{conf["save_filename"]} results already exists at {eval_save_loc}, aborting. 
-            Move or rename the existing file to run this script''')
+    if not conf.get("overwrite", False):
+        assert not os.path.isfile(eval_save_loc), (
+                f'''{conf["save_filename"]} results already exists at {eval_save_loc}, aborting. 
+                Move or rename the existing file to run this script''')
+    else:
+        logging.warning(f"potentially overwriting existing file {conf['save_filename']}")
 
     # get forecast dirs
     dirs = [d for d in Path(forecast_save_loc).iterdir() if d.is_dir() and is_timestamp(d.name)]
@@ -153,14 +157,22 @@ if __name__ == "__main__":
                 f"saved verification of {dir.name} to {intermediate_eval_save_loc}"
             )
 
-    # take average of all verifications and save
-    df = sum(df_dict.values()) / len(df_dict.values())
+    # take nanmean of all verifications and save
+    def nanmean_cell(*values):
+        arrays = [np.atleast_1d(np.array(v, dtype=float)) for v in values]
+        result = np.nanmean(arrays, axis=0)
+        return result[0] if result.size == 1 else result
+    
+    dfs = list(df_dict.values())
+    df = pd.DataFrame(
+        {col: [nanmean_cell(*values) for values in zip(*[df[col] for df in dfs])]
+        for col in dfs[0].columns},
+        index=dfs[0].index
+    )
     df.attrs["init_times"] = list(df_dict.keys())
 
-    result.sort(key=lambda x: x["forecast_step"])  # sort of forecast hours are in order
-    df.to_parquet(
-        eval_save_loc
-    )  # parquet keeps all the dtypes, don't have to split up np arrays in the entries
+    # df.sort(key= lambda x: x["forecast_step"]) # sort of forecast hours are in order
+    df.to_parquet(eval_save_loc) # parquet keeps all the dtypes, don't have to split up np arrays in the entries
     logging.info(f"saved verification to {eval_save_loc}")
 
     # Ensure all processes are finished
