@@ -265,10 +265,8 @@ def main(rank, world_size, conf, backend=None, trial=False):
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
-    train_criterion = load_loss(conf)
-    valid_criterion = load_loss(conf, validation=True)
-
-    # LatWeightedMetrics expects old-schema keys; inject from new schema if absent
+    # Inject v1-schema keys expected by load_loss and LatWeightedMetrics.
+    # Must happen before load_loss — VariableTotalLoss2D reads conf["data"]["variables"].
     if "variables" not in conf["data"]:
         era5_vars = conf["data"]["source"]["ERA5"]["variables"]
         prog = era5_vars.get("prognostic") or {}
@@ -276,6 +274,9 @@ def main(rank, world_size, conf, backend=None, trial=False):
         conf["data"]["variables"] = prog.get("vars_3D", [])
         conf["data"]["surface_variables"] = prog.get("vars_2D", [])
         conf["data"]["diagnostic_variables"] = diag.get("vars_3D", []) + diag.get("vars_2D", []) if diag else []
+
+    train_criterion = load_loss(conf)
+    valid_criterion = load_loss(conf, validation=True)
 
     metrics = LatWeightedMetrics(conf)
 
