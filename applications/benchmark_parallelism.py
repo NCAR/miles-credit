@@ -107,8 +107,20 @@ def main():
 
     # Handle domain sharding: shard x/y along H if domain > 1
     domain = p_conf.get("domain", 1)
+    raw_m = model
+    while hasattr(raw_m, "module"):
+        raw_m = raw_m.module
+    _skip_pad = False
     if domain > 1:
-        h_per = H // domain
+        # Pre-pad full tensor before sharding so each shard gets correct H
+        # (same logic as trainer's _domain_pre_pad path)
+        if getattr(raw_m, "use_padding", False):
+            x = raw_m.padding_opt.pad(x)
+            y = torch.randn(1, out_ch, x.shape[-2], x.shape[-1], device=device)
+            raw_m._skip_internal_padding = True
+            _skip_pad = True
+        padded_h = x.shape[-2]
+        h_per = padded_h // domain
         x = x[..., rank % domain * h_per : (rank % domain + 1) * h_per, :]
         y = y[..., rank % domain * h_per : (rank % domain + 1) * h_per, :]
 
@@ -120,7 +132,8 @@ def main():
         # Model may return [B, C, T, H, W]; collapse T if present
         if pred.dim() == 5:
             pred = pred.squeeze(2)
-        loss = criterion(pred, y.to(pred.dtype))
+        # When pre-padding is active, pred/y are in padded-shard space — match shapes
+        loss = criterion(pred, y[..., : pred.shape[-2], : pred.shape[-1]].to(pred.dtype))
         loss.backward()
         optimizer.step()
 

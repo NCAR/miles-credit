@@ -59,12 +59,14 @@ run_bench "fsdp2_dp4" --data fsdp2 --tensor 1 --domain 1
 # 2. FSDP2 + TP=2 — 2 dp × 2 tp
 run_bench "fsdp2_dp2_tp2" --data fsdp2 --tensor 2 --domain 1
 
-# 3. DDP — 4 replicas, no sharding
-run_bench "ddp_dp4" --data ddp --tensor 1 --domain 1
+# 3. FSDP2 + domain=2 — 2 dp × 2 domain
+run_bench "fsdp2_dp2_domain2" --data fsdp2 --tensor 1 --domain 2
 
-# 4. No parallelism — single logical replica across 4 GPUs (FSDP2 outermost only)
-#    equivalent to fsdp2 with dp=4 but ac=False for baseline
-run_bench "fsdp2_dp4_noac" --data fsdp2 --tensor 1 --domain 1
+# 4. FSDP2 + TP=2 + domain=2 — 3-way: 1 dp × 2 tp × 2 domain
+run_bench "fsdp2_tp2_domain2" --data fsdp2 --tensor 2 --domain 2
+
+# 5. DDP — 4 replicas, static_graph=True (spectral norm safe)
+run_bench "ddp_dp4" --data ddp --tensor 1 --domain 1
 
 echo "=== sweep complete ==="
 echo "$(date)"

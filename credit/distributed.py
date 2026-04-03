@@ -408,7 +408,7 @@ def distributed_model_wrapper_v2(conf: dict, model, device):
 
     elif data_mode == "ddp":
         dp_group = dp_mesh.get_group() if dp_mesh is not None else None
-        ddp_kwargs = dict(device_ids=[device], find_unused_parameters=False)
+        ddp_kwargs = dict(device_ids=[device], static_graph=True)
         if dp_group is not None:
             ddp_kwargs["process_group"] = dp_group
         model = torch.nn.parallel.DistributedDataParallel(model, **ddp_kwargs)

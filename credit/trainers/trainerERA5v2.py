@@ -48,6 +48,11 @@ def _unpad_shard_interp(y_pred, padding_opt, manager, image_h, image_w):
     """
     import torch.nn.functional as F
 
+    # Model may return [B, C, T, H, W]; collapse T for spatial ops
+    squeezed = y_pred.dim() == 5
+    if squeezed:
+        y_pred = y_pred.squeeze(2)
+
     n = manager.domain_parallel_size
 
     # --- W unpad (same for all shards) ---
@@ -68,6 +73,9 @@ def _unpad_shard_interp(y_pred, padding_opt, manager, image_h, image_w):
     shard_h = image_h // n
     if y_pred.shape[-2] != shard_h or y_pred.shape[-1] != image_w:
         y_pred = F.interpolate(y_pred, size=(shard_h, image_w), mode="bilinear", align_corners=False)
+
+    if squeezed:
+        y_pred = y_pred.unsqueeze(2)
 
     return y_pred
 
@@ -105,7 +113,11 @@ def _sync_domain_gradients(model, manager):
     group = manager.domain_group
     for p in model.parameters():
         if p.grad is not None:
-            dist.all_reduce(p.grad, op=dist.ReduceOp.AVG, group=group)
+            # FSDP2 params have DTensor grads — unwrap to local shard before all_reduce
+            grad = p.grad
+            if hasattr(grad, "to_local"):
+                grad = grad.to_local()
+            dist.all_reduce(grad, op=dist.ReduceOp.AVG, group=group)
 
 
 class Trainer(BaseTrainer):

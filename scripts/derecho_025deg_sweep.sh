@@ -12,7 +12,7 @@ set -euo pipefail
 REPO=/glade/work/schreck/repos/miles-credit-main
 BASE_CONFIG=${REPO}/config/wxformer_v2_025deg_pilot.yml
 ACCOUNT=${PBS_ACCOUNT:-NAML0001}
-CONDA_ENV=/glade/work/schreck/conda-envs/credit-main-casper
+CONDA_ENV=/glade/work/schreck/conda-envs/credit-main-derecho
 QUEUE=${DERECHO_QUEUE:-develop}   # develop for fast turnaround; swap to main for production
 
 # Parse optional --account / --queue flags
@@ -24,11 +24,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# develop queue is capped at 1 hr; main can run longer
-if [[ "${QUEUE}" == "develop" ]]; then
-    WALLTIME="01:00:00"
+# develop/gpudev: short walltime; main/gpu: longer
+if [[ "${QUEUE}" == "develop" || "${QUEUE}" == "gpudev" ]]; then
+    WALLTIME="00:10:00"
 else
-    WALLTIME="04:00:00"
+    WALLTIME="00:30:00"
 fi
 
 # ── parallelism configs ──────────────────────────────────────────────────────
@@ -95,21 +95,44 @@ export PYTHONNOUSERSITE=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export LOGLEVEL=INFO
 export NCCL_DEBUG=WARN
-export NCCL_SOCKET_IFNAME=ib0
-export GLOO_SOCKET_IFNAME=ib0
-export FI_CXI_ATS=0
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export NCCL_SOCKET_IFNAME=hsn
+export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+export MPICH_OFI_NIC_POLICY=GPU
+export MPICH_GPU_SUPPORT_ENABLED=1
+export NCCL_IB_DISABLE=1
+export NCCL_CROSS_NIC=1
+export NCCL_NCHANNELS_PER_NET_PEER=4
+export MPICH_RDMA_ENABLED_CUDA=1
+export FI_CXI_DISABLE_HOST_REGISTER=1
+export FI_CXI_OPTIMIZED_MRS=false
+export FI_MR_CACHE_MONITOR=userfaultfd
+export FI_CXI_DEFAULT_CQ_SIZE=131072
 
-MASTER_ADDR=\$(hostname)
-MASTER_PORT=29500
+if [[ ${nnodes} -eq 1 ]]; then
+    torchrun \\
+        --standalone \\
+        --nnodes=1 \\
+        --nproc-per-node=${ngpus} \\
+        ${REPO}/applications/train_v2.py \\
+        -c ${patched}
+else
+    nodes=( \$( cat \$PBS_NODEFILE ) )
+    head_node=\${nodes[0]}
+    head_node_ip=\$(ssh \$head_node hostname -i | awk '{print \$1}')
+    RDZV_PORT=\$(( RANDOM % 10000 + 20000 ))
 
-torchrun \\
-    --nnodes=${nnodes} \\
-    --nproc-per-node=${ngpus} \\
-    --master-addr=\${MASTER_ADDR} \\
-    --master-port=\${MASTER_PORT} \\
-    ${REPO}/applications/train_v2.py \\
-    -c ${patched}
+    mpiexec -n ${total_gpus} --ppn ${ngpus} \\
+        torchrun \\
+            --nnodes=${nnodes} \\
+            --nproc-per-node=${ngpus} \\
+            --rdzv-backend=c10d \\
+            --rdzv-endpoint=\${head_node_ip}:\${RDZV_PORT} \\
+            ${REPO}/applications/train_v2.py \\
+            -c ${patched}
+fi
 PBSEOF
 
     local job_id
