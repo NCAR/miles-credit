@@ -3,6 +3,18 @@ import sys
 import copy
 import logging
 
+# WXFormer (v1) imports — independent of legacy numba/bridgescaler dependencies.
+try:
+    from credit.models.wxformer.crossformer import CrossFormer as WXFormer
+    from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
+    from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
+    from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
+
+    _WXFORMER_AVAILABLE = True
+except (ImportError, Exception) as _wxformer_import_err:
+    logging.warning(f"WXFormer imports unavailable: {_wxformer_import_err}.")
+    _WXFORMER_AVAILABLE = False
+
 # Legacy model imports — wrapped in try/except because their transitive dependencies
 # (bridgescaler → numba) may conflict with newer NumPy (≥2.3) environments.
 try:
@@ -13,11 +25,7 @@ try:
     from credit.models.swin import SwinTransformerV2Cr
     from credit.models.graph import GraphResTransfGRU
     from credit.models.debugger_model import DebuggerModel
-    from credit.models.wxformer.crossformer import CrossFormer as WXFormer
-    from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
-    from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
     from credit.models.unet_downscaling import DownscalingSegmentationModel
-    from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
     from credit.models.unet_diffusion import UnetDiffusion
     from credit.diffusion import ModifiedGaussianDiffusion
     from credit.models.swin_wrf import WRFTransformer
@@ -34,16 +42,9 @@ logger = logging.getLogger(__name__)
 # Define model types and their corresponding classes
 model_types = {}
 
-if _LEGACY_MODELS_AVAILABLE:
+if _WXFORMER_AVAILABLE:
     model_types.update(
         {
-            "crossformer": (
-                CrossFormer,
-                "Loading the CrossFormer model with a conv decoder head and skip connections ...",
-            ),
-            "camulator": (Camulator, "Loading the CAMulator model with a conv decoder head and skip connections ..."),
-            "crossformer-diffusion": (CrossFormerDiffusion, "Loading A DDPM model with CrossFormer Backbone ..."),
-            "unet-diffusion": (UnetDiffusion, "Loading A DDPM model with UNET Backbone ..."),
             "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
             "crossformer-ensemble": (
                 CrossFormerWithNoise,
@@ -53,6 +54,20 @@ if _LEGACY_MODELS_AVAILABLE:
                 CrossFormerWithNoise,
                 "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
             ),
+            "crossformer-diffusion": (CrossFormerDiffusion, "Loading A DDPM model with CrossFormer Backbone ..."),
+            "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
+        }
+    )
+
+if _LEGACY_MODELS_AVAILABLE:
+    model_types.update(
+        {
+            "crossformer": (
+                CrossFormer,
+                "Loading the CrossFormer model with a conv decoder head and skip connections ...",
+            ),
+            "camulator": (Camulator, "Loading the CAMulator model with a conv decoder head and skip connections ..."),
+            "unet-diffusion": (UnetDiffusion, "Loading A DDPM model with UNET Backbone ..."),
             "unet": (SegmentationModel, "Loading a unet model"),
             "fuxi": (Fuxi, "Loading Fuxi model"),
             "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
@@ -60,7 +75,6 @@ if _LEGACY_MODELS_AVAILABLE:
             "debugger": (DebuggerModel, "Loading the debugger model"),
             "wrf": (WRFTransformer, "Loading WRF Transformer"),
             "dscale": (DscaleTransformer, "Loading downscaling Transformer"),
-            "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
             "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
         }
     )
