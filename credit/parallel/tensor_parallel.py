@@ -257,46 +257,34 @@ def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
     Converts in-place. Safe to call before apply_fsdp2.
 
     Args:
-        model: The model to convert (e.g. CrossFormer / WXFormer v2).
+        model: The model to convert (e.g. CrossFormer / WXFormer).
         tp_mesh: 1-D DeviceMesh for the tensor-parallel dimension.
 
     Returns:
         model (same object, modified in-place).
     """
     try:
-        from credit.models.wxformer.wxformer_v2 import (
+        from credit.models.wxformer.crossformer import (
             FeedForward,
-            FeedForwardSwiGLU,
-            GridAttention,
             Attention,
         )
     except ImportError:
-        logger.warning("wxformer_v2 not found — tensor parallelism skipped")
+        logger.warning("crossformer not found — tensor parallelism skipped")
         return model
 
     tp_group = _tp_group_from_mesh(tp_mesh)
 
-    counts = {"ff": 0, "swiglu": 0, "grid_attn": 0, "window_attn": 0}
+    counts = {"ff": 0, "window_attn": 0}
 
     # Walk named children; replace in parent
     for parent_name, parent in model.named_modules():
         for name, module in list(parent.named_children()):
-            if isinstance(module, FeedForwardSwiGLU):
-                setattr(parent, name, _convert_swiglu(module, tp_group))
-                counts["swiglu"] += 1
-            elif isinstance(module, FeedForward):
+            if isinstance(module, FeedForward):
                 setattr(parent, name, _convert_feedforward(module, tp_group))
                 counts["ff"] += 1
-            elif isinstance(module, GridAttention):
-                setattr(parent, name, _convert_grid_attention(module, tp_group))
-                counts["grid_attn"] += 1
             elif isinstance(module, Attention):
                 setattr(parent, name, _convert_window_attention(module, tp_group))
                 counts["window_attn"] += 1
 
-    logger.info(
-        f"Tensor parallelism applied: "
-        f"{counts['swiglu']} SwiGLU, {counts['ff']} FF, "
-        f"{counts['grid_attn']} GridAttn, {counts['window_attn']} WindowAttn"
-    )
+    logger.info(f"Tensor parallelism applied: {counts['ff']} FF, {counts['window_attn']} WindowAttn")
     return model

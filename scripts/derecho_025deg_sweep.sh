@@ -1,16 +1,16 @@
 #!/bin/bash
-# Submit 0.25-deg WXFormer v2 pilot training for all parallelism modes.
+# Submit parallelism pilot training sweep on Derecho for all parallelism modes.
 # Each job uses 1 Derecho node (4 × H100), 10 epochs, 200 batches/epoch.
 # Goal: confirm loss decreases under FSDP2, FSDP2+TP=2, FSDP2+domain=2, and FSDP2+TP=2+domain=2.
 #
 # Usage: bash scripts/derecho_025deg_sweep.sh [--account ACCOUNT]
 #
-# Output goes to: /glade/derecho/scratch/$USER/CREDIT_runs/025deg_pilot_<mode>/
+# Output goes to: /glade/derecho/scratch/$USER/CREDIT_runs/pilot_<mode>/
 
 set -euo pipefail
 
 REPO=/glade/work/schreck/repos/miles-credit-main
-BASE_CONFIG=${REPO}/config/wxformer_v2_025deg_pilot.yml
+BASE_CONFIG=${REPO}/config/fsdp2_parallel_test.yml
 ACCOUNT=${PBS_ACCOUNT:-NAML0001}
 CONDA_ENV=/glade/work/schreck/conda-envs/credit-main-derecho
 QUEUE=${DERECHO_QUEUE:-develop}   # develop for fast turnaround; swap to main for production
@@ -48,7 +48,7 @@ submit_one() {
     local dom=${DOMAIN[$idx]}
     local ngpus=${NGPUS[$idx]}
     local nnodes=${NNODES[$idx]}
-    local save_loc="/glade/derecho/scratch/${USER}/CREDIT_runs/025deg_pilot_${name}"
+    local save_loc="/glade/derecho/scratch/${USER}/CREDIT_runs/pilot_${name}"
 
     # Create output dir and patch config
     mkdir -p "${save_loc}"
@@ -140,7 +140,7 @@ PBSEOF
     echo "  Submitted ${jobname}  →  ${job_id}  (save: ${save_loc})"
 }
 
-echo "=== 0.25-deg WXFormer v2 pilot sweep ==="
+echo "=== Parallelism pilot sweep ==="
 echo "Base config : ${BASE_CONFIG}"
 echo "Account     : ${ACCOUNT}"
 echo "Queue       : ${QUEUE}  (walltime: ${WALLTIME})"

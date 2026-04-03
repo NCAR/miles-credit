@@ -1,0 +1,15 @@
+# ClimaX — 1.40625° ERA5 (Nguyen et al. 2023, Microsoft Research / UCLA)
+# Checkpoint: /glade/derecho/scratch/schreck/credit_zoo/climax/1.40625deg.ckpt
+# MIT License.  8-block ViT backbone (105 keys) loads cleanly; per-variable embedding initialized fresh.
+type: climax
+pretrained_weights: /glade/derecho/scratch/schreck/credit_zoo/climax/1.40625deg.ckpt
+in_channels: 69
+out_channels: 69
+img_size: [128, 256]
+patch_size: 4
+embed_dim: 1024
+depth: 8
+num_heads: 16
+mlp_ratio: 4.0
+drop_rate: 0.0
+agg_depth: 2

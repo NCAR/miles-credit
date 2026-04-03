@@ -1,0 +1,274 @@
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+
+Activating Modules:
+  1) cray-mpich/8.1.29     3) hdf5/1.12.3             5) netcdf/4.9.3
+  2) craype/2.7.31         4) ncarcompilers/1.0.0
+
+pbs_attach: process 32241 attached to job: 5641902.desched1
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+=== Model Zoo Training ===
+Config    : config/model_zoo/graphcast.yml
+Nodes     : 1
+GPUs/node : 4
+Total GPUs: 4
+Head node : 10.14.20.57
+Date      : Sat Mar 28 07:42:05 AM MDT 2026
+
+I0328 07:42:20.158000 33129 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:42:20.158000 33132 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:42:20.158000 33133 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:42:20.158000 33134 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.57:20904
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/531bf97d-46f5-4c30-8726-990b3e1ff03a/tmp/torchelastic_2nnqufza
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:42:20.159000 33134 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.57:20904
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/531bf97d-46f5-4c30-8726-990b3e1ff03a/tmp/torchelastic_y78jgtj7
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:42:20.159000 33129 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.57:20904
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/531bf97d-46f5-4c30-8726-990b3e1ff03a/tmp/torchelastic_bx2dvuzf
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:42:20.159000 33132 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.57:20904
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/531bf97d-46f5-4c30-8726-990b3e1ff03a/tmp/torchelastic_78eqbxl6
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:42:20.159000 33133 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:42:20.203000 33129 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:42:20.203000 33129 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:42:20.204000 33134 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:42:20.205000 33132 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:42:20.205000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:42:20.205000 33134 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:42:20.205000 33132 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:42:20.205000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523] [default] Rendezvous complete for workers. Result:
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   restart_count=0
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_addr=deg0051.hsn.de.hpc.ucar.edu
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_port=44685
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_rank=0
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_world_size=1
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   local_ranks=[0, 1, 2, 3]
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_ranks=[0, 1, 2, 3]
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_ranks=[0, 1, 2, 3]
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_world_sizes=[4, 4, 4, 4]
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_world_sizes=[4, 4, 4, 4]
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523]   event_log_handler=null
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:523] 
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/api.py:685] [default] Starting worker group
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:296] use_agent_store: True
+I0328 07:42:20.427000 33133 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:192] Environment variable 'TORCHELASTIC_ENABLE_FILE_TIMER' not found. Do not start FileTimerServer.
+I0328 07:42:20.428000 33133 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:236] Environment variable 'TORCHELASTIC_HEALTH_CHECK_PORT' not found. Do not start health check.
+number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']
+number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+    main_cli()
+    main_cli()
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 405, in main_cli
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 405, in main_cli
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
+               ^ ^ ^ ^ ^ ^ ^^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^  File "/glade/work/schreck/repos/miles-credit-main/credit/parser.py", line 213, in credit_main_parser
+^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/parser.py", line 213, in credit_main_parser
+    raise
+    raise
+RuntimeError: No active exception to reraise
+RuntimeError: No active exception to reraise
+number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']
+    main_cli()Traceback (most recent call last):
+
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 405, in main_cli
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
+    main_cli()
+      File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 405, in main_cli
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/parser.py", line 213, in credit_main_parser
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^    ^^raise^
+^^^^^^^^^^^^^^^RuntimeError^^: ^No active exception to reraise^
+^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/parser.py", line 213, in credit_main_parser
+    raise
+RuntimeError: No active exception to reraise
+W0328 07:43:27.814000 33133 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 35995 closing signal SIGTERM
+E0328 07:43:28.429000 33133 site-packages/torch/distributed/elastic/multiprocessing/api.py:874] failed (exitcode: 1) local_rank: 0 (pid: 35994) of binary: /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python
+I0328 07:43:28.439000 33133 site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py:370] ('local_rank %s FAILED with no error file. Decorate your entrypoint fn with @record for traceback info. See: https://pytorch.org/docs/stable/elastic/errors.html', 0)
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 277, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/glade/work/schreck/repos/miles-credit-main/applications/train.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-03-28_07:43:27
+  host      : deg0051.hsn.de.hpc.ucar.edu
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 35997)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-03-28_07:43:27
+  host      : deg0051.hsn.de.hpc.ucar.edu
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 35998)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-03-28_07:43:27
+  host      : deg0051.hsn.de.hpc.ucar.edu
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 35994)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+I0328 07:43:28.509000 33134 site-packages/torch/distributed/elastic/agent/server/api.py:721] Rendezvous gracefully exited: The rendezvous 'none' is closed, terminating pending rendezvous.
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 272, in launch_agent
+    if result.is_failed():
+       ^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'is_failed'
+I0328 07:43:28.590000 33129 site-packages/torch/distributed/elastic/agent/server/api.py:721] Rendezvous gracefully exited: The rendezvous 'none' is closed, terminating pending rendezvous.
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 272, in launch_agent
+    if result.is_failed():
+       ^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'is_failed'
+I0328 07:43:28.621000 33132 site-packages/torch/distributed/elastic/agent/server/api.py:721] Rendezvous gracefully exited: The rendezvous 'none' is closed, terminating pending rendezvous.
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 272, in launch_agent
+    if result.is_failed():
+       ^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'is_failed'
+deg0051.hsn.de.hpc.ucar.edu: rank 2 exited with code 1
+deg0051.hsn.de.hpc.ucar.edu: rank 1 died from signal 15

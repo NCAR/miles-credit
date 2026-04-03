@@ -1,0 +1,960 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+/var/spool/pbs/mom_priv/jobs/2989693.casper-pbs.SC: line 10: /etc/profile.d/modules.sh: No such file or directory
+============================= test session starts ==============================
+platform linux -- Python 3.11.8, pytest-8.3.5, pluggy-1.5.0 -- /glade/work/schreck/conda-envs/credit-main-casper/bin/python
+cachedir: .pytest_cache
+rootdir: /glade/work/schreck/repos/miles-credit-main
+configfile: pyproject.toml
+plugins: anyio-4.9.0, jaxtyping-0.3.9, cov-7.1.0
+collecting ... collected 15 items
+
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_returns_train_valid_file_lists FAILED [  6%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_train_valid_split_by_year FAILED [ 13%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_surface_files_present FAILED [ 20%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_no_surface_loc_returns_empty PASSED [ 26%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_dispatch_returns_wrf_dataset FAILED [ 33%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_valid_dispatch FAILED [ 40%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_multistep_dispatch_returns_wrf_multistep FAILED [ 46%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dscale_singlestep_dispatch_returns_dscale_dataset FAILED [ 53%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_interior_varnames FAILED [ 60%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_boundary_varnames FAILED [ 66%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_history_len FAILED [ 73%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys FAILED [ 80%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_interior_and_boundary_have_correct_variables FAILED [ 86%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_standard_wrf_trainer_loads FAILED [ 93%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_multi_step_wrf_trainer_loads FAILED [100%]
+
+=================================== FAILURES ===================================
+_______ TestSetupBoundaryDataLoading.test_returns_train_valid_file_lists _______
+tests/test_regional_v2_pipeline.py:175: in test_returns_train_valid_file_lists
+    assert len(result["train_files"]) == 1  # 1 file matching year 2000
+E   assert 0 == 1
+E    +  where 0 = len([])
+_________ TestSetupBoundaryDataLoading.test_train_valid_split_by_year __________
+tests/test_regional_v2_pipeline.py:184: in test_train_valid_split_by_year
+    assert "2000" in result["train_files"][0]
+E   IndexError: list index out of range
+___________ TestSetupBoundaryDataLoading.test_surface_files_present ____________
+tests/test_regional_v2_pipeline.py:194: in test_surface_files_present
+    assert len(result["train_surface_files"]) >= 1
+E   assert 0 >= 1
+E    +  where 0 = len([])
+_ TestLoadDatasetDispatchWRF.test_wrf_singlestep_dispatch_returns_wrf_dataset __
+tests/test_regional_v2_pipeline.py:216: in test_wrf_singlestep_dispatch_returns_wrf_dataset
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+________ TestLoadDatasetDispatchWRF.test_wrf_singlestep_valid_dispatch _________
+tests/test_regional_v2_pipeline.py:225: in test_wrf_singlestep_valid_dispatch
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=False)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+_ TestLoadDatasetDispatchWRF.test_wrf_multistep_dispatch_returns_wrf_multistep _
+tests/test_regional_v2_pipeline.py:234: in test_wrf_multistep_dispatch_returns_wrf_multistep
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+_ TestLoadDatasetDispatchWRF.test_dscale_singlestep_dispatch_returns_dscale_dataset _
+tests/test_regional_v2_pipeline.py:244: in test_dscale_singlestep_dispatch_returns_dscale_dataset
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+____ TestLoadDatasetDispatchWRF.test_dataset_has_correct_interior_varnames _____
+tests/test_regional_v2_pipeline.py:252: in test_dataset_has_correct_interior_varnames
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+____ TestLoadDatasetDispatchWRF.test_dataset_has_correct_boundary_varnames _____
+tests/test_regional_v2_pipeline.py:260: in test_dataset_has_correct_boundary_varnames
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+_____________ TestLoadDatasetDispatchWRF.test_dataset_history_len ______________
+tests/test_regional_v2_pipeline.py:268: in test_dataset_history_len
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+__________ TestWRFDatasetGetItem.test_getitem_returns_wrf_sample_keys __________
+tests/test_regional_v2_pipeline.py:281: in test_getitem_returns_wrf_sample_keys
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+_ TestWRFDatasetGetItem.test_getitem_interior_and_boundary_have_correct_variables _
+tests/test_regional_v2_pipeline.py:297: in test_getitem_interior_and_boundary_have_correct_variables
+    ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+credit/datasets/load_dataset_and_dataloader.py:220: in load_dataset
+    data_config = setup_data_loading(conf)
+credit/datasets/__init__.py:197: in setup_data_loading
+    if surface_files is not None:
+E   UnboundLocalError: cannot access local variable 'surface_files' where it is not associated with a value
+__________ TestWRFTrainerRegistration.test_standard_wrf_trainer_loads __________
+tests/test_regional_v2_pipeline.py:323: in test_standard_wrf_trainer_loads
+    trainer = load_trainer({"trainer": {"trainer_type": "standard-wrf"}}, DummyModel(), rank=0)
+E   TypeError: load_trainer() got an unexpected keyword argument 'rank'
+_________ TestWRFTrainerRegistration.test_multi_step_wrf_trainer_loads _________
+tests/test_regional_v2_pipeline.py:335: in test_multi_step_wrf_trainer_loads
+    trainer = load_trainer({"trainer": {"trainer_type": "multi-step-wrf"}}, DummyModel(), rank=0)
+E   TypeError: load_trainer() got an unexpected keyword argument 'rank'
+=============================== warnings summary ===============================
+tests/test_regional_v2_pipeline.py: 65 warnings
+  /glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/zarr/api/asynchronous.py:203: UserWarning: Consolidated metadata is currently not part in the Zarr format 3 specification. It may not be supported by other zarr implementations and may change in the future.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_returns_train_valid_file_lists
+FAILED tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_train_valid_split_by_year
+FAILED tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_surface_files_present
+FAILED tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_dispatch_returns_wrf_dataset
+FAILED tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_valid_dispatch
+FAILED tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_multistep_dispatch_returns_wrf_multistep
+FAILED tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dscale_singlestep_dispatch_returns_dscale_dataset
+FAILED tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_interior_varnames
+FAILED tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_boundary_varnames
+FAILED tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_history_len
+FAILED tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys
+FAILED tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_interior_and_boundary_have_correct_variables
+FAILED tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_standard_wrf_trainer_loads
+FAILED tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_multi_step_wrf_trainer_loads
+============ 14 failed, 1 passed, 65 warnings in 147.48s (0:02:27) =============
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+
+EnvironmentLocationNotFound: Not a conda environment: /glade/work/schreck/miniconda3/envs/credit-main
+
+/glade/u/apps/jupyterhub/jh-23.11/bin/python: No module named pytest
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+
+EnvironmentLocationNotFound: Not a conda environment: /glade/work/schreck/miniconda3/envs/credit-main
+
+/glade/u/apps/jupyterhub/jh-23.11/bin/python: No module named pytest
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+============================= test session starts ==============================
+platform linux -- Python 3.11.8, pytest-8.3.5, pluggy-1.5.0 -- /glade/work/schreck/conda-envs/credit-main-casper/bin/python
+cachedir: .pytest_cache
+rootdir: /glade/work/schreck/repos/miles-credit-main
+configfile: pyproject.toml
+plugins: anyio-4.9.0, jaxtyping-0.3.9, cov-7.1.0
+collecting ... collected 15 items
+
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_returns_train_valid_file_lists PASSED [  6%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_train_valid_split_by_year PASSED [ 13%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_surface_files_present PASSED [ 20%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_no_surface_loc_returns_empty PASSED [ 26%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_dispatch_returns_wrf_dataset PASSED [ 33%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_valid_dispatch PASSED [ 40%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_multistep_dispatch_returns_wrf_multistep PASSED [ 46%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dscale_singlestep_dispatch_returns_dscale_dataset PASSED [ 53%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_interior_varnames PASSED [ 60%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_boundary_varnames PASSED [ 66%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_history_len PASSED [ 73%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys FAILED [ 80%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_interior_and_boundary_have_correct_variables FAILED [ 86%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_standard_wrf_trainer_loads PASSED [ 93%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_multi_step_wrf_trainer_loads PASSED [100%]
+
+=================================== FAILURES ===================================
+__________ TestWRFDatasetGetItem.test_getitem_returns_wrf_sample_keys __________
+
+self = <tests.test_regional_v2_pipeline.TestWRFDatasetGetItem object at 0x14f220356610>
+tmp_path = PosixPath('/glade/derecho/scratch/schreck/tmp/pytest-of-schreck/pytest-89/test_getitem_returns_wrf_sampl0')
+
+    def test_getitem_returns_wrf_sample_keys(self, tmp_path):
+        """Verify that __getitem__ returns a Sample with WRF_input and boundary_input keys."""
+        import sys; sys.path.insert(0, "/glade/work/schreck/repos/miles-credit-main")
+        from credit.datasets.load_dataset_and_dataloader import load_dataset
+    
+        conf = _make_wrf_conf(tmp_path, "wrf_singlestep")
+        ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+    
+        assert len(ds) > 0, "dataset has no samples"
+>       sample = ds[0]
+
+tests/test_regional_v2_pipeline.py:285: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+credit/datasets/wrf_singlestep.py:274: in __getitem__
+    static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <xarray.Dataset> Size: 1kB
+Dimensions:   (south_north: 16, west_east: 16, time: 1)
+Coordinates:
+  * time      (time) d...tes: south_north, west_east
+Data variables:
+    LANDMASK  (south_north, west_east) float32 1kB 0.9201 0.7289 ... 0.7606
+dim = {'time': 2}, axis = [0], create_index_for_new_dim = True, dim_kwargs = {}
+d = 'time'
+
+    def expand_dims(
+        self,
+        dim: Hashable | Sequence[Hashable] | Mapping[Any, Any] | None = None,
+        axis: int | Sequence[int] | None = None,
+        create_index_for_new_dim: bool = True,
+        **dim_kwargs: Any,
+    ) -> Self:
+        """Return a new object with an additional axis (or axes) inserted at
+        the corresponding position in the array shape.  The new object is a
+        view into the underlying array, not a copy.
+    
+        If dim is already a scalar coordinate, it will be promoted to a 1D
+        coordinate consisting of a single value.
+    
+        The automatic creation of indexes to back new 1D coordinate variables
+        controlled by the create_index_for_new_dim kwarg.
+    
+        Parameters
+        ----------
+        dim : hashable, sequence of hashable, mapping, or None
+            Dimensions to include on the new variable. If provided as hashable
+            or sequence of hashable, then dimensions are inserted with length
+            1. If provided as a mapping, then the keys are the new dimensions
+            and the values are either integers (giving the length of the new
+            dimensions) or array-like (giving the coordinates of the new
+            dimensions).
+        axis : int, sequence of int, or None, default: None
+            Axis position(s) where new axis is to be inserted (position(s) on
+            the result array). If a sequence of integers is passed,
+            multiple axes are inserted. In this case, dim arguments should be
+            same length list. If axis=None is passed, all the axes will be
+            inserted to the start of the result array.
+        create_index_for_new_dim : bool, default: True
+            Whether to create new ``PandasIndex`` objects when the object being expanded contains scalar variables with names in ``dim``.
+        **dim_kwargs : int or sequence or ndarray
+            The keywords are arbitrary dimensions being inserted and the values
+            are either the lengths of the new dims (if int is given), or their
+            coordinates. Note, this is an alternative to passing a dict to the
+            dim kwarg and will only be used if dim is None.
+    
+        Returns
+        -------
+        expanded : Dataset
+            This object, but with additional dimension(s).
+    
+        Examples
+        --------
+        >>> dataset = xr.Dataset({"temperature": ([], 25.0)})
+        >>> dataset
+        <xarray.Dataset> Size: 8B
+        Dimensions:      ()
+        Data variables:
+            temperature  float64 8B 25.0
+    
+        # Expand the dataset with a new dimension called "time"
+    
+        >>> dataset.expand_dims(dim="time")
+        <xarray.Dataset> Size: 8B
+        Dimensions:      (time: 1)
+        Dimensions without coordinates: time
+        Data variables:
+            temperature  (time) float64 8B 25.0
+    
+        # 1D data
+    
+        >>> temperature_1d = xr.DataArray([25.0, 26.5, 24.8], dims="x")
+        >>> dataset_1d = xr.Dataset({"temperature": temperature_1d})
+        >>> dataset_1d
+        <xarray.Dataset> Size: 24B
+        Dimensions:      (x: 3)
+        Dimensions without coordinates: x
+        Data variables:
+            temperature  (x) float64 24B 25.0 26.5 24.8
+    
+        # Expand the dataset with a new dimension called "time" using axis argument
+    
+        >>> dataset_1d.expand_dims(dim="time", axis=0)
+        <xarray.Dataset> Size: 24B
+        Dimensions:      (time: 1, x: 3)
+        Dimensions without coordinates: time, x
+        Data variables:
+            temperature  (time, x) float64 24B 25.0 26.5 24.8
+    
+        # 2D data
+    
+        >>> temperature_2d = xr.DataArray(np.random.rand(3, 4), dims=("y", "x"))
+        >>> dataset_2d = xr.Dataset({"temperature": temperature_2d})
+        >>> dataset_2d
+        <xarray.Dataset> Size: 96B
+        Dimensions:      (y: 3, x: 4)
+        Dimensions without coordinates: y, x
+        Data variables:
+            temperature  (y, x) float64 96B 0.5488 0.7152 0.6028 ... 0.7917 0.5289
+    
+        # Expand the dataset with a new dimension called "time" using axis argument
+    
+        >>> dataset_2d.expand_dims(dim="time", axis=2)
+        <xarray.Dataset> Size: 96B
+        Dimensions:      (y: 3, x: 4, time: 1)
+        Dimensions without coordinates: y, x, time
+        Data variables:
+            temperature  (y, x, time) float64 96B 0.5488 0.7152 0.6028 ... 0.7917 0.5289
+    
+        # Expand a scalar variable along a new dimension of the same name with and without creating a new index
+    
+        >>> ds = xr.Dataset(coords={"x": 0})
+        >>> ds
+        <xarray.Dataset> Size: 8B
+        Dimensions:  ()
+        Coordinates:
+            x        int64 8B 0
+        Data variables:
+            *empty*
+    
+        >>> ds.expand_dims("x")
+        <xarray.Dataset> Size: 8B
+        Dimensions:  (x: 1)
+        Coordinates:
+          * x        (x) int64 8B 0
+        Data variables:
+            *empty*
+    
+        >>> ds.expand_dims("x").indexes
+        Indexes:
+            x        Index([0], dtype='int64', name='x')
+    
+        >>> ds.expand_dims("x", create_index_for_new_dim=False).indexes
+        Indexes:
+            *empty*
+    
+        See Also
+        --------
+        DataArray.expand_dims
+        """
+        if dim is None:
+            pass
+        elif isinstance(dim, Mapping):
+            # We're later going to modify dim in place; don't tamper with
+            # the input
+            dim = dict(dim)
+        elif isinstance(dim, int):
+            raise TypeError(
+                "dim should be hashable or sequence of hashables or mapping"
+            )
+        elif isinstance(dim, str) or not isinstance(dim, Sequence):
+            dim = {dim: 1}
+        elif isinstance(dim, Sequence):
+            if len(dim) != len(set(dim)):
+                raise ValueError("dims should not contain duplicate values.")
+            dim = dict.fromkeys(dim, 1)
+    
+        dim = either_dict_or_kwargs(dim, dim_kwargs, "expand_dims")
+        assert isinstance(dim, MutableMapping)
+    
+        if axis is None:
+            axis = list(range(len(dim)))
+        elif not isinstance(axis, Sequence):
+            axis = [axis]
+    
+        if len(dim) != len(axis):
+            raise ValueError("lengths of dim and axis should be identical.")
+        for d in dim:
+            if d in self.dims:
+>               raise ValueError(f"Dimension {d} already exists.")
+E               ValueError: Dimension time already exists.
+
+../../conda-envs/credit-main-casper/lib/python3.11/site-packages/xarray/core/dataset.py:4611: ValueError
+_ TestWRFDatasetGetItem.test_getitem_interior_and_boundary_have_correct_variables _
+
+self = <tests.test_regional_v2_pipeline.TestWRFDatasetGetItem object at 0x14f220356d50>
+tmp_path = PosixPath('/glade/derecho/scratch/schreck/tmp/pytest-of-schreck/pytest-89/test_getitem_interior_and_boun0')
+
+    def test_getitem_interior_and_boundary_have_correct_variables(self, tmp_path):
+        """Check variable names via dataset attributes (pre-transform) since transforms convert xarray to tensors."""
+        import sys; sys.path.insert(0, "/glade/work/schreck/repos/miles-credit-main")
+        from credit.datasets.wrf_singlestep import WRF_Dataset
+        from credit.datasets import setup_boundary_data_loading, setup_data_loading
+    
+        conf = _make_wrf_conf(tmp_path, "wrf_singlestep")
+        data_config = setup_data_loading(conf)
+        boundary_config = setup_boundary_data_loading(conf)
+        boundary = conf["data"]["boundary"]
+    
+        param_interior = {
+            "varname_upper_air": conf["data"]["variables"],
+            "varname_surface": conf["data"]["surface_variables"],
+            "varname_dyn_forcing": conf["data"].get("dynamic_forcing_variables", []),
+            "varname_forcing": conf["data"].get("forcing_variables", []),
+            "varname_static": conf["data"].get("static_variables", []),
+            "varname_diagnostic": conf["data"].get("diagnostic_variables", []),
+            "filenames": data_config["train_files"],
+            "filename_surface": data_config["train_surface_files"],
+            "filename_dyn_forcing": data_config.get("train_dyn_forcing_files"),
+            "filename_forcing": conf["data"].get("save_loc_forcing"),
+            "filename_static": conf["data"].get("save_loc_static"),
+            "filename_diagnostic": data_config.get("train_diagnostic_files"),
+            "history_len": 1,
+            "forecast_len": 0,
+        }
+        param_outside = {
+            "varname_upper_air": boundary["variables"],
+            "varname_surface": boundary.get("surface_variables", []),
+            "filenames": boundary_config["train_files"],
+            "filename_surface": boundary_config.get("train_surface_files") or None,
+            "history_len": boundary.get("history_len", 1),
+            "forecast_len": boundary.get("forecast_len", 0),
+            "lead_time_periods": boundary.get("lead_time_periods", 1),
+        }
+        # No transform so sample values remain xarray datasets
+        ds = WRF_Dataset(param_interior=param_interior, param_outside=param_outside, transform=None)
+    
+        assert len(ds) > 0
+>       sample = ds[0]
+
+tests/test_regional_v2_pipeline.py:333: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+credit/datasets/wrf_singlestep.py:274: in __getitem__
+    static_subset_input = self.xarray_static.expand_dims(dim={"time": N_time_dims})
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <xarray.Dataset> Size: 1kB
+Dimensions:   (south_north: 16, west_east: 16, time: 1)
+Coordinates:
+  * time      (time) d...ates: south_north, west_east
+Data variables:
+    LANDMASK  (south_north, west_east) float32 1kB 0.2929 0.131 ... 0.9663
+dim = {'time': 2}, axis = [0], create_index_for_new_dim = True, dim_kwargs = {}
+d = 'time'
+
+    def expand_dims(
+        self,
+        dim: Hashable | Sequence[Hashable] | Mapping[Any, Any] | None = None,
+        axis: int | Sequence[int] | None = None,
+        create_index_for_new_dim: bool = True,
+        **dim_kwargs: Any,
+    ) -> Self:
+        """Return a new object with an additional axis (or axes) inserted at
+        the corresponding position in the array shape.  The new object is a
+        view into the underlying array, not a copy.
+    
+        If dim is already a scalar coordinate, it will be promoted to a 1D
+        coordinate consisting of a single value.
+    
+        The automatic creation of indexes to back new 1D coordinate variables
+        controlled by the create_index_for_new_dim kwarg.
+    
+        Parameters
+        ----------
+        dim : hashable, sequence of hashable, mapping, or None
+            Dimensions to include on the new variable. If provided as hashable
+            or sequence of hashable, then dimensions are inserted with length
+            1. If provided as a mapping, then the keys are the new dimensions
+            and the values are either integers (giving the length of the new
+            dimensions) or array-like (giving the coordinates of the new
+            dimensions).
+        axis : int, sequence of int, or None, default: None
+            Axis position(s) where new axis is to be inserted (position(s) on
+            the result array). If a sequence of integers is passed,
+            multiple axes are inserted. In this case, dim arguments should be
+            same length list. If axis=None is passed, all the axes will be
+            inserted to the start of the result array.
+        create_index_for_new_dim : bool, default: True
+            Whether to create new ``PandasIndex`` objects when the object being expanded contains scalar variables with names in ``dim``.
+        **dim_kwargs : int or sequence or ndarray
+            The keywords are arbitrary dimensions being inserted and the values
+            are either the lengths of the new dims (if int is given), or their
+            coordinates. Note, this is an alternative to passing a dict to the
+            dim kwarg and will only be used if dim is None.
+    
+        Returns
+        -------
+        expanded : Dataset
+            This object, but with additional dimension(s).
+    
+        Examples
+        --------
+        >>> dataset = xr.Dataset({"temperature": ([], 25.0)})
+        >>> dataset
+        <xarray.Dataset> Size: 8B
+        Dimensions:      ()
+        Data variables:
+            temperature  float64 8B 25.0
+    
+        # Expand the dataset with a new dimension called "time"
+    
+        >>> dataset.expand_dims(dim="time")
+        <xarray.Dataset> Size: 8B
+        Dimensions:      (time: 1)
+        Dimensions without coordinates: time
+        Data variables:
+            temperature  (time) float64 8B 25.0
+    
+        # 1D data
+    
+        >>> temperature_1d = xr.DataArray([25.0, 26.5, 24.8], dims="x")
+        >>> dataset_1d = xr.Dataset({"temperature": temperature_1d})
+        >>> dataset_1d
+        <xarray.Dataset> Size: 24B
+        Dimensions:      (x: 3)
+        Dimensions without coordinates: x
+        Data variables:
+            temperature  (x) float64 24B 25.0 26.5 24.8
+    
+        # Expand the dataset with a new dimension called "time" using axis argument
+    
+        >>> dataset_1d.expand_dims(dim="time", axis=0)
+        <xarray.Dataset> Size: 24B
+        Dimensions:      (time: 1, x: 3)
+        Dimensions without coordinates: time, x
+        Data variables:
+            temperature  (time, x) float64 24B 25.0 26.5 24.8
+    
+        # 2D data
+    
+        >>> temperature_2d = xr.DataArray(np.random.rand(3, 4), dims=("y", "x"))
+        >>> dataset_2d = xr.Dataset({"temperature": temperature_2d})
+        >>> dataset_2d
+        <xarray.Dataset> Size: 96B
+        Dimensions:      (y: 3, x: 4)
+        Dimensions without coordinates: y, x
+        Data variables:
+            temperature  (y, x) float64 96B 0.5488 0.7152 0.6028 ... 0.7917 0.5289
+    
+        # Expand the dataset with a new dimension called "time" using axis argument
+    
+        >>> dataset_2d.expand_dims(dim="time", axis=2)
+        <xarray.Dataset> Size: 96B
+        Dimensions:      (y: 3, x: 4, time: 1)
+        Dimensions without coordinates: y, x, time
+        Data variables:
+            temperature  (y, x, time) float64 96B 0.5488 0.7152 0.6028 ... 0.7917 0.5289
+    
+        # Expand a scalar variable along a new dimension of the same name with and without creating a new index
+    
+        >>> ds = xr.Dataset(coords={"x": 0})
+        >>> ds
+        <xarray.Dataset> Size: 8B
+        Dimensions:  ()
+        Coordinates:
+            x        int64 8B 0
+        Data variables:
+            *empty*
+    
+        >>> ds.expand_dims("x")
+        <xarray.Dataset> Size: 8B
+        Dimensions:  (x: 1)
+        Coordinates:
+          * x        (x) int64 8B 0
+        Data variables:
+            *empty*
+    
+        >>> ds.expand_dims("x").indexes
+        Indexes:
+            x        Index([0], dtype='int64', name='x')
+    
+        >>> ds.expand_dims("x", create_index_for_new_dim=False).indexes
+        Indexes:
+            *empty*
+    
+        See Also
+        --------
+        DataArray.expand_dims
+        """
+        if dim is None:
+            pass
+        elif isinstance(dim, Mapping):
+            # We're later going to modify dim in place; don't tamper with
+            # the input
+            dim = dict(dim)
+        elif isinstance(dim, int):
+            raise TypeError(
+                "dim should be hashable or sequence of hashables or mapping"
+            )
+        elif isinstance(dim, str) or not isinstance(dim, Sequence):
+            dim = {dim: 1}
+        elif isinstance(dim, Sequence):
+            if len(dim) != len(set(dim)):
+                raise ValueError("dims should not contain duplicate values.")
+            dim = dict.fromkeys(dim, 1)
+    
+        dim = either_dict_or_kwargs(dim, dim_kwargs, "expand_dims")
+        assert isinstance(dim, MutableMapping)
+    
+        if axis is None:
+            axis = list(range(len(dim)))
+        elif not isinstance(axis, Sequence):
+            axis = [axis]
+    
+        if len(dim) != len(axis):
+            raise ValueError("lengths of dim and axis should be identical.")
+        for d in dim:
+            if d in self.dims:
+>               raise ValueError(f"Dimension {d} already exists.")
+E               ValueError: Dimension time already exists.
+
+../../conda-envs/credit-main-casper/lib/python3.11/site-packages/xarray/core/dataset.py:4611: ValueError
+=============================== warnings summary ===============================
+tests/test_regional_v2_pipeline.py: 91 warnings
+  /glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/zarr/api/asynchronous.py:203: UserWarning: Consolidated metadata is currently not part in the Zarr format 3 specification. It may not be supported by other zarr implementations and may change in the future.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys
+FAILED tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_interior_and_boundary_have_correct_variables
+============ 2 failed, 13 passed, 91 warnings in 147.81s (0:02:27) =============
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+============================= test session starts ==============================
+platform linux -- Python 3.11.8, pytest-8.3.5, pluggy-1.5.0 -- /glade/work/schreck/conda-envs/credit-main-casper/bin/python
+cachedir: .pytest_cache
+rootdir: /glade/work/schreck/repos/miles-credit-main
+configfile: pyproject.toml
+plugins: anyio-4.9.0, jaxtyping-0.3.9, cov-7.1.0
+collecting ... collected 15 items
+
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_returns_train_valid_file_lists PASSED [  6%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_train_valid_split_by_year PASSED [ 13%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_surface_files_present PASSED [ 20%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_no_surface_loc_returns_empty PASSED [ 26%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_dispatch_returns_wrf_dataset PASSED [ 33%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_valid_dispatch PASSED [ 40%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_multistep_dispatch_returns_wrf_multistep PASSED [ 46%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dscale_singlestep_dispatch_returns_dscale_dataset PASSED [ 53%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_interior_varnames PASSED [ 60%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_boundary_varnames PASSED [ 66%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_history_len PASSED [ 73%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys FAILED [ 80%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_interior_and_boundary_have_correct_variables PASSED [ 86%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_standard_wrf_trainer_loads PASSED [ 93%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_multi_step_wrf_trainer_loads PASSED [100%]
+
+=================================== FAILURES ===================================
+__________ TestWRFDatasetGetItem.test_getitem_returns_wrf_sample_keys __________
+
+self = <xarray.Dataset> Size: 38kB
+Dimensions:   (time: 1, level: 12, south_north: 16, west_east: 16)
+Coordinates:
+  * time  ...rth, west_east) float32 12kB 0.1191 ... 0...
+    LANDMASK  (time, south_north, west_east) float32 1kB 0.8023 ... 0.9218
+name = 'WRF_SP'
+
+    def _construct_dataarray(self, name: Hashable) -> DataArray:
+        """Construct a DataArray by indexing this dataset"""
+        from xarray.core.dataarray import DataArray
+    
+        try:
+>           variable = self._variables[name]
+E           KeyError: 'WRF_SP'
+
+../../conda-envs/credit-main-casper/lib/python3.11/site-packages/xarray/core/dataset.py:1237: KeyError
+
+During handling of the above exception, another exception occurred:
+
+self = <xarray.Dataset> Size: 38kB
+Dimensions:   (time: 1, level: 12, south_north: 16, west_east: 16)
+Coordinates:
+  * time  ...rth, west_east) float32 12kB 0.1191 ... 0...
+    LANDMASK  (time, south_north, west_east) float32 1kB 0.8023 ... 0.9218
+key = 'WRF_SP'
+
+    def __getitem__(
+        self, key: Mapping[Any, Any] | Hashable | Iterable[Hashable]
+    ) -> Self | DataArray:
+        """Access variables or coordinates of this dataset as a
+        :py:class:`~xarray.DataArray` or a subset of variables or a indexed dataset.
+    
+        Indexing with a list of names will return a new ``Dataset`` object.
+        """
+        from xarray.core.formatting import shorten_list_repr
+    
+        if utils.is_dict_like(key):
+            return self.isel(**key)
+        if utils.hashable(key):
+            try:
+>               return self._construct_dataarray(key)
+
+../../conda-envs/credit-main-casper/lib/python3.11/site-packages/xarray/core/dataset.py:1344: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../conda-envs/credit-main-casper/lib/python3.11/site-packages/xarray/core/dataset.py:1239: in _construct_dataarray
+    _, name, variable = _get_virtual_variable(self._variables, name, self.sizes)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+variables = {'LANDMASK': <xarray.Variable (time: 1, south_north: 16, west_east: 16)> Size: 1kB
+array([[[0.8022533 , 0.958598  , 0....0, ...,
+           4.1089895e-01,  1.4026903e+00, -2.3530385e-01]]]],
+      shape=(1, 12, 16, 16), dtype=float32), ...}
+key = 'WRF_SP'
+dim_sizes = Frozen({'time': 1, 'level': 12, 'south_north': 16, 'west_east': 16})
+
+    def _get_virtual_variable(
+        variables, key: Hashable, dim_sizes: Mapping | None = None
+    ) -> tuple[Hashable, Hashable, Variable]:
+        """Get a virtual variable (e.g., 'time.year') from a dict of xarray.Variable
+        objects (if possible)
+    
+        """
+        from xarray.core.dataarray import DataArray
+    
+        if dim_sizes is None:
+            dim_sizes = {}
+    
+        if key in dim_sizes:
+            data = pd.Index(range(dim_sizes[key]), name=key)
+            variable = IndexVariable((key,), data)
+            return key, key, variable
+    
+        if not isinstance(key, str):
+            raise KeyError(key)
+    
+        split_key = key.split(".", 1)
+        if len(split_key) != 2:
+>           raise KeyError(key)
+E           KeyError: 'WRF_SP'
+
+../../conda-envs/credit-main-casper/lib/python3.11/site-packages/xarray/core/dataset_utils.py:79: KeyError
+
+The above exception was the direct cause of the following exception:
+
+self = <tests.test_regional_v2_pipeline.TestWRFDatasetGetItem object at 0x14a486142290>
+tmp_path = PosixPath('/glade/derecho/scratch/schreck/tmp/pytest-of-schreck/pytest-90/test_getitem_returns_wrf_sampl0')
+
+    def test_getitem_returns_wrf_sample_keys(self, tmp_path):
+        """Verify that __getitem__ returns a Sample with WRF_input and boundary_input keys."""
+        import sys; sys.path.insert(0, "/glade/work/schreck/repos/miles-credit-main")
+        from credit.datasets.load_dataset_and_dataloader import load_dataset
+    
+        conf = _make_wrf_conf(tmp_path, "wrf_singlestep")
+        ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+    
+        assert len(ds) > 0, "dataset has no samples"
+>       sample = ds[0]
+
+tests/test_regional_v2_pipeline.py:291: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+credit/datasets/wrf_singlestep.py:360: in __getitem__
+    sample = self.transform(sample)
+../../conda-envs/credit-main-casper/lib/python3.11/site-packages/torchvision/transforms/transforms.py:95: in __call__
+    img = t(img)
+credit/transforms/transforms_wrf.py:433: in __call__
+    var_value = value[var_name].values
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <xarray.Dataset> Size: 38kB
+Dimensions:   (time: 1, level: 12, south_north: 16, west_east: 16)
+Coordinates:
+  * time  ...rth, west_east) float32 12kB 0.1191 ... 0...
+    LANDMASK  (time, south_north, west_east) float32 1kB 0.8023 ... 0.9218
+key = 'WRF_SP'
+
+    def __getitem__(
+        self, key: Mapping[Any, Any] | Hashable | Iterable[Hashable]
+    ) -> Self | DataArray:
+        """Access variables or coordinates of this dataset as a
+        :py:class:`~xarray.DataArray` or a subset of variables or a indexed dataset.
+    
+        Indexing with a list of names will return a new ``Dataset`` object.
+        """
+        from xarray.core.formatting import shorten_list_repr
+    
+        if utils.is_dict_like(key):
+            return self.isel(**key)
+        if utils.hashable(key):
+            try:
+                return self._construct_dataarray(key)
+            except KeyError as e:
+                message = f"No variable named {key!r}."
+    
+                best_guess = utils.did_you_mean(key, self.variables.keys())
+                if best_guess:
+                    message += f" {best_guess}"
+                else:
+                    message += f" Variables on the dataset include {shorten_list_repr(list(self.variables.keys()), max_items=10)}"
+    
+                # If someone attempts `ds['foo' , 'bar']` instead of `ds[['foo', 'bar']]`
+                if isinstance(key, tuple):
+                    message += f"\nHint: use a list to select multiple variables, for example `ds[{list(key)}]`"
+>               raise KeyError(message) from e
+E               KeyError: "No variable named 'WRF_SP'. Did you mean one of ('WRF_V', 'WRF_U', 'WRF_T')?"
+
+../../conda-envs/credit-main-casper/lib/python3.11/site-packages/xarray/core/dataset.py:1357: KeyError
+=============================== warnings summary ===============================
+tests/test_regional_v2_pipeline.py: 91 warnings
+  /glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/zarr/api/asynchronous.py:203: UserWarning: Consolidated metadata is currently not part in the Zarr format 3 specification. It may not be supported by other zarr implementations and may change in the future.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys
+============ 1 failed, 14 passed, 91 warnings in 150.66s (0:02:30) =============
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+============================= test session starts ==============================
+platform linux -- Python 3.11.8, pytest-8.3.5, pluggy-1.5.0 -- /glade/work/schreck/conda-envs/credit-main-casper/bin/python
+cachedir: .pytest_cache
+rootdir: /glade/work/schreck/repos/miles-credit-main
+configfile: pyproject.toml
+plugins: anyio-4.9.0, jaxtyping-0.3.9, cov-7.1.0
+collecting ... collected 15 items
+
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_returns_train_valid_file_lists PASSED [  6%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_train_valid_split_by_year PASSED [ 13%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_surface_files_present PASSED [ 20%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_no_surface_loc_returns_empty PASSED [ 26%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_dispatch_returns_wrf_dataset PASSED [ 33%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_valid_dispatch PASSED [ 40%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_multistep_dispatch_returns_wrf_multistep PASSED [ 46%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dscale_singlestep_dispatch_returns_dscale_dataset PASSED [ 53%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_interior_varnames PASSED [ 60%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_boundary_varnames PASSED [ 66%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_history_len PASSED [ 73%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys FAILED [ 80%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_interior_and_boundary_have_correct_variables PASSED [ 86%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_standard_wrf_trainer_loads PASSED [ 93%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_multi_step_wrf_trainer_loads PASSED [100%]
+
+=================================== FAILURES ===================================
+__________ TestWRFDatasetGetItem.test_getitem_returns_wrf_sample_keys __________
+
+self = <tests.test_regional_v2_pipeline.TestWRFDatasetGetItem object at 0x14fa59509c50>
+tmp_path = PosixPath('/glade/derecho/scratch/schreck/tmp/pytest-of-schreck/pytest-91/test_getitem_returns_wrf_sampl0')
+
+    def test_getitem_returns_wrf_sample_keys(self, tmp_path):
+        """Verify that __getitem__ returns a Sample with WRF_input and boundary_input keys."""
+        import sys; sys.path.insert(0, "/glade/work/schreck/repos/miles-credit-main")
+        from credit.datasets.load_dataset_and_dataloader import load_dataset
+    
+        conf = _make_wrf_conf(tmp_path, "wrf_singlestep")
+        ds = load_dataset(conf, rank=0, world_size=1, is_train=True)
+    
+        assert len(ds) > 0, "dataset has no samples"
+        sample = ds[0]
+    
+        # Sample_WRF should have these fields (xarray or tensor depending on transform)
+>       assert hasattr(sample, "WRF_input") or "WRF_input" in sample, \
+            f"missing WRF_input, keys: {sample._fields if hasattr(sample, '_fields') else list(sample.keys())}"
+E       AssertionError: missing WRF_input, keys: ['x_forcing_static', 'x_surf', 'x', 'y_surf', 'y', 'x_boundary', 'x_surf_boundary', 'x_time_encode', 'index']
+E       assert (False or 'WRF_input' in {'index': 0, 'x': tensor([[[[[ 4.2313e+00, -6.0434e-01, -4.9991e-01,  ...,  1.1120e+00,\n             1.9176e+00, -2.7000e-01],\n           [-3.8273e-01, -3.9903e-01, -1.3208e+00,  ..., -4.2498e-01,\n             8.8471e-02,  2.2157e-01],\n           [ 1.5839e+00, -6.3490e-01,  3.9134e-01,  ...,  2.5993e-02,\n             4.6679e-01,  1.7433e+00],\n           ...,\n           [ 1.9588e-01, -6.6653e+00, -1.1943e-01,  ...,  1.7921e-01,\n            -8.5649e-01,  7.5046e-01],\n           [ 3.0598e-01,  2.8949e-02, -5.4329e+00,  ..., -1.1725e+01,\n            -8.6635e+00, -2.0566e+00],\n           [ 7.8064e-01, -4.6987e-01,  1.8327e+00,  ...,  1.8368e-01,\n             2.4761e-01,  5.4887e+00]],\n\n          [[-4.5474e-01,  1.0730e-01,  1.6470e+00,  ..., -4.1071e-01,\n            -3.0850e+00, -4.8463e-01],\n           [ 7.7480e-01, -8.4011e-01, -2.0171e+00,  ..., -3.9109e-01,\n             1.0628e-01, -7.5775e-01],\n           [ 3.4576e+00,  7.8515e-02, -6.0009e-01,  ..., -1.1847e+01,\n            -1.9784e-01, -3.6992e-01],\n           ...,\n           [ 5.9935e-02, -2.9514e+00,  1.1537e+00,  ...,  5.0470e-01,\n            -5.4526e-01, -9.5031e+00],\n           [ 2.1785e+00,  1.5484e+00,  2.9002e-01,  ...,..., 0.5605, 0.9952, 0.9758, 0.1439, 0.9081, 0.5954, 0.4303,\n           0.8536, 0.2582, 0.0994, 0.4857, 0.3345, 0.4380, 0.6412, 0.7425],\n          [0.6947, 0.8035, 0.6520, 0.5397, 0.0692, 0.7087, 0.3855, 0.8771,\n           0.6649, 0.3259, 0.8517, 0.0417, 0.5486, 0.3469, 0.1749, 0.1938],\n          [0.9856, 0.6135, 0.8971, 0.1289, 0.4289, 0.0505, 0.2619, 0.0234,\n           0.3456, 0.2120, 0.5401, 0.6031, 0.8434, 0.5526, 0.9754, 0.8141],\n          [0.4418, 0.8624, 0.9532, 0.0137, 0.4390, 0.2738, 0.4335, 0.3393,\n           0.2803, 0.7216, 0.9415, 0.9165, 0.6448, 0.4621, 0.4726, 0.9285],\n          [0.8660, 0.7955, 0.4554, 0.0126, 0.2873, 0.3807, 0.7589, 0.9306,\n           0.1144, 0.2861, 0.4745, 0.2698, 0.3168, 0.9965, 0.2745, 0.7118],\n          [0.2411, 0.7422, 0.3454, 0.3695, 0.0668, 0.6795, 0.0846, 0.4008,\n           0.6416, 0.9493, 0.1853, 0.1209, 0.0844, 0.6261, 0.1559, 0.4098],\n          [0.8546, 0.1842, 0.9926, 0.3905, 0.3472, 0.9301, 0.6732, 0.8403,\n           0.5432, 0.1342, 0.8716, 0.2408, 0.4305, 0.5883, 0.1136, 0.5964],\n          [0.7888, 0.7053, 0.1124, 0.3462, 0.3444, 0.2078, 0.8810, 0.4046,\n           0.5693, 0.4483, 0.6472, 0.5954, 0.9148, 0.2124, 0.3939, 0.7310]]]]), ...})
+E        +  where False = hasattr({'index': 0, 'x': tensor([[[[[ 4.2313e+00, -6.0434e-01, -4.9991e-01,  ...,  1.1120e+00,\n             1.9176e+00, -2.7000e-01],\n           [-3.8273e-01, -3.9903e-01, -1.3208e+00,  ..., -4.2498e-01,\n             8.8471e-02,  2.2157e-01],\n           [ 1.5839e+00, -6.3490e-01,  3.9134e-01,  ...,  2.5993e-02,\n             4.6679e-01,  1.7433e+00],\n           ...,\n           [ 1.9588e-01, -6.6653e+00, -1.1943e-01,  ...,  1.7921e-01,\n            -8.5649e-01,  7.5046e-01],\n           [ 3.0598e-01,  2.8949e-02, -5.4329e+00,  ..., -1.1725e+01,\n            -8.6635e+00, -2.0566e+00],\n           [ 7.8064e-01, -4.6987e-01,  1.8327e+00,  ...,  1.8368e-01,\n             2.4761e-01,  5.4887e+00]],\n\n          [[-4.5474e-01,  1.0730e-01,  1.6470e+00,  ..., -4.1071e-01,\n            -3.0850e+00, -4.8463e-01],\n           [ 7.7480e-01, -8.4011e-01, -2.0171e+00,  ..., -3.9109e-01,\n             1.0628e-01, -7.5775e-01],\n           [ 3.4576e+00,  7.8515e-02, -6.0009e-01,  ..., -1.1847e+01,\n            -1.9784e-01, -3.6992e-01],\n           ...,\n           [ 5.9935e-02, -2.9514e+00,  1.1537e+00,  ...,  5.0470e-01,\n            -5.4526e-01, -9.5031e+00],\n           [ 2.1785e+00,  1.5484e+00,  2.9002e-01,  ...,..., 0.5605, 0.9952, 0.9758, 0.1439, 0.9081, 0.5954, 0.4303,\n           0.8536, 0.2582, 0.0994, 0.4857, 0.3345, 0.4380, 0.6412, 0.7425],\n          [0.6947, 0.8035, 0.6520, 0.5397, 0.0692, 0.7087, 0.3855, 0.8771,\n           0.6649, 0.3259, 0.8517, 0.0417, 0.5486, 0.3469, 0.1749, 0.1938],\n          [0.9856, 0.6135, 0.8971, 0.1289, 0.4289, 0.0505, 0.2619, 0.0234,\n           0.3456, 0.2120, 0.5401, 0.6031, 0.8434, 0.5526, 0.9754, 0.8141],\n          [0.4418, 0.8624, 0.9532, 0.0137, 0.4390, 0.2738, 0.4335, 0.3393,\n           0.2803, 0.7216, 0.9415, 0.9165, 0.6448, 0.4621, 0.4726, 0.9285],\n          [0.8660, 0.7955, 0.4554, 0.0126, 0.2873, 0.3807, 0.7589, 0.9306,\n           0.1144, 0.2861, 0.4745, 0.2698, 0.3168, 0.9965, 0.2745, 0.7118],\n          [0.2411, 0.7422, 0.3454, 0.3695, 0.0668, 0.6795, 0.0846, 0.4008,\n           0.6416, 0.9493, 0.1853, 0.1209, 0.0844, 0.6261, 0.1559, 0.4098],\n          [0.8546, 0.1842, 0.9926, 0.3905, 0.3472, 0.9301, 0.6732, 0.8403,\n           0.5432, 0.1342, 0.8716, 0.2408, 0.4305, 0.5883, 0.1136, 0.5964],\n          [0.7888, 0.7053, 0.1124, 0.3462, 0.3444, 0.2078, 0.8810, 0.4046,\n           0.5693, 0.4483, 0.6472, 0.5954, 0.9148, 0.2124, 0.3939, 0.7310]]]]), ...}, 'WRF_input')
+
+tests/test_regional_v2_pipeline.py:294: AssertionError
+=============================== warnings summary ===============================
+tests/test_regional_v2_pipeline.py: 91 warnings
+  /glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/zarr/api/asynchronous.py:203: UserWarning: Consolidated metadata is currently not part in the Zarr format 3 specification. It may not be supported by other zarr implementations and may change in the future.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys
+============ 1 failed, 14 passed, 91 warnings in 148.51s (0:02:28) =============
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+============================= test session starts ==============================
+platform linux -- Python 3.11.8, pytest-8.3.5, pluggy-1.5.0 -- /glade/work/schreck/conda-envs/credit-main-casper/bin/python
+cachedir: .pytest_cache
+rootdir: /glade/work/schreck/repos/miles-credit-main
+configfile: pyproject.toml
+plugins: anyio-4.9.0, jaxtyping-0.3.9, cov-7.1.0
+collecting ... collected 15 items
+
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_returns_train_valid_file_lists PASSED [  6%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_train_valid_split_by_year PASSED [ 13%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_surface_files_present PASSED [ 20%]
+tests/test_regional_v2_pipeline.py::TestSetupBoundaryDataLoading::test_no_surface_loc_returns_empty PASSED [ 26%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_dispatch_returns_wrf_dataset PASSED [ 33%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_singlestep_valid_dispatch PASSED [ 40%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_wrf_multistep_dispatch_returns_wrf_multistep PASSED [ 46%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dscale_singlestep_dispatch_returns_dscale_dataset PASSED [ 53%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_interior_varnames PASSED [ 60%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_has_correct_boundary_varnames PASSED [ 66%]
+tests/test_regional_v2_pipeline.py::TestLoadDatasetDispatchWRF::test_dataset_history_len PASSED [ 73%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_returns_wrf_sample_keys PASSED [ 80%]
+tests/test_regional_v2_pipeline.py::TestWRFDatasetGetItem::test_getitem_interior_and_boundary_have_correct_variables PASSED [ 86%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_standard_wrf_trainer_loads PASSED [ 93%]
+tests/test_regional_v2_pipeline.py::TestWRFTrainerRegistration::test_multi_step_wrf_trainer_loads PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/test_regional_v2_pipeline.py: 91 warnings
+  /glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/zarr/api/asynchronous.py:203: UserWarning: Consolidated metadata is currently not part in the Zarr format 3 specification. It may not be supported by other zarr implementations and may change in the future.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 15 passed, 91 warnings in 149.76s (0:02:29) ==================

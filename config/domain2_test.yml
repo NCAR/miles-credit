@@ -1,0 +1,136 @@
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/domain2_test'
+seed: 1000
+
+data:
+    source:
+        ERA5:
+            level_coord: "level"
+            levels: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+            variables:
+                prognostic:
+                    vars_3D: ['u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water']
+                    vars_2D: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+                diagnostic:
+                    vars_2D: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation', 'surface_latent_heat_flux', 'surface_net_solar_radiation', 'surface_net_thermal_radiation', 'surface_sensible_heat_flux']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+                dynamic_forcing:
+                    vars_2D: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+                static:
+                    vars_2D: ['z_norm', 'land_sea_mask']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    start_datetime: "2021-06-01"
+    end_datetime: "2021-07-01"
+    timestep: "6h"
+    history_len: 1
+    forecast_len: 1
+    one_shot: True
+    lead_time_periods: 6
+    skip_periods: null
+    static_first: True
+    scaler_type: 'std_new'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+
+data_valid:
+    source:
+        ERA5:
+            level_coord: "level"
+            levels: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+            variables:
+                prognostic:
+                    vars_3D: ['u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water']
+                    vars_2D: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+                diagnostic:
+                    vars_2D: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation', 'surface_latent_heat_flux', 'surface_net_solar_radiation', 'surface_net_thermal_radiation', 'surface_sensible_heat_flux']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+                dynamic_forcing:
+                    vars_2D: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+                static:
+                    vars_2D: ['z_norm', 'land_sea_mask']
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    start_datetime: "2021-07-01"
+    end_datetime: "2021-08-01"
+    timestep: "6h"
+    history_len: 1
+    forecast_len: 1
+    one_shot: True
+    lead_time_periods: 6
+    skip_periods: null
+    static_first: True
+    scaler_type: 'std_new'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+
+trainer:
+    type: era5-v2
+    parallelism:
+        data: fsdp2
+        tensor: 1
+        domain: 2
+    activation_checkpoint: False
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+    skip_validation: False
+    update_learning_rate: False
+    save_backup_weights: False
+    save_best_weights: False
+    learning_rate: 1.0e-04
+    weight_decay: 0
+    train_batch_size: 1
+    valid_batch_size: 1
+    batches_per_epoch: 5
+    valid_batches_per_epoch: 2
+    stopping_patience: 999
+    start_epoch: 0
+    num_epoch: 2
+    reload_epoch: False
+    epochs: 2
+    use_ema: False
+    use_scheduler: False
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+    thread_workers: 0
+    valid_thread_workers: 0
+
+model:
+    type: "wxformer_v2"
+    frames: 1
+    image_height: 181
+    image_width: 360
+    levels: 18
+    channels: 4
+    surface_channels: 4
+    input_only_channels: 4
+    output_only_channels: 8
+    dim: [64, 128, 256, 512]
+    depth: [2, 2, 4, 2]
+    global_window_size: [8, 4, 2, 1]
+    local_window_size: 3
+    upsample_with_ps: True
+    use_swiglu: True
+    use_shifted_windows: True
+    use_deformable: False
+    use_spectral_norm: True
+    padding_conf:
+        activate: True
+        mode: earth
+        pad_lat: [6, 5]
+        pad_lon: [12, 12]
+    post_conf:
+        activate: False
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+    use_latitude_weights: False
+
+predict:
+    mode: none
+    batch_size: 1

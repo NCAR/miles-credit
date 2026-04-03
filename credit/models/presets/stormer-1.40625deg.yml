@@ -1,0 +1,13 @@
+# Stormer — 1.40625° ERA5, patch_size=2 (Nguyen et al. 2023, UCLA)
+# Checkpoint: /glade/derecho/scratch/schreck/credit_zoo/stormer/stormer_1.40625_patch_size_2.ckpt
+# MIT License.  Transformer backbone (24 blocks) loads cleanly; embedding layers initialized fresh.
+type: stormer
+pretrained_weights: /glade/derecho/scratch/schreck/credit_zoo/stormer/stormer_1.40625_patch_size_2.ckpt
+in_channels: 69
+out_channels: 69
+img_size: [128, 256]
+patch_size: 2
+embed_dim: 1024
+depth: 24
+num_heads: 16
+drop_rate: 0.0

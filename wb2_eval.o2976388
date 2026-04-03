@@ -1,0 +1,917 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+=== WB2 eval + plot ===
+Node   : crhtc104
+Date   : Sat Mar 28 07:04:39 PM MDT 2026
+Branch : v2.1/weatherbench
+
+--- eval ---
+INFO:__main__:Found 366 init dates in /glade/derecho/scratch/schreck/CREDIT_runs/ensemble/production/sixteen_tune/netcdf
+INFO:__main__:Scoring 60 steps with 4 workers
+Pysteps configuration file found at: /glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pysteps/pystepsrc
+
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 12: ERA5 mlevel loaded in 143.7s
+INFO:__main__:Step 24: ERA5 mlevel loaded in 144.0s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 18: ERA5 mlevel loaded in 145.0s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 6: ERA5 mlevel loaded in 145.3s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 6: ERA5 plevel loaded in 256.1s
+INFO:__main__:Step 12: ERA5 plevel loaded in 256.2s
+INFO:__main__:Step 18: ERA5 plevel loaded in 260.5s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 24: ERA5 plevel loaded in 260.7s
+INFO:__main__:Step 6 (6h): done in 260.8s (365 inits)
+INFO:__main__:Step 12 (12h): done in 260.8s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 18 (18h): done in 263.2s (365 inits)
+INFO:__main__:Step 24 (24h): done in 263.5s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 48: ERA5 mlevel loaded in 149.3s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 42: ERA5 mlevel loaded in 150.6s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 36: ERA5 mlevel loaded in 154.0s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 30: ERA5 mlevel loaded in 154.3s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 36: ERA5 plevel loaded in 270.4s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 48: ERA5 plevel loaded in 267.9s
+INFO:__main__:Step 42: ERA5 plevel loaded in 268.2s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 30: ERA5 plevel loaded in 273.2s
+INFO:__main__:Step 48 (48h): done in 271.5s (365 inits)
+INFO:__main__:Step 42 (42h): done in 271.8s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 36 (36h): done in 275.1s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 30 (30h): done in 276.2s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 60: ERA5 mlevel loaded in 156.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 54: ERA5 mlevel loaded in 157.3s
+INFO:__main__:Step 66: ERA5 mlevel loaded in 156.4s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 72: ERA5 mlevel loaded in 158.9s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 66: ERA5 plevel loaded in 268.8s
+INFO:__main__:Step 54: ERA5 plevel loaded in 269.8s
+INFO:__main__:Step 60: ERA5 plevel loaded in 269.8s
+INFO:__main__:Step 72: ERA5 plevel loaded in 267.9s
+INFO:__main__:Step 60 (60h): done in 273.1s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 72 (72h): done in 271.6s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 66 (66h): done in 273.0s (365 inits)
+INFO:__main__:Step 54 (54h): done in 274.1s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 90: ERA5 mlevel loaded in 136.1s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 78: ERA5 mlevel loaded in 138.2s
+INFO:__main__:Step 84: ERA5 mlevel loaded in 137.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 96: ERA5 mlevel loaded in 139.0s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 96: ERA5 plevel loaded in 248.5s
+INFO:__main__:Step 90: ERA5 plevel loaded in 248.6s
+INFO:__main__:Step 84: ERA5 plevel loaded in 249.0s
+INFO:__main__:Step 78: ERA5 plevel loaded in 249.4s
+INFO:__main__:Step 84 (84h): done in 252.4s (365 inits)
+INFO:__main__:Step 96 (96h): done in 252.1s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 90 (90h): done in 252.8s (365 inits)
+INFO:__main__:Step 78 (78h): done in 253.7s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 120: ERA5 mlevel loaded in 139.9s
+INFO:__main__:Step 114: ERA5 mlevel loaded in 140.1s
+INFO:__main__:Step 102: ERA5 mlevel loaded in 140.9s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 108: ERA5 mlevel loaded in 141.3s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 114: ERA5 plevel loaded in 252.3s
+INFO:__main__:Step 102: ERA5 plevel loaded in 253.0s
+INFO:__main__:Step 108: ERA5 plevel loaded in 252.9s
+INFO:__main__:Step 120: ERA5 plevel loaded in 252.4s
+INFO:__main__:Step 114 (114h): done in 255.2s (365 inits)
+INFO:__main__:Step 102 (102h): done in 256.1s (365 inits)
+INFO:__main__:Step 108 (108h): done in 256.1s (365 inits)
+INFO:__main__:Step 120 (120h): done in 255.6s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 132: ERA5 mlevel loaded in 140.4s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 138: ERA5 mlevel loaded in 141.0s
+INFO:__main__:Step 144: ERA5 mlevel loaded in 141.1s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 126: ERA5 mlevel loaded in 141.9s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 138: ERA5 plevel loaded in 254.1s
+INFO:__main__:Step 132: ERA5 plevel loaded in 254.2s
+INFO:__main__:Step 144: ERA5 plevel loaded in 254.0s
+INFO:__main__:Step 126: ERA5 plevel loaded in 254.5s
+INFO:__main__:Step 132 (132h): done in 257.3s (365 inits)
+INFO:__main__:Step 138 (138h): done in 257.6s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 126 (126h): done in 257.8s (365 inits)
+INFO:__main__:Step 144 (144h): done in 257.9s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 168: ERA5 mlevel loaded in 137.1s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 150: ERA5 mlevel loaded in 140.3s
+INFO:__main__:Step 162: ERA5 mlevel loaded in 140.0s
+INFO:__main__:Step 156: ERA5 mlevel loaded in 140.0s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 162: ERA5 plevel loaded in 252.4s
+INFO:__main__:Step 150: ERA5 plevel loaded in 252.8s
+INFO:__main__:Step 156: ERA5 plevel loaded in 252.4s
+INFO:__main__:Step 168: ERA5 plevel loaded in 252.1s
+INFO:__main__:Step 150 (150h): done in 256.0s (365 inits)
+INFO:__main__:Step 162 (162h): done in 255.7s (365 inits)
+INFO:__main__:Step 168 (168h): done in 255.6s (365 inits)
+INFO:__main__:Step 156 (156h): done in 256.0s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 192: ERA5 mlevel loaded in 140.7s
+INFO:__main__:Step 186: ERA5 mlevel loaded in 141.2s
+INFO:__main__:Step 174: ERA5 mlevel loaded in 141.5s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 180: ERA5 mlevel loaded in 142.1s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 174: ERA5 plevel loaded in 254.9s
+INFO:__main__:Step 186: ERA5 plevel loaded in 254.7s
+INFO:__main__:Step 192: ERA5 plevel loaded in 254.6s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 180: ERA5 plevel loaded in 255.7s
+INFO:__main__:Step 186 (186h): done in 258.0s (365 inits)
+INFO:__main__:Step 174 (174h): done in 258.2s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 192 (192h): done in 258.1s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 180 (180h): done in 259.1s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 198: ERA5 mlevel loaded in 139.5s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 216: ERA5 mlevel loaded in 139.5s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 210: ERA5 mlevel loaded in 141.3s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 204: ERA5 mlevel loaded in 141.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 204: ERA5 plevel loaded in 246.3s
+INFO:__main__:Step 198: ERA5 plevel loaded in 246.3s
+INFO:__main__:Step 216: ERA5 plevel loaded in 245.4s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 210: ERA5 plevel loaded in 247.9s
+INFO:__main__:Step 198 (198h): done in 249.7s (365 inits)
+INFO:__main__:Step 204 (204h): done in 249.9s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 216 (216h): done in 249.1s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 210 (210h): done in 250.9s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 228: ERA5 mlevel loaded in 145.1s
+INFO:__main__:Step 222: ERA5 mlevel loaded in 145.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 240: ERA5 mlevel loaded in 145.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 234: ERA5 mlevel loaded in 147.3s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 228: ERA5 plevel loaded in 255.8s
+INFO:__main__:Step 222: ERA5 plevel loaded in 256.0s
+INFO:__main__:Step 234: ERA5 plevel loaded in 255.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 240: ERA5 plevel loaded in 255.0s
+INFO:__main__:Step 222 (222h): done in 259.1s (365 inits)
+INFO:__main__:Step 234 (234h): done in 258.9s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 228 (228h): done in 259.3s (365 inits)
+INFO:__main__:Step 240 (240h): done in 258.3s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 252: ERA5 mlevel loaded in 139.5s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 264: ERA5 mlevel loaded in 140.5s
+INFO:__main__:Step 258: ERA5 mlevel loaded in 140.5s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 246: ERA5 mlevel loaded in 142.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 258: ERA5 plevel loaded in 247.8s
+INFO:__main__:Step 252: ERA5 plevel loaded in 248.2s
+INFO:__main__:Step 246: ERA5 plevel loaded in 248.3s
+INFO:__main__:Step 264: ERA5 plevel loaded in 247.9s
+INFO:__main__:Step 246 (246h): done in 251.2s (365 inits)
+INFO:__main__:Step 258 (258h): done in 250.9s (365 inits)
+INFO:__main__:Step 264 (264h): done in 251.0s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 252 (252h): done in 252.0s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 288: ERA5 mlevel loaded in 137.1s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 282: ERA5 mlevel loaded in 138.7s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 270: ERA5 mlevel loaded in 139.7s
+INFO:__main__:Step 276: ERA5 mlevel loaded in 139.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 288: ERA5 plevel loaded in 246.0s
+INFO:__main__:Step 282: ERA5 plevel loaded in 246.6s
+INFO:__main__:Step 276: ERA5 plevel loaded in 246.7s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 270: ERA5 plevel loaded in 247.3s
+INFO:__main__:Step 282 (282h): done in 250.3s (365 inits)
+INFO:__main__:Step 288 (288h): done in 249.8s (365 inits)
+INFO:__main__:Step 270 (270h): done in 250.6s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 276 (276h): done in 250.6s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 300: ERA5 mlevel loaded in 138.0s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 294: ERA5 mlevel loaded in 139.9s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 306: ERA5 mlevel loaded in 141.9s
+INFO:__main__:Step 312: ERA5 mlevel loaded in 141.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 300: ERA5 plevel loaded in 245.4s
+INFO:__main__:Step 294: ERA5 plevel loaded in 245.6s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 306: ERA5 plevel loaded in 245.9s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 312: ERA5 plevel loaded in 247.7s
+INFO:__main__:Step 294 (294h): done in 249.1s (365 inits)
+INFO:__main__:Step 300 (300h): done in 249.2s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 306 (306h): done in 249.8s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 312 (312h): done in 250.7s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 318: ERA5 mlevel loaded in 140.2s
+INFO:__main__:Step 330: ERA5 mlevel loaded in 139.6s
+INFO:__main__:Step 324: ERA5 mlevel loaded in 140.4s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 336: ERA5 mlevel loaded in 140.7s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 330: ERA5 plevel loaded in 248.6s
+INFO:__main__:Step 324: ERA5 plevel loaded in 249.3s
+INFO:__main__:Step 318: ERA5 plevel loaded in 249.6s
+INFO:__main__:Step 336: ERA5 plevel loaded in 247.9s
+INFO:__main__:Step 324 (324h): done in 252.4s (365 inits)
+INFO:__main__:Step 330 (330h): done in 251.9s (365 inits)
+INFO:__main__:Step 318 (318h): done in 252.6s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Step 336 (336h): done in 252.4s (365 inits)
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 342: ERA5 mlevel loaded in 138.0s
+INFO:__main__:Step 360: ERA5 mlevel loaded in 136.6s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 348: ERA5 mlevel loaded in 139.8s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+INFO:__main__:Step 354: ERA5 mlevel loaded in 140.3s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:347: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 360: ERA5 plevel loaded in 242.3s
+INFO:__main__:Step 342: ERA5 plevel loaded in 243.9s
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 360 (360h): done in 247.1s (365 inits)
+INFO:__main__:Step 342 (342h): done in 249.1s (365 inits)
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:248: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+INFO:__main__:Step 348: ERA5 plevel loaded in 254.4s
+INFO:__main__:Step 354: ERA5 plevel loaded in 254.3s
+INFO:__main__:Step 354 (354h): done in 257.6s (365 inits)
+INFO:__main__:Step 348 (348h): done in 258.0s (365 inits)
+INFO:__main__:Saved WB2 scores to /glade/work/schreck/wb2_scores.csv
+
+======================================================================
+WeatherBench2-style scorecard (mean over all init dates)
+======================================================================
+
+  T500
+   Day        RMSE       ACC
+  ----  ----------  --------
+     3       48.94    0.9779
+
+  T850
+   Day        RMSE       ACC
+  ----  ----------  --------
+     3       36.80    0.9068
+
+  t2m
+   Day        RMSE       ACC
+  ----  ----------  --------
+     3        0.69    0.9631
+
+  U500
+   Day        RMSE       ACC
+  ----  ----------  --------
+     3        2.33    0.9949
+
+  V500
+   Day        RMSE       ACC
+  ----  ----------  --------
+     3        2.27    0.9774
+
+  Q850
+   Day        RMSE       ACC
+  ----  ----------  --------
+     3        0.00    0.9999
+
+======================================================================
+
+--- plot ---
+INFO:__main__:Loaded 60 lead-time rows from /glade/work/schreck/wb2_scores.csv
+Pysteps configuration file found at: /glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pysteps/pystepsrc
+
+INFO:__main__:Saved /glade/work/schreck/repos/miles-credit-main/wb2_figs/bias_all.png
+INFO:__main__:Saved /glade/work/schreck/repos/miles-credit-main/wb2_figs/scorecard_vs_ifs.png
+INFO:__main__:All figures saved to /glade/work/schreck/repos/miles-credit-main/wb2_figs/
+
+Figures written to /glade/work/schreck/repos/miles-credit-main/wb2_figs
+total 33
+drwxr-xr-x+  2 schreck ncar   4096 Mar 28 20:09 .
+drwxr-xr-x+ 17 schreck ncar  16384 Mar 28 19:04 ..
+-rw-r--r--+  1 schreck ncar  58360 Mar 28 20:09 acc_T850.png
+-rw-r--r--+  1 schreck ncar  69759 Mar 28 20:09 acc_Z500.png
+-rw-r--r--+  1 schreck ncar 354853 Mar 28 20:09 bias_all.png
+-rw-r--r--+  1 schreck ncar  88719 Mar 28 20:09 regional_rmse_SP.png
+-rw-r--r--+  1 schreck ncar 101432 Mar 28 20:09 regional_rmse_t2m.png
+-rw-r--r--+  1 schreck ncar  63722 Mar 28 20:09 regional_rmse_T500.png
+-rw-r--r--+  1 schreck ncar  69039 Mar 28 20:09 regional_rmse_T850.png
+-rw-r--r--+  1 schreck ncar  94607 Mar 28 20:09 regional_rmse_U850.png
+-rw-r--r--+  1 schreck ncar  93682 Mar 28 20:09 regional_rmse_V850.png
+-rw-r--r--+  1 schreck ncar 100168 Mar 28 20:09 regional_rmse_Z500.png
+-rw-r--r--+  1 schreck ncar  45374 Mar 28 20:09 rmse_SP.png
+-rw-r--r--+  1 schreck ncar  63622 Mar 28 20:09 rmse_t2m.png
+-rw-r--r--+  1 schreck ncar  37511 Mar 28 20:09 rmse_T500.png
+-rw-r--r--+  1 schreck ncar  57221 Mar 28 20:09 rmse_T850.png
+-rw-r--r--+  1 schreck ncar  66317 Mar 28 20:09 rmse_U850.png
+-rw-r--r--+  1 schreck ncar  49670 Mar 28 20:09 rmse_V850.png
+-rw-r--r--+  1 schreck ncar  77628 Mar 28 20:09 rmse_Z500.png
+-rw-r--r--+  1 schreck ncar  61863 Mar 28 20:09 scorecard_vs_ifs.png

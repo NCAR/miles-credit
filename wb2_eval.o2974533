@@ -1,0 +1,241 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+=== WB2 eval + plot ===
+Node   : crhtc67
+Date   : Sat Mar 28 06:35:18 AM MDT 2026
+Branch : v2.1/weatherbench
+
+--- eval ---
+INFO:__main__:Found 366 init dates in /glade/derecho/scratch/schreck/CREDIT_runs/ensemble/production/sixteen_tune/netcdf
+INFO:__main__:Scoring 60 steps with 16 workers
+Pysteps configuration file found at: /glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pysteps/pystepsrc
+
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+INFO:__main__:Loading climatology from /glade/campaign/cisl/aiml/akn7/CREDIT_CESM/VERIF/ERA5_clim/ERA5_clim_1990_2019_6h_cesm_interp.nc
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:244: UserWarning: The specified chunks separate the stored chunks along dimension "time" starting at index 4. This could degrade performance. Instead, consider rechunking after loading.
+  ds = xr.open_mfdataset(
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py:308: FutureWarning: In a future version of xarray the default value for data_vars will change from data_vars='all' to data_vars=None. This is likely to lead to different results when multiple datasets have matching variables with overlapping values. To opt in to new defaults and get rid of these warnings now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly.
+  ds_pred_all = xr.concat(pred_list, dim="time")
+ERROR:__main__:Step 6 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 12 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 18 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 24 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 30 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 36 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 42 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 48 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 54 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 60 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 66 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 72 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 78 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 84 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 90 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 96 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 102 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 108 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 114 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 120 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 126 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 132 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 138 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 144 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 150 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 156 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 162 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 168 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 174 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 180 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 186 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 192 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 198 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 204 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 210 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 216 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 222 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 228 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 234 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 240 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 246 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 252 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 258 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 264 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 270 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 276 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 282 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 288 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 294 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 300 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 306 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 312 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 318 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 324 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 330 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 336 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 342 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 348 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 354 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+ERROR:__main__:Step 360 raised: A process in the process pool was terminated abruptly while the future was running or pending.
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py", line 549, in <module>
+    main()
+  File "/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py", line 525, in main
+    scores = compute_netcdf_scores(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/applications/eval_weatherbench.py", line 410, in compute_netcdf_scores
+    result = pd.DataFrame(all_records).sort_values("lead_time_hours").reset_index(drop=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pandas/core/frame.py", line 7211, in sort_values
+    k = self._get_label_or_level_values(by[0], axis=axis)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pandas/core/generic.py", line 1914, in _get_label_or_level_values
+    raise KeyError(key)
+KeyError: 'lead_time_hours'
+
+--- plot ---
+Pysteps configuration file found at: /glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pysteps/pystepsrc
+
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/applications/plot_weatherbench.py", line 310, in <module>
+    main()
+  File "/glade/work/schreck/repos/miles-credit-main/applications/plot_weatherbench.py", line 306, in main
+    plot_all(args.scores, args.out, label=args.label, show_refs=not args.no_refs)
+  File "/glade/work/schreck/repos/miles-credit-main/applications/plot_weatherbench.py", line 280, in plot_all
+    df = pd.read_csv(scores_csv)
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pandas/io/parsers/readers.py", line 1026, in read_csv
+    return _read(filepath_or_buffer, kwds)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pandas/io/parsers/readers.py", line 620, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pandas/io/parsers/readers.py", line 1620, in __init__
+    self._engine = self._make_engine(f, self.engine)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pandas/io/parsers/readers.py", line 1880, in _make_engine
+    self.handles = get_handle(
+                   ^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/pandas/io/common.py", line 873, in get_handle
+    handle = open(
+             ^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/glade/work/schreck/wb2_scores_fixed.csv'
+
+Figures written to /glade/work/schreck/repos/miles-credit-main/wb2_figs
+total 465
+drwxr-xr-x+  2 schreck ncar  4096 Mar 27 14:26 .
+drwxr-xr-x+ 17 schreck ncar 16384 Mar 28 06:35 ..
+-rw-r--r--+  1 schreck ncar 72076 Mar 27 14:25 acc_Z500.png
+-rw-r--r--+  1 schreck ncar 51886 Mar 27 14:25 rmse_SP.png
+-rw-r--r--+  1 schreck ncar 65556 Mar 27 14:25 rmse_t2m.png
+-rw-r--r--+  1 schreck ncar 49916 Mar 27 14:25 rmse_T500.png
+-rw-r--r--+  1 schreck ncar 83367 Mar 27 14:25 rmse_Z500.png
+-rw-r--r--+  1 schreck ncar 43331 Mar 27 14:25 scorecard_vs_ifs.png

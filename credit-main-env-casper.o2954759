@@ -1,0 +1,1815 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+============================================================
+Building credit-main-casper
+  source : /glade/u/home/schreck/.conda/envs/credit-casper
+  target : /glade/work/schreck/conda-envs/credit-main-casper
+  repo   : /glade/work/schreck/repos/miles-credit-main
+============================================================
+[1/3] Cloning base env …
+Retrieving notices: - \ done
+Source:      /glade/u/home/schreck/.conda/envs/credit-casper
+Destination: /glade/work/schreck/conda-envs/credit-main-casper
+Packages: 158
+Files: 105374
+
+Downloading and Extracting Packages: ...working...ca-certificates-2026 |            |   0% 
+tzdata-2025a         |            |   0% [A
+
+libbrotlicommon-1.2. |            |   0% [A[A
+
+
+libdeflate-1.25      |            |   0% [A[A[A
+
+
+
+openssl-3.6.1        |            |   0% [A[A[A[A
+
+
+
+
+xorg-libxau-1.0.12   |            |   0% [A[A[A[A[A
+
+
+
+
+
+xorg-libxdmcp-1.1.5  |            |   0% [A[A[A[A[A[A
+
+
+
+
+
+
+xxhash-0.8.3         |            |   0% [A[A[A[A[A[A[A
+
+
+
+
+
+
+
+yaml-0.2.5           |            |   0% [A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+libbrotlidec-1.2.0   |            |   0% [A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+libbrotlienc-1.2.0   |            |   0% [A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+libpng-1.6.51        |            |   0% [A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+libudunits2-2.2.28   |            |   0% [A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+ncurses-6.4          |            |   0% [A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+zlib-ng-2.2.5        |            |   0% [A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+brotli-bin-1.2.0     |            |   0% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+libtiff-4.7.1        |            |   0% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+readline-8.2         |            |   0% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+udunits2-2.2.28      |            |   0% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ... (more hidden) ...[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+tzdata-2025a         | #3         |  14% [Aca-certificates-2026 | #1         |  11% 
+tzdata-2025a         | ########## | 100% [Aca-certificates-2026 | ########## | 100% ca-certificates-2026 | ########## | 100% 
+
+
+libdeflate-1.25      | ##2        |  22% [A[A[A
+
+
+libdeflate-1.25      | ########## | 100% [A[A[A
+
+
+libdeflate-1.25      | ########## | 100% [A[A[A
+
+libbrotlicommon-1.2. | ##         |  21% [A[A
+
+
+
+openssl-3.6.1        |            |   1% [A[A[A[A
+
+libbrotlicommon-1.2. | ########## | 100% [A[A
+
+
+
+openssl-3.6.1        | ########## | 100% [A[A[A[A
+
+
+
+
+xorg-libxau-1.0.12   | ########## | 100% [A[A[A[A[A
+
+
+
+
+xorg-libxau-1.0.12   | ########## | 100% [A[A[A[A[A
+
+libbrotlicommon-1.2. | ########## | 100% [A[A
+
+
+
+
+
+xorg-libxdmcp-1.1.5  | #######9   |  80% [A[A[A[A[A[A
+
+
+
+
+
+xorg-libxdmcp-1.1.5  | ########## | 100% [A[A[A[A[A[A
+
+
+
+
+
+
+xxhash-0.8.3         | #5         |  15% [A[A[A[A[A[A[A
+
+
+
+
+xorg-libxau-1.0.12   | ########## | 100% [A[A[A[A[A
+
+
+
+
+
+
+xxhash-0.8.3         | ########## | 100% [A[A[A[A[A[A[A
+
+
+
+
+
+
+
+yaml-0.2.5           | #9         |  19% [A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+yaml-0.2.5           | ########## | 100% [A[A[A[A[A[A[A[A
+
+
+
+
+
+xorg-libxdmcp-1.1.5  | ########## | 100% [A[A[A[A[A[A
+
+
+
+
+
+
+
+
+libbrotlidec-1.2.0   | ####7      |  48% [A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+libbrotlidec-1.2.0   | ########## | 100% [A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+libbrotlienc-1.2.0   | 5          |   5% [A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+xxhash-0.8.3         | ########## | 100% [A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+libbrotlienc-1.2.0   | ########## | 100% [A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+yaml-0.2.5           | ########## | 100% [A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+libudunits2-2.2.28   | ##         |  20% [A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+libudunits2-2.2.28   | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+libbrotlidec-1.2.0   | ########## | 100% [A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+libpng-1.6.51        | 5          |   5% [A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+libpng-1.6.51        | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+libbrotlienc-1.2.0   | ########## | 100% [A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+ncurses-6.4          | 1          |   2% [A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+libudunits2-2.2.28   | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+zlib-ng-2.2.5        | #4         |  15% [A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+zlib-ng-2.2.5        | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+ncurses-6.4          | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+openssl-3.6.1        | ########## | 100% [A[A[A[A
+
+
+
+openssl-3.6.1        | ########## | 100% [A[A[A[A
+
+
+
+
+
+
+
+
+
+
+libpng-1.6.51        | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+brotli-bin-1.2.0     | #######8   |  78% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+brotli-bin-1.2.0     | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+libtiff-4.7.1        | 3          |   4% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+zlib-ng-2.2.5        | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+libtiff-4.7.1        | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+brotli-bin-1.2.0     | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+udunits2-2.2.28      | #4         |  15% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+readline-8.2         | 4          |   4% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+udunits2-2.2.28      | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+readline-8.2         | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+libtiff-4.7.1        | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ... (more hidden) ...[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ... (more hidden) ...[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+tzdata-2025a         | ########## | 100% [A
+tzdata-2025a         | ########## | 100% [A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+udunits2-2.2.28      | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+readline-8.2         | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ... (more hidden) ...[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+ncurses-6.4          | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+ncurses-6.4          | ########## | 100% [A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                      [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A                                         
+                                         [A
+
+                                         [A[A
+
+
+                                         [A[A[A
+
+
+
+                                         [A[A[A[A
+
+
+
+
+                                         [A[A[A[A[A
+
+
+
+
+
+                                         [A[A[A[A[A[A
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                         [A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+[A
+
+[A[A
+
+
+[A[A[A
+
+
+
+[A[A[A[A
+
+
+
+
+[A[A[A[A[A
+
+
+
+
+
+[A[A[A[A[A[A
+
+
+
+
+
+
+[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+[A
+
+[A[A
+
+
+[A[A[A
+
+
+
+[A[A[A[A
+
+
+
+
+[A[A[A[A[A
+
+
+
+
+
+[A[A[A[A[A[A
+
+
+
+
+
+
+[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A
+[A
+
+[A[A
+
+
+[A[A[A
+
+
+
+[A[A[A[A done
+
+## Package Plan ##
+
+  environment location: /glade/work/schreck/conda-envs/credit-main-casper
+
+  added / updated specs:
+    - conda-forge/linux-64::attr==2.5.1=h166bdaf_1
+    - conda-forge/linux-64::blosc==1.21.6=he440d0b_1
+    - conda-forge/linux-64::brotli-bin==1.2.0=hf2c8021_0
+    - conda-forge/linux-64::brotli==1.2.0=h41a2e66_0
+    - conda-forge/linux-64::c-ares==1.34.5=hb9d3cd8_0
+    - conda-forge/linux-64::cartopy==0.25.0=py311hed34c8f_1
+    - conda-forge/linux-64::cf-units==3.3.0=py311h0372a8f_1
+    - conda-forge/linux-64::cftime==1.6.4=py311h0372a8f_2
+    - conda-forge/linux-64::contourpy==1.3.3=py311hdf67eae_3
+    - conda-forge/linux-64::esmf==8.8.1=mpi_mpich_h10ba997_101
+    - conda-forge/linux-64::fonttools==4.60.1=py311h3778330_0
+    - conda-forge/linux-64::freetype==2.14.1=ha770c72_0
+    - conda-forge/linux-64::geos==3.14.1=h480dda7_0
+    - conda-forge/linux-64::hdf4==4.2.15=h2a13503_7
+    - conda-forge/linux-64::hdf5==1.14.6=mpi_mpich_h7f58efa_1
+    - conda-forge/linux-64::icu==75.1=he02047a_0
+    - conda-forge/linux-64::keyutils==1.6.1=h166bdaf_0
+    - conda-forge/linux-64::kiwisolver==1.4.9=py311h724c32c_2
+    - conda-forge/linux-64::krb5==1.21.3=h659f571_0
+    - conda-forge/linux-64::lcms2==2.17=h717163a_0
+    - conda-forge/linux-64::lerc==4.0.0=h0aef613_1
+    - conda-forge/linux-64::libaec==1.1.4=h3f801dc_0
+    - conda-forge/linux-64::libblas==3.9.0=32_h59b9bed_openblas
+    - conda-forge/linux-64::libbrotlicommon==1.2.0=h09219d5_0
+    - conda-forge/linux-64::libbrotlidec==1.2.0=hd53d788_0
+    - conda-forge/linux-64::libbrotlienc==1.2.0=h02bd7ab_0
+    - conda-forge/linux-64::libcap==2.75=h39aace5_0
+    - conda-forge/linux-64::libcblas==3.9.0=32_he106b2a_openblas
+    - conda-forge/linux-64::libcurl==8.14.1=h332b0f4_0
+    - conda-forge/linux-64::libdeflate==1.25=h17f619e_0
+    - conda-forge/linux-64::libedit==3.1.20191231=he28a2e2_2
+    - conda-forge/linux-64::libev==4.33=hd590300_2
+    - conda-forge/linux-64::libexpat==2.7.0=h5888daf_0
+    - conda-forge/linux-64::libfabric1==2.2.0=hf45584d_0
+    - conda-forge/linux-64::libfabric==2.2.0=ha770c72_0
+    - conda-forge/linux-64::libfreetype6==2.14.1=h73754d4_0
+    - conda-forge/linux-64::libfreetype==2.14.1=ha770c72_0
+    - conda-forge/linux-64::libgcc-ng==15.1.0=h69a702a_3
+    - conda-forge/linux-64::libgcc==15.1.0=h767d61c_3
+    - conda-forge/linux-64::libgcrypt-lib==1.11.1=hb9d3cd8_0
+    - conda-forge/linux-64::libgfortran5==15.1.0=hcea5267_3
+    - conda-forge/linux-64::libgfortran==15.1.0=h69a702a_3
+    - conda-forge/linux-64::libgomp==15.1.0=h767d61c_3
+    - conda-forge/linux-64::libgpg-error==1.55=h3f2d84a_0
+    - conda-forge/linux-64::libhwloc==2.11.2=default_h0d58e46_1001
+    - conda-forge/linux-64::libiconv==1.18=h4ce23a2_1
+    - conda-forge/linux-64::libjpeg-turbo==3.1.0=hb9d3cd8_0
+    - conda-forge/linux-64::liblapack==3.9.0=32_h7ac8fdf_openblas
+    - conda-forge/linux-64::liblzma-devel==5.8.1=hb9d3cd8_2
+    - conda-forge/linux-64::liblzma==5.8.1=hb9d3cd8_2
+    - conda-forge/linux-64::libnetcdf==4.9.2=mpi_mpich_he5990fa_17
+    - conda-forge/linux-64::libnghttp2==1.64.0=h161d5f1_0
+    - conda-forge/linux-64::libnl==3.11.0=hb9d3cd8_0
+    - conda-forge/linux-64::libnsl==2.0.1=hb9d3cd8_1
+    - conda-forge/linux-64::libopenblas==0.3.30=pthreads_h94d23a6_0
+    - conda-forge/linux-64::libpnetcdf==1.14.0=mpi_mpich_hdce4f7b_100
+    - conda-forge/linux-64::libpng==1.6.51=h421ea60_0
+    - conda-forge/linux-64::libsqlite==3.45.2=h2797004_0
+    - conda-forge/linux-64::libssh2==1.11.1=hcf80075_0
+    - conda-forge/linux-64::libstdcxx-ng==15.1.0=h4852527_3
+    - conda-forge/linux-64::libstdcxx==15.1.0=h8f9b012_3
+    - conda-forge/linux-64::libsystemd0==257.7=h4e0b6ca_0
+    - conda-forge/linux-64::libtiff==4.7.1=h9d88235_1
+    - conda-forge/linux-64::libudev1==257.7=hbe16f8c_0
+    - conda-forge/linux-64::libudunits2==2.2.28=h40f5838_3
+    - conda-forge/linux-64::libuuid==2.38.1=h0b41bf4_0
+    - conda-forge/linux-64::libwebp-base==1.6.0=hd42ef1d_0
+    - conda-forge/linux-64::libxcb==1.17.0=h8a09558_0
+    - conda-forge/linux-64::libxcrypt==4.4.36=hd590300_1
+    - conda-forge/linux-64::libxml2==2.13.8=h4bc477f_0
+    - conda-forge/linux-64::libzip==1.11.2=h6991a6a_0
+    - conda-forge/linux-64::libzlib==1.3.1=hb9d3cd8_2
+    - conda-forge/linux-64::lz4-c==1.10.0=h5888daf_1
+    - conda-forge/linux-64::markupsafe==3.0.3=py311h3778330_0
+    - conda-forge/linux-64::matplotlib-base==3.10.8=py311h0f3be63_0
+    - conda-forge/linux-64::mpich==4.3.1=h1a8bee6_100
+    - conda-forge/linux-64::netcdf-fortran==4.6.2=mpi_mpich_h8126461_0
+    - conda-forge/linux-64::netcdf4==1.7.2=nompi_py311h0b29842_103
+    - conda-forge/linux-64::openjpeg==2.5.4=h55fea9a_0
+    - conda-forge/linux-64::openssl==3.6.1=h35e630c_1
+    - conda-forge/linux-64::pandas==2.3.3=py311hed34c8f_1
+    - conda-forge/linux-64::parallelio==2_6_6=mpi_mpich_h3d8902e_101
+    - conda-forge/linux-64::pillow==12.0.0=py311h07c5bb8_0
+    - conda-forge/linux-64::proj==9.4.0=h1d62c97_0
+    - conda-forge/linux-64::pthread-stubs==0.4=hb9d3cd8_1002
+    - conda-forge/linux-64::pyproj==3.6.1=py311hc21b84f_7
+    - conda-forge/linux-64::python-xxhash==3.6.0=py311h041eb40_1
+    - conda-forge/linux-64::python==3.11.8=hab00c5b_0_cpython
+    - conda-forge/linux-64::pywavelets==1.9.0=py311h0372a8f_2
+    - conda-forge/linux-64::pyyaml==6.0.3=py311h3778330_0
+    - conda-forge/linux-64::qhull==2020.2=h434a139_5
+    - conda-forge/linux-64::rdma-core==57.0=h5888daf_0
+    - conda-forge/linux-64::scikit-image==0.25.2=py311hed34c8f_2
+    - conda-forge/linux-64::scipy==1.16.3=py311h1e13796_1
+    - conda-forge/linux-64::shapely==2.1.2=py311h8a92878_2
+    - conda-forge/linux-64::snappy==1.2.1=h8bd8927_1
+    - conda-forge/linux-64::sqlite==3.45.2=h2c6b66d_0
+    - conda-forge/linux-64::tk==8.6.13=noxft_hd72426e_102
+    - conda-forge/linux-64::ucx==1.18.1=h1369271_0
+    - conda-forge/linux-64::udunits2==2.2.28=h40f5838_3
+    - conda-forge/linux-64::unicodedata2==17.0.0=py311h49ec1c0_1
+    - conda-forge/linux-64::xorg-libxau==1.0.12=hb03c661_1
+    - conda-forge/linux-64::xorg-libxdmcp==1.1.5=hb03c661_1
+    - conda-forge/linux-64::xxhash==0.8.3=hb47aa4a_0
+    - conda-forge/linux-64::xz-gpl-tools==5.8.1=hbcc6ac9_2
+    - conda-forge/linux-64::xz-tools==5.8.1=hb9d3cd8_2
+    - conda-forge/linux-64::xz==5.8.1=hbcc6ac9_2
+    - conda-forge/linux-64::yaml==0.2.5=h280c20c_3
+    - conda-forge/linux-64::zlib-ng==2.2.5=hde8ca8f_0
+    - conda-forge/linux-64::zlib==1.3.1=hb9d3cd8_2
+    - conda-forge/linux-64::zstd==1.5.7=hb8e6e7a_2
+    - conda-forge/noarch::ca-certificates==2026.2.25=hbd8a1cb_0
+    - conda-forge/noarch::certifi==2026.2.25=pyhd8ed1ab_0
+    - conda-forge/noarch::click==8.3.1=pyh707e725_0
+    - conda-forge/noarch::cloudpickle==3.1.2=pyhd8ed1ab_0
+    - conda-forge/noarch::cycler==0.12.1=pyhd8ed1ab_1
+    - conda-forge/noarch::esmpy==8.8.1=pyhecae5ae_0
+    - conda-forge/noarch::imageio==2.37.0=pyhfb79c49_0
+    - conda-forge/noarch::importlib-metadata==8.7.0=pyhe01879c_1
+    - conda-forge/noarch::iris==3.12.3=pyha770c72_0
+    - conda-forge/noarch::jinja2==3.1.6=pyhd8ed1ab_0
+    - conda-forge/noarch::joblib==1.5.2=pyhd8ed1ab_0
+    - conda-forge/noarch::lazy-loader==0.4=pyhd8ed1ab_2
+    - conda-forge/noarch::locket==1.0.0=pyhd8ed1ab_0
+    - conda-forge/noarch::looseversion==1.3.0=pyhd8ed1ab_0
+    - conda-forge/noarch::mpi==1.0.1=mpich
+    - conda-forge/noarch::munkres==1.1.4=pyhd8ed1ab_1
+    - conda-forge/noarch::networkx==3.6=pyhcf101f3_0
+    - conda-forge/noarch::packaging==25.0=pyh29332c3_1
+    - conda-forge/noarch::partd==1.4.2=pyhd8ed1ab_0
+    - conda-forge/noarch::pyparsing==3.2.5=pyhcf101f3_0
+    - conda-forge/noarch::pyshp==3.0.2=pyhd8ed1ab_0
+    - conda-forge/noarch::python-dateutil==2.9.0.post0=pyhe01879c_2
+    - conda-forge/noarch::python-tzdata==2025.2=pyhd8ed1ab_0
+    - conda-forge/noarch::python_abi==3.11=7_cp311
+    - conda-forge/noarch::pytz==2025.2=pyhd8ed1ab_0
+    - conda-forge/noarch::six==1.17.0=pyhe01879c_1
+    - conda-forge/noarch::threadpoolctl==3.6.0=pyhecae5ae_0
+    - conda-forge/noarch::tobac==1.6.1=pyhd8ed1ab_0
+    - conda-forge/noarch::toolz==1.1.0=pyhd8ed1ab_1
+    - conda-forge/noarch::trackpy==0.7=pyhd8ed1ab_0
+    - conda-forge/noarch::typing_extensions==4.15.0=pyhcf101f3_0
+    - conda-forge/noarch::xarray==2026.2.0=pyhcf101f3_0
+    - conda-forge/noarch::zipp==3.23.0=pyhd8ed1ab_0
+    - pkgs/main/linux-64::_libgcc_mutex==0.1=main
+    - pkgs/main/linux-64::_openmp_mutex==5.1=1_gnu
+    - pkgs/main/linux-64::bzip2==1.0.8=h5eee18b_6
+    - pkgs/main/linux-64::ld_impl_linux-64==2.40=h12ee557_0
+    - pkgs/main/linux-64::libffi==3.4.4=h6a678d5_1
+    - pkgs/main/linux-64::ncurses==6.4=h6a678d5_0
+    - pkgs/main/linux-64::pip==25.0=py311h06a4308_0
+    - pkgs/main/linux-64::pycodestyle==2.12.1=py311h06a4308_0
+    - pkgs/main/linux-64::readline==8.2=h5eee18b_0
+    - pkgs/main/linux-64::setuptools==75.8.0=py311h06a4308_0
+    - pkgs/main/linux-64::tifffile==2025.10.4=py311h06a4308_0
+    - pkgs/main/linux-64::wheel==0.45.1=py311h06a4308_0
+    - pkgs/main/noarch::autopep8==2.0.4=pyhd3eb1b0_0
+    - pkgs/main/noarch::tzdata==2025a=h04d1e81_0
+
+
+The following NEW packages will be INSTALLED:
+
+  _libgcc_mutex      pkgs/main/linux-64::_libgcc_mutex-0.1-main 
+  _openmp_mutex      pkgs/main/linux-64::_openmp_mutex-5.1-1_gnu 
+  attr               conda-forge/linux-64::attr-2.5.1-h166bdaf_1 
+  autopep8           pkgs/main/noarch::autopep8-2.0.4-pyhd3eb1b0_0 
+  blosc              conda-forge/linux-64::blosc-1.21.6-he440d0b_1 
+  brotli             conda-forge/linux-64::brotli-1.2.0-h41a2e66_0 
+  brotli-bin         conda-forge/linux-64::brotli-bin-1.2.0-hf2c8021_0 
+  bzip2              pkgs/main/linux-64::bzip2-1.0.8-h5eee18b_6 
+  c-ares             conda-forge/linux-64::c-ares-1.34.5-hb9d3cd8_0 
+  ca-certificates    conda-forge/noarch::ca-certificates-2026.2.25-hbd8a1cb_0 
+  cartopy            conda-forge/linux-64::cartopy-0.25.0-py311hed34c8f_1 
+  certifi            conda-forge/noarch::certifi-2026.2.25-pyhd8ed1ab_0 
+  cf-units           conda-forge/linux-64::cf-units-3.3.0-py311h0372a8f_1 
+  cftime             conda-forge/linux-64::cftime-1.6.4-py311h0372a8f_2 
+  click              conda-forge/noarch::click-8.3.1-pyh707e725_0 
+  cloudpickle        conda-forge/noarch::cloudpickle-3.1.2-pyhd8ed1ab_0 
+  contourpy          conda-forge/linux-64::contourpy-1.3.3-py311hdf67eae_3 
+  cycler             conda-forge/noarch::cycler-0.12.1-pyhd8ed1ab_1 
+  esmf               conda-forge/linux-64::esmf-8.8.1-mpi_mpich_h10ba997_101 
+  esmpy              conda-forge/noarch::esmpy-8.8.1-pyhecae5ae_0 
+  fonttools          conda-forge/linux-64::fonttools-4.60.1-py311h3778330_0 
+  freetype           conda-forge/linux-64::freetype-2.14.1-ha770c72_0 
+  geos               conda-forge/linux-64::geos-3.14.1-h480dda7_0 
+  hdf4               conda-forge/linux-64::hdf4-4.2.15-h2a13503_7 
+  hdf5               conda-forge/linux-64::hdf5-1.14.6-mpi_mpich_h7f58efa_1 
+  icu                conda-forge/linux-64::icu-75.1-he02047a_0 
+  imageio            conda-forge/noarch::imageio-2.37.0-pyhfb79c49_0 
+  importlib-metadata conda-forge/noarch::importlib-metadata-8.7.0-pyhe01879c_1 
+  iris               conda-forge/noarch::iris-3.12.3-pyha770c72_0 
+  jinja2             conda-forge/noarch::jinja2-3.1.6-pyhd8ed1ab_0 
+  joblib             conda-forge/noarch::joblib-1.5.2-pyhd8ed1ab_0 
+  keyutils           conda-forge/linux-64::keyutils-1.6.1-h166bdaf_0 
+  kiwisolver         conda-forge/linux-64::kiwisolver-1.4.9-py311h724c32c_2 
+  krb5               conda-forge/linux-64::krb5-1.21.3-h659f571_0 
+  lazy-loader        conda-forge/noarch::lazy-loader-0.4-pyhd8ed1ab_2 
+  lcms2              conda-forge/linux-64::lcms2-2.17-h717163a_0 
+  ld_impl_linux-64   pkgs/main/linux-64::ld_impl_linux-64-2.40-h12ee557_0 
+  lerc               conda-forge/linux-64::lerc-4.0.0-h0aef613_1 
+  libaec             conda-forge/linux-64::libaec-1.1.4-h3f801dc_0 
+  libblas            conda-forge/linux-64::libblas-3.9.0-32_h59b9bed_openblas 
+  libbrotlicommon    conda-forge/linux-64::libbrotlicommon-1.2.0-h09219d5_0 
+  libbrotlidec       conda-forge/linux-64::libbrotlidec-1.2.0-hd53d788_0 
+  libbrotlienc       conda-forge/linux-64::libbrotlienc-1.2.0-h02bd7ab_0 
+  libcap             conda-forge/linux-64::libcap-2.75-h39aace5_0 
+  libcblas           conda-forge/linux-64::libcblas-3.9.0-32_he106b2a_openblas 
+  libcurl            conda-forge/linux-64::libcurl-8.14.1-h332b0f4_0 
+  libdeflate         conda-forge/linux-64::libdeflate-1.25-h17f619e_0 
+  libedit            conda-forge/linux-64::libedit-3.1.20191231-he28a2e2_2 
+  libev              conda-forge/linux-64::libev-4.33-hd590300_2 
+  libexpat           conda-forge/linux-64::libexpat-2.7.0-h5888daf_0 
+  libfabric          conda-forge/linux-64::libfabric-2.2.0-ha770c72_0 
+  libfabric1         conda-forge/linux-64::libfabric1-2.2.0-hf45584d_0 
+  libffi             pkgs/main/linux-64::libffi-3.4.4-h6a678d5_1 
+  libfreetype        conda-forge/linux-64::libfreetype-2.14.1-ha770c72_0 
+  libfreetype6       conda-forge/linux-64::libfreetype6-2.14.1-h73754d4_0 
+  libgcc             conda-forge/linux-64::libgcc-15.1.0-h767d61c_3 
+  libgcc-ng          conda-forge/linux-64::libgcc-ng-15.1.0-h69a702a_3 
+  libgcrypt-lib      conda-forge/linux-64::libgcrypt-lib-1.11.1-hb9d3cd8_0 
+  libgfortran        conda-forge/linux-64::libgfortran-15.1.0-h69a702a_3 
+  libgfortran5       conda-forge/linux-64::libgfortran5-15.1.0-hcea5267_3 
+  libgomp            conda-forge/linux-64::libgomp-15.1.0-h767d61c_3 
+  libgpg-error       conda-forge/linux-64::libgpg-error-1.55-h3f2d84a_0 
+  libhwloc           conda-forge/linux-64::libhwloc-2.11.2-default_h0d58e46_1001 
+  libiconv           conda-forge/linux-64::libiconv-1.18-h4ce23a2_1 
+  libjpeg-turbo      conda-forge/linux-64::libjpeg-turbo-3.1.0-hb9d3cd8_0 
+  liblapack          conda-forge/linux-64::liblapack-3.9.0-32_h7ac8fdf_openblas 
+  liblzma            conda-forge/linux-64::liblzma-5.8.1-hb9d3cd8_2 
+  liblzma-devel      conda-forge/linux-64::liblzma-devel-5.8.1-hb9d3cd8_2 
+  libnetcdf          conda-forge/linux-64::libnetcdf-4.9.2-mpi_mpich_he5990fa_17 
+  libnghttp2         conda-forge/linux-64::libnghttp2-1.64.0-h161d5f1_0 
+  libnl              conda-forge/linux-64::libnl-3.11.0-hb9d3cd8_0 
+  libnsl             conda-forge/linux-64::libnsl-2.0.1-hb9d3cd8_1 
+  libopenblas        conda-forge/linux-64::libopenblas-0.3.30-pthreads_h94d23a6_0 
+  libpnetcdf         conda-forge/linux-64::libpnetcdf-1.14.0-mpi_mpich_hdce4f7b_100 
+  libpng             conda-forge/linux-64::libpng-1.6.51-h421ea60_0 
+  libsqlite          conda-forge/linux-64::libsqlite-3.45.2-h2797004_0 
+  libssh2            conda-forge/linux-64::libssh2-1.11.1-hcf80075_0 
+  libstdcxx          conda-forge/linux-64::libstdcxx-15.1.0-h8f9b012_3 
+  libstdcxx-ng       conda-forge/linux-64::libstdcxx-ng-15.1.0-h4852527_3 
+  libsystemd0        conda-forge/linux-64::libsystemd0-257.7-h4e0b6ca_0 
+  libtiff            conda-forge/linux-64::libtiff-4.7.1-h9d88235_1 
+  libudev1           conda-forge/linux-64::libudev1-257.7-hbe16f8c_0 
+  libudunits2        conda-forge/linux-64::libudunits2-2.2.28-h40f5838_3 
+  libuuid            conda-forge/linux-64::libuuid-2.38.1-h0b41bf4_0 
+  libwebp-base       conda-forge/linux-64::libwebp-base-1.6.0-hd42ef1d_0 
+  libxcb             conda-forge/linux-64::libxcb-1.17.0-h8a09558_0 
+  libxcrypt          conda-forge/linux-64::libxcrypt-4.4.36-hd590300_1 
+  libxml2            conda-forge/linux-64::libxml2-2.13.8-h4bc477f_0 
+  libzip             conda-forge/linux-64::libzip-1.11.2-h6991a6a_0 
+  libzlib            conda-forge/linux-64::libzlib-1.3.1-hb9d3cd8_2 
+  locket             conda-forge/noarch::locket-1.0.0-pyhd8ed1ab_0 
+  looseversion       conda-forge/noarch::looseversion-1.3.0-pyhd8ed1ab_0 
+  lz4-c              conda-forge/linux-64::lz4-c-1.10.0-h5888daf_1 
+  markupsafe         conda-forge/linux-64::markupsafe-3.0.3-py311h3778330_0 
+  matplotlib-base    conda-forge/linux-64::matplotlib-base-3.10.8-py311h0f3be63_0 
+  mpi                conda-forge/noarch::mpi-1.0.1-mpich 
+  mpich              conda-forge/linux-64::mpich-4.3.1-h1a8bee6_100 
+  munkres            conda-forge/noarch::munkres-1.1.4-pyhd8ed1ab_1 
+  ncurses            pkgs/main/linux-64::ncurses-6.4-h6a678d5_0 
+  netcdf-fortran     conda-forge/linux-64::netcdf-fortran-4.6.2-mpi_mpich_h8126461_0 
+  netcdf4            conda-forge/linux-64::netcdf4-1.7.2-nompi_py311h0b29842_103 
+  networkx           conda-forge/noarch::networkx-3.6-pyhcf101f3_0 
+  openjpeg           conda-forge/linux-64::openjpeg-2.5.4-h55fea9a_0 
+  openssl            conda-forge/linux-64::openssl-3.6.1-h35e630c_1 
+  packaging          conda-forge/noarch::packaging-25.0-pyh29332c3_1 
+  pandas             conda-forge/linux-64::pandas-2.3.3-py311hed34c8f_1 
+  parallelio         conda-forge/linux-64::parallelio-2_6_6-mpi_mpich_h3d8902e_101 
+  partd              conda-forge/noarch::partd-1.4.2-pyhd8ed1ab_0 
+  pillow             conda-forge/linux-64::pillow-12.0.0-py311h07c5bb8_0 
+  pip                pkgs/main/linux-64::pip-25.0-py311h06a4308_0 
+  proj               conda-forge/linux-64::proj-9.4.0-h1d62c97_0 
+  pthread-stubs      conda-forge/linux-64::pthread-stubs-0.4-hb9d3cd8_1002 
+  pycodestyle        pkgs/main/linux-64::pycodestyle-2.12.1-py311h06a4308_0 
+  pyparsing          conda-forge/noarch::pyparsing-3.2.5-pyhcf101f3_0 
+  pyproj             conda-forge/linux-64::pyproj-3.6.1-py311hc21b84f_7 
+  pyshp              conda-forge/noarch::pyshp-3.0.2-pyhd8ed1ab_0 
+  python             conda-forge/linux-64::python-3.11.8-hab00c5b_0_cpython 
+  python-dateutil    conda-forge/noarch::python-dateutil-2.9.0.post0-pyhe01879c_2 
+  python-tzdata      conda-forge/noarch::python-tzdata-2025.2-pyhd8ed1ab_0 
+  python-xxhash      conda-forge/linux-64::python-xxhash-3.6.0-py311h041eb40_1 
+  python_abi         conda-forge/noarch::python_abi-3.11-7_cp311 
+  pytz               conda-forge/noarch::pytz-2025.2-pyhd8ed1ab_0 
+  pywavelets         conda-forge/linux-64::pywavelets-1.9.0-py311h0372a8f_2 
+  pyyaml             conda-forge/linux-64::pyyaml-6.0.3-py311h3778330_0 
+  qhull              conda-forge/linux-64::qhull-2020.2-h434a139_5 
+  rdma-core          conda-forge/linux-64::rdma-core-57.0-h5888daf_0 
+  readline           pkgs/main/linux-64::readline-8.2-h5eee18b_0 
+  scikit-image       conda-forge/linux-64::scikit-image-0.25.2-py311hed34c8f_2 
+  scipy              conda-forge/linux-64::scipy-1.16.3-py311h1e13796_1 
+  setuptools         pkgs/main/linux-64::setuptools-75.8.0-py311h06a4308_0 
+  shapely            conda-forge/linux-64::shapely-2.1.2-py311h8a92878_2 
+  six                conda-forge/noarch::six-1.17.0-pyhe01879c_1 
+  snappy             conda-forge/linux-64::snappy-1.2.1-h8bd8927_1 
+  sqlite             conda-forge/linux-64::sqlite-3.45.2-h2c6b66d_0 
+  threadpoolctl      conda-forge/noarch::threadpoolctl-3.6.0-pyhecae5ae_0 
+  tifffile           pkgs/main/linux-64::tifffile-2025.10.4-py311h06a4308_0 
+  tk                 conda-forge/linux-64::tk-8.6.13-noxft_hd72426e_102 
+  tobac              conda-forge/noarch::tobac-1.6.1-pyhd8ed1ab_0 
+  toolz              conda-forge/noarch::toolz-1.1.0-pyhd8ed1ab_1 
+  trackpy            conda-forge/noarch::trackpy-0.7-pyhd8ed1ab_0 
+  typing_extensions  conda-forge/noarch::typing_extensions-4.15.0-pyhcf101f3_0 
+  tzdata             pkgs/main/noarch::tzdata-2025a-h04d1e81_0 
+  ucx                conda-forge/linux-64::ucx-1.18.1-h1369271_0 
+  udunits2           conda-forge/linux-64::udunits2-2.2.28-h40f5838_3 
+  unicodedata2       conda-forge/linux-64::unicodedata2-17.0.0-py311h49ec1c0_1 
+  wheel              pkgs/main/linux-64::wheel-0.45.1-py311h06a4308_0 
+  xarray             conda-forge/noarch::xarray-2026.2.0-pyhcf101f3_0 
+  xorg-libxau        conda-forge/linux-64::xorg-libxau-1.0.12-hb03c661_1 
+  xorg-libxdmcp      conda-forge/linux-64::xorg-libxdmcp-1.1.5-hb03c661_1 
+  xxhash             conda-forge/linux-64::xxhash-0.8.3-hb47aa4a_0 
+  xz                 conda-forge/linux-64::xz-5.8.1-hbcc6ac9_2 
+  xz-gpl-tools       conda-forge/linux-64::xz-gpl-tools-5.8.1-hbcc6ac9_2 
+  xz-tools           conda-forge/linux-64::xz-tools-5.8.1-hb9d3cd8_2 
+  yaml               conda-forge/linux-64::yaml-0.2.5-h280c20c_3 
+  zipp               conda-forge/noarch::zipp-3.23.0-pyhd8ed1ab_0 
+  zlib               conda-forge/linux-64::zlib-1.3.1-hb9d3cd8_2 
+  zlib-ng            conda-forge/linux-64::zlib-ng-2.2.5-hde8ca8f_0 
+  zstd               conda-forge/linux-64::zstd-1.5.7-hb8e6e7a_2 
+
+
+
+Downloading and Extracting Packages: ...working... done
+Preparing transaction: / - \ | / - \ | / - \ | / - \ | done
+Verifying transaction: - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | done
+Executing transaction: - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / 
+To enable CUDA support, UCX requires the CUDA Runtime library (libcudart).
+The library can be installed with the appropriate command below:
+
+* For CUDA 11, run:    conda install cudatoolkit cuda-version=11
+* For CUDA 12, run:    conda install cuda-cudart cuda-version=12
+
+If any of the packages you requested use CUDA then CUDA should already
+have been installed for you.
+
+
+- \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ done
+#
+# To activate this environment, use
+#
+#     $ conda activate /glade/work/schreck/conda-envs/credit-main-casper
+#
+# To deactivate an active environment, use
+#
+#     $ conda deactivate
+
+Clone done.
+[2/3] Installing miles-credit in editable mode …
+Found existing installation: miles-credit 2026.1.1.dev75+g8401c0c28.d20260325
+Uninstalling miles-credit-2026.1.1.dev75+g8401c0c28.d20260325:
+  Successfully uninstalled miles-credit-2026.1.1.dev75+g8401c0c28.d20260325
+Obtaining file:///glade/work/schreck/repos/miles-credit-main
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'error'
+  error: subprocess-exited-with-error
+  
+  × Preparing editable metadata (pyproject.toml) did not run successfully.
+  │ exit code: 1
+  ╰─> [92 lines of output]
+      configuration error: `project.license` must be valid exactly by one definition (2 matches found):
+      
+          - keys:
+              'file': {type: string}
+            required: ['file']
+          - keys:
+              'text': {type: string}
+            required: ['text']
+      
+      DESCRIPTION:
+          `Project license <https://peps.python.org/pep-0621/#license>`_.
+      
+      GIVEN VALUE:
+          "Apache-2.0"
+      
+      OFFENDING RULE: 'oneOf'
+      
+      DEFINITION:
+          {
+              "oneOf": [
+                  {
+                      "properties": {
+                          "file": {
+                              "type": "string",
+                              "$$description": [
+                                  "Relative path to the file (UTF-8) which contains the license for the",
+                                  "project."
+                              ]
+                          }
+                      },
+                      "required": [
+                          "file"
+                      ]
+                  },
+                  {
+                      "properties": {
+                          "text": {
+                              "type": "string",
+                              "$$description": [
+                                  "The license of the project whose meaning is that of the",
+                                  "`License field from the core metadata",
+                                  "<https://packaging.python.org/specifications/core-metadata/#license>`_."
+                              ]
+                          }
+                      },
+                      "required": [
+                          "text"
+                      ]
+                  }
+              ]
+          }
+      Traceback (most recent call last):
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/pip/_vendor/pyproject_hooks/_in_process/_in_process.py", line 389, in <module>
+          main()
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/pip/_vendor/pyproject_hooks/_in_process/_in_process.py", line 373, in main
+          json_out["return_val"] = hook(**hook_input["kwargs"])
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/pip/_vendor/pyproject_hooks/_in_process/_in_process.py", line 209, in prepare_metadata_for_build_editable
+          return hook(metadata_directory, config_settings)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/build_meta.py", line 488, in prepare_metadata_for_build_editable
+          return self.prepare_metadata_for_build_wheel(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/build_meta.py", line 377, in prepare_metadata_for_build_wheel
+          self.run_setup()
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/build_meta.py", line 320, in run_setup
+          exec(code, locals())
+        File "<string>", line 4, in <module>
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/__init__.py", line 117, in setup
+          return distutils.core.setup(**attrs)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/_distutils/core.py", line 160, in setup
+          dist.parse_config_files()
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/dist.py", line 652, in parse_config_files
+          pyprojecttoml.apply_configuration(self, filename, ignore_option_errors)
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/config/pyprojecttoml.py", line 72, in apply_configuration
+          config = read_configuration(filepath, True, ignore_option_errors, dist)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/config/pyprojecttoml.py", line 140, in read_configuration
+          validate(subset, filepath)
+        File "/glade/work/schreck/conda-envs/credit-main-casper/lib/python3.11/site-packages/setuptools/config/pyprojecttoml.py", line 61, in validate
+          raise ValueError(f"{error}\n{summary}") from None
+      ValueError: invalid pyproject.toml config: `project.license`.
+      configuration error: `project.license` must be valid exactly by one definition (2 matches found):
+      
+          - keys:
+              'file': {type: string}
+            required: ['file']
+          - keys:
+              'text': {type: string}
+            required: ['text']
+      
+      [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+error: metadata-generation-failed
+
+× Encountered error while generating package metadata.
+╰─> See above for output.
+
+note: This is an issue with the package mentioned above, not pip.
+hint: See above for details.

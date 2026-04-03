@@ -1,0 +1,408 @@
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+
+Activating Modules:
+  1) cray-mpich/8.1.29     3) hdf5/1.12.3             5) netcdf/4.9.3
+  2) craype/2.7.31         4) ncarcompilers/1.0.0
+
+pbs_attach: process 124863 attached to job: 5641938.desched1
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+=== Model Zoo Training ===
+Config    : config/model_zoo/sfno.yml
+Nodes     : 1
+GPUs/node : 4
+Total GPUs: 4
+Head node : 10.14.20.121
+Date      : Sat Mar 28 07:48:57 AM MDT 2026
+
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:48:59.635000 125781 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.121:29844
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/1e760bc6-1ad7-49db-a670-1ff7caf990ca/tmp/torchelastic_ghzn92_w
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:48:59.635000 125782 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.121:29844
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/1e760bc6-1ad7-49db-a670-1ff7caf990ca/tmp/torchelastic_z2sc7nwc
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:48:59.635000 125783 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.121:29844
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/1e760bc6-1ad7-49db-a670-1ff7caf990ca/tmp/torchelastic_52x4p13k
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:48:59.635000 125784 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.121:29844
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/1e760bc6-1ad7-49db-a670-1ff7caf990ca/tmp/torchelastic_a5zqhxij
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:48:59.636000 125781 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:48:59.642000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:48:59.642000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:48:59.643000 125782 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:48:59.643000 125784 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:48:59.643000 125783 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:48:59.643000 125782 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:48:59.644000 125784 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:48:59.644000 125783 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523] [default] Rendezvous complete for workers. Result:
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   restart_count=0
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_addr=deg0068.hsn.de.hpc.ucar.edu
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_port=41363
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_rank=0
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_world_size=1
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   local_ranks=[0, 1, 2, 3]
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_ranks=[0, 1, 2, 3]
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_ranks=[0, 1, 2, 3]
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_world_sizes=[4, 4, 4, 4]
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_world_sizes=[4, 4, 4, 4]
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523]   event_log_handler=null
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:523] 
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/api.py:685] [default] Starting worker group
+I0328 07:48:59.733000 125781 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:296] use_agent_store: True
+I0328 07:48:59.734000 125781 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:192] Environment variable 'TORCHELASTIC_ENABLE_FILE_TIMER' not found. Do not start FileTimerServer.
+I0328 07:48:59.734000 125781 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:236] Environment variable 'TORCHELASTIC_HEALTH_CHECK_PORT' not found. Do not start health check.
+INFO:root:Running DDP on rank 1 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 3 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 2 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 0 with world_size 4 using nccl.
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:root:Loaded a training ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:root:Loaded a validation ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:credit.models:Loading SFNO (Spherical Fourier Neural Operator) ...
+INFO:credit.models:Loading SFNO (Spherical Fourier Neural Operator) ...
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+[rank3]:     main_cli()
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 434, in main_cli
+[rank3]:     main(world_rank, world_size, conf, backend)
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 248, in main
+[rank3]:     m = load_model(conf)
+[rank3]:         ^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 286, in load_model
+[rank3]:     return model(**filtered_conf)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/sfno/sfno.py", line 252, in __init__
+[rank3]:     self.model = SFNOModel(
+[rank3]:                  ^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/sfno/sfno.py", line 178, in __init__
+[rank3]:     assert H % patch_size == 0 and W % patch_size == 0
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]: AssertionError
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+[rank1]:     main_cli()
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 434, in main_cli
+[rank1]:     main(world_rank, world_size, conf, backend)
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 248, in main
+[rank1]:     m = load_model(conf)
+[rank1]:         ^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 286, in load_model
+[rank1]:     return model(**filtered_conf)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/sfno/sfno.py", line 252, in __init__
+[rank1]:     self.model = SFNOModel(
+[rank1]:                  ^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/sfno/sfno.py", line 178, in __init__
+[rank1]:     assert H % patch_size == 0 and W % patch_size == 0
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]: AssertionError
+INFO:root:Loaded a validation ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:credit.models:Loading SFNO (Spherical Fourier Neural Operator) ...
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+[rank2]:     main_cli()
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 434, in main_cli
+[rank2]:     main(world_rank, world_size, conf, backend)
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 248, in main
+[rank2]:     m = load_model(conf)
+[rank2]:         ^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 286, in load_model
+[rank2]:     return model(**filtered_conf)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/sfno/sfno.py", line 252, in __init__
+[rank2]:     self.model = SFNOModel(
+[rank2]:                  ^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/sfno/sfno.py", line 178, in __init__
+[rank2]:     assert H % patch_size == 0 and W % patch_size == 0
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]: AssertionError
+INFO:root:Loaded a validation ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:credit.models:Loading SFNO (Spherical Fourier Neural Operator) ...
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+[rank0]:     main_cli()
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 434, in main_cli
+[rank0]:     main(world_rank, world_size, conf, backend)
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 248, in main
+[rank0]:     m = load_model(conf)
+[rank0]:         ^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 286, in load_model
+[rank0]:     return model(**filtered_conf)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/sfno/sfno.py", line 252, in __init__
+[rank0]:     self.model = SFNOModel(
+[rank0]:                  ^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/sfno/sfno.py", line 178, in __init__
+[rank0]:     assert H % patch_size == 0 and W % patch_size == 0
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]: AssertionError
+[rank0]:[W328 07:49:12.529624659 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W0328 07:49:13.058000 125781 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 125789 closing signal SIGTERM
+W0328 07:49:13.058000 125781 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 125790 closing signal SIGTERM
+W0328 07:49:13.059000 125781 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 125791 closing signal SIGTERM
+E0328 07:49:13.636000 125781 site-packages/torch/distributed/elastic/multiprocessing/api.py:874] failed (exitcode: 1) local_rank: 0 (pid: 125788) of binary: /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python
+I0328 07:49:13.645000 125781 site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py:370] ('local_rank %s FAILED with no error file. Decorate your entrypoint fn with @record for traceback info. See: https://pytorch.org/docs/stable/elastic/errors.html', 0)
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 277, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/glade/work/schreck/repos/miles-credit-main/applications/train.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-03-28_07:49:13
+  host      : deg0068.hsn.de.hpc.ucar.edu
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 125788)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[W328 07:49:13.144708271 TCPStore.cpp:138] [c10d] recvValueWithTimeout failed on SocketImpl(fd=3, addr=[deg0068.hsn.de.hpc.ucar.edu]:36258, remote=[deg0068.hsn.de.hpc.ucar.edu]:29844): Failed to recv, got 0 bytes. Connection was likely closed. Did the remote server shutdown or crash?
+Exception raised from recvBytes at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/Utils.hpp:682 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x148c110970c4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5d56252 (0x148c24d56252 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5d5793f (0x148c24d5793f in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5d57ff9 (0x148c24d57ff9 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::doWait(c10::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x1c6 (0x148c24d53346 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::TCPStore::doGet(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x33 (0x148c24d537b3 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #6: c10d::TCPStore::get(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x81 (0x148c24d548d1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #7: <unknown function> + 0xcd9746 (0x148c346d9746 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #8: <unknown function> + 0x3c97de (0x148c33dc97de in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #9: <unknown function> + 0x1fcdc6 (0x560a39d3ddc6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #10: _PyObject_MakeTpCall + 0x24b (0x560a39d1a12b in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #11: <unknown function> + 0x22cc56 (0x560a39d6dc56 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #12: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x560a39d4e035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #14: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #15: _PyFunction_Vectorcall + 0x165 (0x560a39d4e035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #16: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #17: _PyFunction_Vectorcall + 0x165 (0x560a39d4e035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #18: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x560a39d4e035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #20: _PyObject_FastCallDictTstate + 0x65 (0x560a39d1ee55 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #21: _PyObject_Call_Prepend + 0x67 (0x560a39d560b7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #22: <unknown function> + 0x2e7ae7 (0x560a39e28ae7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #23: PyObject_Call + 0xbe (0x560a39d5830e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #24: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #25: _PyFunction_Vectorcall + 0x165 (0x560a39d4e035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #26: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #27: <unknown function> + 0x2a3075 (0x560a39de4075 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #28: PyEval_EvalCode + 0x9d (0x560a39de37bd in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #29: <unknown function> + 0x2c028a (0x560a39e0128a in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #30: <unknown function> + 0x2bbf83 (0x560a39dfcf83 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #31: <unknown function> + 0x2d1840 (0x560a39e12840 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #32: _PyRun_SimpleFileObject + 0x1ba (0x560a39e121ca in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #33: _PyRun_AnyFileObject + 0x44 (0x560a39e11fa4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #34: Py_RunMain + 0x271 (0x560a39e0c2e1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #35: Py_BytesMain + 0x37 (0x560a39dd36a7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #36: <unknown function> + 0x40e6c (0x148c416b8e6c in /lib64/libc.so.6)
+frame #37: __libc_start_main + 0x87 (0x148c416b8f35 in /lib64/libc.so.6)
+frame #38: <unknown function> + 0x292539 (0x560a39dd3539 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+
+[W328 07:49:13.167619392 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=3, addr=[deg0068.hsn.de.hpc.ucar.edu]:36258, remote=[deg0068.hsn.de.hpc.ucar.edu]:29844): Broken pipe
+Exception raised from sendBytes at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/Utils.hpp:653 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x148c110970c4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5d56252 (0x148c24d56252 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5d56af6 (0x148c24d56af6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5d586ce (0x148c24d586ce in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::doWait(c10::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x19e (0x148c24d5331e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::TCPStore::doGet(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x33 (0x148c24d537b3 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #6: c10d::TCPStore::get(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x81 (0x148c24d548d1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #7: <unknown function> + 0xcd9746 (0x148c346d9746 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #8: <unknown function> + 0x3c97de (0x148c33dc97de in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #9: <unknown function> + 0x1fcdc6 (0x560a39d3ddc6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #10: _PyObject_MakeTpCall + 0x24b (0x560a39d1a12b in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #11: <unknown function> + 0x22cc56 (0x560a39d6dc56 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #12: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x560a39d4e035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #14: _PyObject_FastCallDictTstate + 0x65 (0x560a39d1ee55 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #15: _PyObject_Call_Prepend + 0x67 (0x560a39d560b7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #16: <unknown function> + 0x2e7ae7 (0x560a39e28ae7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #17: PyObject_Call + 0xbe (0x560a39d5830e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #18: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x560a39d4e035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #20: _PyEval_EvalFrameDefault + 0x4444 (0x560a39d2c244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #21: <unknown function> + 0x2a3075 (0x560a39de4075 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #22: PyEval_EvalCode + 0x9d (0x560a39de37bd in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #23: <unknown function> + 0x2c028a (0x560a39e0128a in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #24: <unknown function> + 0x2bbf83 (0x560a39dfcf83 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #25: <unknown function> + 0x2d1840 (0x560a39e12840 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #26: _PyRun_SimpleFileObject + 0x1ba (0x560a39e121ca in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #27: _PyRun_AnyFileObject + 0x44 (0x560a39e11fa4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #28: Py_RunMain + 0x271 (0x560a39e0c2e1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #29: Py_BytesMain + 0x37 (0x560a39dd36a7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #30: <unknown function> + 0x40e6c (0x148c416b8e6c in /lib64/libc.so.6)
+frame #31: __libc_start_main + 0x87 (0x148c416b8f35 in /lib64/libc.so.6)
+frame #32: <unknown function> + 0x292539 (0x560a39dd3539 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+
+W0328 07:49:13.757000 125783 site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1292] The node 'deg0068.hsn.de.hpc.ucar.edu_125783_0' has failed to shutdown the rendezvous 'none' due to an error of type RendezvousConnectionError.
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 117, in _call_store
+    return getattr(self._store, store_op)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.distributed.DistNetworkError: Failed to recv, got 0 bytes. Connection was likely closed. Did the remote server shutdown or crash?
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 268, in launch_agent
+    result = agent.run()
+             ^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 715, in run
+    result = self._invoke_run(role)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 873, in _invoke_run
+    self._initialize_workers(self._worker_group)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 683, in _initialize_workers
+    self._rendezvous(worker_group)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 498, in _rendezvous
+    rdzv_info = spec.rdzv_handler.next_rendezvous()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 1170, in next_rendezvous
+    self._op_executor.run(join_op, deadline, self._get_deadline)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 648, in run
+    has_set = self._state_holder.sync()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 437, in sync
+    get_response = self._backend.get_state()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 75, in get_state
+    base64_state: bytes = self._call_store("get", self._key)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 119, in _call_store
+    raise RendezvousConnectionError(
+torch.distributed.elastic.rendezvous.api.RendezvousConnectionError: The connection to the C10d store has failed. See inner exception for details.
+deg0068.hsn.de.hpc.ucar.edu: rank 0 exited with code 1
+deg0068.hsn.de.hpc.ucar.edu: rank 2 died from signal 15

@@ -1,0 +1,260 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+=== FSDP policy comparison: hard-coded vs auto-detect ===
+Node   : casper57
+Date   : Sat Mar 28 01:11:38 PM MDT 2026
+Branch : model-zoo
+
+
+=== FSDP policy comparison ===
+Ranks: 2   Device: NVIDIA H100 80GB HBM3
+Model          Policy       Layers found     ms  Status
+----------------------------------------------------------------------
+[rank1]:[W328 13:12:18.645488456 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 1]  using GPU 1 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 194, in main
+    model = factory().to(device)
+            ^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 84, in _make_wxformer
+    return CrossFormer(
+           ^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/wxformer/crossformer.py", line 512, in __init__
+    assert len(dim) == 4
+           ^^^^^^^^^^^^^
+AssertionError
+[rank0]:[W328 13:12:18.843362565 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 0]  using GPU 0 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
+wxformer       hard-coded   0           0  FAIL
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 194, in main
+    model = factory().to(device)
+            ^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 84, in _make_wxformer
+    return CrossFormer(
+           ^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/wxformer/crossformer.py", line 512, in __init__
+    assert len(dim) == 4
+           ^^^^^^^^^^^^^
+AssertionError
+wxformer       auto-detect  0           0  FAIL
+
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 194, in main
+    model = factory().to(device)
+            ^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 95, in _make_crossformer
+    return CrossFormer(
+           ^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/crossformer.py", line 481, in __init__
+    assert len(dim) == 4
+           ^^^^^^^^^^^^^
+AssertionError
+crossformer    hard-coded   0           0  FAIL
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 194, in main
+    model = factory().to(device)
+            ^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 95, in _make_crossformer
+    return CrossFormer(
+           ^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/crossformer.py", line 481, in __init__
+    assert len(dim) == 4
+           ^^^^^^^^^^^^^
+AssertionError
+crossformer    auto-detect  0           0  FAIL
+
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 194, in main
+    model = factory().to(device)
+            ^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 106, in _make_unet
+    return SegmentationModel(
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/unet.py", line 188, in __init__
+    if architecture["name"] == "unet":
+       ~~~~~~~~~~~~^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+unet           hard-coded   0           0  FAIL
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 194, in main
+    model = factory().to(device)
+            ^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 106, in _make_unet
+    return SegmentationModel(
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/unet.py", line 188, in __init__
+    if architecture["name"] == "unet":
+       ~~~~~~~~~~~~^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+unet           auto-detect  0           0  FAIL
+
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 196, in main
+    elapsed = _fsdp_run(model, policy_cls, device)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 158, in _fsdp_run
+    out = wrapped(x)
+          ^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py", line 864, in forward
+    output = self._fsdp_wrapped_module(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/fuxi.py", line 464, in forward
+    B, _, _, _, _ = x.shape
+    ^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 5, got 4)
+fuxi           hard-coded   0           0  FAIL
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 196, in main
+    elapsed = _fsdp_run(model, policy_cls, device)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 158, in _fsdp_run
+    out = wrapped(x)
+          ^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py", line 864, in forward
+    output = self._fsdp_wrapped_module(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/fuxi.py", line 464, in forward
+    B, _, _, _, _ = x.shape
+    ^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 5, got 4)
+fuxi           auto-detect  0           0  FAIL
+
+/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/functional.py:539: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /pytorch/aten/src/ATen/native/TensorShape.cpp:3637.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/functional.py:539: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at /pytorch/aten/src/ATen/native/TensorShape.cpp:3637.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 196, in main
+    elapsed = _fsdp_run(model, policy_cls, device)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 158, in _fsdp_run
+    out = wrapped(x)
+          ^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py", line 864, in forward
+    output = self._fsdp_wrapped_module(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin.py", line 880, in forward
+    x = self.forward_features(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin.py", line 847, in forward_features
+    x = self.patch_embed(x)
+        ^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin.py", line 555, in forward
+    x = self.proj(x)
+        ^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 554, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 549, in _conv_forward
+    return F.conv2d(
+           ^^^^^^^^^
+RuntimeError: Given groups=1, weight of size [64, 70, 2, 2], expected input[1, 20, 32, 64] to have 70 channels, but got 20 channels instead
+swin           hard-coded   0           0  FAIL
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 196, in main
+    elapsed = _fsdp_run(model, policy_cls, device)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/tests/test_fsdp_policies.py", line 158, in _fsdp_run
+    out = wrapped(x)
+          ^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py", line 864, in forward
+    output = self._fsdp_wrapped_module(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin.py", line 880, in forward
+    x = self.forward_features(x)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin.py", line 847, in forward_features
+    x = self.patch_embed(x)
+        ^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin.py", line 555, in forward
+    x = self.proj(x)
+        ^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 554, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 549, in _conv_forward
+    return F.conv2d(
+           ^^^^^^^^^
+RuntimeError: Given groups=1, weight of size [64, 70, 2, 2], expected input[1, 20, 32, 64] to have 70 channels, but got 20 channels instead
+swin           auto-detect  0           0  FAIL
+

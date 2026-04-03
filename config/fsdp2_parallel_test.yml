@@ -138,7 +138,7 @@ trainer:
     valid_thread_workers: 0
 
 model:
-    type: "wxformer_v2"
+    type: "wxformer"
     frames: 1
     image_height: 181
     image_width: 360
@@ -153,10 +153,7 @@ model:
     global_window_size: [8, 4, 2, 1]
     local_window_size: 3
 
-    upsample_with_ps: True      # PixelShuffle decoder (default, eliminates checkerboard)
-    use_swiglu: True
-    use_shifted_windows: True
-    use_deformable: False       # disable deformable for faster smoke test
+    upsample_with_ps: True      # PixelShuffle decoder (eliminates checkerboard)
     use_spectral_norm: True
 
     padding_conf:

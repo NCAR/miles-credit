@@ -1,0 +1,51 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+=== model zoo training sanity test ===
+Node : casper42
+Date : Fri Mar 27 07:04:03 PM MDT 2026
+
+
+Device : cuda
+GPU    : NVIDIA A100-SXM4-80GB
+Grid   : (32, 64)   Steps: 50   LR: 0.001
+
+  training wxformer ...
+  training stormer ...
+  training climax ...
+  training fourcastnet ...
+  training sfno ...
+  training swinrnn ...
+  training fengwu ...
+  training graphcast ...
+  training healpix ...
+  training fourcastnet3 ...
+  training aurora ...
+  training pangu ...
+  training aifs ...
+
+Model            Conv?  Params(M)  Loss[0]    Loss[N]    Drop%    ms/step    Error
+------------------------------------------------------------------------------------------
+wxformer         FAIL   —          —          —          —        —          AssertionError
+stormer          YES    0.5        1.0695     0.3140     70.6%    9          
+climax           YES    0.7        1.0588     0.6104     42.4%    8          
+fourcastnet      YES    0.4        1.3536     0.4958     63.4%    9          
+sfno             YES    0.4        1.3597     0.2329     82.9%    7          
+swinrnn          YES    3.0        1.1798     0.4067     65.5%    26         
+fengwu           YES    0.9        1.3378     0.5815     56.5%    7          
+graphcast        YES    0.1        1.0472     0.9682     7.5%     5          
+healpix          YES    0.5        1.0909     0.6460     40.8%    103        
+fourcastnet3     YES    0.7        1.0446     0.6077     41.8%    31         
+aurora           YES    1258.9     520132192.0000 276310.8125 99.9%    199        
+pangu            YES    24.3       2.5503     0.0066     99.7%    38         
+aifs             YES    50.4       1.3626     1.0078     26.0%    90         
+
+12/13 converging   1 failed

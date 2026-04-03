@@ -1,0 +1,38 @@
+# WXFormer v2 — 0.25° 1-hourly ERA5 (NCAR/MILES campaign model)
+# Canonical config from: wxformer_1h_hf/finetune_final/model_single.yml
+# 640×1280 grid, 16 upper-air levels.
+#
+# default_config supplies the full data/predict/trainer sections so that
+# a user only needs `model: preset: wxformer-025deg-1h` + save_loc.
+default_config: /glade/campaign/cisl/aiml/credit/pretrained_weights/wxformer_1h_hf/finetune_final/model_predict.yml
+type: crossformer
+pretrained_weights: /glade/campaign/cisl/aiml/credit/pretrained_weights/wxformer_1h_hf/finetune_final/best_model_checkpoint.pt
+frames: 1
+image_height: 640
+image_width: 1280
+levels: 16
+channels: 4
+surface_channels: 7
+input_only_channels: 3
+output_only_channels: 0
+patch_width: 1
+patch_height: 1
+frame_patch_size: 1
+dim: [128, 256, 512, 1024]
+depth: [2, 2, 8, 2]
+global_window_size: [10, 5, 2, 1]
+local_window_size: 10
+cross_embed_kernel_sizes:
+  - [4, 8, 16, 32]
+  - [2, 4]
+  - [2, 4]
+  - [2, 4]
+cross_embed_strides: [2, 2, 2, 2]
+attn_dropout: 0.0
+ff_dropout: 0.0
+interp: false
+padding_conf:
+  activate: true
+  mode: earth
+  pad_lat: 80
+  pad_lon: 80

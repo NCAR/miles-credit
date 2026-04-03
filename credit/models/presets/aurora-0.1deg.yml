@@ -1,0 +1,18 @@
+# Aurora — 0.1° global (Chen et al. 2024, Microsoft Research)
+# Checkpoint: /glade/derecho/scratch/schreck/credit_zoo/aurora/aurora-0.1-finetuned.ckpt
+# MIT License.  ~74% of keys load (1.3B params); missing keys are LoRA adapters (expected).
+type: aurora
+pretrained_weights: /glade/derecho/scratch/schreck/credit_zoo/aurora/aurora-0.1-finetuned.ckpt
+surf_vars: ["2t", "10u", "10v", "msl"]
+atmos_vars: ["z", "u", "v", "t", "q"]
+static_vars: ["lsm", "z", "slt"]
+atmos_levels: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+lat_min: -90.0
+lat_max: 90.0
+lon_min: 0.0
+lon_max: 359.75
+n_lat: 1441
+n_lon: 1440
+history_size: 2
+timestep_hours: 6
+use_lora: false

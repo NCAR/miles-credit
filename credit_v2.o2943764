@@ -1,0 +1,43 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+Lmod has detected the following error: The following module(s) are unknown:
+"cray-mpich/8.1.29"
+
+Please check the spelling or version number. Also try "module spider ..."
+It is also possible your cache file is out-of-date; it may help to try:
+  $ module --ignore_cache load "cray-mpich/8.1.29"
+
+Also make sure that all modulefiles written in TCL start with the string
+#%Module
+
+
+
+usage: conda [-h] [-v] [--no-plugins] [-V] COMMAND ...
+conda: error: argument COMMAND: invalid choice: 'activate' (choose from 'clean', 'compare', 'config', 'create', 'info', 'init', 'install', 'list', 'notices', 'package', 'remove', 'uninstall', 'rename', 'run', 'search', 'update', 'upgrade', 'doctor', 'repoquery', 'env')
+pbs_attach: process 37186 attached to job: 2943764.casper-pbs
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+Nodes     : 2
+GPUs/node : 4
+Total GPUs: 8
+Config    : /glade/work/schreck/repos/miles-credit-main/config/wxformer_1dg_6hr_v2.yml
+Head node : 128.117.208.171
+/var/spool/pbs/mom_priv/jobs/2943764.casper-pbs.SC: line 58: /opt/pbs/bin/mpiexec: Permission denied

@@ -1,0 +1,73 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+Config : /glade/work/schreck/repos/miles-credit-main/config/wxformer_1dg_6hr_v2.yml
+Node   : casper39
+GPUs   : 1
+INFO:root:Running DDP on rank 0 with world_size 1 using nccl.
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.models:Loading the CrossFormer model with a conv decoder head and skip connections ...
+INFO:credit.models.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.crossformer:using postblock
+INFO:credit.postblock._postblock:TracerFixer registered
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2.py", line 298, in <module>
+[rank0]:     main_cli()
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2.py", line 294, in main_cli
+[rank0]:     main(world_rank, world_size, conf, args.backend)
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2.py", line 207, in main
+[rank0]:     m = load_model(conf)
+[rank0]:         ^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 234, in load_model
+[rank0]:     return model(**model_conf)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/crossformer.py", line 591, in __init__
+[rank0]:     self.postblock = PostBlock(post_conf)
+[rank0]:                      ^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 66, in __init__
+[rank0]:     if post_conf["skebs"]["activate"]:
+[rank0]:        ~~~~~~~~~^^^^^^^^^
+[rank0]: KeyError: 'skebs'
+[rank0]:[W325 15:20:24.771265386 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+E0325 15:20:25.123000 222159 site-packages/torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 222166) of binary: /glade/u/home/schreck/.conda/envs/credit-casper/bin/python
+Traceback (most recent call last):
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/bin/torchrun", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/u/home/schreck/.conda/envs/credit-casper/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/glade/work/schreck/repos/miles-credit-main/applications/train_v2.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-03-25_15:20:25
+  host      : casper39.hpc.ucar.edu
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 222166)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================

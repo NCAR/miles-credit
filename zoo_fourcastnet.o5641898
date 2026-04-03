@@ -1,0 +1,628 @@
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+
+Activating Modules:
+  1) cray-mpich/8.1.29     3) hdf5/1.12.3             5) netcdf/4.9.3
+  2) craype/2.7.31         4) ncarcompilers/1.0.0
+
+pbs_attach: process 11778 attached to job: 5641898.desched1
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+=== Model Zoo Training ===
+Config    : config/model_zoo/fourcastnet.yml
+Nodes     : 1
+GPUs/node : 4
+Total GPUs: 4
+Head node : 10.14.20.169
+Date      : Sat Mar 28 07:42:04 AM MDT 2026
+
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.169:26939
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/f8aadd70-cf2e-4ebf-87c0-afef1f4711fc/tmp/torchelastic_wcwxikgh
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:42:20.159000 11987 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.169:26939
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/f8aadd70-cf2e-4ebf-87c0-afef1f4711fc/tmp/torchelastic_4w0h6y9g
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:42:20.159000 11988 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.169:26939
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/f8aadd70-cf2e-4ebf-87c0-afef1f4711fc/tmp/torchelastic_yiaumuuh
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:42:20.159000 11984 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.169:26939
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/f8aadd70-cf2e-4ebf-87c0-afef1f4711fc/tmp/torchelastic_6pqaan2a
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:42:20.159000 11985 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:42:20.203000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:42:20.204000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:42:20.205000 11984 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:42:20.205000 11985 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:42:20.205000 11988 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:42:20.205000 11984 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:42:20.205000 11988 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:42:20.205000 11985 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523] [default] Rendezvous complete for workers. Result:
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   restart_count=0
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_addr=deg0080.hsn.de.hpc.ucar.edu
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_port=34581
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_rank=0
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_world_size=1
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   local_ranks=[0, 1, 2, 3]
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_ranks=[0, 1, 2, 3]
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_ranks=[0, 1, 2, 3]
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_world_sizes=[4, 4, 4, 4]
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_world_sizes=[4, 4, 4, 4]
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523]   event_log_handler=null
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:523] 
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/api.py:685] [default] Starting worker group
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:296] use_agent_store: True
+I0328 07:42:20.448000 11987 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:192] Environment variable 'TORCHELASTIC_ENABLE_FILE_TIMER' not found. Do not start FileTimerServer.
+I0328 07:42:20.449000 11987 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:236] Environment variable 'TORCHELASTIC_HEALTH_CHECK_PORT' not found. Do not start health check.
+number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']
+number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']
+number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']
+number of upper-air levels ('levels') is missing from both conf['data'] and conf['model']
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+Traceback (most recent call last):
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+    main_cli()
+    main_cli()
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 405, in main_cli
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 405, in main_cli
+    main_cli()
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 405, in main_cli
+    main_cli()
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
+  File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 405, in main_cli
+    conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
+                 ^ ^ ^ ^ ^ ^^^^^^^^^^^^^^^^^^^^^^^^^    ^^^conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^ ^^ ^^ ^^ ^^ ^^ ^^ ^^ ^^ ^^ ^^^^^    ^^^^^^conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^
+^^  File "/glade/work/schreck/repos/miles-credit-main/credit/parser.py", line 213, in credit_main_parser
+^^ ^ ^ ^  File "/glade/work/schreck/repos/miles-credit-main/credit/parser.py", line 213, in credit_main_parser
+ ^ ^ ^ ^ ^ ^ ^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^  File "/glade/work/schreck/repos/miles-credit-main/credit/parser.py", line 213, in credit_main_parser
+^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/repos/miles-credit-main/credit/parser.py", line 213, in credit_main_parser
+    raise
+    raise
+    raise
+    raise
+RuntimeError: No active exception to reraise
+RuntimeError: No active exception to reraiseRuntimeError
+: No active exception to reraise
+RuntimeError: No active exception to reraise
+W0328 07:43:27.838000 11987 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 15635 closing signal SIGTERM
+E0328 07:43:28.453000 11987 site-packages/torch/distributed/elastic/multiprocessing/api.py:874] failed (exitcode: 1) local_rank: 0 (pid: 15631) of binary: /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python
+I0328 07:43:28.463000 11987 site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py:370] ('local_rank %s FAILED with no error file. Decorate your entrypoint fn with @record for traceback info. See: https://pytorch.org/docs/stable/elastic/errors.html', 0)
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 277, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/glade/work/schreck/repos/miles-credit-main/applications/train.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-03-28_07:43:27
+  host      : deg0080.hsn.de.hpc.ucar.edu
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 15632)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-03-28_07:43:27
+  host      : deg0080.hsn.de.hpc.ucar.edu
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 15634)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-03-28_07:43:27
+  host      : deg0080.hsn.de.hpc.ucar.edu
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 15631)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[W328 07:43:28.931122799 TCPStore.cpp:138] [c10d] recvValueWithTimeout failed on SocketImpl(fd=3, addr=[deg0080.hsn.de.hpc.ucar.edu]:47764, remote=[deg0080.hsn.de.hpc.ucar.edu]:26939): Failed to recv, got 0 bytes. Connection was likely closed. Did the remote server shutdown or crash?
+Exception raised from recvBytes at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/Utils.hpp:682 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14c4cae970c4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5d56252 (0x14c4deb56252 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5d5793f (0x14c4deb5793f in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5d57ff9 (0x14c4deb57ff9 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::doWait(c10::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x1c6 (0x14c4deb53346 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::TCPStore::doGet(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x33 (0x14c4deb537b3 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #6: c10d::TCPStore::get(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x81 (0x14c4deb548d1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #7: <unknown function> + 0xcd9746 (0x14c4ee4d9746 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #8: <unknown function> + 0x3c97de (0x14c4edbc97de in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #9: <unknown function> + 0x1fcdc6 (0x563d5e075dc6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #10: _PyObject_MakeTpCall + 0x24b (0x563d5e05212b in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #11: <unknown function> + 0x22cc56 (0x563d5e0a5c56 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #12: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x563d5e086035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #14: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #15: _PyFunction_Vectorcall + 0x165 (0x563d5e086035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #16: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #17: _PyFunction_Vectorcall + 0x165 (0x563d5e086035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #18: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x563d5e086035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #20: _PyObject_FastCallDictTstate + 0x65 (0x563d5e056e55 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #21: _PyObject_Call_Prepend + 0x67 (0x563d5e08e0b7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #22: <unknown function> + 0x2e7ae7 (0x563d5e160ae7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #23: PyObject_Call + 0xbe (0x563d5e09030e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #24: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #25: _PyFunction_Vectorcall + 0x165 (0x563d5e086035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #26: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #27: <unknown function> + 0x2a3075 (0x563d5e11c075 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #28: PyEval_EvalCode + 0x9d (0x563d5e11b7bd in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #29: <unknown function> + 0x2c028a (0x563d5e13928a in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #30: <unknown function> + 0x2bbf83 (0x563d5e134f83 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #31: <unknown function> + 0x2d1840 (0x563d5e14a840 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #32: _PyRun_SimpleFileObject + 0x1ba (0x563d5e14a1ca in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #33: _PyRun_AnyFileObject + 0x44 (0x563d5e149fa4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #34: Py_RunMain + 0x271 (0x563d5e1442e1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #35: Py_BytesMain + 0x37 (0x563d5e10b6a7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #36: <unknown function> + 0x40e6c (0x14c4fb579e6c in /lib64/libc.so.6)
+frame #37: __libc_start_main + 0x87 (0x14c4fb579f35 in /lib64/libc.so.6)
+frame #38: <unknown function> + 0x292539 (0x563d5e10b539 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+
+[W328 07:43:28.936559959 TCPStore.cpp:138] [c10d] recvValueWithTimeout failed on SocketImpl(fd=3, addr=[deg0080.hsn.de.hpc.ucar.edu]:47762, remote=[deg0080.hsn.de.hpc.ucar.edu]:26939): Failed to recv, got 0 bytes. Connection was likely closed. Did the remote server shutdown or crash?
+Exception raised from recvBytes at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/Utils.hpp:682 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14cb04a970c4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5d56252 (0x14cb18756252 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5d5793f (0x14cb1875793f in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5d57ff9 (0x14cb18757ff9 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::doWait(c10::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x1c6 (0x14cb18753346 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::TCPStore::doGet(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x33 (0x14cb187537b3 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #6: c10d::TCPStore::get(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x81 (0x14cb187548d1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #7: <unknown function> + 0xcd9746 (0x14cb280d9746 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #8: <unknown function> + 0x3c97de (0x14cb277c97de in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #9: <unknown function> + 0x1fcdc6 (0x5650c9760dc6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #10: _PyObject_MakeTpCall + 0x24b (0x5650c973d12b in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #11: <unknown function> + 0x22cc56 (0x5650c9790c56 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #12: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x5650c9771035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #14: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #15: _PyFunction_Vectorcall + 0x165 (0x5650c9771035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #16: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #17: _PyFunction_Vectorcall + 0x165 (0x5650c9771035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #18: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x5650c9771035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #20: _PyObject_FastCallDictTstate + 0x65 (0x5650c9741e55 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #21: _PyObject_Call_Prepend + 0x67 (0x5650c97790b7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #22: <unknown function> + 0x2e7ae7 (0x5650c984bae7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #23: PyObject_Call + 0xbe (0x5650c977b30e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #24: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #25: _PyFunction_Vectorcall + 0x165 (0x5650c9771035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #26: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #27: <unknown function> + 0x2a3075 (0x5650c9807075 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #28: PyEval_EvalCode + 0x9d (0x5650c98067bd in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #29: <unknown function> + 0x2c028a (0x5650c982428a in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #30: <unknown function> + 0x2bbf83 (0x5650c981ff83 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #31: <unknown function> + 0x2d1840 (0x5650c9835840 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #32: _PyRun_SimpleFileObject + 0x1ba (0x5650c98351ca in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #33: _PyRun_AnyFileObject + 0x44 (0x5650c9834fa4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #34: Py_RunMain + 0x271 (0x5650c982f2e1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #35: Py_BytesMain + 0x37 (0x5650c97f66a7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #36: <unknown function> + 0x40e6c (0x14cb351e1e6c in /lib64/libc.so.6)
+frame #37: __libc_start_main + 0x87 (0x14cb351e1f35 in /lib64/libc.so.6)
+frame #38: <unknown function> + 0x292539 (0x5650c97f6539 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+
+[W328 07:43:28.939816438 TCPStore.cpp:138] [c10d] recvValueWithTimeout failed on SocketImpl(fd=3, addr=[deg0080.hsn.de.hpc.ucar.edu]:47758, remote=[deg0080.hsn.de.hpc.ucar.edu]:26939): Failed to recv, got 0 bytes. Connection was likely closed. Did the remote server shutdown or crash?
+Exception raised from recvBytes at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/Utils.hpp:682 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14606b8970c4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5d56252 (0x14607f556252 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5d5793f (0x14607f55793f in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5d57ff9 (0x14607f557ff9 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::doWait(c10::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x1c6 (0x14607f553346 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::TCPStore::doGet(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x33 (0x14607f5537b3 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #6: c10d::TCPStore::get(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x81 (0x14607f5548d1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #7: <unknown function> + 0xcd9746 (0x14608eed9746 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #8: <unknown function> + 0x3c97de (0x14608e5c97de in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #9: <unknown function> + 0x1fcdc6 (0x55feb7177dc6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #10: _PyObject_MakeTpCall + 0x24b (0x55feb715412b in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #11: <unknown function> + 0x22cc56 (0x55feb71a7c56 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #12: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x55feb7188035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #14: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #15: _PyFunction_Vectorcall + 0x165 (0x55feb7188035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #16: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #17: _PyFunction_Vectorcall + 0x165 (0x55feb7188035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #18: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x55feb7188035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #20: _PyObject_FastCallDictTstate + 0x65 (0x55feb7158e55 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #21: _PyObject_Call_Prepend + 0x67 (0x55feb71900b7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #22: <unknown function> + 0x2e7ae7 (0x55feb7262ae7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #23: PyObject_Call + 0xbe (0x55feb719230e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #24: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #25: _PyFunction_Vectorcall + 0x165 (0x55feb7188035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #26: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #27: <unknown function> + 0x2a3075 (0x55feb721e075 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #28: PyEval_EvalCode + 0x9d (0x55feb721d7bd in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #29: <unknown function> + 0x2c028a (0x55feb723b28a in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #30: <unknown function> + 0x2bbf83 (0x55feb7236f83 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #31: <unknown function> + 0x2d1840 (0x55feb724c840 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #32: _PyRun_SimpleFileObject + 0x1ba (0x55feb724c1ca in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #33: _PyRun_AnyFileObject + 0x44 (0x55feb724bfa4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #34: Py_RunMain + 0x271 (0x55feb72462e1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #35: Py_BytesMain + 0x37 (0x55feb720d6a7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #36: <unknown function> + 0x40e6c (0x14609bf7ae6c in /lib64/libc.so.6)
+frame #37: __libc_start_main + 0x87 (0x14609bf7af35 in /lib64/libc.so.6)
+frame #38: <unknown function> + 0x292539 (0x55feb720d539 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+
+[W328 07:43:28.949280946 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=3, addr=[deg0080.hsn.de.hpc.ucar.edu]:47758, remote=[deg0080.hsn.de.hpc.ucar.edu]:26939): Broken pipe
+Exception raised from sendBytes at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/Utils.hpp:653 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14606b8970c4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5d56252 (0x14607f556252 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5d56af6 (0x14607f556af6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5d586ce (0x14607f5586ce in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::doWait(c10::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x19e (0x14607f55331e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::TCPStore::doGet(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x33 (0x14607f5537b3 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #6: c10d::TCPStore::get(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x81 (0x14607f5548d1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #7: <unknown function> + 0xcd9746 (0x14608eed9746 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #8: <unknown function> + 0x3c97de (0x14608e5c97de in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #9: <unknown function> + 0x1fcdc6 (0x55feb7177dc6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #10: _PyObject_MakeTpCall + 0x24b (0x55feb715412b in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #11: <unknown function> + 0x22cc56 (0x55feb71a7c56 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #12: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x55feb7188035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #14: _PyObject_FastCallDictTstate + 0x65 (0x55feb7158e55 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #15: _PyObject_Call_Prepend + 0x67 (0x55feb71900b7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #16: <unknown function> + 0x2e7ae7 (0x55feb7262ae7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #17: PyObject_Call + 0xbe (0x55feb719230e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #18: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x55feb7188035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #20: _PyEval_EvalFrameDefault + 0x4444 (0x55feb7166244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #21: <unknown function> + 0x2a3075 (0x55feb721e075 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #22: PyEval_EvalCode + 0x9d (0x55feb721d7bd in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #23: <unknown function> + 0x2c028a (0x55feb723b28a in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #24: <unknown function> + 0x2bbf83 (0x55feb7236f83 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #25: <unknown function> + 0x2d1840 (0x55feb724c840 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #26: _PyRun_SimpleFileObject + 0x1ba (0x55feb724c1ca in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #27: _PyRun_AnyFileObject + 0x44 (0x55feb724bfa4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #28: Py_RunMain + 0x271 (0x55feb72462e1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #29: Py_BytesMain + 0x37 (0x55feb720d6a7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #30: <unknown function> + 0x40e6c (0x14609bf7ae6c in /lib64/libc.so.6)
+frame #31: __libc_start_main + 0x87 (0x14609bf7af35 in /lib64/libc.so.6)
+frame #32: <unknown function> + 0x292539 (0x55feb720d539 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+
+[W328 07:43:28.949367733 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=3, addr=[deg0080.hsn.de.hpc.ucar.edu]:47764, remote=[deg0080.hsn.de.hpc.ucar.edu]:26939): Broken pipe
+Exception raised from sendBytes at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/Utils.hpp:653 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14c4cae970c4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5d56252 (0x14c4deb56252 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5d56af6 (0x14c4deb56af6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5d586ce (0x14c4deb586ce in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::doWait(c10::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x19e (0x14c4deb5331e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::TCPStore::doGet(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x33 (0x14c4deb537b3 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #6: c10d::TCPStore::get(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x81 (0x14c4deb548d1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #7: <unknown function> + 0xcd9746 (0x14c4ee4d9746 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #8: <unknown function> + 0x3c97de (0x14c4edbc97de in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #9: <unknown function> + 0x1fcdc6 (0x563d5e075dc6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #10: _PyObject_MakeTpCall + 0x24b (0x563d5e05212b in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #11: <unknown function> + 0x22cc56 (0x563d5e0a5c56 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #12: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x563d5e086035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #14: _PyObject_FastCallDictTstate + 0x65 (0x563d5e056e55 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #15: _PyObject_Call_Prepend + 0x67 (0x563d5e08e0b7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #16: <unknown function> + 0x2e7ae7 (0x563d5e160ae7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #17: PyObject_Call + 0xbe (0x563d5e09030e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #18: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x563d5e086035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #20: _PyEval_EvalFrameDefault + 0x4444 (0x563d5e064244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #21: <unknown function> + 0x2a3075 (0x563d5e11c075 in /glade/work/benkirk/con[W328 07:43:28.949414343 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=3, addr=[deg0080.hsn.de.hpc.ucar.edu]:47762, remote=[deg0080.hsn.de.hpc.ucar.edu]:26939): Broken pipe
+Exception raised from sendBytes at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/Utils.hpp:653 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14cb04a970c4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x5d56252 (0x14cb18756252 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: <unknown function> + 0x5d56af6 (0x14cb18756af6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: <unknown function> + 0x5d586ce (0x14cb187586ce in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::doWait(c10::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x19e (0x14cb1875331e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: c10d::TCPStore::doGet(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x33 (0x14cb187537b3 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #6: c10d::TCPStore::get(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) + 0x81 (0x14cb187548d1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #7: <unknown function> + 0xcd9746 (0x14cb280d9746 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #8: <unknown function> + 0x3c97de (0x14cb277c97de in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #9: <unknown function> + 0x1fcdc6 (0x5650c9760dc6 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #10: _PyObject_MakeTpCall + 0x24b (0x5650c973d12b in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #11: <unknown function> + 0x22cc56 (0x5650c9790c56 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #12: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x5650c9771035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #14: _PyObject_FastCallDictTstate + 0x65 (0x5650c9741e55 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #15: _PyObject_Call_Prepend + 0x67 (0x5650c97790b7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #16: <unknown function> + 0x2e7ae7 (0x5650c984bae7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #17: PyObject_Call + 0xbe (0x5650c977b30e in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #18: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x5650c9771035 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #20: _PyEval_EvalFrameDefault + 0x4444 (0x5650c974f244 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #21: <unknown function> + 0x2a3075 (0x5650c9807075 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #22: PyEval_EvalCode + 0x9d (0x563d5e11b7bd in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #23: <unknown function> + 0x2c028a (0x563d5e13928a in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #24: <unknown function> + 0x2bbf83 (0x563d5e134f83 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #25: <unknown function> + 0x2d1840 (0x563d5e14a840 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #26: _PyRun_SimpleFileObject + 0x1ba (0x563d5e14a1ca in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #27: _PyRun_AnyFileObject + 0x44 (0x563d5e149fa4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #28: Py_RunMain + 0x271 (0x563d5e1442e1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #29: Py_BytesMain + 0x37 (0x563d5e10b6a7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #30: <unknown function> + 0x40e6c (0x14c4fb579e6c in /lib64/libc.so.6)
+frame #31: __libc_start_main + 0x87 (0x14c4fb579f35 in /lib64/libc.so.6)
+frame #32: <unknown function> + 0x292539 (0x563d5e10b539 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+
+da-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #22: PyEval_EvalCode + 0x9d (0x5650c98067bd in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #23: <unknown function> + 0x2c028a (0x5650c982428a in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #24: <unknown function> + 0x2bbf83 (0x5650c981ff83 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #25: <unknown function> + 0x2d1840 (0x5650c9835840 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #26: _PyRun_SimpleFileObject + 0x1ba (0x5650c98351ca in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #27: _PyRun_AnyFileObject + 0x44 (0x5650c9834fa4 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #28: Py_RunMain + 0x271 (0x5650c982f2e1 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #29: Py_BytesMain + 0x37 (0x5650c97f66a7 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+frame #30: <unknown function> + 0x40e6c (0x14cb351e1e6c in /lib64/libc.so.6)
+frame #31: __libc_start_main + 0x87 (0x14cb351e1f35 in /lib64/libc.so.6)
+frame #32: <unknown function> + 0x292539 (0x5650c97f6539 in /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python)
+
+W0328 07:43:28.605000 11985 site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1292] The node 'deg0080.hsn.de.hpc.ucar.edu_11985_0' has failed to shutdown the rendezvous 'none' due to an error of type RendezvousConnectionError.
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 117, in _call_store
+W0328 07:43:28.605000 11984 site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1292] The node 'deg0080.hsn.de.hpc.ucar.edu_11984_0' has failed to shutdown the rendezvous 'none' due to an error of type RendezvousConnectionError.
+W0328 07:43:28.605000 11988 site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1292] The node 'deg0080.hsn.de.hpc.ucar.edu_11988_0' has failed to shutdown the rendezvous 'none' due to an error of type RendezvousConnectionError.
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 117, in _call_store
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 117, in _call_store
+    return getattr(self._store, store_op)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.distributed.DistNetworkError: Failed to recv, got 0 bytes. Connection was likely closed. Did the remote server shutdown or crash?
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+    return getattr(self._store, store_op)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.distributed.DistNetworkError: Failed to recv, got 0 bytes. Connection was likely closed. Did the remote server shutdown or crash?
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+    return getattr(self._store, store_op)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.distributed.DistNetworkError: Failed to recv, got 0 bytes. Connection was likely closed. Did the remote server shutdown or crash?
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 268, in launch_agent
+    result = agent.run()
+             ^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 715, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 268, in launch_agent
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 268, in launch_agent
+    result = agent.run()
+    result = self._invoke_run(role)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 873, in _invoke_run
+             ^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 715, in run
+    self._initialize_workers(self._worker_group)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 683, in _initialize_workers
+    result = agent.run()
+             ^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 715, in run
+    result = self._invoke_run(role)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 873, in _invoke_run
+    self._rendezvous(worker_group)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 498, in _rendezvous
+    result = self._invoke_run(role)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 873, in _invoke_run
+    self._initialize_workers(self._worker_group)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    rdzv_info = spec.rdzv_handler.next_rendezvous()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 1170, in next_rendezvous
+    self._initialize_workers(self._worker_group)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 683, in _initialize_workers
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 683, in _initialize_workers
+    self._op_executor.run(join_op, deadline, self._get_deadline)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 648, in run
+    self._rendezvous(worker_group)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    self._rendezvous(worker_group)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 498, in _rendezvous
+    has_set = self._state_holder.sync()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 437, in sync
+    get_response = self._backend.get_state()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 75, in get_state
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 498, in _rendezvous
+    rdzv_info = spec.rdzv_handler.next_rendezvous()
+    rdzv_info = spec.rdzv_handler.next_rendezvous()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 1170, in next_rendezvous
+    base64_state: bytes = self._call_store("get", self._key)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 119, in _call_store
+    raise RendezvousConnectionError(
+torch.distributed.elastic.rendezvous.api.RendezvousConnectionError: The connection to the C10d store has failed. See inner exception for details.
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 1170, in next_rendezvous
+    self._op_executor.run(join_op, deadline, self._get_deadline)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 648, in run
+    self._op_executor.run(join_op, deadline, self._get_deadline)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 648, in run
+    has_set = self._state_holder.sync()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 437, in sync
+    has_set = self._state_holder.sync()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 437, in sync
+    get_response = self._backend.get_state()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 75, in get_state
+    get_response = self._backend.get_state()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 75, in get_state
+    base64_state: bytes = self._call_store("get", self._key)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 119, in _call_store
+    base64_state: bytes = self._call_store("get", self._key)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 119, in _call_store
+    raise RendezvousConnectionError(
+torch.distributed.elastic.rendezvous.api.RendezvousConnectionError: The connection to the C10d store has failed. See inner exception for details.
+    raise RendezvousConnectionError(
+torch.distributed.elastic.rendezvous.api.RendezvousConnectionError: The connection to the C10d store has failed. See inner exception for details.
+deg0080.hsn.de.hpc.ucar.edu: rank 2 exited with code 1
+deg0080.hsn.de.hpc.ucar.edu: rank 3 died from signal 15

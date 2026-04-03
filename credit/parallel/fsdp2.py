@@ -50,8 +50,6 @@ def apply_fsdp2(model: nn.Module, dp_mesh, conf: dict) -> nn.Module:
 
     ac_conf = conf.get("trainer", {}).get("activation_checkpoint", False)
 
-    # Import WXFormer-specific block types — guarded so this works even if
-    # wxformer_v2 is not installed.
     shard_types = _get_shard_types()
 
     count = 0
@@ -153,12 +151,6 @@ def _parse_dtype(s: str) -> torch.dtype:
 def _get_shard_types():
     """Return model block types that should get their own FSDP2 shard."""
     types = []
-    try:
-        from credit.models.wxformer.wxformer_v2 import Transformer, UpBlock, UpBlockPS
-
-        types.extend([Transformer, UpBlock, UpBlockPS])
-    except ImportError:
-        pass
     try:
         from credit.models.crossformer.crossformer import Transformer as V1Transformer
 

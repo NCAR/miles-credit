@@ -1,0 +1,35 @@
+# WXFormer — 1° 6-hourly ERA5 (NCAR/MILES campaign model)
+# Canonical config from: wxformer_1deg_singlestep/model.yml
+# 192×288 grid, 16 upper-air levels.
+type: crossformer
+pretrained_weights: /glade/campaign/cisl/aiml/credit/pretrained_weights/wxformer_1deg_singlestep/checkpoint.pt
+frames: 1
+image_height: 192
+image_width: 288
+levels: 16
+channels: 4
+surface_channels: 7
+input_only_channels: 3
+output_only_channels: 0
+patch_width: 1
+patch_height: 1
+frame_patch_size: 1
+dim: [256, 512, 1024, 2048]
+depth: [2, 2, 8, 2]
+global_window_size: [8, 4, 2, 1]
+local_window_size: 3
+cross_embed_kernel_sizes:
+  - [4, 8, 16, 32]
+  - [2, 4]
+  - [2, 4]
+  - [2, 4]
+cross_embed_strides: [2, 2, 2, 2]
+attn_dropout: 0.0
+ff_dropout: 0.0
+interp: true
+use_spectral_norm: true
+padding_conf:
+  activate: true
+  mode: earth
+  pad_lat: 48
+  pad_lon: 48

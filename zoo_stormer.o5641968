@@ -1,0 +1,846 @@
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+
+Activating Modules:
+  1) cray-mpich/8.1.29     3) hdf5/1.12.3             5) netcdf/4.9.3
+  2) craype/2.7.31         4) ncarcompilers/1.0.0
+
+Warning: Permanently added 'deg0081.hsn.de.hpc.ucar.edu' (ED25519) to the list of known hosts.
+pbs_attach: process 79566 attached to job: 5641968.desched1
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+=== Model Zoo Training ===
+Config    : config/model_zoo/stormer.yml
+Nodes     : 1
+GPUs/node : 4
+Total GPUs: 4
+Head node : 10.14.20.173
+Date      : Sat Mar 28 07:57:46 AM MDT 2026
+
+I0328 07:58:02.467000 80813 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:58:02.467000 80814 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:58:02.467000 80817 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.173:26017
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/6deed2da-5ac0-42c5-ad99-12d19c239e7b/tmp/torchelastic_9112zmjm
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:58:02.468000 80817 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.173:26017
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/6deed2da-5ac0-42c5-ad99-12d19c239e7b/tmp/torchelastic_adnswv9b
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:58:02.468000 80813 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.173:26017
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/6deed2da-5ac0-42c5-ad99-12d19c239e7b/tmp/torchelastic_q_difd_a
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:58:02.468000 80814 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:58:02.467000 80816 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train.py
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : 10.14.20.173:26017
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /var/run/palsd/6deed2da-5ac0-42c5-ad99-12d19c239e7b/tmp/torchelastic_y73majb6
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0328 07:58:02.468000 80816 site-packages/torch/distributed/launcher/api.py:199] 
+I0328 07:58:02.511000 80813 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:58:02.511000 80813 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:58:02.522000 80814 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:58:02.522000 80816 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:58:02.522000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0328 07:58:02.522000 80814 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:58:02.522000 80816 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:58:02.522000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523] [default] Rendezvous complete for workers. Result:
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   restart_count=0
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_addr=deg0081.hsn.de.hpc.ucar.edu
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_port=42491
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_rank=0
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_world_size=1
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   local_ranks=[0, 1, 2, 3]
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_ranks=[0, 1, 2, 3]
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_ranks=[0, 1, 2, 3]
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_world_sizes=[4, 4, 4, 4]
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_world_sizes=[4, 4, 4, 4]
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523]   event_log_handler=null
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:523] 
+I0328 07:58:02.777000 80817 site-packages/torch/distributed/elastic/agent/server/api.py:685] [default] Starting worker group
+I0328 07:58:02.778000 80817 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:296] use_agent_store: True
+I0328 07:58:02.778000 80817 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:192] Environment variable 'TORCHELASTIC_ENABLE_FILE_TIMER' not found. Do not start FileTimerServer.
+I0328 07:58:02.778000 80817 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:236] Environment variable 'TORCHELASTIC_HEALTH_CHECK_PORT' not found. Do not start health check.
+INFO:root:Running DDP on rank 3 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 0 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 1 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 2 with world_size 4 using nccl.
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:root:Loaded a training ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:credit.transforms.transforms_global:Loading stored mean and std data for z-score-based transform and inverse transform
+INFO:root:Loaded a validation ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a validation ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a validation ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a validation ERA5_MultiStep_Batcher dataset (forecast length = 1)
+INFO:root:Loaded a training DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a training DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a training DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a training DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:root:Loaded a validation DataLoader for the ERA5_MultiStep_Batcher ERA dataset.
+INFO:credit.models:Loading Stormer (plain ViT weather model) ...
+INFO:credit.models:Loading Stormer (plain ViT weather model) ...
+INFO:credit.models:Loading Stormer (plain ViT weather model) ...
+INFO:credit.models:Loading Stormer (plain ViT weather model) ...
+deg0081:84238:84238 [0] NCCL INFO NCCL_SOCKET_IFNAME set by environment to hsn
+deg0081:84238:84238 [0] NCCL INFO Bootstrap : Using hsn3:10.14.20.176<0>
+deg0081:84238:84238 [0] NCCL INFO NET/Plugin: Failed to find ncclNetPlugin_v8 symbol.
+deg0081:84238:84238 [0] NCCL INFO NET/Plugin: Loaded net plugin AWS Libfabric (v6)
+deg0081:84238:84238 [0] NCCL INFO NET/Plugin: Failed to find ncclCollNetPlugin_v8 symbol.
+deg0081:84238:84238 [0] NCCL INFO NET/Plugin: Failed to find ncclCollNetPlugin symbol (>= v5). ncclCollNetPlugin symbols v4 and lower are not supported.
+deg0081:84238:84238 [0] NCCL INFO cudaDriverVersion 13000
+NCCL version 2.21.5+cuda12.3
+deg0081:84238:84238 [0] NCCL INFO Comm config Blocking set to 1
+deg0081:84240:84240 [2] NCCL INFO cudaDriverVersion 13000
+deg0081:84240:84240 [2] NCCL INFO NCCL_SOCKET_IFNAME set by environment to hsn
+deg0081:84240:84240 [2] NCCL INFO Bootstrap : Using hsn3:10.14.20.176<0>
+deg0081:84240:84240 [2] NCCL INFO NET/Plugin: Failed to find ncclNetPlugin_v8 symbol.
+deg0081:84240:84240 [2] NCCL INFO NET/Plugin: Loaded net plugin AWS Libfabric (v6)
+deg0081:84240:84240 [2] NCCL INFO NET/Plugin: Failed to find ncclCollNetPlugin_v8 symbol.
+deg0081:84240:84240 [2] NCCL INFO NET/Plugin: Failed to find ncclCollNetPlugin symbol (>= v5). ncclCollNetPlugin symbols v4 and lower are not supported.
+deg0081:84239:84239 [1] NCCL INFO cudaDriverVersion 13000
+deg0081:84239:84239 [1] NCCL INFO NCCL_SOCKET_IFNAME set by environment to hsn
+deg0081:84239:84239 [1] NCCL INFO Bootstrap : Using hsn3:10.14.20.176<0>
+deg0081:84241:84241 [3] NCCL INFO cudaDriverVersion 13000
+deg0081:84241:84241 [3] NCCL INFO NCCL_SOCKET_IFNAME set by environment to hsn
+deg0081:84239:84239 [1] NCCL INFO NET/Plugin: Failed to find ncclNetPlugin_v8 symbol.
+deg0081:84239:84239 [1] NCCL INFO NET/Plugin: Loaded net plugin AWS Libfabric (v6)
+deg0081:84239:84239 [1] NCCL INFO NET/Plugin: Failed to find ncclCollNetPlugin_v8 symbol.
+deg0081:84239:84239 [1] NCCL INFO NET/Plugin: Failed to find ncclCollNetPlugin symbol (>= v5). ncclCollNetPlugin symbols v4 and lower are not supported.
+deg0081:84241:84241 [3] NCCL INFO Bootstrap : Using hsn3:10.14.20.176<0>
+deg0081:84240:84240 [2] NCCL INFO Comm config Blocking set to 1
+deg0081:84241:84241 [3] NCCL INFO NET/Plugin: Failed to find ncclNetPlugin_v8 symbol.
+deg0081:84241:84241 [3] NCCL INFO NET/Plugin: Loaded net plugin AWS Libfabric (v6)
+deg0081:84241:84241 [3] NCCL INFO NET/Plugin: Failed to find ncclCollNetPlugin_v8 symbol.
+deg0081:84241:84241 [3] NCCL INFO NET/Plugin: Failed to find ncclCollNetPlugin symbol (>= v5). ncclCollNetPlugin symbols v4 and lower are not supported.
+deg0081:84239:84239 [1] NCCL INFO Comm config Blocking set to 1
+deg0081:84241:84241 [3] NCCL INFO Comm config Blocking set to 1
+deg0081:84238:98745 [0] NCCL INFO NET/OFI Using aws-ofi-nccl 1.6.0
+deg0081:84240:98749 [2] NCCL INFO NET/OFI Using aws-ofi-nccl 1.6.0
+deg0081:84239:98753 [1] NCCL INFO NET/OFI Using aws-ofi-nccl 1.6.0
+deg0081:84241:98754 [3] NCCL INFO NET/OFI Using aws-ofi-nccl 1.6.0
+deg0081:84239:98753 [1] NCCL INFO NET/OFI Selected Provider is cxi (found 8 nics)
+deg0081:84238:98745 [0] NCCL INFO NET/OFI Selected Provider is cxi (found 8 nics)
+deg0081:84240:98749 [2] NCCL INFO NET/OFI Selected Provider is cxi (found 8 nics)
+deg0081:84239:98753 [1] NCCL INFO Using non-device net plugin version 0
+deg0081:84239:98753 [1] NCCL INFO Using network AWS Libfabric
+deg0081:84241:98754 [3] NCCL INFO NET/OFI Selected Provider is cxi (found 8 nics)
+deg0081:84238:98745 [0] NCCL INFO Using non-device net plugin version 0
+deg0081:84238:98745 [0] NCCL INFO Using network AWS Libfabric
+deg0081:84240:98749 [2] NCCL INFO Using non-device net plugin version 0
+deg0081:84240:98749 [2] NCCL INFO Using network AWS Libfabric
+deg0081:84241:98754 [3] NCCL INFO Using non-device net plugin version 0
+deg0081:84241:98754 [3] NCCL INFO Using network AWS Libfabric
+deg0081:84238:98745 [0] NCCL INFO ncclCommInitRank comm 0x55c61326b190 rank 0 nranks 4 cudaDev 0 nvmlDev 0 busId 3000 commId 0xbed7590ab33a36c4 - Init START
+deg0081:84239:98753 [1] NCCL INFO ncclCommInitRank comm 0x55b89c6c18d0 rank 1 nranks 4 cudaDev 1 nvmlDev 1 busId 41000 commId 0xbed7590ab33a36c4 - Init START
+deg0081:84241:98754 [3] NCCL INFO ncclCommInitRank comm 0x561b41dcb750 rank 3 nranks 4 cudaDev 3 nvmlDev 3 busId c1000 commId 0xbed7590ab33a36c4 - Init START
+deg0081:84240:98749 [2] NCCL INFO ncclCommInitRank comm 0x5635d9552a50 rank 2 nranks 4 cudaDev 2 nvmlDev 2 busId 82000 commId 0xbed7590ab33a36c4 - Init START
+deg0081:84239:98753 [1] NCCL INFO Setting affinity for GPU 1 to ffff,00000000,0000ffff,00000000
+deg0081:84239:98753 [1] NCCL INFO NVLS multicast support is not available on dev 1
+deg0081:84238:98745 [0] NCCL INFO Setting affinity for GPU 0 to ffff0000,00000000,ffff0000,00000000
+deg0081:84238:98745 [0] NCCL INFO NVLS multicast support is not available on dev 0
+deg0081:84241:98754 [3] NCCL INFO Setting affinity for GPU 3 to ffff,00000000,0000ffff
+deg0081:84240:98749 [2] NCCL INFO Setting affinity for GPU 2 to ffff0000,00000000,ffff0000
+deg0081:84241:98754 [3] NCCL INFO NVLS multicast support is not available on dev 3
+deg0081:84240:98749 [2] NCCL INFO NVLS multicast support is not available on dev 2
+deg0081:84238:98745 [0] NCCL INFO comm 0x55c61326b190 rank 0 nRanks 4 nNodes 1 localRanks 4 localRank 0 MNNVL 0
+deg0081:84241:98754 [3] NCCL INFO comm 0x561b41dcb750 rank 3 nRanks 4 nNodes 1 localRanks 4 localRank 3 MNNVL 0
+deg0081:84240:98749 [2] NCCL INFO comm 0x5635d9552a50 rank 2 nRanks 4 nNodes 1 localRanks 4 localRank 2 MNNVL 0
+deg0081:84239:98753 [1] NCCL INFO comm 0x55b89c6c18d0 rank 1 nRanks 4 nNodes 1 localRanks 4 localRank 1 MNNVL 0
+deg0081:84238:98745 [0] NCCL INFO Channel 00/24 :    0   1   2   3
+deg0081:84238:98745 [0] NCCL INFO Channel 01/24 :    0   1   3   2
+deg0081:84238:98745 [0] NCCL INFO Channel 02/24 :    0   2   3   1
+deg0081:84238:98745 [0] NCCL INFO Channel 03/24 :    0   2   1   3
+deg0081:84238:98745 [0] NCCL INFO Channel 04/24 :    0   3   1   2
+deg0081:84238:98745 [0] NCCL INFO Channel 05/24 :    0   3   2   1
+deg0081:84238:98745 [0] NCCL INFO Channel 06/24 :    0   1   2   3
+deg0081:84238:98745 [0] NCCL INFO Channel 07/24 :    0   1   3   2
+deg0081:84238:98745 [0] NCCL INFO Channel 08/24 :    0   2   3   1
+deg0081:84238:98745 [0] NCCL INFO Channel 09/24 :    0   2   1   3
+deg0081:84238:98745 [0] NCCL INFO Channel 10/24 :    0   3   1   2
+deg0081:84238:98745 [0] NCCL INFO Channel 11/24 :    0   3   2   1
+deg0081:84240:98749 [2] NCCL INFO Trees [0] 3/-1/-1->2->1 [1] 3/-1/-1->2->1 [2] 3/-1/-1->2->1 [3] 3/-1/-1->2->1 [4] 1/-1/-1->2->0 [5] 1/-1/-1->2->0 [6] 1/-1/-1->2->0 [7] 1/-1/-1->2->0 [8] -1/-1/-1->2->3 [9] -1/-1/-1->2->3 [10] -1/-1/-1->2->3 [11] -1/-1/-1->2->3 [12] 3/-1/-1->2->1 [13] 3/-1/-1->2->1 [14] 3/-1/-1->2->1 [15] 3/-1/-1->2->1 [16] 1/-1/-1->2->0 [17] 1/-1/-1->2->0 [18] 1/-1/-1->2->0 [19] 1/-1/-1->2->0 [20] -1/-1/-1->2->3 [21] -1/-1/-1->2->3 [22] -1/-1/-1->2->3 [23] -1/-1/-1->2->3
+deg0081:84238:98745 [0] NCCL INFO Channel 12/24 :    0   1   2   3
+deg0081:84238:98745 [0] NCCL INFO Channel 13/24 :    0   1   3   2
+deg0081:84238:98745 [0] NCCL INFO Channel 14/24 :    0   2   3   1
+deg0081:84241:98754 [3] NCCL INFO Trees [0] -1/-1/-1->3->2 [1] -1/-1/-1->3->2 [2] -1/-1/-1->3->2 [3] -1/-1/-1->3->2 [4] -1/-1/-1->3->1 [5] -1/-1/-1->3->1 [6] -1/-1/-1->3->1 [7] -1/-1/-1->3->1 [8] 2/-1/-1->3->0 [9] 2/-1/-1->3->0 [10] 2/-1/-1->3->0 [11] 2/-1/-1->3->0 [12] -1/-1/-1->3->2 [13] -1/-1/-1->3->2 [14] -1/-1/-1->3->2 [15] -1/-1/-1->3->2 [16] -1/-1/-1->3->1 [17] -1/-1/-1->3->1 [18] -1/-1/-1->3->1 [19] -1/-1/-1->3->1 [20] 2/-1/-1->3->0 [21] 2/-1/-1->3->0 [22] 2/-1/-1->3->0 [23] 2/-1/-1->3->0
+deg0081:84238:98745 [0] NCCL INFO Channel 15/24 :    0   2   1   3
+deg0081:84238:98745 [0] NCCL INFO Channel 16/24 :    0   3   1   2
+deg0081:84239:98753 [1] NCCL INFO Trees [0] 2/-1/-1->1->0 [1] 2/-1/-1->1->0 [2] 2/-1/-1->1->0 [3] 2/-1/-1->1->0 [4] 3/-1/-1->1->2 [5] 3/-1/-1->1->2 [6] 3/-1/-1->1->2 [7] 3/-1/-1->1->2 [8] 0/-1/-1->1->-1 [9] 0/-1/-1->1->-1 [10] 0/-1/-1->1->-1 [11] 0/-1/-1->1->-1 [12] 2/-1/-1->1->0 [13] 2/-1/-1->1->0 [14] 2/-1/-1->1->0 [15] 2/-1/-1->1->0 [16] 3/-1/-1->1->2 [17] 3/-1/-1->1->2 [18] 3/-1/-1->1->2 [19] 3/-1/-1->1->2 [20] 0/-1/-1->1->-1 [21] 0/-1/-1->1->-1 [22] 0/-1/-1->1->-1 [23] 0/-1/-1->1->-1
+deg0081:84238:98745 [0] NCCL INFO Channel 17/24 :    0   3   2   1
+deg0081:84238:98745 [0] NCCL INFO Channel 18/24 :    0   1   2   3
+deg0081:84238:98745 [0] NCCL INFO Channel 19/24 :    0   1   3   2
+deg0081:84238:98745 [0] NCCL INFO Channel 20/24 :    0   2   3   1
+deg0081:84238:98745 [0] NCCL INFO Channel 21/24 :    0   2   1   3
+deg0081:84238:98745 [0] NCCL INFO Channel 22/24 :    0   3   1   2
+deg0081:84238:98745 [0] NCCL INFO Channel 23/24 :    0   3   2   1
+deg0081:84240:98749 [2] NCCL INFO P2P Chunksize set to 524288
+deg0081:84239:98753 [1] NCCL INFO P2P Chunksize set to 524288
+deg0081:84238:98745 [0] NCCL INFO Trees [0] 1/-1/-1->0->-1 [1] 1/-1/-1->0->-1 [2] 1/-1/-1->0->-1 [3] 1/-1/-1->0->-1 [4] 2/-1/-1->0->-1 [5] 2/-1/-1->0->-1 [6] 2/-1/-1->0->-1 [7] 2/-1/-1->0->-1 [8] 3/-1/-1->0->1 [9] 3/-1/-1->0->1 [10] 3/-1/-1->0->1 [11] 3/-1/-1->0->1 [12] 1/-1/-1->0->-1 [13] 1/-1/-1->0->-1 [14] 1/-1/-1->0->-1 [15] 1/-1/-1->0->-1 [16] 2/-1/-1->0->-1 [17] 2/-1/-1->0->-1 [18] 2/-1/-1->0->-1 [19] 2/-1/-1->0->-1 [20] 3/-1/-1->0->1 [21] 3/-1/-1->0->1 [22] 3/-1/-1->0->1 [23] 3/-1/-1->0->1
+deg0081:84241:98754 [3] NCCL INFO P2P Chunksize set to 524288
+deg0081:84238:98745 [0] NCCL INFO P2P Chunksize set to 524288
+deg0081:84238:98745 [0] NCCL INFO Channel 00/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 01/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 06/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 07/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 12/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 13/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 18/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 19/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 00/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 02/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 06/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 08/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 12/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 00/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 14/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 03/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 18/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 06/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 20/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 09/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 00/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 12/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 04/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 15/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 06/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 18/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 10/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 21/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 12/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 16/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 18/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 22/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 02/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 04/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 08/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 10/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 02/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 01/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 01/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 14/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 03/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 04/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 03/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 16/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 08/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 07/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 07/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 20/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 09/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 10/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 09/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 22/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 14/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 13/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 13/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 15/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 16/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 15/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 20/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 19/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 19/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 21/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 22/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 21/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 04/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 03/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 02/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 01/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 05/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 05/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 05/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 05/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 10/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 09/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 08/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 07/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 11/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 11/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 11/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 11/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 16/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 15/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 14/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 17/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 13/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 17/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 17/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 22/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 17/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 21/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 20/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 23/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 19/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 23/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 23/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 23/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Connected all rings
+deg0081:84241:98754 [3] NCCL INFO Connected all rings
+deg0081:84238:98745 [0] NCCL INFO Connected all rings
+deg0081:84240:98749 [2] NCCL INFO Connected all rings
+deg0081:84238:98745 [0] NCCL INFO Channel 02/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 03/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 08/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 08/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 01/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 09/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 10/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 03/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 01/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 10/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 11/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 09/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 02/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 11/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 20/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 10/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 03/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 14/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 22/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 11/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 05/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 15/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 13/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 23/0 : 3[3] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 07/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 20/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 15/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 13/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 21/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 21/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 14/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 22/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 22/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 15/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 23/0 : 0[0] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 17/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 23/0 : 2[2] -> 3[3] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 19/0 : 1[1] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 04/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 05/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 05/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 06/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 06/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 04/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 07/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 05/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 07/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 16/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 05/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 06/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 17/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 17/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 06/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 16/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 18/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 18/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 17/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 19/0 : 0[0] -> 2[2] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 17/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 19/0 : 3[3] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 18/0 : 2[2] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 18/0 : 1[1] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 00/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 02/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 03/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 08/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 09/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 08/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 10/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 09/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 12/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 20/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 14/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 00/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 00/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84238:98745 [0] NCCL INFO Channel 21/0 : 0[0] -> 3[3] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 15/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 01/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 01/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 20/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 02/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 03/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 21/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 04/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 09/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Channel 22/0 : 3[3] -> 2[2] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 06/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 10/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 07/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 12/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 12/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 13/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 15/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 13/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 14/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 21/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 16/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84239:98753 [1] NCCL INFO Channel 22/0 : 1[1] -> 0[0] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 18/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84240:98749 [2] NCCL INFO Channel 19/0 : 2[2] -> 1[1] via P2P/CUMEM/read
+deg0081:84241:98754 [3] NCCL INFO Connected all trees
+deg0081:84240:98749 [2] NCCL INFO Connected all trees
+deg0081:84239:98753 [1] NCCL INFO Connected all trees
+deg0081:84238:98745 [0] NCCL INFO Connected all trees
+deg0081:84241:98754 [3] NCCL INFO threadThresholds 8/8/64 | 32/8/64 | 512 | 512
+deg0081:84241:98754 [3] NCCL INFO 24 coll channels, 24 collnet channels, 0 nvls channels, 32 p2p channels, 8 p2p channels per peer
+deg0081:84240:98749 [2] NCCL INFO threadThresholds 8/8/64 | 32/8/64 | 512 | 512
+deg0081:84240:98749 [2] NCCL INFO 24 coll channels, 24 collnet channels, 0 nvls channels, 32 p2p channels, 8 p2p channels per peer
+deg0081:84239:98753 [1] NCCL INFO threadThresholds 8/8/64 | 32/8/64 | 512 | 512
+deg0081:84239:98753 [1] NCCL INFO 24 coll channels, 24 collnet channels, 0 nvls channels, 32 p2p channels, 8 p2p channels per peer
+deg0081:84238:98745 [0] NCCL INFO threadThresholds 8/8/64 | 32/8/64 | 512 | 512
+deg0081:84238:98745 [0] NCCL INFO 24 coll channels, 24 collnet channels, 0 nvls channels, 32 p2p channels, 8 p2p channels per peer
+deg0081:84240:98749 [2] NCCL INFO TUNER/Plugin: Failed to find ncclTunerPlugin_v2, using internal tuner instead.
+deg0081:84238:98745 [0] NCCL INFO TUNER/Plugin: Failed to find ncclTunerPlugin_v2, using internal tuner instead.
+deg0081:84239:98753 [1] NCCL INFO TUNER/Plugin: Failed to find ncclTunerPlugin_v2, using internal tuner instead.
+deg0081:84240:98749 [2] NCCL INFO ncclCommInitRank comm 0x5635d9552a50 rank 2 nranks 4 cudaDev 2 nvmlDev 2 busId 82000 commId 0xbed7590ab33a36c4 - Init COMPLETE
+deg0081:84238:98745 [0] NCCL INFO ncclCommInitRank comm 0x55c61326b190 rank 0 nranks 4 cudaDev 0 nvmlDev 0 busId 3000 commId 0xbed7590ab33a36c4 - Init COMPLETE
+deg0081:84239:98753 [1] NCCL INFO ncclCommInitRank comm 0x55b89c6c18d0 rank 1 nranks 4 cudaDev 1 nvmlDev 1 busId 41000 commId 0xbed7590ab33a36c4 - Init COMPLETE
+deg0081:84241:98754 [3] NCCL INFO TUNER/Plugin: Failed to find ncclTunerPlugin_v2, using internal tuner instead.
+deg0081:84241:98754 [3] NCCL INFO ncclCommInitRank comm 0x561b41dcb750 rank 3 nranks 4 cudaDev 3 nvmlDev 3 busId c1000 commId 0xbed7590ab33a36c4 - Init COMPLETE
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.trainers:Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.
+INFO:credit.trainers.trainerERA5:Loading a multi-step trainer class
+INFO:credit.trainers.base_trainer:The training metric being used is valid_loss which has direction min
+INFO:credit.trainers.base_trainer:The current job will run 1 epochs max
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers:Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.
+INFO:credit.trainers.trainerERA5:Loading a multi-step trainer class
+INFO:credit.trainers.base_trainer:The training metric being used is valid_loss which has direction min
+INFO:credit.trainers.base_trainer:The current job will run 1 epochs max
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers:Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.
+INFO:credit.trainers.trainerERA5:Loading a multi-step trainer class
+INFO:credit.trainers.base_trainer:The training metric being used is valid_loss which has direction min
+INFO:credit.trainers.base_trainer:The current job will run 1 epochs max
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5:Using grad-max-norm value: dynamic
+INFO:credit.trainers.trainerERA5:Using grad-max-norm value: dynamic
+  0%|          | 0/1000 [00:00<?, ?it/s]  0%|          | 0/1000 [00:00<?, ?it/s]INFO:credit.trainers:Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.
+INFO:credit.trainers.trainerERA5:Loading a multi-step trainer class
+INFO:credit.trainers.base_trainer:The training metric being used is valid_loss which has direction min
+INFO:credit.trainers.base_trainer:The current job will run 1 epochs max
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5:Using grad-max-norm value: dynamic
+  0%|          | 0/1000 [00:00<?, ?it/s]INFO:credit.trainers.trainerERA5:Using grad-max-norm value: dynamic
+  0%|          | 0/1000 [00:00<?, ?it/s][rank1]: Traceback (most recent call last):
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+[rank1]:     main_cli()
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 434, in main_cli
+[rank1]:     main(world_rank, world_size, conf, backend)
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 281, in main
+[rank1]:     result = trainer.fit(
+[rank1]:              ^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/trainers/base_trainer.py", line 287, in fit
+[rank1]:     train_results = self.train_one_epoch(
+[rank1]:                     ^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/trainers/trainerERA5.py", line 217, in train_one_epoch
+[rank1]:     y_pred = self.model(x)
+[rank1]:              ^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1648, in forward
+[rank1]:     else self._run_ddp_forward(*inputs, **kwargs)
+[rank1]:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1474, in _run_ddp_forward
+[rank1]:     return self.module(*inputs, **kwargs)  # type: ignore[index]
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 267, in forward
+[rank1]:     out = self.model(x)
+[rank1]:           ^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 184, in forward
+[rank1]:     x = self.patch_embed(x)  # (B, n_patches, embed_dim)
+[rank1]:         ^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 35, in forward
+[rank1]:     x = self.proj(x)
+[rank1]:         ^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 548, in forward
+[rank1]:     return self._conv_forward(input, self.weight, self.bias)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 543, in _conv_forward
+[rank1]:     return F.conv2d(
+[rank1]:            ^^^^^^^^^
+[rank1]: RuntimeError: Expected 3D (unbatched) or 4D (batched) input to conv2d, but got input of size: [2, 80, 1, 184, 360]
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+[rank3]:     main_cli()
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 434, in main_cli
+[rank3]:     main(world_rank, world_size, conf, backend)
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 281, in main
+[rank3]:     result = trainer.fit(
+[rank3]:              ^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/trainers/base_trainer.py", line 287, in fit
+[rank3]:     train_results = self.train_one_epoch(
+[rank3]:                     ^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/trainers/trainerERA5.py", line 217, in train_one_epoch
+[rank3]:     y_pred = self.model(x)
+[rank3]:              ^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank3]:     return forward_call(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1648, in forward
+[rank3]:     else self._run_ddp_forward(*inputs, **kwargs)
+[rank3]:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1474, in _run_ddp_forward
+[rank3]:     return self.module(*inputs, **kwargs)  # type: ignore[index]
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank3]:     return forward_call(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 267, in forward
+[rank3]:     out = self.model(x)
+[rank3]:           ^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank3]:     return forward_call(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 184, in forward
+[rank3]:     x = self.patch_embed(x)  # (B, n_patches, embed_dim)
+[rank3]:         ^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank3]:     return forward_call(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 35, in forward
+[rank3]:     x = self.proj(x)
+[rank3]:         ^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank3]:     return forward_call(*args, **kwargs)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 548, in forward
+[rank3]:     return self._conv_forward(input, self.weight, self.bias)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 543, in _conv_forward
+[rank3]:     return F.conv2d(
+[rank3]:            ^^^^^^^^^
+[rank3]: RuntimeError: Expected 3D (unbatched) or 4D (batched) input to conv2d, but got input of size: [2, 80, 1, 184, 360]
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+[rank0]:     main_cli()
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 434, in main_cli
+[rank0]:     main(world_rank, world_size, conf, backend)
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 281, in main
+[rank0]:     result = trainer.fit(
+[rank0]:              ^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/trainers/base_trainer.py", line 287, in fit
+[rank0]:     train_results = self.train_one_epoch(
+[rank0]:                     ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/trainers/trainerERA5.py", line 217, in train_one_epoch
+[rank0]:     y_pred = self.model(x)
+[rank0]:              ^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1648, in forward
+[rank0]:     else self._run_ddp_forward(*inputs, **kwargs)
+[rank0]:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1474, in _run_ddp_forward
+[rank0]:     return self.module(*inputs, **kwargs)  # type: ignore[index]
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 267, in forward
+[rank0]:     out = self.model(x)
+[rank0]:           ^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 184, in forward
+[rank0]:     x = self.patch_embed(x)  # (B, n_patches, embed_dim)
+[rank0]:         ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 35, in forward
+[rank0]:     x = self.proj(x)
+[rank0]:         ^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 548, in forward
+[rank0]:     return self._conv_forward(input, self.weight, self.bias)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 543, in _conv_forward
+[rank0]:     return F.conv2d(
+[rank0]:            ^^^^^^^^^
+[rank0]: RuntimeError: Expected 3D (unbatched) or 4D (batched) input to conv2d, but got input of size: [2, 80, 1, 184, 360]
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 438, in <module>
+[rank2]:     main_cli()
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 434, in main_cli
+[rank2]:     main(world_rank, world_size, conf, backend)
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train.py", line 281, in main
+[rank2]:     result = trainer.fit(
+[rank2]:              ^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/trainers/base_trainer.py", line 287, in fit
+[rank2]:     train_results = self.train_one_epoch(
+[rank2]:                     ^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/trainers/trainerERA5.py", line 217, in train_one_epoch
+[rank2]:     y_pred = self.model(x)
+[rank2]:              ^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank2]:     return forward_call(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1648, in forward
+[rank2]:     else self._run_ddp_forward(*inputs, **kwargs)
+[rank2]:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1474, in _run_ddp_forward
+[rank2]:     return self.module(*inputs, **kwargs)  # type: ignore[index]
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank2]:     return forward_call(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 267, in forward
+[rank2]:     out = self.model(x)
+[rank2]:           ^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank2]:     return forward_call(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 184, in forward
+[rank2]:     x = self.patch_embed(x)  # (B, n_patches, embed_dim)
+[rank2]:         ^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank2]:     return forward_call(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/stormer/stormer.py", line 35, in forward
+[rank2]:     x = self.proj(x)
+[rank2]:         ^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+[rank2]:     return forward_call(*args, **kwargs)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 548, in forward
+[rank2]:     return self._conv_forward(input, self.weight, self.bias)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/nn/modules/conv.py", line 543, in _conv_forward
+[rank2]:     return F.conv2d(
+[rank2]:            ^^^^^^^^^
+[rank2]: RuntimeError: Expected 3D (unbatched) or 4D (batched) input to conv2d, but got input of size: [2, 80, 1, 184, 360]
+  0%|          | 0/1000 [00:02<?, ?it/s]
+  0%|          | 0/1000 [00:02<?, ?it/s]
+  0%|          | 0/1000 [00:02<?, ?it/s]
+  0%|          | 0/1000 [00:02<?, ?it/s]
+deg0081:84241:98915 [3] NCCL INFO [Service thread] Connection closed by localRank 3
+deg0081:84239:98918 [1] NCCL INFO [Service thread] Connection closed by localRank 1
+[rank0]:[W328 07:59:10.936772255 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+deg0081:84238:98913 [0] NCCL INFO [Service thread] Connection closed by localRank 0
+deg0081:84240:98911 [2] NCCL INFO [Service thread] Connection closed by localRank 2
+deg0081:84241:99296 [3] NCCL INFO comm 0x561b41dcb750 rank 3 nranks 4 cudaDev 3 busId c1000 - Abort COMPLETE
+deg0081:84239:99328 [1] NCCL INFO comm 0x55b89c6c18d0 rank 1 nranks 4 cudaDev 1 busId 41000 - Abort COMPLETE
+deg0081:84238:99367 [0] NCCL INFO comm 0x55c61326b190 rank 0 nranks 4 cudaDev 0 busId 3000 - Abort COMPLETE
+deg0081:84240:99462 [2] NCCL INFO comm 0x5635d9552a50 rank 2 nranks 4 cudaDev 2 busId 82000 - Abort COMPLETE
+W0328 07:59:12.068000 80817 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 84240 closing signal SIGTERM
+W0328 07:59:12.069000 80817 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 84241 closing signal SIGTERM
+E0328 07:59:12.633000 80817 site-packages/torch/distributed/elastic/multiprocessing/api.py:874] failed (exitcode: 1) local_rank: 0 (pid: 84238) of binary: /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/python
+I0328 07:59:12.643000 80817 site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py:370] ('local_rank %s FAILED with no error file. Decorate your entrypoint fn with @record for traceback info. See: https://pytorch.org/docs/stable/elastic/errors.html', 0)
+Traceback (most recent call last):
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 277, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/glade/work/schreck/repos/miles-credit-main/applications/train.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-03-28_07:59:12
+  host      : deg0081.hsn.de.hpc.ucar.edu
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 84239)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-03-28_07:59:12
+  host      : deg0081.hsn.de.hpc.ucar.edu
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 84238)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+deg0081.hsn.de.hpc.ucar.edu: rank 3 exited with code 1
+deg0081.hsn.de.hpc.ucar.edu: rank 2 died from signal 15

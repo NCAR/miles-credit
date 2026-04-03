@@ -1,0 +1,28 @@
+# FuXi — 0.25° 6-hourly ERA5 (NCAR/MILES campaign model, trained by Kyle Friedman)
+# Canonical config from: fuxi_6h_hf/model_single.yml
+# 640×1280 grid, 16 upper-air levels, 2-frame input.
+#
+# default_config supplies the full data/predict/trainer sections so that
+# a user only needs `model: preset: fuxi-025deg-6h` + save_loc.
+default_config: /glade/campaign/cisl/aiml/credit/pretrained_weights/fuxi_6h_hf/model_predict.yml
+type: fuxi
+pretrained_weights: /glade/campaign/cisl/aiml/credit/pretrained_weights/fuxi_6h_hf/best_model_checkpoint.pt
+frames: 2
+image_height: 640
+image_width: 1280
+levels: 16
+channels: 4
+surface_channels: 7
+input_only_channels: 3
+output_only_channels: 0
+patch_width: 4
+patch_height: 4
+frame_patch_size: 2
+dim: 1024
+depth: 16
+num_groups: 32
+num_heads: 8
+window_size: 7
+use_spectral_norm: true
+pad_lat: 80
+pad_lon: 80

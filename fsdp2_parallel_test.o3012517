@@ -1,0 +1,264 @@
+
+Inactive Modules:
+  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
+  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) ncarenv/25.10 => ncarenv/24.12
+
+Repo   : /glade/work/schreck/repos/miles-credit-main
+Config : /glade/work/schreck/repos/miles-credit-main/config/fsdp2_parallel_test.yml
+Node   : casper37
+GPUs   : 4
+WARNING:root:Legacy model imports unavailable (numba/NumPy conflict or missing dep): No module named 'credit.models.crossformer.crossformer'; 'credit.models.crossformer' is not a package.
+WARNING:root:Legacy model imports unavailable (numba/NumPy conflict or missing dep): No module named 'credit.models.crossformer.crossformer'; 'credit.models.crossformer' is not a package.
+WARNING:root:Legacy model imports unavailable (numba/NumPy conflict or missing dep): No module named 'credit.models.crossformer.crossformer'; 'credit.models.crossformer' is not a package.
+WARNING:root:Legacy model imports unavailable (numba/NumPy conflict or missing dep): No module named 'credit.models.crossformer.crossformer'; 'credit.models.crossformer' is not a package.
+INFO:root:Running FSDP2 on rank 2 with world_size 4 using nccl.
+INFO:root:Running FSDP2 on rank 0 with world_size 4 using nccl.
+INFO:root:Running FSDP2 on rank 2 with world_size 4 using nccl.
+INFO:root:Running FSDP2 on rank 0 with world_size 4 using nccl.
+INFO:root:Running FSDP2 on rank 1 with world_size 4 using nccl.
+INFO:root:Running FSDP2 on rank 1 with world_size 4 using nccl.
+INFO:root:Running FSDP2 on rank 3 with world_size 4 using nccl.
+INFO:root:Running FSDP2 on rank 3 with world_size 4 using nccl.
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.models:Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...
+INFO:credit.models:Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...
+INFO:credit.models.wxformer.wxformer_v2:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.wxformer_v2:Adding spectral norm to all conv and linear layers
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.models:Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...
+INFO:credit.models:Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.models:Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...
+INFO:credit.models:Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.models:Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...
+INFO:credit.models:Loading WXFormer v2 (PixelShuffle + SwiGLU + deformable attn) ...
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'tp': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'tp': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.tensor_parallel:Tensor parallelism applied: 20 SwiGLU, 0 FF, 0 GridAttn, 20 WindowAttn
+INFO:credit.parallel.tensor_parallel:Tensor parallelism applied: 20 SwiGLU, 0 FF, 0 GridAttn, 20 WindowAttn
+INFO:root:[V2] Tensor parallelism: degree=2
+INFO:root:[V2] Tensor parallelism: degree=2
+INFO:credit.models.wxformer.wxformer_v2:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.wxformer_v2:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.wxformer_v2:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.wxformer_v2:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.wxformer_v2:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.wxformer_v2:Adding spectral norm to all conv and linear layers
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'tp': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'tp': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'tp': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'tp': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.tensor_parallel:Tensor parallelism applied: 20 SwiGLU, 0 FF, 0 GridAttn, 20 WindowAttn
+INFO:credit.parallel.tensor_parallel:Tensor parallelism applied: 20 SwiGLU, 0 FF, 0 GridAttn, 20 WindowAttn
+INFO:root:[V2] Tensor parallelism: degree=2
+INFO:root:[V2] Tensor parallelism: degree=2
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'tp': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'tp': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.tensor_parallel:Tensor parallelism applied: 20 SwiGLU, 0 FF, 0 GridAttn, 20 WindowAttn
+INFO:credit.parallel.tensor_parallel:Tensor parallelism applied: 20 SwiGLU, 0 FF, 0 GridAttn, 20 WindowAttn
+INFO:root:[V2] Tensor parallelism: degree=2
+INFO:root:[V2] Tensor parallelism: degree=2
+INFO:credit.parallel.tensor_parallel:Tensor parallelism applied: 20 SwiGLU, 0 FF, 0 GridAttn, 20 WindowAttn
+INFO:credit.parallel.tensor_parallel:Tensor parallelism applied: 20 SwiGLU, 0 FF, 0 GridAttn, 20 WindowAttn
+INFO:root:[V2] Tensor parallelism: degree=2
+INFO:root:[V2] Tensor parallelism: degree=2
+INFO:credit.parallel.fsdp2:FSDP2: sharded 7 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 7 submodules + top-level model
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+[rank0]:[W402 10:33:30.726873658 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 0]  using GPU 0 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
+NCCL version 2.21.5+cuda12.4
+INFO:credit.parallel.fsdp2:FSDP2: sharded 7 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 7 submodules + top-level model
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+[rank1]:[W402 10:33:30.868553453 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 1]  using GPU 1 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
+INFO:credit.parallel.fsdp2:FSDP2: sharded 7 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 7 submodules + top-level model
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+[rank2]:[W402 10:33:30.932950898 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 2]  using GPU 2 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
+INFO:credit.parallel.fsdp2:FSDP2: sharded 7 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 7 submodules + top-level model
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+[rank3]:[W402 10:33:30.934243515 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 3]  using GPU 3 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.trainers:ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5v2:Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5v2:Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5v2:Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5v2:Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5v2:Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5v2:Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5v2:Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5v2:Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 30
+DEBUG:credit.samplers:batch indices: [67]
+DEBUG:credit.samplers:num indices: 30
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:credit.samplers:batch indices: [43]
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 30
+DEBUG:credit.samplers:batch indices: [99]
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 30
+DEBUG:credit.samplers:batch indices: [77]
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+INFO:credit.trainers.preflight:Preflight: first batch ready in 0.7s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 0.7s.
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 30
+DEBUG:credit.samplers:batch indices: [67]
+NCCL version 2.21.5+cuda12.4
+NCCL version 2.21.5+cuda12.4
+ 20%|██        | 1/5 [00:03<00:13,  3.34s/it]Epoch: 0 train_loss: 6.456901 train_acc: -0.018447 train_mae: 1.773873 forecast_len: 1 lr: 0.000100000000:  20%|██        | 1/5 [00:03<00:13,  3.34s/it]Epoch: 0 train_loss: 6.456901 train_acc: -0.018447 train_mae: 1.773873 forecast_len: 1 lr: 0.000100000000:  40%|████      | 2/5 [00:04<00:05,  2.00s/it]Epoch: 0 train_loss: 6.402316 train_acc: 0.004143 train_mae: 1.752354 forecast_len: 1 lr: 0.000100000000:  40%|████      | 2/5 [00:04<00:05,  2.00s/it] Epoch: 0 train_loss: 6.402316 train_acc: 0.004143 train_mae: 1.752354 forecast_len: 1 lr: 0.000100000000:  60%|██████    | 3/5 [00:05<00:03,  1.56s/it]Epoch: 0 train_loss: 5.637256 train_acc: 0.036407 train_mae: 1.606813 forecast_len: 1 lr: 0.000100000000:  60%|██████    | 3/5 [00:05<00:03,  1.56s/it]Epoch: 0 train_loss: 5.637256 train_acc: 0.036407 train_mae: 1.606813 forecast_len: 1 lr: 0.000100000000:  80%|████████  | 4/5 [00:06<00:01,  1.46s/it]Epoch: 0 train_loss: 5.102658 train_acc: 0.066881 train_mae: 1.502917 forecast_len: 1 lr: 0.000100000000:  80%|████████  | 4/5 [00:06<00:01,  1.46s/it]Epoch: 0 train_loss: 5.102658 train_acc: 0.066881 train_mae: 1.502917 forecast_len: 1 lr: 0.000100000000: 100%|██████████| 5/5 [00:08<00:00,  1.39s/it]  0%|          | 0/5 [00:08<?, ?it/s]  0%|          | 0/5 [00:08<?, ?it/s]  0%|          | 0/5 [00:08<?, ?it/s]
+
+Epoch: 0 train_loss: 4.728896 train_acc: 0.095317 train_mae: 1.430688 forecast_len: 1 lr: 0.000100000000: 100%|██████████| 5/5 [00:08<00:00,  1.39s/it]
+Epoch: 0 train_loss: 4.728896 train_acc: 0.095317 train_mae: 1.430688 forecast_len: 1 lr: 0.000100000000: 100%|██████████| 5/5 [00:08<00:00,  1.60s/it]
+  0%|          | 0/2 [00:00<?, ?it/s]  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 31
+DEBUG:credit.samplers:num indices: 31
+DEBUG:credit.samplers:batch indices: [1]
+DEBUG:credit.samplers:batch indices: [2]
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 31
+DEBUG:credit.samplers:batch indices: [3]
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 31
+DEBUG:credit.samplers:batch indices: [0]
+ 50%|█████     | 1/2 [00:00<00:00,  1.27it/s]Epoch: 0 valid_loss: 2.944210 valid_acc: 0.255626 valid_mae: 1.119800:  50%|█████     | 1/2 [00:00<00:00,  1.27it/s]Epoch: 0 valid_loss: 2.944210 valid_acc: 0.255626 valid_mae: 1.119800: 100%|██████████| 2/2 [00:01<00:00,  1.27it/s]  0%|          | 0/2 [00:01<?, ?it/s]  0%|          | 0/2 [00:01<?, ?it/s]  0%|          | 0/2 [00:01<?, ?it/s]
+
+Epoch: 0 valid_loss: 2.957318 valid_acc: 0.255008 valid_mae: 1.121631: 100%|██████████| 2/2 [00:01<00:00,  1.27it/s]
+Epoch: 0 valid_loss: 2.957318 valid_acc: 0.255008 valid_mae: 1.121631: 100%|██████████| 2/2 [00:01<00:00,  1.27it/s]
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Beginning epoch 1
+INFO:credit.trainers.base_trainer:Beginning epoch 1
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]INFO:credit.trainers.base_trainer:Beginning epoch 1
+INFO:credit.trainers.base_trainer:Beginning epoch 1
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]INFO:credit.trainers.base_trainer:Beginning epoch 1
+INFO:credit.trainers.base_trainer:Beginning epoch 1
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 30
+DEBUG:credit.samplers:batch indices: [77]
+DEBUG:credit.samplers:num indices: 30
+DEBUG:credit.samplers:batch indices: [43]
+DEBUG:credit.samplers:num indices: 30
+DEBUG:credit.samplers:batch indices: [99]
+INFO:credit.trainers.base_trainer:Beginning epoch 1
+INFO:credit.trainers.base_trainer:Beginning epoch 1
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5v2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 30
+DEBUG:credit.samplers:batch indices: [67]
+ 20%|██        | 1/5 [00:00<00:03,  1.10it/s]Epoch: 1 train_loss: 2.898129 train_acc: 0.261336 train_mae: 1.088368 forecast_len: 1 lr: 0.000100000000:  20%|██        | 1/5 [00:00<00:03,  1.10it/s]Epoch: 1 train_loss: 2.898129 train_acc: 0.261336 train_mae: 1.088368 forecast_len: 1 lr: 0.000100000000:  40%|████      | 2/5 [00:01<00:02,  1.02it/s]Epoch: 1 train_loss: 2.752172 train_acc: 0.280568 train_mae: 1.065462 forecast_len: 1 lr: 0.000100000000:  40%|████      | 2/5 [00:01<00:02,  1.02it/s]Epoch: 1 train_loss: 2.752172 train_acc: 0.280568 train_mae: 1.065462 forecast_len: 1 lr: 0.000100000000:  60%|██████    | 3/5 [00:02<00:02,  1.00s/it]Epoch: 1 train_loss: 2.596737 train_acc: 0.298551 train_mae: 1.037620 forecast_len: 1 lr: 0.000100000000:  60%|██████    | 3/5 [00:02<00:02,  1.00s/it]Epoch: 1 train_loss: 2.596737 train_acc: 0.298551 train_mae: 1.037620 forecast_len: 1 lr: 0.000100000000:  80%|████████  | 4/5 [00:04<00:01,  1.01s/it]Epoch: 1 train_loss: 2.459039 train_acc: 0.314845 train_mae: 1.011643 forecast_len: 1 lr: 0.000100000000:  80%|████████  | 4/5 [00:04<00:01,  1.01s/it]Epoch: 1 train_loss: 2.459039 train_acc: 0.314845 train_mae: 1.011643 forecast_len: 1 lr: 0.000100000000: 100%|██████████| 5/5 [00:05<00:00,  1.02s/it]  0%|          | 0/5 [00:06<?, ?it/s]  0%|          | 0/5 [00:06<?, ?it/s]
+
+Epoch: 1 train_loss: 2.344143 train_acc: 0.330329 train_mae: 0.990544 forecast_len: 1 lr: 0.000100000000: 100%|██████████| 5/5 [00:05<00:00,  1.02s/it]  0%|          | 0/5 [00:06<?, ?it/s]
+Epoch: 1 train_loss: 2.344143 train_acc: 0.330329 train_mae: 0.990544 forecast_len: 1 lr: 0.000100000000: 100%|██████████| 5/5 [00:05<00:00,  1.01s/it]
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 31
+DEBUG:credit.samplers:batch indices: [2]
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 31
+DEBUG:credit.samplers:batch indices: [3]
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 31
+DEBUG:credit.samplers:batch indices: [1]
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 31
+DEBUG:credit.samplers:batch indices: [0]
+ 50%|█████     | 1/2 [00:00<00:00,  1.25it/s]Epoch: 1 valid_loss: 1.650376 valid_acc: 0.415703 valid_mae: 0.879479:  50%|█████     | 1/2 [00:00<00:00,  1.25it/s]Epoch: 1 valid_loss: 1.650376 valid_acc: 0.415703 valid_mae: 0.879479: 100%|██████████| 2/2 [00:01<00:00,  1.26it/s]  0%|          | 0/2 [00:01<?, ?it/s]  0%|          | 0/2 [00:01<?, ?it/s]  0%|          | 0/2 [00:01<?, ?it/s]
+
+Epoch: 1 valid_loss: 1.657445 valid_acc: 0.416139 valid_mae: 0.880912: 100%|██████████| 2/2 [00:01<00:00,  1.26it/s]
+Epoch: 1 valid_loss: 1.657445 valid_acc: 0.416139 valid_mae: 0.880912: 100%|██████████| 2/2 [00:01<00:00,  1.26it/s]
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test
+INFO:credit.trainers.base_trainer:Saving FSDP2 checkpoint to /glade/derecho/scratch/schreck/CREDIT_runs/tp2_test

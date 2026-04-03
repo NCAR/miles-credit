@@ -434,9 +434,9 @@ def _apply_activation_checkpointing_v2(model, conf):
     import functools
 
     try:
-        from credit.models.wxformer.wxformer_v2 import Transformer, UpBlock, UpBlockPS
+        from credit.models.crossformer.crossformer import Transformer as V1Transformer
 
-        block_types = (Transformer, UpBlock, UpBlockPS)
+        block_types = (V1Transformer,)
     except ImportError:
         return
 
