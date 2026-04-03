@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
+pytest.importorskip("credit.cli", reason="credit.cli not available until v2/cli-tooling is merged")
+
 
 # ---------------------------------------------------------------------------
 # Minimal config fixture
