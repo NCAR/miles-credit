@@ -22,8 +22,8 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
     def __init__(
         self,
         noise_latent_dim=128,
-        encoder_noise_factor=0.235,
-        decoder_noise_factor=0.235,
+        encoder_noise_factor=0.235, # <-- Now accepts a list
+        decoder_noise_factor=0.235, # <-- Now accepts a list
         encoder_noise=False,  # Set False by default to match paper's decoder-only focus
         freeze=False,  # False for joint fine-tuning transfer learning
         correlated=False,  # Added correlated toggle
@@ -48,36 +48,63 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
 
         self.encoder_noise = encoder_noise
 
-        # If SDL is disabled, force noise factors to 0.0
+        # --- HANDLE DECODER LIST ---
         if not self.enable_sdl:
-            encoder_noise_factor = 0.0
-            decoder_noise_factor = 0.0
+            decoder_noise_factor = [0.0, 0.0, 0.0]
+            
+        if isinstance(decoder_noise_factor, (float, int)):
+            decoder_noise_factors = [float(decoder_noise_factor)] * 3
+        elif isinstance(decoder_noise_factor, list):
+            if len(decoder_noise_factor) != 3:
+                raise ValueError(f"decoder_noise_factor list must have exactly 3 elements, got {len(decoder_noise_factor)}")
+            decoder_noise_factors = [float(x) for x in decoder_noise_factor]
+        else:
+            raise TypeError("decoder_noise_factor must be a float or a list of floats.")
 
+        # --- HANDLE ENCODER LIST ---
+        if not self.enable_sdl:
+            encoder_noise_factor = [0.0, 0.0, 0.0]
+            
+        if isinstance(encoder_noise_factor, (float, int)):
+            encoder_noise_factors = [float(encoder_noise_factor)] * 3
+        elif isinstance(encoder_noise_factor, list):
+            # Checking for 3 elements because your code builds 3 encoder noise layers
+            if len(encoder_noise_factor) != 3:
+                raise ValueError(f"encoder_noise_factor list must have exactly 3 elements, got {len(encoder_noise_factor)}")
+            encoder_noise_factors = [float(x) for x in encoder_noise_factor]
+        else:
+            raise TypeError("encoder_noise_factor must be a float or a list of floats.")
+
+        # --- BUILD ENCODER NOISE LAYERS ---
         if encoder_noise:
             # Encoder noise injection layers
             self.encoder_noise_layers = nn.ModuleList(
                 [
+                    # dims[0] is the shallowest/finest resolution
                     StochasticDecompositionLayer(
-                        self.noise_latent_dim, dims[0], encoder_noise_factor
+                        self.noise_latent_dim, dims[0], encoder_noise_factors[0]
                     ),
+                    # dims[1] is the intermediate resolution
                     StochasticDecompositionLayer(
-                        self.noise_latent_dim, dims[1], encoder_noise_factor
+                        self.noise_latent_dim, dims[1], encoder_noise_factors[1]
                     ),
+                    # dims[2] is the deepest/coarsest resolution
                     StochasticDecompositionLayer(
-                        self.noise_latent_dim, dims[2], encoder_noise_factor
+                        self.noise_latent_dim, dims[2], encoder_noise_factors[2]
                     ),
                 ]
             )
 
         # Decoder noise injection layers (reverse order: 2, 1, 0)
+        # --- BUILD DECODER NOISE LAYERS ---
         self.noise_inject1 = StochasticDecompositionLayer(
-            self.noise_latent_dim, dims[2], decoder_noise_factor
+            self.noise_latent_dim, dims[2], decoder_noise_factors[0]
         )
         self.noise_inject2 = StochasticDecompositionLayer(
-            self.noise_latent_dim, dims[1], decoder_noise_factor
+            self.noise_latent_dim, dims[1], decoder_noise_factors[1]
         )
         self.noise_inject3 = StochasticDecompositionLayer(
-            self.noise_latent_dim, dims[0], decoder_noise_factor
+            self.noise_latent_dim, dims[0], decoder_noise_factors[2]
         )
 
         # --- THE FIX: FREEZE NOISE LAYERS IF NOT USING THEM ---
@@ -245,8 +272,8 @@ if __name__ == "__main__":
     }
 
     crossformer_config["noise_latent_dim"] = 128
-    crossformer_config["encoder_noise_factor"] = 0.235
-    crossformer_config["decoder_noise_factor"] = 0.235
+    crossformer_config["encoder_noise_factor"] = [0.235, 0.10, 0.05]
+    crossformer_config["decoder_noise_factor"] = [0.05, 0.10, 0.235]
     crossformer_config["encoder_noise"] = False  # Defaulting to paper implementation
     crossformer_config["freeze"] = False
     crossformer_config["correlated"] = False  # Added flag to test block
