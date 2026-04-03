@@ -8,7 +8,7 @@ authors = [{ name = "NCAR Machine Integration and Learning for Earth Systems (MI
 readme = "README.md"
 license = {text = "Apache-2.0"}
 dynamic = ["version"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy",
     "pandas",
@@ -74,6 +74,9 @@ serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 
 packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets",
     "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
+
+[tool.setuptools.package-data]
+"credit.metadata" = ["*.yaml", "*.yml", "*.nc", "*.csv"]
 
 [tool.setuptools_scm]
 version_file = "credit/_version.py"
