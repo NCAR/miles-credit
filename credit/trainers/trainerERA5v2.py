@@ -58,8 +58,8 @@ def _unpad_shard_interp(y_pred, padding_opt, manager, image_h, image_w):
 
     # --- H unpad: only remove rows at the physical boundary ---
     ph = padding_opt.pad_NS
-    pad_top = ph[0] if manager.is_first_domain_rank() else 0
-    pad_bot = ph[1] if manager.is_last_domain_rank() else 0
+    pad_top = ph[0] if manager.is_first_domain_rank else 0
+    pad_bot = ph[1] if manager.is_last_domain_rank else 0
     if pad_top > 0 or pad_bot > 0:
         end_h = -pad_bot if pad_bot > 0 else None
         y_pred = y_pred[..., pad_top:end_h, :]
