@@ -390,6 +390,11 @@ def distributed_model_wrapper_v2(conf: dict, model, device):
         model = apply_tensor_parallel(model, tp_mesh)
         logging.info(f"[V2] Tensor parallelism: degree={tp_size}")
 
+    # Ensure all parameters/buffers are on the target device after domain/TP
+    # transforms (which may create new modules via wrapping). Must happen before
+    # FSDP2, which converts params to DTensors and can't be moved afterwards.
+    model.to(device)
+
     # ── 3. Data parallelism ───────────────────────────────────────────────
     dp_mesh = submeshes.get("dp")
 
