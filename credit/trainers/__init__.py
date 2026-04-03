@@ -3,10 +3,18 @@ import logging
 
 # Import trainer classes
 from credit.trainers.trainerERA5 import Trainer as TrainerERA5
+from credit.trainers.trainerERA5v2 import Trainer as TrainerERA5v2
 from credit.trainers.trainerERA5_Diffusion import Trainer as TrainerERA5_Diffusion
 from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
 from credit.trainers.trainer_downscaling import Trainer as Trainer404
-from credit.trainers.ic_optimization import Trainer as TrainerIC
+
+try:
+    from credit.trainers.ic_optimization import Trainer as TrainerIC
+
+    _IC_OPT_AVAILABLE = True
+except (ImportError, Exception):
+    TrainerIC = None
+    _IC_OPT_AVAILABLE = False
 from credit.trainers.trainer_om4_samudra import Trainer as TrainerSamudra
 
 from credit.trainers.trainerLES import Trainer as TrainerLES
@@ -22,6 +30,10 @@ trainer_types = {
         TrainerERA5,
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
+    "era5-v2": (
+        TrainerERA5v2,
+        "ERA5 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.",
+    ),
     "era5-diffusion": (
         TrainerERA5_Diffusion,
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
@@ -34,7 +46,7 @@ trainer_types = {
         TrainerERA5,
         "Loading a single or multi-step trainer for the CAM dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
-    "ic-opt": (TrainerIC, "Loading an initial condition optimizer training class"),
+    **({"ic-opt": (TrainerIC, "Loading an initial condition optimizer training class")} if _IC_OPT_AVAILABLE else {}),
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
     "standard-les": (TrainerLES, "Loading a single-step LES trainer"),
     "standard-wrf": (TrainerWRF, "Loading a single-step WRF trainer"),
