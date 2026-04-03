@@ -989,7 +989,7 @@ class TestBuildParser:
     def test_init_default_model(self):
         parser = _build_parser()
         args = parser.parse_args(["init", "-o", "out.yml"])
-        assert args.model == "wxformer_v2"
+        assert args.model == "wxformer"
 
     def test_rollout_defaults(self):
         parser = _build_parser()
@@ -1556,13 +1556,13 @@ class TestInit:
 
         monkeypatch.setattr(os.path, "exists", fake_exists)
 
-        args = argparse.Namespace(grid="0.25deg", model="wxformer_v2", output=out, force=False)
+        args = argparse.Namespace(grid="0.25deg", model="wxformer", output=out, force=False)
         cli._init(args)
         assert len(copies) == 1
         assert copies[0][1] == out
 
     def test_init_unknown_grid_exits(self, monkeypatch):
-        args = argparse.Namespace(grid="99deg", model="wxformer_v2", output="out.yml", force=False)
+        args = argparse.Namespace(grid="99deg", model="wxformer", output="out.yml", force=False)
         with pytest.raises(SystemExit):
             cli._init(args)
 
@@ -1578,7 +1578,7 @@ class TestInit:
 
         monkeypatch.setattr(os.path, "exists", fake_exists)
         monkeypatch.setattr(shutil, "copy", lambda src, dst: None)
-        args = argparse.Namespace(grid="0.25deg", model="wxformer_v2", output=out, force=False)
+        args = argparse.Namespace(grid="0.25deg", model="wxformer", output=out, force=False)
         with pytest.raises(SystemExit):
             cli._init(args)
 
@@ -1590,7 +1590,7 @@ class TestInit:
 
         out = tmp_path / "existing.yml"
         out.write_text("old content")
-        args = argparse.Namespace(grid="1deg", model="wxformer_v2", output=str(out), force=True)
+        args = argparse.Namespace(grid="1deg", model="wxformer", output=str(out), force=True)
         cli._init(args)  # should not raise
 
     def test_init_template_not_found_exits(self, tmp_path, monkeypatch):
@@ -1601,7 +1601,7 @@ class TestInit:
         # template does NOT exist, output does not exist either
         monkeypatch.setattr(os.path, "exists", lambda p: False)
         monkeypatch.setattr(shutil, "copy", lambda src, dst: None)
-        args = argparse.Namespace(grid="0.25deg", model="wxformer_v2", output=out, force=False)
+        args = argparse.Namespace(grid="0.25deg", model="wxformer", output=out, force=False)
         with pytest.raises(SystemExit):
             cli._init(args)
 

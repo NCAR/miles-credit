@@ -811,10 +811,10 @@ def _init(args: argparse.Namespace) -> None:
     import shutil
 
     templates = {
-        ("0.25deg", "wxformer_v2"): "config/wxformer_025deg_6hr_v2.yml",
-        ("0.25deg", "crossformer"): "config/wxformer_025deg_6hr_v2.yml",
-        ("1deg", "wxformer_v2"): "config/wxformer_1dg_6hr_v2.yml",
-        ("1deg", "crossformer"): "config/wxformer_1dg_6hr_v2.yml",
+        ("0.25deg", "wxformer"): "config/wxformer_1dg_6hr.yml",
+        ("0.25deg", "crossformer"): "config/wxformer_1dg_6hr.yml",
+        ("1deg", "wxformer"): "config/wxformer_1dg_6hr.yml",
+        ("1deg", "crossformer"): "config/wxformer_1dg_6hr.yml",
     }
 
     repo = _repo_root()
@@ -2237,9 +2237,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--model",
-        choices=["crossformer", "wxformer_v2"],
-        default="wxformer_v2",
-        help="Model architecture (default: wxformer_v2)",
+        choices=["crossformer", "wxformer"],
+        default="wxformer",
+        help="Model architecture (default: wxformer)",
     )
     p.add_argument(
         "-o", "--output", default="config.yml", metavar="FILE", help="Output file path (default: config.yml)"
