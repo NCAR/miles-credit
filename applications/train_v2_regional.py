@@ -142,6 +142,18 @@ def main(rank, world_size, conf, backend=None):
     )
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
+    # Populate keys that credit_main_parser would normally set, so transforms work.
+    if "all_varnames" not in conf["data"]:
+        conf["data"]["all_varnames"] = (
+            conf["data"].get("variables", [])
+            + conf["data"].get("surface_variables", [])
+            + conf["data"].get("dynamic_forcing_variables", [])
+            + conf["data"].get("diagnostic_variables", [])
+        )
+    if "all_varnames" not in conf["data"].get("boundary", {}):
+        bnd = conf["data"].get("boundary", {})
+        bnd["all_varnames"] = bnd.get("variables", []) + bnd.get("surface_variables", [])
+
     train_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=True)
     valid_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=False)
 
