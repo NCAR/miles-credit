@@ -681,6 +681,22 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
         dataloader = BatchForecastLenDataLoader(dataset)
     elif type(dataset) is MultiprocessingBatcherPrefetch:
         dataloader = BatchForecastLenDataLoader(dataset)
+    elif type(dataset) in (WRF_Dataset, WRF_MultiStep, Dscale_Dataset):
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=is_train,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            sampler=sampler,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor if num_workers > 0 else None,
+            pin_memory=True,
+            persistent_workers=True if num_workers > 0 else False,
+        )
     else:
         raise ValueError(f"Unsupported dataset type: {type(dataset)}")
 
