@@ -1296,7 +1296,11 @@ class CrossFormer(BaseModel):
             lat = self.lat_embed.unsqueeze(2).expand(B, -1, T, -1, W)
             x = torch.cat([x, lat], dim=1)
 
-        if self.use_padding:
+        # _skip_internal_padding is set by the trainer when domain-parallel pre-padding
+        # has already been applied to the full tensor before spatial sharding.
+        _skip_pad = getattr(self, "_skip_internal_padding", False)
+
+        if self.use_padding and not _skip_pad:
             x = self.padding_opt.pad(x)
 
         if self.patch_width > 1 and self.patch_height > 1:
@@ -1331,11 +1335,11 @@ class CrossFormer(BaseModel):
                 else:
                     x = self.up_block_out(x)
 
-        if self.use_padding:
-            x = self.padding_opt.unpad(x)
-
-        if self.use_interp:
-            x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
+        if not _skip_pad:
+            if self.use_padding:
+                x = self.padding_opt.unpad(x)
+            if self.use_interp:
+                x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
         b, _, h, w = x.shape
         x = x.view(b, self.base_output_channels, self.output_frames, h, w)

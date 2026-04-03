@@ -27,6 +27,51 @@ def _get_domain_manager(model):
     return None
 
 
+def _get_raw_model(model):
+    """Unwrap DDP / FSDP2 wrapper to access raw model attributes."""
+    m = model
+    while hasattr(m, "module"):
+        m = m.module
+    return m
+
+
+def _unpad_shard_interp(y_pred, padding_opt, manager, image_h, image_w):
+    """Shard-aware unpad + interpolate for domain-parallel model output.
+
+    When domain-parallel pre-padding is used, the model skips its internal
+    pad/unpad/interp.  After the forward pass, y_pred has shape
+    (B, C, H_shard_padded_out, W_padded_out).  This function:
+      1. Removes W (longitude) padding — identical on every shard.
+      2. Removes H (latitude) padding from boundary rows of the boundary shards
+         only (shard 0 has the north pole rows; shard N-1 has south pole rows).
+      3. Interpolates to the exact unpadded shard height (image_h // N).
+    """
+    import torch.nn.functional as F
+
+    n = manager.domain_parallel_size
+
+    # --- W unpad (same for all shards) ---
+    pw = padding_opt.pad_WE
+    if any(v > 0 for v in pw):
+        end_w = -pw[1] if pw[1] > 0 else None
+        y_pred = y_pred[..., pw[0] : end_w]
+
+    # --- H unpad: only remove rows at the physical boundary ---
+    ph = padding_opt.pad_NS
+    pad_top = ph[0] if manager.is_first_domain_rank() else 0
+    pad_bot = ph[1] if manager.is_last_domain_rank() else 0
+    if pad_top > 0 or pad_bot > 0:
+        end_h = -pad_bot if pad_bot > 0 else None
+        y_pred = y_pred[..., pad_top:end_h, :]
+
+    # --- Resize to exact unpadded shard dimensions ---
+    shard_h = image_h // n
+    if y_pred.shape[-2] != shard_h or y_pred.shape[-1] != image_w:
+        y_pred = F.interpolate(y_pred, size=(shard_h, image_w), mode="bilinear", align_corners=False)
+
+    return y_pred
+
+
 def _shard_spatial(tensor, manager):
     """Shard tensor along H (dim=-2) according to this rank's domain slice.
 
@@ -86,6 +131,30 @@ class Trainer(BaseTrainer):
 
         # Domain parallel manager (None if not using domain parallel)
         self.domain_manager = _get_domain_manager(model)
+
+        # Domain-parallel pre-pad mode: when the model has internal padding AND
+        # domain parallel is active, we must apply padding to the FULL tensor
+        # before sharding so each shard sees (image_h//N + pad_h) rows.
+        # Without this, each shard independently pads to (image_h//N + 2*pad_h),
+        # yielding wrong post-embed dimensions that break window-attention divisibility.
+        self._raw_model = _get_raw_model(model)
+        raw_m = self._raw_model
+        if (
+            self.domain_manager is not None
+            and self.domain_manager.domain_parallel_size > 1
+            and getattr(raw_m, "use_padding", False)
+        ):
+            self._domain_pre_pad = raw_m.padding_opt
+            self._domain_image_h = raw_m.image_height
+            self._domain_image_w = raw_m.image_width
+            logger.info(
+                "[domain parallel] Pre-pad mode: padding applied to full tensor "
+                "before sharding; model internal pad/unpad/interp disabled."
+            )
+        else:
+            self._domain_pre_pad = None
+            self._domain_image_h = None
+            self._domain_image_w = None
 
         # ---- Preblock: normalize then assemble batch field tensors into x and y ----
         preblocks = {}
@@ -229,12 +298,16 @@ class Trainer(BaseTrainer):
                     x = batch["x"].to(self.device).float()
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                    if self._domain_pre_pad is not None:
+                        x = self._domain_pre_pad.pad(x)
                     x = _shard_spatial(x, self.domain_manager)
                 else:
                     # Roll x forward: take new batch's forcing/static, replace prog with y_pred
                     x_new = batch["x"].to(self.device).float()
                     if self.ensemble_size > 1:
                         x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
+                    if self._domain_pre_pad is not None:
+                        x_new = self._domain_pre_pad.pad(x_new)
                     x_new = _shard_spatial(x_new, self.domain_manager)
                     n_prog = x_new.shape[1] - self.static_dim_size
                     y_pred_prog = y_pred[:, :n_prog, ...]
@@ -249,8 +322,19 @@ class Trainer(BaseTrainer):
                 # FSDP2 uses MixedPrecisionPolicy for dtype management; manual
                 # autocast conflicts with SpectralNorm's power-iteration buffers.
                 _amp = self.amp and self.mode != "fsdp2"
+                if self._domain_pre_pad is not None:
+                    self._raw_model._skip_internal_padding = True
                 with torch.autocast(device_type="cuda", enabled=_amp):
                     y_pred = self.model(x)
+                if self._domain_pre_pad is not None:
+                    self._raw_model._skip_internal_padding = False
+                    y_pred = _unpad_shard_interp(
+                        y_pred,
+                        self._domain_pre_pad,
+                        self.domain_manager,
+                        self._domain_image_h,
+                        self._domain_image_w,
+                    )
 
                 # postblock opts outside of model
                 if self.flag_mass_conserve:
