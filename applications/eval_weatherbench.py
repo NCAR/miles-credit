@@ -258,7 +258,7 @@ def _score_step_worker(args):
     Parameters
     ----------
     args : tuple
-        (step, files, era5_glob, clim_path)
+        (step, files, era5_glob, clim_path, lead_time_hours)
 
     Returns
     -------
@@ -268,8 +268,8 @@ def _score_step_worker(args):
 
     _log = _logging.getLogger(__name__)
 
-    step, files, era5_glob, clim_path = args
-    lead_h = step  # filename suffix is already lead-time hours
+    step, files, era5_glob, clim_path, lead_time_hours = args
+    lead_h = step * lead_time_hours
 
     # Load climatology inside worker (no shared state across processes)
     ds_clim = None
@@ -393,7 +393,7 @@ def compute_netcdf_scores(forecast_dir, era5_glob, clim_path=None, lead_time_hou
     n_workers = workers or os.cpu_count() or 1
     logger.info(f"Scoring {n_steps} steps with {n_workers} workers")
 
-    work_items = [(step, files, era5_glob, clim_path) for step, files in sorted(step_files.items())]
+    work_items = [(step, files, era5_glob, clim_path, lead_time_hours) for step, files in sorted(step_files.items())]
 
     all_records = []
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
