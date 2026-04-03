@@ -121,14 +121,29 @@ padding_conf:
     pad_lon: 48
 ```
 
-## Graph Transformer 
+## CAMulator
 
-Arnold to add discussion. 
+**CAMulator** (`camulator`) is the WXFormer architecture trained on CAM (Community Atmosphere Model)
+simulation data rather than ERA5 reanalysis. It shares the CrossFormer-based encoder-decoder
+backbone with WXFormer but targets CAM's variable set and grid.
 
-## Unet 
+**Author:** Will Chapman (formerly CGD/NCAR, now CU Boulder).
 
-Add Discussion 
+## Graph Transformer
 
-## WxFormer Diffusion 
+The Graph Transformer (`graph`) is a graph-based residual transformer with a GRU temporal component
+for weather prediction.
 
-Will to add discussion. 
+**Author:** Arnold Kazadi (former MILES intern, NCAR).
+
+## UNet
+
+The UNet (`unet`) is a standard segmentation-style U-Net adapted for weather field prediction,
+using convolutional encoder-decoder blocks with skip connections.
+
+## WXFormer Diffusion
+
+The WXFormer diffusion model (`crossformer-diffusion`) wraps the CrossFormer backbone in a
+DDPM (denoising diffusion probabilistic model) framework for probabilistic weather generation.
+
+**Author:** Will Chapman (formerly CGD/NCAR, now CU Boulder).

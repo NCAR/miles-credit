@@ -1,7 +1,9 @@
 import logging
 
 import numpy as np
+import xarray as xr
 from pysteps.verification.ensscores import rankhist
+from properscoring import crps_ensemble
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,42 @@ def binned_spread_skill(da_pred, da_true, num_bins, w_lat=None):
     }
 
 
+def crps(da_pred, da_true, w_lat=None):
+    """Latitude-weighted mean CRPS per forecast region.
+
+    Args:
+        da_pred: ensemble predictions with an 'ensemble_member_label' dimension,
+                 shape (time, ensemble_member_label, latitude, longitude).
+        da_true: truth DataArray, shape (time, latitude, longitude).
+        w_lat:   latitude weights (defaults to cos(lat)).
+
+    Returns:
+        dict with keys 'crps_global', 'crps_tropics', 'crps_n_extratropics',
+        'crps_s_extratropics' — each a latitude-weighted float.
+    """
+    if w_lat is None:
+        w_lat = np.cos(np.deg2rad(da_pred.latitude))
+
+    # properscoring expects (n_obs, n_members); flatten spatial dims together.
+    # Transpose to (time, lat, lon, ensemble) first.
+    fcst = da_pred.transpose("time", "latitude", "longitude", "ensemble_member_label").values
+    obs = da_true.values  # (time, lat, lon)
+
+    crps_map = crps_ensemble(obs, fcst)  # (time, lat, lon)
+
+    # Average over time and longitude → (lat,)
+    crps_lat = crps_map.mean(axis=(0, 2))
+    crps_da = xr.DataArray(crps_lat, coords={"latitude": da_pred.latitude.values}, dims=["latitude"])
+
+    result_dict = {}
+    for slice_name, s in latitude_slices.items():
+        w = w_lat.sel(latitude=s)
+        c = crps_da.sel(latitude=s)
+        result_dict[f"crps_{slice_name}"] = float((c * w).sum() / w.sum())
+
+    return result_dict
+
+
 def rank_histogram_apply(da_pred, da_true, w_lat=None):
     """
     computes the rank histogram
@@ -83,16 +121,45 @@ def rank_histogram_apply(da_pred, da_true, w_lat=None):
     """
 
     ensemble_size = len(da_pred.ensemble_member_label)
-    rank_hist = np.zeros(ensemble_size + 1)
 
-    da_pred = da_pred.transpose("ensemble_member_label", ...)
+    # Vectorize: reshape (ensemble, time, lat, lon) → (ensemble, time*lat*lon)
+    # and (time, lat, lon) → (time*lat*lon,) so rankhist processes all grid points at once.
+    pred_arr = da_pred.transpose("ensemble_member_label", "time", "latitude", "longitude").values
+    true_arr = da_true.transpose("time", "latitude", "longitude").values
+    pred_flat = pred_arr.reshape(ensemble_size, -1)
+    true_flat = true_arr.reshape(-1)
 
-    # TODO: vectorize this computation
-    for time in da_pred.time:
-        rank_hist += rankhist(
-            da_pred.sel(time=time).values,  # requires ensemble_member_label to be first dim after removing time
-            da_true.sel(time=time).values,
-            normalize=False,
-        )
+    return rankhist(pred_flat, true_flat, normalize=False)
 
-    return rank_hist
+
+def crps_spatial_avg(pred, truth, w_lat):
+    """Spatially-weighted CRPS and ensemble spread for a numpy ensemble.
+
+    Parameters
+    ----------
+    pred : np.ndarray, shape (n_members, lat, lon)
+        Ensemble forecast.
+    truth : np.ndarray, shape (lat, lon)
+        Verification field.
+    w_lat : np.ndarray, shape (lat,)
+        Latitude weights (should be normalized; e.g. cos(lat) / mean(cos(lat))).
+
+    Returns
+    -------
+    crps_val : float
+        Spatially-weighted mean CRPS.
+    spread_val : float
+        Spatially-weighted mean ensemble standard deviation.
+    """
+    n_members, lat, lon = pred.shape
+
+    obs_flat = truth.reshape(-1)
+    fcst_flat = pred.reshape(n_members, -1).T  # (lat*lon, n_members)
+    crps_map = crps_ensemble(obs_flat, fcst_flat).reshape(lat, lon)
+
+    crps_val = float((crps_map * w_lat[:, None]).sum() / (lat * lon))
+
+    spread_map = pred.std(axis=0)
+    spread_val = float((spread_map * w_lat[:, None]).sum() / (lat * lon))
+
+    return crps_val, spread_val
