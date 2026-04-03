@@ -51,14 +51,16 @@ def _minimal_conf(**trainer_overrides):
     }
 
 
-class _ConcreteTrainer(BaseTrainer):
-    """Minimal concrete subclass so we can instantiate BaseTrainer."""
+if _TRAINER_V2_AVAILABLE:
 
-    def train_one_epoch(self, *a, **kw):
-        pass
+    class _ConcreteTrainer(BaseTrainer):
+        """Minimal concrete subclass so we can instantiate BaseTrainer."""
 
-    def validate(self, *a, **kw):
-        return {}
+        def train_one_epoch(self, *a, **kw):
+            pass
+
+        def validate(self, *a, **kw):
+            return {}
 
 
 # ---------------------------------------------------------------------------
