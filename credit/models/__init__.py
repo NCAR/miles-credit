@@ -6,7 +6,7 @@ import logging
 # Legacy model imports — wrapped in try/except because their transitive dependencies
 # (bridgescaler → numba) may conflict with newer NumPy (≥2.3) environments.
 try:
-    from credit.models.crossformer.crossformer import CrossFormer
+    from credit.models.crossformer import CrossFormer
     from credit.models.camulator import Camulator
     from credit.models.unet import SegmentationModel
     from credit.models.fuxi import Fuxi
