@@ -36,6 +36,7 @@ def full_state_pressure_interpolation(
     pressure_3d_var: str = "P",
     mslp_temp_height: float = 1000.0,
     use_simple_mslp: bool = False,
+    surface_geopotential_var: str = "geopotential_at_surface",
 ) -> xr.Dataset:
     """Interpolate the full state of the model to pressure and height coordinates.
 
@@ -85,6 +86,7 @@ def full_state_pressure_interpolation(
         pressure_3d_var (str): Name of the 3D pressure field derived on the model grid.
         mslp_temp_height (float): height above ground level in meters where temperature is sampled for mslp calculation.
         use_simple_mslp (bool): Whether to use the simple or complex MSLP calculation.
+        surface_geopotential_var (str): Name of the unnormalized surface geopotential variable being used for MSLP calculations
     Returns:
         pressure_ds (xr.Dataset): Dataset containing pressure interpolated variables.
 

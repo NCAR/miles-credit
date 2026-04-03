@@ -9,7 +9,7 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dynamic = ["version"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy",
     "pandas",
@@ -70,6 +70,9 @@ develop = ["pre-commit",
 
 packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets",
     "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
+
+[tool.setuptools.package-data]
+"credit.metadata" = ["*.yaml", "*.yml", "*.nc", "*.csv"]
 
 [tool.setuptools_scm]
 version_file = "credit/_version.py"
