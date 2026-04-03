@@ -28,15 +28,6 @@ except (ImportError, Exception) as _legacy_import_err:
     logging.warning(f"Legacy model imports unavailable (numba/NumPy conflict or missing dep): {_legacy_import_err}.")
     _LEGACY_MODELS_AVAILABLE = False
 
-try:
-    from credit.models.wxformer.wxformer_v2_ensemble import CrossFormerV2WithNoise
-
-    _WXFORMER_V2_SDL = True
-except ImportError:
-    CrossFormerV2WithNoise = None
-    _WXFORMER_V2_SDL = False
-
-
 logger = logging.getLogger(__name__)
 
 # Define model types and their corresponding classes
@@ -71,12 +62,6 @@ if _LEGACY_MODELS_AVAILABLE:
             "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
             "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
         }
-    )
-
-if _WXFORMER_V2_SDL:
-    model_types["wxformer_v2_ensemble"] = (
-        CrossFormerV2WithNoise,
-        "Loading the WXFormer v2 ensemble model with SDL noise injection ...",
     )
 
 
