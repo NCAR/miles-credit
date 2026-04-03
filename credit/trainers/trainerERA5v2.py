@@ -369,7 +369,18 @@ class Trainer(BaseTrainer):
                 # backprop on specified timesteps
                 if t in self.backprop_on_timestep:
                     y = batch["y"].to(self.device).float()
-                    y = _shard_spatial(y, self.domain_manager)
+                    if self._domain_pre_pad is not None:
+                        y = self._domain_pre_pad.pad(y)
+                        y = _shard_spatial(y, self.domain_manager)
+                        y = _unpad_shard_interp(
+                            y,
+                            self._domain_pre_pad,
+                            self.domain_manager,
+                            self._domain_image_h,
+                            self._domain_image_w,
+                        )
+                    else:
+                        y = _shard_spatial(y, self.domain_manager)
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
@@ -496,11 +507,17 @@ class Trainer(BaseTrainer):
                         x = batch["x"].to(self.device).float()
                         if self.ensemble_size > 1:
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                        if self._domain_pre_pad is not None:
+                            x = self._domain_pre_pad.pad(x)
+                        x = _shard_spatial(x, self.domain_manager)
                     else:
                         # Roll x forward for multi-step validation rollout
                         x_new = batch["x"].to(self.device).float()
                         if self.ensemble_size > 1:
                             x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
+                        if self._domain_pre_pad is not None:
+                            x_new = self._domain_pre_pad.pad(x_new)
+                        x_new = _shard_spatial(x_new, self.domain_manager)
                         n_prog = x_new.shape[1] - self.static_dim_size
                         x_new[:, :n_prog, ...] = y_pred[:, :n_prog, ...].detach()
                         x = x_new
@@ -508,7 +525,18 @@ class Trainer(BaseTrainer):
                     if self.flag_clamp:
                         x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
 
+                    if self._domain_pre_pad is not None:
+                        self._raw_model._skip_internal_padding = True
                     y_pred = self.model(x.float())
+                    if self._domain_pre_pad is not None:
+                        self._raw_model._skip_internal_padding = False
+                        y_pred = _unpad_shard_interp(
+                            y_pred,
+                            self._domain_pre_pad,
+                            self.domain_manager,
+                            self._domain_image_h,
+                            self._domain_image_w,
+                        )
 
                     # postblock opts outside of model
                     if self.flag_mass_conserve:
@@ -531,6 +559,16 @@ class Trainer(BaseTrainer):
                     # compute loss and metrics only at the final rollout step
                     if t == self.valid_forecast_len:
                         y = batch["y"].to(self.device).float()
+                        if self._domain_pre_pad is not None:
+                            y = self._domain_pre_pad.pad(y)
+                            y = _shard_spatial(y, self.domain_manager)
+                            y = _unpad_shard_interp(
+                                y,
+                                self._domain_pre_pad,
+                                self.domain_manager,
+                                self._domain_image_h,
+                                self._domain_image_w,
+                            )
                         if self.flag_clamp:
                             y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
