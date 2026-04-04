@@ -1,0 +1,129 @@
+# CREDIT conus404 smoke test — minimal config using only available data.
+# Data rootpath: /glade/derecho/scratch/mcginnis/credit/
+# Uses only conus404_static + conus404_2D; no ERA5, solar, or 3D.
+# Transforms set to none (no norm files required).
+
+save_loc: '/glade/derecho/scratch/schreck/CREDIT_runs/conus404_smoke'
+seed: 2222
+
+sampling: &samples
+    history_len: 1
+    forecast_len: 1
+
+data_defaults: &ddefault
+    <<: *samples
+    rootpath: "/glade/derecho/scratch/mcginnis/credit"
+    first_date: "1980-01-02"
+    last_date:  "1980-03-31"
+
+data:
+    <<: *ddefault
+
+    datasets:
+
+        conus404_static:
+            <<: *ddefault
+            glob: 'conus404/conus404.static.nc'
+            dim: static
+            normalize: True
+            variables:
+                boundary:
+                    - HGT
+                    - LANDMASK
+                unused:
+                    - COSALPHA
+                    - E
+                    - F
+                    - SINALPHA
+                    - VAR
+                    - VAR_SSO
+                    - XLAT
+                    - XLONG
+            transforms:
+                default: none
+
+        conus404_2D:
+            <<: *ddefault
+            glob: 'conus404/2d/*/conus404.2d.*.nc'
+            dim: 2D
+            variables:
+                boundary:
+                    - COSZEN
+                prognostic:
+                    - PSFC
+                    - T2
+                    - U10
+                    - V10
+                diagnostic:
+                    - PREC_ACC_NC
+                unused:
+                    - Q2
+                    - SWDNB
+                    - TD2
+                    - totalVap
+                    - SNOW
+            transforms:
+                default: none
+
+
+model:
+    type: "unet_downscaling"
+    image_height: 1015
+    image_width: 1367
+    frames: 1
+    architecture:
+        name: "unet"
+        encoder_name: "resnet18"
+        encoder_weights: null
+
+
+trainer:
+    type: "conus404"
+    mode: none
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    save_backup_weights: False
+    save_best_weights: False
+    save_metric_vars: False
+
+    learning_rate: 1.0e-04
+    weight_decay: 1.0e-05
+
+    train_batch_size: 1
+    valid_batch_size: 1
+    ensemble_size: 1
+
+    batches_per_epoch: 5
+    valid_batches_per_epoch: 2
+    stopping_patience: 999
+    skip_validation: True
+
+    start_epoch: 0
+    epochs: 2
+
+    use_scheduler: False
+    scheduler:
+        scheduler_type: 'lambda'
+
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+    save_data: False
+
+    thread_workers: 0
+    valid_thread_workers: 0
+    prefetch_factor: 2
+
+
+loss:
+    training_loss: "mse"
+    use_power_loss: False
+    use_spectral_loss: False
+    spectral_lambda_reg: 0.1
+    spectral_wavenum_init: 20
+    use_latitude_weights: False
+    use_variable_weights: False

@@ -697,6 +697,28 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
             pin_memory=True,
             persistent_workers=True if num_workers > 0 else False,
         )
+    elif type(dataset) is DownscalingDataset:
+        # Each sample from DownscalingDataset already has a leading batch dim (shape [1, V, T, H, W])
+        # from unsqueeze(0) in to_tensor.  Use cat (not stack) to build the mini-batch correctly.
+        def _downscaling_collate(batch):
+            result = {}
+            for key in batch[0]:
+                if isinstance(batch[0][key], torch.Tensor):
+                    result[key] = torch.cat([b[key] for b in batch], dim=0)
+                else:
+                    result[key] = [b[key] for b in batch]
+            return result
+
+        dataloader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=is_train,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor if num_workers > 0 else None,
+            pin_memory=True,
+            persistent_workers=True if num_workers > 0 else False,
+            collate_fn=_downscaling_collate,
+        )
     else:
         raise ValueError(f"Unsupported dataset type: {type(dataset)}")
 
