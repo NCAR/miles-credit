@@ -131,6 +131,37 @@ def _regional_varnames(conf):
     return varnames
 
 
+def _populate_post_conf(conf):
+    """Replicate the tracer_inds computation that credit_main_parser normally performs."""
+    post_conf = conf.get("model", {}).get("post_conf", {})
+    if not post_conf.get("activate", False):
+        return
+    tf_conf = post_conf.get("tracer_fixer", {})
+    if not tf_conf.get("activate", False):
+        return
+
+    varname_output = _regional_varnames(conf)
+    varname_tracers = tf_conf["tracer_name"]
+    tracers_thres_input = tf_conf.get("tracer_thres", [0.0] * len(varname_tracers))
+    tracers_thres_maximum = tf_conf.get("tracer_thres_max", None)
+
+    tracer_threshold_dict = dict(zip(varname_tracers, tracers_thres_input))
+    tracer_threshold_dict_max = dict(zip(varname_tracers, tracers_thres_maximum)) if tracers_thres_maximum else {}
+
+    tracer_inds, tracer_thres, tracer_thres_max = [], [], []
+    for i_var, var in enumerate(varname_output):
+        if var in tracer_threshold_dict:
+            tracer_inds.append(i_var)
+            tracer_thres.append(float(tracer_threshold_dict[var]))
+            if tracers_thres_maximum is not None:
+                tracer_thres_max.append(float(tracer_threshold_dict_max[var]))
+
+    tf_conf["tracer_inds"] = tracer_inds
+    tf_conf["tracer_thres"] = tracer_thres
+    if tracers_thres_maximum is not None:
+        tf_conf["tracer_thres_max"] = tracer_thres_max
+
+
 def main(rank, world_size, conf, backend=None):
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
@@ -161,6 +192,9 @@ def main(rank, world_size, conf, backend=None):
     valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
 
     seed_everything(conf["seed"] + rank)
+
+    # Populate tracer_inds in post_conf (normally done by credit_main_parser).
+    _populate_post_conf(conf)
 
     m = load_model(conf)
     m.to(device)
