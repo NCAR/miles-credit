@@ -314,7 +314,7 @@ class Trainer(BaseTrainer):
 
                     results_dict[f"valid_{name}"].append(value[0].item())
 
-                batch_loss = torch.Tensor([loss.item()]).cuda(self.device)
+                batch_loss = torch.Tensor([loss.mean().item()]).cuda(self.device)
 
                 if distributed:
                     torch.distributed.barrier()
