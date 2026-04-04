@@ -36,10 +36,11 @@ data:
     static_first: True
 
     boundary:
-        variables: ['U', 'V', 'T', 'Q']
+        # T, Q, VAR_10U, VAR_10V are 100% NaN in the dscale_3h zarr files — use only valid vars
+        variables: ['U', 'V']
         save_loc: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/dscale_3h/*.zarr'
 
-        surface_variables: ['MSL', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+        surface_variables: ['MSL', 'VAR_2T']
         save_loc_surface: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/dscale_3h/*.zarr'
 
         levels: 11
@@ -122,8 +123,8 @@ model:
         image_height: 336
         image_width: 336
         levels: 11
-        channels: 4
-        surface_channels: 4
+        channels: 2
+        surface_channels: 2
         patch_height: 4
         patch_width: 4
         frame_patch_size: 2
