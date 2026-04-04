@@ -9,14 +9,13 @@ import numpy as np
 
 import torch
 import torch.distributed as dist
-from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
 
 import optuna
-from credit.data import concat_and_reshape, reshape_only
 from credit.scheduler import update_on_batch
 from credit.trainers.utils import accum_log, cycle
 from credit.trainers.base_trainer import BaseTrainer
+from credit.preblock import WRFPreBlock
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 class Trainer(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int):
         super().__init__(model, rank)
-
+        self.preblock = WRFPreBlock()
         logger.info("WRF single-step training")
 
     # Training function.
@@ -75,53 +74,10 @@ class Trainer(BaseTrainer):
             # training log
             logs = {}
 
-            with autocast(enabled=amp):
-                # --------------------------------------------------------------------------------- #
-                if "x_surf" in batch:
-                    # combine x and x_surf
-                    # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
-                    # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)
-                else:
-                    # no x_surf
-                    x = reshape_only(batch["x"]).to(self.device)
-
-                # --------------------------------------------------------------------------------- #
-                # add forcing and static variables
-                if "x_forcing_static" in batch:
-                    # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-
-                    # concat on var dimension
-                    x = torch.cat((x, x_forcing_batch), dim=1)
-
-                # --------------------------------------------------------------------------------- #
-                # combine y and y_surf
-                if "y_surf" in batch:
-                    y = concat_and_reshape(batch["y"], batch["y_surf"]).to(self.device)
-                else:
-                    y = reshape_only(batch["y"]).to(self.device)
-
-                if "y_diag" in batch:
-                    # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-
-                    # concat on var dimension
-                    y = torch.cat((y, y_diag_batch), dim=1)
-
-                # --------------------------------------------------------------------------------- #
-                # boundary conditions
-                if "x_surf_boundary" in batch:
-                    x_boundary = concat_and_reshape(batch["x_boundary"], batch["x_surf_boundary"]).to(self.device)
-                else:
-                    x_boundary = reshape_only(batch["x_boundary"]).to(self.device)
-                # Boundary zarr files have NaN in the interior domain (only edges are valid).
-                # Replace NaN with 0.0 so the model receives a finite tensor.
-                x_boundary = torch.nan_to_num(x_boundary, nan=0.0)
-
-                # --------------------------------------------------------------------------------- #
-                # time encoding
-                x_time_encode = batch["x_time_encode"].to(self.device)
+            with torch.autocast(device_type="cuda", enabled=amp):
+                # assemble inputs and target via WRFPreBlock
+                x, x_boundary, x_time_encode = self.preblock(batch, self.device)
+                y = self.preblock.assemble_target(batch, self.device)
 
                 # single step predict
                 y_pred = self.model(x, x_boundary, x_time_encode)
@@ -254,49 +210,9 @@ class Trainer(BaseTrainer):
             batch = next(dl)
 
             with torch.no_grad():
-                if "x_surf" in batch:
-                    # combine x and x_surf
-                    # input: (batch_num, time, var, level, lat, lon), (batch_num, time, var, lat, lon)
-                    # output: (batch_num, var, time, lat, lon), 'x' first and then 'x_surf'
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(self.device)
-                else:
-                    # no x_surf
-                    x = reshape_only(batch["x"]).to(self.device)
-
-                # --------------------------------------------------------------------------------- #
-                # add forcing and static variables
-                if "x_forcing_static" in batch:
-                    # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    x_forcing_batch = batch["x_forcing_static"].to(self.device).permute(0, 2, 1, 3, 4)
-
-                    # concat on var dimension
-                    x = torch.cat((x, x_forcing_batch), dim=1)
-
-                # --------------------------------------------------------------------------------- #
-                # combine y and y_surf
-                if "y_surf" in batch:
-                    y = concat_and_reshape(batch["y"], batch["y_surf"]).to(self.device)
-                else:
-                    y = reshape_only(batch["y"]).to(self.device)
-
-                if "y_diag" in batch:
-                    # (batch_num, time, var, lat, lon) --> (batch_num, var, time, lat, lon)
-                    y_diag_batch = batch["y_diag"].to(self.device).permute(0, 2, 1, 3, 4)
-
-                    # concat on var dimension
-                    y = torch.cat((y, y_diag_batch), dim=1)
-
-                # --------------------------------------------------------------------------------- #
-                # boundary conditions
-                if "x_surf_boundary" in batch:
-                    x_boundary = concat_and_reshape(batch["x_boundary"], batch["x_surf_boundary"]).to(self.device)
-                else:
-                    x_boundary = reshape_only(batch["x_boundary"]).to(self.device)
-                x_boundary = torch.nan_to_num(x_boundary, nan=0.0)
-
-                # --------------------------------------------------------------------------------- #
-                # time encoding
-                x_time_encode = batch["x_time_encode"].to(self.device)
+                # assemble inputs and target via WRFPreBlock
+                x, x_boundary, x_time_encode = self.preblock(batch, self.device)
+                y = self.preblock.assemble_target(batch, self.device)
 
                 y_pred = self.model(x, x_boundary, x_time_encode)
 
