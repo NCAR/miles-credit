@@ -21,8 +21,8 @@ data:
     mean_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/C404_mean_1980_2019_12lev.nc'
     std_path: '/glade/derecho/scratch/ksha/DWC_data/CONUS_domain_GP/mean_std/C404_std_residual_1980_2019_12lev_clean.nc'
 
-    train_years: [1980, 2019]
-    valid_years: [2019, 2020]
+    train_years: [2017, 2022]
+    valid_years: [2022, 2023]
 
     scaler_type: 'std-wrf'
 
