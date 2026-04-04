@@ -115,6 +115,9 @@ class Trainer(BaseTrainer):
                     x_boundary = concat_and_reshape(batch["x_boundary"], batch["x_surf_boundary"]).to(self.device)
                 else:
                     x_boundary = reshape_only(batch["x_boundary"]).to(self.device)
+                # Boundary zarr files have NaN in the interior domain (only edges are valid).
+                # Replace NaN with 0.0 so the model receives a finite tensor.
+                x_boundary = torch.nan_to_num(x_boundary, nan=0.0)
 
                 # --------------------------------------------------------------------------------- #
                 # time encoding
@@ -289,6 +292,7 @@ class Trainer(BaseTrainer):
                     x_boundary = concat_and_reshape(batch["x_boundary"], batch["x_surf_boundary"]).to(self.device)
                 else:
                     x_boundary = reshape_only(batch["x_boundary"]).to(self.device)
+                x_boundary = torch.nan_to_num(x_boundary, nan=0.0)
 
                 # --------------------------------------------------------------------------------- #
                 # time encoding
