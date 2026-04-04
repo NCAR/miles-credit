@@ -70,7 +70,7 @@ trainer:
     save_best_weights: True
     save_metric_vars: True
 
-    learning_rate: 1.0e-03
+    learning_rate: 1.0e-05
     weight_decay: 1.0e-06
 
     train_batch_size: 1
@@ -92,7 +92,7 @@ trainer:
 
     amp: False
     grad_accum_every: 1
-    grad_max_norm: 32.0
+    grad_max_norm: 1.0
 
     thread_workers: 2
     valid_thread_workers: 0
