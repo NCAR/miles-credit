@@ -132,10 +132,14 @@ def _regional_varnames(conf):
 
 
 def _populate_post_conf(conf):
-    """Replicate the tracer_inds computation that credit_main_parser normally performs."""
+    """Replicate the post_conf setup that credit_main_parser normally performs."""
     post_conf = conf.get("model", {}).get("post_conf", {})
     if not post_conf.get("activate", False):
         return
+
+    # Copy data config into post_conf so load_transforms can find scaler_type.
+    post_conf["data"] = {k: v for k, v in conf["data"].items()}
+
     tf_conf = post_conf.get("tracer_fixer", {})
     if not tf_conf.get("activate", False):
         return
