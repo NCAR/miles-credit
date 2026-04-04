@@ -137,6 +137,18 @@ def _populate_post_conf(conf):
     if not post_conf.get("activate", False):
         return
 
+    # Set defaults for all post modules (mirrors parser.py lines 456-473).
+    _post_list = [
+        "skebs",
+        "tracer_fixer",
+        "global_mass_fixer",
+        "global_water_fixer",
+        "global_energy_fixer",
+        "global_energy_fixer_updown",
+    ]
+    for mod in _post_list:
+        post_conf.setdefault(mod, {"activate": False})
+
     # Copy data config into post_conf so load_transforms can find scaler_type.
     post_conf["data"] = {k: v for k, v in conf["data"].items()}
 
