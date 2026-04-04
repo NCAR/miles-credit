@@ -115,7 +115,7 @@ model:
         patch_height: 4
         patch_width: 4
         frame_patch_size: 1
-        dim: 1280
+        dim: 128
 
     param_outside:
         frames: 2
@@ -127,13 +127,13 @@ model:
         patch_height: 4
         patch_width: 4
         frame_patch_size: 2
-        dim: 1280
+        dim: 128
 
     time_encode_dim: 16
-    num_groups: 32
-    num_heads: 8
+    num_groups: 4
+    num_heads: 4
     window_size: 7
-    depth: 36
+    depth: 2
 
     use_spectral_norm: True
     interp: False
