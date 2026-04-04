@@ -1,17 +1,25 @@
 import logging
 from torchvision import transforms as tforms
-from credit.transforms.deprecated._transforms import ToTensor
-from credit.transforms.transforms_les import NormalizeLES, ToTensorLES
 from credit.transforms.transforms_wrf import NormalizeWRF, ToTensorWRF
 from credit.transforms.transforms_global import (
     Normalize_ERA5_and_Forcing,
     ToTensor_ERA5_and_Forcing,
 )
-from credit.transforms.transforms_quantile import (
-    BridgescalerScaleState,
-    NormalizeState_Quantile_Bridgescalar,
-    ToTensor_BridgeScaler,
-)
+
+# Bridgescaler-dependent transforms — guarded because bridgescaler → numba → NumPy ≤ 2.2
+try:
+    from credit.transforms.deprecated._transforms import ToTensor
+    from credit.transforms.transforms_les import NormalizeLES, ToTensorLES
+    from credit.transforms.transforms_quantile import (
+        BridgescalerScaleState,
+        NormalizeState_Quantile_Bridgescalar,
+        ToTensor_BridgeScaler,
+    )
+
+    _BRIDGESCALER_TRANSFORMS_AVAILABLE = True
+except (ImportError, Exception) as _bs_err:
+    logging.warning(f"Bridgescaler transforms unavailable (numba/NumPy conflict): {_bs_err}.")
+    _BRIDGESCALER_TRANSFORMS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
