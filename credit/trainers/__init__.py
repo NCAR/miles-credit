@@ -6,12 +6,31 @@ from credit.trainers.trainerERA5 import Trainer as TrainerERA5
 from credit.trainers.trainerERA5_Diffusion import Trainer as TrainerERA5_Diffusion
 from credit.trainers.trainerERA5_ensemble import Trainer as TrainerEnsemble
 from credit.trainers.trainer_downscaling import Trainer as Trainer404
-from credit.trainers.ic_optimization import Trainer as TrainerIC
 from credit.trainers.trainer_om4_samudra import Trainer as TrainerSamudra
 
-from credit.trainers.trainerLES import Trainer as TrainerLES
 from credit.trainers.trainerWRF import Trainer as TrainerWRF
 from credit.trainers.trainerWRF_multi import Trainer as TrainerWRFMulti
+
+# ic_optimization → credit.output → credit.interp → numba (needs NumPy ≤ 2.2)
+# trainerLES → optuna (optional dep)
+# Guard these so environments with NumPy ≥ 2.3 or without optuna still boot.
+try:
+    from credit.trainers.ic_optimization import Trainer as TrainerIC
+
+    _IC_OPT_AVAILABLE = True
+except (ImportError, Exception) as _ic_err:
+    logging.warning(f"ic_optimization trainer unavailable: {_ic_err}.")
+    TrainerIC = None
+    _IC_OPT_AVAILABLE = False
+
+try:
+    from credit.trainers.trainerLES import Trainer as TrainerLES
+
+    _LES_TRAINER_AVAILABLE = True
+except (ImportError, Exception) as _les_err:
+    logging.warning(f"trainerLES unavailable: {_les_err}.")
+    TrainerLES = None
+    _LES_TRAINER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +53,7 @@ trainer_types = {
         TrainerERA5,
         "Loading a single or multi-step trainer for the CAM dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
-    "ic-opt": (TrainerIC, "Loading an initial condition optimizer training class"),
     "conus404": (Trainer404, "Loading a standard trainer for the CONUS404 dataset."),
-    "standard-les": (TrainerLES, "Loading a single-step LES trainer"),
     "standard-wrf": (TrainerWRF, "Loading a single-step WRF trainer"),
     "multi-step-wrf": (TrainerWRFMulti, "Loading a multi-step WRF trainer"),
     "samudra": (
@@ -44,6 +61,12 @@ trainer_types = {
         "Loading a single or multi-step trainer for the Samudra OM4 dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
 }
+
+if _IC_OPT_AVAILABLE:
+    trainer_types["ic-opt"] = (TrainerIC, "Loading an initial condition optimizer training class")
+
+if _LES_TRAINER_AVAILABLE:
+    trainer_types["standard-les"] = (TrainerLES, "Loading a single-step LES trainer")
 
 
 def load_trainer(conf):
