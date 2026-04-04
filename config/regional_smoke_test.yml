@@ -56,7 +56,7 @@ data:
 trainer:
     type: standard-wrf
 
-    mode: fsdp
+    mode: ddp
     cpu_offload: False
     activation_checkpoint: False
     checkpoint_all_layers: False
