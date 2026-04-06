@@ -31,7 +31,7 @@ class LogTransform(BasePreblock):
         super().__init__()
         self.variables = variables
         self.data_types = data_types or ["input", "target"]
-        self.eps = eps
+        self.eps = torch.tensor(eps)
 
         # Validate data_types at init
         invalid = set(self.data_types) - set(self.VALID_DATA_TYPES)
