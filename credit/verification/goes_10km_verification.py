@@ -164,9 +164,12 @@ def verification_per_timestep(dataset, climo, eval_conf, step_file_tuple):
             """
             return (bin_edges[0] < da) & (da <= bin_edges[1])
 
-        for window_size in eval_conf["fss_window_sizes"]:
+        for threshold in eval_conf["C13_thresholds"]:
+            f_o = is_in_bin(target_da, [0., threshold]).mean()
+            result_dict = result_dict | {f"obs_freq_T{threshold}": float(f_o.values)}
+
+            for window_size in eval_conf["fss_window_sizes"]:
             # binary threshold fss
-            for threshold in eval_conf["C13_thresholds"]:
                 fss = fss_2d(pred_da, target_da,
                             event_threshold=threshold,
                             window_size=(window_size, window_size),
@@ -175,11 +178,15 @@ def verification_per_timestep(dataset, climo, eval_conf, step_file_tuple):
                             )
                 result_dict = result_dict | {f"FSS_WS{window_size}_C13_T{threshold}": float(fss.values)}
 
-            # categorical fss
-            for category_name, bin in eval_conf["sky_categories"].items():
-                pred_binary = is_in_bin(pred_da, bin)
-                target_binary = is_in_bin(target_da, bin)
-                
+        # categorical fss
+        for category_name, bin in eval_conf["sky_categories"].items():
+            pred_binary = is_in_bin(pred_da, bin)
+            target_binary = is_in_bin(target_da, bin)
+
+            f_o = target_binary.mean()
+            result_dict = result_dict | {f"obs_freq_{category_name}": float(f_o.values)}
+
+            for window_size in eval_conf["fss_window_sizes"]:
                 fss = fss_2d_binary(pred_binary, target_binary,
                         window_size=(window_size, window_size),
                         spatial_dims=("latitude", "longitude"),
