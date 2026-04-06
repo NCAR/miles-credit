@@ -3,12 +3,14 @@ from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
 from credit.preblock.scaler import BridgeScaleTransformer
 from credit.preblock.regrid import Regridder
+from credit.preblock.concat import ConcatenateToTensor
 
 PREBLOCK_REGISTRY = {
     "log_transform": LogTransform,
     "sqrt_transform": SqrtTransform,
     "bridgescaler_transform": BridgeScaleTransformer,
     "regrid": Regridder,
+    "concat": ConcatenateToTensor,
 }
 
 
@@ -27,12 +29,18 @@ def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
         nn.ModuleDict of instantiated preblocks, ordered as in config.
     """
     return nn.ModuleDict(
-        {name: PREBLOCK_REGISTRY[block_cfg["type"]](**block_cfg["args"]) for name, block_cfg in preblock_cfg.items()}
+        {
+            name: PREBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
+            for name, block_cfg in preblock_cfg.items()
+        }
     )
 
 
-def apply_preblocks(preblocks: nn.ModuleDict, batch: dict) -> dict:
-    """Sequentially applies all preblocks to a batch dict."""
+def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
+    """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
+
+    Concatenation is always performed last and is not configurable.
+    """
     for preblock in preblocks.values():
         batch = preblock(batch)
-    return batch
+    return PREBLOCK_REGISTRY["concat"]()(batch)
