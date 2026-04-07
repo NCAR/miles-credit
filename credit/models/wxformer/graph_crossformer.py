@@ -36,7 +36,7 @@ class StaticGraphConv(MessagePassing):
     """
 
     def __init__(self, in_channels, out_channels):
-        super().__init__(aggr="mean")
+        super().__init__(aggr="mean", node_dim=0)
         self.lin = nn.Linear(in_channels, out_channels)
 
     def forward(self, x, edge_index):

@@ -2,7 +2,6 @@ import os
 import sys
 import yaml
 import logging
-import warnings
 from pathlib import Path
 from argparse import ArgumentParser
 import multiprocessing as mp
@@ -39,7 +38,6 @@ import traceback
 
 
 logger = logging.getLogger(__name__)
-warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"

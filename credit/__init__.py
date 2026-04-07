@@ -1,3 +1,8 @@
+import warnings
+
+# Ignore DeprecationWarning for torch_geometric.distributed which was deprecated in 2.7.0
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="torch_geometric.distributed")
+
 """CREDIT is an open software platform to train and deploy AI atmospheric prediction models.
 
 =====

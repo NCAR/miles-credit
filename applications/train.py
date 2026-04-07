@@ -1,15 +1,9 @@
-"""
-train.py
--------------------------------------------------------
-"""
-
 import os
 import sys
 import yaml
 import optuna
 import shutil
 import logging
-import warnings
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -37,9 +31,6 @@ from credit.models.checkpoint import (
     TorchFSDPCheckpointIO,
     load_state_dict_error_handler,
 )
-
-
-warnings.filterwarnings("ignore")
 
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
