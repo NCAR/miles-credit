@@ -32,3 +32,4 @@ h5py<=3.14.0
 h5netcdf
 torchmetrics
 s3fs
+torch-cluster

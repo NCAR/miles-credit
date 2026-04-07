@@ -40,6 +40,7 @@ dependencies = [
     "pvlib",
     "torch-harmonics",
     "torch_geometric",
+    "torch-cluster",
     "torchmetrics",
     "fsspec",
     "gcsfs",
@@ -49,6 +50,7 @@ dependencies = [
     "setuptools_scm",
     "setuptools",
     "s3fs"
+
 ]
 
 [project.optional-dependencies]
