@@ -7,7 +7,7 @@ import xarray as xr
 from bridgescaler.distributed_tensor import DStandardScalerTensor
 from bridgescaler import save_scaler_dict, scale_var_dict
 from credit.preblock.regrid import Regridder
-from credit.preblock.scaler import BridgeScaleTransformer
+from credit.preblock.scaler import BridgeScalerTransformer
 
 
 def create_synthetic_data() -> dict:
@@ -172,7 +172,7 @@ def scaler_file(tmp_path):
 def test_scaler_output_shape(scaler_file):
     """Transform preserves the input tensor shape for every variable."""
     path, variables, data = scaler_file
-    scaler = BridgeScaleTransformer(scaler_path=path, variables=list(variables), method="transform")
+    scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
     original_shapes = {v: data["era5"]["input"][v].shape for v in variables}
     result = scaler(data)
     for v in variables:
@@ -182,7 +182,7 @@ def test_scaler_output_shape(scaler_file):
 def test_scaler_transform_changes_values(scaler_file):
     """Transform produces different values than the raw input."""
     path, variables, data = scaler_file
-    scaler = BridgeScaleTransformer(scaler_path=path, variables=list(variables), method="transform")
+    scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
     var = list(variables)[0]
     original = data["era5"]["input"][var].clone()
     result = scaler(data)
@@ -193,8 +193,8 @@ def test_scaler_round_trip(scaler_file):
     """transform followed by inverse recovers the original tensor."""
     path, variables, data = scaler_file
     var_list = list(variables)
-    fwd = BridgeScaleTransformer(scaler_path=path, variables=var_list, method="transform")
-    inv = BridgeScaleTransformer(scaler_path=path, variables=var_list, method="inverse_transform")
+    fwd = BridgeScalerTransformer(scaler_path=path, variables=var_list, method="transform")
+    inv = BridgeScalerTransformer(scaler_path=path, variables=var_list, method="inverse_transform")
     var = var_list[0]
     original = data["era5"]["input"][var].clone()
     data = fwd(data)
