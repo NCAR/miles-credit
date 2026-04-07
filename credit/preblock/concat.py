@@ -2,7 +2,7 @@ import torch
 from credit.preblock.base import BasePreblock
 
 
-class ConcatenateToTensor(BasePreblock):
+class ConcatToTensor(BasePreblock):
     """End-of-chain preblock that concatenates a nested batch dict of tensors
     into a single input tensor (and optionally a target tensor).
 

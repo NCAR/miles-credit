@@ -2,7 +2,7 @@ from bridgescaler import load_scaler_dict, scale_var_dict
 from credit.preblock.base import BasePreblock
 
 
-class BridgeScaleTransformer(BasePreblock):
+class BridgeScalerTransformer(BasePreblock):
     """Scaling preblock using a fitted bridgescaler dict.
 
     Applies per-variable z-score scaling (or its inverse) to tensors in a

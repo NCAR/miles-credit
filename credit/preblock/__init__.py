@@ -1,16 +1,16 @@
 import torch.nn as nn
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
-from credit.preblock.scaler import BridgeScaleTransformer
+from credit.preblock.scaler import BridgeScalerTransformer
 from credit.preblock.regrid import Regridder
-from credit.preblock.concat import ConcatenateToTensor
+from credit.preblock.concat import ConcatToTensor
 
 PREBLOCK_REGISTRY = {
     "log_transform": LogTransform,
     "sqrt_transform": SqrtTransform,
-    "bridgescaler_transform": BridgeScaleTransformer,
+    "bridgescaler_transform": BridgeScalerTransformer,
     "regrid": Regridder,
-    "concat": ConcatenateToTensor,
+    "concat": ConcatToTensor,
 }
 
 
