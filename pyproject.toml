@@ -91,6 +91,11 @@ credit_train_les = "credit.applications.train_les:primary_main"
 credit_rollout_wrf = "credit.applications.rollout_wrf:main"
 credit_rollout_les = "credit.applications.rollout_les:main"
 
+# Gen2 entry points
+credit_train_gen2 = "credit.applications.train_gen2:main_cli"
+credit_rollout_to_netcdf_gen2 = "credit.applications.rollout_to_netcdf_gen2:main"
+credit_rollout_realtime_gen2 = "credit.applications.rollout_realtime_gen2:main"
+
 [tool.ruff]
 src = ["credit", "applications", "tests"]
 line-length = 120
