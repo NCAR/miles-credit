@@ -3,66 +3,67 @@ import sys
 import copy
 import logging
 
-# Legacy model imports — wrapped in try/except because their transitive dependencies
-# (bridgescaler → numba) may conflict with newer NumPy (≥2.3) environments.
-try:
-    from credit.models.crossformer import CrossFormer
-    from credit.models.camulator import Camulator
-    from credit.models.unet import SegmentationModel
-    from credit.models.fuxi import Fuxi
-    from credit.models.swin import SwinTransformerV2Cr
-    from credit.models.graph import GraphResTransfGRU
-    from credit.models.debugger_model import DebuggerModel
-    from credit.models.wxformer.crossformer import CrossFormer as WXFormer
-    from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
-    from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
-    from credit.models.unet_downscaling import DownscalingSegmentationModel
-    from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
-    from credit.models.unet_diffusion import UnetDiffusion
-    from credit.diffusion import ModifiedGaussianDiffusion
-    from credit.models.swin_wrf import WRFTransformer
-    from credit.models.dscale_wrf import DscaleTransformer
+# Import model classes
+from credit.models.crossformer import CrossFormer
+from credit.models.camulator import Camulator
+from credit.models.unet import SegmentationModel
+from credit.models.fuxi import Fuxi
+from credit.models.swin import SwinTransformerV2Cr
+from credit.models.graph import GraphResTransfGRU
+from credit.models.debugger_model import DebuggerModel
+from credit.models.wxformer.crossformer import CrossFormer as WXFormer
+from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
+from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
+from credit.models.unet_downscaling import DownscalingSegmentationModel
+from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
+from credit.models.unet_diffusion import UnetDiffusion
+from credit.diffusion import ModifiedGaussianDiffusion
+from credit.models.swin_wrf import WRFTransformer
+from credit.models.dscale_wrf import DscaleTransformer
 
-    _LEGACY_MODELS_AVAILABLE = True
-except (ImportError, Exception) as _legacy_import_err:
-    logging.warning(f"Legacy model imports unavailable (numba/NumPy conflict or missing dep): {_legacy_import_err}.")
-    _LEGACY_MODELS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 # Define model types and their corresponding classes
-model_types = {}
-
-if _LEGACY_MODELS_AVAILABLE:
-    model_types.update(
-        {
-            "crossformer": (
-                CrossFormer,
-                "Loading the CrossFormer model with a conv decoder head and skip connections ...",
-            ),
-            "camulator": (Camulator, "Loading the CAMulator model with a conv decoder head and skip connections ..."),
-            "crossformer-diffusion": (CrossFormerDiffusion, "Loading A DDPM model with CrossFormer Backbone ..."),
-            "unet-diffusion": (UnetDiffusion, "Loading A DDPM model with UNET Backbone ..."),
-            "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
-            "crossformer-ensemble": (
-                CrossFormerWithNoise,
-                "Loading the ensemble CrossFormer model with a noise injection scheme ...",
-            ),
-            "crossformer-style": (
-                CrossFormerWithNoise,
-                "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
-            ),
-            "unet": (SegmentationModel, "Loading a unet model"),
-            "fuxi": (Fuxi, "Loading Fuxi model"),
-            "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
-            "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
-            "debugger": (DebuggerModel, "Loading the debugger model"),
-            "wrf": (WRFTransformer, "Loading WRF Transformer"),
-            "dscale": (DscaleTransformer, "Loading downscaling Transformer"),
-            "crossformer_downscaling": (DownscalingCrossFormer, "Loading downscaling crossformer model"),
-            "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
-        }
-    )
+model_types = {
+    "crossformer": (
+        CrossFormer,
+        "Loading the CrossFormer model with a conv decoder head and skip connections ...",
+    ),
+    "camulator": (
+        Camulator,
+        "Loading the CAMulator model with a conv decoder head and skip connections ...",
+    ),
+    "crossformer-diffusion": (
+        CrossFormerDiffusion,
+        "Loading A DDPM model with CrossFormer Backbone ...",
+    ),
+    "unet-diffusion": (
+        UnetDiffusion,
+        "Loading A DDPM model with UNET Backbone ...",
+    ),
+    "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
+    "crossformer-ensemble": (
+        CrossFormerWithNoise,
+        "Loading the ensemble CrossFormer model with a noise injection scheme ...",
+    ),
+    "crossformer-style": (
+        CrossFormerWithNoise,
+        "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
+    ),
+    "unet": (SegmentationModel, "Loading a unet model"),
+    "fuxi": (Fuxi, "Loading Fuxi model"),
+    "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
+    "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
+    "debugger": (DebuggerModel, "Loading the debugger model"),
+    "wrf": (WRFTransformer, "Loading WRF Transformer"),
+    "dscale": (DscaleTransformer, "Loading downscaling Transformer"),
+    "crossformer_downscaling": (
+        DownscalingCrossFormer,
+        "Loading downscaling crossformer model",
+    ),
+    "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
+}
 
 
 # Define FSDP sharding and/or checkpointing policy
