@@ -1,23 +1,35 @@
-import torch.nn as nn
-
-try:
-    from bridgescaler import load_scaler
-except (ImportError, Exception):
-    load_scaler = None
+from bridgescaler import load_scaler_dict, scale_var_dict
+from credit.preblock.base import BasePreblock
 
 
-class Scaler(nn.Module):
+class BridgeScalerTransformer(BasePreblock):
+    """Scaling preblock using a fitted bridgescaler dict.
+
+    Applies per-variable z-score scaling (or its inverse) to tensors in a
+    nested batch dict of the form ``batch[source][data_type][var_key]``.
+
+    The scaler dict must have been fit with ``bridgescaler.scale_var_dict``
+    using the same nested structure and saved with ``bridgescaler.save_scaler_dict``.
+
+    Example config::
+
+        type: "bridgescaler_transform"
+        args:
+            scaler_path: "/path/to/scaler.json"
+            variables:
+                - "era5/prognostic/3d/T"
+                - "era5/prognostic/3d/U"
+            method: "transform"
     """
-    Scaling layer using a bridgescaler object. Supports transform and its inverse.
-    """
 
-    def __init__(self, scaler_path, inverse=False):
+    def __init__(self, scaler_path: str, variables: list[str], method: str):
+
         super().__init__()
-        self.scaler = load_scaler(scaler_path)
-        self.inverse = inverse
+        self.variables = variables
+        self.method = method
+        self.scaler_path = scaler_path
+        self.scaler = load_scaler_dict(scaler_path)
 
-    def forward(self, x):
-        if self.inverse:
-            return self.scaler.inverse_transform(x)
-        else:
-            return self.scaler.transform(x)
+    def forward(self, batch: dict) -> dict:
+
+        return scale_var_dict(batch, self.scaler, self.method, self.variables)

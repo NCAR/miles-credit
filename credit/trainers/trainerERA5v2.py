@@ -5,13 +5,12 @@ from collections import defaultdict
 import numpy as np
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 import tqdm
 
 import optuna
 
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-from credit.preblock import ConcatPreblock, ERA5Normalizer, apply_preblocks
+from credit.preblock import build_preblocks, apply_preblocks
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
@@ -40,12 +39,8 @@ class Trainer(BaseTrainer):
         super().__init__(model, rank, conf)
         logger.info("Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)")
 
-        # ---- Preblock: normalize then assemble batch field tensors into x and y ----
-        preblocks = {}
-        if conf.get("data", {}).get("scaler_type") == "std_new":
-            preblocks["norm"] = ERA5Normalizer(conf)
-        preblocks["concat"] = ConcatPreblock()
-        self.preblocks = nn.ModuleDict(preblocks)
+        # ---- Preblock: config-driven transforms then auto-concat to tensors ----
+        self.preblocks = build_preblocks(conf.get("preblocks", {}))
 
         # ---- Postblock conservation fixers ----
         post_conf = conf.get("model", {}).get("post_conf", {})
@@ -176,15 +171,15 @@ class Trainer(BaseTrainer):
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
-                batch = apply_preblocks(self.preblocks, batch)
+                x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
 
                 if t == 1:
-                    x = batch["x"].to(self.device).float()
+                    x = x_raw.to(self.device).float()
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
                 else:
                     # Roll x forward: take new batch's forcing/static, replace prog with y_pred
-                    x_new = batch["x"].to(self.device).float()
+                    x_new = x_raw.to(self.device).float()
                     if self.ensemble_size > 1:
                         x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
                     n_prog = x_new.shape[1] - self.static_dim_size
@@ -220,7 +215,7 @@ class Trainer(BaseTrainer):
 
                 # backprop on specified timesteps
                 if t in self.backprop_on_timestep:
-                    y = batch["y"].to(self.device).float()
+                    y = y_raw.to(self.device).float()
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
@@ -339,15 +334,15 @@ class Trainer(BaseTrainer):
 
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
-                    batch = apply_preblocks(self.preblocks, batch)
+                    x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
 
                     if t == 1:
-                        x = batch["x"].to(self.device).float()
+                        x = x_raw.to(self.device).float()
                         if self.ensemble_size > 1:
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
                     else:
                         # Roll x forward for multi-step validation rollout
-                        x_new = batch["x"].to(self.device).float()
+                        x_new = x_raw.to(self.device).float()
                         if self.ensemble_size > 1:
                             x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
                         n_prog = x_new.shape[1] - self.static_dim_size
@@ -379,7 +374,7 @@ class Trainer(BaseTrainer):
 
                     # compute loss and metrics only at the final rollout step
                     if t == self.valid_forecast_len:
-                        y = batch["y"].to(self.device).float()
+                        y = y_raw.to(self.device).float()
                         if self.flag_clamp:
                             y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 

@@ -318,13 +318,9 @@ class TestTrainerSubclassInstantiation:
         assert not t.flag_mass_conserve
 
     def test_era5v2_trainer_init(self):
-        from unittest.mock import patch
+        from credit.trainers.trainerERA5v2 import Trainer
 
-        # ERA5Normalizer loads mean/std files at init — replace with identity nn.Module
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            from credit.trainers.trainerERA5v2 import Trainer
-
-            t = Trainer(_tiny_model(), rank=0, conf=_era5_v2_conf())
+        t = Trainer(_tiny_model(), rank=0, conf=_era5_v2_conf())
         assert t.forecast_len == 1
 
     def test_era5_ensemble_trainer_init(self):
@@ -402,12 +398,23 @@ class _FakeDataset:
 
 
 class _FakeLoader:
-    """Minimal iterable loader that yields pre-assembled {x, y} batches."""
+    """Minimal iterable loader that yields nested-format batches for trainerERA5v2.
+
+    Each batch has the structure expected by apply_preblocks / ConcatToTensor:
+        batch["era5"]["input"][var_key]  -> (B, 1, H, W) tensor
+        batch["era5"]["target"][var_key] -> (B, 1, H, W) tensor
+
+    C variables are emitted so ConcatToTensor assembles (B, C, H, W) tensors,
+    matching the original flat (B, C, H, W) shape expected by the test models.
+    """
 
     def __init__(self, B, C, H, W, n_batches):
         self.dataset = _FakeDataset()
         self.sampler = None
-        self._shape = (B, C, H, W)
+        self._B = B
+        self._C = C
+        self._H = H
+        self._W = W
         self._n = n_batches
 
     def __len__(self):
@@ -416,23 +423,21 @@ class _FakeLoader:
     def __iter__(self):
         import torch
 
+        B, C, H, W = self._B, self._C, self._H, self._W
         for _ in range(self._n):
-            x = torch.randn(*self._shape)
-            y = torch.randn(*self._shape)
-            yield {"x": x, "y": y}
+            input_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
+            target_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
+            yield {"era5": {"input": input_vars, "target": target_vars}}
 
 
 class TestERA5v2MultiStepTraining:
     """Verify forecast_len > 1 in the v2 trainer autoregressive loop."""
 
     def test_forecast_len_2_init(self, tmp_path):
-        from unittest.mock import patch
-        import torch.nn as nn
         from credit.trainers.trainerERA5v2 import Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            t = Trainer(_tiny_model(), rank=0, conf=conf)
+        t = Trainer(_tiny_model(), rank=0, conf=conf)
 
         assert t.forecast_len == 2
         assert t.backprop_on_timestep == [1, 2]
@@ -440,21 +445,17 @@ class TestERA5v2MultiStepTraining:
         assert t.varnum_diag == 0
 
     def test_backprop_on_timestep_default_covers_all_steps(self, tmp_path):
-        from unittest.mock import patch
-        import torch.nn as nn
         from credit.trainers.trainerERA5v2 import Trainer
 
         for fl in [1, 2, 3]:
             conf = _era5_v2_multistep_conf(forecast_len=fl, tmp_path=tmp_path)
-            with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-                t = Trainer(_tiny_model(), rank=0, conf=conf)
+            t = Trainer(_tiny_model(), rank=0, conf=conf)
             assert t.backprop_on_timestep == list(range(1, fl + 1))
 
     def test_2step_train_one_epoch_runs(self, tmp_path):
         """2-step autoregressive loop completes on CPU with toy data."""
         import torch
         import torch.nn as nn
-        from unittest.mock import patch
         from credit.trainers.trainerERA5v2 import Trainer
 
         B, C, H, W = 1, 4, 4, 4
@@ -464,8 +465,7 @@ class TestERA5v2MultiStepTraining:
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
 
         conf = _era5_v2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            trainer = Trainer(model, rank=0, conf=conf)
+        trainer = Trainer(model, rank=0, conf=conf)
 
         # _FakeLoader yields forecast_len * batches_per_epoch batches total
         loader = _FakeLoader(B, C, H, W, n_batches=forecast_len)
@@ -518,8 +518,7 @@ class TestERA5v2MultiStepTraining:
 
         model = _ConstModel()
         conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            trainer = Trainer(model, rank=0, conf=conf)
+        trainer = Trainer(model, rank=0, conf=conf)
 
         step = [0]
         x_at_step1_out = [None]
@@ -527,11 +526,12 @@ class TestERA5v2MultiStepTraining:
         original_apply = apply_preblocks
 
         def _patched_apply(preblocks, batch):
-            batch = original_apply(preblocks, batch)
+            result = original_apply(preblocks, batch)
+            x_raw, y_raw, _ = result
             step[0] += 1
             if step[0] == 1:
-                x_at_step1_out[0] = batch["x"].clone()
-            return batch
+                x_at_step1_out[0] = x_raw.clone()
+            return result
 
         def _metrics(pred, y):
             return {"acc": 0.0, "mae": 0.0}
@@ -910,27 +910,23 @@ class TestTrainerERA5v2AdditionalCoverage:
 
     def test_backprop_on_timestep_explicit(self, tmp_path):
         """Explicit backprop_on_timestep in data conf is used directly (lines 102-103)."""
-        from unittest.mock import patch
         from credit.trainers.trainerERA5v2 import Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=3, tmp_path=tmp_path)
         conf["data"]["backprop_on_timestep"] = [2, 3]
 
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            t = Trainer(_tiny_model(), rank=0, conf=conf)
+        t = Trainer(_tiny_model(), rank=0, conf=conf)
 
         assert t.backprop_on_timestep == [2, 3]
 
     def test_data_clamp_sets_flags(self, tmp_path):
         """data_clamp in conf sets flag_clamp, clamp_min, clamp_max (lines 107-115)."""
-        from unittest.mock import patch
         from credit.trainers.trainerERA5v2 import Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["data"]["data_clamp"] = [-5.0, 5.0]
 
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            t = Trainer(_tiny_model(), rank=0, conf=conf)
+        t = Trainer(_tiny_model(), rank=0, conf=conf)
 
         assert t.flag_clamp is True
         assert t.clamp_min == -5.0
@@ -938,44 +934,37 @@ class TestTrainerERA5v2AdditionalCoverage:
 
     def test_data_valid_overrides_valid_forecast_len(self, tmp_path):
         """data_valid block used when present (lines 118-120)."""
-        from unittest.mock import patch
         from credit.trainers.trainerERA5v2 import Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         conf["data_valid"] = {"forecast_len": 4, "history_len": 2}
 
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            t = Trainer(_tiny_model(), rank=0, conf=conf)
+        t = Trainer(_tiny_model(), rank=0, conf=conf)
 
         assert t.valid_forecast_len == 4
         assert t.valid_history_len == 2
 
     def test_retain_graph_flag(self, tmp_path):
         """retain_graph flag extracted from conf (line 98)."""
-        from unittest.mock import patch
         from credit.trainers.trainerERA5v2 import Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["data"]["retain_graph"] = True
 
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            t = Trainer(_tiny_model(), rank=0, conf=conf)
+        t = Trainer(_tiny_model(), rank=0, conf=conf)
 
         assert t.retain_graph is True
 
     def test_validate_one_epoch_runs(self, tmp_path):
         """validate() completes on CPU with toy data and returns valid_loss."""
-        from unittest.mock import patch
-
         B, C, H, W = 1, 4, 4, 4
 
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
         conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
 
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5v2 import Trainer
 
-            trainer = Trainer(model, rank=0, conf=conf)
+        trainer = Trainer(model, rank=0, conf=conf)
 
         loader = _FakeLoader(B, C, H, W, n_batches=1)
 
@@ -997,8 +986,6 @@ class TestTrainerERA5v2AdditionalCoverage:
 
     def test_train_with_ema_update(self, tmp_path):
         """EMA update is called when ema is not None (line 252-253)."""
-        from unittest.mock import patch
-
         B, C, H, W = 1, 4, 4, 4
 
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
@@ -1006,10 +993,9 @@ class TestTrainerERA5v2AdditionalCoverage:
         conf["trainer"]["use_ema"] = True
         conf["trainer"]["ema_decay"] = 0.999
 
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5v2 import Trainer
 
-            trainer = Trainer(model, rank=0, conf=conf)
+        trainer = Trainer(model, rank=0, conf=conf)
 
         assert trainer.ema is not None
         initial_step = trainer.ema.step
@@ -1037,18 +1023,15 @@ class TestTrainerERA5v2AdditionalCoverage:
 
     def test_grad_max_norm_clipping(self, tmp_path):
         """grad_max_norm > 0 triggers gradient clipping (lines 245-246)."""
-        from unittest.mock import patch
-
         B, C, H, W = 1, 4, 4, 4
 
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
         conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["grad_max_norm"] = 0.01  # very small to actually clip
 
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5v2 import Trainer
 
-            trainer = Trainer(model, rank=0, conf=conf)
+        trainer = Trainer(model, rank=0, conf=conf)
 
         loader = _FakeLoader(B, C, H, W, n_batches=1)
 
@@ -1073,7 +1056,7 @@ class TestTrainerERA5v2AdditionalCoverage:
 
     def test_scheduler_lambda_step_called(self, tmp_path):
         """lambda scheduler steps once per epoch at epoch start (lines 146-147)."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock
         from credit.trainers.trainerERA5v2 import Trainer
 
         B, C, H, W = 1, 4, 4, 4
@@ -1083,8 +1066,7 @@ class TestTrainerERA5v2AdditionalCoverage:
         conf["trainer"]["use_scheduler"] = True
         conf["trainer"]["scheduler"] = {"scheduler_type": "lambda"}
 
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            trainer = Trainer(model, rank=0, conf=conf)
+        trainer = Trainer(model, rank=0, conf=conf)
 
         mock_scheduler = MagicMock()
         loader = _FakeLoader(B, C, H, W, n_batches=1)

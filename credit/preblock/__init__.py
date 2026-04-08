@@ -1,15 +1,46 @@
 import torch.nn as nn
+from credit.preblock.log import LogTransform
+from credit.preblock.sqrt import SqrtTransform
+from credit.preblock.scaler import BridgeScalerTransformer
+from credit.preblock.regrid import Regridder
+from credit.preblock.concat import ConcatToTensor
 
-from credit.preblock.concat import ConcatPreblock
-from credit.preblock.norm import ERA5Normalizer
-from credit.preblock.regrid import Regrid
-from credit.preblock.scaler import Scaler
+PREBLOCK_REGISTRY = {
+    "log_transform": LogTransform,
+    "sqrt_transform": SqrtTransform,
+    "bridgescaler_transform": BridgeScalerTransformer,
+    "regrid": Regridder,
+    "concat": ConcatToTensor,
+}
 
-__all__ = ["ConcatPreblock", "ERA5Normalizer", "apply_preblocks", "Regrid", "Scaler"]
+
+def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
+    """
+    Instantiates all preblocks from the config's 'preblocks' section.
+
+    Args:
+        preblock_cfg: the full preblocks dict from the config, e.g.:
+            {
+                'era5_log_transform': {'type': 'log_transform', 'args': {...}},
+                'era5_z_transform':   {'type': 'z_transform',   'args': {...}},
+            }
+
+    Returns:
+        nn.ModuleDict of instantiated preblocks, ordered as in config.
+    """
+    return nn.ModuleDict(
+        {
+            name: PREBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
+            for name, block_cfg in preblock_cfg.items()
+        }
+    )
 
 
-def apply_preblocks(preblocks: nn.ModuleDict, batch: dict) -> dict:
-    """Sequentially applies all preblocks to a batch dict."""
+def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
+    """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
+
+    Concatenation is always performed last and is not configurable.
+    """
     for preblock in preblocks.values():
         batch = preblock(batch)
-    return batch
+    return PREBLOCK_REGISTRY["concat"]()(batch)
