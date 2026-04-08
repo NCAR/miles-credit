@@ -417,3 +417,6 @@ class TrainerERA5Gen2(BaseTrainer):
         gc.collect()
 
         return results_dict
+
+
+Trainer = TrainerERA5Gen2  # canonical alias, matches other trainer modules
