@@ -10,7 +10,8 @@ import tqdm
 import optuna
 
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-from credit.preblock import build_preblocks, apply_preblocks
+from credit.preblock import apply_preblocks
+from credit.preblock.concat import ConcatPreblock
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
@@ -39,8 +40,14 @@ class TrainerERA5Gen2(BaseTrainer):
         super().__init__(model, rank, conf)
         logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
 
-        # ---- Preblock: config-driven transforms then auto-concat to tensors ----
-        self.preblocks = build_preblocks(conf.get("preblocks", {}))
+        # ---- Preblock: optional per-variable normalizer, then ConcatPreblock ----
+        preblocks = {}
+        if conf.get("data", {}).get("scaler_type") == "std_new":
+            from credit.preblock.norm import ERA5Normalizer
+
+            preblocks["norm"] = ERA5Normalizer(conf)
+        preblocks["concat"] = ConcatPreblock()
+        self.preblocks = torch.nn.ModuleDict(preblocks)
 
         # ---- Postblock conservation fixers ----
         post_conf = conf.get("model", {}).get("post_conf", {})

@@ -276,7 +276,6 @@ def _era5_v2_conf(**overrides):
     base = _minimal_conf()
     base["data"] = {
         "forecast_len": 1,
-        "scaler_type": "std_new",
         "source": {
             "ERA5": {
                 "levels": [500, 850],
@@ -288,8 +287,6 @@ def _era5_v2_conf(**overrides):
                 },
             }
         },
-        "mean_path": "/dev/null",
-        "std_path": "/dev/null",
     }
     base.update(overrides)
     return base
@@ -373,7 +370,6 @@ def _era5_v2_multistep_conf(forecast_len, tmp_path):
     base["data"] = {
         "forecast_len": forecast_len,
         "retain_graph": False,
-        "scaler_type": "std_new",
         "source": {
             "ERA5": {
                 "levels": [],
@@ -385,8 +381,6 @@ def _era5_v2_multistep_conf(forecast_len, tmp_path):
                 },
             }
         },
-        "mean_path": "/dev/null",
-        "std_path": "/dev/null",
     }
     return base
 

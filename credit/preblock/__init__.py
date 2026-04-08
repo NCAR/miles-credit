@@ -5,6 +5,7 @@ import torch.nn as nn
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
 from credit.preblock.regrid import Regridder
+from credit.preblock.concat import ConcatPreblock as ConcatPreblock
 from credit.preblock.concat import ConcatToTensor
 
 # bridgescaler depends on numba which requires NumPy ≤ 2.2
@@ -51,10 +52,27 @@ def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
 
 
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
-    """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
+    """Sequentially applies all preblocks, then returns (x, y, metadata) tuple.
 
-    Concatenation is always performed last and is not configurable.
+    Supports two terminal preblock styles:
+    - ``ConcatPreblock`` (Gen2): adds ``batch["x"]`` and ``batch["y"]`` to the dict,
+      then apply_preblocks extracts them and returns a tuple for interface consistency.
+    - ``ConcatToTensor`` (Gen1/legacy): called automatically if no Gen2 preblock set "x".
+
+    Returns:
+        (x_tensor, y_tensor, metadata_dict)
     """
     for preblock in preblocks.values():
-        batch = preblock(batch)
+        result = preblock(batch)
+        if isinstance(result, dict):
+            batch = result
+        else:
+            # Legacy: a preblock returned a tuple directly (e.g. ConcatToTensor used standalone)
+            return result
+
+    # If ConcatPreblock already assembled x/y into the batch dict, extract them
+    if "x" in batch:
+        return batch["x"], batch.get("y", None), batch.get("metadata", {})
+
+    # Fallback: Gen1 path — run ConcatToTensor as before
     return PREBLOCK_REGISTRY["concat"]()(batch)
