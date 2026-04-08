@@ -74,7 +74,7 @@ save_loc_diagnostic: '/path/to/diagnostic_data/'
 
 - **Diagnostic variables** are used for evaluation but **not directly predicted** by the model.  
 
-#### Periodic & Static Forcing  
+### Periodic & Static Forcing  
 
 ```yaml
 forcing_variables: ['TSI', 'SST']
@@ -87,8 +87,6 @@ save_loc_static: '/path/to/static_data.nc'
 - **Periodic forcing**: Should cover an entire leap year (e.g., 366 days for an hourly model).  
 - **Static variables**: Must be normalized **by the user** before use.  
 
-
-You're right again—these options are **critical for data standardization and conservation enforcement**, so they should be fully documented. Below is an **expanded section** that provides detailed explanations.  
 
 ---
 
