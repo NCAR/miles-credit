@@ -226,10 +226,11 @@ def main(rank, world_size, conf, backend=None, trial=False):
     if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
         setup(rank, world_size, conf["trainer"]["mode"], backend)
 
-    device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
-    )
-    torch.cuda.set_device(rank % torch.cuda.device_count())
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+        torch.cuda.set_device(rank % torch.cuda.device_count())
+    else:
+        device = torch.device("cpu")
 
     train_dataset = _load_dataset(conf, is_train=True)
     valid_dataset = _load_dataset(conf, is_train=False)
@@ -253,12 +254,12 @@ def main(rank, world_size, conf, backend=None, trial=False):
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
-    train_criterion = load_loss(conf)
-    valid_criterion = load_loss(conf, validation=True)
-
     # Inject flat variable keys so LatWeightedMetrics / load_loss can build
     # their variable lists without touching credit_main_parser.
     _inject_flat_var_keys(conf)
+
+    train_criterion = load_loss(conf)
+    valid_criterion = load_loss(conf, validation=True)
     metrics = LatWeightedMetrics(conf)
 
     trainer_cls = load_trainer(conf)
