@@ -85,7 +85,7 @@ class BredVector:
             # logger.info("using postblock")
             self.postblock = PostBlock(self.post_conf)
 
-        if self.hemispheric_rescale is not None:
+        if self.hemispheric_rescale is not False:
             if not os.path.exists(terrain_file) or terrain_file is None:
                 raise FileNotFoundError(f"Terrain file {terrain_file} not found")
             latlons = xr.open_dataset(terrain_file).load()
@@ -178,7 +178,7 @@ class BredVector:
                 gamma = torch.norm(x_dyn) / (torch.norm(x_perturbed_dyn_subset) + 1e-8)
                 dx = dx * gamma
 
-            if self.hemispheric_rescale is not None:
+            if self.hemispheric_rescale is not False:
                 latitudes = self.latitudes.to(device)
                 dx = self.hemispheric_rescale(dx, latitudes)
 
