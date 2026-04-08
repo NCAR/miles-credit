@@ -5,8 +5,8 @@ import torch.nn as nn
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
 from credit.preblock.regrid import Regridder
-from credit.preblock.concat import ConcatPreblock as ConcatPreblock
 from credit.preblock.concat import ConcatToTensor
+from credit.preblock.norm import ERA5Normalizer
 
 # bridgescaler depends on numba which requires NumPy ≤ 2.2
 try:
@@ -23,6 +23,7 @@ PREBLOCK_REGISTRY = {
     "sqrt_transform": SqrtTransform,
     "regrid": Regridder,
     "concat": ConcatToTensor,
+    "era5_normalizer": ERA5Normalizer,
 }
 
 if _BRIDGESCALER_AVAILABLE:
@@ -52,27 +53,10 @@ def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
 
 
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
-    """Sequentially applies all preblocks, then returns (x, y, metadata) tuple.
+    """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
 
-    Supports two terminal preblock styles:
-    - ``ConcatPreblock`` (Gen2): adds ``batch["x"]`` and ``batch["y"]`` to the dict,
-      then apply_preblocks extracts them and returns a tuple for interface consistency.
-    - ``ConcatToTensor`` (Gen1/legacy): called automatically if no Gen2 preblock set "x".
-
-    Returns:
-        (x_tensor, y_tensor, metadata_dict)
+    Concatenation is always performed last via ConcatToTensor and is not configurable.
     """
     for preblock in preblocks.values():
-        result = preblock(batch)
-        if isinstance(result, dict):
-            batch = result
-        else:
-            # Legacy: a preblock returned a tuple directly (e.g. ConcatToTensor used standalone)
-            return result
-
-    # If ConcatPreblock already assembled x/y into the batch dict, extract them
-    if "x" in batch:
-        return batch["x"], batch.get("y", None), batch.get("metadata", {})
-
-    # Fallback: Gen1 path — run ConcatToTensor as before
+        batch = preblock(batch)
     return PREBLOCK_REGISTRY["concat"]()(batch)

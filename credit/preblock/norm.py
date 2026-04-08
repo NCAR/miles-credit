@@ -1,8 +1,7 @@
 """
 norm.py
 -------
-ERA5Normalizer: normalizes per-variable ERA5 tensors (before ConcatPreblock)
-using mean/std NC files (scaler_type: std_new).
+ERA5Normalizer: normalizes per-variable ERA5 tensors using mean/std NC files.
 
 Operates on the raw batch structure from MultiSourceDataset::
 
@@ -10,6 +9,16 @@ Operates on the raw batch structure from MultiSourceDataset::
     batch["era5"]["input"]["era5/field_type/2d/varname"]  = (B, 1, T, H, W)
 
 Variables absent from the mean/std file are passed through unchanged.
+
+Registered in the preblock registry as ``"era5_normalizer"`` so it can be
+included via the config's ``preblocks:`` section::
+
+    preblocks:
+      norm:
+        type: era5_normalizer
+        args:
+          mean_path: /path/to/mean.nc
+          std_path:  /path/to/std.nc
 """
 
 import logging
@@ -25,22 +34,19 @@ logger = logging.getLogger(__name__)
 class ERA5Normalizer(nn.Module):
     """Normalizes per-variable ERA5 tensors using pre-computed mean/std files.
 
-    Mean and std are loaded from ``conf["data"]["mean_path"]`` and
-    ``conf["data"]["std_path"]`` (NetCDF files with a ``variable`` coordinate).
-
     Normalization: ``(x - mean) / std`` applied per variable. Variables not
-    found in the statistics file are passed through unchanged with a warning.
+    found in the statistics file are passed through unchanged.
 
     Args:
-        conf: Full training config dict. Must contain ``conf["data"]["mean_path"]``
-              and ``conf["data"]["std_path"]``.
+        mean_path: Path to NetCDF file containing per-variable means.
+        std_path:  Path to NetCDF file containing per-variable standard deviations.
     """
 
-    def __init__(self, conf: dict) -> None:
+    def __init__(self, mean_path: str, std_path: str) -> None:
         super().__init__()
-        data_conf = conf["data"]
-        mean_path = data_conf["mean_path"]
-        std_path = data_conf["std_path"]
+
+        ds_mean = xr.open_dataset(mean_path)
+        ds_std = xr.open_dataset(std_path)
 
         ds_mean = xr.open_dataset(mean_path)
         ds_std = xr.open_dataset(std_path)
