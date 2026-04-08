@@ -11,12 +11,12 @@ try:
     from credit.trainers.base_trainer import EMATracker, BaseTrainer
     from credit.scheduler import LinearWarmupCosineScheduler
 
-    _TRAINER_V2_AVAILABLE = True
+    _TRAINER_GEN2_AVAILABLE = True
 except ImportError:
-    _TRAINER_V2_AVAILABLE = False
+    _TRAINER_GEN2_AVAILABLE = False
 
 pytestmark = pytest.mark.skipif(
-    not _TRAINER_V2_AVAILABLE,
+    not _TRAINER_GEN2_AVAILABLE,
     reason="EMATracker / LinearWarmupCosineScheduler not available until v2/trainer-preblocks is merged",
 )
 
@@ -51,7 +51,7 @@ def _minimal_conf(**trainer_overrides):
     }
 
 
-if _TRAINER_V2_AVAILABLE:
+if _TRAINER_GEN2_AVAILABLE:
 
     class _ConcreteTrainer(BaseTrainer):
         """Minimal concrete subclass so we can instantiate BaseTrainer."""
@@ -282,8 +282,8 @@ def _era5_v1_conf(**overrides):
     return base
 
 
-def _era5_v2_conf(**overrides):
-    """Minimal conf for trainerERA5v2.Trainer (v2 nested data schema)."""
+def _era5_gen2_conf(**overrides):
+    """Minimal conf for trainerERA5gen2.Trainer (v2 nested data schema)."""
     base = _minimal_conf()
     base["data"] = {
         "forecast_len": 1,
@@ -332,10 +332,10 @@ class TestTrainerSubclassInstantiation:
         from unittest.mock import patch
 
         # ERA5Normalizer loads mean/std files at init — replace with identity nn.Module
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
-            from credit.trainers.trainerERA5v2 import Trainer
+        with patch("credit.trainers.trainerERA5gen2.ERA5Normalizer", return_value=nn.Identity()):
+            from credit.trainers.trainerERA5gen2 import Trainer
 
-            t = Trainer(_tiny_model(), rank=0, conf=_era5_v2_conf())
+            t = Trainer(_tiny_model(), rank=0, conf=_era5_gen2_conf())
         assert t.forecast_len == 1
 
     def test_era5_ensemble_trainer_init(self):
@@ -379,8 +379,8 @@ class TestTrainerSubclassInstantiation:
 # ---------------------------------------------------------------------------
 
 
-def _era5_v2_multistep_conf(forecast_len, tmp_path):
-    """Minimal conf for trainerERA5v2.Trainer with forecast_len > 1."""
+def _era5_gen2_multistep_conf(forecast_len, tmp_path):
+    """Minimal conf for trainerERA5gen2.Trainer with forecast_len > 1."""
     base = _minimal_conf()
     base["save_loc"] = str(tmp_path)
     base["trainer"]["batches_per_epoch"] = 1
@@ -433,16 +433,16 @@ class _FakeLoader:
             yield {"x": x, "y": y}
 
 
-class TestERA5v2MultiStepTraining:
+class TestERA5Gen2MultiStepTraining:
     """Verify forecast_len > 1 in the v2 trainer autoregressive loop."""
 
     def test_forecast_len_2_init(self, tmp_path):
         from unittest.mock import patch
         import torch.nn as nn
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import Trainer
 
-        conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+        conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        with patch("credit.trainers.trainerERA5gen2.ERA5Normalizer", return_value=nn.Identity()):
             t = Trainer(_tiny_model(), rank=0, conf=conf)
 
         assert t.forecast_len == 2
@@ -453,11 +453,11 @@ class TestERA5v2MultiStepTraining:
     def test_backprop_on_timestep_default_covers_all_steps(self, tmp_path):
         from unittest.mock import patch
         import torch.nn as nn
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import Trainer
 
         for fl in [1, 2, 3]:
-            conf = _era5_v2_multistep_conf(forecast_len=fl, tmp_path=tmp_path)
-            with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+            conf = _era5_gen2_multistep_conf(forecast_len=fl, tmp_path=tmp_path)
+            with patch("credit.trainers.trainerERA5gen2.ERA5Normalizer", return_value=nn.Identity()):
                 t = Trainer(_tiny_model(), rank=0, conf=conf)
             assert t.backprop_on_timestep == list(range(1, fl + 1))
 
@@ -466,7 +466,7 @@ class TestERA5v2MultiStepTraining:
         import torch
         import torch.nn as nn
         from unittest.mock import patch
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import Trainer
 
         B, C, H, W = 1, 4, 4, 4
         forecast_len = 2
@@ -474,8 +474,8 @@ class TestERA5v2MultiStepTraining:
         # 1x1 conv so shapes stay intact and model has real parameters
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
 
-        conf = _era5_v2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+        conf = _era5_gen2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
+        with patch("credit.trainers.trainerERA5gen2.ERA5Normalizer", return_value=nn.Identity()):
             trainer = Trainer(model, rank=0, conf=conf)
 
         # _FakeLoader yields forecast_len * batches_per_epoch batches total
@@ -508,7 +508,7 @@ class TestERA5v2MultiStepTraining:
         import torch
         import torch.nn as nn
         from unittest.mock import patch
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import Trainer
         from credit.preblock import apply_preblocks
 
         B, C, H, W = 1, 4, 4, 4
@@ -528,8 +528,8 @@ class TestERA5v2MultiStepTraining:
                 return out
 
         model = _ConstModel()
-        conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
-        with patch("credit.trainers.trainerERA5v2.ERA5Normalizer", return_value=nn.Identity()):
+        conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        with patch("credit.trainers.trainerERA5gen2.ERA5Normalizer", return_value=nn.Identity()):
             trainer = Trainer(model, rank=0, conf=conf)
 
         step = [0]
@@ -552,7 +552,7 @@ class TestERA5v2MultiStepTraining:
         criterion = nn.MSELoss()
         scaler = torch.amp.GradScaler("cpu", enabled=False)
 
-        with patch("credit.trainers.trainerERA5v2.apply_preblocks", side_effect=_patched_apply):
+        with patch("credit.trainers.trainerERA5gen2.apply_preblocks", side_effect=_patched_apply):
             trainer.train_one_epoch(
                 epoch=0,
                 trainloader=loader,
