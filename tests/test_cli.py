@@ -53,7 +53,7 @@ def _make_minimal_conf(tmp_path, extra=None):
     conf = {
         "save_loc": str(tmp_path / "save"),
         "trainer": {
-            "type": "era5-v2",
+            "type": "era5-gen2",
             "epochs": 20,
             "num_epoch": 5,
         },
@@ -89,7 +89,7 @@ def _casper_args(**kwargs):
         account="NAML0001",
         conda_env="/some/env",
         torchrun="/usr/bin/torchrun",
-        job_name="credit_v2",
+        job_name="credit_gen2",
         dry_run=False,
         reload=False,
         chain=None,
@@ -113,7 +113,7 @@ def _derecho_args(**kwargs):
         account="NAML0001",
         conda_env="/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221",
         torchrun=None,
-        job_name="credit_v2",
+        job_name="credit_gen2",
         dry_run=False,
         reload=False,
         chain=None,
@@ -272,7 +272,7 @@ class TestLoadPbsConfig:
         assert result["walltime"] == "04:00:00"
 
     def test_missing_pbs_returns_empty(self, tmp_path):
-        conf = {"trainer": {"type": "era5-v2"}}
+        conf = {"trainer": {"type": "era5-gen2"}}
         p = tmp_path / "cfg.yml"
         p.write_text(yaml.dump(conf))
         assert _load_pbs_config(str(p)) == {}
@@ -1150,7 +1150,7 @@ class TestConvertAutoTransform:
                 "NAML0001",
                 "credit-env",
                 "12:00:00",
-                "credit_v2",
+                "credit_gen2",
                 # nodes, gpus, cpus, mem, queue
                 "1",
                 "4",
@@ -1168,7 +1168,7 @@ class TestConvertAutoTransform:
 
         with open(out_path) as f:
             result = yaml.safe_load(f)
-        assert result["trainer"]["type"] == "era5-v2"
+        assert result["trainer"]["type"] == "era5-gen2"
 
     def test_forecast_len_incremented(self, tmp_path, monkeypatch):
         config_path = self._make_v1_conf(tmp_path)
@@ -1183,7 +1183,7 @@ class TestConvertAutoTransform:
                 "NAML0001",
                 "credit-env",
                 "12:00:00",
-                "credit_v2",
+                "credit_gen2",
                 "1",
                 "4",
                 "64",
@@ -1210,7 +1210,7 @@ class TestConvertAutoTransform:
         }
         p = tmp_path / "ens.yml"
         p.write_text(yaml.dump(conf))
-        out_path = str(tmp_path / "ens_v2.yml")
+        out_path = str(tmp_path / "ens_gen2.yml")
 
         # After auto-transforms:
         # EMA y, decay 0.9999, tb y
@@ -1227,7 +1227,7 @@ class TestConvertAutoTransform:
                 "NAML0001",
                 "credit-env",
                 "12:00:00",
-                "credit_v2",
+                "credit_gen2",
                 "1",
                 "4",
                 "64",
@@ -1252,7 +1252,7 @@ class TestConvertAutoTransform:
         }
         p = tmp_path / "ens.yml"
         p.write_text(yaml.dump(conf))
-        out_path = str(tmp_path / "ens_v2.yml")
+        out_path = str(tmp_path / "ens_gen2.yml")
 
         answers = iter(
             [
@@ -1264,7 +1264,7 @@ class TestConvertAutoTransform:
                 "NAML0001",
                 "credit-env",
                 "12:00:00",
-                "credit_v2",
+                "credit_gen2",
                 "1",
                 "4",
                 "64",
@@ -1293,7 +1293,7 @@ class TestConvertAutoTransform:
                 "NAML0001",
                 "credit-env",
                 "12:00:00",
-                "credit_v2",
+                "credit_gen2",
                 "1",
                 "4",
                 "64",
@@ -1326,12 +1326,12 @@ class TestCollectRunContext:
         assert result == ""
 
     def test_with_config_includes_content(self, tmp_path):
-        conf = {"save_loc": str(tmp_path), "trainer": {"type": "era5-v2"}}
+        conf = {"save_loc": str(tmp_path), "trainer": {"type": "era5-gen2"}}
         p = tmp_path / "cfg.yml"
         p.write_text(yaml.dump(conf))
         args = argparse.Namespace(config=str(p))
         result = cli._collect_run_context(args)
-        assert "era5-v2" in result
+        assert "era5-gen2" in result
 
     def test_missing_config_returns_empty(self, tmp_path):
         args = argparse.Namespace(config=str(tmp_path / "nonexistent.yml"))
@@ -1346,7 +1346,7 @@ class TestCollectRunContext:
         # Write a minimal CSV
         log = save_loc / "training_log.csv"
         log.write_text("epoch,train_loss\n1,1.5\n2,1.2\n")
-        conf = {"save_loc": str(save_loc), "trainer": {"type": "era5-v2"}}
+        conf = {"save_loc": str(save_loc), "trainer": {"type": "era5-gen2"}}
         p = tmp_path / "cfg.yml"
         p.write_text(yaml.dump(conf))
         args = argparse.Namespace(config=str(p))

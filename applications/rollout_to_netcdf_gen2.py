@@ -1,5 +1,5 @@
 """
-rollout_to_netcdf_v2.py
+rollout_to_netcdf_gen2.py
 -----------------------
 Rollout entry point for the v2 data schema (conf["data"]["source"]).
 
@@ -12,9 +12,9 @@ Key differences from rollout_to_netcdf.py (v1):
 
 Usage:
     torchrun --standalone --nnodes=1 --nproc-per-node=<N_GPUS> \\
-        applications/rollout_to_netcdf_v2.py -c config/wxformer_025deg_6hr_v2.yml
+        applications/rollout_to_netcdf_gen2.py -c config/wxformer_025deg_6hr_gen2.yml
 
-Or submit via PBS (see scripts/casper_v2.sh with SCRIPT=applications/rollout_to_netcdf_v2.py).
+Or submit via PBS (see scripts/casper_gen2.sh with SCRIPT=applications/rollout_to_netcdf_gen2.py).
 """
 
 import os
@@ -75,7 +75,7 @@ def _inject_flat_schema(conf):
 
 
 def _inject_tracer_inds(conf):
-    """Compute tracer_inds for TracerFixer from v2 variable layout (same as train_v2.py)."""
+    """Compute tracer_inds for TracerFixer from v2 variable layout (same as train_gen2.py)."""
     tracer_conf = conf.get("model", {}).get("post_conf", {}).get("tracer_fixer", {})
     if not tracer_conf.get("activate", False) or "tracer_inds" in tracer_conf:
         return
@@ -399,7 +399,7 @@ def main():
         conf = yaml.load(f, Loader=yaml.FullLoader)
 
     assert "source" in conf["data"], (
-        "rollout_to_netcdf_v2.py requires the v2 nested data schema (conf['data']['source']). "
+        "rollout_to_netcdf_gen2.py requires the v2 nested data schema (conf['data']['source']). "
         "For v1 configs use rollout_to_netcdf.py."
     )
 

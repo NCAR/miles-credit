@@ -69,7 +69,7 @@ def _train(args: argparse.Namespace) -> None:
 
 
 def _rollout(args: argparse.Namespace) -> None:
-    from credit.applications.rollout_to_netcdf_v2 import main
+    from credit.applications.rollout_to_netcdf_gen2 import main
 
     argv = [
         "credit-rollout",
@@ -87,7 +87,7 @@ def _rollout(args: argparse.Namespace) -> None:
 
 
 def _realtime(args: argparse.Namespace) -> None:
-    from credit.applications.rollout_realtime_v2 import main
+    from credit.applications.rollout_realtime_gen2 import main
 
     argv = [
         "credit-realtime",
@@ -163,8 +163,8 @@ def _convert(args: argparse.Namespace) -> None:
     # trainer.type
     V1_TYPES = {"era5", "standard", "universal"}
     if trainer_type in V1_TYPES:
-        conf["trainer"]["type"] = "era5-v2"
-        changes.append(f"trainer.type: '{trainer_type}' → 'era5-v2'")
+        conf["trainer"]["type"] = "era5-gen2"
+        changes.append(f"trainer.type: '{trainer_type}' → 'era5-gen2'")
 
     # forecast_len: v1 uses 0 = single step, v2 uses 1 = single step
     fl = conf.get("data", {}).get("forecast_len", 0)
@@ -237,7 +237,7 @@ def _convert(args: argparse.Namespace) -> None:
         "Conda env (name or full path)", default=pbs.get("conda") or pbs.get("conda_env") or "credit-derecho"
     )
     walltime = _prompt("Walltime (HH:MM:SS)", default=pbs.get("walltime") or "12:00:00")
-    job_name = _prompt("Job name", default=pbs.get("job_name") or "credit_v2")
+    job_name = _prompt("Job name", default=pbs.get("job_name") or "credit_gen2")
 
     new_pbs = {
         "project": account,
@@ -268,7 +268,7 @@ def _convert(args: argparse.Namespace) -> None:
     # ------------------------------------------------------------------
     print()
     base, ext = os.path.splitext(args.config)
-    default_out = getattr(args, "output", None) or (f"{base}_v2{ext}" if ext else f"{args.config}_v2.yml")
+    default_out = getattr(args, "output", None) or (f"{base}_v2{ext}" if ext else f"{args.config}_gen2.yml")
     out_path = _prompt("Output config path", default=default_out)
 
     with open(out_path, "w") as f:
@@ -333,7 +333,7 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
         pbs_cfg.get("conda") or pbs_cfg.get("conda_env"),
         "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221",
     )
-    r.job_name = pbs_cfg.get("job_name", "credit_v2")
+    r.job_name = pbs_cfg.get("job_name", "credit_gen2")
     return r
 
 
@@ -353,7 +353,7 @@ def _build_pbs_script(
     # Apply defaults for fields not set by the caller (mirrors _resolve_pbs_opts defaults).
     is_casper = getattr(args, "cluster", "casper") == "casper"
     _d = argparse.Namespace(
-        job_name="credit_v2",
+        job_name="credit_gen2",
         account="NAML0001",
         cpus=8 if is_casper else 64,
         mem="128GB" if is_casper else "480GB",
@@ -607,7 +607,7 @@ def _submit(args: argparse.Namespace) -> None:
 def _build_rollout_pbs_script(args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int) -> str:
     """Return a PBS script for one subset of an ensemble rollout.
 
-    Each job runs ``rollout_to_netcdf_v2.py --subset <subset> --no_subset <n_subsets>``.
+    Each job runs ``rollout_to_netcdf_gen2.py --subset <subset> --no_subset <n_subsets>``.
     Jobs are independent (no afterok chain) — they all start at once.
     """
     job_name = f"{args.job_name[:10]}-{subset:02d}of{n_subsets:02d}"
@@ -640,7 +640,7 @@ def _build_rollout_pbs_script(args: argparse.Namespace, config: str, repo: str, 
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
             {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
-                ${{REPO}}/applications/rollout_to_netcdf_v2.py \\
+                ${{REPO}}/applications/rollout_to_netcdf_gen2.py \\
                 -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
         """)
 
@@ -674,7 +674,7 @@ def _build_rollout_pbs_script(args: argparse.Namespace, config: str, repo: str, 
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
             torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
-                ${{REPO}}/applications/rollout_to_netcdf_v2.py \\
+                ${{REPO}}/applications/rollout_to_netcdf_gen2.py \\
                 -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
         """)
 
@@ -970,7 +970,7 @@ data:
 ## Trainer config
 ```yaml
 trainer:
-  type: era5-v2
+  type: era5-gen2
   mode: ddp           # none | ddp | fsdp
   train_batch_size: 8
   num_epoch: 5        # epochs per PBS job
@@ -1058,7 +1058,7 @@ def _collect_run_context(args: argparse.Namespace) -> str:
 
         # ---- Most recent PBS output file ----
         try:
-            pbs_files = _glob.glob("credit_v2.o*") + _glob.glob("credit.o*")
+            pbs_files = _glob.glob("credit_gen2.o*") + _glob.glob("credit.o*")
             if pbs_files:
                 newest = max(pbs_files, key=os.path.getmtime)
                 with open(newest) as f:
@@ -2144,7 +2144,7 @@ def _build_parser() -> argparse.ArgumentParser:
             Convert a v1 CREDIT config to v2 format.
 
             Automatic changes:
-              - trainer.type: era5 → era5-v2
+              - trainer.type: era5 → era5-gen2
               - data.forecast_len: +1  (v2 semantics: 1 = single step, v1 used 0)
               - data.valid_forecast_len: +1
               - data.backprop_on_timestep: shifted to 1-indexed
@@ -2156,12 +2156,12 @@ def _build_parser() -> argparse.ArgumentParser:
               - PBS / job settings (account, conda env, nodes, walltime, ...)
 
             Example:
-              credit convert -c old_model.yml          # saves to old_model_v2.yml
+              credit convert -c old_model.yml          # saves to old_model_gen2.yml
               credit convert -c old_model.yml -o new.yml
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="v1 config YAML to convert")
-    p.add_argument("-o", "--output", default=None, metavar="OUTPUT", help="Output path (default: <input>_v2.yml)")
+    p.add_argument("-o", "--output", default=None, metavar="OUTPUT", help="Output path (default: <input>_gen2.yml)")
 
     # ---- init ----
     # ---- metrics ----

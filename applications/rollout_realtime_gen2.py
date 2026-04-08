@@ -1,12 +1,12 @@
 """
-rollout_realtime_v2.py
+rollout_realtime_gen2.py
 ----------------------
 Operational/realtime forecast rollout for CREDIT v2 models.
 
 Designed to be run with a single command — no pre-editing of config files:
 
-    python rollout_realtime_v2.py \\
-        -c config/wxformer_025deg_6hr_v2.yml \\
+    python rollout_realtime_gen2.py \\
+        -c config/wxformer_025deg_6hr_gen2.yml \\
         --init-time 2024-01-15T00 \\
         --steps 40 \\
         --save-dir /path/to/output
@@ -54,7 +54,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 
 # ---------------------------------------------------------------------------
-# Config helpers (shared with rollout_to_netcdf_v2)
+# Config helpers (shared with rollout_to_netcdf_gen2)
 # ---------------------------------------------------------------------------
 
 
@@ -342,13 +342,13 @@ def main():
         epilog="""
 Examples:
   Single GPU, one init time:
-    python rollout_realtime_v2.py -c config/wxformer_025deg_6hr_v2.yml --init-time 2024-01-15T00
+    python rollout_realtime_gen2.py -c config/wxformer_025deg_6hr_gen2.yml --init-time 2024-01-15T00
 
   With explicit step count and save dir:
-    python rollout_realtime_v2.py -c config.yml --init-time 2024-01-15T00 --steps 60 --save-dir /scratch/$USER/fcst
+    python rollout_realtime_gen2.py -c config.yml --init-time 2024-01-15T00 --steps 60 --save-dir /scratch/$USER/fcst
 
   Multi-GPU DDP (via torchrun):
-    torchrun --standalone --nnodes=1 --nproc-per-node=4 rollout_realtime_v2.py -c config.yml --init-time 2024-01-15T00
+    torchrun --standalone --nnodes=1 --nproc-per-node=4 rollout_realtime_gen2.py -c config.yml --init-time 2024-01-15T00
         """,
     )
     parser.add_argument(
@@ -391,7 +391,7 @@ Examples:
         conf = yaml.load(f, Loader=yaml.FullLoader)
 
     assert "source" in conf["data"], (
-        "rollout_realtime_v2.py requires the v2 nested data schema. For v1 configs use rollout_realtime.py."
+        "rollout_realtime_gen2.py requires the v2 nested data schema. For v1 configs use rollout_realtime.py."
     )
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
