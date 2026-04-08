@@ -87,11 +87,12 @@ credit = "credit.cli:main"
 
 # Gen2 entry points
 credit_train_gen2 = "credit.applications.train_gen2:main_cli"
-credit_rollout_realtime_v2 = "credit.applications.rollout_realtime_v2:main"
-credit_rollout_to_netcdf_v2 = "credit.applications.rollout_to_netcdf_v2:main"
+credit_rollout_realtime_gen2 = "credit.applications.rollout_realtime_gen2:main"
+credit_rollout_to_netcdf_gen2 = "credit.applications.rollout_to_netcdf_gen2:main"
 
-# Legacy v1 entry points
-credit_train = "credit.applications.train:main_cli"
+# Gen1 entry points
+credit_train_gen1 = "credit.applications.train_gen1:main_cli"
+credit_train = "credit.applications.train_gen1:main_cli"  # backward-compat alias
 credit_rollout_realtime = "credit.applications.rollout_realtime:main_cli"
 credit_gfs_init = "credit.applications.gfs_init:main"
 credit_gefs_init = "credit.applications.gefs_init:main"
