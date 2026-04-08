@@ -19,7 +19,7 @@ import torch
 logger = logging.getLogger(__name__)
 
 
-class Trainer(BaseTrainer):
+class TrainerWRFMulti(BaseTrainer):
     """
     Trainer class for handling the training, validation, and checkpointing of models.
 

@@ -18,7 +18,7 @@ import optuna
 logger = logging.getLogger(__name__)
 
 
-class Trainer(BaseTrainer):
+class TrainerSamudra(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer class for handling the training, validation, and checkpointing of models.

@@ -21,7 +21,7 @@ from credit.trainers.base_trainer import BaseTrainer
 logger = logging.getLogger(__name__)
 
 
-class Trainer(BaseTrainer):
+class TrainerLES(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         super().__init__(model, rank, conf)
         logger.info("LES single-step training")

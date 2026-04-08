@@ -18,16 +18,16 @@ from credit.trainers.utils import accum_log, cycle
 logger = logging.getLogger(__name__)
 
 
-class Trainer(BaseTrainer):
+class TrainerERA5Gen2(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
-        Trainer for ERA5 v2 data schema.
+        Gen 2 trainer for the ERA5 nested data schema.
 
-        Key differences from TrainerERA5 (v1):
+        Key differences from TrainerERA5 (Gen 1):
           - Uses new nested data schema: conf["data"]["source"]["ERA5"]["variables"]
-          - Applies a ConcatPreblock to assemble batch tensors before the model forward pass
+          - Applies preblocks to assemble batch tensors before the model forward pass
             (no concat_and_reshape / reshape_only calls in the training loop)
-          - forecast_len semantics: 1 = 1 step (v1 used 0 = 1 step)
+          - forecast_len semantics: 1 = 1 step (Gen 1 used 0 = 1 step)
           - backprop_on_timestep: range(1, forecast_len+1) instead of range(0, forecast_len+2)
           - Validation config read from conf["data_valid"] if present, else conf["data"]
 
@@ -37,7 +37,7 @@ class Trainer(BaseTrainer):
             conf: Full configuration dict.
         """
         super().__init__(model, rank, conf)
-        logger.info("Loading ERA5-v2 trainer (new nested data schema, preblock-assembled batches)")
+        logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
 
         # ---- Preblock: config-driven transforms then auto-concat to tensors ----
         self.preblocks = build_preblocks(conf.get("preblocks", {}))
@@ -266,19 +266,7 @@ class Trainer(BaseTrainer):
                 print(results_dict["train_loss"])
                 raise optuna.TrialPruned()
 
-            to_print = "Epoch: {} train_loss: {:.6f} train_acc: {:.6f} train_mae: {:.6f} forecast_len: {:.0f}".format(
-                epoch,
-                np.mean(results_dict["train_loss"]),
-                np.mean(results_dict["train_acc"]),
-                np.mean(results_dict["train_mae"]),
-                self.forecast_len,
-            )
-            if self.ensemble_size > 1:
-                to_print += f" std: {np.mean(results_dict['train_std']):.6f}"
-            to_print += " lr: {:.12f}".format(optimizer.param_groups[0]["lr"])
-            if self.rank == 0:
-                batch_group_generator.update(1)
-                batch_group_generator.set_description(to_print)
+            self._log_batch_progress(epoch, results_dict, optimizer, batch_group_generator, phase="train")
 
             if self.use_scheduler and self.scheduler_type in update_on_batch:
                 scheduler.step()
@@ -393,17 +381,7 @@ class Trainer(BaseTrainer):
                 results_dict["valid_loss"].append(batch_loss[0].item())
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)
 
-                to_print = "Epoch: {} valid_loss: {:.6f} valid_acc: {:.6f} valid_mae: {:.6f}".format(
-                    epoch,
-                    np.mean(results_dict["valid_loss"]),
-                    np.mean(results_dict["valid_acc"]),
-                    np.mean(results_dict["valid_mae"]),
-                )
-                if self.ensemble_size > 1:
-                    to_print += f" std: {np.mean(results_dict['valid_std']):.6f}"
-                if self.rank == 0:
-                    batch_group_generator.update(1)
-                    batch_group_generator.set_description(to_print)
+                self._log_batch_progress(epoch, results_dict, optimizer=None, pbar=batch_group_generator, phase="valid")
 
         batch_group_generator.close()
 

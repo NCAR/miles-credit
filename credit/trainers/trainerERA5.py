@@ -19,7 +19,7 @@ from credit.trainers.utils import accum_log, cycle
 logger = logging.getLogger(__name__)
 
 
-class Trainer(BaseTrainer):
+class TrainerERA5(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer for multi-step ERA5 rollout training.

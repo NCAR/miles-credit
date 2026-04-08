@@ -1,6 +1,6 @@
 """
 Tests for:
-  - credit/trainers/preflight.py (estimate_dataloader_memory_gb, check_dataloader_startup)
+  - credit/trainers/preflight.py (estimate_dataloader_memory_gib, check_dataloader_startup)
   - credit/scheduler.py         (load_scheduler, CosineAnnealingWarmupRestarts,
                                   annealed_probability, update_on_batch)
 
@@ -19,7 +19,7 @@ import torch.nn as nn
 # ---------------------------------------------------------------------------
 
 
-class TestEstimateDataloaderMemoryGb:
+class TestEstimateDataloaderMemoryGib:
     def _conf(self, **overrides):
         base = {
             "trainer": {
@@ -44,28 +44,28 @@ class TestEstimateDataloaderMemoryGb:
         return base
 
     def test_returns_positive_float(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
-        gb = estimate_dataloader_memory_gb(self._conf())
+        gb = estimate_dataloader_memory_gib(self._conf())
         assert isinstance(gb, float)
         assert gb > 0
 
     def test_scales_with_workers(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
-        gb1 = estimate_dataloader_memory_gb(self._conf(thread_workers=1))
-        gb4 = estimate_dataloader_memory_gb(self._conf(thread_workers=4))
+        gb1 = estimate_dataloader_memory_gib(self._conf(thread_workers=1))
+        gb4 = estimate_dataloader_memory_gib(self._conf(thread_workers=4))
         assert abs(gb4 / gb1 - 4.0) < 0.01
 
     def test_scales_with_batch_size(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
-        gb1 = estimate_dataloader_memory_gb(self._conf(train_batch_size=1))
-        gb2 = estimate_dataloader_memory_gb(self._conf(train_batch_size=2))
+        gb1 = estimate_dataloader_memory_gib(self._conf(train_batch_size=1))
+        gb2 = estimate_dataloader_memory_gib(self._conf(train_batch_size=2))
         assert abs(gb2 / gb1 - 2.0) < 0.01
 
     def test_zero_channels_returns_zero(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
         conf = self._conf()
         conf["data"]["source"]["ERA5"]["levels"] = []
@@ -73,19 +73,19 @@ class TestEstimateDataloaderMemoryGb:
             "prognostic": {"vars_3D": [], "vars_2D": []},
             "diagnostic": {"vars_2D": []},
         }
-        assert estimate_dataloader_memory_gb(conf) == 0.0
+        assert estimate_dataloader_memory_gib(conf) == 0.0
 
     def test_missing_keys_returns_zero(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
-        assert estimate_dataloader_memory_gb({}) == 0.0
+        assert estimate_dataloader_memory_gib({}) == 0.0
 
     def test_uses_default_image_size_when_model_absent(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
         conf = self._conf()
         del conf["model"]
-        gb = estimate_dataloader_memory_gb(conf)
+        gb = estimate_dataloader_memory_gib(conf)
         # Should fall back to 721×1440 defaults and still return a float
         assert isinstance(gb, float)
         assert gb > 0
@@ -332,14 +332,14 @@ class TestUpdateOnBatch:
 
 
 class TestPsutilAvailableRam:
-    """Cover the _available_ram_gb helper (lines 85-92)."""
+    """Cover the _available_ram_gib helper."""
 
     def test_returns_float_when_psutil_available(self):
         """If psutil is importable, should return a positive float."""
         pytest.importorskip("psutil")
-        from credit.trainers.preflight import _available_ram_gb
+        from credit.trainers.preflight import _available_ram_gib
 
-        gb = _available_ram_gb()
+        gb = _available_ram_gib()
         assert isinstance(gb, float)
         assert gb >= 0
 
@@ -360,9 +360,11 @@ class TestPsutilAvailableRam:
 
         # Reload to get fresh version with blocked import
         pf_fresh = importlib.import_module("credit.trainers.preflight")
-        result = pf_fresh._available_ram_gb.__wrapped__() if hasattr(pf_fresh._available_ram_gb, "__wrapped__") else 0.0
+        result = (
+            pf_fresh._available_ram_gib.__wrapped__() if hasattr(pf_fresh._available_ram_gib, "__wrapped__") else 0.0
+        )
         # Just test the function directly
-        assert pf_fresh._available_ram_gb() >= 0.0
+        assert pf_fresh._available_ram_gib() >= 0.0
 
 
 class TestCheckDataloaderStartupMemoryWarnings:
@@ -414,7 +416,7 @@ class TestCheckDataloaderStartupMemoryWarnings:
         from credit.trainers import preflight as pf
 
         # Make available RAM appear tiny so any estimate looks dangerous
-        monkeypatch.setattr(pf, "_available_ram_gb", lambda: 0.001)
+        monkeypatch.setattr(pf, "_available_ram_gib", lambda: 0.001)
 
         class _FastLoader:
             def __iter__(self):
@@ -433,7 +435,7 @@ class TestCheckDataloaderStartupMemoryWarnings:
 
         # Calculate what the estimate will be for a small conf, then set avail_gb
         # so that the estimate falls in the 50-80% range
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
         small_conf = {
             "trainer": {"thread_workers": 1, "prefetch_factor": 1, "train_batch_size": 1},
@@ -450,10 +452,10 @@ class TestCheckDataloaderStartupMemoryWarnings:
                 }
             },
         }
-        est = estimate_dataloader_memory_gb(small_conf)
+        est = estimate_dataloader_memory_gib(small_conf)
         # Set available = est / 0.65 so pct ≈ 65% (between 50 and 80)
         avail = est / 0.65
-        monkeypatch.setattr(pf, "_available_ram_gb", lambda: avail)
+        monkeypatch.setattr(pf, "_available_ram_gib", lambda: avail)
 
         class _FastLoader:
             def __iter__(self):

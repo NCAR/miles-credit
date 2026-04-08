@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader
 
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
-from credit.trainers.preflight import check_dataloader_startup
+from credit.trainers.preflight import check_dataloader_startup, check_model_gpu_memory
 from credit.trainers.utils import cleanup
 
 try:
@@ -135,7 +135,7 @@ class BaseTrainer(ABC):
         self.mode = trainer_conf.get("mode", "none")
         self.distributed = self.mode in ("fsdp", "ddp")
         self.start_epoch = trainer_conf.get("start_epoch", 0)
-        self.epochs = trainer_conf.get("epochs", 70)
+        self.epochs = trainer_conf.get("epochs", 1)
         self.skip_validation = trainer_conf.get("skip_validation", False)
         self.load_weights = trainer_conf.get("load_weights", False)
         self.use_scheduler = trainer_conf.get("use_scheduler", True)
@@ -150,6 +150,9 @@ class BaseTrainer(ABC):
         self.stopping_patience = trainer_conf.get("stopping_patience", 100)
         self.save_every_epoch = trainer_conf.get("save_every_epoch", False)
         self.stop_after_epoch = trainer_conf.get("stop_after_epoch", False)
+        # num_epoch caps how many additional epochs run from start_epoch.
+        # Defaults to a large sentinel so `epochs` is the effective limit when
+        # num_epoch is not set in the config.
         self.num_epoch = trainer_conf.get("num_epoch", int(1e8))
         self.save_metric_vars = trainer_conf.get("save_metric_vars", [])
         self.train_one_epoch_mode = trainer_conf.get("train_one_epoch", False)
@@ -236,6 +239,43 @@ class BaseTrainer(ABC):
         metrics: Dict[str, Any],
     ) -> Dict[str, float]:
         raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # Progress logging
+    # ------------------------------------------------------------------
+
+    def _log_batch_progress(
+        self,
+        epoch: int,
+        results_dict: dict,
+        optimizer: Optional[Optimizer],
+        pbar,
+        phase: str = "train",
+    ) -> None:
+        """Update a tqdm progress bar with rolling-mean batch metrics.
+
+        Reads any keys in *results_dict* that start with ``<phase>_`` and
+        formats them as a space-separated description string. Always appends
+        the current learning rate.
+
+        Args:
+            epoch:        Current epoch number.
+            results_dict: Dict mapping metric names to lists of per-batch values.
+            optimizer:    Current optimizer (used to read the learning rate).
+            pbar:         tqdm progress bar to update.
+            phase:        Metric prefix, either ``"train"`` or ``"valid"``.
+        """
+        parts = [f"Epoch: {epoch}"]
+        for key in (f"{phase}_loss", f"{phase}_acc", f"{phase}_mae"):
+            if results_dict.get(key):
+                parts.append(f"{key}: {np.mean(results_dict[key]):.6f}")
+        if self.ensemble_size > 1 and results_dict.get(f"{phase}_std"):
+            parts.append(f"{phase}_std: {np.mean(results_dict[f'{phase}_std']):.6f}")
+        if phase == "train":
+            parts.append(f"lr: {optimizer.param_groups[0]['lr']:.12f}")
+        if self.rank == 0:
+            pbar.update(1)
+            pbar.set_description(" ".join(parts))
 
     # ------------------------------------------------------------------
     # Checkpointing
@@ -362,6 +402,9 @@ class BaseTrainer(ABC):
         # Preflight: check DataLoader memory and first-batch latency (rank-0 only)
         timeout_s = conf.get("trainer", {}).get("dataloader_timeout_s", 300)
         check_dataloader_startup(conf, train_loader, rank=self.rank, timeout_s=timeout_s)
+
+        # Preflight: synthetic forward/backward/optimizer step to measure peak VRAM
+        check_model_gpu_memory(conf, self.model, optimizer, rank=self.rank)
 
         for epoch in range(start_epoch, epoch_limit):
             # Backup previous epoch's checkpoint

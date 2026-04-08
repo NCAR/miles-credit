@@ -272,7 +272,7 @@ def _era5_v1_conf(**overrides):
 
 
 def _era5_v2_conf(**overrides):
-    """Minimal conf for trainerERA5v2.Trainer (v2 nested data schema)."""
+    """Minimal conf for trainerERA5gen2.Trainer (v2 nested data schema)."""
     base = _minimal_conf()
     base["data"] = {
         "forecast_len": 1,
@@ -303,14 +303,14 @@ class TestTrainerSubclassInstantiation:
     """
 
     def test_era5_trainer_init(self):
-        from credit.trainers.trainerERA5 import Trainer
+        from credit.trainers.trainerERA5 import TrainerERA5 as Trainer
 
         t = Trainer(_tiny_model(), rank=0, conf=_era5_v1_conf())
         assert t.forecast_len == 1
         assert not t.flag_mass_conserve
 
     def test_era5_trainer_init_with_post_conf_inactive(self):
-        from credit.trainers.trainerERA5 import Trainer
+        from credit.trainers.trainerERA5 import TrainerERA5 as Trainer
 
         conf = _era5_v1_conf()
         conf["model"] = {"post_conf": {"activate": False}}
@@ -318,43 +318,43 @@ class TestTrainerSubclassInstantiation:
         assert not t.flag_mass_conserve
 
     def test_era5v2_trainer_init(self):
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         t = Trainer(_tiny_model(), rank=0, conf=_era5_v2_conf())
         assert t.forecast_len == 1
 
     def test_era5_ensemble_trainer_init(self):
-        from credit.trainers.trainerERA5_ensemble import Trainer
+        from credit.trainers.trainerERA5_ensemble import TrainerERA5Ensemble as Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
 
     def test_era5_diffusion_trainer_init(self):
-        from credit.trainers.trainerERA5_Diffusion import Trainer
+        from credit.trainers.trainerERA5_Diffusion import TrainerERA5Diffusion as Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
 
     def test_les_trainer_init(self):
-        from credit.trainers.trainerLES import Trainer
+        from credit.trainers.trainerLES import TrainerLES as Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
 
     def test_wrf_trainer_init(self):
-        from credit.trainers.trainerWRF import Trainer
+        from credit.trainers.trainerWRF import TrainerWRF as Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
 
     def test_wrf_multi_trainer_init(self):
-        from credit.trainers.trainerWRF_multi import Trainer
+        from credit.trainers.trainerWRF_multi import TrainerWRFMulti as Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
 
     def test_downscaling_trainer_init(self):
-        from credit.trainers.trainer_downscaling import Trainer
+        from credit.trainers.trainer_downscaling import TrainerDownscaling as Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
 
     def test_om4_samudra_trainer_init(self):
-        from credit.trainers.trainer_om4_samudra import Trainer
+        from credit.trainers.trainer_om4_samudra import TrainerSamudra as Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
 
@@ -365,7 +365,7 @@ class TestTrainerSubclassInstantiation:
 
 
 def _era5_v2_multistep_conf(forecast_len, tmp_path):
-    """Minimal conf for trainerERA5v2.Trainer with forecast_len > 1."""
+    """Minimal conf for trainerERA5gen2.Trainer with forecast_len > 1."""
     base = _minimal_conf()
     base["save_loc"] = str(tmp_path)
     base["trainer"]["batches_per_epoch"] = 1
@@ -398,7 +398,7 @@ class _FakeDataset:
 
 
 class _FakeLoader:
-    """Minimal iterable loader that yields nested-format batches for trainerERA5v2.
+    """Minimal iterable loader that yields nested-format batches for trainerERA5gen2.
 
     Each batch has the structure expected by apply_preblocks / ConcatToTensor:
         batch["era5"]["input"][var_key]  -> (B, 1, H, W) tensor
@@ -434,7 +434,7 @@ class TestERA5v2MultiStepTraining:
     """Verify forecast_len > 1 in the v2 trainer autoregressive loop."""
 
     def test_forecast_len_2_init(self, tmp_path):
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         t = Trainer(_tiny_model(), rank=0, conf=conf)
@@ -445,7 +445,7 @@ class TestERA5v2MultiStepTraining:
         assert t.varnum_diag == 0
 
     def test_backprop_on_timestep_default_covers_all_steps(self, tmp_path):
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         for fl in [1, 2, 3]:
             conf = _era5_v2_multistep_conf(forecast_len=fl, tmp_path=tmp_path)
@@ -456,7 +456,7 @@ class TestERA5v2MultiStepTraining:
         """2-step autoregressive loop completes on CPU with toy data."""
         import torch
         import torch.nn as nn
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
         forecast_len = 2
@@ -497,7 +497,7 @@ class TestERA5v2MultiStepTraining:
         import torch
         import torch.nn as nn
         from unittest.mock import patch
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
         from credit.preblock import apply_preblocks
 
         B, C, H, W = 1, 4, 4, 4
@@ -541,7 +541,7 @@ class TestERA5v2MultiStepTraining:
         criterion = nn.MSELoss()
         scaler = torch.amp.GradScaler("cpu", enabled=False)
 
-        with patch("credit.trainers.trainerERA5v2.apply_preblocks", side_effect=_patched_apply):
+        with patch("credit.trainers.trainerERA5gen2.apply_preblocks", side_effect=_patched_apply):
             trainer.train_one_epoch(
                 epoch=0,
                 trainloader=loader,
@@ -569,16 +569,16 @@ class TestLoadTrainer:
 
     def test_valid_era5_type_returns_class(self):
         from credit.trainers import load_trainer
-        from credit.trainers.trainerERA5 import Trainer
+        from credit.trainers.trainerERA5 import TrainerERA5 as Trainer
 
         result = load_trainer({"trainer": {"type": "era5"}})
         assert result is Trainer
 
     def test_valid_era5v2_type_returns_class(self):
         from credit.trainers import load_trainer
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
-        result = load_trainer({"trainer": {"type": "era5-v2"}})
+        result = load_trainer({"trainer": {"type": "era5-gen2"}})
         assert result is Trainer
 
     def test_all_registered_types_return_a_class(self):
@@ -901,16 +901,16 @@ class TestSaveCheckpoint:
 
 
 # ---------------------------------------------------------------------------
-# TrainerERA5v2 — additional coverage
+# TrainerERA5Gen2 — additional coverage
 # ---------------------------------------------------------------------------
 
 
-class TestTrainerERA5v2AdditionalCoverage:
-    """Cover trainerERA5v2 init branches and validate loop."""
+class TestTrainerERA5Gen2AdditionalCoverage:
+    """Cover trainerERA5gen2 init branches and validate loop."""
 
     def test_backprop_on_timestep_explicit(self, tmp_path):
         """Explicit backprop_on_timestep in data conf is used directly (lines 102-103)."""
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=3, tmp_path=tmp_path)
         conf["data"]["backprop_on_timestep"] = [2, 3]
@@ -921,7 +921,7 @@ class TestTrainerERA5v2AdditionalCoverage:
 
     def test_data_clamp_sets_flags(self, tmp_path):
         """data_clamp in conf sets flag_clamp, clamp_min, clamp_max (lines 107-115)."""
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["data"]["data_clamp"] = [-5.0, 5.0]
@@ -934,7 +934,7 @@ class TestTrainerERA5v2AdditionalCoverage:
 
     def test_data_valid_overrides_valid_forecast_len(self, tmp_path):
         """data_valid block used when present (lines 118-120)."""
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         conf["data_valid"] = {"forecast_len": 4, "history_len": 2}
@@ -946,7 +946,7 @@ class TestTrainerERA5v2AdditionalCoverage:
 
     def test_retain_graph_flag(self, tmp_path):
         """retain_graph flag extracted from conf (line 98)."""
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["data"]["retain_graph"] = True
@@ -962,7 +962,7 @@ class TestTrainerERA5v2AdditionalCoverage:
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
         conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
 
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         trainer = Trainer(model, rank=0, conf=conf)
 
@@ -993,7 +993,7 @@ class TestTrainerERA5v2AdditionalCoverage:
         conf["trainer"]["use_ema"] = True
         conf["trainer"]["ema_decay"] = 0.999
 
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         trainer = Trainer(model, rank=0, conf=conf)
 
@@ -1029,7 +1029,7 @@ class TestTrainerERA5v2AdditionalCoverage:
         conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["grad_max_norm"] = 0.01  # very small to actually clip
 
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         trainer = Trainer(model, rank=0, conf=conf)
 
@@ -1057,7 +1057,7 @@ class TestTrainerERA5v2AdditionalCoverage:
     def test_scheduler_lambda_step_called(self, tmp_path):
         """lambda scheduler steps once per epoch at epoch start (lines 146-147)."""
         from unittest.mock import MagicMock
-        from credit.trainers.trainerERA5v2 import Trainer
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
 
