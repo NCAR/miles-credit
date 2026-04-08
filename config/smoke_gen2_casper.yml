@@ -120,15 +120,7 @@ trainer:
     reload_epoch: False
     epochs: 3
 
-    use_scheduler: True
-    scheduler:
-      scheduler_type: cosine-annealing-restarts
-      first_cycle_steps: 50
-      cycle_mult: 1.0
-      max_lr: 1.0e-03
-      min_lr: 1.0e-06
-      warmup_steps: 10
-      gamma: 1.0
+    use_scheduler: False
 
     amp: False
 
