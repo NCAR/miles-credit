@@ -271,7 +271,7 @@ def _era5_v1_conf(**overrides):
     return base
 
 
-def _era5_v2_conf(**overrides):
+def _era5_gen2_conf(**overrides):
     """Minimal conf for trainerERA5gen2.Trainer (v2 nested data schema)."""
     base = _minimal_conf()
     base["data"] = {
@@ -314,10 +314,10 @@ class TestTrainerSubclassInstantiation:
         t = Trainer(_tiny_model(), rank=0, conf=conf)
         assert not t.flag_mass_conserve
 
-    def test_era5v2_trainer_init(self):
+    def test_era5gen2_trainer_init(self):
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
-        t = Trainer(_tiny_model(), rank=0, conf=_era5_v2_conf())
+        t = Trainer(_tiny_model(), rank=0, conf=_era5_gen2_conf())
         assert t.forecast_len == 1
 
     def test_era5_ensemble_trainer_init(self):
@@ -357,11 +357,11 @@ class TestTrainerSubclassInstantiation:
 
 
 # ---------------------------------------------------------------------------
-# Multi-step training (forecast_len > 1) — ERA5 v2 trainer
+# Multi-step training (forecast_len > 1) — ERA5 Gen2 trainer
 # ---------------------------------------------------------------------------
 
 
-def _era5_v2_multistep_conf(forecast_len, tmp_path):
+def _era5_gen2_multistep_conf(forecast_len, tmp_path):
     """Minimal conf for trainerERA5gen2.Trainer with forecast_len > 1."""
     base = _minimal_conf()
     base["save_loc"] = str(tmp_path)
@@ -424,13 +424,13 @@ class _FakeLoader:
             yield {"era5": {"input": input_vars, "target": target_vars}}
 
 
-class TestERA5v2MultiStepTraining:
+class TestERA5Gen2MultiStepTraining:
     """Verify forecast_len > 1 in the v2 trainer autoregressive loop."""
 
     def test_forecast_len_2_init(self, tmp_path):
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
-        conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         t = Trainer(_tiny_model(), rank=0, conf=conf)
 
         assert t.forecast_len == 2
@@ -442,7 +442,7 @@ class TestERA5v2MultiStepTraining:
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         for fl in [1, 2, 3]:
-            conf = _era5_v2_multistep_conf(forecast_len=fl, tmp_path=tmp_path)
+            conf = _era5_gen2_multistep_conf(forecast_len=fl, tmp_path=tmp_path)
             t = Trainer(_tiny_model(), rank=0, conf=conf)
             assert t.backprop_on_timestep == list(range(1, fl + 1))
 
@@ -458,7 +458,7 @@ class TestERA5v2MultiStepTraining:
         # 1x1 conv so shapes stay intact and model has real parameters
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
 
-        conf = _era5_v2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
         trainer = Trainer(model, rank=0, conf=conf)
 
         # _FakeLoader yields forecast_len * batches_per_epoch batches total
@@ -511,7 +511,7 @@ class TestERA5v2MultiStepTraining:
                 return out
 
         model = _ConstModel()
-        conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         trainer = Trainer(model, rank=0, conf=conf)
 
         step = [0]
@@ -551,6 +551,120 @@ class TestERA5v2MultiStepTraining:
         assert captured["last_x"] is not None
         expected = x_at_step1_out[0]  # y_pred at t=1 = model(x_t1) = x_t1 * 1.0 ≈ x_t1
         torch.testing.assert_close(captured["last_x"], expected, atol=1e-5, rtol=1e-5)
+
+    def test_rollout_partial_channels_at_t2(self, tmp_path):
+        """At t=2, ERA5Dataset returns only dynfrc channels.
+
+        Verify the trainer correctly:
+          - updates dynfrc slice (channels 0..n_dynfrc-1) from the new batch
+          - preserves static slice (channels n_dynfrc..static_dim_size-1)
+          - replaces prognostic slice (channels static_dim_size..) with y_pred
+        """
+        import torch
+        import torch.nn as nn
+        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+
+        # Layout: 2 dynfrc + 1 static + 3 prog  →  static_dim_size = 3, n_prog = 3
+        N_DYNFRC, N_STATIC, N_PROG = 2, 1, 3
+        STATIC_DIM = N_DYNFRC + N_STATIC  # 3
+        TOTAL = N_DYNFRC + N_STATIC + N_PROG  # 6
+        B, H, W = 1, 4, 4
+
+        conf = _minimal_conf()
+        conf["save_loc"] = str(tmp_path)
+        conf["trainer"]["batches_per_epoch"] = 1
+        conf["trainer"]["valid_batches_per_epoch"] = 1
+        conf["data"] = {
+            "forecast_len": 2,
+            "retain_graph": False,
+            "source": {
+                "ERA5": {
+                    "levels": [],
+                    "variables": {
+                        "prognostic": {"vars_3D": [], "vars_2D": [f"p{i}" for i in range(N_PROG)]},
+                        "diagnostic": {"vars_3D": [], "vars_2D": []},
+                        "dynamic_forcing": {"vars_2D": [f"df{i}" for i in range(N_DYNFRC)]},
+                        "static": {"vars_2D": [f"st{i}" for i in range(N_STATIC)]},
+                    },
+                }
+            },
+        }
+
+        # Model: outputs N_PROG channels, all zeros — makes y_pred easy to check.
+        # Multiply by self.w so the output has a grad_fn for backprop.
+        class _ZeroProgModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                return torch.zeros(x.shape[0], N_PROG, x.shape[2], x.shape[3]) * self.w
+
+        trainer = Trainer(_ZeroProgModel(), rank=0, conf=conf)
+        assert trainer.static_dim_size == STATIC_DIM
+
+        # Known fixed tensors for each channel group
+        dynfrc_t1 = torch.full((B, N_DYNFRC, H, W), 1.0)
+        static_ch = torch.full((B, N_STATIC, H, W), 2.0)
+        prog_t1 = torch.full((B, N_PROG, H, W), 3.0)
+        dynfrc_t2 = torch.full((B, N_DYNFRC, H, W), 9.0)  # new forcing at t=2
+
+        step = [0]
+
+        class _PartialLoader:
+            """Step 1: full batch. Step 2: dynfrc only (simulates ERA5Dataset i>0)."""
+
+            dataset = _FakeDataset()
+            sampler = None
+
+            def __len__(self):
+                return 2
+
+            def __iter__(self):
+                # t=1 batch: all channel types present
+                full_input = {}
+                for i in range(N_DYNFRC):
+                    full_input[f"era5/dynamic_forcing/2d/df{i}"] = dynfrc_t1[:, i : i + 1]
+                for i in range(N_STATIC):
+                    full_input[f"era5/static/2d/st{i}"] = static_ch[:, i : i + 1]
+                for i in range(N_PROG):
+                    full_input[f"era5/prognostic/2d/p{i}"] = prog_t1[:, i : i + 1]
+                target = {f"era5/prognostic/2d/p{i}": prog_t1[:, i : i + 1] for i in range(N_PROG)}
+                yield {"era5": {"input": full_input, "target": target}}
+
+                # t=2 batch: only dynfrc (ERA5Dataset i>0 behavior)
+                partial_input = {f"era5/dynamic_forcing/2d/df{i}": dynfrc_t2[:, i : i + 1] for i in range(N_DYNFRC)}
+                yield {"era5": {"input": partial_input, "target": target}}
+
+        captured_x = {}
+
+        class _CapturingModel(_ZeroProgModel):
+            def forward(self, x):
+                captured_x[step[0]] = x.detach().clone()
+                step[0] += 1
+                return super().forward(x)
+
+        trainer.model = _CapturingModel()
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
+        criterion = nn.MSELoss()
+        scaler = torch.amp.GradScaler("cpu", enabled=False)
+        trainer.train_one_epoch(
+            epoch=0,
+            trainloader=_PartialLoader(),
+            optimizer=optimizer,
+            criterion=criterion,
+            scaler=scaler,
+            scheduler=None,
+            metrics=lambda p, y: {"acc": 0.0, "mae": 0.0},
+        )
+
+        x_t2 = captured_x[1]  # x fed to model at t=2
+        # dynfrc channels updated from t=2 batch
+        torch.testing.assert_close(x_t2[:, :N_DYNFRC], dynfrc_t2, atol=1e-5, rtol=1e-5)
+        # static channels preserved from t=1
+        torch.testing.assert_close(x_t2[:, N_DYNFRC:STATIC_DIM], static_ch, atol=1e-5, rtol=1e-5)
+        # prognostic channels replaced by y_pred (zeros from _ZeroProgModel)
+        torch.testing.assert_close(x_t2[:, STATIC_DIM:], torch.zeros(B, N_PROG, H, W), atol=1e-5, rtol=1e-5)
 
 
 # ---------------------------------------------------------------------------
@@ -906,7 +1020,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         """Explicit backprop_on_timestep in data conf is used directly (lines 102-103)."""
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
-        conf = _era5_v2_multistep_conf(forecast_len=3, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=3, tmp_path=tmp_path)
         conf["data"]["backprop_on_timestep"] = [2, 3]
 
         t = Trainer(_tiny_model(), rank=0, conf=conf)
@@ -917,7 +1031,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         """data_clamp in conf sets flag_clamp, clamp_min, clamp_max (lines 107-115)."""
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
-        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["data"]["data_clamp"] = [-5.0, 5.0]
 
         t = Trainer(_tiny_model(), rank=0, conf=conf)
@@ -930,7 +1044,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         """data_valid block used when present (lines 118-120)."""
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
-        conf = _era5_v2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         conf["data_valid"] = {"forecast_len": 4, "history_len": 2}
 
         t = Trainer(_tiny_model(), rank=0, conf=conf)
@@ -942,7 +1056,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         """retain_graph flag extracted from conf (line 98)."""
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
-        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["data"]["retain_graph"] = True
 
         t = Trainer(_tiny_model(), rank=0, conf=conf)
@@ -954,7 +1068,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         B, C, H, W = 1, 4, 4, 4
 
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
-        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
 
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
@@ -983,7 +1097,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         B, C, H, W = 1, 4, 4, 4
 
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
-        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["use_ema"] = True
         conf["trainer"]["ema_decay"] = 0.999
 
@@ -1020,7 +1134,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         B, C, H, W = 1, 4, 4, 4
 
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
-        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["grad_max_norm"] = 0.01  # very small to actually clip
 
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
@@ -1056,7 +1170,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         B, C, H, W = 1, 4, 4, 4
 
         model = nn.Conv2d(C, C, kernel_size=1, bias=False)
-        conf = _era5_v2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
+        conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["use_scheduler"] = True
         conf["trainer"]["scheduler"] = {"scheduler_type": "lambda"}
 
