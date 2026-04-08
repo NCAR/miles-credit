@@ -172,6 +172,10 @@ class TrainerERA5Gen2(BaseTrainer):
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
                 x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
+                # ERA5Dataset outputs 5D tensors (B, C, frames, H, W); collapse frames dim
+                if x_raw.dim() == 5:
+                    x_raw = x_raw.flatten(1, 2)
+                    y_raw = y_raw.flatten(1, 2)
 
                 if t == 1:
                     x = x_raw.to(self.device).float()
@@ -194,6 +198,9 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 with torch.autocast(device_type="cuda", enabled=self.amp):
                     y_pred = self.model(x)
+                # Model may output (B, C, frames, H, W); collapse frames dim to match x/y
+                if y_pred.dim() == 5:
+                    y_pred = y_pred.flatten(1, 2)
 
                 # postblock opts outside of model
                 if self.flag_mass_conserve:
@@ -323,6 +330,10 @@ class TrainerERA5Gen2(BaseTrainer):
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
                     x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
+                    # ERA5Dataset outputs 5D tensors (B, C, frames, H, W); collapse frames dim
+                    if x_raw.dim() == 5:
+                        x_raw = x_raw.flatten(1, 2)
+                        y_raw = y_raw.flatten(1, 2)
 
                     if t == 1:
                         x = x_raw.to(self.device).float()
@@ -341,6 +352,9 @@ class TrainerERA5Gen2(BaseTrainer):
                         x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
 
                     y_pred = self.model(x.float())
+                    # Model may output (B, C, frames, H, W); collapse frames dim to match x/y
+                    if y_pred.dim() == 5:
+                        y_pred = y_pred.flatten(1, 2)
 
                     # postblock opts outside of model
                     if self.flag_mass_conserve:

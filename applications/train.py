@@ -403,8 +403,10 @@ def main_cli():
     # handling config args
 
     conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
-    if "datasets" not in conf["data"].keys() and (
-        conf["data"]["dataset_type"] not in ("Ocean_MultiStep_Batcher", "Ocean_Tensor_Batcher")
+    if (
+        "datasets" not in conf["data"].keys()
+        and "source" not in conf["data"].keys()
+        and conf["data"].get("dataset_type") not in ("Ocean_MultiStep_Batcher", "Ocean_Tensor_Batcher")
     ):
         training_data_check(conf, print_summary=False)
         # todo: data check for downscaling mode

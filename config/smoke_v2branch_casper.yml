@@ -1,0 +1,169 @@
+# Smoke test for v2/trainer-preblocks branch
+# Single-GPU Casper, v1 trainer + ERA5 1deg data, wxformer
+# Goal: verify MSE drops and ACC rises in a few batches
+
+save_loc: '/glade/work/schreck/runs/CREDIT_runs/smoke_v2branch'
+seed: 1000
+
+data:
+    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    level_ids: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+
+    surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+    save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+    dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+    static_variables: ["z_norm", "land_sea_mask"]
+    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    save_loc_physics: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+
+    train_years: [2000, 2003]
+    valid_years: [2014, 2015]
+
+    scaler_type: 'std_new'
+    history_len: 1
+    valid_history_len: 1
+    forecast_len: 0
+    valid_forecast_len: 0
+    lead_time_periods: 6
+    skip_periods: null
+    static_first: False
+    dataset_type: ERA5_MultiStep_Batcher
+
+model:
+    type: "wxformer"
+    frames: 1
+    image_height: 181
+    image_width: 360
+    levels: 18
+    channels: 4
+    surface_channels: 4
+    input_only_channels: 4
+    output_only_channels: 0   # no diagnostics for speed
+
+    patch_width: 1
+    patch_height: 1
+    frame_patch_size: 1
+
+    dim: [32, 64, 128, 256]
+    depth: [2, 2, 2, 2]
+    global_window_size: [8, 4, 2, 1]
+    local_window_size: 4
+    cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+    cross_embed_strides: [2, 2, 2, 2]
+    attn_dropout: 0.
+    ff_dropout: 0.
+    upsample_with_ps: True
+
+    use_spectral_norm: True
+    upsample_v_conv: True
+    decoder_attention_type: "scse"
+    interp: False
+
+    padding_conf:
+        activate: True
+        mode: "earth"
+        pad_lat: [37, 38]
+        pad_lon: [76, 76]
+
+    post_conf:
+        activate: True
+        grid: 'equiangular'
+        tracer_fixer:
+            activate: True
+            denorm: True
+            tracer_name: ['specific_total_water']
+            tracer_thres: [1e-10]
+        global_mass_fixer:
+            activate: False
+            activate_outside_model: False
+        global_water_fixer:
+            activate: False
+            activate_outside_model: False
+        global_energy_fixer:
+            activate: False
+            activate_outside_model: False
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+    use_power_loss: False
+    use_spectral_loss: False
+    spectral_lambda_reg: 0.1
+    spectral_wavenum_init: 20
+    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
+    use_latitude_weights: True
+    use_variable_weights: False
+
+trainer:
+    type: era5
+    mode: none          # single GPU
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    save_backup_weights: False
+    save_best_weights: True
+    save_metric_vars: True
+
+    update_learning_rate: False
+    learning_rate: 1.0e-03
+    weight_decay: 0
+
+    train_batch_size: 2
+    valid_batch_size: 2
+    ensemble_size: 1
+
+    batches_per_epoch: 50
+    valid_batches_per_epoch: 10
+    stopping_patience: 50
+    skip_validation: False
+
+    start_epoch: 0
+    num_epoch: 3
+    reload_epoch: False
+    epochs: 3
+
+    use_scheduler: True
+    scheduler:
+      scheduler_type: cosine-annealing-restarts
+      first_cycle_steps: 50
+      cycle_mult: 1.0
+      max_lr: 1.0e-03
+      min_lr: 1.0e-06
+      warmup_steps: 10
+      gamma: 1.0
+
+    amp: False
+
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+
+    thread_workers: 4
+    valid_thread_workers: 2
+    prefetch_factor: 2
+
+pbs:
+    conda: "credit-main-casper"
+    job_name: "smoke_v2branch"
+    nodes: 1
+    ncpus: 8
+    ngpus: 1
+    mem: '64GB'
+    walltime: '1:00:00'
+    gpu_type: 'v100'
+    project: 'NAML0001'
+    queue: 'casper'

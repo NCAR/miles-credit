@@ -13,7 +13,9 @@ from credit.datasets.om4_multistep_batcher import (
     Ocean_Tensor_Batcher,
 )
 from credit.datasets.downscaling_dataset import DownscalingDataset
+from credit.datasets.multi_source import MultiSourceDataset
 from credit.datasets import setup_data_loading
+from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from credit.transforms import load_transforms
@@ -160,6 +162,14 @@ def load_dataset(conf, rank=0, world_size=1, is_train=True):
     Returns:
         Dataset: The loaded dataset.
     """
+
+    # Gen2 / MultiSourceDataset path: triggered by nested "source" key
+    if "source" in conf["data"]:
+        data_conf = conf["data"] if is_train else {**conf["data"], **conf.get("data_valid", {})}
+        dataset = MultiSourceDataset(data_conf, return_target=True)
+        train_flag = "training" if is_train else "validation"
+        logging.info("Loaded a %s MultiSourceDataset", train_flag)
+        return dataset
 
     is_downscaling = False
     if "datasets" in conf["data"]:
@@ -439,6 +449,31 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
     shuffle = is_train
 
     num_workers = conf["trainer"]["thread_workers"] if is_train else conf["trainer"]["valid_thread_workers"]
+    # Gen2 / MultiSourceDataset: early return with DistributedMultiStepBatchSampler
+    if isinstance(dataset, MultiSourceDataset):
+        data_conf = conf["data"] if is_train else {**conf["data"], **conf.get("data_valid", {})}
+        forecast_len = data_conf.get("forecast_len", 1)
+        prefetch_factor_gen2 = conf["trainer"].get("prefetch_factor", 4)
+        sampler = DistributedMultiStepBatchSampler(
+            dataset,
+            batch_size=batch_size,
+            num_forecast_steps=forecast_len,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=shuffle,
+            seed=seed,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_sampler=sampler,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor_gen2 if num_workers > 0 else None,
+            persistent_workers=num_workers > 0,
+        )
+        train_flag = "training" if is_train else "validation"
+        logging.info("Loaded a %s DataLoader for MultiSourceDataset.", train_flag)
+        return dataloader
+
     if type(dataset) is DownscalingDataset:
         forecast_len = conf["data"]["forecast_len"]
     else:
