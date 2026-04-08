@@ -1,0 +1,201 @@
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+=== regional smoke test ===
+Node : deg0017
+Date : Fri Apr  3 05:48:20 PM MDT 2026
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) ncarenv/24.12
+INFO:root:Running FSDP on rank 1 with world_size 4 using nccl.
+INFO:root:Running FSDP on rank 0 with world_size 4 using nccl.
+INFO:root:Running FSDP on rank 2 with world_size 4 using nccl.
+INFO:root:Running FSDP on rank 3 with world_size 4 using nccl.
+INFO:credit.transforms.transforms_wrf:WRF domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:WRF domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:WRF domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:WRF domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:Boundary domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:Boundary domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:Boundary domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:Boundary domain z-score parameters loaded
+INFO:root:Loaded a training wrf_singlestep dataset (forecast length = 1)
+INFO:root:Loaded a training wrf_singlestep dataset (forecast length = 1)
+INFO:root:Loaded a training wrf_singlestep dataset (forecast length = 1)
+INFO:root:Loaded a training wrf_singlestep dataset (forecast length = 1)
+INFO:credit.transforms.transforms_wrf:WRF domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:WRF domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:WRF domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:WRF domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:Boundary domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:Boundary domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:Boundary domain z-score parameters loaded
+INFO:credit.transforms.transforms_wrf:Boundary domain z-score parameters loaded
+INFO:root:Loaded a validation wrf_singlestep dataset (forecast length = 1)
+INFO:root:Loaded a validation wrf_singlestep dataset (forecast length = 1)
+INFO:root:Loaded a validation wrf_singlestep dataset (forecast length = 1)
+INFO:root:Loaded a validation wrf_singlestep dataset (forecast length = 1)
+INFO:root:Loaded a training DataLoader for the WRF_Dataset ERA dataset.
+INFO:root:Loaded a training DataLoader for the WRF_Dataset ERA dataset.
+INFO:root:Loaded a validation DataLoader for the WRF_Dataset ERA dataset.
+INFO:root:Loaded a training DataLoader for the WRF_Dataset ERA dataset.
+INFO:root:Loaded a validation DataLoader for the WRF_Dataset ERA dataset.
+INFO:root:Loaded a training DataLoader for the WRF_Dataset ERA dataset.
+INFO:root:Loaded a validation DataLoader for the WRF_Dataset ERA dataset.
+INFO:root:Loaded a validation DataLoader for the WRF_Dataset ERA dataset.
+INFO:credit.models:Loading WRF Transformer
+INFO:credit.models:Loading WRF Transformer
+INFO:credit.models:Loading WRF Transformer
+INFO:credit.models:Loading WRF Transformer
+INFO:credit.models.swin_wrf.swin_wrf:Adding spectral norm to all conv and linear layers
+INFO:credit.models.swin_wrf.swin_wrf:Adding spectral norm to all conv and linear layers
+INFO:credit.models.swin_wrf.swin_wrf:Adding spectral norm to all conv and linear layers
+INFO:credit.models.swin_wrf.swin_wrf:Adding spectral norm to all conv and linear layers
+INFO:credit.postblock._postblock:TracerFixer registered
+INFO:credit.postblock._postblock:TracerFixer registered
+INFO:credit.postblock._postblock:TracerFixer registered
+INFO:credit.postblock._postblock:TracerFixer registered
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 242, in <module>
+[rank1]:     main_cli()
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 238, in main_cli
+[rank1]:     main(world_rank, world_size, conf, args.backend)
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 165, in main
+[rank1]:     m = load_model(conf)
+[rank1]:         ^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 227, in load_model
+[rank1]:     return model(**model_conf)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin_wrf/swin_wrf.py", line 444, in __init__
+[rank1]:     self.postblock = PostBlock(post_conf)
+[rank1]:                      ^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 63, in __init__
+[rank1]:     opt = TracerFixer(post_conf)
+[rank1]:           ^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 125, in __init__
+[rank1]:     self.tracer_indices = post_conf["tracer_fixer"]["tracer_inds"]
+[rank1]:                           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+[rank1]: KeyError: 'tracer_inds'
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 242, in <module>
+[rank2]:     main_cli()
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 238, in main_cli
+[rank2]:     main(world_rank, world_size, conf, args.backend)
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 165, in main
+[rank2]:     m = load_model(conf)
+[rank2]:         ^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 227, in load_model
+[rank2]:     return model(**model_conf)
+[rank2]:            ^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin_wrf/swin_wrf.py", line 444, in __init__
+[rank2]:     self.postblock = PostBlock(post_conf)
+[rank2]:                      ^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 63, in __init__
+[rank2]:     opt = TracerFixer(post_conf)
+[rank2]:           ^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 125, in __init__
+[rank2]:     self.tracer_indices = post_conf["tracer_fixer"]["tracer_inds"]
+[rank2]:                           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+[rank2]: KeyError: 'tracer_inds'
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 242, in <module>
+[rank0]:     main_cli()
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 238, in main_cli
+[rank0]:     main(world_rank, world_size, conf, args.backend)
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 165, in main
+[rank0]:     m = load_model(conf)
+[rank0]:         ^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 227, in load_model
+[rank0]:     return model(**model_conf)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin_wrf/swin_wrf.py", line 444, in __init__
+[rank0]:     self.postblock = PostBlock(post_conf)
+[rank0]:                      ^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 63, in __init__
+[rank0]:     opt = TracerFixer(post_conf)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 125, in __init__
+[rank0]:     self.tracer_indices = post_conf["tracer_fixer"]["tracer_inds"]
+[rank0]:                           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+[rank0]: KeyError: 'tracer_inds'
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 242, in <module>
+[rank3]:     main_cli()
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 238, in main_cli
+[rank3]:     main(world_rank, world_size, conf, args.backend)
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py", line 165, in main
+[rank3]:     m = load_model(conf)
+[rank3]:         ^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/__init__.py", line 227, in load_model
+[rank3]:     return model(**model_conf)
+[rank3]:            ^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/models/swin_wrf/swin_wrf.py", line 444, in __init__
+[rank3]:     self.postblock = PostBlock(post_conf)
+[rank3]:                      ^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 63, in __init__
+[rank3]:     opt = TracerFixer(post_conf)
+[rank3]:           ^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/glade/work/schreck/repos/miles-credit-main/credit/postblock/_postblock.py", line 125, in __init__
+[rank3]:     self.tracer_indices = post_conf["tracer_fixer"]["tracer_inds"]
+[rank3]:                           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+[rank3]: KeyError: 'tracer_inds'
+[rank0]:[W403 17:50:20.827800496 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W0403 17:50:21.697000 35162 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 39713 closing signal SIGTERM
+E0403 17:50:22.061000 35162 site-packages/torch/distributed/elastic/multiprocessing/api.py:874] failed (exitcode: 1) local_rank: 0 (pid: 39712) of binary: /glade/work/schreck/conda-envs/credit-main-derecho/bin/python
+Traceback (most recent call last):
+  File "/glade/work/schreck/conda-envs/credit-main-derecho/bin/torchrun", line 9, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/distributed/run.py", line 901, in main
+    run(args)
+  File "/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/distributed/run.py", line 892, in run
+    elastic_launch(
+  File "/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 143, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 277, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/glade/work/schreck/repos/miles-credit-main/applications/train_v2_regional.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-04-03_17:50:21
+  host      : deg0017.hsn.de.hpc.ucar.edu
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 39714)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-04-03_17:50:21
+  host      : deg0017.hsn.de.hpc.ucar.edu
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 39715)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-04-03_17:50:21
+  host      : deg0017.hsn.de.hpc.ucar.edu
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 39712)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+
+=== done Fri Apr  3 05:50:22 PM MDT 2026 ===

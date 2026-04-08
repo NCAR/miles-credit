@@ -62,7 +62,7 @@ def _repo_root() -> str:
 
 
 def _train(args: argparse.Namespace) -> None:
-    from credit.applications.train_v2 import main_cli
+    from credit.applications.train_gen2 import main_cli
 
     sys.argv = ["credit-train", "-c", args.config, "--backend", args.backend]
     main_cli()
@@ -395,7 +395,7 @@ def _build_pbs_script(
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
             {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
-                ${{REPO}}/applications/train_v2.py -c ${{CONFIG}}
+                ${{REPO}}/applications/train_gen2.py -c ${{CONFIG}}
         """)
 
     else:  # derecho
@@ -454,7 +454,7 @@ def _build_pbs_script(
                     --standalone \\
                     --nnodes=1 \\
                     --nproc-per-node={args.gpus} \\
-                    ${{REPO}}/applications/train_v2.py -c ${{CONFIG}}
+                    ${{REPO}}/applications/train_gen2.py -c ${{CONFIG}}
             """)
         else:
             # Multi-node: MPI + c10d rendezvous via head-node IP
@@ -471,7 +471,7 @@ def _build_pbs_script(
                         --nproc-per-node={args.gpus} \\
                         --rdzv-backend=c10d \\
                         --rdzv-endpoint="${{head_node_ip}}:${{RDZV_PORT}}" \\
-                    ${{REPO}}/applications/train_v2.py -c ${{CONFIG}}
+                    ${{REPO}}/applications/train_gen2.py -c ${{CONFIG}}
             """)
 
         return header + launch
@@ -855,7 +855,7 @@ def _init(args: argparse.Namespace) -> None:
 def _build_channel_map(conf):
     """Return a dict mapping variable name -> list of channel indices in the output tensor.
 
-    Channel order mirrors ConcatPreblock TARGET_FIELD_ORDER:
+    Channel order follows ERA5Dataset insertion order (target):
         prognostic/3D (each var × n_levels), prognostic/2D, diagnostic/2D
     """
     src = conf["data"]["source"]["ERA5"]
@@ -879,7 +879,7 @@ def _build_channel_map(conf):
 
 
 def _build_denorm_stats(conf):
-    """Return (mean_arr, std_arr) aligned with ConcatPreblock TARGET_FIELD_ORDER output channels.
+    """Return (mean_arr, std_arr) aligned with ERA5Dataset target channel order.
 
     Channel order: prognostic/3D (each var × n_levels), prognostic/2D, diagnostic/2D.
     Variables missing from the stat files get mean=0, std=1 (pass-through).
@@ -899,8 +899,9 @@ def _build_denorm_stats(conf):
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
 
-    mean_ds = xr.open_dataset(conf["data"]["mean_path"]).load()
-    std_ds = xr.open_dataset(conf["data"]["std_path"]).load()
+    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", {})
+    mean_ds = xr.open_dataset(norm_args["mean_path"]).load()
+    std_ds = xr.open_dataset(norm_args["std_path"]).load()
 
     def _stats(varname, is_3d):
         if varname not in mean_ds or varname not in std_ds:
@@ -1629,7 +1630,6 @@ def _plot(args: argparse.Namespace) -> None:
         logger.warning("cartopy not found — using plain lat/lon axes. Install cartopy for globe projections.")
 
     import torch
-    import torch.nn as nn
 
     with open(args.config) as f:
         conf = yaml.safe_load(f)
@@ -1659,7 +1659,7 @@ def _plot(args: argparse.Namespace) -> None:
     # ---- Load one validation sample ----
     import pandas as pd
     from credit.datasets.multi_source import MultiSourceDataset
-    from credit.preblock import ERA5Normalizer, ConcatPreblock, apply_preblocks
+    from credit.preblock import build_preblocks, apply_preblocks
 
     data_conf = conf.get("data_valid", conf["data"])
 
@@ -1687,16 +1687,11 @@ def _plot(args: argparse.Namespace) -> None:
     # default_collate adds the batch dimension exactly as the DataLoader would
     batch = default_collate([sample])
 
-    preblocks = nn.ModuleDict(
-        {
-            "norm": ERA5Normalizer(conf),
-            "concat": ConcatPreblock(),
-        }
-    )
-    batch = apply_preblocks(preblocks, batch)
+    preblocks = build_preblocks(conf.get("preblocks", {}))
+    x, y, _ = apply_preblocks(preblocks, batch)
 
-    x = batch["x"].to(device)  # (1, C_in, T, H, W)
-    y = batch["y"]  # (1, C_out, T, H, W)
+    x = x.to(device)  # (1, C_in, T, H, W)
+    # y is (1, C_out, T, H, W)
 
     # ---- Forward pass ----
     with torch.no_grad():

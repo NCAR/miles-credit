@@ -5,7 +5,7 @@ Rollout entry point for the v2 data schema (conf["data"]["source"]).
 
 Key differences from rollout_to_netcdf.py (v1):
   - No credit_main_parser / predict_data_check (those are v1-only)
-  - Uses ERA5Dataset + ERA5Normalizer + ConcatPreblock for data loading
+  - Uses ERA5Dataset + build_preblocks/apply_preblocks for data loading
   - Inverse-normalization built from mean/std NC files (per-channel)
   - Injects flat data schema keys for output.py compatibility
   - forecast_len semantics: N steps at lead_time_periods hours per step
@@ -30,11 +30,10 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 import torch
-import torch.nn as nn
 import xarray as xr
 
 from credit.datasets.era5 import ERA5Dataset
-from credit.preblock import ERA5Normalizer, ConcatPreblock, apply_preblocks
+from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info, setup, distributed_model_wrapper
@@ -103,7 +102,7 @@ def _inject_tracer_inds(conf):
 def _build_output_denorm(conf, device, dtype=torch.float32):
     """Build (mean, std) tensors of shape (1, C_out, 1, 1, 1) for inverse-normalizing y_pred.
 
-    Channel order matches ConcatPreblock _TARGET_FIELD_ORDER:
+    Channel order follows ERA5Dataset target insertion order:
         prognostic/3d (each var × n_levels), prognostic/2d, diagnostic/2d
     """
     data_conf = conf["data"]
@@ -115,8 +114,9 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
 
-    mean_ds = xr.open_dataset(data_conf["mean_path"]).load()
-    std_ds = xr.open_dataset(data_conf["std_path"]).load()
+    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", {})
+    mean_ds = xr.open_dataset(norm_args["mean_path"]).load()
+    std_ds = xr.open_dataset(norm_args["std_path"]).load()
 
     def _stats(varname, is_3d):
         if varname not in mean_ds:
@@ -214,20 +214,18 @@ def predict(rank, world_size, conf, p):
     static_v = v.get("static") or {}
     n_levels = len(src["levels"])
 
-    # channel counts
+    # channel counts — ERA5Dataset input insertion order: [dynfrc | static | prog]
     n_prog = len(prog.get("vars_3D", [])) * n_levels + len(prog.get("vars_2D", []))
     n_dyn = len(dyn.get("vars_2D", []))
+    n_static = len(static_v.get("vars_2D", []))
+    static_dim_size = n_dyn + n_static  # channels before prognostic in x
     varnum_diag = len(diag.get("vars_2D", [])) + len(diag.get("vars_3D", [])) * n_levels
 
     lead_time_periods = conf["data"]["lead_time_periods"]
     forecast_steps = conf["predict"].get("forecast_steps", conf["predict"].get("days", 1) * (24 // lead_time_periods))
 
     # ---- Preblocks ----
-    preblocks_dict = {}
-    if conf["data"].get("scaler_type") == "std_new":
-        preblocks_dict["norm"] = ERA5Normalizer(conf)
-    preblocks_dict["concat"] = ConcatPreblock()
-    preblocks = nn.ModuleDict(preblocks_dict)
+    preblocks = build_preblocks(conf.get("preblocks", {}))
 
     # ---- Inverse normalization ----
     denorm_mean, denorm_std = _build_output_denorm(conf, device)
@@ -276,8 +274,8 @@ def predict(rank, world_size, conf, p):
             # Step 0: load full initial state
             sample_full = dataset[(t0, 0)]
             batch_full = _sample_to_batch(sample_full)
-            batch_full = apply_preblocks(preblocks, batch_full)
-            x = batch_full["x"].to(device).float()  # (1, C_in, 1, H, W)
+            x, _ = apply_preblocks(preblocks, batch_full)
+            x = x.to(device).float()  # (1, C_in, 1, H, W)
 
             x_init = None
             results = []
@@ -317,13 +315,13 @@ def predict(rank, world_size, conf, p):
                     t_next = t0 + step * dt
                     sample_frc = dataset[(t_next, 1)]  # loads only dynamic_forcing
                     batch_frc = _sample_to_batch(sample_frc)
-                    batch_frc = apply_preblocks(preblocks, batch_frc)
-                    x_frc = batch_frc["x"].to(device).float()  # (1, n_dyn, 1, H, W)
+                    x_frc, _ = apply_preblocks(preblocks, batch_frc)
+                    x_frc = x_frc.to(device).float()  # (1, n_dyn, 1, H, W)
 
-                    # Replace prognostic with y_pred, forcing with new data, static unchanged
-                    x[:, :n_prog, ...] = y_pred[:, :n_prog, ...].detach()
-                    x[:, n_prog : n_prog + n_dyn, ...] = x_frc
-                    # x[:, n_prog+n_dyn:, ...] stays (static)
+                    # ERA5Dataset insertion order: [dynfrc | static | prog]
+                    x[:, :n_dyn, ...] = x_frc  # update dynamic forcing
+                    x[:, static_dim_size:, ...] = y_pred[:, :n_prog, ...].detach()  # update prognostic
+                    # x[:, n_dyn:static_dim_size, ...] stays (static)
 
             for result in results:
                 result.get()

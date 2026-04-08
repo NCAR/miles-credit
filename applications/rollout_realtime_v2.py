@@ -34,12 +34,11 @@ from multiprocessing.shared_memory import SharedMemory
 import pandas as pd
 import numpy as np
 import torch
-import torch.nn as nn
 import xarray as xr
 from tqdm import tqdm
 
 from credit.datasets.era5 import ERA5Dataset
-from credit.preblock import ERA5Normalizer, ConcatPreblock, apply_preblocks
+from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info, setup, distributed_model_wrapper
@@ -208,15 +207,14 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     prog = v.get("prognostic") or {}
     dyn = v.get("dynamic_forcing") or {}
     n_levels = len(src["levels"])
+    # ERA5Dataset input insertion order: [dynfrc | static | prog]
     n_prog = len(prog.get("vars_3D", [])) * n_levels + len(prog.get("vars_2D", []))
     n_dyn = len(dyn.get("vars_2D", []))
+    n_static = len(v.get("static", {}).get("vars_2D", []))
+    static_dim_size = n_dyn + n_static
 
     # ---- Preblocks ----
-    preblocks_dict = {}
-    if conf["data"].get("scaler_type") == "std_new":
-        preblocks_dict["norm"] = ERA5Normalizer(conf)
-    preblocks_dict["concat"] = ConcatPreblock()
-    preblocks = nn.ModuleDict(preblocks_dict)
+    preblocks = build_preblocks(conf.get("preblocks", {}))
 
     # ---- Inverse normalizer ----
     denorm_mean, denorm_std = _build_output_denorm(conf, device)
@@ -279,8 +277,8 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     # ---- Load full initial state ----
     sample_full = dataset[(init_time, 0)]
     batch_full = _sample_to_batch(sample_full)
-    batch_full = apply_preblocks(preblocks, batch_full)
-    x = batch_full["x"].to(device).float()  # (1, C_in, 1, H, W)
+    x, _ = apply_preblocks(preblocks, batch_full)
+    x = x.to(device).float()  # (1, C_in, 1, H, W)
 
     results = []
     x_init = None
@@ -316,12 +314,13 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
                 t_next = init_time + step * dt
                 sample_frc = dataset[(t_next, 1)]  # only dynamic_forcing
                 batch_frc = _sample_to_batch(sample_frc)
-                batch_frc = apply_preblocks(preblocks, batch_frc)
-                x_frc = batch_frc["x"].to(device).float()
+                x_frc, _ = apply_preblocks(preblocks, batch_frc)
+                x_frc = x_frc.to(device).float()
 
-                x[:, :n_prog, ...] = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
-                x[:, n_prog : n_prog + n_dyn, ...] = x_frc
-                # x[:, n_prog+n_dyn:, ...] — static unchanged
+                # ERA5Dataset insertion order: [dynfrc | static | prog]
+                x[:, :n_dyn, ...] = x_frc
+                x[:, static_dim_size:, ...] = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
+                # x[:, n_dyn:static_dim_size, ...] — static unchanged
 
     for r in results:
         r.get()

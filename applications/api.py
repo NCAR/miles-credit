@@ -41,7 +41,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 import xarray as xr
 import yaml
 from fastapi import FastAPI, HTTPException
@@ -59,7 +58,7 @@ from credit.datasets.era5 import ERA5Dataset
 from credit.models import load_model
 from credit.output import load_metadata
 from credit.postblock import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
-from credit.preblock import ConcatPreblock, ERA5Normalizer, apply_preblocks
+from credit.preblock import build_preblocks, apply_preblocks
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +93,8 @@ async def lifespan(app: FastAPI):
     model.eval()
     logger.info("Model ready.")
 
-    # Normalizer preblocks
-    preblocks_dict = {}
-    if conf["data"].get("scaler_type") == "std_new":
-        preblocks_dict["norm"] = ERA5Normalizer(conf)
-    preblocks_dict["concat"] = ConcatPreblock()
-    preblocks = nn.ModuleDict(preblocks_dict)
+    # Preblocks — driven from config preblocks: section
+    preblocks = build_preblocks(conf.get("preblocks", {}))
 
     # Inverse-normalisation stats (for physical-unit output)
     denorm_mean, denorm_std = _build_output_denorm(conf, device)
@@ -110,14 +105,17 @@ async def lifespan(app: FastAPI):
     lon = latlons.longitude.values
     meta_data = load_metadata(conf)
 
-    # Channel counts (needed to splice prognostic / dynamic-forcing channels)
+    # Channel counts — ERA5Dataset input insertion order: [dynfrc | static | prog]
     src = conf["data"]["source"]["ERA5"]
     v = src["variables"]
     prog = v.get("prognostic") or {}
     dyn = v.get("dynamic_forcing") or {}
+    static_v = v.get("static") or {}
     n_levels = len(src["levels"])
     n_prog = len(prog.get("vars_3D", [])) * n_levels + len(prog.get("vars_2D", []))
     n_dyn = len(dyn.get("vars_2D", []))
+    n_static = len(static_v.get("vars_2D", []))
+    static_dim_size = n_dyn + n_static
 
     _STATE.update(
         conf=conf,
@@ -131,6 +129,7 @@ async def lifespan(app: FastAPI):
         meta_data=meta_data,
         n_prog=n_prog,
         n_dyn=n_dyn,
+        static_dim_size=static_dim_size,
     )
 
     yield  # ← server is running
@@ -221,6 +220,7 @@ def forecast(req: ForecastRequest):
     meta_data = _STATE["meta_data"]
     n_prog = _STATE["n_prog"]
     n_dyn = _STATE["n_dyn"]
+    static_dim_size = _STATE["static_dim_size"]
 
     # ---- Parse init time ----
     try:
@@ -273,8 +273,8 @@ def forecast(req: ForecastRequest):
         raise HTTPException(422, f"Could not load initial state for {init_str}: {e}")
 
     batch = _sample_to_batch(sample)
-    batch = apply_preblocks(preblocks, batch)
-    x = batch["x"].to(device).float()  # (1, C_in, 1, H, W)
+    x, _ = apply_preblocks(preblocks, batch)
+    x = x.to(device).float()  # (1, C_in, 1, H, W)
 
     # ---- Autoregressive rollout ----
     x_init = None
@@ -324,12 +324,13 @@ def forecast(req: ForecastRequest):
                     t_next = init_time + step * dt
                     sample_frc = dataset[(t_next, 1)]  # dynamic_forcing only
                     batch_frc = _sample_to_batch(sample_frc)
-                    batch_frc = apply_preblocks(preblocks, batch_frc)
-                    x_frc = batch_frc["x"].to(device).float()
+                    x_frc, _ = apply_preblocks(preblocks, batch_frc)
+                    x_frc = x_frc.to(device).float()
 
-                    x[:, :n_prog, ...] = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
-                    x[:, n_prog : n_prog + n_dyn, ...] = x_frc
-                    # static channels (n_prog+n_dyn:) are unchanged
+                    # ERA5Dataset insertion order: [dynfrc | static | prog]
+                    x[:, :n_dyn, ...] = x_frc
+                    x[:, static_dim_size:, ...] = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
+                    # x[:, n_dyn:static_dim_size, ...] — static unchanged
 
         for r in results:
             r.get()
