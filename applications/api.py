@@ -47,7 +47,7 @@ from fastapi import FastAPI, HTTPException
 from multiprocessing.shared_memory import SharedMemory
 from pydantic import BaseModel
 
-from credit.applications.rollout_realtime_v2 import (
+from credit.applications.rollout_realtime_gen2 import (
     _build_output_denorm,
     _inject_flat_schema,
     _inject_tracer_inds,

@@ -268,7 +268,7 @@ def _convert(args: argparse.Namespace) -> None:
     # ------------------------------------------------------------------
     print()
     base, ext = os.path.splitext(args.config)
-    default_out = getattr(args, "output", None) or (f"{base}_v2{ext}" if ext else f"{args.config}_gen2.yml")
+    default_out = getattr(args, "output", None) or (f"{base}_gen2{ext}" if ext else f"{args.config}_gen2.yml")
     out_path = _prompt("Output config path", default=default_out)
 
     with open(out_path, "w") as f:
