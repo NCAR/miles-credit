@@ -1,17 +1,31 @@
+import logging
+
 import torch.nn as nn
+
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
-from credit.preblock.scaler import BridgeScalerTransformer
 from credit.preblock.regrid import Regridder
 from credit.preblock.concat import ConcatToTensor
+
+# bridgescaler depends on numba which requires NumPy ≤ 2.2
+try:
+    from credit.preblock.scaler import BridgeScalerTransformer
+
+    _BRIDGESCALER_AVAILABLE = True
+except (ImportError, Exception) as _e:
+    logging.warning(f"BridgeScalerTransformer unavailable (numba/NumPy conflict): {_e}")
+    BridgeScalerTransformer = None
+    _BRIDGESCALER_AVAILABLE = False
 
 PREBLOCK_REGISTRY = {
     "log_transform": LogTransform,
     "sqrt_transform": SqrtTransform,
-    "bridgescaler_transform": BridgeScalerTransformer,
     "regrid": Regridder,
     "concat": ConcatToTensor,
 }
+
+if _BRIDGESCALER_AVAILABLE:
+    PREBLOCK_REGISTRY["bridgescaler_transform"] = BridgeScalerTransformer
 
 
 def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
