@@ -1,1 +1,1 @@
-../../applications/rollout_to_netcdf_v2.py
+../../applications/rollout_to_netcdf_gen2.py
