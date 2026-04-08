@@ -667,11 +667,6 @@ surface_channels: 7
 
 Here's an **expanded and structured section** detailing the **model configuration**, including explanations of **architecture choices, spatial resolution, patch embeddings, attention mechanisms, and normalization techniques**.  
 
----
-## Model Configuration  
-
-The `model` section defines the **architecture and input structure** for CREDIT.  
-
 ### Selecting a Model Architecture  
 
 ```yaml
