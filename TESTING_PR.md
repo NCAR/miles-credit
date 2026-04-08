@@ -163,16 +163,16 @@ You'll be asked a series of questions:
 - Enable EMA? (new v2 feature, recommended)
 - Enable TensorBoard?
 - PBS settings (account, conda env, walltime, etc.)
-- Output file path (defaults to `wxformer_1dg_6hr_v2.yml`)
+- Output file path (defaults to `wxformer_1dg_6hr_gen2.yml`)
 
 **What it auto-applies (no questions):**
-- `trainer.type: era5` → `era5-v2`
+- `trainer.type: era5` → `era5-gen2`
 - `data.forecast_len`: +1 (v2 semantics: 1 = single step, v1 used 0)
 - `data.valid_forecast_len`: +1
 - `data.backprop_on_timestep`: shifted to 1-indexed
 
-**Check the output** — open the generated `_v2.yml` and verify:
-- `trainer.type` is `era5-v2`
+**Check the output** — open the generated `_gen2.yml` and verify:
+- `trainer.type` is `era5-gen2`
 - `data.forecast_len` is one higher than the original
 - `trainer.use_ema` and `trainer.use_tensorboard` are set as you answered
 - `pbs:` block has your account and conda env

@@ -9,7 +9,7 @@
 | `starter_v2.yml` | Minimal template with `# USER SETTINGS` comments |
 | `example-v2026.1.0.yml` | Fully annotated reference — every option explained |
 
-All four use `trainer.type: era5-v2` and the current data schema.
+All four use `trainer.type: era5-gen2` and the current data schema.
 To generate a fresh config from a template: `credit init --grid 1deg -o my_config.yml`
 To convert a v1 config: `credit convert -c old_model.yml`
 

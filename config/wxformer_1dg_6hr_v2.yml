@@ -93,7 +93,7 @@ data_valid:
     std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
 
 trainer:
-    type: era5-v2
+    type: era5-gen2
 
     mode: ddp
     cpu_offload: False

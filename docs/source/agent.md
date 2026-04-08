@@ -162,10 +162,10 @@ a large run, etc.
 ### Understand source code
 
 ```bash
-credit ask "walk me through how ConcatPreblock assembles the batch tensor — what goes into x and what goes into y?"
+credit ask "walk me through how apply_preblocks assembles the batch tensor — what goes into x and what goes into y?"
 ```
 
-The agent reads `credit/preblock/concat.py` and the relevant trainer code and gives you a
+The agent reads `credit/preblock/__init__.py` and the relevant trainer code and gives you a
 plain-English explanation with line references.
 
 ### Compare two configs
@@ -240,7 +240,7 @@ the agent starts with your full run setup and gets to the answer faster.
 **Be specific about what went wrong.**  "it crashed" forces the agent to explore; "it crashed
 with CUDA OOM at epoch 3" lets it skip the discovery phase and go straight to solutions.
 
-**For source code questions, name the thing.**  "how does ConcatPreblock work?" is better
+**For source code questions, name the thing.**  "how does apply_preblocks work?" is better
 than "how does the data pipeline work?" because the agent can immediately read the right module.
 
 **Use `--max-turns` for very complex tasks.**  The default of 20 is enough for most

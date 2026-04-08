@@ -9,7 +9,7 @@ Add one line to the `trainer` block of your config:
 
 ```yaml
 trainer:
-    type: era5-v2
+    type: era5-gen2
     use_tensorboard: True   # <-- add this
     ...
 ```

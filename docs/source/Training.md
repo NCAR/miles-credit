@@ -80,7 +80,7 @@ every time.
 # ---- Derecho ----------------------------------------------------------------
 pbs:
     project: "NCAR0001"        # YOUR allocation code (PBS -A) — change this!
-    job_name: "credit_v2"      # job name shown in qstat
+    job_name: "credit_gen2"      # job name shown in qstat
     walltime: "12:00:00"       # wall-clock limit per job (HH:MM:SS)
     nodes: 1                   # number of nodes (derecho only; casper is always 1)
     ncpus: 64                  # CPUs per node
@@ -94,7 +94,7 @@ pbs:
 # ---- Casper -----------------------------------------------------------------
 pbs:
     project: "NCAR0001"
-    job_name: "credit_v2"
+    job_name: "credit_gen2"
     walltime: "04:00:00"
     ncpus: 8
     ngpus: 1
@@ -221,11 +221,11 @@ tensorboard --logdir /glade/derecho/scratch/$USER/CREDIT_runs/my_run/tensorboard
 
 ### Trainer configuration
 
-Set `trainer.type: era5-v2` in your config. Key fields:
+Set `trainer.type: era5-gen2` in your config. Key fields:
 
 ```yaml
 trainer:
-    type: era5-v2
+    type: era5-gen2
     mode: ddp               # none | ddp | fsdp
     train_batch_size: 8     # per-GPU; total = batch_size × n_gpus
     num_epoch: 5            # epochs per job submission

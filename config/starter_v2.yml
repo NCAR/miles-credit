@@ -109,7 +109,7 @@ data_valid:
 
 # ---- USER SETTINGS: training hyperparameters ---- #
 trainer:
-    type: era5-v2           # use the v2 trainer (new nested data schema)
+    type: era5-gen2           # use the v2 trainer (new nested data schema)
 
     mode: ddp               # none | ddp | fsdp  (ddp recommended for multi-GPU)
     cpu_offload: False

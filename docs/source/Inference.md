@@ -165,7 +165,7 @@ predict:
 
 ## Running Rollouts with the v2 Data Schema
 
-If you trained with `trainer.type: era5-v2`, use the v2 rollout commands.
+If you trained with `trainer.type: era5-gen2`, use the v2 rollout commands.
 The same YAML config used for training drives inference — no separate rollout config is needed.
 
 ### Batch rollout to NetCDF
