@@ -182,15 +182,21 @@ class TrainerERA5Gen2(BaseTrainer):
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
                 else:
-                    # Roll x forward: take new batch's forcing/static, replace prog with y_pred
-                    x_new = x_raw.to(self.device).float()
+                    # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
+                    # Build full input: start from previous x, update dynfrc and
+                    # prognostic slices; static channels stay unchanged.
+                    # ERA5Dataset insertion order: [dynfrc | static | prog]
+                    x_dynfrc = x_raw.to(self.device).float()
                     if self.ensemble_size > 1:
-                        x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
-                    n_prog = x_new.shape[1] - self.static_dim_size
+                        x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
+                    n_dynfrc = x_dynfrc.shape[1]
+                    n_prog = x.shape[1] - self.static_dim_size
                     y_pred_prog = y_pred[:, :n_prog, ...]
                     if not self.retain_graph:
                         y_pred_prog = y_pred_prog.detach()
-                    x_new[:, :n_prog, ...] = y_pred_prog
+                    x_new = x.clone()
+                    x_new[:, :n_dynfrc, ...] = x_dynfrc
+                    x_new[:, self.static_dim_size :, ...] = y_pred_prog
                     x = x_new
 
                 if self.flag_clamp:
@@ -340,12 +346,17 @@ class TrainerERA5Gen2(BaseTrainer):
                         if self.ensemble_size > 1:
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
                     else:
-                        # Roll x forward for multi-step validation rollout
-                        x_new = x_raw.to(self.device).float()
+                        # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
+                        # Build full input: start from previous x, update dynfrc and
+                        # prognostic slices; static channels stay unchanged.
+                        x_dynfrc = x_raw.to(self.device).float()
                         if self.ensemble_size > 1:
-                            x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
-                        n_prog = x_new.shape[1] - self.static_dim_size
-                        x_new[:, :n_prog, ...] = y_pred[:, :n_prog, ...].detach()
+                            x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
+                        n_dynfrc = x_dynfrc.shape[1]
+                        n_prog = x.shape[1] - self.static_dim_size
+                        x_new = x.clone()
+                        x_new[:, :n_dynfrc, ...] = x_dynfrc
+                        x_new[:, self.static_dim_size :, ...] = y_pred[:, :n_prog, ...].detach()
                         x = x_new
 
                     if self.flag_clamp:
