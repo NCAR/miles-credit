@@ -354,6 +354,11 @@ class BaseTrainer(ABC):
         # Cap total epochs by num_epoch
         epoch_limit = min(epochs, start_epoch + self.num_epoch)
 
+        # Some datasets (e.g. ERA5_MultiStep_Batcher) need set_epoch called before
+        # __getitem__ is accessible; initialize here so preflight doesn't crash.
+        if hasattr(train_loader.dataset, "set_epoch"):
+            train_loader.dataset.set_epoch(start_epoch)
+
         # Preflight: check DataLoader memory and first-batch latency (rank-0 only)
         timeout_s = conf.get("trainer", {}).get("dataloader_timeout_s", 300)
         check_dataloader_startup(conf, train_loader, rank=self.rank, timeout_s=timeout_s)
