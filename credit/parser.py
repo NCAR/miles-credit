@@ -106,8 +106,6 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # many config options don't apply when downscaling to regional
     is_downscaling = "datasets" in conf["data"]
-    # Gen2 configs use a nested "source" key instead of flat "variables"/"save_loc" keys
-    is_gen2 = "source" in conf["data"]
     dataset_type = conf["data"].get("dataset_type", None)
     if isinstance(dataset_type, str):
         is_ocean = "Ocean" in dataset_type
@@ -184,11 +182,6 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
         # end new-style conf['data'] check
         # ===========================================#
-
-    elif is_gen2:
-        # Gen2 (MultiSourceDataset): data is specified under conf["data"]["source"];
-        # no Gen1 flat variable keys required.
-        conf["data"].setdefault("data_clamp", None)
 
     else:
         # must have upper-air variables
@@ -483,7 +476,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     if post_conf["activate"] and not activate_any:
         raise ("post_conf is set activate, but no post modules specified")
 
-    if conf["model"]["post_conf"]["activate"] and not is_gen2:
+    if conf["model"]["post_conf"]["activate"]:
         # copy only model configs to post_conf subdictionary
         conf["model"]["post_conf"]["model"] = {k: v for k, v in conf["model"].items() if k != "post_conf"}
         # copy data configs to post_conf (for de-normalize variables)

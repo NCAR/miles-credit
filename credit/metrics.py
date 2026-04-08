@@ -4,25 +4,15 @@ from datetime import datetime
 from credit.losses.weighted_loss import latitude_weights
 
 
-def _extract_var_names(conf):
-    """Return (atmos_vars, surface_vars, diag_vars) for Gen1 and Gen2 configs."""
-    if "source" in conf["data"]:
-        src = next(iter(conf["data"]["source"].values()))
-        prog = (src.get("variables") or {}).get("prognostic") or {}
-        diag_cfg = (src.get("variables") or {}).get("diagnostic") or {}
-        return prog.get("vars_3D") or [], prog.get("vars_2D") or [], diag_cfg.get("vars_2D") or []
-    return (
-        conf["data"]["variables"],
-        conf["data"]["surface_variables"],
-        conf["data"]["diagnostic_variables"],
-    )
-
-
 class LatWeightedMetrics:
     def __init__(self, conf, training_mode=True):
         self.conf = conf
-        atmos_vars, surface_vars, diag_vars = _extract_var_names(conf)
+        atmos_vars = conf["data"]["variables"]
+        surface_vars = conf["data"]["surface_variables"]
+        diag_vars = conf["data"]["diagnostic_variables"]
+
         levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
+
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
         self.vars += diag_vars
@@ -105,10 +95,14 @@ class LatWeightedMetricsClimatology:
         self.conf = conf
         self.climatology = climatology  # xarray Dataset with climatology data
 
-        atmos_vars, surface_vars, diag_vars = _extract_var_names(conf)
+        atmos_vars = conf["data"]["variables"]
+        surface_vars = conf["data"]["surface_variables"]
+        diag_vars = conf["data"]["diagnostic_variables"]
+
         levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
+
         self.vars += surface_vars
         self.vars += diag_vars
         self.acc_vars = surface_vars + diag_vars
@@ -232,8 +226,12 @@ class LatWeightedMetricsEnsemble:
 
     def __init__(self, conf, training_mode=True):
         self.conf = conf
-        atmos_vars, surface_vars, diag_vars = _extract_var_names(conf)
+        atmos_vars = conf["data"]["variables"]
+        surface_vars = conf["data"]["surface_variables"]
+        diag_vars = conf["data"]["diagnostic_variables"]
+
         levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
+
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
         self.vars += diag_vars

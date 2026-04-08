@@ -141,20 +141,11 @@ class VariableTotalLoss2D(torch.nn.Module):
         self.conf = conf
         self.training_loss = conf["loss"]["training_loss"]
 
-        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
+        atmos_vars = conf["data"]["variables"]
+        surface_vars = conf["data"]["surface_variables"]
+        diag_vars = conf["data"]["diagnostic_variables"]
 
-        if "source" in conf["data"]:
-            # Gen2: extract var names from nested source config
-            src = next(iter(conf["data"]["source"].values()))
-            prog = (src.get("variables") or {}).get("prognostic") or {}
-            diag_cfg = (src.get("variables") or {}).get("diagnostic") or {}
-            atmos_vars = prog.get("vars_3D") or []
-            surface_vars = prog.get("vars_2D") or []
-            diag_vars = diag_cfg.get("vars_2D") or []
-        else:
-            atmos_vars = conf["data"]["variables"]
-            surface_vars = conf["data"]["surface_variables"]
-            diag_vars = conf["data"]["diagnostic_variables"]
+        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
