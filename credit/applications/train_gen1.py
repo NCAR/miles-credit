@@ -1,1 +1,1 @@
-../../applications/train.py
+../../applications/train_gen1.py
