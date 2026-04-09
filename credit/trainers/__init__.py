@@ -2,7 +2,7 @@ import copy
 import logging
 
 # Import trainer classes
-from credit.trainers.trainerERA5 import TrainerERA5
+from credit.trainers.trainerERA5gen1 import TrainerERA5
 from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2
 from credit.trainers.trainerERA5_Diffusion import TrainerERA5Diffusion
 from credit.trainers.trainerERA5_ensemble import TrainerERA5Ensemble

@@ -300,14 +300,14 @@ class TestTrainerSubclassInstantiation:
     """
 
     def test_era5_trainer_init(self):
-        from credit.trainers.trainerERA5 import TrainerERA5 as Trainer
+        from credit.trainers.trainerERA5gen1 import TrainerERA5 as Trainer
 
         t = Trainer(_tiny_model(), rank=0, conf=_era5_v1_conf())
         assert t.forecast_len == 1
         assert not t.flag_mass_conserve
 
     def test_era5_trainer_init_with_post_conf_inactive(self):
-        from credit.trainers.trainerERA5 import TrainerERA5 as Trainer
+        from credit.trainers.trainerERA5gen1 import TrainerERA5 as Trainer
 
         conf = _era5_v1_conf()
         conf["model"] = {"post_conf": {"activate": False}}
@@ -677,7 +677,7 @@ class TestLoadTrainer:
 
     def test_valid_era5_type_returns_class(self):
         from credit.trainers import load_trainer
-        from credit.trainers.trainerERA5 import TrainerERA5 as Trainer
+        from credit.trainers.trainerERA5gen1 import TrainerERA5 as Trainer
 
         result = load_trainer({"trainer": {"type": "era5"}})
         assert result is Trainer
