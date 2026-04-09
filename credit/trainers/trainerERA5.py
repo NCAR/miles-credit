@@ -450,3 +450,6 @@ class TrainerERA5(BaseTrainer):
         gc.collect()
 
         return results_dict
+
+
+Trainer = TrainerERA5  # backward-compatible alias
