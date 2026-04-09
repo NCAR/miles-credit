@@ -46,6 +46,8 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    Ensemble Training <Ensembles.md>
    Ensemble Inference <EnsemblesInference.md>
    Working with Loss Functions <Losses.md>
+   WeatherBench Evaluation <WeatherBench.md>
+   Performance Metrics <PerformanceMetrics.md>
 
 .. toctree::
    :maxdepth: 2

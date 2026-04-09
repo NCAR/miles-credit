@@ -5,6 +5,49 @@ from pysteps.verification.ensscores import rankhist
 
 logger = logging.getLogger(__name__)
 
+
+def crps_spatial_avg(pred_ens, truth, w_lat):
+    """
+    Spatially-averaged CRPS using the sorted-ensemble formula.
+
+    Uses the energy decomposition CRPS = E[|X - y|] - 0.5 * E[|X - X'|] with
+    E[|X - X'|] computed via the O(n log n) sorted-ensemble identity:
+
+        E[|X - X'|] = (2/n²) * sum_i (2i - n + 1) * x_{(i)}   (i: 0-indexed sorted)
+
+    Parameters
+    ----------
+    pred_ens : np.ndarray  shape (n_members, lat, lon), float64
+    truth    : np.ndarray  shape (lat, lon),             float64
+    w_lat    : np.ndarray  shape (lat,)  normalized cos-lat weights
+                           (w = cos(lat) / mean(cos(lat)))
+
+    Returns
+    -------
+    crps   : float  spatially-averaged CRPS
+    spread : float  spatially-averaged ensemble std (ddof=1)
+    """
+    n, n_lat, n_lon = pred_ens.shape
+    w2d = w_lat[:, None]  # (lat, 1)
+
+    def sp_avg(arr2d):
+        return (arr2d * w2d).sum() / (n_lat * n_lon)
+
+    # E[|X - y|]: mean over members, spatial avg
+    abs_err = np.abs(pred_ens - truth[None]).mean(axis=0)
+    term1 = sp_avg(abs_err)
+
+    # E[|X - X'|] via sorted-ensemble formula
+    sorted_ens = np.sort(pred_ens, axis=0)
+    wk = (2 * np.arange(n) - n + 1).reshape(n, 1, 1).astype(np.float64)
+    energy_map = (2.0 / (n * n)) * (sorted_ens * wk).sum(axis=0)
+    term2 = sp_avg(energy_map)
+
+    crps = float(term1 - 0.5 * term2)
+    spread = float(sp_avg(pred_ens.std(axis=0, ddof=1)))
+    return crps, spread
+
+
 latitude_slices = {
     "global": slice(-91, 91),
     "s_extratropics": slice(-91, -24.5),
