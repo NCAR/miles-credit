@@ -23,7 +23,7 @@ class TrainerERA5Gen2(BaseTrainer):
         """
         Gen 2 trainer for the ERA5 nested data schema.
 
-        Key differences from TrainerERA5 (Gen 1):
+        Key differences from TrainerERA5Gen1:
           - Uses new nested data schema: conf["data"]["source"]["ERA5"]["variables"]
           - Applies preblocks to assemble batch tensors before the model forward pass
             (no concat_and_reshape / reshape_only calls in the training loop)

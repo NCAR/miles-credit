@@ -2,7 +2,7 @@ import copy
 import logging
 
 # Import trainer classes
-from credit.trainers.trainerERA5gen1 import TrainerERA5
+from credit.trainers.trainerERA5gen1 import TrainerERA5Gen1
 from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2
 from credit.trainers.trainerERA5_Diffusion import TrainerERA5Diffusion
 from credit.trainers.trainerERA5_ensemble import TrainerERA5Ensemble
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Define trainer types and their corresponding classes
 trainer_types = {
     "era5": (
-        TrainerERA5,
+        TrainerERA5Gen1,
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
     "era5-gen2": (
@@ -43,7 +43,7 @@ trainer_types = {
         "Loading a single or multi-step trainer for the ERA5 dataset for parallel computation of the CRPS loss.",
     ),
     "cam": (
-        TrainerERA5,
+        TrainerERA5Gen1,
         "Loading a single or multi-step trainer for the CAM dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
     **({"ic-opt": (TrainerIC, "Loading an initial condition optimizer training class")} if _IC_OPT_AVAILABLE else {}),
