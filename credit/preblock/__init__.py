@@ -1,17 +1,33 @@
+import logging
+
 import torch.nn as nn
+
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
-from credit.preblock.scaler import BridgeScalerTransformer
 from credit.preblock.regrid import Regridder
 from credit.preblock.concat import ConcatToTensor
+from credit.preblock.norm import ERA5Normalizer
+
+# bridgescaler depends on numba which requires NumPy ≤ 2.2
+try:
+    from credit.preblock.scaler import BridgeScalerTransformer
+
+    _BRIDGESCALER_AVAILABLE = True
+except (ImportError, Exception) as _e:
+    logging.warning(f"BridgeScalerTransformer unavailable (numba/NumPy conflict): {_e}")
+    BridgeScalerTransformer = None
+    _BRIDGESCALER_AVAILABLE = False
 
 PREBLOCK_REGISTRY = {
     "log_transform": LogTransform,
     "sqrt_transform": SqrtTransform,
-    "bridgescaler_transform": BridgeScalerTransformer,
     "regrid": Regridder,
     "concat": ConcatToTensor,
+    "era5_normalizer": ERA5Normalizer,
 }
+
+if _BRIDGESCALER_AVAILABLE:
+    PREBLOCK_REGISTRY["bridgescaler_transform"] = BridgeScalerTransformer
 
 
 def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
@@ -39,7 +55,7 @@ def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
     """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
 
-    Concatenation is always performed last and is not configurable.
+    Concatenation is always performed last via ConcatToTensor and is not configurable.
     """
     for preblock in preblocks.values():
         batch = preblock(batch)
