@@ -428,10 +428,18 @@ predict:
         # [Optional] defaults to 1
         ic_interval_days: 1   # spacing between init days. defaults to 1 total number of ICs will be duration // ic_interval_days
         days: 2             # forecast lead time as days (1 means 24-hour forecast)
+  
+    # For generating quasi-realtime forecasts from GFS initial conditions
+    realtime:
+      forecast_start_time: "2026-04-01 00:00:00"
+      forecast_end_time: "2026-04-02 00:00:00"
+      forecast_timestep: "6h"
 
-    # saved variables (rollout_to_netcdf.yml)
-    # save_vars: [] will save ALL variables
-    # remove save_vars from config will save ALL variables
+    initial_condition_path: "/glade/derecho/scratch/$USER/gfs/"
+
+    # saved variables 
+    save_vars: [] # will save ALL variables
+    # removing save_vars from config will save ALL variables
 
     # Metadata file adds units and long names to each variable. If no path is provided, the parser
     # assumes that the file is in credit.metadata. Will now work when CREDIT is installed from PyPI or pip.
