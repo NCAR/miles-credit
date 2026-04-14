@@ -27,9 +27,6 @@ dependencies = [
     "einops",
     "pyyaml",
     "cartopy",
-    "dask",
-    "distributed",
-    "dask-jobqueue",
     "zarr",
     "numcodecs",
     "einops",
@@ -43,12 +40,10 @@ dependencies = [
     "torchmetrics",
     "fsspec",
     "gcsfs",
-    "miles-guess",
-    "keras",
-    "metpy",
+    "s3fs",
     "setuptools_scm",
     "setuptools",
-    "s3fs"
+    "numba"
 ]
 
 [project.optional-dependencies]
@@ -65,6 +60,10 @@ develop = ["pre-commit",
     "jupyter",
     "ruff",
     "pytest"]
+
+ptype = ["metpy",
+         "miles-guess",
+         "keras"]
 
 [tool.setuptools]
 
