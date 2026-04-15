@@ -19,7 +19,7 @@
 # the location to save your workspace, it will have 
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
-save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/test'
+save_loc: '/glade/derecho/scratch/$USER/credit_example_model/'
 seed: 1000
 
 data:
