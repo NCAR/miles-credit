@@ -47,23 +47,11 @@ data:
     # diagnostic variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
     # the time dimension MUST be the same as upper-air variables
     # files must have the listed variable names 
-    # THESE ARE NOT LOADING CORRECTLY ON X
     # diagnostic variables will be normalized by the dataloader, users do not need to normalize them
     diagnostic_variables: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation', 'surface_latent_heat_flux', 'surface_net_solar_radiation',
                           'surface_net_thermal_radiation', 'surface_sensible_heat_flux'] 
     save_loc_diagnostic: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
     
-    # periodic forcing variables, forcing variables that are the same year-to-year
-    # must be a single zarr or nc with (time, latitude, longitude) dims
-    # the time dimension should cover an entire LEAP YEAR
-    #
-    # e.g., periodic forcing variables can be provided on the year 2000, 
-    #       and its time coords should have 24*366 hours for a hourly model
-    #
-    # THESE ARE REDUNDANT?
-    # periodic forcing variables MUST be normalized BY USER 
-    # forcing_variables: ['TSI']   
-    save_loc_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT/forcing_norm_6h.nc'
     
     # static variables must be a single zarr or nc with (latitude, longitude) coords
     # static variables must be normalized BY USER 
