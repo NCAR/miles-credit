@@ -41,7 +41,7 @@ data:
     # the time dimension MUST be the same as upper-air variables
     # files must have the listed variable names
     # surface variables will be normalized by the dataloader, users do not need to normalize them
-    dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+    dynamic_forcing_variables: ['toa_incident_solar_radiation']
     save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
 
     # diagnostic variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
@@ -557,7 +557,6 @@ trainer:
     # of the previous job and continue from there
     # useful for epoch-dependent schedulers
     reload_epoch: False # can also use --> train_one_epoch: True
-    epochs: 70
 
 
     use_scheduler: True
