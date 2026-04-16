@@ -26,7 +26,7 @@ data:
     # upper-air variables, must be YEARLY zarr or nc with (time, level, latitude, longitude) dims
     # files must have the listed variable names 
     # upper-air variables will be normalized by the dataloader, users do not need to normalize them
-    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_humidity"]
     save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
     level_ids: [1., 9., 19.,  29.,  39.,  49.,  59.,  69.,  79.,  89.,  97., 104.,
            111., 116., 122., 126., 131., 136.]
