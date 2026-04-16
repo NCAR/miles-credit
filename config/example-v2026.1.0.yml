@@ -19,7 +19,7 @@
 # the location to save your workspace, it will have 
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
-save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/test'
+save_loc: '/glade/derecho/scratch/$USER/credit_example_model/'
 seed: 1000
 
 data:
@@ -143,7 +143,7 @@ model:
     levels: &levels 18                        # number of upper-air variable levels (default: 15)
     channels: 4                       # upper-air variable channels
     surface_channels: 4               # surface variable channels
-    input_only_channels: 4            # dynamic forcing, forcing, static channels
+    input_only_channels: 3            # dynamic forcing, forcing, static channels
     output_only_channels: 8           # diagnostic variable channels
     
     patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
@@ -549,6 +549,7 @@ trainer:
     skip_validation: False
 
     # total number of epochs
+    epochs: 100
     start_epoch: 0
     # the trainer will stop after iterating a given number of epochs
     # this works for any start_epoch and reload_epoch: True
@@ -557,7 +558,6 @@ trainer:
     # of the previous job and continue from there
     # useful for epoch-dependent schedulers
     reload_epoch: False # can also use --> train_one_epoch: True
-
 
     use_scheduler: True
 
