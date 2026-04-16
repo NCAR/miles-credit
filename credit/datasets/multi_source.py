@@ -61,15 +61,23 @@ import pandas as pd
 from torch.utils.data import Dataset
 
 from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.hrrr import HRRRDataset
 from credit.datasets.MRMS import MRMSDataset
 
 logger = logging.getLogger(__name__)
 
-# Maps config["source"] keys to Dataset classes.
-# Add entries here to register new data sources.
+# Maps config["source"] keys to Dataset factories.
+# Each factory must accept (config, return_target) and expose a ``datetimes``
+# attribute (pd.DatetimeIndex).  Add entries here to register new sources.
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
     "MRMS": MRMSDataset,
+    # HRRR pressure-level (wrfprsf) — reads config["source"]["HRRR"]
+    "HRRR": HRRRDataset,
+    # HRRR native/hybrid-sigma levels (wrfnatf) — reads config["source"]["HRRR_NAT"]
+    "HRRR_NAT": lambda cfg, rt: HRRRDataset(cfg, rt, product="wrfnatf", config_key="HRRR_NAT"),
+    # HRRR 15-min sub-hourly surface (wrfsubhf) — reads config["source"]["HRRR_SUBH"]
+    "HRRR_SUBH": lambda cfg, rt: HRRRDataset(cfg, rt, product="wrfsubhf", config_key="HRRR_SUBH"),
 }
 
 
