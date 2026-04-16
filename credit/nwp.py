@@ -1,47 +1,42 @@
 import numpy as np
 import pandas as pd
-from os.path import join
+from os.path import join, exists
 import xarray as xr
 from functools import partial
 from multiprocessing import Pool
-
-# import fsspec
+from importlib.resources import files
 from credit.interp import geopotential_from_model_vars, create_pressure_grid
 from credit.physics_constants import GRAVITY
 import datetime
 import time
 import traceback
+import yaml
 
 try:
     import xesmf as xe
 except (ImportError, ModuleNotFoundError) as e:
-    raise e("""xesmf not installed.\n
+    message = """xesmf not installed.\n
             Install esmf with conda first to prevent conda from overwriting numpy.\n
             `conda install -c conda-forge esmf esmpy`
             Then install xesmf with pip.\n
             `pip install xesmf`
-            """)
+            """
+    raise e(message)
 
-gfs_map = {
-    "tmp": "T",
-    "ugrd": "U",
-    "vgrd": "V",
-    "spfh": "Q",
-    "pressfc": "SP",
-    "tmp2m": "t2m",
-}
-level_map = {"T500": "T", "U500": "U", "V500": "V", "Q500": "Q", "Z500": "Z"}
-upper_air = ["T", "U", "V", "Q", "Z"]
-surface = ["SP", "t2m"]
+gfs_map = {}
+level_map = {}
+upper_air = {}
+surface = {}
 
 
 def build_GFS_init(
-    output_grid,
-    date,
-    variables,
-    model_level_indices,
-    gdas_base_path="https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/",
-    n_procs=1,
+    output_grid: xr.Dataset,
+    date: pd.Timestamp,
+    variables: list,
+    model_level_indices: list,
+    gdas_base_path: str = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/",
+    variable_mapping: str = "wchapmanera5",
+    n_procs: int = 1,
 ):
     """
     Create GFS initial conditions on model levels that are interpolated from ECMWF L137 model levels.
@@ -51,6 +46,7 @@ def build_GFS_init(
         variables (list): list of variable names
         model_level_indices (list): list of model level indices to extract from L137 model levels
         gdas_base_path (str): Path to GFS base directory on NOMADS (archives last 10 days) or Google Cloud (since 2021)
+        variable_mapping (str):
         n_procs (int): Number of processors to use in pool.
 
     Returns:
@@ -63,42 +59,58 @@ def build_GFS_init(
         "spfh",
         "hgtsfc",
     ]  # required for calculating pressure and geopotential
+    _get_gfs_maps(variable_mapping)
     gfs_variables = list(set([k for k, v in gfs_map.items() if v in variables]).union(required_variables))
-    print(gfs_variables)
+
     pool = Pool(n_procs)
-    atm_full_path = build_file_path(date, gdas_base_path, file_type="atm")
-    sfc_full_path = build_file_path(date, gdas_base_path, file_type="sfc")
+    atm_full_path = _build_file_path(date, gdas_base_path, file_type="atm")
+    sfc_full_path = _build_file_path(date, gdas_base_path, file_type="sfc")
     print("Download GFS atmospheric data")
     start = time.perf_counter()
-    gfs_atm_data = load_gfs_data(atm_full_path, gfs_variables, pool=pool)
+    gfs_atm_data = _load_gfs_data(atm_full_path, gfs_variables, pool=pool)
     end = time.perf_counter()
     dur = end - start
     print(f"Elapsed: {dur:0.6f}")
     print("Download GFS surface data")
     start = time.perf_counter()
-    gfs_sfc_data = load_gfs_data(sfc_full_path, gfs_variables, pool=pool)
+    gfs_sfc_data = _load_gfs_data(sfc_full_path, gfs_variables, pool=pool)
     end = time.perf_counter()
     dur = end - start
     print(f"Elapsed: {dur:0.6f}")
-    gfs_data = combine_data(gfs_atm_data, gfs_sfc_data)
+    gfs_data = _combine_data(gfs_atm_data, gfs_sfc_data)
     print("Regrid data")
     start = time.perf_counter()
-    regridded_gfs = regrid(gfs_data, output_grid, pool=pool)
+    regridded_gfs = _regrid(gfs_data, output_grid, pool=pool)
     end = time.perf_counter()
     dur = end - start
     print(f"Elapsed: {dur:0.6f}")
     print("Interpolate to model levels")
     start = time.perf_counter()
-    interpolated_gfs = interpolate_to_model_level(regridded_gfs, output_grid, model_level_indices, variables)
+    interpolated_gfs = _interpolate_to_model_level(regridded_gfs, output_grid, model_level_indices, variables)
     end = time.perf_counter()
     dur = end - start
     print(f"Elapsed: {dur:0.6f}")
-    final_data = format_data(interpolated_gfs, regridded_gfs, model_level_indices)
+    final_data = _format_data(interpolated_gfs, regridded_gfs, model_level_indices)
 
     return final_data
 
 
-def add_pressure_and_geopotential(data):
+def _get_gfs_maps(variable_mapping_type: str):
+    meta_path = str(files("credit.metadata"))
+    mapping_file = join(meta_path, f"gfs_to_{variable_mapping_type}.yml")
+    global gfs_map, level_map, upper_air, surface
+    if not exists(mapping_file):
+        raise FileNotFoundError(f"{variable_mapping_type} does not have a valid GFS mapping file in credit.metadata.")
+    with open(mapping_file) as mapping_obj:
+        mapping = yaml.safe_load(mapping_obj)
+    gfs_map = mapping["gfs_map"]
+    level_map = mapping["level_map"]
+    upper_air = mapping["upper_air"]
+    surface = mapping["surface"]
+    return
+
+
+def _add_pressure_and_geopotential(data):
     """
     Derive pressure and geopotential fields from model level data and to dataset
     Args:
@@ -128,16 +140,17 @@ def add_pressure_and_geopotential(data):
     return data
 
 
-def build_file_path(date, base_path, file_type="atm"):
+def _build_file_path(date, base_path, file_type="atm", step="f000"):
     """
     Create NOMADS filepaths for etiher upper air or surface data
     Args:
         date: (pd.Timestamp) date of GFS initialization
         base_path: (str) NOMADS base directory (archives last 10 days)
         file_type: (str) Type of analysis data (supports 'atm' or 'sfc')
-
+        step: (str) "anl" or "f000" to "f009". f times have additional diagnostics
+            like ugrd10 and vgrd10 not found in the analysis files.
     Returns:
-        (str) NOMADS filepaths
+        (str) NOMADS or Google Cloud filepaths that can be read in xarray with the h5netcdf engine
     """
     dir_path = date.strftime("gdas.%Y%m%d/%H/atmos/")
     file_name = date.strftime(f"gdas.t%Hz.{file_type}anl.nc")
@@ -145,7 +158,7 @@ def build_file_path(date, base_path, file_type="atm"):
     return join(base_path, dir_path, file_name)
 
 
-def load_gfs_variable(variable, full_file_path=None):
+def _load_gfs_variable(variable, full_file_path=None):
     try:
         print("Loading ", variable)
         with xr.open_dataset(full_file_path, engine="h5netcdf") as full_ds:
@@ -156,7 +169,7 @@ def load_gfs_variable(variable, full_file_path=None):
     return sub_ds
 
 
-def load_gfs_data(full_file_path, variables, pool=None):
+def _load_gfs_data(full_file_path, variables, pool=None):
     """
     Load GFS data directly from Nomads or Google Cloud server
     Args:
@@ -170,7 +183,7 @@ def load_gfs_data(full_file_path, variables, pool=None):
     print(ds)
     available_vars = list(ds.data_vars)
     sub_variables = [v for v in variables if v in available_vars]
-    load_vars = partial(load_gfs_variable, full_file_path=full_file_path)
+    load_vars = partial(_load_gfs_variable, full_file_path=full_file_path)
     # ds = ds[sub_variables].rename({"grid_xt": "longitude", "grid_yt": "latitude"}).load()
     var_ds_list = pool.map(load_vars, sub_variables)
     full_ds = xr.merge(var_ds_list)
@@ -180,7 +193,7 @@ def load_gfs_data(full_file_path, variables, pool=None):
     return full_ds
 
 
-def combine_data(atm_data, sfc_data):
+def _combine_data(atm_data, sfc_data):
     """
     Merge upper air and surface data
     Args:
@@ -197,12 +210,12 @@ def combine_data(atm_data, sfc_data):
         if var in gfs_map.keys():
             atm_data = atm_data.rename({var: gfs_map[var]})
 
-    data = add_pressure_and_geopotential(atm_data)
+    data = _add_pressure_and_geopotential(atm_data)
 
     return data
 
 
-def regrid_variable(variable_data, regridder):
+def _regrid_variable(variable_data, regridder):
     try:
         regridded_data = regridder(variable_data)
         regridded_data.name = variable_data.name
@@ -212,7 +225,7 @@ def regrid_variable(variable_data, regridder):
         raise e
 
 
-def regrid(nwp_data, output_grid, method="conservative", pool=None):
+def _regrid(nwp_data, output_grid, method="conservative", pool=None):
     """
     Spatially regrid (interpolate) from GFS grid to CREDIT grid
     Args:
@@ -229,12 +242,11 @@ def regrid(nwp_data, output_grid, method="conservative", pool=None):
         ds_out = output_grid[["longitude", "latitude"]].load()
     in_grid = nwp_data[["longitude", "latitude"]].load()
     regridder = xe.Regridder(in_grid, ds_out, method=method)
-    # ds_regridded = regridder(nwp_data)
     results = []
     for variable in list(nwp_data.data_vars):
         da = nwp_data[variable]
         da.name = variable
-        results.append(pool.apply_async(regrid_variable, (da, regridder)))
+        results.append(pool.apply_async(_regrid_variable, (da, regridder)))
     ds_re_list = []
     for result in results:
         ds_re_list.append(result.get())
@@ -243,7 +255,7 @@ def regrid(nwp_data, output_grid, method="conservative", pool=None):
     return ds_regridded.squeeze()
 
 
-def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indices, variables):
+def _interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indices, variables):
     """
     Verticallly interpolate GFS model level data to CREDIT model levels
     Args:
@@ -295,7 +307,7 @@ def interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indi
     return interpolated_data
 
 
-def format_data(data_dict, regridded_data, model_levels):
+def _format_data(data_dict, regridded_data, model_levels):
     """
     Format data for CREDIT model ingestion
     Args:
@@ -317,7 +329,7 @@ def format_data(data_dict, regridded_data, model_levels):
     return data
 
 
-def format_datetime(init_time):
+def _format_datetime(init_time):
     """
     Format datetime string from CREDIT configuration file
     Args:
