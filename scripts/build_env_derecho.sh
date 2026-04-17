@@ -23,7 +23,7 @@ set -euo pipefail
 
 REPO=/glade/work/schreck/repos/miles-credit-main
 SOURCE_ENV=/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221
-TARGET_ENV=/glade/work/schreck/conda-envs/credit-main-derecho
+TARGET_ENV=/glade/work/$USER/conda-envs/credit-main-derecho
 
 echo "============================================================"
 echo "Building credit-main-derecho"
