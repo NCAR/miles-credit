@@ -43,8 +43,14 @@ def main():
     gfs_init.to_zarr(out_file)
     config["data"]["save_loc"] = out_file
     config["data"]["save_loc_surface"] = out_file
+    config["data"]["save_loc_diagnostic"] = out_file
     real_config = args.config.replace(".yml", "_realtime.yml")
-    print(f"Saving realtime config to {real_config}.")
+    print(
+        f"Saving realtime config to {real_config}. Update data:save_loc_dynamic_forcing to point to appropriate solar netcdf files."
+    )
+    print(
+        "See /glade/campaign/cisl/aiml/credit/ for pre-generated files, or use credit_calc_global_solar to produce your own."
+    )
     with open(real_config, "w") as out_config_file:
         yaml.dump(config, out_config_file, default_flow_style=False, sort_keys=False)
 

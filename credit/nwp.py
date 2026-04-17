@@ -12,17 +12,6 @@ import time
 import traceback
 import yaml
 
-try:
-    import xesmf as xe
-except (ImportError, ModuleNotFoundError) as e:
-    message = """xesmf not installed.\n
-            Install esmf with conda first to prevent conda from overwriting numpy.\n
-            `conda install -c conda-forge esmf esmpy`
-            Then install xesmf with pip.\n
-            `pip install xesmf`
-            """
-    raise e(message)
-
 gfs_map = {}
 level_map = {}
 upper_air = {}
@@ -77,7 +66,7 @@ def build_GFS_init(
     end = time.perf_counter()
     dur = end - start
     print(f"Elapsed: {dur:0.6f}")
-    gfs_data = _combine_data(gfs_atm_data, gfs_sfc_data)
+    gfs_data = _combine_data(gfs_atm_data, gfs_sfc_data, gfs_map["tmp"], gfs_map["spfh"])
     print("Regrid data")
     start = time.perf_counter()
     regridded_gfs = _regrid(gfs_data, output_grid, pool=pool)
@@ -110,7 +99,7 @@ def _get_gfs_maps(variable_mapping_type: str):
     return
 
 
-def _add_pressure_and_geopotential(data):
+def _add_pressure_and_geopotential(data, temperature_var, specific_humidity_var):
     """
     Derive pressure and geopotential fields from model level data and to dataset
     Args:
@@ -121,8 +110,8 @@ def _add_pressure_and_geopotential(data):
     """
     sfc_pressure = data["SP"].values.squeeze()
     sfc_gpt = data["hgtsfc"].values.squeeze() * GRAVITY
-    level_T = data["T"].values.squeeze()
-    level_Q = data["Q"].values.squeeze()
+    level_T = data[temperature_var].values.squeeze()
+    level_Q = data[specific_humidity_var].values.squeeze()
     a_coeff = data.attrs["ak"]
     b_coeff = data.attrs["bk"]
 
@@ -134,8 +123,8 @@ def _add_pressure_and_geopotential(data):
         level_Q.astype(np.float64),
         half_prs_grid.astype(np.float64),
     )
-    data["Z"] = (data["T"].dims, np.expand_dims(geopotential, axis=0))
-    data["P"] = (data["T"].dims, np.expand_dims(full_prs_grid, axis=0))
+    data["Z"] = (data[temperature_var].dims, np.expand_dims(geopotential, axis=0))
+    data["P"] = (data[temperature_var].dims, np.expand_dims(full_prs_grid, axis=0))
 
     return data
 
@@ -161,7 +150,7 @@ def _build_file_path(date, base_path, file_type="atm", step="f000"):
 def _load_gfs_variable(variable, full_file_path=None):
     try:
         print("Loading ", variable)
-        with xr.open_dataset(full_file_path, engine="h5netcdf") as full_ds:
+        with xr.open_dataset(full_file_path, engine="h5netcdf", storage_options={"token": "anon"}) as full_ds:
             sub_ds = full_ds[variable].load()
     except Exception as e:
         print(traceback.format_exc())
@@ -179,21 +168,18 @@ def _load_gfs_data(full_file_path, variables, pool=None):
     Returns:
         xr.Dataset
     """
-    ds = xr.open_dataset(full_file_path, engine="h5netcdf")
-    print(ds)
+    ds = xr.open_dataset(full_file_path, engine="h5netcdf", storage_options={"token": "anon"})
     available_vars = list(ds.data_vars)
     sub_variables = [v for v in variables if v in available_vars]
     load_vars = partial(_load_gfs_variable, full_file_path=full_file_path)
-    # ds = ds[sub_variables].rename({"grid_xt": "longitude", "grid_yt": "latitude"}).load()
     var_ds_list = pool.map(load_vars, sub_variables)
     full_ds = xr.merge(var_ds_list)
-    print(full_ds)
     full_ds = full_ds.rename({"grid_xt": "longitude", "grid_yt": "latitude"})
     full_ds.attrs = ds.attrs
     return full_ds
 
 
-def _combine_data(atm_data, sfc_data):
+def _combine_data(atm_data, sfc_data, temperature_var, specific_humidity_var):
     """
     Merge upper air and surface data
     Args:
@@ -210,7 +196,7 @@ def _combine_data(atm_data, sfc_data):
         if var in gfs_map.keys():
             atm_data = atm_data.rename({var: gfs_map[var]})
 
-    data = _add_pressure_and_geopotential(atm_data)
+    data = _add_pressure_and_geopotential(atm_data, temperature_var, specific_humidity_var)
 
     return data
 
@@ -236,6 +222,17 @@ def _regrid(nwp_data, output_grid, method="conservative", pool=None):
     Returns:
         (xr.Dataset) Regridded GFS initial conditions
     """
+    try:
+        import xesmf as xe
+    except (ImportError, ModuleNotFoundError) as e:
+        message = """xesmf not installed.\n
+                Install esmf with conda first to prevent conda from overwriting numpy.\n
+                `conda install -c conda-forge esmf esmpy`
+                Then install xesmf with pip.\n
+                `pip install xesmf`
+                """
+        raise e(message)
+
     if "time" in output_grid.variables.keys():
         ds_out = output_grid[["longitude", "latitude"]].drop_vars(["time"]).load()
     else:
@@ -250,7 +247,6 @@ def _regrid(nwp_data, output_grid, method="conservative", pool=None):
     ds_re_list = []
     for result in results:
         ds_re_list.append(result.get())
-    print(ds_re_list)
     ds_regridded = xr.merge(ds_re_list)
     return ds_regridded.squeeze()
 

@@ -26,7 +26,7 @@ data:
     # upper-air variables, must be YEARLY zarr or nc with (time, level, latitude, longitude) dims
     # files must have the listed variable names 
     # upper-air variables will be normalized by the dataloader, users do not need to normalize them
-    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_humidity"]
+    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
     save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
     level_ids: [1., 9., 19.,  29.,  39.,  49.,  59.,  69.,  79.,  89.,  97., 104.,
            111., 116., 122., 126., 131., 136.]
@@ -545,8 +545,8 @@ trainer:
     # number of batches per epoch for training and validation
     # set to 0 to use all available training samples e.g. `len(dataloader)`
     # if the number is larger than all training samples, all available training samples will be used
-    batches_per_epoch: 10
-    valid_batches_per_epoch: 2
+    batches_per_epoch: 100
+    valid_batches_per_epoch: 20
     # early stopping
     stopping_patience: 50
     # True: do not validate, always save weights

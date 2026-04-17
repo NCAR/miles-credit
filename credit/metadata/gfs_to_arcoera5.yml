@@ -1,6 +1,6 @@
 gfs_map:
   tmp: temperature
-  spfh: specific_humidity
+  spfh: specific_total_water
   ugrd: u_component_of_wind
   vgrd: v_component_of_wind
   tmp2m: VAR_2T
@@ -12,12 +12,12 @@ level_map:
   T500: temperature
   U500: u_component_of_wind
   V500: v_component_of_wind
-  Q500: specific_humidity
+  Q500: specific_total_water
   Z500: Z
 
 upper_air:
   - "temperature"
-  - "specific_humidity"
+  - "specific_total_water"
   - "u_component_of_wind"
   - "v_component_of_wind"
   - "Z"
@@ -25,5 +25,7 @@ upper_air:
 surface:
   - "SP"
   - "VAR_2T"
+  - "VAR_10U"
+  - "VAR_10V"
 
 
