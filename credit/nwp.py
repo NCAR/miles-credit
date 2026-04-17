@@ -142,7 +142,7 @@ def _build_file_path(date, base_path, file_type="atm", step="f000"):
         (str) NOMADS or Google Cloud filepaths that can be read in xarray with the h5netcdf engine
     """
     dir_path = date.strftime("gdas.%Y%m%d/%H/atmos/")
-    file_name = date.strftime(f"gdas.t%Hz.{file_type}anl.nc")
+    file_name = date.strftime(f"gdas.t%Hz.{file_type}{step}.nc")
 
     return join(base_path, dir_path, file_name)
 

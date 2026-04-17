@@ -292,7 +292,8 @@ def predict(rank, world_size, conf, p):
             # Clamp if needed
             if flag_clamp:
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
-
+            print("X shape", x.shape)
+            print(model)
             # Model inference on the entire batch
             y_pred = model(x.float())
 

@@ -40,7 +40,7 @@ def main():
         n_procs=n_procs,
     )
     out_file = join(initial_condition_path, f"gfs_init_{date.strftime('%Y%m%d_%H00')}.zarr")
-    gfs_init.to_zarr(out_file)
+    gfs_init.to_zarr(out_file, mode="w")
     config["data"]["save_loc"] = out_file
     config["data"]["save_loc_surface"] = out_file
     config["data"]["save_loc_diagnostic"] = out_file
