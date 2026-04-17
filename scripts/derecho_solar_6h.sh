@@ -22,6 +22,5 @@ mpiexec -n 512 -ppn 128 python -u -m mpi4py applications/calc_global_solar.py \
   -t "6h" \
   -v "toa_incident_solar_radiation" \
   -u "10Min" \
-  -o "/glade/derecho/scratch/dgagne/credit_solar_6h_1deg_era5_mlevel/" \ 
+  -o "/glade/derecho/scratch/dgagne/credit_solar_6h_1deg_era5_mlevel/" \
   -g "geopotential_at_surface"
-

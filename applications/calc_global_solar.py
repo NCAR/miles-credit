@@ -19,19 +19,17 @@ def main():
     parser.add_argument(
         "-i",
         "--input",
-        type=str,
         default="/glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc",
         help="File containing longitudes, latitudes, and geopotential height.",
     )
     parser.add_argument(
         "-g",
         "--geo",
-        type=str,
         default="Z_GDS4_SFC",
         help="Geopotential height variable.",
     )
     parser.add_argument("-v", "--var", type=str, default="tsi", help="Solar radiation variable name")
-    parser.add_argument("-o", "--output", type=str, required=True, help="Output directory")
+    parser.add_argument("-o", "--output", type=str, help="Output directory")
     parser.add_argument("-z", "--zarr", action="store_true", help="Output as zarr files.")
     args = parser.parse_args()
     grid_points_sub = None
@@ -73,6 +71,7 @@ def main():
             args.end,
             step_freq=args.step,
             sub_freq=args.sub,
+            solar_var=args.var,
         )
         if rank > 0:
             comm.Send(
