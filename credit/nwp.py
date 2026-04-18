@@ -1,11 +1,17 @@
 import numpy as np
 import pandas as pd
-from os.path import join, exists
+from os.path import join, exists, expandvars
 import xarray as xr
 from functools import partial
 from multiprocessing import Pool
 from importlib.resources import files
-from credit.interp import geopotential_from_model_vars, create_pressure_grid
+from credit.interp import (
+    geopotential_from_model_vars,
+    create_pressure_grid,
+    create_reduced_pressure_grid,
+    interp_hybrid_to_hybrid_levels,
+    interp_hybrid_to_pressure_levels,
+)
 from credit.physics_constants import GRAVITY
 import datetime
 import time
@@ -22,18 +28,22 @@ def build_GFS_init(
     output_grid: xr.Dataset,
     date: pd.Timestamp,
     variables: list,
-    model_level_indices: list,
+    model_level_file: str = "",
+    model_levels: np.ndarray = None,
     gdas_base_path: str = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/",
     variable_mapping: str = "wchapmanera5",
     n_procs: int = 1,
 ):
     """
-    Create GFS initial conditions on model levels that are interpolated from ECMWF L137 model levels.
+    Download GFS model level initial conditions, regrid to CREDIT model's grid, and vertically interpolate
+    3D variables to CREDIT model levels.
+
     Args:
-        output_grid (xr.DataArray): grid of ERA5 model levels
+        output_grid (xr.Dataset): netCDF file containing latitude and longitude coordinates of CREDIT model grid.
         date (pd.Timestamp): date of GFS initialization
-        variables (list): list of variable names
-        model_level_indices (list): list of model level indices to extract from L137 model levels
+        variables (list): list of variable names.
+        model_level_file (str): Path to file containing output model level a and b coefficients on full and half levels.
+        model_levels (np.ndarray): Subset of model levels to interpolate to.
         gdas_base_path (str): Path to GFS base directory on NOMADS (archives last 10 days) or Google Cloud (since 2021)
         variable_mapping (str):
         n_procs (int): Number of processors to use in pool.
@@ -75,11 +85,14 @@ def build_GFS_init(
     print(f"Elapsed: {dur:0.6f}")
     print("Interpolate to model levels")
     start = time.perf_counter()
-    interpolated_gfs = _interpolate_to_model_level(regridded_gfs, output_grid, model_level_indices, variables)
+    # interpolated_gfs = _interpolate_to_model_level(regridded_gfs, output_grid, model_level_indices, variables)
+    interpolated_gfs = _vertical_interpolation(
+        regridded_gfs, model_level_file, model_levels, variable_mapping, variables, gfs_map["pressfc"]
+    )
     end = time.perf_counter()
     dur = end - start
     print(f"Elapsed: {dur:0.6f}")
-    final_data = _format_data(interpolated_gfs, regridded_gfs, model_level_indices)
+    final_data = _format_data(interpolated_gfs, regridded_gfs, model_levels)
 
     return final_data
 
@@ -215,12 +228,12 @@ def _regrid(nwp_data, output_grid, method="conservative", pool=None):
     """
     Spatially regrid (interpolate) from GFS grid to CREDIT grid
     Args:
-        nwp_data: (xr.Dataset) GFS initial conditions
-        output_grid: (xr.Dataset) CREDIT grid
-        method: (str)
+        nwp_data (xr.Dataset): GFS initial conditions
+        output_grid (xr.Dataset): CREDIT grid
+        method (str): conservative or bilinear
 
     Returns:
-        (xr.Dataset) Regridded GFS initial conditions
+        (xr.Dataset): Regridded GFS initial conditions
     """
     try:
         import xesmf as xe
@@ -251,55 +264,51 @@ def _regrid(nwp_data, output_grid, method="conservative", pool=None):
     return ds_regridded.squeeze()
 
 
-def _interpolate_to_model_level(regridded_nwp_data, output_grid, model_level_indices, variables):
-    """
-    Verticallly interpolate GFS model level data to CREDIT model levels
-    Args:
-        regridded_nwp_data: (xr.Dataset) GFS initial conditions on CREDIT grid
-        output_grid: (xr.Dataset) CREDIT Grid
-        model_level_indices: (list) list of model level indices to extract from L137 model levels
-        variables: (list) list of variable names
-
-    Returns:
-        (dict): Dictionary of xr.DataArrays of interpolated GFS model level data
-    """
+def _vertical_interpolation(
+    state_dataset, model_level_file, model_levels, variable_mapping, variables, surface_pressure_var
+):
     upper_vars = [var for var in variables if var in upper_air]
     surface_vars = [var for var in variables if var in surface]
     vars_500 = [var for var in variables if "500" in var]
-
-    xp = regridded_nwp_data["P"].values
-    fp = regridded_nwp_data
-    output_pressure = output_grid["a_half"] + output_grid["b_half"] * regridded_nwp_data["SP"]
-    sampled_output_pressure = output_pressure[model_level_indices].values
-    ny, nx = regridded_nwp_data.sizes["latitude"], regridded_nwp_data.sizes["longitude"]
+    if "/" not in model_level_file:
+        meta_path = str(files("credit.metadata"))
+        model_level_file_path = join(meta_path, model_level_file)
+    else:
+        model_level_file_path = expandvars(model_level_file)
+    a_model_name = "a_model"
+    b_model_name = "b_model"
+    level_var = "level"
+    if "cam" in variable_mapping.lower():
+        a_model_name = "hyam"
+        b_model_name = "hybm"
+        level_var = "level"
+    with xr.open_dataset(model_level_file_path) as mod_lev_ds:
+        valid_levels = np.isin(model_levels, mod_lev_ds[level_var].values)
+        if a_model_name == "hyam":
+            P0 = 1.0
+            a_model = mod_lev_ds[a_model_name].values[valid_levels] * P0
+        else:
+            a_model = mod_lev_ds[a_model_name].values[valid_levels]
+        b_model = mod_lev_ds[b_model_name].values[valid_levels]
+    out_pressure = create_reduced_pressure_grid(state_dataset[surface_pressure_var].values, a_model, b_model)
     interpolated_data = {}
     for var in upper_vars:
-        fp_data = fp[var].values
         interpolated_data[var] = {
-            "dims": ["latitude", "longitude", "level"],
-            "data": np.array(
-                [
-                    np.interp(sampled_output_pressure[:, j, i], xp[:, j, i], fp_data[:, j, i])
-                    for j in range(ny)
-                    for i in range(nx)
-                ]
-            ).reshape(ny, nx, len(model_level_indices)),
+            "dims": ["level", "latitude", "longitude"],
+            "data": interp_hybrid_to_hybrid_levels(state_dataset[var].values, state_dataset["P"].values, out_pressure),
         }
     for var in vars_500:
-        prs = 50000  # 500mb
-        fp_data = fp[level_map[var]].values
         interpolated_data[var] = {
             "dims": ["latitude", "longitude"],
-            "data": np.array(
-                [np.interp([prs], xp[:, j, i], fp_data[:, j, i]) for j in range(ny) for i in range(nx)]
-            ).reshape(ny, nx),
+            "data": interp_hybrid_to_pressure_levels(
+                state_dataset[var].values, state_dataset["P"].values, np.array([50000.0])
+            ),
         }
     for var in surface_vars:
         interpolated_data[var] = {
-            "dims": regridded_nwp_data[var].dims,
-            "data": regridded_nwp_data[var].values,
+            "dims": state_dataset[var].dims,
+            "data": state_dataset[var].values,
         }
-
     return interpolated_data
 
 

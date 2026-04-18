@@ -428,6 +428,8 @@ predict:
     initial_condition_path: "/glade/derecho/scratch/$USER/gfs/"
     # Pointer to file in credit.metadata for mapping from GFS to the training data
     variable_mapping: "arcoera5"
+    # File in credit.metadata containing vertical level information.
+    model_level_file: "ERA5_Lev_Info.nc"
 
     # saved variables 
     save_vars: [] # will save ALL variables
@@ -459,7 +461,9 @@ predict:
       temperature_var: "temperature"
       surface_geopotential_var: "geopotential_at_surface"
 
+    # Path to unnormalized static variables like geopotential height at the surface.
     static_fields: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
     
     # Attributes for compressing and chunking output netCDF files.
     ua_var_encoding:
