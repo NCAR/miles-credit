@@ -33,10 +33,10 @@ jobs:
         conda run -n credit pip install -e .
         ./tests/CI_CIRRUS/dateChange.sh /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
         export PATH=/home/ubuntu/.local/bin:$PATH
-        conda run -n credit python -u credit_gfs_init -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml -p 4
-        conda run -n credit python -u credit_rollout_realtime -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
-        conda run -n credit python -u credit_train -c /__w/miles-credit/miles-credit/config/example-v2026.1.0.yml
-        conda run -n credit python -u credit_gfs_init -c /__w/miles-credit/miles-credit/config/example-v2026.1.0.yml -p 4
+        conda run -n credit credit_gfs_init -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml -p 4
+        conda run -n credit credit_rollout_realtime -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
+        conda run -n credit credit_train -c /__w/miles-credit/miles-credit/config/example-v2026.1.0.yml
+        conda run -n credit credit_gfs_init -c /__w/miles-credit/miles-credit/config/example-v2026.1.0.yml -p 4
 
         du -h /output
     #- name: Upload the gfs_init.py netCDF output files to CIRRUS storage
