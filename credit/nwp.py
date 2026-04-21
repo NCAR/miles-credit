@@ -300,8 +300,12 @@ def _vertical_interpolation(
     for var in vars_500:
         interpolated_data[var] = {
             "dims": ["latitude", "longitude"],
-            "data": interp_hybrid_to_pressure_levels(
-                state_dataset[level_map[var]].values, state_dataset["P"].values, np.array([50000.0], dtype=np.float32)
+            "data": np.squeeze(
+                interp_hybrid_to_pressure_levels(
+                    state_dataset[level_map[var]].values,
+                    state_dataset["P"].values,
+                    np.array([50000.0], dtype=np.float32),
+                )
             ),
         }
     for var in surface_vars:
