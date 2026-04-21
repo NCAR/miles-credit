@@ -30,6 +30,7 @@ jobs:
         echo "Running debug job for PR on self-hosted runner"
         git log -1
         chmod -R 777 ./tests/CI_CIRRUS/*
+        conda run -n credit pip install -e .
         ./tests/CI_CIRRUS/dateChange.sh /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
         export PATH=/home/ubuntu/.local/bin:$PATH
         conda run -n credit python -u /__w/miles-credit/miles-credit/applications/gfs_init.py -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
