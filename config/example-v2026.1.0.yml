@@ -549,8 +549,8 @@ trainer:
     # number of batches per epoch for training and validation
     # set to 0 to use all available training samples e.g. `len(dataloader)`
     # if the number is larger than all training samples, all available training samples will be used
-    batches_per_epoch: 100
-    valid_batches_per_epoch: 20
+    batches_per_epoch: 10
+    valid_batches_per_epoch: 2
     # early stopping
     stopping_patience: 50
     # True: do not validate, always save weights
