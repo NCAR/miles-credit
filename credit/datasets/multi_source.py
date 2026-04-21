@@ -76,6 +76,7 @@ _SOURCE_REGISTRY: dict[str, type] = {
     "HRRR_SUBH": HRRRDataset,
 }
 
+
 class MultiSourceDataset(Dataset):
     """PyTorch Dataset that combines multiple source datasets.
 
