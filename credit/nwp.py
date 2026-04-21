@@ -224,7 +224,7 @@ def _regrid_variable(variable_data, regridder):
         raise e
 
 
-def _regrid(nwp_data, output_grid, method="conservative", pool=None):
+def _regrid(nwp_data, output_grid, method="bilinear", pool=None):
     """
     Spatially regrid (interpolate) from GFS grid to CREDIT grid
     Args:
@@ -283,14 +283,14 @@ def _vertical_interpolation(
         b_model_name = "hybm"
         level_var = "level"
     with xr.open_dataset(model_level_file_path) as mod_lev_ds:
-        valid_levels = np.isin(model_levels, mod_lev_ds[level_var].values)
+        valid_levels = np.isin(mod_lev_ds[level_var].values, model_levels)
         if a_model_name == "hyam":
             P0 = 1.0
             a_model = mod_lev_ds[a_model_name].values[valid_levels] * P0
         else:
             a_model = mod_lev_ds[a_model_name].values[valid_levels]
         b_model = mod_lev_ds[b_model_name].values[valid_levels]
-    out_pressure = create_reduced_pressure_grid(state_dataset[surface_pressure_var].values, a_model, b_model)
+    out_pressure, _ = create_reduced_pressure_grid(state_dataset[surface_pressure_var].values, a_model, b_model)
     interpolated_data = {}
     for var in upper_vars:
         interpolated_data[var] = {
@@ -301,7 +301,7 @@ def _vertical_interpolation(
         interpolated_data[var] = {
             "dims": ["latitude", "longitude"],
             "data": interp_hybrid_to_pressure_levels(
-                state_dataset[var].values, state_dataset["P"].values, np.array([50000.0])
+                state_dataset[var].values, state_dataset["P"].values, np.array([50000.0], dtype=np.float32)
             ),
         }
     for var in surface_vars:
