@@ -1149,7 +1149,6 @@ def training_data_check(conf, print_summary=False):
     # check file consistencies
     ## upper-air files
     all_ERA_files = sorted(glob(conf["data"]["save_loc"]))
-    print(all_ERA_files)
     train_ERA_files = [file for file in all_ERA_files if any(year in file for year in train_years)]
     valid_ERA_files = [file for file in all_ERA_files if any(year in file for year in valid_years)]
 
