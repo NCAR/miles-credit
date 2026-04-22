@@ -30,7 +30,7 @@ def build_GFS_init(
     variables: list,
     model_level_file: str = "",
     model_levels: np.ndarray = None,
-    gdas_base_path: str = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/",
+    gdas_base_path: str = "gs://global-forecast-system/",
     variable_mapping: str = "wchapmanera5",
     n_procs: int = 1,
 ):

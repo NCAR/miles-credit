@@ -71,7 +71,6 @@ more space by adding `export XDG_CACHE_HOME="/glade/work/$USER/.cache"` to your 
 :::
 
 
-
 ## Installation from source
 See <project:installation.md> for detailed instructions on building CREDIT and its
 dependencies from source or for building CREDIT on the Derecho supercomputer.
@@ -81,7 +80,8 @@ To train a basic WXFormer model on Casper or Derecho, run the following command 
 ```bash
 credit_train -c config/example-v2026.1.0.yml
 ```
-This script will train a simple WXFormer model on 1 degree ERA5 data for 10 batches. The model will not be good, but if it completes successfully, you can
+This script will train a simple WXFormer model on 1 degree ERA5 data for 10 batches. The model will not be good,
+but if it completes successfully, you can
 have some confidence that CREDIT has been set up correctly in your environment.
 
 Next, make sure inference is working by running:
@@ -89,6 +89,23 @@ Next, make sure inference is working by running:
 credit_rollout_to_netcdf -c config/example-v2026.1.0.yml
 ```
 This will perform a short forecast based on ERA5 and will save the outputs to a specified directory.
+
+If you want to run a realtime forecast, first download and regrid GFS data to your domain.
+```bash
+credit_gfs_init -c config/example-v2026.1.0.yml -p 1
+```
+The script will create a GFS initialization file in your scratch directory. It
+will also create a realtime config file `config/example-v2026.1.0_realtime.yml`.
+Edit the realtime config file so that `data:save_loc_dynamic_forcing` is
+`/glade/campaign/cisl/aiml/credit/credit_solar_6h_1deg_era5_mlevel/*.nc`.  Then you can
+run a realtime forecast with
+```bash
+credit_rollout_realtime -c config/example-v2026.1.0_realtime.yml -p 1
+```
+This script will output 6-hourly netcdf files to your scratch directory and
+performs interpolation to pressure levels. From there you can view the data with your
+favorite visualization tool.
+
 
 ## Running a pretrained model
 See <project:Inference.md> for more details on how to run one of the pretrained CREDIT models.
