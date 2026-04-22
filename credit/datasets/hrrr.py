@@ -41,7 +41,7 @@ Both local and remote modes use the same ``.idx`` + byte-range pipeline:
 
 1. Fetch the sidecar ``.idx`` inventory (~100 KB) via HTTPS to get exact byte
    offsets for every GRIB message.
-2. Issue one HTTP Range GET per required message (~50–200 KB each) via
+2. Issue one HTTP Range GET per required message (~50-200 KB each) via
    ``requests``, with all messages fetched in parallel using
    :class:`concurrent.futures.ThreadPoolExecutor`.
 
@@ -51,7 +51,7 @@ full-file scan.  The ``.idx`` sidecar must be present alongside the grib2;
 download it with ``hrrr_download.py``.
 
 For a typical training sample (5 vars × 6 levels ≈ 30 messages) remote mode
-transfers ~3 MB instead of ~200 MB (~60–100× reduction).
+transfers ~3 MB instead of ~200 MB (~60-100× reduction).
 
 Variable lookup is driven by :data:`VAR_REGISTRY`.  Extend it at import
 time to add variables without subclassing::
@@ -409,7 +409,7 @@ def _build_nat_entry_map(idx_entries: list[dict], idx_name: str) -> dict[int, di
         TMP:10 hybrid level:anl:
 
     i.e. ``level`` ends with ``" hybrid level"`` and the prefix is the integer
-    level index (1–65, bottom-up).
+    level index (1-65, bottom-up).
     """
     result: dict[int, dict] = {}
     for e in idx_entries:
@@ -561,13 +561,7 @@ class HRRRDataset(Dataset):
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
 
-    def __init__(
-        self,
-        config: dict,
-        return_target: bool = False,
-        # product: str = "wrfprsf",
-        # config_key: str = "HRRR",
-    ) -> None:
+    def __init__(self, config: dict, return_target: bool = False) -> None:
         """Initialise HRRRDataset.
 
         Args:
@@ -588,7 +582,8 @@ class HRRRDataset(Dataset):
 
         if len(config["source"]) != 1:
             raise ValueError("Expected exactly one source in config['source'], " + f"got: {config['source'].keys()}")
-        config_key = list(config["source"].keys())[0]  # Probably a more pythonic way to do this
+        # Extract the single key
+        (config_key,) = config["source"]
 
         if config_key not in VALID_PRODUCTS:
             raise ValueError(
@@ -615,7 +610,9 @@ class HRRRDataset(Dataset):
         self.datetimes: pd.DatetimeIndex = self._build_timestamps()
 
         if self.mode == "local" and self.base_path is None:
-            raise ValueError(f"config['source']['{config_key}']['base_path'] is required for local mode")
+            raise ValueError(
+                f"Missing 'base_path'. A config['source']['{config_key}']['base_path'] is required for local mode"
+            )
 
         if "variables" not in source_cfg:
             raise KeyError(
@@ -690,12 +687,19 @@ class HRRRDataset(Dataset):
             self._spatial_slice = (slice(None), slice(None))
             return self._spatial_slice
 
+        if len(lats.shape) != 2 or len(lons.shape) != 2:
+            raise ValueError(f"Expected 2-D lat/lon arrays, got shapes {lats.shape} and {lons.shape}")
+
+        if lats.shape != lons.shape:
+            raise ValueError(f"Latitude and longitude arrays have different shapes: {lats.shape} vs {lons.shape}")
+
         min_lon, max_lon, min_lat, max_lat = self.extent
         min_lon = (min_lon + 180.0) % 360.0 - 180.0
         max_lon = (max_lon + 180.0) % 360.0 - 180.0
         lon_norm = (lons + 180.0) % 360.0 - 180.0
 
         mask = (lats >= min_lat) & (lats <= max_lat) & (lon_norm >= min_lon) & (lon_norm <= max_lon)
+
         rows = np.where(mask.any(axis=1))[0]
         cols = np.where(mask.any(axis=0))[0]
 

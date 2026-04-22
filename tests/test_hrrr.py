@@ -12,10 +12,13 @@ import os
 import textwrap
 
 import pandas as pd
+import numpy as np
+
 import pytest
 
 from credit.datasets.hrrr import (
     VALID_PRODUCTS,
+    _HRRR_HTTPS_BASE,
     _build_nat_entry_map,
     _build_prs_entry_map,
     _find_subhf_entry,
@@ -24,6 +27,7 @@ from credit.datasets.hrrr import (
     _parse_idx,
     _resolve_nat_levels,
     _resolve_pressure_levels,
+    _s3_uri_to_https,
     HRRRDataset,
 )
 
@@ -81,6 +85,26 @@ def test_local_path_wrfnatf():
 def test_local_path_wrfsubhf():
     path = _hrrr_local_path("/data/hrrr", _T_V3, forecast_hour=1, product="wrfsubhf")
     assert path.endswith("hrrr.t06z.wrfsubhf01.grib2")
+    assert "conus" in path
+
+
+def test_local_path_v2_no_conus():
+    path = _hrrr_local_path("/data/hrrr", _T_V2, forecast_hour=0, product="wrfprsf")
+    assert path.endswith("hrrr.t12z.wrfprsf00.grib2")
+    assert "conus" not in path
+
+
+# ---------------------------------------------------------------------------
+# s3 uri to https
+
+
+def test_s3_uri_to_https():
+    s3_uri = _hrrr_s3_uri(_T_V3, forecast_hour=0, product="wrfprsf")
+    assert s3_uri.startswith("s3://")
+    https_url = _s3_uri_to_https(s3_uri)
+    assert https_url.startswith(_HRRR_HTTPS_BASE + "/")
+    start_len = len(_HRRR_HTTPS_BASE) + 1
+    assert https_url[start_len + 1] != "/"  # no double slashes in path
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +361,13 @@ def test_hrrr_dataset_only_one_of_multiple_sources():
             HRRRDataset(multi_source_cfg)
 
 
+def test_hrrr_local_no_base_path():
+    cfg = _make_config("HRRR", mode="local")
+    assert "base_path" not in cfg["source"]["HRRR"]
+    with pytest.raises(ValueError, match="Missing 'base_path'"):
+        HRRRDataset(cfg)
+
+
 # ---------------------------------------------------------------------------
 # HRRRDataset variable types
 # ---------------------------------------------------------------------------
@@ -387,6 +418,283 @@ def test_hrrr_dataset_unsupported_empty_variables():
     cfg = _make_config("HRRR", variables={})
     with pytest.raises(ValueError, match="No variables specified"):
         HRRRDataset(cfg)
+
+
+# ---------------------------------------------------------------------------
+# Spatial Slicing
+# ---------------------------------------------------------------------------
+
+
+def _make_large_extent_dict():
+    # Larger than HRRR CONUS Domain
+    return {
+        "lon_min": -125,
+        "lon_max": -60,
+        "lat_min": 21,
+        "lat_max": 49,
+    }
+
+
+def _make_small_inner_extent_dict():
+    # Specifically chosen since this exhibits the overbounding used in the current spatial slicing
+    return {
+        "lon_min": -100,
+        "lon_max": -80,
+        "lat_min": 30,
+        "lat_max": 45,
+    }
+
+
+def _make_extent_from_dict(extent_dict):
+    return [extent_dict["lon_min"], extent_dict["lon_max"], extent_dict["lat_min"], extent_dict["lat_max"]]
+
+
+def _make_example_lat_lon_array_from_northwest_corner():
+    # Pulled from HRRR pygrib file
+    lat_array = np.array(
+        [
+            [21.138123, 21.14511004, 21.1520901, 21.1590632, 21.16602932, 21.17298847, 21.17994064],
+            [21.16299459, 21.1699845, 21.17696744, 21.18394341, 21.1909124, 21.19787441, 21.20482944],
+            [21.18786863, 21.19486142, 21.20184723, 21.20882607, 21.21579793, 21.22276281, 21.22972071],
+            [21.21274513, 21.21974079, 21.22672948, 21.23371119, 21.24068592, 21.24765367, 21.25461443],
+            [21.23762407, 21.24462262, 21.25161418, 21.25859877, 21.26557637, 21.27254698, 21.2795106],
+        ]
+    )
+    lon_array = np.array(
+        [
+            [-122.719528, -122.69286132, -122.6661903, -122.63951495, -122.61283526, -122.58615124, -122.5594629],
+            [-122.72702499, -122.70035119, -122.67367305, -122.64699057, -122.62030375, -122.59361261, -122.56691713],
+            [-122.73452632, -122.7078454, -122.68116014, -122.65447053, -122.62777658, -122.6010783, -122.57437568],
+            [-122.74203201, -122.71534397, -122.68865157, -122.66195483, -122.63525374, -122.60854832, -122.58183856],
+            [-122.74954205, -122.72284688, -122.69614735, -122.66944347, -122.64273525, -122.61602268, -122.58930577],
+        ]
+    )
+
+    assert lat_array.shape == lon_array.shape == (5, 7)
+
+    return lat_array, lon_array
+
+
+def make_example_lat_lon_array_from_southeast_corner():
+    # Pulled from HRRR pygrib file
+    lat_array = np.array(
+        [
+            [47.82395705, 47.81369093, 47.80341474, 47.79312849],
+            [47.84850201, 47.83823259, 47.8279531, 47.81766354],
+            [47.87304341, 47.86277069, 47.85248789, 47.84219502],
+        ]
+    )
+    lon_array = np.array(
+        [
+            [-61.05747982, -61.02092594, -60.9843842, -60.94785462],
+            [-61.04219088, -61.00562502, -60.96907132, -60.93252978],
+            [-61.02688979, -60.99031194, -60.95374627, -60.91719277],
+        ]
+    )
+
+    assert lat_array.shape == lon_array.shape == (3, 4)
+
+    return lat_array, lon_array
+
+
+def make_example_sparse_lat_lon_array():
+    # Pulled from HRRR pygrib file with [::200]
+    lat_array = np.array(
+        [
+            [
+                21.138123,
+                22.39363054,
+                23.35211458,
+                23.9989997,
+                24.32429928,
+                24.3229457,
+                23.99496013,
+                23.34545175,
+                22.38444668,
+            ],
+            [
+                26.15567125,
+                27.51704653,
+                28.55681548,
+                29.25878727,
+                29.6118577,
+                29.61038848,
+                29.25440314,
+                28.54958622,
+                27.50708576,
+            ],
+            [
+                31.23524502,
+                32.7064578,
+                33.83064323,
+                34.58986908,
+                34.97181768,
+                34.97022817,
+                34.58512669,
+                33.82282544,
+                32.69569056,
+            ],
+            [
+                36.33549131,
+                37.91987254,
+                39.13117389,
+                39.94956089,
+                40.36137462,
+                40.35966068,
+                39.94444814,
+                39.12274831,
+                37.90827365,
+            ],
+            [
+                41.41038658,
+                43.11071088,
+                44.41149614,
+                45.29078069,
+                45.73337849,
+                45.73153623,
+                45.28528634,
+                44.40244548,
+                43.09825876,
+            ],
+            [
+                46.41017285,
+                48.22884146,
+                49.6213434,
+                50.56325709,
+                51.03758491,
+                51.03561028,
+                50.55736972,
+                49.61165081,
+                48.21551648,
+            ],
+        ]
+    )
+    lon_array = np.array(
+        [
+            [
+                -122.719528,
+                -117.3045922,
+                -111.74689876,
+                -106.08259595,
+                -100.35241767,
+                -94.60006322,
+                -88.87025317,
+                -83.20666997,
+                -77.65001567,
+            ],
+            [
+                -124.31052716,
+                -118.58097871,
+                -112.68038876,
+                -106.65130907,
+                -100.54250721,
+                -94.40681151,
+                -88.29845598,
+                -82.27024578,
+                -76.37090505,
+            ],
+            [
+                -126.10886706,
+                -120.0297058,
+                -113.74342493,
+                -107.30043563,
+                -100.7597301,
+                -94.18597618,
+                -87.64581876,
+                -81.20389314,
+                -74.91913112,
+            ],
+            [
+                -128.15621863,
+                -121.68731687,
+                -114.96463159,
+                -108.04824745,
+                -101.01033929,
+                -93.93120087,
+                -86.89397596,
+                -79.97891151,
+                -73.25809648,
+            ],
+            [
+                -130.50562862,
+                -123.60114758,
+                -116.38160307,
+                -108.91897449,
+                -101.30266779,
+                -93.63401497,
+                -86.01857485,
+                -78.55761016,
+                -71.34040163,
+            ],
+            [
+                -133.22540236,
+                -125.83346482,
+                -118.04464678,
+                -109.9454323,
+                -101.64807138,
+                -93.28287546,
+                -84.98663607,
+                -76.88955879,
+                -69.10370576,
+            ],
+        ]
+    )
+
+    assert lat_array.shape == lon_array.shape == (6, 9)
+
+    return lat_array, lon_array
+
+
+def test_hrrr_dataset_spatial_slicing_with_large_extent():
+    nw_arrays = _make_example_lat_lon_array_from_northwest_corner()
+    se_arrays = make_example_lat_lon_array_from_southeast_corner()
+
+    for lat_array, lon_array in [nw_arrays, se_arrays]:
+        cfg = _make_config("HRRR", extent=_make_extent_from_dict(_make_large_extent_dict()))
+        ds = HRRRDataset(cfg)
+        curr_slice = ds._get_spatial_slice(lat_array, lon_array)
+
+        assert len(curr_slice) == 2
+        assert isinstance(curr_slice[0], slice) and isinstance(curr_slice[1], slice)
+
+        # Because the extent is larger than CONUS, we expect the full range of the lat/lon arrays
+        assert curr_slice[0] == slice(0, lat_array.shape[0])
+        assert curr_slice[1] == slice(0, lon_array.shape[1])
+
+        # If we slice again, we should get the same result (idempotent)
+        curr_slice_2 = ds._get_spatial_slice(lat_array, lon_array)
+        assert curr_slice == curr_slice_2
+
+
+def test_hrrr_dataset_spatial_slicing_with_small_inner_extent():
+    lat_array, lon_array = make_example_sparse_lat_lon_array()
+
+    cfg = _make_config("HRRR", extent=_make_extent_from_dict(_make_small_inner_extent_dict()))
+    ds = HRRRDataset(cfg)
+    curr_slice = ds._get_spatial_slice(lat_array, lon_array)
+    print(curr_slice)
+
+    assert len(curr_slice) == 2
+    assert isinstance(curr_slice[0], slice) and isinstance(curr_slice[1], slice)
+    assert curr_slice[0] == slice(2, 4, None)
+    assert curr_slice[1] == slice(5, 8, None)
+
+
+def test_hrrr_dataset_spatial_slicing_no_extent():
+    cfg = _make_config("HRRR")
+    assert "extent" not in cfg["source"]["HRRR"]
+    ds = HRRRDataset(cfg)
+    lat_array, lon_array = _make_example_lat_lon_array_from_northwest_corner()
+
+    curr_slice = ds._get_spatial_slice(lat_array, lon_array)
+    assert len(curr_slice) == 2
+    assert isinstance(curr_slice[0], slice) and isinstance(curr_slice[1], slice)
+    assert curr_slice[0] == slice(None) and curr_slice[1] == slice(None)
+
+
+# ---------------------------------------------------------------------------
+# Getting Dataset Items
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
