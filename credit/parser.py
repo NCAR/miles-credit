@@ -1149,19 +1149,16 @@ def training_data_check(conf, print_summary=False):
     # check file consistencies
     ## upper-air files
     all_ERA_files = sorted(glob(conf["data"]["save_loc"]))
-
+    print(all_ERA_files)
     train_ERA_files = [file for file in all_ERA_files if any(year in file for year in train_years)]
     valid_ERA_files = [file for file in all_ERA_files if any(year in file for year in valid_years)]
 
     for i_year, year in enumerate(train_years):
-        assert year in train_ERA_files[i_year], "[Year {}] is missing from [upper-air files {}]".format(
-            year, conf["data"]["save_loc"]
-        )
+        save_loc = conf["data"]["save_loc"]
+        assert year in train_ERA_files[i_year], f"Year {year} is missing from upper-air files {save_loc}."
 
     for i_year, year in enumerate(valid_years):
-        assert year in valid_ERA_files[i_year], "[Year {}] is missing from [upper-air files {}]".format(
-            year, conf["data"]["save_loc"]
-        )
+        assert year in valid_ERA_files[i_year], f"Year {year} is missing from upper-air files {save_loc}."
 
     ## surface files
     if conf["data"]["flag_surface"]:
