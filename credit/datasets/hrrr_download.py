@@ -23,7 +23,7 @@ Usage::
 Or programmatically::
 
     from credit.datasets.hrrr_download import download_hrrr
-    download_hrrr(config, num_workers=8, overwrite=False)
+    download_hrrr(config['data'], num_workers=8, overwrite=False)
 
 Config section used (``data.source.HRRR``)::
 
