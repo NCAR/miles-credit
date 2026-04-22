@@ -380,6 +380,7 @@ def test_hrrr_dataset_variable_types():
             "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m", "d2m"]},
             "diagnostic": {"vars_3D": ["RH"], "vars_2D": ["sp"]},
             "dynamic_forcing": {"vars_3D": ["Q"], "vars_2D": ["dswrf"]},
+            "static": {"vars_2D": ["orog"]},
         },
     )
     ds = HRRRDataset(cfg)
@@ -390,6 +391,7 @@ def test_hrrr_dataset_variable_types():
     assert var_dict["diagnostic"]["vars_2D"] == ["sp"]
     assert var_dict["dynamic_forcing"]["vars_3D"] == ["Q"]
     assert var_dict["dynamic_forcing"]["vars_2D"] == ["dswrf"]
+    assert var_dict["static"]["vars_2D"] == ["orog"]
 
 
 def test_hrrr_dataset_unsupported_static_variables():
@@ -397,13 +399,13 @@ def test_hrrr_dataset_unsupported_static_variables():
         "HRRR",
         variables={
             "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
-            "static": {
+            "not_valid": {
                 "vars_3D": ["orog"],
                 "vars_2D": [],
-            },  # Currently unsupported field type for HRRR datasets, but can change in the future
+            },
         },
     )
-    with pytest.raises(KeyError, match="Unknown field_type 'static'"):
+    with pytest.raises(KeyError, match="Unknown field_type 'not_valid'"):
         HRRRDataset(cfg)
 
 
