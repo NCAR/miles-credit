@@ -91,7 +91,7 @@ _IDX_TEXT = textwrap.dedent("""\
     1:0:d=2022010106:TMP:500 mb:anl:
     2:12345:d=2022010106:TMP:700 mb:anl:
     3:23456:d=2022010106:UGRD:500 mb:anl:
-    4:34567:d=2022010106:TMP:2 m above ground:anl:
+    4:34567:d=2022010106:DPT:2 m above ground:anl:
 """)
 
 
@@ -105,7 +105,7 @@ def test_parse_idx_basic():
     assert entries[0]["byte_start"] == 0
     assert entries[0]["byte_end"] == 12344  # next entry start - 1
     # Last entry
-    assert entries[-1]["var"] == "TMP"
+    assert entries[-1]["var"] == "DPT"
     assert entries[-1]["level"] == "2 m above ground"
     assert entries[-1]["step"] == "anl"
     assert entries[-1]["byte_start"] == 34567
@@ -335,6 +335,58 @@ def test_hrrr_dataset_only_one_of_multiple_sources():
         }
         with pytest.raises(ValueError, match="Expected exactly one source in config"):
             HRRRDataset(multi_source_cfg)
+
+
+# ---------------------------------------------------------------------------
+# HRRRDataset variable types
+# ---------------------------------------------------------------------------
+
+
+def test_hrrr_dataset_variable_types():
+    cfg = _make_config(
+        "HRRR",
+        variables={
+            "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m", "d2m"]},
+            "diagnostic": {"vars_3D": ["RH"], "vars_2D": ["sp"]},
+            "dynamic_forcing": {"vars_3D": ["Q"], "vars_2D": ["dswrf"]},
+        },
+    )
+    ds = HRRRDataset(cfg)
+    var_dict = ds.var_dict
+    assert var_dict["prognostic"]["vars_3D"] == ["T", "U"]
+    assert var_dict["prognostic"]["vars_2D"] == ["t2m", "d2m"]
+    assert var_dict["diagnostic"]["vars_3D"] == ["RH"]
+    assert var_dict["diagnostic"]["vars_2D"] == ["sp"]
+    assert var_dict["dynamic_forcing"]["vars_3D"] == ["Q"]
+    assert var_dict["dynamic_forcing"]["vars_2D"] == ["dswrf"]
+
+
+def test_hrrr_dataset_unsupported_static_variables():
+    cfg = _make_config(
+        "HRRR",
+        variables={
+            "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
+            "static": {
+                "vars_3D": ["orog"],
+                "vars_2D": [],
+            },  # Currently unsupported field type for HRRR datasets, but can change in the future
+        },
+    )
+    with pytest.raises(KeyError, match="Unknown field_type 'static'"):
+        HRRRDataset(cfg)
+
+
+def test_hrrr_dataset_unsupported_no_variables():
+    cfg = _make_config("HRRR", variables={})
+    del cfg["source"]["HRRR"]["variables"]  # Simulate user forgetting to include "variables" key
+    with pytest.raises(KeyError, match="Missing 'variables' key"):
+        HRRRDataset(cfg)
+
+
+def test_hrrr_dataset_unsupported_empty_variables():
+    cfg = _make_config("HRRR", variables={})
+    with pytest.raises(ValueError, match="No variables specified"):
+        HRRRDataset(cfg)
 
 
 # ---------------------------------------------------------------------------

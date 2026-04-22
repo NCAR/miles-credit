@@ -589,8 +589,6 @@ class HRRRDataset(Dataset):
         if len(config["source"]) != 1:
             raise ValueError("Expected exactly one source in config['source'], " + f"got: {config['source'].keys()}")
         config_key = list(config["source"].keys())[0]  # Probably a more pythonic way to do this
-        print("Config:", config)
-        print("Config key:", config_key)
 
         if config_key not in VALID_PRODUCTS:
             raise ValueError(
@@ -598,11 +596,6 @@ class HRRRDataset(Dataset):
                 + f"Valid products mapped as: {VALID_PRODUCTS}"
             )
         product = VALID_PRODUCTS[config_key]
-
-        # if product not in VALID_PRODUCTS:
-        #     raise ValueError(f"Unknown HRRR product '{product}'. Valid: {sorted(VALID_PRODUCTS)}")
-
-        print("Config key from config:", config["source"].keys())
         source_cfg = config["source"][config_key]
 
         self.product: str = product
@@ -623,6 +616,16 @@ class HRRRDataset(Dataset):
 
         if self.mode == "local" and self.base_path is None:
             raise ValueError(f"config['source']['{config_key}']['base_path'] is required for local mode")
+
+        if "variables" not in source_cfg:
+            raise KeyError(
+                f"Missing 'variables' key in config['source']['{config_key}']" + f"Current keys: {source_cfg.keys()}"
+            )
+        if len(source_cfg["variables"]) == 0:
+            raise ValueError(
+                f"No variables specified under config['source']['{config_key}']['variables']"
+                + f"Current dictionary: {source_cfg['variables']}"
+            )
 
         self.var_dict: dict[str, dict] = {}
         for field_type, d in source_cfg.get("variables", {}).items():
