@@ -373,6 +373,7 @@ def _build_prs_entry_map(idx_entries: list[dict], idx_name: str) -> dict[float, 
             try:
                 lv_f = float(e["level"].replace(" mb", ""))
             except ValueError:
+                logging.debug(f"Skipping idx entry with non-float pressure level: {e['level']}")
                 continue
             result[lv_f] = e
     return result
@@ -424,6 +425,7 @@ def _build_nat_entry_map(idx_entries: list[dict], idx_name: str) -> dict[int, di
             try:
                 lv = int(e["level"].replace(" hybrid level", ""))
             except ValueError:
+                logging.debug(f"Skipping idx entry with non-integer hybrid level: {e['level']}")
                 continue
             result[lv] = e
     return result

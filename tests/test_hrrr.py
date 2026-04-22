@@ -146,6 +146,47 @@ def test_parse_idx_step_field():
     assert entries[1]["step"] == "30 min fcst"
 
 
+def test_parse_idx_empty_text():
+    entries = _parse_idx("")
+    assert entries == []
+
+
+def test_parse_idx_empty_multiline_text():
+    """
+    Test for edge case
+        ```
+        if not line:
+            continue
+        ```
+    """
+    multiline_empty_text = "\n\n\n"
+    entries = _parse_idx(multiline_empty_text)
+    assert entries == []
+
+
+def test_parse_idx_malformed_line():
+    """
+    Test for edge case
+        ```
+        if len(parts) < 6:
+            continue
+        ```
+    """
+    text_per_line = _IDX_TEXT.strip().splitlines()
+    # Remove the colon from line 2
+    text_per_line[1] = text_per_line[1].replace(":", "", 2)  # remove two colons to make it malformed
+
+    malformed_text = "\n".join(text_per_line)
+    print(f"Malformed text:\n{malformed_text}")
+
+    malformed_entries = _parse_idx(malformed_text)
+    print(f"Malformed entries: {malformed_entries}")
+    assert len(malformed_entries) == 3  # one entry should be skipped
+    assert malformed_entries[0]["var"] == "TMP"
+    assert malformed_entries[1]["var"] == "UGRD"
+    assert malformed_entries[2]["var"] == "DPT"
+
+
 # ---------------------------------------------------------------------------
 # _build_prs_entry_map / _resolve_pressure_levels
 # ---------------------------------------------------------------------------
@@ -165,6 +206,13 @@ def test_build_prs_entry_map():
     prs_map = _build_prs_entry_map(entries, "TMP")
     assert set(prs_map.keys()) == {500.0, 700.0, 850.0}
     assert prs_map[500.0]["byte_start"] == 0
+
+
+def test_build_prs_entry_map_non_float_level():
+    entries = _make_prs_entries()
+    entries[1]["level"] = "surface mb"  # non-float level should be skipped
+    prs_map = _build_prs_entry_map(entries, "TMP")
+    assert set(prs_map.keys()) == {500.0, 850.0}
 
 
 def test_resolve_pressure_levels_all():
@@ -213,6 +261,13 @@ def test_build_nat_entry_map_other_var():
     entries = _make_nat_entries()
     nat_map = _build_nat_entry_map(entries, "UGRD")
     assert set(nat_map.keys()) == {10}
+
+
+def test_build_nat_entry_map_non_int_level():
+    entries = _make_nat_entries()
+    entries[1]["level"] = "surface hybrid level"  # non-int level should be skipped
+    nat_map = _build_nat_entry_map(entries, "TMP")
+    assert set(nat_map.keys()) == {10, 30}
 
 
 def test_resolve_nat_levels_all():
@@ -647,7 +702,7 @@ def make_example_sparse_lat_lon_array():
     return lat_array, lon_array
 
 
-def test_hrrr_dataset_spatial_slicing_with_large_extent():
+def test_hrrr_spatial_slicing_with_large_extent():
     nw_arrays = _make_example_lat_lon_array_from_northwest_corner()
     se_arrays = make_example_lat_lon_array_from_southeast_corner()
 
@@ -668,10 +723,11 @@ def test_hrrr_dataset_spatial_slicing_with_large_extent():
         assert curr_slice == curr_slice_2
 
 
-def test_hrrr_dataset_spatial_slicing_with_small_inner_extent():
+def test_hrrr_spatial_slicing_with_small_inner_extent():
     lat_array, lon_array = make_example_sparse_lat_lon_array()
 
-    cfg = _make_config("HRRR", extent=_make_extent_from_dict(_make_small_inner_extent_dict()))
+    extent = _make_extent_from_dict(_make_small_inner_extent_dict())
+    cfg = _make_config("HRRR", extent=extent)
     ds = HRRRDataset(cfg)
     curr_slice = ds._get_spatial_slice(lat_array, lon_array)
     print(curr_slice)
@@ -682,7 +738,7 @@ def test_hrrr_dataset_spatial_slicing_with_small_inner_extent():
     assert curr_slice[1] == slice(5, 8, None)
 
 
-def test_hrrr_dataset_spatial_slicing_no_extent():
+def test_hrrr_spatial_slicing_no_extent():
     cfg = _make_config("HRRR")
     assert "extent" not in cfg["source"]["HRRR"]
     ds = HRRRDataset(cfg)
@@ -692,6 +748,45 @@ def test_hrrr_dataset_spatial_slicing_no_extent():
     assert len(curr_slice) == 2
     assert isinstance(curr_slice[0], slice) and isinstance(curr_slice[1], slice)
     assert curr_slice[0] == slice(None) and curr_slice[1] == slice(None)
+
+
+def test_hrrr_spatial_slicing_extent_out_of_bounds():
+    lat_array, lon_array = make_example_sparse_lat_lon_array()
+
+    # Extent that is completely outside the lat/lon arrays (near French Polynesia)
+    cfg = _make_config("HRRR", extent=[-150, -130, -20, -25])
+    ds = HRRRDataset(cfg)
+    with pytest.raises(ValueError, match="does not intersect the HRRR CONUS domain"):
+        ds._get_spatial_slice(lat_array, lon_array)
+
+
+def test_hrrr_spatial_slicing_incorrect_lat_lon_arrays():
+    lat_array_wrong_shape = np.array([21.0, 22.0, 23.0, 24.0])
+    lon_array_wrong_shape = np.array([-122.0, -121.0, -120.0])
+
+    extent = _make_extent_from_dict(_make_small_inner_extent_dict())
+    cfg = _make_config("HRRR", extent=extent)
+    ds = HRRRDataset(cfg)
+
+    with pytest.raises(ValueError, match="Expected 2-D lat/lon arrays"):
+        ds._get_spatial_slice(lat_array_wrong_shape, lon_array_wrong_shape)
+
+    lat_array_correct, lon_array_correct = make_example_sparse_lat_lon_array()
+
+    with pytest.raises(ValueError, match="Expected 2-D lat/lon arrays"):
+        ds._get_spatial_slice(lat_array_wrong_shape, lon_array_correct)
+
+    with pytest.raises(ValueError, match="Expected 2-D lat/lon arrays"):
+        ds._get_spatial_slice(lat_array_correct, lon_array_wrong_shape)
+
+    lat_array_cropped = lat_array_correct[:3, :3]
+    lon_array_cropped = lon_array_correct[:3, :3]
+
+    with pytest.raises(ValueError, match="Latitude and longitude arrays have different shapes"):
+        ds._get_spatial_slice(lat_array_cropped, lon_array_correct)
+
+    with pytest.raises(ValueError, match="Latitude and longitude arrays have different shapes"):
+        ds._get_spatial_slice(lat_array_correct, lon_array_cropped)
 
 
 # ---------------------------------------------------------------------------
