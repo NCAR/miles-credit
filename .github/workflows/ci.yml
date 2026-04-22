@@ -33,12 +33,24 @@ jobs:
         with:
           python-version: ${{matrix.python-version}}
           cache: 'pip'
+      - name: ESMF support Package Install
+        run: |
+          sudo apt-get -qq -y update
+          sudo apt -qq install libnetcdf-dev libnetcdff-dev
+      - name: Install ESMF
+        uses: esmf-org/install-esmf-action@v1
+        env:
+          ESMF_NETCDF: nc-config
+      - name: Print ESMF Info
+        run: |
+          cat ${ESMFMKFILE}
       - name: Install dependencies
         run: | 
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install . 
           pip install pytest pytest-cov
+          pip install xesmf
       - name: Run tests
         run: |
           pytest --cov=credit --cov-branch --cov-report=xml
