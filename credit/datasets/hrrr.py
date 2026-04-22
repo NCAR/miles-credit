@@ -129,7 +129,7 @@ from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
 
-VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing"}
+VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing", "static"}
 
 # V3+ S3 path includes a 'conus/' subdirectory; v1/v2 does not
 _HRRR_V3_CUTOFF = pd.Timestamp("2018-07-12")
@@ -214,6 +214,13 @@ VAR_REGISTRY: dict[str, dict] = {
     "snowd": {"idx_name": "SNOD", "idx_level": "surface"},  # snow depth (m)
     "weasd": {"idx_name": "WEASD", "idx_level": "surface"},  # water equivalent of snow depth (kg/m²)
     "snowc": {"idx_name": "SNOWC", "idx_level": "surface"},  # snow cover (%)
+    # Masking
+    "landmask": {"idx_name": "LAND", "idx_level": "surface"},  # land sea mask (land=1,sea=0)
+    # Simulated Brightness Temperatures
+    "goes11bt3": {"idx_name": "SBT113", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES West Chan. 3
+    "goes11bt4": {"idx_name": "SBT114", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES West Chan. 4
+    "goes12bt3": {"idx_name": "SBT123", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES East Chan. 3
+    "goes12bt4": {"idx_name": "SBT124", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES East Chan. 4
 }
 
 # Maximum parallel workers for remote fetching
@@ -712,8 +719,13 @@ class HRRRDataset(Dataset):
 
         input_data: dict = {}
         self._extract_field("dynamic_forcing", t, input_data)
+
+        # Prognostic + static are only needed at the initial step
         if i == 0:
-            self._extract_field("prognostic", t, input_data)
+            if "static" in self.var_dict:
+                self._extract_field("static", t, input_data)
+            if "prognostic" in self.var_dict:
+                self._extract_field("prognostic", t, input_data)
 
         sample: dict = {
             "input": input_data,
