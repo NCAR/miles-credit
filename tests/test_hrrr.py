@@ -880,12 +880,30 @@ def test_hrrr_remote_wrfsubhf_getitem():
     cfg = _make_config(
         "HRRR_SUBH",
         levels=[10, 20],
-        variables={"prognostic": {"vars_3D": [], "vars_2D": ["t2m"]}, "static": {"vars_2D": ["orog"]}},
+        variables={"prognostic": {"vars_2D": ["t2m"]}, "static": {"vars_2D": ["orog"]}},
     )
     ds = HRRRDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
     assert "hrrr_subh/prognostic/2d/t2m" in sample["input"]
+
+
+@pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
+def test_hrrr_remote_wrfsubhf_getitem_3D_variable():
+    cfg = _make_config(
+        "HRRR_SUBH",
+        levels=[10, 20],
+        variables={
+            "prognostic": {"vars_3D": ["T"]},
+            "diagnostic": {"vars_3D": ["RH"]},
+            "dynamic_forcing": {"vars_3D": ["Q"]},
+            "static": {"vars_2D": ["orog"]},
+        },
+    )
+    ds = HRRRDataset(cfg)
+    t = ds.datetimes[0]
+    with pytest.raises(ValueError, match="wrfsubhf is a surface-only product"):
+        ds[(t, 0)]
 
 
 @pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
