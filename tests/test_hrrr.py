@@ -98,11 +98,17 @@ _IDX_TEXT = textwrap.dedent("""\
 def test_parse_idx_basic():
     entries = _parse_idx(_IDX_TEXT)
     assert len(entries) == 4
+    # First entry
     assert entries[0]["var"] == "TMP"
     assert entries[0]["level"] == "500 mb"
     assert entries[0]["step"] == "anl"
     assert entries[0]["byte_start"] == 0
     assert entries[0]["byte_end"] == 12344  # next entry start - 1
+    # Last entry
+    assert entries[-1]["var"] == "TMP"
+    assert entries[-1]["level"] == "2 m above ground"
+    assert entries[-1]["step"] == "anl"
+    assert entries[-1]["byte_start"] == 34567
     assert entries[-1]["byte_end"] is None  # last entry
 
 
