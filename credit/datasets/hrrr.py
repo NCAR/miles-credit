@@ -778,6 +778,7 @@ class HRRRDataset(Dataset):
         if field_type not in VALID_FIELD_TYPES:
             raise KeyError(f"Unknown field_type '{field_type}'. Valid options: {sorted(VALID_FIELD_TYPES)}")
         if not isinstance(d, dict):
+            logging.debug(f"Provided dictionary of incorrect type: {type(d)}. Object is {d}")
             return
 
         vars_3d: list[str] = d.get("vars_3D") or []
