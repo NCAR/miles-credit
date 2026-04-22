@@ -226,11 +226,7 @@ _MAX_REMOTE_WORKERS = 8
 _HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
 
 #: Supported HRRR GRIB2 products.
-VALID_PRODUCTS = {
-    "HRRR": "wrfprsf", 
-    "HRRR_NAT": "wrfnatf", 
-    "HRRR_SUBH": "wrfsubhf"
-}
+VALID_PRODUCTS = {"HRRR": "wrfprsf", "HRRR_NAT": "wrfnatf", "HRRR_SUBH": "wrfsubhf"}
 
 
 # ---------------------------------------------------------------------------
@@ -591,18 +587,16 @@ class HRRRDataset(Dataset):
             raise ValueError(f"Missing 'source' key in config: {config}")
 
         if len(config["source"]) != 1:
-            raise ValueError(
-                "Expected exactly one source in config['source'], " + \
-                f"got: {config['source'].keys()}"
-            )
-        config_key = list(config["source"].keys())[0] # Probably a more pythonic way to do this
+            raise ValueError("Expected exactly one source in config['source'], " + f"got: {config['source'].keys()}")
+        config_key = list(config["source"].keys())[0]  # Probably a more pythonic way to do this
         print("Config:", config)
         print("Config key:", config_key)
 
         if config_key not in VALID_PRODUCTS:
             raise ValueError(
-                f"Unknown HRRR product '{config_key}' in config['source']." + \
-                f"Valid products mapped as: {VALID_PRODUCTS}")
+                f"Unknown HRRR product '{config_key}' in config['source']."
+                + f"Valid products mapped as: {VALID_PRODUCTS}"
+            )
         product = VALID_PRODUCTS[config_key]
 
         # if product not in VALID_PRODUCTS:
@@ -612,7 +606,7 @@ class HRRRDataset(Dataset):
         source_cfg = config["source"][config_key]
 
         self.product: str = product
-        self.source_name: str = config_key.lower() 
+        self.source_name: str = config_key.lower()
         self.return_target: bool = return_target
         self.mode: str = source_cfg.get("mode", "local")
         self.base_path: str | None = source_cfg.get("base_path", None)

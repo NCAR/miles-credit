@@ -33,11 +33,7 @@ from credit.datasets.hrrr import (
 
 
 def test_valid_products():
-    assert VALID_PRODUCTS == {
-        "HRRR": "wrfprsf", 
-        "HRRR_NAT": "wrfnatf", 
-        "HRRR_SUBH": "wrfsubhf"
-    }
+    assert VALID_PRODUCTS == {"HRRR": "wrfprsf", "HRRR_NAT": "wrfnatf", "HRRR_SUBH": "wrfsubhf"}
 
 
 # ---------------------------------------------------------------------------
@@ -344,10 +340,7 @@ SKIP_REMOTE = not os.getenv("HRRR_TEST_REMOTE")
 
 @pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
 def test_hrrr_remote_wrfprsf_getitem():
-    cfg = _make_config(
-        "HRRR", 
-        levels=[500, 700], 
-        variables={"prognostic": {"vars_3D": ["T"], "vars_2D": ["t2m"]}})
+    cfg = _make_config("HRRR", levels=[500, 700], variables={"prognostic": {"vars_3D": ["T"], "vars_2D": ["t2m"]}})
     ds = HRRRDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
@@ -357,10 +350,7 @@ def test_hrrr_remote_wrfprsf_getitem():
 
 @pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
 def test_hrrr_remote_wrfnatf_getitem():
-    cfg = _make_config(
-        "HRRR_NAT", 
-        levels=[10, 20], 
-        variables={"prognostic": {"vars_3D": ["T"], "vars_2D": []}})
+    cfg = _make_config("HRRR_NAT", levels=[10, 20], variables={"prognostic": {"vars_3D": ["T"], "vars_2D": []}})
     ds = HRRRDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
