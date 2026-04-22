@@ -233,13 +233,10 @@ _MAX_REMOTE_WORKERS = 8
 _HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
 
 #: Supported HRRR GRIB2 products.
-VALID_PRODUCTS = {"wrfprsf", "wrfnatf", "wrfsubhf"}
-
-#: Maps product name → tensor key prefix used in sample dicts.
-_PRODUCT_SOURCE_NAMES: dict[str, str] = {
-    "wrfprsf": "hrrr",
-    "wrfnatf": "hrrr_nat",
-    "wrfsubhf": "hrrr_subh",
+VALID_PRODUCTS = {
+    "HRRR": "wrfprsf", 
+    "HRRR_NAT": "wrfnatf", 
+    "HRRR_SUBH": "wrfsubhf"
 }
 
 
@@ -579,8 +576,8 @@ class HRRRDataset(Dataset):
         self,
         config: dict,
         return_target: bool = False,
-        product: str = "wrfprsf",
-        config_key: str = "HRRR",
+        # product: str = "wrfprsf",
+        # config_key: str = "HRRR",
     ) -> None:
         """Initialise HRRRDataset.
 
@@ -596,12 +593,33 @@ class HRRRDataset(Dataset):
                 pressure-level product; pass ``"HRRR_NAT"`` or
                 ``"HRRR_SUBH"`` for the other products.
         """
-        if product not in VALID_PRODUCTS:
-            raise ValueError(f"Unknown HRRR product '{product}'. Valid: {sorted(VALID_PRODUCTS)}")
+        # Get the configuration key from the source config:
+        if "source" not in config:
+            raise ValueError(f"Missing 'source' key in config: {config}")
+
+        if len(config["source"]) != 1:
+            raise ValueError(
+                "Expected exactly one source in config['source'], " + \
+                f"got: {config['source'].keys()}"
+            )
+        config_key = list(config["source"].keys())[0] # Probably a more pythonic way to do this
+        print("Config:", config)
+        print("Config key:", config_key)
+
+        if config_key not in VALID_PRODUCTS:
+            raise ValueError(
+                f"Unknown HRRR product '{config_key}' in config['source']." + \
+                f"Valid products mapped as: {VALID_PRODUCTS}")
+        product = VALID_PRODUCTS[config_key]
+
+        # if product not in VALID_PRODUCTS:
+        #     raise ValueError(f"Unknown HRRR product '{product}'. Valid: {sorted(VALID_PRODUCTS)}")
+
+        print("Config key from config:", config["source"].keys())
         source_cfg = config["source"][config_key]
 
         self.product: str = product
-        self.source_name: str = _PRODUCT_SOURCE_NAMES[product]
+        self.source_name: str = config_key.lower() 
         self.return_target: bool = return_target
         self.mode: str = source_cfg.get("mode", "local")
         self.base_path: str | None = source_cfg.get("base_path", None)

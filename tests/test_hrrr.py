@@ -16,7 +16,6 @@ import pytest
 
 from credit.datasets.hrrr import (
     VALID_PRODUCTS,
-    _PRODUCT_SOURCE_NAMES,
     _build_nat_entry_map,
     _build_prs_entry_map,
     _find_subhf_entry,
@@ -34,13 +33,11 @@ from credit.datasets.hrrr import (
 
 
 def test_valid_products():
-    assert VALID_PRODUCTS == {"wrfprsf", "wrfnatf", "wrfsubhf"}
-
-
-def test_product_source_names():
-    assert _PRODUCT_SOURCE_NAMES["wrfprsf"] == "hrrr"
-    assert _PRODUCT_SOURCE_NAMES["wrfnatf"] == "hrrr_nat"
-    assert _PRODUCT_SOURCE_NAMES["wrfsubhf"] == "hrrr_subh"
+    assert VALID_PRODUCTS == {
+        "HRRR": "wrfprsf", 
+        "HRRR_NAT": "wrfnatf", 
+        "HRRR_SUBH": "wrfsubhf"
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +266,7 @@ def _make_config(source_key="HRRR", **extra_source):
 
 def test_hrrr_dataset_wrfprsf_defaults():
     cfg = _make_config("HRRR")
-    ds = HRRRDataset(cfg, product="wrfprsf", config_key="HRRR")
+    ds = HRRRDataset(cfg)
     assert ds.product == "wrfprsf"
     assert ds.source_name == "hrrr"
     assert len(ds) == 25  # 2022-01-01 00:00 … 2022-01-02 00:00 inclusive (25 h)
@@ -277,7 +274,7 @@ def test_hrrr_dataset_wrfprsf_defaults():
 
 def test_hrrr_dataset_wrfnatf():
     cfg = _make_config("HRRR_NAT", variables={"prognostic": {"vars_3D": ["T", "U"], "vars_2D": []}})
-    ds = HRRRDataset(cfg, product="wrfnatf", config_key="HRRR_NAT")
+    ds = HRRRDataset(cfg)
     assert ds.product == "wrfnatf"
     assert ds.source_name == "hrrr_nat"
 
@@ -288,15 +285,54 @@ def test_hrrr_dataset_wrfsubhf():
         variables={"prognostic": {"vars_3D": [], "vars_2D": ["t2m"]}},
     )
     cfg["timestep"] = "15min"
-    ds = HRRRDataset(cfg, product="wrfsubhf", config_key="HRRR_SUBH")
+    ds = HRRRDataset(cfg)
     assert ds.product == "wrfsubhf"
     assert ds.source_name == "hrrr_subh"
 
 
 def test_hrrr_dataset_invalid_product():
-    cfg = _make_config()
+    cfg = _make_config("HRRR_BADPRODUCT")
     with pytest.raises(ValueError, match="Unknown HRRR product"):
-        HRRRDataset(cfg, product="wrfbadproduct")
+        HRRRDataset(cfg)
+
+
+def test_hrrr_dataset_missing_source():
+    cfg = _make_config("HRRR_MISSING")
+    del cfg["source"]
+    with pytest.raises(ValueError, match="Missing 'source' key in config"):
+        HRRRDataset(cfg)
+
+
+def test_hrrr_dataset_wrong_config_hierarchy_passed_higher():
+    cfg = _make_config("HRRR")
+    data_cfg = {"data": cfg}
+
+    with pytest.raises(ValueError, match="Missing 'source' key in config"):
+        HRRRDataset(data_cfg)
+
+
+def test_hrrr_dataset_wrong_config_hierarchy_passed_lower():
+    cfg = _make_config("HRRR")
+    with pytest.raises(ValueError, match="Missing 'source' key in config"):
+        HRRRDataset(cfg["source"]["HRRR"])
+
+
+def test_hrrr_dataset_only_one_of_multiple_sources():
+    cfg = _make_config("HRRR")
+    rest_cfg = {k: v for k, v in cfg.items() if k != "source"}
+
+    other_dataset_name = ["ERA5", "MRMS", "NOT_VALID_DATASET"]
+
+    for other in other_dataset_name:
+        multi_source_cfg = {
+            "source": {
+                other: cfg["source"]["HRRR"],
+                "HRRR": cfg["source"]["HRRR"],
+            },
+            **rest_cfg,
+        }
+        with pytest.raises(ValueError, match="Expected exactly one source in config"):
+            HRRRDataset(multi_source_cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -308,8 +344,11 @@ SKIP_REMOTE = not os.getenv("HRRR_TEST_REMOTE")
 
 @pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
 def test_hrrr_remote_wrfprsf_getitem():
-    cfg = _make_config("HRRR", levels=[500, 700], variables={"prognostic": {"vars_3D": ["T"], "vars_2D": ["t2m"]}})
-    ds = HRRRDataset(cfg, product="wrfprsf", config_key="HRRR")
+    cfg = _make_config(
+        "HRRR", 
+        levels=[500, 700], 
+        variables={"prognostic": {"vars_3D": ["T"], "vars_2D": ["t2m"]}})
+    ds = HRRRDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
     assert "hrrr/prognostic/3d/T" in sample["input"]
@@ -318,8 +357,11 @@ def test_hrrr_remote_wrfprsf_getitem():
 
 @pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
 def test_hrrr_remote_wrfnatf_getitem():
-    cfg = _make_config("HRRR_NAT", levels=[10, 20], variables={"prognostic": {"vars_3D": ["T"], "vars_2D": []}})
-    ds = HRRRDataset(cfg, product="wrfnatf", config_key="HRRR_NAT")
+    cfg = _make_config(
+        "HRRR_NAT", 
+        levels=[10, 20], 
+        variables={"prognostic": {"vars_3D": ["T"], "vars_2D": []}})
+    ds = HRRRDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
     assert "hrrr_nat/prognostic/3d/T" in sample["input"]

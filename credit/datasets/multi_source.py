@@ -62,6 +62,7 @@ from torch.utils.data import Dataset
 
 from credit.datasets.era5 import ERA5Dataset
 from credit.datasets.MRMS import MRMSDataset
+from credit.datasets.hrrr import HRRRDataset
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,9 @@ logger = logging.getLogger(__name__)
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
     "MRMS": MRMSDataset,
+    "HRRR": HRRRDataset,
+    "HRRR_NAT": HRRRDataset,
+    "HRRR_SUBH": HRRRDataset,
 }
 
 
@@ -99,10 +103,14 @@ class MultiSourceDataset(Dataset):
     def __init__(self, config: dict, return_target: bool = False) -> None:
         self.datasets: dict[str, Dataset] = {}
         source_cfg = config.get("source", {})
+        rest_cfg = {k: v for k, v in config.items() if k != "source"}
 
         for key, cls in _SOURCE_REGISTRY.items():
             if key in source_cfg:
-                self.datasets[key.lower()] = cls(config, return_target)
+                # Pass in just the sub-config for this source to avoid confusion
+                # with multisource datasets (e.g., HRRR and HRRR_NAT)
+                sub_config = {"source": {key: source_cfg[key]}, **rest_cfg}
+                self.datasets[key.lower()] = cls(sub_config, return_target)
                 logger.info("MultiSourceDataset: registered source '%s'", key.lower())
             else:
                 logger.debug("MultiSourceDataset: source '%s' not in config, skipping", key)
@@ -151,6 +159,7 @@ class MultiSourceDataset(Dataset):
         """
         if not self.datasets:
             return pd.DatetimeIndex([])
+
         sets = [set(ds.datetimes) for ds in self.datasets.values()]
         common = set.intersection(*sets)
         if not common:
