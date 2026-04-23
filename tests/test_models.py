@@ -2,14 +2,22 @@
 
 import os
 import yaml
+import pytest
 
 import torch
 
-from credit.models import load_model
-from credit.models.unet import SegmentationModel
-from credit.models.crossformer import CrossFormer
-from credit.models.fuxi import Fuxi
+from credit.models import load_model, _LEGACY_MODELS_AVAILABLE
 from credit.parser import credit_main_parser
+
+pytestmark = pytest.mark.skipif(
+    not _LEGACY_MODELS_AVAILABLE,
+    reason="Legacy model deps unavailable (numba/bridgescaler conflict with NumPy ≥2.3)",
+)
+
+if _LEGACY_MODELS_AVAILABLE:
+    from credit.models.unet import SegmentationModel
+    from credit.models.crossformer import CrossFormer
+    from credit.models.fuxi import Fuxi
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
 CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
