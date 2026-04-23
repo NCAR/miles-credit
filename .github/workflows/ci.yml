@@ -38,7 +38,7 @@ jobs:
           sudo apt-get -qq -y update
           sudo apt -qq install libnetcdf-dev libnetcdff-dev
       - name: Install ESMF
-        uses: esmf-org/install-esmf-action@v1
+        uses: esmf-org/install-esmf-action@39afafec8570201bcf14ccdba7ffc246278f8d21 # v1.0.2
         env:
           ESMF_NETCDF: nc-config
         with:
