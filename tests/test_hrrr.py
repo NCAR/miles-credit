@@ -846,9 +846,10 @@ def test_register_field_none_dictionary():
 # ---------------------------------------------------------------------------
 
 SKIP_REMOTE = not os.getenv("HRRR_TEST_REMOTE")
+REASON_SKIP_REMOTE = "Set HRRR_TEST_REMOTE=1 to run remote tests"
 
 
-@pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
+@pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_wrfprsf_getitem():
     cfg = _make_config(
         "HRRR",
@@ -862,7 +863,7 @@ def test_hrrr_remote_wrfprsf_getitem():
     assert sample["input"]["hrrr/prognostic/3d/T"].shape == (2, 1, *sample["input"]["hrrr/prognostic/3d/T"].shape[2:])
 
 
-@pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
+@pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_wrfnatf_getitem():
     cfg = _make_config(
         "HRRR_NAT",
@@ -875,7 +876,7 @@ def test_hrrr_remote_wrfnatf_getitem():
     assert "hrrr_nat/prognostic/3d/T" in sample["input"]
 
 
-@pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
+@pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_wrfsubhf_getitem():
     cfg = _make_config(
         "HRRR_SUBH",
@@ -888,7 +889,7 @@ def test_hrrr_remote_wrfsubhf_getitem():
     assert "hrrr_subh/prognostic/2d/t2m" in sample["input"]
 
 
-@pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
+@pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_wrfsubhf_getitem_3D_variable():
     cfg = _make_config(
         "HRRR_SUBH",
@@ -906,7 +907,7 @@ def test_hrrr_remote_wrfsubhf_getitem_3D_variable():
         ds[(t, 0)]
 
 
-@pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
+@pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_return_target_true():
     cfg = _make_config(
         "HRRR",
@@ -928,7 +929,7 @@ def test_hrrr_remote_return_target_true():
     assert "hrrr/prognostic/3d/T" in sample["target"]
 
 
-@pytest.mark.skipif(SKIP_REMOTE, reason="Set HRRR_TEST_REMOTE=1 to run remote tests")
+@pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_getitem_invalid_datetime():
     cfg = _make_config("HRRR")
     ds = HRRRDataset(cfg)

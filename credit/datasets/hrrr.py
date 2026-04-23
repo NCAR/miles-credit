@@ -541,6 +541,39 @@ def _to_float32(values: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Validate the Dataset Request
+# ---------------------------------------------------------------------------
+
+
+def _validate_product_request(config: dict) -> tuple[str, str]:
+    """Validate the dataset request config, raising ValueError for invalid requests."""
+    # Get the configuration key from the source config:
+    if "source" not in config:
+        raise ValueError(f"Missing 'source' key in config: {config}")
+
+    # config_key: Key under ``config["source"]`` containing this
+    #         product's settings.  Defaults to ``"HRRR"`` for the
+    #         pressure-level product; pass ``"HRRR_NAT"`` or
+    #         ``"HRRR_SUBH"`` for the other products.
+    if len(config["source"]) != 1:
+        raise ValueError("Expected exactly one source in config['source'], " + f"got: {config['source'].keys()}")
+    # Extract the single config key
+    (config_key,) = config["source"]
+
+    # product: HRRR product to load.  One of ``VALID_PRODUCTS``:
+    #         ``"wrfprsf"`` (pressure-level, default), ``"wrfnatf"``
+    #         (native/hybrid-sigma levels), or ``"wrfsubhf"`` (15-min
+    #         sub-hourly surface).
+    if config_key not in VALID_PRODUCTS:
+        raise ValueError(
+            f"Unknown HRRR product '{config_key}' in config['source']." + f"Valid products mapped as: {VALID_PRODUCTS}"
+        )
+    product = VALID_PRODUCTS[config_key]
+
+    return config_key, product
+
+
+# ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
 
@@ -576,30 +609,8 @@ class HRRRDataset(Dataset):
         Args:
             config: Top-level ``data`` config dict.
             return_target: Whether to include a ``"target"`` key in each sample.
-            product: HRRR product to load.  One of ``VALID_PRODUCTS``:
-                ``"wrfprsf"`` (pressure-level, default), ``"wrfnatf"``
-                (native/hybrid-sigma levels), or ``"wrfsubhf"`` (15-min
-                sub-hourly surface).
-            config_key: Key under ``config["source"]`` containing this
-                product's settings.  Defaults to ``"HRRR"`` for the
-                pressure-level product; pass ``"HRRR_NAT"`` or
-                ``"HRRR_SUBH"`` for the other products.
         """
-        # Get the configuration key from the source config:
-        if "source" not in config:
-            raise ValueError(f"Missing 'source' key in config: {config}")
-
-        if len(config["source"]) != 1:
-            raise ValueError("Expected exactly one source in config['source'], " + f"got: {config['source'].keys()}")
-        # Extract the single key
-        (config_key,) = config["source"]
-
-        if config_key not in VALID_PRODUCTS:
-            raise ValueError(
-                f"Unknown HRRR product '{config_key}' in config['source']."
-                + f"Valid products mapped as: {VALID_PRODUCTS}"
-            )
-        product = VALID_PRODUCTS[config_key]
+        config_key, product = _validate_product_request(config)
         source_cfg = config["source"][config_key]
 
         self.product: str = product

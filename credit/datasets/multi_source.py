@@ -77,6 +77,24 @@ _SOURCE_REGISTRY: dict[str, type] = {
 }
 
 
+def make_single_source_subconfig(config: dict, source_key: str) -> dict:
+    """
+    Return a modified config dict containing only the specified source.
+
+    This is used internally to instantiate each sub-dataset with a config
+    containing just its own source config block, to avoid confusion with
+    multisource config fields (e.g. HRRR vs HRRR_NAT vs HRRR_SUBH).
+
+    Args:
+        config: Original multisource config dict.
+        source_key: Key of the source to isolate (e.g., "HRRR").
+
+    Returns:
+        New config dict containing only the specified source's config block.
+    """
+    return {"source": {source_key: config["source"][source_key]}, **{k: v for k, v in config.items() if k != "source"}}
+
+
 class MultiSourceDataset(Dataset):
     """PyTorch Dataset that combines multiple source datasets.
 
@@ -109,7 +127,7 @@ class MultiSourceDataset(Dataset):
             if key in source_cfg:
                 # Pass in just the sub-config for this source to avoid confusion
                 # with multisource datasets (e.g., HRRR and HRRR_NAT)
-                sub_config = {"source": {key: source_cfg[key]}, **rest_cfg}
+                sub_config = make_single_source_subconfig(config, key)
                 self.datasets[key.lower()] = cls(sub_config, return_target)
                 logger.info("MultiSourceDataset: registered source '%s'", key.lower())
             else:

@@ -48,7 +48,8 @@ from typing import NamedTuple
 
 import pandas as pd
 
-from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri
+from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request
+from credit.datasets.multi_source import make_single_source_subconfig
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +92,34 @@ def _download_one(task: _DownloadTask) -> str:
 # ---------------------------------------------------------------------------
 
 
+def get_specific_product_config(config: dict, product: str) -> dict:
+    """
+    Separate the config to only the requested product, so that we can pass it to the download function.
+
+    Args:
+        config: Top-level ``data`` config dict.
+        product: Product to extract config for.  One of "wrfprsf", "wrfnatf", or "wrfsubhf".
+
+    Returns:
+        A new config dict with only the requested product's source config, and the same top-level fields.
+    """
+    from credit.datasets.hrrr import VALID_PRODUCTS  # noqa: PLC0415
+
+    valid_keys_or_vals = set(VALID_PRODUCTS.keys()) | set(VALID_PRODUCTS.values())
+
+    if product not in valid_keys_or_vals:
+        raise ValueError(f"Invalid product: {product}. Must be one of {valid_keys_or_vals}")
+
+    if product in VALID_PRODUCTS:
+        config_key = product
+    else:  # Look up the config key corresponding to the requested product value (invert dictionary)
+        config_key = next(key for key, val in VALID_PRODUCTS.items() if val == product)
+
+    return make_single_source_subconfig(config, config_key)
+
+
 def download_hrrr(
     config: dict,
-    product: str = "wrfprsf",
     num_workers: int = 4,
     overwrite: bool = False,
 ) -> None:
@@ -106,11 +132,6 @@ def download_hrrr(
     Args:
         config: Top-level ``data`` config dict (same object passed to
             ``HRRRDataset``).
-        product: HRRR product to download — ``"wrfprsf"`` (pressure-level,
-            default), ``"wrfnatf"`` (native/hybrid-sigma), or ``"wrfsubhf"``
-            (15-min sub-hourly surface).  For ``"wrfsubhf"`` the full set of
-            FF files implied by the date-range and timestep is computed
-            automatically (one file per 60-min block).
         num_workers: Number of parallel download workers.  Each worker opens
             its own ``s3fs`` connection.  Default ``4``.
         overwrite: Re-download files that already exist on disk. Default
@@ -121,10 +142,8 @@ def download_hrrr(
         KeyError: If the config is missing required fields.
         ValueError: If *product* is not a recognised HRRR product.
     """
-    from credit.datasets.hrrr import VALID_PRODUCTS  # noqa: PLC0415
-
-    if product not in VALID_PRODUCTS:
-        raise ValueError(f"Unknown product '{product}'. Valid: {sorted(VALID_PRODUCTS)}")
+    config_key, product = _validate_product_request(config)
+    source_cfg = config["source"][config_key]
 
     try:
         import s3fs  # noqa: PLC0415
@@ -133,10 +152,6 @@ def download_hrrr(
     except ImportError as exc:
         raise ImportError("s3fs is required for downloading: pip install s3fs") from exc
 
-    # Determine which config block to read (HRRR / HRRR_NAT / HRRR_SUBH)
-    _config_key_map = {"wrfprsf": "HRRR", "wrfnatf": "HRRR_NAT", "wrfsubhf": "HRRR_SUBH"}
-    config_key = _config_key_map[product]
-    source_cfg = config["source"][config_key]
     base_path: str = source_cfg["base_path"]
     forecast_hour: int = int(source_cfg.get("forecast_hour", 0))
 
@@ -215,9 +230,9 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config file.")
     parser.add_argument(
         "--product",
-        default="wrfprsf",
-        choices=["wrfprsf", "wrfnatf", "wrfsubhf"],
-        help="HRRR product to download (default: wrfprsf).",
+        default=None,
+        choices=["HRRR", "wrfprsf", "HRRR_NAT", "wrfnatf", "HRRR_SUBH", "wrfsubhf"],
+        help="HRRR product to download (default: use config, assuming single source). Note, HRRR=wrfprsf, HRRR_NAT=wrfnatf, and HRRR_SUBH=wrfsubhf.",
     )
     parser.add_argument(
         "--num_workers",
@@ -237,4 +252,8 @@ if __name__ == "__main__":
         cfg = yaml.safe_load(f)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    download_hrrr(cfg["data"], product=args.product, num_workers=args.num_workers, overwrite=args.overwrite)
+
+    if args.product is not None:
+        cfg["data"] = get_specific_product_config(cfg["data"], args.product)
+
+    download_hrrr(cfg["data"], num_workers=args.num_workers, overwrite=args.overwrite)
