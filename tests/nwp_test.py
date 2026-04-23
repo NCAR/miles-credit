@@ -141,7 +141,7 @@ def generate_synthetic_gfs_data(date):
             9.987807e02,
         ],
         dtype=np.float32,
-    )
+    )  # noqa
     phalf = np.array(
         [
             9.990000e-03,
@@ -274,7 +274,7 @@ def generate_synthetic_gfs_data(date):
             1.000000e03,
         ],
         dtype=np.float32,
-    )
+    )  # noqa
     coords = {
         "grid_yt": ("grid_yt", grid_yt),
         "grid_xt": ("grid_xt", grid_xt),
@@ -435,7 +435,7 @@ def generate_synthetic_gfs_data(date):
                 0.0000000e00,
             ],
             dtype=np.float32,
-        ),
+        ),  # noqa
         "bk": np.array(
             [
                 0.0000000e00,
@@ -568,7 +568,7 @@ def generate_synthetic_gfs_data(date):
                 1.0000000e00,
             ],
             dtype=np.float32,
-        ),
+        ),  # noqa
     }
     gfs_syn_atm = xr.Dataset(data_vars=data_vars_atm, coords=coords, attrs=gfs_attrs)
     base_path = dirname(abspath(__file__))
