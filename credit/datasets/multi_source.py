@@ -60,7 +60,7 @@ import logging
 import pandas as pd
 from torch.utils.data import Dataset
 
-from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.era5 import ERA5Dataset, ERA5DatasetFDB
 from credit.datasets.MRMS import MRMSDataset
 from credit.datasets.hrrr import HRRRDataset
 
@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 # Add entries here to register new data sources.
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
+    "ERA%_FDB": ERA5DatasetFDB,
     "MRMS": MRMSDataset,
     "HRRR": HRRRDataset,
     "HRRR_NAT": HRRRDataset,
