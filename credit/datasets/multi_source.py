@@ -70,7 +70,7 @@ logger = logging.getLogger(__name__)
 # Add entries here to register new data sources.
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
-    "ERA%_FDB": ERA5DatasetFDB,
+    "ERA5_FDB": ERA5DatasetFDB,
     "MRMS": MRMSDataset,
     "HRRR": HRRRDataset,
     "HRRR_NAT": HRRRDataset,
