@@ -19,18 +19,17 @@ def main():
     parser.add_argument(
         "-i",
         "--input",
-        type=str,
         default="/glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc",
         help="File containing longitudes, latitudes, and geopotential height.",
     )
     parser.add_argument(
         "-g",
         "--geo",
-        type=str,
         default="Z_GDS4_SFC",
         help="Geopotential height variable.",
     )
-    parser.add_argument("-o", "--output", type=str, required=True, help="Output directory")
+    parser.add_argument("-v", "--var", type=str, default="tsi", help="Solar radiation variable name")
+    parser.add_argument("-o", "--output", type=str, help="Output directory")
     parser.add_argument("-z", "--zarr", action="store_true", help="Output as zarr files.")
     args = parser.parse_args()
     grid_points_sub = None
@@ -47,7 +46,7 @@ def main():
                 data=np.zeros((dates.size, lats.size, lons.size), dtype=np.float32),
                 coords={"time": dates, "longitude": lons, "latitude": lats},
                 dims=("time", "latitude", "longitude"),
-                name="tsi",
+                name=args.var,
                 attrs={"long_name": "total solar irradiance", "units": "J m-2"},
             )
             heights = static_ds[args.geo].values / 9.81
@@ -72,6 +71,7 @@ def main():
             args.end,
             step_freq=args.step,
             sub_freq=args.sub,
+            solar_var=args.var,
         )
         if rank > 0:
             comm.Send(
@@ -79,16 +79,16 @@ def main():
                     [
                         solar_point["latitude"].values,
                         solar_point["longitude"].values,
-                        solar_point["tsi"].values.ravel(),
+                        solar_point[args.var].values.ravel(),
                     ]
                 ),
                 dest=0,
                 tag=rank,
             )
         else:
-            solar_grid.loc[:, solar_point["latitude"], solar_point["longitude"]] = solar_point["tsi"].values
+            solar_grid.loc[:, solar_point["latitude"], solar_point["longitude"]] = solar_point[args.var].values
             for sr in range(1, size):
-                other_point = np.empty(2 + solar_grid.shape[0], dtype=solar_point["tsi"].dtype)
+                other_point = np.empty(2 + solar_grid.shape[0], dtype=solar_point[args.var].dtype)
                 comm.Recv(other_point, source=sr, tag=sr)
                 solar_grid.loc[:, other_point[0], other_point[1]] = other_point[2:]
 
@@ -105,7 +105,7 @@ def main():
                 os.path.join(args.output, filename),
                 mode="w",
                 encoding={
-                    "tsi": {
+                    args.var: {
                         "chunks": (
                             1,
                             solar_grid.shape[1],
@@ -119,7 +119,7 @@ def main():
             solar_grid.to_netcdf(
                 os.path.join(args.output, filename),
                 encoding={
-                    "tsi": {
+                    args.var: {
                         "zlib": True,
                         "complevel": 1,
                         "shuffle": True,
