@@ -1,0 +1,120 @@
+save_loc: '/glade/derecho/scratch/schreck/tmp/model_zoo_train/fourcastnet'
+seed: 1000
+
+data:
+    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    level_ids: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+    surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+    save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    diagnostic_variables: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
+                           'surface_latent_heat_flux', 'surface_net_solar_radiation', 'surface_net_thermal_radiation',
+                           'surface_sensible_heat_flux']
+    save_loc_diagnostic: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    save_loc_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT/forcing_norm_6h.nc'
+    static_variables: ["z_norm", "land_sea_mask"]
+    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    save_loc_physics: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+    train_years: [2000, 2014]
+    valid_years: [2014, 2018]
+    scaler_type: 'std_new'
+    history_len: 1
+    valid_history_len: 1
+    forecast_len: 0
+    valid_forecast_len: 0
+    lead_time_periods: 6
+    static_first: False
+    dataset_type: ERA5_MultiStep_Batcher
+
+model:
+    type: "fourcastnet"
+    in_channels: 80
+    out_channels: 84
+    img_size: [181, 360]
+    levels: 18
+    patch_size: 4
+    embed_dim: 512
+    depth: 8
+    n_blocks: 8
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+    use_power_loss: False
+    use_spectral_loss: False
+    spectral_lambda_reg: 0.1
+    spectral_wavenum_init: 20
+    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
+    use_latitude_weights: True
+    use_variable_weights: False
+
+predict:
+    mode: none
+    batch_size: 1
+    forecasts:
+        type: "custom"
+        start_year: 2019
+        start_month: 1
+        start_day: 1
+        start_hours: [0, 12]
+        duration: 10
+        days: 10
+    metadata: '/glade/u/home/schreck/miles-credit/credit/metadata/era5.yaml'
+    save_forecast: '/glade/derecho/scratch/schreck/tmp/model_zoo_train/fourcastnet/rollout'
+
+trainer:
+    type: era5
+    mode: ddp
+    activation_checkpoint: False
+    compile: False
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+    save_backup_weights: False
+    save_best_weights: True
+    save_metric_vars: False
+    update_learning_rate: False
+    learning_rate: 5.0e-04
+    weight_decay: 0
+    train_batch_size: 2
+    valid_batch_size: 2
+    ensemble_size: 1
+    batches_per_epoch: 1000
+    valid_batches_per_epoch: 50
+    stopping_patience: 200
+    skip_validation: False
+    start_epoch: 0
+    num_epoch: 1
+    reload_epoch: False
+    epochs: 100
+    use_scheduler: True
+    scheduler:
+        scheduler_type: cosine-annealing-restarts
+        first_cycle_steps: 1000
+        cycle_mult: 2.0
+        max_lr: 5.0e-04
+        min_lr: 1.0e-06
+        warmup_steps: 999
+        gamma: 0.8
+    amp: True
+    grad_accum_every: 1
+    grad_max_norm: 'dynamic'
+    thread_workers: 4
+    valid_thread_workers: 1
+    prefetch_factor: 2
+
+pbs:
+    conda: "credit-derecho"
+    project: "NAML0001"
+    job_name: "zoo_fourcastnet"
+    walltime: "12:00:00"
+    nodes: 1
+    ncpus: 64
+    ngpus: 4
+    mem: '480GB'
+    queue: 'main'
