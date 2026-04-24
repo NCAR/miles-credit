@@ -37,6 +37,35 @@ data:
                 dynamic_forcing: null
             extent: [ -130, -60, 20, 55 ]
 
+        GOES:
+            goes_id: "goes16"
+            mode: "remote"
+            product: "ABI-L2-MCMIPC"
+            variables:
+                prognostic:
+                    vars_2D:
+                        - "CMI_C01"
+                        - "CMI_C02"
+                        - "CMI_C03"
+                        - "CMI_C04"
+                        - "CMI_C05"
+                        - "CMI_C06"
+                        - "CMI_C07"
+                        - "CMI_C08"
+                        - "CMI_C09"
+                        - "CMI_C10"
+                        - "CMI_C11"
+                        - "CMI_C12"
+                        - "CMI_C13"
+                        - "CMI_C14"
+                        - "CMI_C15"
+                        - "CMI_C16"
+                    path: "/glade/derecho/scratch/kevinyang/datasets/goes/"
+                diagnostic: null
+                dynamic_forcing: null
+            latlon2d_dir: "/glade/derecho/scratch/kevinyang/datasets/goes/"
+            extent: [-130, -60, 20, 55]
+
     start_datetime: "2021-06-01"
     end_datetime: "2021-06-04"
     timestep: "6h"
