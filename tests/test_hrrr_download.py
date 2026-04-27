@@ -76,9 +76,8 @@ def test_get_specific_product_config():
 # Remote integration tests (skipped unless HRRR_TEST_REMOTE=1)
 # ---------------------------------------------------------------------------
 
-
-SKIP_REMOTE = not os.getenv("HRRR_TEST_REMOTE")
-REASON_SKIP_REMOTE = "Set HRRR_TEST_REMOTE=1 to run remote tests"
+SKIP_REMOTE = bool(os.getenv("SKIP_HRRR_REMOTE"))
+REASON_SKIP_REMOTE = "Set SKIP_HRRR_REMOTE=1 to skip remote tests"
 
 
 @pytest.fixture(scope="session")
