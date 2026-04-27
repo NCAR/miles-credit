@@ -115,10 +115,14 @@ def main_cli():
         device = torch.device("cpu")
 
     train_dataset = load_dataset(conf, is_train=True)
-    valid_dataset = load_dataset(conf, is_train=False)
-
     train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
-    valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
+
+    skip_validation = conf["trainer"].get("skip_validation", False)
+    if skip_validation:
+        valid_loader = None
+    else:
+        valid_dataset = load_dataset(conf, is_train=False)
+        valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
 
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
