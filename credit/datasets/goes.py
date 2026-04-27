@@ -48,7 +48,9 @@ VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing"}
 
 
 def _build_spatial_slices(
-    extent: list[int] | None, lat2d: np.ndarray | None = None, lon2d: np.ndarray | None = None,
+    extent: list[int] | None,
+    lat2d: np.ndarray | None = None,
+    lon2d: np.ndarray | None = None,
 ) -> tuple[slice, slice]:
     """Compute row (latitude) and column (longitude) slices that bound a geographic extent on a 2-D grid.
 
@@ -82,8 +84,9 @@ def _build_spatial_slices(
 
     elif isinstance(extent, list):
         if lat2d is None or lon2d is None:
-            raise ValueError("A geographic extent requires lat2d and lon2d; "
-                             "pass 2-D coordinate arrays or set extent=None.")
+            raise ValueError(
+                "A geographic extent requires lat2d and lon2d; pass 2-D coordinate arrays or set extent=None."
+            )
 
         lon_min, lon_max, lat_min, lat_max = extent
 
@@ -101,9 +104,8 @@ def _build_spatial_slices(
 
     return y_slice, x_slice
 
-def _find_nearest_latlon(
-        lat2d: np.ndarray, lon2d: np.ndarray, lat_target: float, lon_target: float
-) -> tuple[int, int]:
+
+def _find_nearest_latlon(lat2d: np.ndarray, lon2d: np.ndarray, lat_target: float, lon_target: float) -> tuple[int, int]:
     """Find the 2-D grid indices of the point nearest to a target lat/lon using Haversine distance.
 
     Args:
@@ -251,8 +253,7 @@ class GOESDataset(Dataset):
         ValueError: If ``goes_id`` or ``region`` are not recognized.
     """
 
-    def __init__(
-        self, config: dict, return_target: bool = False) -> None:
+    def __init__(self, config: dict, return_target: bool = False) -> None:
         source_cfg = config["source"]["GOES"]
 
         self.goes_id: str = source_cfg.get("goes_id", "goes16")
@@ -287,7 +288,7 @@ class GOESDataset(Dataset):
         # Pre-compute spatial slices from GOES fixed lat/lon grids
         self.latlon2d_dir: str = source_cfg.get("latlon2d_dir", "")
 
-        if self.goes_id in ("goes16", "goes19"):    # both GOES-East
+        if self.goes_id in ("goes16", "goes19"):  # both GOES-East
             prefix = "goes19"
         elif self.goes_id in ("goes17", "goes18"):  # both GOES-West
             prefix = "goes18"
@@ -305,12 +306,12 @@ class GOESDataset(Dataset):
         try:
             with xr.open_dataset(latlon2d_path) as ds:
                 self.y_slice, self.x_slice = _build_spatial_slices(
-                    self.extent, ds.latitude.values, ds.longitude.values,
+                    self.extent,
+                    ds.latitude.values,
+                    ds.longitude.values,
                 )
         except FileNotFoundError as e:
-            raise FileNotFoundError(
-                f"Latitude/longitude grid file not found at {latlon2d_path}"
-            ) from e
+            raise FileNotFoundError(f"Latitude/longitude grid file not found at {latlon2d_path}") from e
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -395,9 +396,7 @@ class GOESDataset(Dataset):
         }
         self._fs = s3fs.S3FileSystem(**fs_config)
 
-    def _collect_GOES_file_path(
-            self, base_dir: str = "", verbose: bool = False
-    ):
+    def _collect_GOES_file_path(self, base_dir: str = "", verbose: bool = False):
         """Build a time-ordered file map for the dataset's datetime range.
 
         For each requested timestamp the method lists the appropriate S3 or
@@ -427,6 +426,7 @@ class GOESDataset(Dataset):
         # -- Collect file paths from local or remote hourly directories --
         if self.mode == "remote":
             import s3fs
+
             fs = s3fs.S3FileSystem(anon=True, token="anon")
 
         file_paths = []
@@ -449,9 +449,7 @@ class GOESDataset(Dataset):
                     print(f"[WARN] No data at {dt}: {e}")
 
         if not file_paths:
-            raise FileNotFoundError(
-                "No valid GOES-L2 files found for the given datetimes."
-            )
+            raise FileNotFoundError("No valid GOES-L2 files found for the given datetimes.")
 
         # -- Parse GOES L2 filenames and convert timestamp fields --
         # reference: _goes_file_df() under goes2go/src/goes2go/data.py
@@ -470,9 +468,7 @@ class GOESDataset(Dataset):
 
         # -- Match each requested timestamp to its nearest GOES file --
         unique_times = df.index.unique()
-        nearest_indices = unique_times.get_indexer(
-            self.datetimes, method="nearest", tolerance=self.tolerance
-        )
+        nearest_indices = unique_times.get_indexer(self.datetimes, method="nearest", tolerance=self.tolerance)
 
         freq = _infer_period_freq("s%Y%j%H%M%S%f")
 
