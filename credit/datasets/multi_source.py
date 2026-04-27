@@ -45,6 +45,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 
 from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.MRMS import MRMSDataset
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ logger = logging.getLogger(__name__)
 # Add entries here to register new data sources.
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
+    "MRMS": MRMSDataset,
 }
 
 
@@ -66,7 +68,7 @@ class MultiSourceDataset(Dataset):
 
     Attributes:
         datasets: Ordered mapping of lowercase source name to its Dataset
-            instance (e.g. ``{"era5": ERA5Dataset}``).
+            instance (e.g. ``{"era5": ERA5Dataset, "mrms": MRMSDataset}``).
         datetimes: DatetimeIndex of timestamps valid for *all* active sources
             (intersection of each source's own ``datetimes``).
         static_metadata: Per-source static metadata aggregated from each
