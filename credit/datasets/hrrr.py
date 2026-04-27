@@ -586,6 +586,7 @@ class HRRRDataset(Dataset):
     * ``prognostic``      — input at step 0 and target (autoregressive rollout)
     * ``dynamic_forcing`` — input at every step; never a target
     * ``diagnostic``      — target only
+    * ``static``          — input at step 0; never a target, applies to all steps
 
     Both modes use ``pygrib`` for GRIB2 decoding.  Remote mode fetches the
     ``.idx`` sidecar and issues parallel HTTP Range requests — no full file
@@ -596,9 +597,9 @@ class HRRRDataset(Dataset):
 
     Attributes:
         source_name: Tensor key prefix — ``"hrrr"``, ``"hrrr_nat"``, or
-            ``"hrrr_subh"`` depending on *product*.
+            ``"hrrr_subh"``.
         product: Active HRRR product (``"wrfprsf"``, ``"wrfnatf"``, or
-            ``"wrfsubhf"``).
+            ``"wrfsubhf"``) depending on *source_name*.
         datetimes: DatetimeIndex of valid initialisation timestamps.
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
