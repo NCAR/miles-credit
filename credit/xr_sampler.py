@@ -51,8 +51,7 @@ class XRSamplerByYear:
 
         # Resolve globs once at construction time.
         self._path_groups = [
-            {"filenames": sorted(glob(pattern)), "variables": vars_list}
-            for pattern, vars_list in path_to_vars.items()
+            {"filenames": sorted(glob(pattern)), "variables": vars_list} for pattern, vars_list in path_to_vars.items()
         ]
 
         # Flat list of all tracked variables (for external reference).
@@ -69,10 +68,7 @@ class XRSamplerByYear:
             for group in self._path_groups:
                 matching = [fn for fn in group["filenames"] if str(year) in fn]
                 if len(matching) != 1:
-                    raise RuntimeError(
-                        f"expected exactly 1 file for year {year}, "
-                        f"found {len(matching)}: {matching}"
-                    )
+                    raise RuntimeError(f"expected exactly 1 file for year {year}, found {len(matching)}: {matching}")
                 ds = get_forward_data(matching[0])
                 ds = drop_var_from_dataset(ds, group["variables"])
                 if not isinstance(ds.time[0].values, np.datetime64):
