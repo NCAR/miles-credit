@@ -8,7 +8,7 @@ from credit.preblock.regrid import Regridder
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.norm import ERA5Normalizer
 
-# bridgescaler depends on numba which requires NumPy ≤ 2.2
+# bridgescaler is an optional dependency; guard against environments without it
 try:
     from credit.preblock.scaler import BridgeScalerTransformer
 

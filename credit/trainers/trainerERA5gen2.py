@@ -29,7 +29,7 @@ class TrainerERA5Gen2(BaseTrainer):
             (no concat_and_reshape / reshape_only calls in the training loop)
           - forecast_len semantics: 1 = 1 step (Gen 1 used 0 = 1 step)
           - backprop_on_timestep: range(1, forecast_len+1) instead of range(0, forecast_len+2)
-          - Validation config read from conf["data_valid"] if present, else conf["data"]
+          - Validation config read from conf["validation_data"] if present, else conf["data"]
 
         Args:
             model: The (possibly DDP/FSDP-wrapped) model.
@@ -109,10 +109,14 @@ class TrainerERA5Gen2(BaseTrainer):
             self.clamp_min = float(data_clamp[0])
             self.clamp_max = float(data_clamp[1])
 
-        # Validation config: use data_valid block if present, else fall back to data
-        data_valid = conf.get("data_valid", data_conf)
+        # Validation config: use validation_data block if present, else fall back to data
+        data_valid = conf.get("validation_data", data_conf)
         self.valid_history_len = data_valid.get("history_len", data_conf.get("history_len", 1))
         self.valid_forecast_len = data_valid.get("forecast_len", self.forecast_len)
+
+        # If True, log a warning on NaN loss instead of raising TrialPruned.
+        # Useful for smoke tests with unnormalized data where NaN is expected.
+        self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
 
     def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         """
@@ -277,7 +281,10 @@ class TrainerERA5Gen2(BaseTrainer):
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(results_dict["train_loss"])
-                raise optuna.TrialPruned()
+                if self.skip_nan_prune:
+                    logger.warning("NaN/Inf loss detected but skip_nan_prune=True; continuing.")
+                else:
+                    raise optuna.TrialPruned()
 
             self._log_batch_progress(epoch, results_dict, optimizer, batch_group_generator, phase="train")
 

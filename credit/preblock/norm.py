@@ -40,25 +40,39 @@ class ERA5Normalizer(nn.Module):
     Args:
         mean_path: Path to NetCDF file containing per-variable means.
         std_path:  Path to NetCDF file containing per-variable standard deviations.
+        levels:    Optional list of 1-indexed model levels to select from the
+                   full 137-level stats (e.g. [60, 90, 120, 137] for a 4-level
+                   smoke test).  When omitted, all levels in the stats file are
+                   used.
     """
 
-    def __init__(self, mean_path: str, std_path: str) -> None:
+    def __init__(self, mean_path: str, std_path: str, levels: list[int] | None = None) -> None:
         super().__init__()
 
         ds_mean = xr.open_dataset(mean_path)
         ds_std = xr.open_dataset(std_path)
 
-        ds_mean = xr.open_dataset(mean_path)
-        ds_std = xr.open_dataset(std_path)
+        # Convert 1-indexed level list to 0-indexed array indices.
+        level_idx = [lv - 1 for lv in levels] if levels is not None else None
 
         # Build {varname: tensor} lookup. Tensors are scalar or 1-D (levels).
+        # Use only variables present in both files; extras in either are skipped.
         self._mean: dict[str, torch.Tensor] = {}
         self._std: dict[str, torch.Tensor] = {}
-        for var in ds_mean.data_vars:
-            self._mean[var] = torch.tensor(np.array(ds_mean[var].values), dtype=torch.float32)
-            self._std[var] = torch.tensor(np.array(ds_std[var].values), dtype=torch.float32)
+        for var in set(ds_mean.data_vars) & set(ds_std.data_vars):
+            m = torch.tensor(np.array(ds_mean[var].values), dtype=torch.float32)
+            s = torch.tensor(np.array(ds_std[var].values), dtype=torch.float32)
+            if level_idx is not None and m.dim() == 1 and m.shape[0] > 1:
+                m = m[level_idx]
+                s = s[level_idx]
+            self._mean[var] = m
+            self._std[var] = s
 
-        logger.info("ERA5Normalizer: loaded stats for %d variables", len(self._mean))
+        logger.info(
+            "ERA5Normalizer: loaded stats for %d variables%s",
+            len(self._mean),
+            f" (levels={levels})" if levels is not None else "",
+        )
 
     def _normalize_tensor(self, key: str, tensor: torch.Tensor) -> torch.Tensor:
         """Normalize *tensor* using the variable name extracted from *key*."""
@@ -80,7 +94,7 @@ class ERA5Normalizer(nn.Module):
             std = std.view(1, -1, 1, 1, 1)
         # else: scalar — broadcasts naturally
 
-        return (tensor - mean) / (std + 1e-7)
+        return (tensor - mean) / std.clamp(min=1e-12)
 
     def forward(self, batch: dict) -> dict:
         """Normalize all input/target tensors in-place (returns same dict)."""

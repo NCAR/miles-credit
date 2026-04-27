@@ -61,6 +61,11 @@ import pandas as pd
 from torch.utils.data import Dataset
 
 from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.era5land import ERA5LandDataset
+from credit.datasets.era5native import ERA5NativeRawDataset
+from credit.datasets.era5kerchunk import ERA5KerchunkDataset
+from credit.datasets.era5zarr import ERA5ZarrDataset
+from credit.datasets.era5d633000plevel import ERA5D633000PLevelDataset
 from credit.datasets.MRMS import MRMSDataset
 
 logger = logging.getLogger(__name__)
@@ -69,6 +74,11 @@ logger = logging.getLogger(__name__)
 # Add entries here to register new data sources.
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
+    "ERA5LAND": ERA5LandDataset,
+    "ERA5NATIVE": ERA5NativeRawDataset,
+    "ERA5KERCHUNK": ERA5KerchunkDataset,
+    "ERA5ZARR": ERA5ZarrDataset,
+    "ERA5D633000PLEVEL": ERA5D633000PLevelDataset,
     "MRMS": MRMSDataset,
 }
 

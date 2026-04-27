@@ -32,7 +32,7 @@ data:
   start_datetime: "2000-01-01"
   end_datetime: "2003-12-31"
 
-data_valid:
+validation_data:
   start_datetime: "2014-01-01"
   end_datetime: "2015-12-31"
 

@@ -17,8 +17,8 @@ import xarray as xr
 import torch
 
 try:
-    from bridgescaler import read_scaler
-except (ImportError, Exception):
+    from bridgescaler import read_scaler  # optional dependency
+except ImportError:
     read_scaler = None
 
 from credit.data import Sample, device_compatible_to

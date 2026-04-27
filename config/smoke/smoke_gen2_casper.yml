@@ -1,50 +1,57 @@
-# Smoke test for v2/trainer-preblocks branch — Gen2 data schema
-# Single-GPU Casper, era5-gen2 trainer + MultiSourceDataset, wxformer
-# Goal: verify MSE drops and ACC rises over a few epochs;
-#       matches smoke_v2branch_casper.yml model/trainer settings exactly.
+# Smoke test — Gen2 trainer + MultiSourceDataset, 0.25° 16-level model-level ERA5
+# Same data layout as the Nature paper: upper-air+surface from SixHourly_y_TOTAL zarr,
+# tsi from solar NC, static from static_norm_old.nc
+# Reduced model size and 2-year training window for quick Casper single-GPU validation.
 
-save_loc: '/glade/work/schreck/runs/CREDIT_runs/smoke_gen2'
+save_loc: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2'
 seed: 1000
 
 data:
   source:
     ERA5:
       level_coord: "level"
-      levels: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+      levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
       variables:
         prognostic:
-          vars_3D: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
-          vars_2D: ["SP", "VAR_2T", "VAR_10U", "VAR_10V"]
-          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
+          vars_3D: ["U", "V", "T", "Q"]
+          vars_2D: ["SP", "t2m", "V500", "U500", "T500", "Z500", "Q500"]
+          path: "/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL*"
           filename_time_format: "%Y"
         dynamic_forcing:
-          vars_2D: ["toa_incident_solar_radiation", "land_sea_CI_mask"]
-          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
+          vars_2D: ["tsi"]
+          path: "/glade/campaign/cisl/aiml/credit/credit_solar_nc_6h_0.25deg/*.nc"
           filename_time_format: "%Y"
         static:
-          vars_2D: ["z_norm", "land_sea_mask"]
-          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
+          vars_2D: ["Z_GDS4_SFC", "LSM"]
+          path: "/glade/campaign/cisl/aiml/credit/static_scalers/static_norm_old.nc"
         diagnostic: null
 
   timestep: "6h"
   forecast_len: 1
-  start_datetime: "2000-01-01"
-  end_datetime: "2003-12-31"
+  start_datetime: "2015-01-01"
+  end_datetime: "2016-12-31"
 
-data_valid:
-  start_datetime: "2014-01-01"
-  end_datetime: "2015-12-31"
+validation_data:
+  start_datetime: "2017-01-01"
+  end_datetime: "2018-12-31"
+
+preblocks:
+  norm:
+    type: era5_normalizer
+    args:
+      mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/mean_6h_1979_2018_16lev_0.25deg.nc"
+      std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/std_6h_1979_2018_16lev_0.25deg.nc"
 
 model:
-    type: "wxformer"
+    type: "crossformer"
     frames: 1
-    image_height: 181
-    image_width: 360
-    levels: 18
+    image_height: 640
+    image_width: 1280
+    levels: 16
     channels: 4
-    surface_channels: 4
-    input_only_channels: 4
-    output_only_channels: 0   # no diagnostics for speed
+    surface_channels: 7
+    input_only_channels: 3
+    output_only_channels: 0
 
     patch_width: 1
     patch_height: 1
@@ -52,8 +59,8 @@ model:
 
     dim: [32, 64, 128, 256]
     depth: [2, 2, 2, 2]
-    global_window_size: [8, 4, 2, 1]
-    local_window_size: 4
+    global_window_size: [10, 5, 2, 1]
+    local_window_size: 10
     cross_embed_kernel_sizes:
     - [4, 8, 16, 32]
     - [2, 4]
@@ -62,18 +69,15 @@ model:
     cross_embed_strides: [2, 2, 2, 2]
     attn_dropout: 0.
     ff_dropout: 0.
-    upsample_with_ps: True
 
     use_spectral_norm: True
-    upsample_v_conv: True
-    decoder_attention_type: "scse"
-    interp: False
+    interp: True
 
     padding_conf:
         activate: True
         mode: "earth"
-        pad_lat: [37, 38]
-        pad_lon: [76, 76]
+        pad_lat: [80, 80]
+        pad_lon: [80, 80]
 
     post_conf:
         activate: False
@@ -83,15 +87,13 @@ loss:
     validation_loss: "mse"
     use_power_loss: False
     use_spectral_loss: False
-    spectral_lambda_reg: 0.1
-    spectral_wavenum_init: 20
-    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
     use_latitude_weights: True
+    latitude_weights: '/glade/campaign/cisl/aiml/credit/static_scalers/LSM_static_variables_ERA5_zhght.nc'
     use_variable_weights: False
 
 trainer:
     type: era5-gen2
-    mode: none          # single GPU
+    mode: none
 
     load_weights: False
     load_optimizer: False
@@ -106,37 +108,37 @@ trainer:
     learning_rate: 1.0e-03
     weight_decay: 0
 
-    train_batch_size: 2
-    valid_batch_size: 2
+    train_batch_size: 1
+    valid_batch_size: 1
     ensemble_size: 1
 
-    batches_per_epoch: 50
-    valid_batches_per_epoch: 10
+    batches_per_epoch: 5
+    valid_batches_per_epoch: 2
     stopping_patience: 50
     skip_validation: False
 
     start_epoch: 0
-    num_epoch: 3
+    num_epoch: 1
     reload_epoch: False
-    epochs: 3
+    epochs: 1
 
-    use_scheduler: False
+    use_scheduler: True
+    scheduler:
+      scheduler_type: cosine-annealing-restarts
+      first_cycle_steps: 50
+      cycle_mult: 1.0
+      max_lr: 1.0e-03
+      min_lr: 1.0e-06
+      warmup_steps: 10
+      gamma: 1.0
 
     amp: False
-
     grad_accum_every: 1
     grad_max_norm: 1.0
 
     thread_workers: 4
     valid_thread_workers: 2
     prefetch_factor: 2
-
-preblocks:
-  norm:
-    type: era5_normalizer
-    args:
-      mean_path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc"
-      std_path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc"
 
 pbs:
     conda: "credit-main-casper"

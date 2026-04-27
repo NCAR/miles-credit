@@ -21,6 +21,19 @@ def _tiny_model():
     return nn.Linear(4, 2)
 
 
+class _ScaleModel(nn.Module):
+    """Shape-preserving model: scales input by a learned scalar.
+    Avoids cuDNN convolution so tests run on any GPU/driver version.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.w = nn.Parameter(torch.ones(1))
+
+    def forward(self, x):
+        return x * self.w
+
+
 def _minimal_conf(**trainer_overrides):
     """Return a minimal conf dict suitable for BaseTrainer.__init__."""
     trainer = {
@@ -447,16 +460,17 @@ class TestERA5Gen2MultiStepTraining:
             assert t.backprop_on_timestep == list(range(1, fl + 1))
 
     def test_2step_train_one_epoch_runs(self, tmp_path):
-        """2-step autoregressive loop completes on CPU with toy data."""
+        """2-step autoregressive loop completes with toy data."""
         import torch
         import torch.nn as nn
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
         forecast_len = 2
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         # 1x1 conv so shapes stay intact and model has real parameters
-        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        model = _ScaleModel().to(device)
 
         conf = _era5_gen2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
         trainer = Trainer(model, rank=0, conf=conf)
@@ -469,7 +483,7 @@ class TestERA5Gen2MultiStepTraining:
 
         optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
         criterion = nn.MSELoss()
-        scaler = torch.amp.GradScaler("cpu", enabled=False)
+        scaler = torch.amp.GradScaler(device.type, enabled=False)
 
         results = trainer.train_one_epoch(
             epoch=0,
@@ -495,6 +509,7 @@ class TestERA5Gen2MultiStepTraining:
         from credit.preblock import apply_preblocks
 
         B, C, H, W = 1, 4, 4, 4
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         captured = {}
 
         class _ConstModel(nn.Module):
@@ -510,7 +525,7 @@ class TestERA5Gen2MultiStepTraining:
                 captured["last_out"] = out.detach().clone()
                 return out
 
-        model = _ConstModel()
+        model = _ConstModel().to(device)
         conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         trainer = Trainer(model, rank=0, conf=conf)
 
@@ -533,7 +548,7 @@ class TestERA5Gen2MultiStepTraining:
         loader = _FakeLoader(B, C, H, W, n_batches=2)
         optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
         criterion = nn.MSELoss()
-        scaler = torch.amp.GradScaler("cpu", enabled=False)
+        scaler = torch.amp.GradScaler(device.type, enabled=False)
 
         with patch("credit.trainers.trainerERA5gen2.apply_preblocks", side_effect=_patched_apply):
             trainer.train_one_epoch(
@@ -549,7 +564,7 @@ class TestERA5Gen2MultiStepTraining:
         # At t=2 the model sees x = y_pred from t=1 = x_at_step1_out (since model is identity-like)
         # captured["last_x"] is the x fed to the model at t=2
         assert captured["last_x"] is not None
-        expected = x_at_step1_out[0]  # y_pred at t=1 = model(x_t1) = x_t1 * 1.0 ≈ x_t1
+        expected = x_at_step1_out[0].to(device)  # y_pred at t=1 = model(x_t1) = x_t1 * 1.0 ≈ x_t1
         torch.testing.assert_close(captured["last_x"], expected, atol=1e-5, rtol=1e-5)
 
     def test_rollout_partial_channels_at_t2(self, tmp_path):
@@ -569,6 +584,7 @@ class TestERA5Gen2MultiStepTraining:
         STATIC_DIM = N_DYNFRC + N_STATIC  # 3
         TOTAL = N_DYNFRC + N_STATIC + N_PROG  # 6
         B, H, W = 1, 4, 4
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         conf = _minimal_conf()
         conf["save_loc"] = str(tmp_path)
@@ -598,9 +614,9 @@ class TestERA5Gen2MultiStepTraining:
                 self.w = nn.Parameter(torch.zeros(1))
 
             def forward(self, x):
-                return torch.zeros(x.shape[0], N_PROG, x.shape[2], x.shape[3]) * self.w
+                return torch.zeros(x.shape[0], N_PROG, x.shape[2], x.shape[3], device=x.device) * self.w
 
-        trainer = Trainer(_ZeroProgModel(), rank=0, conf=conf)
+        trainer = Trainer(_ZeroProgModel().to(device), rank=0, conf=conf)
         assert trainer.static_dim_size == STATIC_DIM
 
         # Known fixed tensors for each channel group
@@ -644,10 +660,10 @@ class TestERA5Gen2MultiStepTraining:
                 step[0] += 1
                 return super().forward(x)
 
-        trainer.model = _CapturingModel()
+        trainer.model = _CapturingModel().to(device)
         optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
         criterion = nn.MSELoss()
-        scaler = torch.amp.GradScaler("cpu", enabled=False)
+        scaler = torch.amp.GradScaler(device.type, enabled=False)
         trainer.train_one_epoch(
             epoch=0,
             trainloader=_PartialLoader(),
@@ -660,11 +676,13 @@ class TestERA5Gen2MultiStepTraining:
 
         x_t2 = captured_x[1]  # x fed to model at t=2
         # dynfrc channels updated from t=2 batch
-        torch.testing.assert_close(x_t2[:, :N_DYNFRC], dynfrc_t2, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(x_t2[:, :N_DYNFRC], dynfrc_t2.to(device), atol=1e-5, rtol=1e-5)
         # static channels preserved from t=1
-        torch.testing.assert_close(x_t2[:, N_DYNFRC:STATIC_DIM], static_ch, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(x_t2[:, N_DYNFRC:STATIC_DIM], static_ch.to(device), atol=1e-5, rtol=1e-5)
         # prognostic channels replaced by y_pred (zeros from _ZeroProgModel)
-        torch.testing.assert_close(x_t2[:, STATIC_DIM:], torch.zeros(B, N_PROG, H, W), atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(
+            x_t2[:, STATIC_DIM:], torch.zeros(B, N_PROG, H, W, device=device), atol=1e-5, rtol=1e-5
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1041,11 +1059,11 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         assert t.clamp_max == 5.0
 
     def test_data_valid_overrides_valid_forecast_len(self, tmp_path):
-        """data_valid block used when present (lines 118-120)."""
+        """validation_data block used when present (lines 118-120)."""
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
-        conf["data_valid"] = {"forecast_len": 4, "history_len": 2}
+        conf["validation_data"] = {"forecast_len": 4, "history_len": 2}
 
         t = Trainer(_tiny_model(), rank=0, conf=conf)
 
@@ -1064,10 +1082,11 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         assert t.retain_graph is True
 
     def test_validate_one_epoch_runs(self, tmp_path):
-        """validate() completes on CPU with toy data and returns valid_loss."""
+        """validate() completes with toy data and returns valid_loss."""
         B, C, H, W = 1, 4, 4, 4
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        model = _ScaleModel().to(device)
         conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
 
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
@@ -1095,8 +1114,9 @@ class TestTrainerERA5Gen2AdditionalCoverage:
     def test_train_with_ema_update(self, tmp_path):
         """EMA update is called when ema is not None (line 252-253)."""
         B, C, H, W = 1, 4, 4, 4
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        model = _ScaleModel().to(device)
         conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["use_ema"] = True
         conf["trainer"]["ema_decay"] = 0.999
@@ -1115,7 +1135,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
 
         optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
         criterion = nn.MSELoss()
-        scaler = torch.amp.GradScaler("cpu", enabled=False)
+        scaler = torch.amp.GradScaler(device.type, enabled=False)
 
         trainer.train_one_epoch(
             epoch=0,
@@ -1132,8 +1152,9 @@ class TestTrainerERA5Gen2AdditionalCoverage:
     def test_grad_max_norm_clipping(self, tmp_path):
         """grad_max_norm > 0 triggers gradient clipping (lines 245-246)."""
         B, C, H, W = 1, 4, 4, 4
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        model = _ScaleModel().to(device)
         conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["grad_max_norm"] = 0.01  # very small to actually clip
 
@@ -1148,7 +1169,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
 
         optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
         criterion = nn.MSELoss()
-        scaler = torch.amp.GradScaler("cpu", enabled=False)
+        scaler = torch.amp.GradScaler(device.type, enabled=False)
 
         # Should complete without error even with aggressive clipping
         results = trainer.train_one_epoch(
@@ -1168,8 +1189,9 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        model = nn.Conv2d(C, C, kernel_size=1, bias=False)
+        model = _ScaleModel().to(device)
         conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["use_scheduler"] = True
         conf["trainer"]["scheduler"] = {"scheduler_type": "lambda"}
@@ -1184,7 +1206,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
 
         optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
         criterion = nn.MSELoss()
-        scaler = torch.amp.GradScaler("cpu", enabled=False)
+        scaler = torch.amp.GradScaler(device.type, enabled=False)
 
         trainer.train_one_epoch(
             epoch=0,

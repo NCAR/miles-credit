@@ -150,7 +150,7 @@ def test_regrid_flip_axis(weight_file):
 
 _skip_bridgescaler = pytest.mark.skipif(
     not _BRIDGESCALER_AVAILABLE,
-    reason="bridgescaler/numba unavailable (NumPy version conflict)",
+    reason="bridgescaler not available in this environment",
 )
 
 

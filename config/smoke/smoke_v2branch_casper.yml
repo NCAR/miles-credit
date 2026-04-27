@@ -1,31 +1,31 @@
-# Smoke test for v2/trainer-preblocks branch
-# Single-GPU Casper, v1 trainer + ERA5 1deg data, wxformer
-# Goal: verify MSE drops and ACC rises in a few batches
+# Smoke test — Gen1 trainer, 0.25° 16-level model-level ERA5
+# Same data layout as the Nature paper (wxformer_6h_single_step):
+#   upper-air+surface from SixHourly_y_TOTAL zarr, tsi from solar NC, static from static_norm_old.nc
+# Reduced model size and 2-year training window for quick Casper single-GPU validation.
 
-save_loc: '/glade/work/schreck/runs/CREDIT_runs/smoke_v2branch'
+save_loc: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen1'
 seed: 1000
 
 data:
-    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
-    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
-    level_ids: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+    variables: ['U', 'V', 'T', 'Q']
+    save_loc: '/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL*'
 
-    surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
-    save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    surface_variables: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
+    save_loc_surface: '/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL*'
 
-    dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
-    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    dynamic_forcing_variables: ['tsi']
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/credit/credit_solar_nc_6h_0.25deg/*.nc'
 
-    static_variables: ["z_norm", "land_sea_mask"]
-    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    static_variables: ['Z_GDS4_SFC', 'LSM']
+    save_loc_static: '/glade/campaign/cisl/aiml/credit/static_scalers/static_norm_old.nc'
 
-    save_loc_physics: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    mean_path: '/glade/campaign/cisl/aiml/credit/static_scalers/mean_6h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/credit/static_scalers/std_6h_1979_2018_16lev_0.25deg.nc'
 
-    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+    level_ids: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
 
-    train_years: [2000, 2003]
-    valid_years: [2014, 2015]
+    train_years: [2015, 2016]
+    valid_years: [2017, 2018]
 
     scaler_type: 'std_new'
     history_len: 1
@@ -34,19 +34,19 @@ data:
     valid_forecast_len: 0
     lead_time_periods: 6
     skip_periods: null
-    static_first: False
+    static_first: True
     dataset_type: ERA5_MultiStep_Batcher
 
 model:
-    type: "wxformer"
+    type: "crossformer"
     frames: 1
-    image_height: 181
-    image_width: 360
-    levels: 18
+    image_height: 640
+    image_width: 1280
+    levels: 16
     channels: 4
-    surface_channels: 4
-    input_only_channels: 4
-    output_only_channels: 0   # no diagnostics for speed
+    surface_channels: 7
+    input_only_channels: 3
+    output_only_channels: 0
 
     patch_width: 1
     patch_height: 1
@@ -54,8 +54,8 @@ model:
 
     dim: [32, 64, 128, 256]
     depth: [2, 2, 2, 2]
-    global_window_size: [8, 4, 2, 1]
-    local_window_size: 4
+    global_window_size: [10, 5, 2, 1]
+    local_window_size: 10
     cross_embed_kernel_sizes:
     - [4, 8, 16, 32]
     - [2, 4]
@@ -64,51 +64,28 @@ model:
     cross_embed_strides: [2, 2, 2, 2]
     attn_dropout: 0.
     ff_dropout: 0.
-    upsample_with_ps: True
+
+    pad_lon: 80
+    pad_lat: 80
 
     use_spectral_norm: True
-    upsample_v_conv: True
-    decoder_attention_type: "scse"
-    interp: False
-
-    padding_conf:
-        activate: True
-        mode: "earth"
-        pad_lat: [37, 38]
-        pad_lon: [76, 76]
+    interp: True
 
     post_conf:
-        activate: True
-        grid: 'equiangular'
-        tracer_fixer:
-            activate: True
-            denorm: True
-            tracer_name: ['specific_total_water']
-            tracer_thres: [1e-10]
-        global_mass_fixer:
-            activate: False
-            activate_outside_model: False
-        global_water_fixer:
-            activate: False
-            activate_outside_model: False
-        global_energy_fixer:
-            activate: False
-            activate_outside_model: False
+        activate: False
 
 loss:
     training_loss: "mse"
     validation_loss: "mse"
     use_power_loss: False
     use_spectral_loss: False
-    spectral_lambda_reg: 0.1
-    spectral_wavenum_init: 20
-    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
     use_latitude_weights: True
+    latitude_weights: '/glade/campaign/cisl/aiml/credit/static_scalers/LSM_static_variables_ERA5_zhght.nc'
     use_variable_weights: False
 
 trainer:
     type: era5
-    mode: none          # single GPU
+    mode: none
 
     load_weights: False
     load_optimizer: False
@@ -123,19 +100,19 @@ trainer:
     learning_rate: 1.0e-03
     weight_decay: 0
 
-    train_batch_size: 2
-    valid_batch_size: 2
+    train_batch_size: 1
+    valid_batch_size: 1
     ensemble_size: 1
 
-    batches_per_epoch: 50
-    valid_batches_per_epoch: 10
+    batches_per_epoch: 5
+    valid_batches_per_epoch: 2
     stopping_patience: 50
     skip_validation: False
 
     start_epoch: 0
-    num_epoch: 3
+    num_epoch: 1
     reload_epoch: False
-    epochs: 3
+    epochs: 1
 
     use_scheduler: True
     scheduler:
@@ -148,7 +125,6 @@ trainer:
       gamma: 1.0
 
     amp: False
-
     grad_accum_every: 1
     grad_max_norm: 1.0
 
@@ -158,7 +134,7 @@ trainer:
 
 pbs:
     conda: "credit-main-casper"
-    job_name: "smoke_v2branch"
+    job_name: "smoke_gen1"
     nodes: 1
     ncpus: 8
     ngpus: 1
