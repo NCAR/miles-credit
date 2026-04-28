@@ -98,7 +98,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     Notes:
         This function is used in the following scripts:
-        - applications/train.py
+        - applications/train_gen1.py
         - applications/train_multistep.py
         - applications/rollout_to_netcdf.py
 
@@ -1131,7 +1131,7 @@ def training_data_check(conf, print_summary=False):
           Note: this part checks lat, lon, level coordinates, and it ignores 'time' coordinates.
 
     Where is it applied?
-        - applications/train.py
+        - applications/train_gen1.py
         - applications/train_multistep.py
 
     """

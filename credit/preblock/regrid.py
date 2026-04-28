@@ -18,7 +18,6 @@ class Regridder(BasePreblock):
     def __init__(
         self, weight_file, variables: list[str], data_types: list[str] = None, reshape_to_xy=True, flip_axis=None
     ):
-
         super().__init__()
         with xr.open_dataset(weight_file) as grid_weights:
             rows = grid_weights["row"].values - 1  # ESMF indices are 1-based
@@ -59,7 +58,6 @@ class Regridder(BasePreblock):
         self._W_device = None
 
     def _get_W(self, device):
-
         if self._W is not None and self._W_device == device:
             return self._W
 

@@ -171,6 +171,8 @@ climate/Look_at_Tens.ipynb
 
 # local dev / HPC-specific test scripts
 test_energy_fixer_updown.py
+regional_smoke.o*
+wb2_figs/
 
 # MAC DS_Store files
 .DS_Store
