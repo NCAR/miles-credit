@@ -68,7 +68,6 @@ ptype = ["metpy",
 
 ask    = ["anthropic>=0.40", "groq>=0.9", "openai>=1.0", "google-generativeai>=0.8"]
 agent  = ["anthropic>=0.40"]
-serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 
 [tool.setuptools]
 
