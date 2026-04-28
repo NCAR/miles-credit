@@ -27,6 +27,7 @@ _STRFTIME_TO_REGEX: dict[str, str] = {
     "%M": r"\d{2}",
     "%S": r"\d{2}",
     "%j": r"\d{3}",
+    "%f": r"\d",  # single fractional-second digit
 }
 
 # Ordered finest → coarsest; first match wins
