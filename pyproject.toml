@@ -25,10 +25,9 @@ dependencies = [
     "torchvision",
     "einops",
     "pyyaml",
-    "cartopy",
     "zarr",
+    "pygrib",
     "numcodecs",
-    "einops",
     "echo-opt",
     "bridgescaler",
     "segmentation-models-pytorch",
@@ -43,7 +42,6 @@ dependencies = [
     "setuptools_scm",
     "setuptools",
     "numba",
-    "s3fs",
     "tensorboard"
 ]
 
