@@ -346,7 +346,11 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     r.nodes = int(_first(args.nodes, pbs_cfg.get("nodes"), 1))
     r.cpus = int(_first(args.cpus, pbs_cfg.get("ncpus") or pbs_cfg.get("cpus"), 8 if is_casper else 64))
     r.mem = _first(args.mem, pbs_cfg.get("mem"), "128GB" if is_casper else "480GB")
-    r.queue = _first(args.queue, pbs_cfg.get("queue"), "casper" if is_casper else "main")
+    _queue_default = "casper" if is_casper else "main"
+    r.queue = _first(args.queue, pbs_cfg.get("queue"))
+    if r.queue is None:
+        r.queue = _queue_default
+        logger.info("pbs.queue not specified — using cluster default: %s", _queue_default)
     r.gpu_type = _first(args.gpu_type, pbs_cfg.get("gpu_type"), "a100_80gb")
     r.conda_env = _first(
         args.conda_env,
