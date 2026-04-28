@@ -6,8 +6,7 @@ All tests run on CPU with no cluster or real data required.
 import time
 import pytest
 
-pytest.importorskip("credit.trainers.preflight", reason="preflight not available until v2/trainer-preblocks is merged")
-from credit.trainers.preflight import estimate_dataloader_memory_gb, check_dataloader_startup  # noqa: E402
+from credit.trainers.preflight import estimate_dataloader_memory_gib, check_dataloader_startup  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -44,34 +43,34 @@ def _conf(workers=4, prefetch=4, batch=1, h=721, w=1440, vars_3d=None, vars_2d=N
 
 
 # ---------------------------------------------------------------------------
-# estimate_dataloader_memory_gb — pure function tests
+# estimate_dataloader_memory_gib — pure function tests
 # ---------------------------------------------------------------------------
 
 
 class TestEstimateDataloaderMemoryGb:
     def test_returns_float(self):
-        assert isinstance(estimate_dataloader_memory_gb(_conf()), float)
+        assert isinstance(estimate_dataloader_memory_gib(_conf()), float)
 
     def test_zero_channels_returns_zero(self):
-        est = estimate_dataloader_memory_gb(_conf(vars_3d=[], vars_2d=[], diag_2d=[], n_levels=13))
+        est = estimate_dataloader_memory_gib(_conf(vars_3d=[], vars_2d=[], diag_2d=[], n_levels=13))
         assert est == 0.0
 
     def test_empty_conf_returns_zero(self):
-        assert estimate_dataloader_memory_gb({}) == 0.0
+        assert estimate_dataloader_memory_gib({}) == 0.0
 
     def test_scales_with_workers(self):
-        base = estimate_dataloader_memory_gb(_conf(workers=1))
-        doubled = estimate_dataloader_memory_gb(_conf(workers=2))
+        base = estimate_dataloader_memory_gib(_conf(workers=1))
+        doubled = estimate_dataloader_memory_gib(_conf(workers=2))
         assert abs(doubled / base - 2.0) < 1e-6
 
     def test_scales_with_prefetch(self):
-        base = estimate_dataloader_memory_gb(_conf(prefetch=1))
-        quad = estimate_dataloader_memory_gb(_conf(prefetch=4))
+        base = estimate_dataloader_memory_gib(_conf(prefetch=1))
+        quad = estimate_dataloader_memory_gib(_conf(prefetch=4))
         assert abs(quad / base - 4.0) < 1e-6
 
     def test_scales_with_batch(self):
-        base = estimate_dataloader_memory_gb(_conf(batch=1))
-        octu = estimate_dataloader_memory_gb(_conf(batch=8))
+        base = estimate_dataloader_memory_gib(_conf(batch=1))
+        octu = estimate_dataloader_memory_gib(_conf(batch=8))
         assert abs(octu / base - 8.0) < 1e-6
 
     def test_formula_1d_era5(self):
@@ -90,7 +89,7 @@ class TestEstimateDataloaderMemoryGb:
         total_ch = 3 * 13 + 1  # 40
         bytes_per_sample = 721 * 1440 * total_ch * 4 * 2
         expected_gb = (4 * 4 * 1 * bytes_per_sample) / 1e9
-        assert abs(estimate_dataloader_memory_gb(conf) - expected_gb) < 0.01
+        assert abs(estimate_dataloader_memory_gib(conf) - expected_gb) < 0.01
 
     def test_025deg_era5_is_large(self):
         """0.25° ERA5 with typical settings should be >10 GB."""
@@ -105,7 +104,7 @@ class TestEstimateDataloaderMemoryGb:
             diag_2d=[],
             n_levels=37,
         )
-        est = estimate_dataloader_memory_gb(conf)
+        est = estimate_dataloader_memory_gib(conf)
         assert est > 10.0
 
     def test_missing_trainer_conf_uses_defaults(self):
@@ -124,7 +123,7 @@ class TestEstimateDataloaderMemoryGb:
                 }
             },
         }
-        est = estimate_dataloader_memory_gb(conf)
+        est = estimate_dataloader_memory_gib(conf)
         assert est > 0.0
 
     def test_raises_internally_returns_zero(self):
@@ -145,7 +144,7 @@ class TestEstimateDataloaderMemoryGb:
                 }
             },
         }
-        result = estimate_dataloader_memory_gb(bad_conf)
+        result = estimate_dataloader_memory_gib(bad_conf)
         assert result == 0.0
 
 
