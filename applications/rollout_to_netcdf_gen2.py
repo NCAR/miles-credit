@@ -221,7 +221,9 @@ def predict(rank, world_size, conf, p):
     static_dim_size = n_dyn + n_static  # channels before prognostic in x
     varnum_diag = len(diag.get("vars_2D", [])) + len(diag.get("vars_3D", [])) * n_levels
 
-    lead_time_periods = conf["data"]["lead_time_periods"]
+    lead_time_periods = conf["data"].get("lead_time_periods") or int(
+        pd.Timedelta(conf["data"]["timestep"]).total_seconds() // 3600
+    )
     forecast_steps = conf["predict"].get("forecast_steps", conf["predict"].get("days", 1) * (24 // lead_time_periods))
 
     # ---- Preblocks ----
