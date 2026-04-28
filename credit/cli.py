@@ -477,18 +477,33 @@ def _build_pbs_script(
         return header + launch
 
 
-def _qsub(script: str) -> str:
-    """Write *script* to a temp file, call qsub, and return the job ID string."""
+def _qsub(script: str, save_loc: str | None = None) -> str:
+    """Write *script* to save_loc/pbs_scripts/, call qsub, and return the job ID string."""
+    import datetime
     import subprocess
     import tempfile
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
-        f.write(script)
-        script_path = f.name
+    # Persist the launch script so it can be inspected after submission
+    if save_loc:
+        scripts_dir = os.path.join(os.path.expandvars(save_loc), "pbs_scripts")
+        os.makedirs(scripts_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        script_path = os.path.join(scripts_dir, f"submit_{ts}.sh")
+        with open(script_path, "w") as f:
+            f.write(script)
+        delete_after = False
+    else:
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False)
+        tmp.write(script)
+        tmp.close()
+        script_path = tmp.name
+        delete_after = True
+
     try:
         result = subprocess.run(["qsub", script_path], capture_output=True, text=True)
     finally:
-        os.unlink(script_path)
+        if delete_after:
+            os.unlink(script_path)
 
     if result.returncode != 0:
         print(f"qsub failed:\n{result.stderr}", file=sys.stderr)
@@ -566,9 +581,14 @@ def _submit(args: argparse.Namespace) -> None:
         _do_submit_rollout(args)
         return
 
+    import yaml
+
     repo = _repo_root()
     pbs_cfg = _load_pbs_config(args.config)
     args = _resolve_pbs_opts(args, pbs_cfg)
+    with open(args.config) as f:
+        _full_conf = yaml.safe_load(f)
+    save_loc = os.path.expandvars(_full_conf.get("save_loc", "."))
     n_jobs = _compute_chain(args)
 
     _print_job_plan(args, n_jobs)
@@ -594,13 +614,13 @@ def _submit(args: argparse.Namespace) -> None:
 
     # Submit job 1
     script = _build_pbs_script(args, first_config, repo, depend_on=None)
-    job_id = _qsub(script)
+    job_id = _qsub(script, save_loc=save_loc)
     print(f"[1/{n_jobs}] {job_id}  {first_config}")
 
     # Submit remaining chained reload jobs
     for i in range(2, n_jobs + 1):
         script = _build_pbs_script(args, reload_config, repo, depend_on=job_id)
-        job_id = _qsub(script)
+        job_id = _qsub(script, save_loc=save_loc)
         print(f"[{i}/{n_jobs}] {job_id}  afterok  (reload)")
 
 
@@ -775,10 +795,11 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
             print(_build_rollout_pbs_script(args, config_abs, repo, i, n_jobs))
         return
 
+    rollout_save_loc = os.path.expandvars(conf.get("save_loc", "."))
     job_ids = []
     for i in range(1, n_jobs + 1):
         script = _build_rollout_pbs_script(args, config_abs, repo, i, n_jobs)
-        job_id = _qsub(script)
+        job_id = _qsub(script, save_loc=rollout_save_loc)
         job_ids.append(job_id)
         print(f"[{i:2d}/{n_jobs}] {job_id}")
 
