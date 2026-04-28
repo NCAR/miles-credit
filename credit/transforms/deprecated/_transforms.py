@@ -13,7 +13,11 @@ import netCDF4 as nc
 import torch
 
 from credit.data import Sample, device_compatible_to
-from bridgescaler import read_scaler
+
+try:
+    from bridgescaler import read_scaler  # optional dependency
+except ImportError:
+    read_scaler = None
 
 logger = logging.getLogger(__name__)
 

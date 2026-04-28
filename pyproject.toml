@@ -6,10 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "miles-credit"
 authors = [{ name = "NCAR Machine Integration and Learning for Earth Systems (MILES)", email = "miles@ucar.edu" }]
 readme = "README.md"
-license = "Apache-2.0"
-license-files = ["LICENSE"]
+license = {text = "Apache-2.0"}
 dynamic = ["version"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy",
     "pandas",
@@ -27,9 +26,6 @@ dependencies = [
     "einops",
     "pyyaml",
     "cartopy",
-    "dask",
-    "distributed",
-    "dask-jobqueue",
     "zarr",
     "numcodecs",
     "einops",
@@ -43,12 +39,12 @@ dependencies = [
     "torchmetrics",
     "fsspec",
     "gcsfs",
-    "miles-guess",
-    "keras",
-    "metpy",
+    "s3fs",
     "setuptools_scm",
     "setuptools",
-    "s3fs"
+    "numba",
+    "s3fs",
+    "tensorboard"
 ]
 
 [project.optional-dependencies]
@@ -66,16 +62,37 @@ develop = ["pre-commit",
     "ruff",
     "pytest"]
 
+ptype = ["metpy",
+         "miles-guess",
+         "keras"]
+
+ask    = ["anthropic>=0.40", "groq>=0.9", "openai>=1.0", "google-generativeai>=0.8"]
+agent  = ["anthropic>=0.40"]
+serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+
 [tool.setuptools]
 
 packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets",
     "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
 
+[tool.setuptools.package-data]
+"credit.metadata" = ["*.yaml", "*.yml", "*.nc", "*.csv"]
+
 [tool.setuptools_scm]
 version_file = "credit/_version.py"
 
 [project.scripts]
-credit_train = "credit.applications.train:main_cli"
+# Unified CLI (recommended)
+credit = "credit.cli:main"
+
+# Gen2 entry points
+credit_train_gen2 = "credit.applications.train_gen2:main_cli"
+credit_rollout_realtime_gen2 = "credit.applications.rollout_realtime_gen2:main"
+credit_rollout_to_netcdf_gen2 = "credit.applications.rollout_to_netcdf_gen2:main"
+
+# Gen1 entry points
+credit_train_gen1 = "credit.applications.train_gen1:main_cli"
+credit_train = "credit.applications.train_gen1:main_cli"  # backward-compat alias
 credit_rollout_realtime = "credit.applications.rollout_realtime:main_cli"
 credit_gfs_init = "credit.applications.gfs_init:main"
 credit_gefs_init = "credit.applications.gefs_init:main"

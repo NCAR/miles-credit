@@ -1,8 +1,12 @@
-name: Run inference with Pull Request
+name: CI CIRRUS
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
 jobs: 
   build: 
     runs-on: gha-runner-miles-credit1
@@ -17,17 +21,21 @@ jobs:
      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
     steps: 
     - name: checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+          persist-credentials: false
     - name: Run debug job
       run: |
         git config --global --add safe.directory /__w/miles-credit/miles-credit
         echo "Running debug job for PR on self-hosted runner"
         git log -1
         chmod -R 777 ./tests/CI_CIRRUS/*
+        conda run -n credit pip install -e .
         ./tests/CI_CIRRUS/dateChange.sh /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
         export PATH=/home/ubuntu/.local/bin:$PATH
-        conda run -n credit python -u /__w/miles-credit/miles-credit/applications/gfs_init.py -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
-        conda run -n credit python -u /__w/miles-credit/miles-credit/applications/rollout_realtime.py -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
+        conda run -n credit credit_gfs_init -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml -p 4
+        conda run -n credit credit_rollout_realtime -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
+
         du -h /output
     #- name: Upload the gfs_init.py netCDF output files to CIRRUS storage
     #  run: |

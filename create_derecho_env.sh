@@ -23,7 +23,7 @@ set -e
 # containing Derecho-specific torch & MPI bits.
 # (install torchmetrics at this point too, installing it later
 # via pip risks an undesirable torch update.)
-module load conda
+module load conda mkl
 module list
 topdir=$(git rev-parse --show-toplevel)
 CREDIT_ENV_NAME=${CREDIT_ENV_NAME:-"credit-derecho"}

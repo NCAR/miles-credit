@@ -4,10 +4,10 @@
 
 # Contents
 #     - data
-#     - trainer
 #     - model
 #     - loss
 #     - predict
+#     - trainer
 #     - pbs
 
 # This file will run on Casper or Derecho to generate an example model. You will need to modify save_loc, metadata,
@@ -19,7 +19,7 @@
 # the location to save your workspace, it will have 
 # (1) pbs script, (2) a copy of this config, (3) model weights, (4) training_log.csv
 # if save_loc does not exist, it will be created automatically
-save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/test'
+save_loc: '/glade/derecho/scratch/$USER/credit_example_model/'
 seed: 1000
 
 data:
@@ -41,29 +41,18 @@ data:
     # the time dimension MUST be the same as upper-air variables
     # files must have the listed variable names
     # surface variables will be normalized by the dataloader, users do not need to normalize them
-    dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+    dynamic_forcing_variables: ['toa_incident_solar_radiation']
     save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
 
     # diagnostic variables, must be YEARLY zarr or nc with (time, latitude, longitude) dims
     # the time dimension MUST be the same as upper-air variables
-    # files must have the listed variable names 
-    # THESE ARE NOT LOADING CORRECTLY ON X
+    # files must have the listed variable names
     # diagnostic variables will be normalized by the dataloader, users do not need to normalize them
-    diagnostic_variables: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation', 'surface_latent_heat_flux', 'surface_net_solar_radiation',
+    diagnostic_variables: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
+                           'surface_latent_heat_flux', 'surface_net_solar_radiation',
                           'surface_net_thermal_radiation', 'surface_sensible_heat_flux'] 
     save_loc_diagnostic: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
-    
-    # periodic forcing variables, forcing variables that are the same year-to-year
-    # must be a single zarr or nc with (time, latitude, longitude) dims
-    # the time dimension should cover an entire LEAP YEAR
-    #
-    # e.g., periodic forcing variables can be provided on the year 2000, 
-    #       and its time coords should have 24*366 hours for a hourly model
-    #
-    # THESE ARE REDUNDANT?
-    # periodic forcing variables MUST be normalized BY USER 
-    # forcing_variables: ['TSI']   
-    save_loc_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT/forcing_norm_6h.nc'
+
     
     # static variables must be a single zarr or nc with (latitude, longitude) coords
     # static variables must be normalized BY USER 
@@ -155,7 +144,7 @@ model:
     levels: &levels 18                        # number of upper-air variable levels (default: 15)
     channels: 4                       # upper-air variable channels
     surface_channels: 4               # surface variable channels
-    input_only_channels: 4            # dynamic forcing, forcing, static channels
+    input_only_channels: 3            # dynamic forcing, forcing, static channels
     output_only_channels: 8           # diagnostic variable channels
     
     patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
@@ -254,7 +243,7 @@ model:
             tracer_thres: [1e-10, 0]
 
         global_mass_fixer:
-            activate: True
+            activate: False
             activate_outside_model: False
             simple_demo: False
             denorm: True
@@ -414,7 +403,7 @@ predict:
 
     # Set the batch_size for the prediction inference mode (default is 1)
     # this batches init_datetimes together so that we are fully utilizing the GPUs 
-    batch_size: 16
+    batch_size: 1
 
     forecasts:
         type: "custom"       # keep it as "custom". See also credit.forecast
@@ -422,37 +411,61 @@ predict:
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 1152       # number of days to initialize from, starting from the (year, mon, day) above
+        duration: 1       # number of days to initialize from, starting from the (year, mon, day) above
                              # duration should be divisible by the number of GPUs 
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         # [Optional] defaults to 1
         ic_interval_days: 1   # spacing between init days. defaults to 1 total number of ICs will be duration // ic_interval_days
-        days: 10             # forecast lead time as days (1 means 24-hour forecast)
+        days: 2             # forecast lead time as days (1 means 24-hour forecast)
 
-    # saved variables (rollout_to_netcdf.yml)
-    # save_vars: [] will save ALL variables
-    # remove save_vars from config will save ALL variables
-    metadata: '/glade/u/home/$USER/miles-credit/credit/metadata/era5.yaml'
+    # For generating quasi-realtime forecasts from GFS initial conditions
+    realtime:
+      forecast_start_time: "2026-04-01 00:00:00"
+      forecast_end_time: "2026-04-02 00:00:00"
+      forecast_timestep: "6h"
+
+    # Path where processed GFS initial conditions are downloaded.
+    initial_condition_path: "/glade/derecho/scratch/$USER/gfs/"
+    # Pointer to file in credit.metadata for mapping from GFS to the training data
+    variable_mapping: "arcoera5"
+    # File in credit.metadata containing vertical level information.
+    model_level_file: "ERA5_Lev_Info.nc"
+
+    # saved variables
+    save_vars: [] # will save ALL variables
+    # removing save_vars from config will save ALL variables
+
+    # Metadata file adds units and long names to each variable. If no path is provided, the parser
+    # assumes that the file is in credit.metadata. Will now work when CREDIT is installed from PyPI or pip.
+    metadata: 'era5.yaml'
     
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
     # each forecast lead time produces a file.nc
     save_forecast: '/glade/derecho/scratch/$USER/example/'
     
-    # this keyword will apply a low-pass filter to all fields and each forecast step
-    # it will reduce high-freq noise, but may impact performance
+    # this keyword will apply a low-pass filter to all fields at each forecast step
+    # It will reduce high-freq noise but may impact performance.
     use_laplace_filter: False
     
     # climatology file to be used with rollout_metrics.py. 
     # Supplying this will compute anomaly ACC, otherwise its Pearson coefficient (acc in metrics).
     climatology: '/glade/campaign/cisl/aiml/ksha/CREDIT_arXiv/VERIF/verif_6h/ERA5_clim/ERA5_clim_1990_2019_6h_interp.nc'
 
-    # Optional: Interpolate data field from hybrid sigma-pressure vertical coordinates to pressure levels.
-    # Used with rollout_to_netcdf.py
-
+    # Optional: Interpolate the data field from hybrid sigma-pressure vertical coordinates to pressure levels.
+    # Used with rollout scripts. If left out, no interpolation is done.
     interp_pressure:
       pressure_levels: [500.0, 850.0, 925.0]
+      interp_fields: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+      q_var: "specific_total_water"
+      temperature_var: "temperature"
+      surface_geopotential_var: "geopotential_at_surface"
 
+    # Path to unnormalized static variables like geopotential height at the surface.
+    static_fields: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+
+    # Attributes for compressing and chunking output netCDF files.
     ua_var_encoding:
       zlib: True
       complevel: 1
@@ -463,7 +476,7 @@ predict:
       zlib: True
       complevel: 1
       shuffle: True
-      chunksizes: [ 1, 4, *height, *width]
+      chunksizes: [ 1, 3, *height, *width]
 
     surface_var_encoding:
       zlib: True
@@ -529,21 +542,22 @@ trainer:
 
     # define training and validation batch size
     # for ddp and fsdp, actual batch size = batch_size * number of GPUs
-    train_batch_size: 16
-    valid_batch_size: 16
+    train_batch_size: 4
+    valid_batch_size: 4
     ensemble_size: 1  # [Optional] default 1 means deterministic training behavior
 
     # number of batches per epoch for training and validation
     # set to 0 to use all available training samples e.g. `len(dataloader)`
     # if the number is larger than all training samples, all available training samples will be used
-    batches_per_epoch: 1000
-    valid_batches_per_epoch: 20
+    batches_per_epoch: 10
+    valid_batches_per_epoch: 2
     # early stopping
     stopping_patience: 50
     # True: do not validate, always save weights
     skip_validation: False
 
     # total number of epochs
+    epochs: 100
     start_epoch: 0
     # the trainer will stop after iterating a given number of epochs
     # this works for any start_epoch and reload_epoch: True
@@ -552,8 +566,6 @@ trainer:
     # of the previous job and continue from there
     # useful for epoch-dependent schedulers
     reload_epoch: False # can also use --> train_one_epoch: True
-    epochs: 70
-
 
     use_scheduler: True
 
@@ -592,33 +604,27 @@ trainer:
     # This only works with ERA5_MultiStep_Batcher or MultiprocessingBatcherPrefetch
     prefetch_factor: 2
 
-# PBS job submission settings for `credit submit`.
-# These values are used as defaults; CLI flags (--account, --gpus, etc.) take priority.
-# Resolution order: CLI flag > this pbs: section > cluster built-in default.
-#
-# Set project to YOUR allocation code — this is what gets charged on Derecho/Casper.
-# You can also export PBS_ACCOUNT in your shell instead of setting it here.
+# credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
+pbs: 
+    # example for derecho
+    conda: "credit-derecho"
+    project: "NAML0001"
+    job_name: "train_model"
+    walltime: "12:00:00"
+    nodes: 1
+    ncpus: 64
+    ngpus: 4
+    mem: '480GB'
+    queue: 'main'
 
-# ---- Derecho example --------------------------------------------------------
-pbs:
-    project: "NAML0001"        # YOUR allocation code (PBS -A); required to charge the right account
-    job_name: "credit_gen2"      # PBS job name shown in qstat
-    walltime: "12:00:00"       # wall-clock limit per job (HH:MM:SS)
-    nodes: 1                   # number of nodes (derecho only; casper is always 1)
-    ncpus: 64                  # CPUs per node  (derecho: 64 / casper: 8)
-    ngpus: 4                   # GPUs per node  (derecho: 4 / casper: up to 8)
-    mem: '480GB'               # memory per node (derecho: 480GB / casper: 128GB)
-    queue: 'main'              # queue name     (derecho: main / casper: casper)
-    conda: "credit-derecho"    # conda env name or full path to activate before training
-
-# ---- Casper example (uncomment and replace the block above) -----------------
-# pbs:
-#     project: "NAML0001"
-#     job_name: "credit_gen2"
-#     walltime: "04:00:00"
-#     ncpus: 8
-#     ngpus: 1
-#     mem: '128GB'
-#     queue: 'casper'
-#     gpu_type: 'a100_80gb'   # casper GPU type (a100_80gb, v100, etc.)
-#     conda: "credit"
+    # example for casper
+    # conda: "credit-casper"
+    # job_name: 'train_model'
+    # nodes: 1
+    # ncpus: 8
+    # ngpus: 1
+    # mem: '128GB'
+    # walltime: '4:00:00'
+    # gpu_type: 'v100'
+    # project: 'NAML0001'
+    # queue: 'casper'
