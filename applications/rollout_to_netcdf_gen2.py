@@ -396,10 +396,11 @@ def main():
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
-    root.addHandler(ch)
+    if not root.handlers:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        root.addHandler(ch)
 
     with open(args.model_config) as f:
         conf = yaml.load(f, Loader=yaml.FullLoader)
