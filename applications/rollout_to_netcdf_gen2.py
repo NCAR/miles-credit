@@ -275,7 +275,7 @@ def predict(rank, world_size, conf, p):
     # ---- Rollout ----
     with torch.no_grad():
         for init_str in forecasts:
-            t0 = pd.Timestamp(init_str)
+            t0 = pd.Timestamp(init_str).tz_localize(None)
 
             # Step 0: load full initial state
             sample_full = dataset[(t0, 0)]
@@ -449,7 +449,12 @@ def main():
             launch_script_mpi(args.model_config, script_path)
         sys.exit()
 
-    conf["predict"]["forecasts"] = load_forecasts(conf)
+    # load_forecasts returns [init_str, end_str] pairs; extract init times and
+    # normalise to the T%HZ format expected by _save_worker / save_netcdf_increment.
+    raw_forecasts = load_forecasts(conf)
+    conf["predict"]["forecasts"] = [
+        pd.Timestamp(f[0] if isinstance(f, (list, tuple)) else f).strftime("%Y-%m-%dT%HZ") for f in raw_forecasts
+    ]
 
     if args.no_subset and args.subset:
         import numpy as np
