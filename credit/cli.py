@@ -360,7 +360,11 @@ def _build_pbs_script(
         queue="casper" if is_casper else "main",
         gpu_type="a100_80gb",
         torchrun=None,
-        conda_env="/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221",
+        conda_env=(
+            "/glade/u/home/schreck/.conda/envs/credit-casper"
+            if is_casper
+            else "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221"
+        ),
     )
     args = argparse.Namespace(**{**vars(_d), **{k: v for k, v in vars(args).items() if v is not None}})
     if account is not None:
@@ -368,7 +372,7 @@ def _build_pbs_script(
     depend_line = f"#PBS -W depend=afterok:{depend_on}\n" if depend_on else ""
 
     if args.cluster == "casper":
-        torchrun = args.torchrun or _find_torchrun()
+        conda_env = args.conda_env
 
         return textwrap.dedent(f"""\
             #!/bin/bash -l
@@ -380,13 +384,19 @@ def _build_pbs_script(
             #PBS -j oe
             #PBS -k eod
             {depend_line}
+            module load conda/latest
+
+            conda activate {conda_env}
+
             REPO={repo}
             CONFIG={config}
             NGPUS={args.gpus}
+            TORCHRUN=$(which torchrun)
 
             echo "Config : ${{CONFIG}}"
             echo "Node   : $(hostname)"
             echo "GPUs   : ${{NGPUS}}"
+            echo "torchrun: ${{TORCHRUN}}"
 
             export PYTHONPATH="${{REPO}}:${{PYTHONPATH}}"
             export PYTHONNOUSERSITE=1
@@ -394,7 +404,7 @@ def _build_pbs_script(
             export MKL_NUM_THREADS=1
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-            {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
                 ${{REPO}}/applications/train_gen2.py -c ${{CONFIG}}
         """)
 
