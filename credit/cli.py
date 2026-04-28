@@ -1153,23 +1153,69 @@ def _ask_gemini(user_msg: str) -> None:
         print(chunk.text, end="", flush=True)
 
 
+_OPENROUTER_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free"
+_DIM = "\033[2m"
+_RESET = "\033[0m"
+
+
+def _ask_openrouter(user_msg: str) -> None:
+    """Stream a response via OpenRouter (Qwen3-Next-80B with thinking mode — free tier)."""
+    from openai import OpenAI
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.environ["OPENROUTER_API_KEY"],
+    )
+    stream = client.chat.completions.create(
+        model=_OPENROUTER_MODEL,
+        max_tokens=8192,
+        extra_body={"enable_thinking": True},
+        messages=[
+            {"role": "system", "content": _CREDIT_SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg},
+        ],
+        stream=True,
+    )
+    in_thinking = False
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        reasoning = getattr(delta, "reasoning_content", None)
+        if reasoning:
+            if not in_thinking:
+                print(f"{_DIM}<thinking>", flush=True)
+                in_thinking = True
+            print(f"{reasoning}", end="", flush=True)
+        if delta.content:
+            if in_thinking:
+                print(f"</thinking>{_RESET}\n", flush=True)
+                in_thinking = False
+            print(delta.content, end="", flush=True)
+    if in_thinking:
+        print(f"</thinking>{_RESET}", flush=True)
+
+
 _PROVIDERS = {
     "anthropic": ("ANTHROPIC_API_KEY", "anthropic", "Claude Haiku"),
     "openai": ("OPENAI_API_KEY", "openai", "GPT-4o"),
     "gemini": ("GOOGLE_API_KEY", "google.generativeai", "Gemini 1.5 Pro"),
     "groq": ("GROQ_API_KEY", "groq", "Llama 3 Instant (free)"),
+    "openrouter": ("OPENROUTER_API_KEY", "openai", "Qwen3-Next-80B thinking (OpenRouter free)"),
 }
 _PROVIDER_INSTALL = {
     "anthropic": "anthropic",
     "openai": "openai",
     "gemini": "google-generativeai",
     "groq": "groq",
+    "openrouter": "openai",
 }
 _PROVIDER_RUNNERS = {
     "anthropic": _ask_anthropic,
     "openai": _ask_openai,
     "gemini": _ask_gemini,
     "groq": _ask_groq,
+    "openrouter": _ask_openrouter,
 }
 
 
@@ -1185,6 +1231,7 @@ def _ask(args: argparse.Namespace) -> None:
         2. OPENAI_API_KEY     → GPT-4o              (pip install openai)
         3. GOOGLE_API_KEY     → Gemini 1.5 Pro      (pip install google-generativeai)
         4. GROQ_API_KEY       → Llama 3 Instant     (pip install groq — free tier)
+        5. OPENROUTER_API_KEY → Qwen3-Next-80B      (pip install openai — free tier, thinking mode)
     """
     import logging
 
@@ -1284,27 +1331,22 @@ def _ask(args: argparse.Namespace) -> None:
             print(
                 "\nNo working provider found.\n"
                 "Anthropic credits are exhausted. Set a fallback key:\n"
-                "  export GROQ_API_KEY=gsk_...    # https://console.groq.com  (free)\n"
-                "  export GOOGLE_API_KEY=AIza...  # https://aistudio.google.com\n"
-                "  export OPENAI_API_KEY=sk-...   # https://platform.openai.com",
+                "  export GROQ_API_KEY=gsk_...             # https://console.groq.com  (free)\n"
+                "  export OPENROUTER_API_KEY=sk-or-...    # https://openrouter.ai     (free tier)\n"
+                "  export GOOGLE_API_KEY=AIza...          # https://aistudio.google.com\n"
+                "  export OPENAI_API_KEY=sk-...           # https://platform.openai.com",
                 file=sys.stderr,
             )
         else:
             _ncar = _is_ncar_system()
             msg = "No API key found."
-            if _ncar:
-                msg += (
-                    "\n\nOn NCAR systems (Casper/Derecho) you can use the shared Anthropic credits:\n\n"
-                    "  module use /glade/work/bdobbins/llms/modules\n"
-                    "  module load llms\n\n"
-                    "Add those two lines to ~/.bashrc to persist across sessions."
-                )
             msg += (
                 "\n\nOr set your own key:\n\n"
                 "  export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com\n"
                 "  export OPENAI_API_KEY=sk-...           # https://platform.openai.com\n"
                 "  export GOOGLE_API_KEY=AIza...          # https://aistudio.google.com  (free for NCAR)\n"
-                "  export GROQ_API_KEY=gsk_...            # https://console.groq.com     (free tier)\n\n"
+                "  export GROQ_API_KEY=gsk_...            # https://console.groq.com     (free tier)\n"
+                "  export OPENROUTER_API_KEY=sk-or-...   # https://openrouter.ai         (free tier)\n\n"
                 "See: https://miles-credit.readthedocs.io/en/latest/quickstart.html"
                 "#get-help-from-the-ai-assistant"
             )
@@ -1336,10 +1378,11 @@ def _ask(args: argparse.Namespace) -> None:
 
     print(
         "\nNo working provider found. Set one of:\n"
-        "  export GROQ_API_KEY=gsk_...      # https://console.groq.com  (free)\n"
-        "  export GOOGLE_API_KEY=AIza...    # https://aistudio.google.com  (free for NCAR)\n"
-        "  export OPENAI_API_KEY=sk-...     # https://platform.openai.com\n"
-        "  export ANTHROPIC_API_KEY=sk-ant- # https://console.anthropic.com  (requires credits)",
+        "  export GROQ_API_KEY=gsk_...            # https://console.groq.com  (free)\n"
+        "  export OPENROUTER_API_KEY=sk-or-...   # https://openrouter.ai     (free tier)\n"
+        "  export GOOGLE_API_KEY=AIza...          # https://aistudio.google.com  (free for NCAR)\n"
+        "  export OPENAI_API_KEY=sk-...           # https://platform.openai.com\n"
+        "  export ANTHROPIC_API_KEY=sk-ant-       # https://console.anthropic.com  (requires credits)",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -1531,14 +1574,7 @@ def _agent(args: argparse.Namespace) -> None:
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         msg = "ANTHROPIC_API_KEY is not set.\n"
-        if _is_ncar_system():
-            msg += (
-                "\nOn NCAR systems (Casper/Derecho) you can use the shared Anthropic credits:\n\n"
-                "  module use /glade/work/bdobbins/llms/modules\n"
-                "  module load llms\n\n"
-                "Add those two lines to ~/.bashrc to persist across sessions."
-            )
-        else:
+        if not _is_ncar_system():
             msg += (
                 "\ncredit agent requires an Anthropic API key with active credits.\n"
                 "  export ANTHROPIC_API_KEY=sk-ant-...\n"
@@ -2101,10 +2137,7 @@ def _build_parser() -> argparse.ArgumentParser:
               OPENAI_API_KEY     → GPT-4o             https://platform.openai.com
               GOOGLE_API_KEY     → Gemini 1.5 Pro     https://aistudio.google.com (free for NCAR)
               GROQ_API_KEY       → Llama 3 Instant    https://console.groq.com    (free tier)
-
-            NCAR users (Casper/Derecho) — shared Anthropic credits available:
-              module use /glade/work/bdobbins/llms/modules
-              module load llms
+              OPENROUTER_API_KEY → Qwen3-Next-80B      https://openrouter.ai       (free tier, thinking)
 
             Examples:
               credit ask "why is my training loss stuck at 2.5?"
@@ -2124,7 +2157,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--provider",
         default=None,
-        choices=["anthropic", "openai", "gemini", "groq"],
+        choices=["anthropic", "openai", "gemini", "groq", "openrouter"],
         help="Force a specific LLM provider for simple chat (default: auto-detect; Anthropic agent always tried first)",
     )
     p.add_argument(
