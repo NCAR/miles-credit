@@ -523,7 +523,7 @@ def _compute_chain(args: argparse.Namespace) -> int:
 def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     """Print a human-readable summary of what is about to be submitted."""
     import yaml
-    from credit.trainers.preflight import estimate_dataloader_memory_gb
+    from credit.trainers.preflight import estimate_dataloader_memory_gib
 
     try:
         with open(args.config) as f:
@@ -539,8 +539,8 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     if args.cluster == "derecho" and args.nodes > 1:
         gpu_str = f"{args.gpus} GPU(s) × {args.nodes} nodes ({args.gpus * args.nodes} total)"
 
-    mem_est = estimate_dataloader_memory_gb(conf)
-    mem_str = f"~{mem_est:.0f} GB" if mem_est > 0 else "unknown"
+    mem_est = estimate_dataloader_memory_gib(conf)
+    mem_str = f"~{mem_est:.0f} GiB" if mem_est > 0 else "unknown"
     mem_warn = "  ⚠  consider reducing thread_workers / prefetch_factor" if mem_est > 24 else ""
 
     chain_desc = f"{n_jobs} job(s)  ({epochs} epochs ÷ {per_job} per job)" if n_jobs > 1 else "1 job (no chaining)"
