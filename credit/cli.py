@@ -167,6 +167,95 @@ def _convert(args: argparse.Namespace) -> None:
         conf["trainer"]["type"] = "era5-gen2"
         changes.append(f"trainer.type: '{trainer_type}' → 'era5-gen2'")
 
+    # data schema: v1 flat → v2 nested source
+    _V1_DATA_FLAT_KEYS = {
+        "variables",
+        "surface_variables",
+        "dynamic_forcing_variables",
+        "static_variables",
+        "save_loc",
+        "save_loc_surface",
+        "save_loc_dynamic_forcing",
+        "save_loc_static",
+        "mean_path",
+        "std_path",
+        "train_years",
+        "valid_years",
+        "lead_time_periods",
+        "scaler_type",
+        "history_len",
+        "valid_history_len",
+        "dataset_type",
+        "static_first",
+        "skip_periods",
+        "one_shot",
+    }
+    data = conf.get("data", {})
+    if "source" not in data and _V1_DATA_FLAT_KEYS & set(data.keys()):
+        vars_3d = data.get("variables") or []
+        vars_2d = data.get("surface_variables") or []
+        dyn_vars = data.get("dynamic_forcing_variables") or []
+        static_vars = data.get("static_variables") or []
+        prog_path = data.get("save_loc") or data.get("save_loc_surface") or ""
+        dyn_path = data.get("save_loc_dynamic_forcing") or ""
+        static_path = data.get("save_loc_static") or ""
+        mean_path = data.get("mean_path") or ""
+        std_path = data.get("std_path") or ""
+        lead_time = int(data.get("lead_time_periods") or 6)
+        train_years = data.get("train_years") or [1979, 2018]
+        valid_years = data.get("valid_years") or [2018, 2019]
+        n_levels = conf.get("model", {}).get("levels", 16)
+        _DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+        levels = _DEFAULT_LEVELS_16[:n_levels]
+
+        era5_vars = {
+            "prognostic": {
+                "vars_3D": vars_3d,
+                "vars_2D": vars_2d,
+                "path": prog_path,
+                "filename_time_format": "%Y",
+            },
+        }
+        if dyn_vars:
+            era5_vars["dynamic_forcing"] = {
+                "vars_2D": dyn_vars,
+                "path": dyn_path,
+                "filename_time_format": "%Y",
+            }
+        if static_vars:
+            era5_vars["static"] = {"vars_2D": static_vars, "path": static_path}
+        era5_vars["diagnostic"] = None
+
+        # Keep non-flat keys (forecast_len, valid_forecast_len, backprop_on_timestep, …)
+        keep_keys = {k: v for k, v in data.items() if k not in _V1_DATA_FLAT_KEYS}
+        conf["data"] = {
+            "source": {"ERA5": {"level_coord": "level", "levels": levels, "variables": era5_vars}},
+            "timestep": f"{lead_time}h",
+            "forecast_len": data.get("forecast_len", 0),
+            "start_datetime": f"{train_years[0]}-01-01",
+            "end_datetime": f"{train_years[1]}-12-31",
+            **keep_keys,
+        }
+        conf.setdefault("validation_data", {}).update(
+            {
+                "start_datetime": f"{valid_years[0]}-01-01",
+                "end_datetime": f"{valid_years[1]}-12-31",
+            }
+        )
+        if mean_path or std_path:
+            conf.setdefault("preblocks", {})["norm"] = {
+                "type": "era5_normalizer",
+                "args": {"mean_path": mean_path, "std_path": std_path},
+            }
+        changes.append(
+            f"data: flat V1 schema → nested V2 source schema  (ERA5, {n_levels} levels, timestep={lead_time}h)"
+        )
+        changes.append(f"data.start_datetime: {train_years[0]}-01-01 .. {train_years[1]}-12-31")
+        changes.append(f"validation_data: {valid_years[0]}-01-01 .. {valid_years[1]}-12-31")
+        if mean_path:
+            changes.append("preblocks.norm: moved from data.mean_path / data.std_path")
+        changes.append("  NOTE: review data paths — glob patterns may need updating for v2 file layout")
+
     # forecast_len: v1 uses 0 = single step, v2 uses 1 = single step
     fl = conf.get("data", {}).get("forecast_len", 0)
     new_fl = fl + 1
