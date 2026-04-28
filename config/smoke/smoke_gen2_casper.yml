@@ -144,9 +144,9 @@ pbs:
     conda: "/glade/u/home/schreck/.conda/envs/credit-casper"  # full path — avoids conda init issues in PBS
     job_name: "smoke_gen2"
     project: "NAML0001"
-    queue: "casper"
     walltime: "01:00:00"
     ncpus: 8
     ngpus: 1
     mem: "64GB"
     gpu_type: "v100"
+    # queue: "casper"   # default for casper; "main" for derecho
