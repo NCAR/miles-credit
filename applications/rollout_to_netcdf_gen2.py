@@ -266,7 +266,7 @@ def predict(rank, world_size, conf, p):
     dataset_conf = dict(conf["data"])
     dataset_conf["forecast_len"] = 1
     dataset = ERA5Dataset(dataset_conf, return_target=False)
-    dt = pd.Timedelta(conf["data"]["timestep"])
+    dt = pd.Timedelta(conf["data"]["timestep"]) if "timestep" in conf["data"] else pd.Timedelta(hours=lead_time_periods)
 
     # ---- Forecast init times: distribute across ranks ----
     all_forecasts = conf["predict"]["forecasts"]
@@ -412,6 +412,26 @@ def main():
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
     _inject_flat_schema(conf)
 
+    if "predict" not in conf:
+        logger.error(
+            "Config is missing a required 'predict:' section.\n"
+            "Add a predict: block to your config, e.g.:\n\n"
+            "  predict:\n"
+            "    mode: none\n"
+            "    save_forecast: /path/to/output/rollout\n"
+            "    forecasts:\n"
+            "      type: custom\n"
+            "      start_year: 2017\n"
+            "      start_month: 1\n"
+            "      start_day: 1\n"
+            "      start_hours: [0]\n"
+            "      duration: 4\n"
+            "      ic_interval_days: 1\n"
+            "      days: 2\n"
+            "    metadata: /path/to/credit/metadata/era5.yaml\n"
+            "    batch_size: 1\n"
+        )
+        sys.exit(1)
     assert "save_forecast" in conf["predict"], "conf['predict']['save_forecast'] is required."
     os.makedirs(os.path.expandvars(conf["predict"]["save_forecast"]), exist_ok=True)
 
