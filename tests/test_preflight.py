@@ -75,21 +75,30 @@ class TestEstimateDataloaderMemoryGb:
 
     def test_formula_1d_era5(self):
         """Spot-check with 1-degree ERA5: 3×13+1 = 40 channels."""
+        vars_3d = ["U", "V", "T"]
+        vars_2d = ["SP"]
+        n_levels = 13
+        h = 721
+        w = 1440
         conf = _conf(
             workers=4,
             prefetch=4,
             batch=1,
-            h=721,
-            w=1440,
-            vars_3d=["U", "V", "T"],
-            vars_2d=["SP"],
+            h=h,
+            w=w,
+            vars_3d=vars_3d,
+            vars_2d=vars_2d,
             diag_2d=[],
-            n_levels=13,
+            n_levels=n_levels,
         )
-        total_ch = 3 * 13 + 1  # 40
-        bytes_per_sample = 721 * 1440 * total_ch * 4 * 2
-        expected_gb = (4 * 4 * 1 * bytes_per_sample) / 1e9
-        assert abs(estimate_dataloader_memory_gib(conf) - expected_gb) < 0.01
+        print(conf)
+        total_ch = len(vars_3d) * n_levels + len(vars_2d)  # 40
+        bytes_per_sample = h * w * total_ch * 4 * 2
+        expected_gb = (4 * 4 * 1 * bytes_per_sample) / 2**30
+        predicted_gb = estimate_dataloader_memory_gib(conf)
+        print(expected_gb)
+        print(predicted_gb)
+        assert abs(predicted_gb - expected_gb) < 0.01
 
     def test_025deg_era5_is_large(self):
         """0.25° ERA5 with typical settings should be >10 GB."""
