@@ -361,7 +361,12 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
 
 
 def _build_pbs_script(
-    args: argparse.Namespace, config: str, repo: str, account: str = None, depend_on: str = None
+    args: argparse.Namespace,
+    config: str,
+    repo: str,
+    account: str = None,
+    depend_on: str = None,
+    save_loc: str = None,
 ) -> str:
     """Return a PBS batch script string for the given args and config path.
 
@@ -372,7 +377,14 @@ def _build_pbs_script(
         account:   PBS account string; overrides ``args.account`` when provided.
         depend_on: If set, adds ``#PBS -W depend=afterok:<depend_on>`` so this
                    job only starts after the given job ID completes successfully.
+        save_loc:  If set, job stdout/stderr is written to <save_loc>/logs/.
     """
+    if save_loc:
+        logs_dir = os.path.join(os.path.expandvars(save_loc), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        output_line = f"#PBS -o {logs_dir}"
+    else:
+        output_line = ""
     # Apply defaults for fields not set by the caller (mirrors _resolve_pbs_opts defaults).
     is_casper = getattr(args, "cluster", "casper") == "casper"
     _d = argparse.Namespace(
@@ -402,6 +414,7 @@ def _build_pbs_script(
             #PBS -q {args.queue}
             #PBS -j oe
             #PBS -k eod
+            {output_line}
             {depend_line}
             module load conda/latest
 
@@ -441,6 +454,7 @@ def _build_pbs_script(
             #PBS -j oe
             #PBS -k eod
             #PBS -r n
+            {output_line}
             {depend_line}
             module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 \\
                         cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
@@ -632,34 +646,42 @@ def _submit(args: argparse.Namespace) -> None:
     reload_config = _write_reload_config(os.path.abspath(args.config)) if n_jobs > 1 else None
 
     if args.dry_run:
-        script = _build_pbs_script(args, first_config, repo, depend_on=None)
+        script = _build_pbs_script(args, first_config, repo, depend_on=None, save_loc=save_loc)
         print(f"# --- Job 1/{n_jobs} ---")
         print(script)
         if n_jobs > 1:
-            script2 = _build_pbs_script(args, reload_config, repo, depend_on="<job_1_id>")
+            script2 = _build_pbs_script(args, reload_config, repo, depend_on="<job_1_id>", save_loc=save_loc)
             print(f"# --- Jobs 2..{n_jobs}/{n_jobs} (afterok chained, reload config) ---")
             print(script2)
         return
 
     # Submit job 1
-    script = _build_pbs_script(args, first_config, repo, depend_on=None)
+    script = _build_pbs_script(args, first_config, repo, depend_on=None, save_loc=save_loc)
     job_id = _qsub(script, save_loc=save_loc)
     print(f"[1/{n_jobs}] {job_id}  {first_config}")
 
     # Submit remaining chained reload jobs
     for i in range(2, n_jobs + 1):
-        script = _build_pbs_script(args, reload_config, repo, depend_on=job_id)
+        script = _build_pbs_script(args, reload_config, repo, depend_on=job_id, save_loc=save_loc)
         job_id = _qsub(script, save_loc=save_loc)
         print(f"[{i}/{n_jobs}] {job_id}  afterok  (reload)")
 
 
-def _build_rollout_pbs_script(args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int) -> str:
+def _build_rollout_pbs_script(
+    args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int, save_loc: str = None
+) -> str:
     """Return a PBS script for one subset of an ensemble rollout.
 
     Each job runs ``rollout_to_netcdf_gen2.py --subset <subset> --no_subset <n_subsets>``.
     Jobs are independent (no afterok chain) — they all start at once.
     """
     job_name = f"{args.job_name[:10]}-{subset:02d}of{n_subsets:02d}"
+    if save_loc:
+        logs_dir = os.path.join(os.path.expandvars(save_loc), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        output_line = f"#PBS -o {logs_dir}"
+    else:
+        output_line = ""
 
     if args.cluster == "casper":
         torchrun = args.torchrun or _find_torchrun()
@@ -672,6 +694,7 @@ def _build_rollout_pbs_script(args: argparse.Namespace, config: str, repo: str, 
             #PBS -q {args.queue}
             #PBS -j oe
             #PBS -k eod
+            {output_line}
 
             REPO={repo}
             CONFIG={config}
@@ -705,6 +728,7 @@ def _build_rollout_pbs_script(args: argparse.Namespace, config: str, repo: str, 
             #PBS -j oe
             #PBS -k eod
             #PBS -r n
+            {output_line}
 
             module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 \\
                         cuda/12.3.2 conda/latest
@@ -815,19 +839,19 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
     _print_ensemble_rollout_plan(args, n_jobs, n_forecasts, ensemble_size)
 
     config_abs = os.path.abspath(args.config)
+    rollout_save_loc = os.path.expandvars(conf.get("save_loc", "."))
 
     if args.dry_run:
         for i in range(1, n_jobs + 1):
             print(f"# {'=' * 50}")
             print(f"# Job {i}/{n_jobs}  (subset {i} of {n_jobs})")
             print(f"# {'=' * 50}")
-            print(_build_rollout_pbs_script(args, config_abs, repo, i, n_jobs))
+            print(_build_rollout_pbs_script(args, config_abs, repo, i, n_jobs, save_loc=rollout_save_loc))
         return
 
-    rollout_save_loc = os.path.expandvars(conf.get("save_loc", "."))
     job_ids = []
     for i in range(1, n_jobs + 1):
-        script = _build_rollout_pbs_script(args, config_abs, repo, i, n_jobs)
+        script = _build_rollout_pbs_script(args, config_abs, repo, i, n_jobs, save_loc=rollout_save_loc)
         job_id = _qsub(script, save_loc=rollout_save_loc)
         job_ids.append(job_id)
         print(f"[{i:2d}/{n_jobs}] {job_id}")
