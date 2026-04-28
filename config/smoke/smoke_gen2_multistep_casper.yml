@@ -1,0 +1,152 @@
+# Smoke test for multi-step (forecast_len=2) rollout — Gen2 data schema
+# Exercises the t>1 rollout path in trainerERA5gen2 where ERA5Dataset
+# returns only dynamic_forcing channels and the trainer must reconstruct
+# the full input from the previous x + y_pred.
+# Otherwise identical to smoke_gen2_casper.yml.
+
+save_loc: '/glade/work/schreck/runs/CREDIT_runs/smoke_gen2_multistep'
+seed: 1000
+
+data:
+  source:
+    ERA5:
+      level_coord: "level"
+      levels: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+      variables:
+        prognostic:
+          vars_3D: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+          vars_2D: ["SP", "VAR_2T", "VAR_10U", "VAR_10V"]
+          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
+          filename_time_format: "%Y"
+        dynamic_forcing:
+          vars_2D: ["toa_incident_solar_radiation", "land_sea_CI_mask"]
+          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
+          filename_time_format: "%Y"
+        static:
+          vars_2D: ["z_norm", "land_sea_mask"]
+          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
+        diagnostic: null
+
+  timestep: "6h"
+  forecast_len: 2
+  start_datetime: "2000-01-01"
+  end_datetime: "2003-12-31"
+
+validation_data:
+  start_datetime: "2014-01-01"
+  end_datetime: "2015-12-31"
+
+model:
+    type: "wxformer"
+    frames: 1
+    image_height: 181
+    image_width: 360
+    levels: 18
+    channels: 4
+    surface_channels: 4
+    input_only_channels: 4
+    output_only_channels: 0   # no diagnostics for speed
+
+    patch_width: 1
+    patch_height: 1
+    frame_patch_size: 1
+
+    dim: [32, 64, 128, 256]
+    depth: [2, 2, 2, 2]
+    global_window_size: [8, 4, 2, 1]
+    local_window_size: 4
+    cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+    cross_embed_strides: [2, 2, 2, 2]
+    attn_dropout: 0.
+    ff_dropout: 0.
+    upsample_with_ps: True
+
+    use_spectral_norm: True
+    upsample_v_conv: True
+    decoder_attention_type: "scse"
+    interp: False
+
+    padding_conf:
+        activate: True
+        mode: "earth"
+        pad_lat: [37, 38]
+        pad_lon: [76, 76]
+
+    post_conf:
+        activate: False
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+    use_power_loss: False
+    use_spectral_loss: False
+    spectral_lambda_reg: 0.1
+    spectral_wavenum_init: 20
+    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
+    use_latitude_weights: True
+    use_variable_weights: False
+
+trainer:
+    type: era5-gen2
+    mode: none          # single GPU
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    save_backup_weights: False
+    save_best_weights: True
+    save_metric_vars: True
+
+    update_learning_rate: False
+    learning_rate: 1.0e-03
+    weight_decay: 0
+
+    train_batch_size: 2
+    valid_batch_size: 2
+    ensemble_size: 1
+
+    batches_per_epoch: 20
+    valid_batches_per_epoch: 5
+    stopping_patience: 50
+    skip_validation: False
+
+    start_epoch: 0
+    num_epoch: 2
+    reload_epoch: False
+    epochs: 2
+
+    use_scheduler: False
+
+    amp: False
+
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+
+    thread_workers: 4
+    valid_thread_workers: 2
+    prefetch_factor: 2
+
+preblocks:
+  norm:
+    type: era5_normalizer
+    args:
+      mean_path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc"
+      std_path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc"
+
+pbs:
+    conda: "credit-main-casper"
+    job_name: "smoke_gen2_ms"
+    nodes: 1
+    ncpus: 8
+    ngpus: 1
+    mem: '64GB'
+    walltime: '1:00:00'
+    gpu_type: 'v100'
+    project: 'NAML0001'
+    queue: 'casper'
