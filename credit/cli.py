@@ -281,15 +281,35 @@ def _convert(args: argparse.Namespace) -> None:
 
 
 def _load_pbs_config(config_path: str) -> dict:
-    """Return the ``pbs:`` section from a YAML config file, or an empty dict."""
-    try:
-        import yaml
+    """Return the ``pbs:`` section from a YAML config file.
 
-        with open(config_path) as f:
-            conf = yaml.safe_load(f)
-        return conf.get("pbs", {}) or {}
-    except Exception:
-        return {}
+    Raises SystemExit if the section is missing or if ``conda`` is not specified.
+    """
+    import yaml
+
+    with open(config_path) as f:
+        conf = yaml.safe_load(f)
+
+    pbs = conf.get("pbs") or {}
+    if not pbs:
+        print(
+            f"ERROR: config '{config_path}' is missing a required 'pbs:' section.\n"
+            "Add a pbs: block — see config/example-v2026.1.0.yml for reference.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not (pbs.get("conda") or pbs.get("conda_env")):
+        print(
+            "ERROR: pbs.conda is required but not set in the config.\n"
+            "Specify the conda environment name or full path, e.g.:\n"
+            "  pbs:\n"
+            "    conda: /glade/u/home/$USER/.conda/envs/credit-casper",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return pbs
 
 
 def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Namespace:
@@ -331,7 +351,6 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     r.conda_env = _first(
         args.conda_env,
         pbs_cfg.get("conda") or pbs_cfg.get("conda_env"),
-        "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221",
     )
     r.job_name = pbs_cfg.get("job_name", "credit_gen2")
     return r
@@ -360,11 +379,7 @@ def _build_pbs_script(
         queue="casper" if is_casper else "main",
         gpu_type="a100_80gb",
         torchrun=None,
-        conda_env=(
-            "/glade/u/home/schreck/.conda/envs/credit-casper"
-            if is_casper
-            else "/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221"
-        ),
+        conda_env=None,
     )
     args = argparse.Namespace(**{**vars(_d), **{k: v for k, v in vars(args).items() if v is not None}})
     if account is not None:

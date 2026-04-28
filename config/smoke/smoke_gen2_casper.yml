@@ -141,13 +141,12 @@ trainer:
     prefetch_factor: 2
 
 pbs:
-    conda: "credit-main-casper"
+    conda: "/glade/u/home/schreck/.conda/envs/credit-casper"  # full path — avoids conda init issues in PBS
     job_name: "smoke_gen2"
-    nodes: 1
+    project: "NAML0001"
+    queue: "casper"
+    walltime: "01:00:00"
     ncpus: 8
     ngpus: 1
-    mem: '64GB'
-    walltime: '1:00:00'
-    gpu_type: 'v100'
-    project: 'NAML0001'
-    queue: 'casper'
+    mem: "64GB"
+    gpu_type: "v100"
