@@ -65,6 +65,7 @@ def _make_minimal_conf(tmp_path, extra=None):
             "project": "NAML0001",
             "walltime": "06:00:00",
             "job_name": "test_job",
+            "conda": "/glade/u/home/testuser/.conda/envs/credit",
         },
     }
     if extra:
@@ -264,29 +265,38 @@ class TestLoadPbsConfig:
     """Tests for _load_pbs_config."""
 
     def test_returns_pbs_section(self, tmp_path):
-        conf = {"pbs": {"project": "MYACCT", "walltime": "04:00:00"}}
+        conf = {"pbs": {"project": "MYACCT", "walltime": "04:00:00", "conda": "/envs/credit"}}
         p = tmp_path / "cfg.yml"
         p.write_text(yaml.dump(conf))
         result = _load_pbs_config(str(p))
         assert result["project"] == "MYACCT"
         assert result["walltime"] == "04:00:00"
 
-    def test_missing_pbs_returns_empty(self, tmp_path):
+    def test_missing_pbs_exits(self, tmp_path):
         conf = {"trainer": {"type": "era5-gen2"}}
         p = tmp_path / "cfg.yml"
         p.write_text(yaml.dump(conf))
-        assert _load_pbs_config(str(p)) == {}
+        with pytest.raises(SystemExit):
+            _load_pbs_config(str(p))
 
-    def test_nonexistent_file_returns_empty(self, tmp_path):
-        result = _load_pbs_config(str(tmp_path / "does_not_exist.yml"))
-        assert result == {}
+    def test_missing_conda_exits(self, tmp_path):
+        conf = {"pbs": {"project": "MYACCT", "walltime": "04:00:00"}}
+        p = tmp_path / "cfg.yml"
+        p.write_text(yaml.dump(conf))
+        with pytest.raises(SystemExit):
+            _load_pbs_config(str(p))
 
-    def test_broken_yaml_returns_empty(self, tmp_path):
+    def test_nonexistent_file_raises(self, tmp_path):
+        with pytest.raises((FileNotFoundError, OSError)):
+            _load_pbs_config(str(tmp_path / "does_not_exist.yml"))
+
+    def test_broken_yaml_raises(self, tmp_path):
         p = tmp_path / "bad.yml"
         p.write_text("key: [broken yaml")
-        result = _load_pbs_config(str(p))
-        # may or may not succeed; must not raise — just return dict
-        assert isinstance(result, dict)
+        import yaml as _yaml
+
+        with pytest.raises(_yaml.YAMLError):
+            _load_pbs_config(str(p))
 
 
 # ===========================================================================
@@ -531,7 +541,7 @@ def _inject_preflight(mem_gb=0.0):
     def _ctx():
         key = "credit.trainers.preflight"
         fake = types.ModuleType(key)
-        fake.estimate_dataloader_memory_gb = lambda conf: mem_gb
+        fake.estimate_dataloader_memory_gib = lambda conf: mem_gb
         old = sys.modules.get(key)
         sys.modules[key] = fake
         try:
@@ -1389,7 +1399,7 @@ class TestSubmitReload:
         )
         qsub_calls = []
 
-        def fake_qsub(script):
+        def fake_qsub(script, save_loc=None):
             qsub_calls.append(script)
             return "99999.pbs"
 
@@ -1412,7 +1422,7 @@ class TestSubmitReload:
         qsub_calls = []
         counter = [0]
 
-        def fake_qsub(script):
+        def fake_qsub(script, save_loc=None):
             counter[0] += 1
             qsub_calls.append(script)
             return f"{counter[0]}000.pbs"

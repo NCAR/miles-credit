@@ -140,6 +140,21 @@ trainer:
     valid_thread_workers: 2
     prefetch_factor: 2
 
+predict:
+    mode: none
+    save_forecast: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2/rollout'
+    forecasts:
+        type: "custom"
+        start_year: 2017
+        start_month: 1
+        start_day: 1
+        start_hours: [0]
+        duration: 4
+        ic_interval_days: 1
+        days: 2
+    metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
+    batch_size: 1
+
 pbs:
     conda: "/glade/u/home/schreck/.conda/envs/credit-casper"  # full path — avoids conda init issues in PBS
     job_name: "smoke_gen2"

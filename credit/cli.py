@@ -8,7 +8,8 @@ Examples
   credit realtime -c config.yml --init-time 2024-01-15T00 --steps 40
   credit rollout -c config.yml
   credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2
-  credit submit --cluster casper  -c config.yml --gpus 1 --dry-run
+  credit submit --cluster casper  -c config.yml --mode rollout --jobs 10
+  credit submit --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00
   credit init --grid 0.25deg -o my_config.yml
 """
 
@@ -618,10 +619,151 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     print()
 
 
+def _build_realtime_pbs_script(
+    args: argparse.Namespace,
+    config: str,
+    repo: str,
+    init_time: str,
+    steps: int,
+    save_loc: str = None,
+) -> str:
+    """Return a PBS script that runs a single realtime forecast."""
+    if save_loc:
+        logs_dir = os.path.join(os.path.expandvars(save_loc), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        output_line = f"#PBS -o {logs_dir}"
+    else:
+        output_line = ""
+
+    job_name = getattr(args, "job_name", "credit_realtime")
+
+    if args.cluster == "casper":
+        conda_env = args.conda_env
+        return textwrap.dedent(f"""\
+            #!/bin/bash -l
+            #PBS -N {job_name}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l walltime={args.walltime}
+            #PBS -A {args.account}
+            #PBS -q {args.queue}
+            #PBS -j oe
+            #PBS -k eod
+            {output_line}
+
+            module load conda/latest
+
+            conda activate {conda_env}
+
+            REPO={repo}
+            CONFIG={config}
+            NGPUS={args.gpus}
+            TORCHRUN=$(which torchrun)
+
+            echo "Realtime forecast — init: {init_time}  steps: {steps}"
+            echo "Config  : ${{CONFIG}}"
+            echo "Node    : $(hostname)"
+
+            export PYTHONPATH="${{REPO}}:${{PYTHONPATH}}"
+            export PYTHONNOUSERSITE=1
+            export OMP_NUM_THREADS=1
+            export MKL_NUM_THREADS=1
+            export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+                ${{REPO}}/applications/rollout_realtime_gen2.py \\
+                -c ${{CONFIG}} --init-time {init_time} --steps {steps}
+        """)
+
+    else:  # derecho
+        conda_env = args.conda_env
+        return textwrap.dedent(f"""\
+            #!/bin/bash
+            #PBS -A {args.account}
+            #PBS -N {job_name}
+            #PBS -l walltime={args.walltime}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
+            #PBS -q {args.queue}
+            #PBS -j oe
+            #PBS -k eod
+            #PBS -r n
+            {output_line}
+
+            module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 \\
+                        cuda/12.3.2 conda/latest
+
+            conda activate {conda_env}
+
+            REPO={repo}
+            CONFIG={config}
+
+            echo "Realtime forecast — init: {init_time}  steps: {steps}"
+            echo "Config  : ${{CONFIG}}"
+
+            export PYTHONPATH="${{REPO}}:${{PYTHONPATH}}"
+            export OMP_NUM_THREADS=1
+            export MKL_NUM_THREADS=1
+            export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+            torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
+                ${{REPO}}/applications/rollout_realtime_gen2.py \\
+                -c ${{CONFIG}} --init-time {init_time} --steps {steps}
+        """)
+
+
+def _do_submit_realtime(args: argparse.Namespace) -> None:
+    """Submit a single PBS job for a realtime forecast."""
+    import yaml
+
+    repo = _repo_root()
+    pbs_cfg = _load_pbs_config(args.config)
+
+    if not hasattr(args, "nodes"):
+        args.nodes = None
+    if not hasattr(args, "torchrun"):
+        args.torchrun = None
+
+    args = _resolve_pbs_opts(args, pbs_cfg)
+
+    with open(args.config) as f:
+        conf = yaml.safe_load(f)
+    save_loc = os.path.expandvars(conf.get("save_loc", "."))
+    config_abs = os.path.abspath(args.config)
+
+    init_time = args.init_time
+    steps = getattr(args, "steps", 40)
+
+    print()
+    print("=" * 52)
+    print("  Realtime job plan")
+    print("=" * 52)
+    print(f"  Cluster   : {args.cluster}")
+    print(f"  Account   : {args.account}")
+    print(f"  Config    : {args.config}")
+    print(f"  Init time : {init_time}")
+    print(f"  Steps     : {steps}")
+    print(f"  GPUs      : {args.gpus}")
+    print(f"  Walltime  : {args.walltime}")
+    print("=" * 52)
+    print()
+
+    script = _build_realtime_pbs_script(args, config_abs, repo, init_time, steps, save_loc=save_loc)
+
+    if args.dry_run:
+        print(script)
+        return
+
+    job_id = _qsub(script, save_loc=save_loc)
+    print(f"Submitted: {job_id}")
+
+
 def _submit(args: argparse.Namespace) -> None:
     """Generate and optionally submit PBS batch scripts, with optional chaining."""
-    if getattr(args, "rollout", False):
+    mode = getattr(args, "submit_mode", "train")
+    if mode == "rollout":
         _do_submit_rollout(args)
+        return
+    if mode == "realtime":
+        _do_submit_realtime(args)
         return
 
     import yaml
@@ -774,14 +916,14 @@ def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_foreca
 
 
 def _rollout_ensemble(args: argparse.Namespace) -> None:
-    """Deprecated: use ``credit submit --rollout`` instead."""
+    """Deprecated: use ``credit submit --mode rollout`` instead."""
     print(
         "WARNING: credit rollout-ensemble is deprecated.\n"
         "Use instead:\n"
-        "  credit submit --cluster <casper|derecho> --rollout --jobs N -c config.yml\n",
+        "  credit submit --cluster <casper|derecho> --mode rollout --jobs N -c config.yml\n",
         file=sys.stderr,
     )
-    args.rollout = True
+    args.submit_mode = "rollout"
     if not hasattr(args, "reload"):
         args.reload = False
     if not hasattr(args, "chain"):
@@ -1018,7 +1160,7 @@ The main entry point is the `credit` CLI.
 
 ## Key CLI commands
 - `credit train -c config.yml`                    — start/resume training
-- `credit submit --cluster casper|derecho -c config.yml --gpus N [--nodes N] [--chain N] [--reload]`
+- `credit submit --cluster casper|derecho -c config.yml [--mode train|rollout|realtime] --gpus N [--nodes N] [--chain N] [--reload] [--jobs N] [--init-time YYYY-MM-DDTHH] [--steps N]`
 - `credit plot -c config.yml --field VAR_2T --denorm`   — quick visualisation from checkpoint
 - `credit rollout -c config.yml`                  — batch forecast to NetCDF
 - `credit realtime -c config.yml --init-time YYYY-MM-DDTHH --steps N`
@@ -1084,10 +1226,15 @@ trainer:
 | PBS job cancelled after failure | Normal: `afterok` chain auto-cancels remaining jobs | Use `credit submit --reload --chain N` to restart |
 | FSDP + EMA slow | EMA does extra full-param sync on FSDP | Use `use_ema: False` with FSDP or accept overhead |
 
-## How --chain works
+## How --chain works (train mode)
 `--chain N` submits N PBS jobs with afterok dependencies. Job 1 runs fresh (or --reload).
 Jobs 2..N auto-generate `config_reload.yml` and resume from checkpoint.
 Rule of thumb: chain = ceil(total_epochs / num_epoch). E.g., 70 epochs / 5 per job = 14.
+
+## submit --mode options
+- `--mode train` (default): training job, supports --chain and --reload
+- `--mode rollout`: N parallel jobs covering all init times, use --jobs N; reads predict: section
+- `--mode realtime`: single forecast job, requires --init-time YYYY-MM-DDTHH and --steps N
 
 ## What healthy training looks like
 - After epoch 1: train_loss ≈ 1–3 (order 1)
@@ -1968,7 +2115,8 @@ def _build_parser() -> argparse.ArgumentParser:
               credit realtime -c config.yml --init-time 2024-01-15T00 --steps 40
               credit rollout  -c config.yml
               credit submit   --cluster casper  -c config.yml --gpus 1
-              credit submit   --cluster casper  -c config.yml --rollout --jobs 10
+              credit submit   --cluster casper  -c config.yml --mode rollout --jobs 10
+              credit submit   --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00
               credit submit   --cluster derecho -c config.yml --gpus 4 --nodes 2
               credit init     --grid 0.25deg -o my_config.yml
         """),
@@ -2059,29 +2207,39 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- submit ----
     p = sub.add_parser(
         "submit",
-        help="Generate and submit a PBS training or rollout job",
+        help="Generate and submit a PBS training, rollout, or realtime job",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent("""\
             Generate a PBS batch script and optionally submit it via qsub.
             Use --dry-run to inspect the script before submitting.
-            Use --reload to resume from the latest checkpoint automatically.
-            Use --chain N to submit N back-to-back jobs via PBS afterok dependencies.
 
-            For rollout (ensemble or deterministic), use --rollout --jobs N to split
-            init times across N parallel independent PBS jobs (no afterok chain).
-            Ensemble behaviour is controlled by predict.ensemble_size in the config.
+            Modes:
+              train     (default) Submit a training job.  Use --reload / --chain for
+                        resuming and chaining multiple epochs across jobs.
+              rollout   Submit N parallel PBS rollout jobs covering all init times.
+                        Use --jobs N to set parallelism.  No afterok chain.
+              realtime  Submit a single realtime forecast job.
+                        Requires --init-time and --steps.
 
             Examples:
               credit submit --cluster casper  -c config.yml --gpus 1 --walltime 04:00:00
               credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2 --dry-run
-              credit submit --cluster casper  -c config.yml --gpus 4 --reload
-              credit submit --cluster derecho -c config.yml --gpus 4 --nodes 1 --chain 10
-              credit submit --cluster casper  -c config.yml --rollout --jobs 10
-              credit submit --cluster derecho -c config.yml --rollout --jobs 20 --gpus 1
+              credit submit --cluster casper  -c config.yml --mode train --reload
+              credit submit --cluster derecho -c config.yml --mode train --chain 10
+              credit submit --cluster casper  -c config.yml --mode rollout --jobs 10
+              credit submit --cluster derecho -c config.yml --mode rollout --jobs 20 --gpus 1
+              credit submit --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00 --steps 40
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG")
     p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
+    p.add_argument(
+        "--mode",
+        dest="submit_mode",
+        default="train",
+        choices=["train", "rollout", "realtime"],
+        help="Submission mode: train (default), rollout, or realtime",
+    )
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per node (config pbs.ngpus → 4)")
     p.add_argument(
         "--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only (config pbs.nodes → 1)"
@@ -2106,27 +2264,34 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="conda_env",
         default=None,
         metavar="PATH",
-        help="Conda environment path for derecho (default: credit-derecho-torch28-nccl221)",
+        help="Conda environment path (default: from config pbs.conda)",
     )
     p.add_argument("--dry-run", action="store_true", help="Print the PBS script without submitting")
-    p.add_argument(
-        "--rollout",
-        action="store_true",
-        help="Submit parallel rollout jobs instead of a training job. "
-        "Use with --jobs N to split init times across N independent PBS jobs. "
-        "Ensemble behaviour is controlled by predict.ensemble_size in the config.",
-    )
     p.add_argument(
         "--jobs",
         type=int,
         default=10,
         metavar="N",
-        help="Number of parallel PBS rollout jobs when using --rollout (default: 10)",
+        help="Number of parallel PBS rollout jobs for --mode rollout (default: 10)",
+    )
+    p.add_argument(
+        "--init-time",
+        dest="init_time",
+        default=None,
+        metavar="YYYY-MM-DDTHH",
+        help="Forecast init time for --mode realtime, e.g. 2024-01-15T00",
+    )
+    p.add_argument(
+        "--steps",
+        type=int,
+        default=40,
+        metavar="N",
+        help="Number of autoregressive steps for --mode realtime (default: 40)",
     )
     p.add_argument(
         "--reload",
         action="store_true",
-        help="Resume from checkpoint: patch load_weights/optimizer/scaler/"
+        help="(train mode) Resume from checkpoint: patch load_weights/optimizer/scaler/"
         "scheduler/reload_epoch in the config and submit the reload job",
     )
     p.add_argument(
@@ -2134,7 +2299,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="N",
-        help="Submit N jobs in sequence using PBS afterok dependencies. "
+        help="(train mode) Submit N jobs in sequence using PBS afterok dependencies. "
         "Job 1 uses the base config (or --reload config); jobs 2..N "
         "are automatic reload jobs. If omitted, computed automatically "
         "from ceil(trainer.epochs / trainer.num_epoch) in the config. "
