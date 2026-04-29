@@ -26,6 +26,7 @@ from credit.physics_constants import (
     CP_VAPOR,
 )
 from credit.skebs import SKEBS
+from credit.postblock.mslp import MSLPCalculator
 
 import logging
 from math import pi
@@ -95,6 +96,11 @@ class PostBlock(nn.Module):
                 logger.info("GlobalEnergyFixerUpDown registered")
                 opt = GlobalEnergyFixerUpDown(post_conf)
                 self.operations.append(opt)
+
+        # MSLP diagnostic
+        if post_conf.get("mslp_calculator", {}).get("activate", False):
+            logger.info("MSLPCalculator registered")
+            self.operations.append(MSLPCalculator(post_conf))
 
     def forward(self, x):
         for op in self.operations:
