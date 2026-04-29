@@ -19,7 +19,7 @@ from credit.trainers.utils import accum_log, cycle
 logger = logging.getLogger(__name__)
 
 
-class TrainerERA5EnsembleGen2(BaseTrainer):
+class TrainerEnsembleGen2(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Gen 2 ensemble trainer for the ERA5 nested data schema.
@@ -401,4 +401,4 @@ class TrainerERA5EnsembleGen2(BaseTrainer):
         return results_dict
 
 
-Trainer = TrainerERA5EnsembleGen2
+Trainer = TrainerEnsembleGen2

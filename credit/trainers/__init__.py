@@ -5,8 +5,8 @@ import logging
 from credit.trainers.trainerERA5gen1 import TrainerERA5Gen1
 from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2
 from credit.trainers.trainerERA5_Diffusion import TrainerERA5Diffusion
-from credit.trainers.trainerERA5_ensemble_gen1 import TrainerERA5EnsembleGen1
-from credit.trainers.trainerERA5_ensemble_gen2 import TrainerERA5EnsembleGen2
+from credit.trainers.trainer_ensemble_gen1 import TrainerEnsembleGen1
+from credit.trainers.trainer_ensemble_gen2 import TrainerEnsembleGen2
 from credit.trainers.trainer_downscaling import TrainerDownscaling
 
 try:
@@ -40,15 +40,15 @@ trainer_types = {
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
     "era5-ensemble-gen1": (
-        TrainerERA5EnsembleGen1,
+        TrainerEnsembleGen1,
         "Gen 1 ensemble trainer for ERA5: ring-reduce CRPS loss, gen1 data schema (concat_and_reshape).",
     ),
     "era5-ensemble": (  # backward-compat alias for era5-ensemble-gen1
-        TrainerERA5EnsembleGen1,
+        TrainerEnsembleGen1,
         "Gen 1 ensemble trainer for ERA5: ring-reduce CRPS loss, gen1 data schema (concat_and_reshape).",
     ),
     "era5-ensemble-gen2": (
-        TrainerERA5EnsembleGen2,
+        TrainerEnsembleGen2,
         "Gen 2 ensemble trainer for ERA5: ring-reduce CRPS loss, gen2 nested data schema with preblocks.",
     ),
     "cam": (
