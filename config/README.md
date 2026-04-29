@@ -4,34 +4,38 @@
 
 | File | What it is |
 |------|-----------|
-| `wxformer_1dg_6hr_v2.yml` | **ERA5 1° WXFormer — recommended starting point** |
-| `wxformer_025deg_6hr_v2.yml` | ERA5 0.25° WXFormer (full-res, more GPU memory) |
-| `starter_v2.yml` | Minimal template with `# USER SETTINGS` comments |
-| `example-v2026.1.0.yml` | Fully annotated reference — every option explained |
+| `example-v2026.2.yml` | **Fully annotated gen2 reference — every option explained** |
+| `example-v2026.1.0.yml` | Fully annotated gen1 reference (superseded) |
 
-All four use `trainer.type: era5-gen2` and the current data schema.
-To generate a fresh config from a template: `credit init --grid 1deg -o my_config.yml`
-To convert a v1 config: `credit convert -c old_model.yml`
+For working starting points, see `gen_2/examples/` below.
 
-## Subdirectories
+## Directory structure
 
 ```
 config/
-  applications/
-    realtime/       GFS-initialized real-time forecast configs
-    ensemble/       Ensemble training and evaluation (CAM, ERA5)
-    downscaling/    Statistical downscaling, CONUS404
-    diffusion/      Diffusion model variants
-    other_models/   FuXi, Swin, UNet, GraphCast, Samudra
-    climate/        Long climate rollout configs
-    physics/        Physics post-block examples (mass/water/energy conservation)
-    ic_opt/         Initial condition optimization
-  data/             Dataset-specific configs (ERA5 schema variants, multi-source)
-  dev/              Development / CI test configs (not for production use)
-  archive/
-    v1/             Superseded v1 configs (kept for reference)
-    old_configs/    Pre-2024 configs
-    arXiv_2024/     Configs used in the 2024 arXiv paper (reproducibility)
+  gen_2/                    Current generation (era5-gen2 trainer, nested data schema)
+    examples/
+      example-v2026.2.yml           Annotated reference config (CrossFormer, 1° ERA5, 6h)
+      wxformer_era5_025deg_6hr.yml  WXFormer, 0.25° ERA5 pressure-level, 6h
+      wxformer_npj_era5_028deg.yml  WXFormer, model-level ERA5, 0.28°
+      multi_source_data.yaml        Multi-source data configuration example
+    smoke/                  CI smoke-test configs (not for production use)
+
+  gen_1/                    Previous generation configs (kept for reference)
+    applications/
+      climate/        Long climate rollout
+      diffusion/      Diffusion model variants
+      domain_parallel/ Domain-decomposition training
+      downscaling/    Statistical downscaling, CONUS404
+      ensemble/       Ensemble training and evaluation (CAM, ERA5)
+      ic_opt/         Initial condition optimization
+      other_models/   FuXi, Swin, UNet, GraphCast, Samudra
+      physics/        Physics post-block examples (mass/water/energy conservation)
+    example/          Annotated gen1 reference config
+    arXiv_2024/       Configs used in the 2024 arXiv paper (reproducibility)
+    archive/
+      v1/             Superseded v1 configs
+    old_configs/      Pre-2024 configs
 ```
 
 ## PBS / job submission
