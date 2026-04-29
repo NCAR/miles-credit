@@ -67,7 +67,9 @@ CREDIT supports two distinct scaling approaches for multi-GPU training:
 - Effective ensemble size becomes `ensemble_size × num_gpus`
 - KCRPS computation occurs across the entire distributed ensemble
 - Batch size remains constant per GPU regardless of ensemble scaling
-- Requires cross-GPU communication for loss computation: by default a single `all_gather` is issued per batch step. Set `trainer.crps_lat_chunks: N` to split into N chunks if GPU memory is tight (at the cost of N all-gather calls instead of 1).
+- Requires cross-GPU communication for loss computation
+
+*Note: Enhanced flexibility for the distributed ensemble approach is currently under development.*
 
 ## Technical Implementation Summary
 

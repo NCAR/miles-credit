@@ -487,7 +487,6 @@ ensemble_size: 1
 - **`train_batch_size`**: Number of samples per training batch.  
 - **`valid_batch_size`**: Number of samples per validation batch.  
 - **`ensemble_size`**: Controls stochastic ensemble training (default = `1`, meaning deterministic behavior).  
-- **`crps_lat_chunks`** *(era5-ensemble trainer only)*: Number of latitude chunks per all-gather call during CRPS loss computation (default = `1`). The default gathers the full spatial tensor in a single collective, which is ~720× faster than the legacy per-latitude gather. Increase to `4`–`8` only if you hit GPU OOM on large global grids — each chunk reduces peak memory at the cost of one additional all-gather.
 
 💡 *For **multi-GPU training** (`fsdp` or `ddp`), the **effective batch size** = `train_batch_size × num_GPUs`.*  
 
@@ -1270,8 +1269,8 @@ batch_size: 1
 ensemble_size: 1
 ```
 
-- **`batch_size`** → Number of forecast initializations processed **at once**.
-- **`ensemble_size`** → Number of ensemble members per initialization. Set to `1` for deterministic rollout; set to `N > 1` to save N ensemble members to NetCDF. Can also be overridden at the CLI with `credit rollout --ensemble-size N` without modifying the config.
+- **`batch_size`** → Number of forecast initializations processed **at once**.  
+- **`ensemble_size`** → Number of ensemble members per initialization.  
 
 💡 *Increase `batch_size` if running inference on multiple GPUs.*  
 
