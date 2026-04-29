@@ -39,17 +39,17 @@ trainer_types = {
         TrainerERA5Diffusion,
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
-    "era5-ensemble-gen1": (
+    "ensemble-gen1": (
         TrainerEnsembleGen1,
-        "Gen 1 ensemble trainer for ERA5: ring-reduce CRPS loss, gen1 data schema (concat_and_reshape).",
+        "Gen 1 ensemble trainer: ring-reduce CRPS loss, gen1 data schema (concat_and_reshape).",
     ),
-    "era5-ensemble": (  # backward-compat alias for era5-ensemble-gen1
-        TrainerEnsembleGen1,
-        "Gen 1 ensemble trainer for ERA5: ring-reduce CRPS loss, gen1 data schema (concat_and_reshape).",
-    ),
-    "era5-ensemble-gen2": (
+    "ensemble-gen2": (
         TrainerEnsembleGen2,
-        "Gen 2 ensemble trainer for ERA5: ring-reduce CRPS loss, gen2 nested data schema with preblocks.",
+        "Gen 2 ensemble trainer: ring-reduce CRPS loss, gen2 nested data schema with preblocks.",
+    ),
+    "era5-ensemble": (  # backward-compat alias for ensemble-gen1
+        TrainerEnsembleGen1,
+        "Gen 1 ensemble trainer: ring-reduce CRPS loss, gen1 data schema (concat_and_reshape).",
     ),
     "cam": (
         TrainerERA5Gen1,
