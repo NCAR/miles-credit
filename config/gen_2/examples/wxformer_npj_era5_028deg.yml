@@ -1,3 +1,4 @@
+# Gen2 config for the wchapman model level ERA5 data used for the original CREDIT models.
 data:
     source:
         ERA5:
@@ -93,8 +94,8 @@ trainer:
     valid_thread_workers: 0
 
 model:
-    # crossformer example
-    type: "crossformer"
+    # wxformer example
+    type: "wxformer"
     frames: 1                         # number of input states (default: 1)
     image_height: 640                 # number of latitude grids (default: 640)
     image_width: 1280                 # number of longitude grids (default: 1280)
@@ -170,7 +171,7 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
 
-    save_forecast: '/glade/derecho/scratch/schreck/finetune/wxformer_1h/'
+    save_forecast: '/glade/derecho/scratch/$USER/finetune/wxformer_1h/'
     save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
 
     # turn-off low-pass filter
@@ -180,7 +181,7 @@ predict:
     # save_format: "nc"
 
 pbs: #derecho
-    conda: "/glade/work/ksha/miniconda3/envs/credit"
+    conda: "credit-derecho"
     project: "NAML0001"
     job_name: "wxformer_1h"
     walltime: "12:00:00"

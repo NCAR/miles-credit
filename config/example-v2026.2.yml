@@ -1,18 +1,18 @@
 # --------------------------------------------------------------------------------------------------------------------- #
-# CREDIT starter config — v2 data schema, 1-degree ERA5, 6-hourly CrossFormer
+# CREDIT starter config — gen2 data schema, 1-degree ERA5, 6-hourly CrossFormer
 #
 # Quick-start: edit the USER SETTINGS sections below, then:
 #
 #   # Preview the PBS script (no submission)
-#   credit submit --cluster casper -c config/starter_v2.yml --gpus 4 --chain 14 --dry-run
+#   credit submit --cluster casper -c config/example-v2026.2.yml --gpus 4 --chain 14 --dry-run
 #
 #   # Submit 14 chained jobs (~70 epochs at 5 epochs/job)
-#   credit submit --cluster casper  -c config/starter_v2.yml --gpus 4 --chain 14
-#   credit submit --cluster derecho -c config/starter_v2.yml --gpus 4 --nodes 1 --chain 14
+#   credit submit --cluster casper  -c config/example-v2026.2.yml --gpus 4 --chain 14
+#   credit submit --cluster derecho -c config/example-v2026.2.yml --gpus 4 --nodes 1 --chain 14
 # --------------------------------------------------------------------------------------------------------------------- #
 
 # ---- USER SETTINGS: output directory ---- #
-save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2'
 seed: 1000
 
 
@@ -166,7 +166,7 @@ trainer:
 # number of variables, update image_height/width, levels, channels, and
 # surface_channels to match your data.
 model:
-  type: "crossformer"
+  type: "wxformer"
   frames: 1
   image_height: 181       # 1-degree ERA5 latitude grid
   image_width: 360        # 1-degree ERA5 longitude grid
@@ -181,7 +181,7 @@ model:
   frame_patch_size: 1
 
   # Model capacity: increase dim/depth for a larger model
-  dim: [ 256, 512, 1024, 2048 ]
+  dim: [32, 64, 128, 256]
   depth: [ 2, 2, 8, 2 ]
 
   # Window sizes — these must divide the padded spatial dims at each stage.
@@ -198,14 +198,15 @@ model:
   attn_dropout: 0.
   ff_dropout: 0.
 
-  interp: True
+  interp: False
   use_spectral_norm: True
+  upsample_with_ps: True            # Upsample with pixel shuffle
 
   padding_conf:
     activate: True
     mode: earth          # spherical (latitude-wrapping) padding
-    pad_lat: [ 30, 30 ]
-    pad_lon: [ 12, 12 ]
+    pad_lat: [ 37, 38 ]
+    pad_lon: [ 76, 76 ]
 
   post_conf:
     activate: True
@@ -246,9 +247,9 @@ predict:
   use_laplace_filter: False
 
 pbs: #derecho
-  conda: "/glade/work/akn7/conda-envs/credit-derecho"
+  conda: "credit-derecho"
   project: "NAML0001"
-  job_name: "wxformer_025deg_6hr_v2"
+  job_name: "wxformer_1deg_6hr_gen2"
   walltime: "12:00:00"
   nodes: 8
   ncpus: 64
