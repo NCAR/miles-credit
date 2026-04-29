@@ -88,54 +88,6 @@ def gather_tensor(tensor):
     return Gather.apply(tensor)
 
 
-def ring_crps_loss(y_pred, y, rank, world_size):
-    """Fair CRPS via ring communication — O(1) extra memory, no all_gather.
-
-    Each GPU holds 1 ensemble member. K-1 ring shifts pass one member buffer at a
-    time so rank r accumulates |x_r - x_j| for every j != r without ever
-    materialising the full K-member ensemble on a single device.
-
-    Gradient correctness (no cross-rank backward needed):
-        d(CRPS)/d(x_r) = sign(x_r-y)/K  -  sum_{j!=r} sign(x_r-x_j) / (K*(K-1))
-    Both terms are computed entirely from rank r's local graph. DDP averaging
-    (1/K) then gives the correct model-parameter gradient.
-
-    Local loss (scaled so DDP avg = d(CRPS)/d(params)):
-        loss_r = |y_pred_r - y|  -  sum_{j!=r} |y_pred_r - x_j| / (K-1)
-
-    Args:
-        y_pred:     (ens_per_gpu, C, T, H, W) — local predictions, requires_grad.
-        y:          (1, C, T, H, W) — truth tensor.
-        rank:       local rank index.
-        world_size: K = total ensemble size (one member per GPU assumed).
-
-    Returns:
-        Scalar loss for this rank; backward populates y_pred.grad correctly.
-    """
-    K = world_size
-
-    skill = (y_pred - y).abs()  # gradient flows to y_pred
-
-    buf = y_pred.detach().contiguous()  # ring buffer — no grad needed
-    spread = torch.zeros_like(y_pred)
-    for _ in range(K - 1):
-        next_buf = torch.empty_like(buf)
-        reqs = dist.batch_isend_irecv(
-            [
-                dist.P2POp(dist.isend, buf, (rank + 1) % K),
-                dist.P2POp(dist.irecv, next_buf, (rank - 1 + K) % K),
-            ]
-        )
-        for req in reqs:
-            req.wait()
-        buf = next_buf
-        spread = spread + (y_pred - buf).abs()  # gradient flows to y_pred
-
-    # Divide by K so DDP avg (1/K) gives the same effective gradient scale as
-    # the all_gather reference path (each rank contributes 1/K of d(CRPS)/d(params)).
-    return (skill - spread / (K - 1)).mean() / K
-
-
 class TrainerERA5Ensemble(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
@@ -375,12 +327,36 @@ class TrainerERA5Ensemble(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y, self.rank, dist.get_world_size())
-                    total_std = (y_pred - y).detach().std()
+                    lat_size = y.shape[3]
+                    # crps_lat_chunks=1 (default) gathers the full spatial tensor in one
+                    # collective; increase to e.g. 8 for global models where memory is tight.
+                    lat_chunks = self.conf["trainer"].get("crps_lat_chunks", 1)
+                    chunk_size = (lat_size + lat_chunks - 1) // lat_chunks
+
+                    total_loss = 0
+                    total_std = 0
+                    for chunk_start in range(0, lat_size, chunk_size):
+                        chunk_end = min(chunk_start + chunk_size, lat_size)
+                        n_lats = chunk_end - chunk_start
+
+                        y_pred_chunk = y_pred[:, :, :, chunk_start:chunk_end].contiguous()
+                        y_chunk = y[:, :, :, chunk_start:chunk_end].contiguous()
+                        y_pred_chunk = gather_tensor(y_pred_chunk)
+
+                        chunk_loss = criterion(y_chunk.to(y_pred_chunk.dtype), y_pred_chunk).mean() * (
+                            n_lats / lat_size
+                        )
+                        total_loss += chunk_loss
+
+                        chunk_std = ((y_pred_chunk - y_chunk.to(y_pred_chunk.dtype)).detach().std()) * (
+                            n_lats / lat_size
+                        )
+                        total_std += chunk_std
 
                     accum_log(logs, {"loss": total_loss.item()})
                     accum_log(logs, {"std": total_std.item()})
 
+                    # Single backward call for the accumulated loss
                     scaler.scale(total_loss).backward()
 
                 if distributed:
@@ -699,8 +675,29 @@ class TrainerERA5Ensemble(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y, self.rank, dist.get_world_size())
-                    total_std = (y_pred - y).detach().std()
+                    lat_size = y.shape[3]
+                    lat_chunks = self.conf["trainer"].get("crps_lat_chunks", 1)
+                    chunk_size = (lat_size + lat_chunks - 1) // lat_chunks
+
+                    total_loss = 0
+                    total_std = 0
+                    for chunk_start in range(0, lat_size, chunk_size):
+                        chunk_end = min(chunk_start + chunk_size, lat_size)
+                        n_lats = chunk_end - chunk_start
+
+                        y_pred_chunk = y_pred[:, :, :, chunk_start:chunk_end].contiguous()
+                        y_chunk = y[:, :, :, chunk_start:chunk_end].contiguous()
+                        y_pred_chunk = gather_tensor(y_pred_chunk)
+
+                        chunk_loss = criterion(y_chunk.to(y_pred_chunk.dtype), y_pred_chunk).mean() * (
+                            n_lats / lat_size
+                        )
+                        total_loss += chunk_loss
+
+                        chunk_std = ((y_pred_chunk - y_chunk.to(y_pred_chunk.dtype)).detach().std()) * (
+                            n_lats / lat_size
+                        )
+                        total_std += chunk_std
 
                     accum_log(logs, {"loss": total_loss.item()})
                     accum_log(logs, {"std": total_std.item()})
