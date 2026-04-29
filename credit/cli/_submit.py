@@ -296,19 +296,18 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
 
     chain_desc = f"{n_jobs} job(s)  ({epochs} epochs ÷ {per_job} per job)" if n_jobs > 1 else "1 job (no chaining)"
 
-    print()
-    print("=" * 52)
-    print("  Job plan")
-    print("=" * 52)
-    print(f"  Cluster  : {args.cluster}")
-    print(f"  Account  : {getattr(args, 'account', 'unset')}")
-    print(f"  Config   : {getattr(args, 'config', 'unset')}")
-    print(f"  GPUs     : {gpu_str}")
-    print(f"  Walltime : {args.walltime} per job")
-    print(f"  Chain    : {chain_desc}")
-    print(f"  DataLoader memory est. : {mem_str}{mem_warn}")
-    print("=" * 52)
-    print()
+    sep = "=" * 52
+    print(
+        f"\n{sep}\n  Job plan\n{sep}\n"
+        f"  Cluster  : {args.cluster}\n"
+        f"  Account  : {getattr(args, 'account', 'unset')}\n"
+        f"  Config   : {getattr(args, 'config', 'unset')}\n"
+        f"  GPUs     : {gpu_str}\n"
+        f"  Walltime : {args.walltime} per job\n"
+        f"  Chain    : {chain_desc}\n"
+        f"  DataLoader memory est. : {mem_str}{mem_warn}\n"
+        f"{sep}\n"
+    )
 
 
 def _build_realtime_pbs_script(
@@ -409,19 +408,18 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
     init_time = args.init_time
     steps = getattr(args, "steps", 40)
 
-    print()
-    print("=" * 52)
-    print("  Realtime job plan")
-    print("=" * 52)
-    print(f"  Cluster   : {args.cluster}")
-    print(f"  Account   : {args.account}")
-    print(f"  Config    : {args.config}")
-    print(f"  Init time : {init_time}")
-    print(f"  Steps     : {steps}")
-    print(f"  GPUs      : {args.gpus}")
-    print(f"  Walltime  : {args.walltime}")
-    print("=" * 52)
-    print()
+    sep = "=" * 52
+    print(
+        f"\n{sep}\n  Realtime job plan\n{sep}\n"
+        f"  Cluster   : {args.cluster}\n"
+        f"  Account   : {args.account}\n"
+        f"  Config    : {args.config}\n"
+        f"  Init time : {init_time}\n"
+        f"  Steps     : {steps}\n"
+        f"  GPUs      : {args.gpus}\n"
+        f"  Walltime  : {args.walltime}\n"
+        f"{sep}\n"
+    )
 
     script = _build_realtime_pbs_script(args, config_abs, repo, init_time, steps, save_loc=save_loc)
 
@@ -554,20 +552,19 @@ def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_foreca
     per_job = -(-n_forecasts // n_jobs)  # ceiling division
     total_runs = n_forecasts * ensemble_size
 
-    print()
-    print("=" * 56)
-    print("  Ensemble rollout plan")
-    print("=" * 56)
-    print(f"  Cluster        : {args.cluster}")
-    print(f"  Account        : {args.account}")
-    print(f"  Config         : {args.config}")
-    print(f"  Init times     : {n_forecasts}  ({per_job} per job)")
-    print(f"  Ensemble size  : {ensemble_size}  →  {total_runs} total forecasts")
-    print(f"  Parallel jobs  : {n_jobs}  (all start at once, no dependencies)")
-    print(f"  GPUs per job   : {args.gpus}")
-    print(f"  Walltime/job   : {args.walltime}")
-    print("=" * 56)
-    print()
+    sep = "=" * 56
+    print(
+        f"\n{sep}\n  Ensemble rollout plan\n{sep}\n"
+        f"  Cluster        : {args.cluster}\n"
+        f"  Account        : {args.account}\n"
+        f"  Config         : {args.config}\n"
+        f"  Init times     : {n_forecasts}  ({per_job} per job)\n"
+        f"  Ensemble size  : {ensemble_size}  →  {total_runs} total forecasts\n"
+        f"  Parallel jobs  : {n_jobs}  (all start at once, no dependencies)\n"
+        f"  GPUs per job   : {args.gpus}\n"
+        f"  Walltime/job   : {args.walltime}\n"
+        f"{sep}\n"
+    )
 
 
 def _rollout_ensemble(args: argparse.Namespace) -> None:
