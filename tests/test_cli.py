@@ -1403,7 +1403,10 @@ class TestSubmitReload:
             qsub_calls.append(script)
             return "99999.pbs"
 
-        monkeypatch.setattr(cli, "_qsub", fake_qsub)
+        import sys
+
+        _submit_mod = sys.modules["credit.cli._submit"]
+        monkeypatch.setattr(_submit_mod, "_qsub", fake_qsub)
         with _inject_preflight(0.0):
             cli._submit(args)
 
@@ -1427,7 +1430,10 @@ class TestSubmitReload:
             qsub_calls.append(script)
             return f"{counter[0]}000.pbs"
 
-        monkeypatch.setattr(cli, "_qsub", fake_qsub)
+        import sys
+
+        _submit_mod = sys.modules["credit.cli._submit"]
+        monkeypatch.setattr(_submit_mod, "_qsub", fake_qsub)
         with _inject_preflight(0.0):
             cli._submit(args)
 
@@ -1631,7 +1637,9 @@ class TestMainDispatch:
         def fake_train(args):
             called["args"] = args
 
-        monkeypatch.setattr(cli, "_train", fake_train)
+        import sys as _sys
+
+        monkeypatch.setattr(_sys.modules["credit.cli._parser"], "_train", fake_train)
         monkeypatch.setattr(sys, "argv", ["credit", "train", "-c", config_path])
         main()
         assert called["args"].config == config_path
@@ -1643,7 +1651,9 @@ class TestMainDispatch:
         def fake_rollout(args):
             called["args"] = args
 
-        monkeypatch.setattr(cli, "_rollout", fake_rollout)
+        import sys as _sys
+
+        monkeypatch.setattr(_sys.modules["credit.cli._parser"], "_rollout", fake_rollout)
         monkeypatch.setattr(sys, "argv", ["credit", "rollout", "-c", config_path])
         main()
         assert called["args"].config == config_path
@@ -1655,7 +1665,9 @@ class TestMainDispatch:
         def fake_submit(args):
             called["args"] = args
 
-        monkeypatch.setattr(cli, "_submit", fake_submit)
+        import sys as _sys
+
+        monkeypatch.setattr(_sys.modules["credit.cli._parser"], "_submit", fake_submit)
         monkeypatch.setattr(
             sys,
             "argv",
@@ -1670,7 +1682,9 @@ class TestMainDispatch:
         def fake_init(args):
             called["args"] = args
 
-        monkeypatch.setattr(cli, "_init", fake_init)
+        import sys as _sys
+
+        monkeypatch.setattr(_sys.modules["credit.cli._parser"], "_init", fake_init)
         monkeypatch.setattr(sys, "argv", ["credit", "init", "-o", "out.yml"])
         main()
         assert called["args"].output == "out.yml"
@@ -1682,7 +1696,9 @@ class TestMainDispatch:
         def fake_convert(args):
             called["args"] = args
 
-        monkeypatch.setattr(cli, "_convert", fake_convert)
+        import sys as _sys
+
+        monkeypatch.setattr(_sys.modules["credit.cli._parser"], "_convert", fake_convert)
         monkeypatch.setattr(sys, "argv", ["credit", "convert", "-c", config_path])
         main()
         assert called["args"].config == config_path
@@ -1693,7 +1709,9 @@ class TestMainDispatch:
         def fake_ask(args):
             called["args"] = args
 
-        monkeypatch.setattr(cli, "_ask", fake_ask)
+        import sys as _sys
+
+        monkeypatch.setattr(_sys.modules["credit.cli._parser"], "_ask", fake_ask)
         monkeypatch.setattr(sys, "argv", ["credit", "ask", "what", "is", "credit?"])
         main()
         assert called["args"].question == ["what", "is", "credit?"]
