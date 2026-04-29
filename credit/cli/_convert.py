@@ -118,7 +118,7 @@ def _convert(args: argparse.Namespace) -> None:
         valid_years = data.get("valid_years") or [2018, 2019]
         n_levels = conf.get("model", {}).get("levels", 16)
         _DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
-        levels = [int(x) for x in data["level_ids"]] if "level_ids" in data else _DEFAULT_LEVELS_16[:n_levels]
+        levels = [float(x) for x in data["level_ids"]] if "level_ids" in data else _DEFAULT_LEVELS_16[:n_levels]
 
         era5_vars = {
             "prognostic": {
@@ -147,8 +147,22 @@ def _convert(args: argparse.Namespace) -> None:
 
         # Keep non-flat keys (forecast_len, valid_forecast_len, backprop_on_timestep, …)
         keep_keys = {k: v for k, v in data.items() if k not in _V1_DATA_FLAT_KEYS}
+        _default_coord = "hybrid" if levels and max(levels) <= 137 else "level"
+        if not use_defaults:
+            _coord_hint = f"[{_default_coord}]"
+            _coord_ans = (
+                _prompt(
+                    f"level_coord — 'hybrid' for ERA5 model levels (1–137), 'level' for pressure levels {_coord_hint}",
+                    default=_default_coord,
+                ).strip()
+                or _default_coord
+            )
+            level_coord = _coord_ans if _coord_ans in ("hybrid", "level") else _default_coord
+        else:
+            level_coord = _default_coord
+
         conf["data"] = {
-            "source": {"ERA5": {"level_coord": "level", "levels": levels, "variables": era5_vars}},
+            "source": {"ERA5": {"level_coord": level_coord, "levels": levels, "variables": era5_vars}},
             "timestep": f"{lead_time}h",
             "forecast_len": data.get("forecast_len", 0),
             "start_datetime": f"{train_years[0]}-01-01",
