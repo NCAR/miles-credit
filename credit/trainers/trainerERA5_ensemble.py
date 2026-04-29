@@ -328,28 +328,33 @@ class TrainerERA5Ensemble(BaseTrainer):
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
                     lat_size = y.shape[3]
+                    # crps_lat_chunks=1 (default) gathers the full spatial tensor in one
+                    # collective; increase to e.g. 8 for global models where memory is tight.
+                    lat_chunks = self.conf["trainer"].get("crps_lat_chunks", 1)
+                    chunk_size = (lat_size + lat_chunks - 1) // lat_chunks
+
                     total_loss = 0
                     total_std = 0
-                    for i in range(lat_size):
-                        # Slice the tensors
-                        y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
-                        y_slice = y[:, :, :, i : i + 1].contiguous()
+                    for chunk_start in range(0, lat_size, chunk_size):
+                        chunk_end = min(chunk_start + chunk_size, lat_size)
+                        n_lats = chunk_end - chunk_start
 
-                        # Gather the tensor
-                        y_pred_slice = gather_tensor(y_pred_slice)
-                        # y_slice = gather_tensor(y_slice)
+                        y_pred_chunk = y_pred[:, :, :, chunk_start:chunk_end].contiguous()
+                        y_chunk = y[:, :, :, chunk_start:chunk_end].contiguous()
+                        y_pred_chunk = gather_tensor(y_pred_chunk)
 
-                        # Compute loss for this slice
-                        loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
-                        total_loss += loss
+                        chunk_loss = criterion(y_chunk.to(y_pred_chunk.dtype), y_pred_chunk).mean() * (
+                            n_lats / lat_size
+                        )
+                        total_loss += chunk_loss
 
-                        # Compute the std
-                        std = ((y_pred_slice - y_slice.to(y_pred_slice.dtype)).detach().std()) / lat_size
-                        total_std += std
+                        chunk_std = ((y_pred_chunk - y_chunk.to(y_pred_chunk.dtype)).detach().std()) * (
+                            n_lats / lat_size
+                        )
+                        total_std += chunk_std
 
-                        # Track per-channel loss
-                        accum_log(logs, {"loss": loss.item()})
-                        accum_log(logs, {"std": std.item()})
+                    accum_log(logs, {"loss": total_loss.item()})
+                    accum_log(logs, {"std": total_std.item()})
 
                     # Single backward call for the accumulated loss
                     scaler.scale(total_loss).backward()
@@ -671,25 +676,31 @@ class TrainerERA5Ensemble(BaseTrainer):
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
                     lat_size = y.shape[3]
+                    lat_chunks = self.conf["trainer"].get("crps_lat_chunks", 1)
+                    chunk_size = (lat_size + lat_chunks - 1) // lat_chunks
+
                     total_loss = 0
-                    for i in range(lat_size):
-                        # Slice the tensors
-                        y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
-                        y_slice = y[:, :, :, i : i + 1].contiguous()
+                    total_std = 0
+                    for chunk_start in range(0, lat_size, chunk_size):
+                        chunk_end = min(chunk_start + chunk_size, lat_size)
+                        n_lats = chunk_end - chunk_start
 
-                        # Gather the tensor
-                        y_pred_slice = gather_tensor(y_pred_slice)
+                        y_pred_chunk = y_pred[:, :, :, chunk_start:chunk_end].contiguous()
+                        y_chunk = y[:, :, :, chunk_start:chunk_end].contiguous()
+                        y_pred_chunk = gather_tensor(y_pred_chunk)
 
-                        # Compute loss for this slice
-                        loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
-                        total_loss += loss
+                        chunk_loss = criterion(y_chunk.to(y_pred_chunk.dtype), y_pred_chunk).mean() * (
+                            n_lats / lat_size
+                        )
+                        total_loss += chunk_loss
 
-                        # Compute the std
-                        std = ((y_pred_slice - y_slice.to(y_pred_slice.dtype)).detach().std()) / lat_size
+                        chunk_std = ((y_pred_chunk - y_chunk.to(y_pred_chunk.dtype)).detach().std()) * (
+                            n_lats / lat_size
+                        )
+                        total_std += chunk_std
 
-                        # Track per-channel loss, std
-                        accum_log(logs, {"loss": loss.item()})
-                        accum_log(logs, {"std": std.item()})
+                    accum_log(logs, {"loss": total_loss.item()})
+                    accum_log(logs, {"std": total_std.item()})
 
                     # ----------------------------------------------------------------------- #
 
