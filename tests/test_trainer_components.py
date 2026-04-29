@@ -70,11 +70,11 @@ if _TRAINER_GEN2_AVAILABLE:
     class _ConcreteTrainer(BaseTrainer):
         """Minimal concrete subclass so we can instantiate BaseTrainer."""
 
-    def train_one_epoch(self, *a, **kw):
-        pass
+        def train_one_epoch(self, *a, **kw):
+            pass
 
-    def validate(self, *a, **kw):
-        return {}
+        def validate(self, *a, **kw):
+            return {}
 
 
 # ---------------------------------------------------------------------------
