@@ -13,130 +13,13 @@ from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
 from credit.data import concat_and_reshape, reshape_only
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.losses.crps import ring_crps_loss
 import optuna
 
 logger = logging.getLogger(__name__)
 
 
-class Gather(torch.autograd.Function):
-    """Custom autograd function for gathering tensors from all processes while preserving gradients.
-
-    This layer performs an all_gather operation on the provided tensor across all
-    distributed processes and concatenates them along the batch dimension (dim=0).
-    The backward pass correctly routes gradients back to the originating processes.
-
-    This is useful for operations like computng ensembles where you need to compute
-    the CRPS between samples across all GPUs, while still being able to backpropagate
-    through the gathered tensor.
-    """
-
-    @staticmethod
-    def forward(ctx, input):
-        """Gather tensors from all ranks and concatenate them on the batch dimension.
-
-        Args:
-            ctx: Context object to store information for backward pass
-            input: Tensor to be gathered across processes
-
-        Returns:
-            Concatenated tensor from all processes
-        """
-        ctx.world_size = dist.get_world_size()
-        ctx.rank = dist.get_rank()
-
-        gathered = [torch.zeros_like(input) for _ in range(ctx.world_size)]
-        dist.all_gather(gathered, input)
-        return torch.cat(gathered, dim=0)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        """Distribute gradients back to their originating processes.
-
-        Args:
-            ctx: Context object with stored information from forward pass
-            grad_output: Gradient with respect to the forward output
-
-        Returns:
-            Gradient for the input tensor
-        """
-        # Each rank gets its corresponding chunk of grad_output
-        input_grad = grad_output.chunk(ctx.world_size, dim=0)[ctx.rank]
-        return input_grad
-
-
-def gather_tensor(tensor):
-    """Gathers tensors from all ranks and preserves autograd graph.
-
-    This function allows you to gather tensors from all processes in a distributed
-    setting while maintaining the autograd graph for backward passes. This is critical
-    for operations that need to compute losses across all samples in a distributed
-    training environment.
-
-    Args:
-        tensor: The tensor to gather across processes
-
-    Returns:
-        Tensor concatenated from all processes along dimension 0
-
-    Example:
-        >>> # On each GPU
-        >>> local_tensor = torch.randn(8, 128)  # local batch of embeddings
-        >>> # Gather embeddings from all GPUs (total batch_size * world_size)
-        >>> gathered_tensor = gather_tensor(local_tensor)
-        >>> # Now you can compute a loss that depends on all samples
-    """
-    return Gather.apply(tensor)
-
-
-def ring_crps_loss(y_pred, y, rank, world_size):
-    """Fair CRPS via ring communication — O(1) extra memory, no all_gather.
-
-    Each GPU holds 1 ensemble member. K-1 ring shifts pass one member buffer at a
-    time so rank r accumulates |x_r - x_j| for every j != r without ever
-    materialising the full K-member ensemble on a single device.
-
-    Gradient correctness (no cross-rank backward needed):
-        d(CRPS)/d(x_r) = sign(x_r-y)/K  -  sum_{j!=r} sign(x_r-x_j) / (K*(K-1))
-    Both terms are computed entirely from rank r's local graph. DDP averaging
-    (1/K) then gives the correct model-parameter gradient.
-
-    Local loss (scaled so DDP avg = d(CRPS)/d(params)):
-        loss_r = |y_pred_r - y|  -  sum_{j!=r} |y_pred_r - x_j| / (K-1)
-
-    Args:
-        y_pred:     (ens_per_gpu, C, T, H, W) — local predictions, requires_grad.
-        y:          (1, C, T, H, W) — truth tensor.
-        rank:       local rank index.
-        world_size: K = total ensemble size (one member per GPU assumed).
-
-    Returns:
-        Scalar loss for this rank; backward populates y_pred.grad correctly.
-    """
-    K = world_size
-
-    skill = (y_pred - y).abs()  # gradient flows to y_pred
-
-    buf = y_pred.detach().contiguous()  # ring buffer — no grad needed
-    spread = torch.zeros_like(y_pred)
-    for _ in range(K - 1):
-        next_buf = torch.empty_like(buf)
-        reqs = dist.batch_isend_irecv(
-            [
-                dist.P2POp(dist.isend, buf, (rank + 1) % K),
-                dist.P2POp(dist.irecv, next_buf, (rank - 1 + K) % K),
-            ]
-        )
-        for req in reqs:
-            req.wait()
-        buf = next_buf
-        spread = spread + (y_pred - buf).abs()  # gradient flows to y_pred
-
-    # Divide by K so DDP avg (1/K) gives the same effective gradient scale as
-    # the all_gather reference path (each rank contributes 1/K of d(CRPS)/d(params)).
-    return (skill - spread / (K - 1)).mean() / K
-
-
-class TrainerERA5Ensemble(BaseTrainer):
+class TrainerERA5EnsembleGen1(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer class for handling the training, validation, and checkpointing of models.
