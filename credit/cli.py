@@ -527,7 +527,7 @@ def _build_pbs_script(
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
             ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
-                ${{REPO}}/applications/train_gen2.py -c ${{CONFIG}}
+                ${{REPO}}/credit/applications/train_gen2.py -c ${{CONFIG}}
         """)
 
     else:  # derecho
@@ -587,7 +587,7 @@ def _build_pbs_script(
                     --standalone \\
                     --nnodes=1 \\
                     --nproc-per-node={args.gpus} \\
-                    ${{REPO}}/applications/train_gen2.py -c ${{CONFIG}}
+                    ${{REPO}}/credit/applications/train_gen2.py -c ${{CONFIG}}
             """)
         else:
             # Multi-node: MPI + c10d rendezvous via head-node IP
@@ -604,7 +604,7 @@ def _build_pbs_script(
                         --nproc-per-node={args.gpus} \\
                         --rdzv-backend=c10d \\
                         --rdzv-endpoint="${{head_node_ip}}:${{RDZV_PORT}}" \\
-                    ${{REPO}}/applications/train_gen2.py -c ${{CONFIG}}
+                    ${{REPO}}/credit/applications/train_gen2.py -c ${{CONFIG}}
             """)
 
         return header + launch
@@ -759,7 +759,7 @@ def _build_realtime_pbs_script(
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
             ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
-                ${{REPO}}/applications/rollout_realtime_gen2.py \\
+                ${{REPO}}/credit/applications/rollout_realtime_gen2.py \\
                 -c ${{CONFIG}} --init-time {init_time} --steps {steps}
         """)
 
@@ -794,7 +794,7 @@ def _build_realtime_pbs_script(
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
             torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
-                ${{REPO}}/applications/rollout_realtime_gen2.py \\
+                ${{REPO}}/credit/applications/rollout_realtime_gen2.py \\
                 -c ${{CONFIG}} --init-time {init_time} --steps {steps}
         """)
 
@@ -943,7 +943,7 @@ def _build_rollout_pbs_script(
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
             {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
-                ${{REPO}}/applications/rollout_to_netcdf_gen2.py \\
+                ${{REPO}}/credit/applications/rollout_to_netcdf_gen2.py \\
                 -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
         """)
 
@@ -978,7 +978,7 @@ def _build_rollout_pbs_script(
             export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
             torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
-                ${{REPO}}/applications/rollout_to_netcdf_gen2.py \\
+                ${{REPO}}/credit/applications/rollout_to_netcdf_gen2.py \\
                 -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
         """)
 
