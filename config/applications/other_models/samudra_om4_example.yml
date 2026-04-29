@@ -163,7 +163,7 @@ predict:
         ['2014-09-30T00:00:00', '2014-10-25T00:00:00']
     ]
         
-    metadata: '/glade/work/schreck/repos/miles-credit/credit/metadata/samudra.yaml'
+    metadata: 'samudra.yaml'
     save_forecast: '/glade/derecho/scratch/schreck/CREDIT_runs/samudra/netcdf'
     
     # turn-off low-pass filter

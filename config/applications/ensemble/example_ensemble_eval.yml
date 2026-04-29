@@ -34,7 +34,7 @@ num_bins: 25
 
 pbs: 
     # example for casper
-    conda: "~/credit"
+    conda: "credit-casper"
     job_name: 'ensemble_eval'
     nodes: 1
     ncpus: 32

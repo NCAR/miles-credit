@@ -18,7 +18,7 @@ data:
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/credit/credit_solar_nc_1h_0.25deg/*.nc'
     
     # static variables
     static_variables: ['Z_GDS4_SFC','LSM'] 
@@ -207,7 +207,7 @@ predict:
     # save_format: "nc"
 
 pbs: #derecho
-    conda: "/glade/work/ksha/miniconda3/envs/credit"
+    conda: "credit-derecho"
     project: "NAML0001"
     job_name: "wxformer_6h"
     walltime: "12:00:00"

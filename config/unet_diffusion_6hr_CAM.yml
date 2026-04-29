@@ -505,7 +505,7 @@ predict:
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables
     # remove save_vars from config will save ALL variables
-    metadata: '/glade/work/schreck/repos/credit/miles-credit/metadata/era5.yaml'
+    metadata: 'era5.yaml'
     
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc

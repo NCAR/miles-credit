@@ -18,7 +18,7 @@ data:
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dgagne/credit_solar_6h_0.25deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/credit/credit_solar_6h_0.25deg/*.nc'
     
     # static variables
     static_variables: ['Z_GDS4_SFC','LSM'] 

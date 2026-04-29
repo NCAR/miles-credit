@@ -4,7 +4,7 @@
 # The model is trained on 1 hourly model-level ERA5 data with top solar irradiance, geopotential, and land-sea mask
 # Output variables: model level [U, V, T, Q], single level [SP, t2m], and 500 hPa [U, V, T, Z, Q]
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/derecho/scratch/schreck/CREDIT_runs/ic_opt/'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/ic_opt/'
 seed: 1000
 
 data:
@@ -213,8 +213,8 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 10             # forecast lead time as days (1 means 24-hour forecast)
         
-    metadata: '/glade/u/home/akn7/miles-credit/credit/metadata/era5.yaml'
-    save_forecast: '/glade/derecho/scratch/schreck/CREDIT_runs/ic_opt/saved_states/'
+    metadata: 'era5.yaml'
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/ic_opt/saved_states/'
     # save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
     
     # turn-off low-pass filter
@@ -224,7 +224,7 @@ predict:
     # save_format: "nc"
 
 pbs: #derecho
-    conda: "/glade/work/akn7/conda-envs/credit-derecho"
+    conda: "credit-derecho"
     project: "NAML0001"
     job_name: "graph_1h"
     walltime: "12:00:00"

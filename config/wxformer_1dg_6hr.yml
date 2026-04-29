@@ -190,7 +190,7 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 1             # forecast lead time as days (1 means 24-hour forecast)
         
-    metadata: '/glade/u/home/akn7/miles-credit/credit/metadata/era5.yaml'
+    metadata: 'era5.yaml'
     save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_1dg_6hr'
     # save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
     

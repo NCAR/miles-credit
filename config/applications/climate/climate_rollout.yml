@@ -489,7 +489,7 @@ predict:
     # saved variables (rollout_to_netcdf.yml)
     # save_vars: [] will save ALL variables
     # remove save_vars from config will save ALL variables
-    metadata: '/glade/work/schreck/repos/credit/miles-credit/metadata/era5.yaml'
+    metadata: 'era5.yaml'
     
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
@@ -545,7 +545,7 @@ predict:
 
 # credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
 pbs: #derecho
-    conda: "/glade/work/wchapman/conda-envs/credit-derecho"
+    conda: "credit-derecho"
     project: "NAML0001"
     job_name: "ps_wxformer_CESM_6h"
     walltime: "12:00:00"

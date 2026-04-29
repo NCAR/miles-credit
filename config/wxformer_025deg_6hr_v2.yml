@@ -223,7 +223,7 @@ predict:
         duration: 1
         days: 1
 
-    metadata: '/glade/u/home/akn7/miles-credit/credit/metadata/era5.yaml'
+    metadata: 'era5.yaml'
     save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_025deg_6hr_v2'
 
     use_laplace_filter: False

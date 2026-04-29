@@ -282,8 +282,7 @@ predict:
     # save_format: "nc"
 
 pbs: #derecho
-    conda: "/glade/u/home/dkimpara/credit"
-    project: "NAML0001"
+    conda: "credit-derecho"
     job_name: "test_cesm_ensemble"
     walltime: "00:15:00"
     nodes: 1

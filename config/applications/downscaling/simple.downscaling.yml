@@ -444,7 +444,7 @@ predict:
 
 
 pbs: # casper
-    conda: "credit"
+    conda: "credit-casper"
     job_name: 'down-simple-test'
     nodes: 1
     ncpus: 8

@@ -431,7 +431,7 @@ predict:
     #     - "path/to/climatology/file.3d.nc"
 
 pbs: # casper
-    conda: "credit"
+    conda: "credit-casper"
     job_name: 'downscaling-wxf'
     nodes: 1
     ncpus: 8
