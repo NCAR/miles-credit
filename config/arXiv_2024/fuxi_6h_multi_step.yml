@@ -29,8 +29,8 @@ data:
     save_loc_static: '/glade/campaign/cisl/aiml/credit/static_scalers/static_norm_20250416.nc'
     
     # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_6h_1979_2018_16lev_0.25deg.nc'
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_6h_1979_2018_16lev_0.25deg.nc'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/mean_6h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_6h_1979_2018_16lev_0.25deg.nc'
     
     # train / validation split
     train_years: [1979, 2018]

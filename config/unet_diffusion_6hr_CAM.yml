@@ -449,7 +449,7 @@ loss:
     
     # this file is MANDATORY for the "predict" section below (inference stage)
     # the file must be nc and must contain 1D variables named "latitude" and "longitude"
-    latitude_weights: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/static/ERA5_mlevel_cesm_static.zarr'
+    latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/static/ERA5_mlevel_cesm_static.zarr'
     # latitude_weights: "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
 
     # use latitude weighting

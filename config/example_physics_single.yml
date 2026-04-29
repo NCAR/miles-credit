@@ -7,15 +7,15 @@ seed: 1000
 data:
     # upper-air variables
     variables: ['U', 'V', 'T', 'Z', 'specific_total_water']
-    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
     
     # surface variables
     surface_variables: ['MSL', 'VAR_2T', 'SKT']
-    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
+    save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
     
     # diagnostic variables
     diagnostic_variables: ['evaporation', 'total_precipitation', 'TCC',
@@ -25,18 +25,18 @@ data:
                            'surface_latent_heat_flux',
                            'top_net_solar_radiation',
                            'top_net_thermal_radiation']
-    save_loc_diagnostic: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
+    save_loc_diagnostic: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/all_in_one/ERA5_plevel_1deg_6h_*_conserve.zarr'
     
     # static variables
     static_variables: ['z_norm', 'soil_type'] 
-    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
+    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
 
     # physics file
-    save_loc_physics: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
+    save_loc_physics: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
     
     # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
     
     # train / validation split
     train_years: [1979, 2019]
@@ -221,7 +221,7 @@ loss:
     
     # use latitude weighting
     use_latitude_weights: True
-    latitude_weights: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
+    latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_1deg/static/ERA5_plevel_1deg_6h_conserve_static.zarr'
     
     # turn-off variable weighting
     use_variable_weights: False

@@ -10,26 +10,26 @@ seed: 1000
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
     
     # surface variables
     surface_variables: ['SP','t2m','V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
+    save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
     
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/all_in_one/ERA5_mlevel_cesm_6h_lev16_*.zarr'
     
     # static variables
     static_variables: ['Z_GDS4_SFC','LSM'] 
-    save_loc_static: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/static/ERA5_mlevel_cesm_static.zarr'
+    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/static/ERA5_mlevel_cesm_static.zarr'
     
     # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/mean_6h_1979_2018_cesm.nc'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/mean_6h_1979_2018_cesm.nc'
     # regular z-score version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/std_6h_1979_2018_cesm.nc'
+    # std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/std_6h_1979_2018_cesm.nc'
     # residual norm version
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/std_residual_6h_1979_2018_cesm.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_cesm_stage1/mean_std/std_residual_6h_1979_2018_cesm.nc'
     
     # train / validation split
     train_years: [1979, 2018]

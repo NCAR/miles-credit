@@ -25,11 +25,11 @@ data:
     save_loc_static: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_onedeg.nc'
 
     # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
     # regular z-score version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
+    # std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
     # residual norm version
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
 
     # train / validation split
     train_years: [1979, 2018]
@@ -166,7 +166,7 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
 
-    save_forecast: '/glade/derecho/scratch/ksha/CREDIT/wxformer_1h/'
+    save_forecast: '/glade/campaign/cisl/aiml/ksha/CREDIT/wxformer_1h/'
     save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
 
     # turn-off low-pass filter

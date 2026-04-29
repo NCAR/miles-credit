@@ -55,7 +55,7 @@ data:
     # mean / std path
     mean_path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/mean_6h_1979_2010_32lev_1.0deg_new.nc'
     # regular z-score version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
+    # std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
     # residual norm version
     std_path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/std_6h_1979_2010_32lev_1.0deg_new.nc'
     

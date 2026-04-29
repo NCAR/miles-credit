@@ -17,7 +17,7 @@ data:
     
                 static:
                     vars_2D: ['Z_GDS4_SFC','LSM']
-                    path: '/glade/derecho/scratch/ksha/CREDIT_data/static_norm_old.nc'
+                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/static_norm_old.nc'
 
     start_datetime: "2021-12-31"
     end_datetime: "2022-01-05"
@@ -39,11 +39,11 @@ data:
     static_first: True
 
     # mean / std path
-    mean_path: '/glade/derecho/scratch/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
     # regular z-score version
-    # std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
+    # std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
     # residual norm version
-    std_path: '/glade/derecho/scratch/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
 
 
     scaler_type: 'std_new'
