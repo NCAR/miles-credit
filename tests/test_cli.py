@@ -558,27 +558,29 @@ def _inject_preflight(mem_gb=0.0):
 class TestPrintJobPlan:
     """Tests for _print_job_plan — just verifies it doesn't raise."""
 
-    def test_no_exception_casper(self, tmp_path, capsys):
+    def test_no_exception_casper(self, tmp_path, caplog):
+        import logging
+
         config_path = _make_minimal_conf(tmp_path)
         args = _casper_args(config=config_path)
 
-        with _inject_preflight(0.0):
+        with caplog.at_level(logging.INFO), _inject_preflight(0.0):
             _print_job_plan(args, n_jobs=3)
 
-        out = capsys.readouterr().out
-        assert "Job plan" in out
+        assert "Job plan" in caplog.text
 
-    def test_no_exception_derecho(self, tmp_path, capsys):
+    def test_no_exception_derecho(self, tmp_path, caplog):
+        import logging
+
         config_path = _make_minimal_conf(tmp_path)
         args = _derecho_args(config=config_path, nodes=2)
 
-        with _inject_preflight(5.0):
+        with caplog.at_level(logging.INFO), _inject_preflight(5.0):
             _print_job_plan(args, n_jobs=1)
 
-        out = capsys.readouterr().out
-        assert "derecho" in out
+        assert "derecho" in caplog.text
 
-    def test_bad_config_no_exception(self, tmp_path, capsys):
+    def test_bad_config_no_exception(self, tmp_path):
         args = _casper_args(config=str(tmp_path / "no_file.yml"))
 
         with _inject_preflight(0.0):
@@ -628,24 +630,30 @@ class TestBuildRolloutPbsScript:
 class TestPrintEnsembleRolloutPlan:
     """Tests for _print_ensemble_rollout_plan."""
 
-    def test_no_exception(self, capsys):
-        args = _casper_args()
-        _print_ensemble_rollout_plan(args, n_jobs=5, n_forecasts=50, ensemble_size=4)
-        out = capsys.readouterr().out
-        assert "Ensemble rollout plan" in out
+    def test_no_exception(self, caplog):
+        import logging
 
-    def test_shows_n_jobs(self, capsys):
         args = _casper_args()
-        _print_ensemble_rollout_plan(args, n_jobs=8, n_forecasts=40, ensemble_size=2)
-        out = capsys.readouterr().out
-        assert "8" in out
+        with caplog.at_level(logging.INFO):
+            _print_ensemble_rollout_plan(args, n_jobs=5, n_forecasts=50, ensemble_size=4)
+        assert "Ensemble rollout plan" in caplog.text
 
-    def test_shows_total_forecasts(self, capsys):
+    def test_shows_n_jobs(self, caplog):
+        import logging
+
         args = _casper_args()
-        _print_ensemble_rollout_plan(args, n_jobs=5, n_forecasts=10, ensemble_size=3)
-        out = capsys.readouterr().out
+        with caplog.at_level(logging.INFO):
+            _print_ensemble_rollout_plan(args, n_jobs=8, n_forecasts=40, ensemble_size=2)
+        assert "8" in caplog.text
+
+    def test_shows_total_forecasts(self, caplog):
+        import logging
+
+        args = _casper_args()
+        with caplog.at_level(logging.INFO):
+            _print_ensemble_rollout_plan(args, n_jobs=5, n_forecasts=10, ensemble_size=3)
         # 10 forecasts × 3 ensemble = 30 total
-        assert "30" in out
+        assert "30" in caplog.text
 
 
 # ===========================================================================

@@ -297,16 +297,27 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     chain_desc = f"{n_jobs} job(s)  ({epochs} epochs ÷ {per_job} per job)" if n_jobs > 1 else "1 job (no chaining)"
 
     sep = "=" * 52
-    print(
-        f"\n{sep}\n  Job plan\n{sep}\n"
-        f"  Cluster  : {args.cluster}\n"
-        f"  Account  : {getattr(args, 'account', 'unset')}\n"
-        f"  Config   : {getattr(args, 'config', 'unset')}\n"
-        f"  GPUs     : {gpu_str}\n"
-        f"  Walltime : {args.walltime} per job\n"
-        f"  Chain    : {chain_desc}\n"
-        f"  DataLoader memory est. : {mem_str}{mem_warn}\n"
-        f"{sep}\n"
+    logger.info(
+        "\n%s\n  Job plan\n%s\n"
+        "  Cluster  : %s\n"
+        "  Account  : %s\n"
+        "  Config   : %s\n"
+        "  GPUs     : %s\n"
+        "  Walltime : %s per job\n"
+        "  Chain    : %s\n"
+        "  DataLoader memory est. : %s%s\n"
+        "%s",
+        sep,
+        sep,
+        args.cluster,
+        getattr(args, "account", "unset"),
+        getattr(args, "config", "unset"),
+        gpu_str,
+        args.walltime,
+        chain_desc,
+        mem_str,
+        mem_warn,
+        sep,
     )
 
 
@@ -409,16 +420,26 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
     steps = getattr(args, "steps", 40)
 
     sep = "=" * 52
-    print(
-        f"\n{sep}\n  Realtime job plan\n{sep}\n"
-        f"  Cluster   : {args.cluster}\n"
-        f"  Account   : {args.account}\n"
-        f"  Config    : {args.config}\n"
-        f"  Init time : {init_time}\n"
-        f"  Steps     : {steps}\n"
-        f"  GPUs      : {args.gpus}\n"
-        f"  Walltime  : {args.walltime}\n"
-        f"{sep}\n"
+    logger.info(
+        "\n%s\n  Realtime job plan\n%s\n"
+        "  Cluster   : %s\n"
+        "  Account   : %s\n"
+        "  Config    : %s\n"
+        "  Init time : %s\n"
+        "  Steps     : %s\n"
+        "  GPUs      : %s\n"
+        "  Walltime  : %s\n"
+        "%s",
+        sep,
+        sep,
+        args.cluster,
+        args.account,
+        args.config,
+        init_time,
+        steps,
+        args.gpus,
+        args.walltime,
+        sep,
     )
 
     script = _build_realtime_pbs_script(args, config_abs, repo, init_time, steps, save_loc=save_loc)
@@ -428,7 +449,7 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
         return
 
     job_id = _qsub(script, save_loc=save_loc)
-    print(f"Submitted: {job_id}")
+    logger.info("Submitted: %s", job_id)
 
 
 def _submit(args: argparse.Namespace) -> None:
@@ -470,12 +491,12 @@ def _submit(args: argparse.Namespace) -> None:
 
     script = _build_pbs_script(args, first_config, repo, depend_on=None, save_loc=save_loc)
     job_id = _qsub(script, save_loc=save_loc)
-    print(f"[1/{n_jobs}] {job_id}  {first_config}")
+    logger.info("[1/%d] %s  %s", n_jobs, job_id, first_config)
 
     for i in range(2, n_jobs + 1):
         script = _build_pbs_script(args, reload_config, repo, depend_on=job_id, save_loc=save_loc)
         job_id = _qsub(script, save_loc=save_loc)
-        print(f"[{i}/{n_jobs}] {job_id}  afterok  (reload)")
+        logger.info("[%d/%d] %s  afterok  (reload)", i, n_jobs, job_id)
 
 
 def _build_rollout_pbs_script(
@@ -553,17 +574,30 @@ def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_foreca
     total_runs = n_forecasts * ensemble_size
 
     sep = "=" * 56
-    print(
-        f"\n{sep}\n  Ensemble rollout plan\n{sep}\n"
-        f"  Cluster        : {args.cluster}\n"
-        f"  Account        : {args.account}\n"
-        f"  Config         : {args.config}\n"
-        f"  Init times     : {n_forecasts}  ({per_job} per job)\n"
-        f"  Ensemble size  : {ensemble_size}  →  {total_runs} total forecasts\n"
-        f"  Parallel jobs  : {n_jobs}  (all start at once, no dependencies)\n"
-        f"  GPUs per job   : {args.gpus}\n"
-        f"  Walltime/job   : {args.walltime}\n"
-        f"{sep}\n"
+    logger.info(
+        "\n%s\n  Ensemble rollout plan\n%s\n"
+        "  Cluster        : %s\n"
+        "  Account        : %s\n"
+        "  Config         : %s\n"
+        "  Init times     : %s  (%s per job)\n"
+        "  Ensemble size  : %s  →  %s total forecasts\n"
+        "  Parallel jobs  : %s  (all start at once, no dependencies)\n"
+        "  GPUs per job   : %s\n"
+        "  Walltime/job   : %s\n"
+        "%s",
+        sep,
+        sep,
+        args.cluster,
+        args.account,
+        args.config,
+        n_forecasts,
+        per_job,
+        ensemble_size,
+        total_runs,
+        n_jobs,
+        args.gpus,
+        args.walltime,
+        sep,
     )
 
 
@@ -638,11 +672,11 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
         script = _build_rollout_pbs_script(args, config_abs, repo, i, n_jobs, save_loc=rollout_save_loc)
         job_id = _qsub(script, save_loc=rollout_save_loc)
         job_ids.append(job_id)
-        print(f"[{i:2d}/{n_jobs}] {job_id}")
+        logger.info("[%2d/%d] %s", i, n_jobs, job_id)
 
-    print()
-    print(f"Submitted {n_jobs} parallel rollout jobs.")
-    print(f"Output will be written to: {conf.get('predict', {}).get('save_forecast', '<save_forecast in config>')}")
-    print()
-    print("Monitor with:")
-    print("  qstat -u $USER")
+    save_forecast = conf.get("predict", {}).get("save_forecast", "<save_forecast in config>")
+    logger.info(
+        "\nSubmitted %d parallel rollout jobs.\nOutput will be written to: %s\nMonitor with:\n  qstat -u $USER",
+        n_jobs,
+        save_forecast,
+    )
