@@ -47,9 +47,9 @@ trainer_types = {
         TrainerEnsembleGen2,
         "Gen 2 ensemble trainer: ring-reduce CRPS loss, gen2 nested data schema with preblocks.",
     ),
-    "era5-ensemble": (  # backward-compat alias for ensemble-gen1
-        TrainerEnsembleGen1,
-        "Gen 1 ensemble trainer: ring-reduce CRPS loss, gen1 data schema (concat_and_reshape).",
+    "era5-ensemble": (  # backward-compat alias for ensemble-gen2
+        TrainerEnsembleGen2,
+        "Gen 2 ensemble trainer: ring-reduce CRPS loss, gen2 nested data schema with preblocks.",
     ),
     "cam": (
         TrainerERA5Gen1,
