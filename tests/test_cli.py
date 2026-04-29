@@ -346,14 +346,14 @@ class TestResolvePbsOpts:
         r = _resolve_pbs_opts(args, {})
         assert r.cpus == 8
         assert r.mem == "128GB"
-        assert r.queue == "casper"
+        assert r.queue == "casper@casper-pbs"
 
     def test_derecho_defaults(self):
         args = self._minimal_args(cluster="derecho")
         r = _resolve_pbs_opts(args, {})
         assert r.cpus == 64
         assert r.mem == "480GB"
-        assert r.queue == "main"
+        assert r.queue == "main@desched1"
 
     def test_gpus_alias(self):
         args = self._minimal_args(cluster="casper", gpus=None)

@@ -101,7 +101,9 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     r.nodes = int(_first(args.nodes, pbs_cfg.get("nodes"), d["nodes"]))
     r.cpus = int(_first(args.cpus, pbs_cfg.get("ncpus") or pbs_cfg.get("cpus"), d["cpus"]))
     r.mem = _first(args.mem, pbs_cfg.get("mem"), d["mem"])
-    r.queue = _first(args.queue, pbs_cfg.get("queue"), d["queue"])
+    pbs_server = "casper-pbs" if is_casper else "desched1"
+    raw_queue = _first(args.queue, pbs_cfg.get("queue"), d["queue"])
+    r.queue = raw_queue if "@" in raw_queue else f"{raw_queue}@{pbs_server}"
     r.gpu_type = _first(args.gpu_type, pbs_cfg.get("gpu_type"), d["gpu_type"])
     r.conda_env = _first(args.conda_env, pbs_cfg.get("conda") or pbs_cfg.get("conda_env"))
     r.job_name = pbs_cfg.get("job_name", d["job_name"])
