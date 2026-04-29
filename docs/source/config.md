@@ -1269,8 +1269,8 @@ batch_size: 1
 ensemble_size: 1
 ```
 
-- **`batch_size`** → Number of forecast initializations processed **at once**.
-- **`ensemble_size`** → Number of ensemble members per initialization. Set to `1` for deterministic rollout; set to `N > 1` to save N ensemble members to NetCDF. Can also be overridden at the CLI with `credit rollout --ensemble-size N` without modifying the config.
+- **`batch_size`** → Number of forecast initializations processed **at once**.  
+- **`ensemble_size`** → Number of ensemble members per initialization.  
 
 💡 *Increase `batch_size` if running inference on multiple GPUs.*  
 

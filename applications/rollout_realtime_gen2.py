@@ -45,6 +45,7 @@ from credit.distributed import get_rank_info, setup, distributed_model_wrapper
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.nwp import build_GFS_init
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -108,8 +109,9 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
 
-    mean_ds = xr.open_dataset(data_conf["mean_path"]).load()
-    std_ds = xr.open_dataset(data_conf["std_path"]).load()
+    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", data_conf)
+    mean_ds = xr.open_dataset(norm_args.get("mean_path", data_conf.get("mean_path"))).load()
+    std_ds = xr.open_dataset(norm_args.get("std_path", data_conf.get("std_path"))).load()
 
     def _stats(varname, is_3d):
         if varname not in mean_ds:
@@ -153,26 +155,84 @@ def _sample_to_batch(sample):
 # ---------------------------------------------------------------------------
 
 
-def _save_worker(shm_name, arr_shape, arr_dtype, init_str, step, lead_time_periods, lat, lon, meta_data, conf):
+def _save_worker(shm_name, arr_shape, arr_dtype, init_str, step, fhr_per_step, lat, lon, meta_data, conf):
     try:
         shm = SharedMemory(shm_name)
         y_np = np.ndarray(arr_shape, dtype=arr_dtype, buffer=shm.buf).copy()
         shm.unlink()
 
-        utc_dt = datetime.strptime(init_str, "%Y-%m-%dT%HZ") + timedelta(hours=lead_time_periods * step)
+        utc_dt = datetime.strptime(init_str, "%Y-%m-%dT%HZ") + timedelta(hours=fhr_per_step * step)
         y_t = torch.from_numpy(y_np)
         darray_upper_air, darray_single_level = make_xarray(y_t, utc_dt, lat, lon, conf)
         save_netcdf_increment(
             darray_upper_air,
             darray_single_level,
             init_str,
-            lead_time_periods * step,
+            fhr_per_step * step,
             meta_data,
             conf,
         )
-        print(f"  step={step:3d}  valid={utc_dt.strftime('%Y-%m-%d %HZ')}  fhr={lead_time_periods * step:3d}h")
+        print(f"  step={step:3d}  valid={utc_dt.strftime('%Y-%m-%d %HZ')}  fhr={fhr_per_step * step:3d}h")
     except Exception:
         print(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# GFS initial condition fetch
+# ---------------------------------------------------------------------------
+
+
+def run_gfs_init(conf, init_time: pd.Timestamp, n_procs: int = 1) -> str:
+    """Download GFS analysis for init_time, regrid to CREDIT grid, save as zarr.
+
+    Patches conf['data']['source']['ERA5']['variables']['prognostic']['path']
+    to the generated zarr so ERA5Dataset loads the GFS IC at step 0.
+    Returns the zarr path.
+    """
+    rt_conf = conf["predict"]["realtime"]
+    ic_path = rt_conf["initial_condition_path"]
+    os.makedirs(ic_path, exist_ok=True)
+
+    zarr_path = os.path.join(ic_path, f"gfs_init_{init_time.strftime('%Y%m%d_%H00')}.zarr")
+
+    if not os.path.exists(zarr_path):
+        base = os.path.abspath(os.path.dirname(__file__))
+        parent = os.path.basename(os.path.abspath(os.path.join(base, os.pardir)))
+        metadata_path = os.path.join(base, os.pardir, "metadata" if parent == "credit" else "credit/metadata")
+
+        lev_info_file = os.path.join(metadata_path, "ERA5_Lev_Info.nc")
+        credit_grid = xr.open_dataset(lev_info_file)
+        model_level_csv = os.path.join(metadata_path, "L137_model_level_indices.csv")
+        model_level_indices = pd.read_csv(model_level_csv)["model_level_indices"].values
+
+        prog = conf["data"]["source"]["ERA5"]["variables"].get("prognostic", {})
+        variables = prog.get("vars_3D", []) + prog.get("vars_2D", [])
+
+        now = pd.Timestamp.utcnow().tz_localize(None)
+        init_naive = init_time.tz_localize(None) if init_time.tzinfo is not None else init_time
+        gdas_base = (
+            "gs://global-forecast-system/"
+            if now - init_naive >= pd.Timedelta(days=10)
+            else "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/"
+        )
+
+        logger.info(f"Building GFS init for {init_time} from {gdas_base}")
+        gfs_ds = build_GFS_init(
+            output_grid=credit_grid,
+            date=init_time,
+            variables=variables,
+            model_level_file=lev_info_file,
+            model_levels=model_level_indices,
+            gdas_base_path=gdas_base,
+            n_procs=n_procs,
+        )
+        logger.info(f"Saving GFS init zarr to {zarr_path}")
+        gfs_ds.to_zarr(zarr_path, mode="w")
+    else:
+        logger.info(f"GFS init zarr already exists: {zarr_path}")
+
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = zarr_path
+    return zarr_path
 
 
 # ---------------------------------------------------------------------------
@@ -198,8 +258,8 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     else:
         device = torch.device("cpu")
 
-    lead_time_periods = conf["data"]["lead_time_periods"]
     dt = pd.Timedelta(conf["data"]["timestep"])
+    fhr_per_step = int(dt.total_seconds() / 3600)
 
     # ---- v2 channel bookkeeping ----
     src = conf["data"]["source"]["ERA5"]
@@ -271,7 +331,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     init_str = init_time.strftime("%Y-%m-%dT%HZ")
     conf["predict"]["save_forecast"] = save_dir
 
-    logger.info(f"Forecast init: {init_str}  steps: {n_steps}  fhr_max: {n_steps * lead_time_periods}h")
+    logger.info(f"Forecast init: {init_str}  steps: {n_steps}  fhr_max: {n_steps * fhr_per_step}h")
     logger.info(f"Saving to: {save_dir}/{init_str}/")
 
     # ---- Load full initial state ----
@@ -305,7 +365,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
             shm_arr[:] = y_phys
             result = pool.apply_async(
                 _save_worker,
-                (shm.name, y_phys.shape, y_phys.dtype, init_str, step, lead_time_periods, lat, lon, meta_data, conf),
+                (shm.name, y_phys.shape, y_phys.dtype, init_str, step, fhr_per_step, lat, lon, meta_data, conf),
             )
             results.append(result)
 
@@ -419,15 +479,19 @@ Examples:
     if args.steps is not None:
         n_steps = args.steps
     else:
-        lead_time_periods = conf["data"]["lead_time_periods"]
+        fhr_per_step = int(pd.Timedelta(conf["data"]["timestep"]).total_seconds() / 3600)
         days = conf.get("predict", {}).get("forecasts", {}).get("days", 10)
-        n_steps = days * (24 // lead_time_periods)
+        n_steps = days * (24 // fhr_per_step)
 
     # ---- Save directory ----
     save_dir = args.save_dir or conf.get("predict", {}).get("save_forecast")
     assert save_dir, "Specify --save-dir or set conf['predict']['save_forecast']."
     save_dir = os.path.expandvars(save_dir)
     os.makedirs(save_dir, exist_ok=True)
+
+    if conf.get("predict", {}).get("realtime", {}).get("use_gfs_init", False):
+        logger.info("use_gfs_init=True: fetching GFS analysis as initial condition")
+        run_gfs_init(conf, init_time, n_procs=args.num_cpus)
 
     seed_everything(conf["seed"])
     local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])
