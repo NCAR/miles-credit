@@ -82,9 +82,6 @@ class TrainerERA5Gen2(BaseTrainer):
         dyn = vars_conf.get("dynamic_forcing") or {}
         static_v = vars_conf.get("static") or {}
         num_levels = len(source.get("levels", []))
-
-        # Diagnostic output channel count (excluded from autoregressive x update)
-        # ERA5Dataset already flattens 3D: varnum_diag = vars_3D*levels + vars_2D
         self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
 
         # Forcing+static input channel count (last channels of x, not predicted by model)
@@ -94,10 +91,9 @@ class TrainerERA5Gen2(BaseTrainer):
 
         # forecast_len: 1 = 1 step (new semantics, unlike v1 where 0 = 1 step)
         self.forecast_len = data_conf["forecast_len"]
-        if "backprop_on_timestep" in data_conf:
-            self.backprop_on_timestep = data_conf["backprop_on_timestep"]
-        else:
-            self.backprop_on_timestep = list(range(1, self.forecast_len + 1))
+        trainer_conf = conf.get("trainer", {})
+        bpt = trainer_conf.get("backprop_on_timestep") or data_conf.get("backprop_on_timestep")
+        self.backprop_on_timestep = bpt if bpt is not None else list(range(1, self.forecast_len + 1))
 
         data_clamp = data_conf.get("data_clamp")
         if data_clamp is None:

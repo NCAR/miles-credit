@@ -25,10 +25,9 @@ dependencies = [
     "torchvision",
     "einops",
     "pyyaml",
-    "cartopy",
     "zarr",
+    "pygrib",
     "numcodecs",
-    "einops",
     "echo-opt",
     "bridgescaler",
     "segmentation-models-pytorch",
@@ -43,7 +42,6 @@ dependencies = [
     "setuptools_scm",
     "setuptools",
     "numba",
-    "s3fs",
     "tensorboard"
 ]
 
@@ -68,7 +66,6 @@ ptype = ["metpy",
 
 ask    = ["anthropic>=0.40", "groq>=0.9", "openai>=1.0", "google-generativeai>=0.8"]
 agent  = ["anthropic>=0.40"]
-serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 
 [tool.setuptools]
 
