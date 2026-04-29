@@ -12,7 +12,6 @@ from tqdm import tqdm
 # ---------- #
 # Numerics
 from datetime import datetime, timedelta, timezone
-import pandas as pd
 import xarray as xr
 import numpy as np
 
@@ -36,7 +35,6 @@ from credit.models.checkpoint import load_model_state, load_state_dict_error_han
 from credit.parser import credit_main_parser
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-from credit.nwp import build_GFS_init
 import traceback
 
 
@@ -45,67 +43,6 @@ warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-
-
-def run_gfs_init(conf, n_procs=1):
-    """Download GFS analysis, regrid to CREDIT grid, and save as zarr IC file.
-
-    Updates conf['data']['save_loc'] and conf['data']['save_loc_surface'] to point
-    at the generated zarr so RealtimePredictDataset picks it up automatically.
-
-    Returns the zarr path.
-    """
-    forecast_start_time = conf["predict"]["realtime"]["forecast_start_time"]
-    date = pd.Timestamp(forecast_start_time, tz="UTC")
-
-    ic_path = conf["predict"]["realtime"]["initial_condition_path"]
-    os.makedirs(ic_path, exist_ok=True)
-
-    zarr_path = os.path.join(ic_path, f"gfs_init_{date.strftime('%Y%m%d_%H00')}.zarr")
-
-    if os.path.exists(zarr_path):
-        logger.info(f"GFS init zarr already exists: {zarr_path}")
-        conf["data"]["save_loc"] = zarr_path
-        conf["data"]["save_loc_surface"] = zarr_path
-        return zarr_path
-
-    # Resolve metadata directory relative to this script
-    base_path = os.path.abspath(os.path.dirname(__file__))
-    parent_name = os.path.basename(os.path.abspath(os.path.join(base_path, os.pardir)))
-    if parent_name == "credit":
-        metadata_path = os.path.join(base_path, os.pardir, "metadata")
-    else:
-        metadata_path = os.path.join(base_path, os.pardir, "credit", "metadata")
-
-    credit_grid = xr.open_dataset(os.path.join(metadata_path, "ERA5_Lev_Info.nc"))
-    model_levels = pd.read_csv(os.path.join(metadata_path, "L137_model_level_indices.csv"))
-    model_level_indices = model_levels["model_level_indices"].values
-
-    variables = conf["data"]["variables"] + conf["data"]["surface_variables"]
-
-    # NOMADS keeps 10 days; fall back to GCS for older dates
-    now_date = pd.Timestamp.utcnow()
-    if now_date - date >= pd.Timedelta(days=10):
-        gdas_base_path = "gs://global-forecast-system/"
-    else:
-        gdas_base_path = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/"
-
-    logger.info(f"Building GFS init for {date} from {gdas_base_path}")
-    gfs_init = build_GFS_init(
-        output_grid=credit_grid,
-        date=date,
-        variables=variables,
-        model_level_indices=model_level_indices,
-        gdas_base_path=gdas_base_path,
-        n_procs=n_procs,
-    )
-
-    logger.info(f"Saving GFS init zarr to {zarr_path}")
-    gfs_init.to_zarr(zarr_path)
-
-    conf["data"]["save_loc"] = zarr_path
-    conf["data"]["save_loc_surface"] = zarr_path
-    return zarr_path
 
 
 def process_forecast(
@@ -532,11 +469,6 @@ def main_cli():
             logging.info("Launching to PBS on Derecho")
             launch_script_mpi(config, script_path)
         sys.exit()
-
-    # Pull GFS analysis as the initial condition when requested
-    if conf["predict"].get("realtime", {}).get("use_gfs_init", False):
-        logger.info("use_gfs_init=True: fetching GFS analysis as initial condition")
-        run_gfs_init(conf, n_procs=num_cpus)
 
     seed = conf["seed"]
     seed_everything(seed)
