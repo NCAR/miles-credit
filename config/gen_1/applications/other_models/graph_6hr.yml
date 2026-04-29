@@ -1,4 +1,4 @@
-save_loc: "/glade/derecho/scratch/akn7/STAGING/miles-credit/results/graph_new/one/"
+save_loc: "/glade/derecho/scratch/$USER/STAGING/miles-credit/results/graph_new/one/"
 seed: 1000
 
 data:
@@ -168,7 +168,7 @@ diagnostics:
         use_KE_difference_vis: True
 
 pbs: #derecho
-    conda: "/glade/work/ksha/miniconda3/envs/credit"
+    conda: "credit-derecho"
     project: "NAML0001"
     job_name: "wxformer"
     walltime: "12:00:00"
@@ -179,7 +179,7 @@ pbs: #derecho
     queue: 'main'
     
 # pbs: # casper
-#     conda: "/glade/work/schreck/miniconda3/envs/evidential"
+#     conda: "credit-casper"
 #     job_name: 'latlon'
 #     nodes: 1
 #     ncpus: 8

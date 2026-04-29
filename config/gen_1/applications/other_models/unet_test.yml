@@ -10,19 +10,19 @@ seed: 1000
 data:
     # upper-air variables
     variables: ['U','V','T','Q']
-    save_loc: '/glade/derecho/scratch/dkimpara/y_ONEdeg*.zarr'
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_ONEdeg*.zarr'
 
     # surface variables
     surface_variables: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-    save_loc_surface: '/glade/derecho/scratch/dkimpara/y_ONEdeg*.zarr'
+    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_ONEdeg*.zarr'
 
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/derecho/scratch/dkimpara/credit_solar_1h_1deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/credit/credit_solar_1h_1deg/*.nc'
 
     # static variables
     static_variables: ['Z_GDS4_SFC','LSM']
-    save_loc_static: '/glade/derecho/scratch/dkimpara/LSM_static_variables_ERA5_zhght_onedeg.nc'
+    save_loc_static: '/glade/campaign/cisl/aiml/credit/static_scalers/LSM_static_variables_ERA5_zhght_onedeg.nc'
 
     # mean / std path
     mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
@@ -166,7 +166,7 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-hour forecast)
 
-    save_forecast: '/glade/campaign/cisl/aiml/ksha/CREDIT/wxformer_1h/'
+    save_forecast: '/glade/derecho/scratch/$USER/unet_test_1dg_output/'
     save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
 
     # turn-off low-pass filter
@@ -176,7 +176,7 @@ predict:
     # save_format: "nc"
 
 pbs: # casper
-    conda: "$HOME/credit"
+    conda: "credit-casper"
     job_name: 'test_1dg_unet'
     project: 'NAML0001'
     nodes: 1

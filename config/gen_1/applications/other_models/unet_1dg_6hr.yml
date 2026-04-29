@@ -180,7 +180,7 @@ predict:
     # save_format: "nc"
 
 pbs: # casper
-    conda: "$HOME/credit"
+    conda: "credit-casper"
     job_name: 'test_1dg_unet'
     project: 'NAML0001'
     nodes: 1

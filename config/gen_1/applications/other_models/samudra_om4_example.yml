@@ -1,4 +1,4 @@
-save_loc: '/glade/derecho/scratch/schreck/CREDIT_runs/mom/'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/mom/'
 seed: 1000
 
 data:
@@ -164,14 +164,14 @@ predict:
     ]
         
     metadata: 'samudra.yaml'
-    save_forecast: '/glade/derecho/scratch/schreck/CREDIT_runs/samudra/netcdf'
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/samudra/netcdf'
     
     # turn-off low-pass filter
     use_laplace_filter: False
     static_fields: "/glade/campaign/cisl/aiml/credit/static_scalers/static_variables_ERA5_zhght_onedeg.nc"
     
 pbs: #derecho
-    conda: "/glade/work/akn7/conda-envs/credit-derecho"
+    conda: "credit-derecho"
     project: "NAML0001"
     job_name: "style-wxf"
     walltime: "12:00:00"

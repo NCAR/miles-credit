@@ -201,7 +201,7 @@ predict:
     # save_format: "nc"
     
 pbs: #derecho
-    conda: "/glade/work/ksha/miniconda3/envs/credit"
+    conda: "credit-derecho"
     project: "NAML0001"
     job_name: "fuxi_6h"
     walltime: "12:00:00"
