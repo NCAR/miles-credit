@@ -88,8 +88,56 @@ def gather_tensor(tensor):
     return Gather.apply(tensor)
 
 
-class Trainer(BaseTrainer):
-    def __init__(self, model: torch.nn.Module, rank: int):
+def ring_crps_loss(y_pred, y, rank, world_size):
+    """Fair CRPS via ring communication — O(1) extra memory, no all_gather.
+
+    Each GPU holds 1 ensemble member. K-1 ring shifts pass one member buffer at a
+    time so rank r accumulates |x_r - x_j| for every j != r without ever
+    materialising the full K-member ensemble on a single device.
+
+    Gradient correctness (no cross-rank backward needed):
+        d(CRPS)/d(x_r) = sign(x_r-y)/K  -  sum_{j!=r} sign(x_r-x_j) / (K*(K-1))
+    Both terms are computed entirely from rank r's local graph. DDP averaging
+    (1/K) then gives the correct model-parameter gradient.
+
+    Local loss (scaled so DDP avg = d(CRPS)/d(params)):
+        loss_r = |y_pred_r - y|  -  sum_{j!=r} |y_pred_r - x_j| / (K-1)
+
+    Args:
+        y_pred:     (ens_per_gpu, C, T, H, W) — local predictions, requires_grad.
+        y:          (1, C, T, H, W) — truth tensor.
+        rank:       local rank index.
+        world_size: K = total ensemble size (one member per GPU assumed).
+
+    Returns:
+        Scalar loss for this rank; backward populates y_pred.grad correctly.
+    """
+    K = world_size
+
+    skill = (y_pred - y).abs()  # gradient flows to y_pred
+
+    buf = y_pred.detach().contiguous()  # ring buffer — no grad needed
+    spread = torch.zeros_like(y_pred)
+    for _ in range(K - 1):
+        next_buf = torch.empty_like(buf)
+        reqs = dist.batch_isend_irecv(
+            [
+                dist.P2POp(dist.isend, buf, (rank + 1) % K),
+                dist.P2POp(dist.irecv, next_buf, (rank - 1 + K) % K),
+            ]
+        )
+        for req in reqs:
+            req.wait()
+        buf = next_buf
+        spread = spread + (y_pred - buf).abs()  # gradient flows to y_pred
+
+    # Divide by K so DDP avg (1/K) gives the same effective gradient scale as
+    # the all_gather reference path (each rank contributes 1/K of d(CRPS)/d(params)).
+    return (skill - spread / (K - 1)).mean() / K
+
+
+class TrainerERA5Ensemble(BaseTrainer):
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer class for handling the training, validation, and checkpointing of models.
 
@@ -115,12 +163,12 @@ class Trainer(BaseTrainer):
                 Perform the full training loop across multiple epochs, including validation
                 and checkpointing.
         """
-        super().__init__(model, rank)
+        super().__init__(model, rank, conf)
         # Add any additional initialization if needed
         logger.info("Loading a multi-step trainer class")
 
     # Training function.
-    def train_one_epoch(self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics):
+    def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         """
         Trains the model for one epoch.
 
@@ -137,56 +185,56 @@ class Trainer(BaseTrainer):
         Returns:
             dict: Dictionary containing training metrics and loss for the epoch.
         """
-        batches_per_epoch = conf["trainer"]["batches_per_epoch"]
-        grad_max_norm = conf["trainer"].get("grad_max_norm", 0.0)
-        amp = conf["trainer"]["amp"]
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
-        forecast_length = conf["data"]["forecast_len"]
-        ensemble_size = conf["trainer"].get("ensemble_size", 1)
+        batches_per_epoch = self.conf["trainer"]["batches_per_epoch"]
+        grad_max_norm = self.conf["trainer"].get("grad_max_norm", 0.0)
+        amp = self.conf["trainer"]["amp"]
+        distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        forecast_length = self.conf["data"]["forecast_len"]
+        ensemble_size = self.conf["trainer"].get("ensemble_size", 1)
         if ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {ensemble_size}")
         logger.info(f"Using grad-max-norm value: {grad_max_norm}")
 
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
+        varnum_diag = len(self.conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
         static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
+            len(self.conf["data"]["dynamic_forcing_variables"])
+            + len(self.conf["data"]["forcing_variables"])
+            + len(self.conf["data"]["static_variables"])
         )
 
         # [Optional] retain graph for multiple backward passes
-        retain_graph = conf["data"].get("retain_graph", False)
+        retain_graph = self.conf["data"].get("retain_graph", False)
 
         # [Optional] Use the config option to set when to backprop
-        if "backprop_on_timestep" in conf["data"]:
-            backprop_on_timestep = conf["data"]["backprop_on_timestep"]
+        if "backprop_on_timestep" in self.conf["data"]:
+            backprop_on_timestep = self.conf["data"]["backprop_on_timestep"]
         else:
             # If not specified in config, use the range 1 to forecast_len
-            backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
+            backprop_on_timestep = list(range(0, self.conf["data"]["forecast_len"] + 1 + 1))
 
         assert forecast_length <= backprop_on_timestep[-1], (
             f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
         )
 
         # update the learning rate if epoch-by-epoch updates that dont depend on a metric
-        if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
+        if self.conf["trainer"]["use_scheduler"] and self.conf["trainer"]["scheduler"]["scheduler_type"] == "lambda":
             scheduler.step()
 
         # ------------------------------------------------------- #
         # clamp to remove outliers
-        if conf["data"]["data_clamp"] is None:
+        if self.conf["data"]["data_clamp"] is None:
             flag_clamp = False
         else:
             flag_clamp = True
-            clamp_min = float(conf["data"]["data_clamp"][0])
-            clamp_max = float(conf["data"]["data_clamp"][1])
+            clamp_min = float(self.conf["data"]["data_clamp"][0])
+            clamp_max = float(self.conf["data"]["data_clamp"][1])
 
         # ====================================================== #
         # postblock opts outside of model
-        post_conf = conf["model"]["post_conf"]
+        post_conf = self.conf["model"]["post_conf"]
         flag_mass_conserve = False
         flag_water_conserve = False
         flag_energy_conserve = False
@@ -327,31 +375,12 @@ class Trainer(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    lat_size = y.shape[3]
-                    total_loss = 0
-                    total_std = 0
-                    for i in range(lat_size):
-                        # Slice the tensors
-                        y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
-                        y_slice = y[:, :, :, i : i + 1].contiguous()
+                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y, self.rank, dist.get_world_size())
+                    total_std = (y_pred - y).detach().std()
 
-                        # Gather the tensor
-                        y_pred_slice = gather_tensor(y_pred_slice)
-                        # y_slice = gather_tensor(y_slice)
+                    accum_log(logs, {"loss": total_loss.item()})
+                    accum_log(logs, {"std": total_std.item()})
 
-                        # Compute loss for this slice
-                        loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
-                        total_loss += loss
-
-                        # Compute the std
-                        std = ((y_pred_slice - y_slice.to(y_pred_slice.dtype)).detach().std()) / lat_size
-                        total_std += std
-
-                        # Track per-channel loss
-                        accum_log(logs, {"loss": loss.item()})
-                        accum_log(logs, {"std": std.item()})
-
-                    # Single backward call for the accumulated loss
                     scaler.scale(total_loss).backward()
 
                 if distributed:
@@ -462,7 +491,10 @@ class Trainer(BaseTrainer):
                 batch_group_generator.update(1)
                 batch_group_generator.set_description(to_print)
 
-            if conf["trainer"]["use_scheduler"] and conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch:
+            if (
+                self.conf["trainer"]["use_scheduler"]
+                and self.conf["trainer"]["scheduler"]["scheduler_type"] in update_on_batch
+            ):
                 scheduler.step()
 
         #  Shutdown the progbar
@@ -474,7 +506,7 @@ class Trainer(BaseTrainer):
 
         return results_dict
 
-    def validate(self, epoch, conf, valid_loader, criterion, metrics):
+    def validate(self, epoch, valid_loader, criterion, metrics):
         """
         Validates the model on the validation dataset.
 
@@ -492,23 +524,29 @@ class Trainer(BaseTrainer):
         self.model.eval()
 
         # number of diagnostic variables
-        varnum_diag = len(conf["data"]["diagnostic_variables"])
+        varnum_diag = len(self.conf["data"]["diagnostic_variables"])
 
         # number of dynamic forcing + forcing + static
         static_dim_size = (
-            len(conf["data"]["dynamic_forcing_variables"])
-            + len(conf["data"]["forcing_variables"])
-            + len(conf["data"]["static_variables"])
+            len(self.conf["data"]["dynamic_forcing_variables"])
+            + len(self.conf["data"]["forcing_variables"])
+            + len(self.conf["data"]["static_variables"])
         )
 
-        valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]
-        history_len = conf["data"]["valid_history_len"] if "valid_history_len" in conf["data"] else conf["history_len"]
+        valid_batches_per_epoch = self.conf["trainer"]["valid_batches_per_epoch"]
+        history_len = (
+            self.conf["data"]["valid_history_len"]
+            if "valid_history_len" in self.conf["data"]
+            else self.conf["history_len"]
+        )
         forecast_len = (
-            conf["data"]["valid_forecast_len"] if "valid_forecast_len" in conf["data"] else conf["forecast_len"]
+            self.conf["data"]["valid_forecast_len"]
+            if "valid_forecast_len" in self.conf["data"]
+            else self.conf["forecast_len"]
         )
-        ensemble_size = conf["trainer"].get("ensemble_size", 1)
+        ensemble_size = self.conf["trainer"].get("ensemble_size", 1)
 
-        distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
+        distributed = True if self.conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
 
         results_dict = defaultdict(list)
 
@@ -530,16 +568,16 @@ class Trainer(BaseTrainer):
 
         # ------------------------------------------------------- #
         # clamp to remove outliers
-        if conf["data"]["data_clamp"] is None:
+        if self.conf["data"]["data_clamp"] is None:
             flag_clamp = False
         else:
             flag_clamp = True
-            clamp_min = float(conf["data"]["data_clamp"][0])
-            clamp_max = float(conf["data"]["data_clamp"][1])
+            clamp_min = float(self.conf["data"]["data_clamp"][0])
+            clamp_max = float(self.conf["data"]["data_clamp"][1])
 
         # ====================================================== #
         # postblock opts outside of model
-        post_conf = conf["model"]["post_conf"]
+        post_conf = self.conf["model"]["post_conf"]
         flag_mass_conserve = False
         flag_water_conserve = False
         flag_energy_conserve = False
@@ -661,26 +699,11 @@ class Trainer(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    lat_size = y.shape[3]
-                    total_loss = 0
-                    for i in range(lat_size):
-                        # Slice the tensors
-                        y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
-                        y_slice = y[:, :, :, i : i + 1].contiguous()
+                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y, self.rank, dist.get_world_size())
+                    total_std = (y_pred - y).detach().std()
 
-                        # Gather the tensor
-                        y_pred_slice = gather_tensor(y_pred_slice)
-
-                        # Compute loss for this slice
-                        loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
-                        total_loss += loss
-
-                        # Compute the std
-                        std = ((y_pred_slice - y_slice.to(y_pred_slice.dtype)).detach().std()) / lat_size
-
-                        # Track per-channel loss, std
-                        accum_log(logs, {"loss": loss.item()})
-                        accum_log(logs, {"std": std.item()})
+                    accum_log(logs, {"loss": total_loss.item()})
+                    accum_log(logs, {"std": total_std.item()})
 
                     # ----------------------------------------------------------------------- #
 
