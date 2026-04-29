@@ -64,7 +64,7 @@ class PostBlock(nn.Module):
             self.operations.append(opt)
 
         # stochastic kinetic energy backscattering (SKEB)
-        if post_conf["skebs"]["activate"]:
+        if post_conf.get("skebs", {}).get("activate", False):
             logging.info("using SKEBS")
             self.operations.append(SKEBS(post_conf))
 

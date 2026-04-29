@@ -5,6 +5,11 @@ conditions**. Any trained deterministic checkpoint works — no special ensemble
 required. Spread is generated entirely through IC perturbation, so the quality depends on
 the perturbation method chosen.
 
+1.  Perturbing initial conditions with deterministic models
+2.  Utilizing stochastic models with identical initial conditions
+
+The inference scripts (`rollout_metrics_noisy_ics.py`, `rollout_metrics_noisy_models.py`) will compute and save **ensemble metrics only**. To **save forecast outputs to NetCDF**, use `credit rollout` with `ensemble_size > 1` — either set it in the `predict` block of the config file or pass `--ensemble-size N` at the CLI. The two scripts presented here compute the CRPS score for each variable and keep track of the ensemble member scores, means and standard deviations.
+
 For SDL (Stochastic Decoder Layer) ensembles where spread comes from learned model noise
 rather than IC perturbations, see [SDL Ensemble](SDL_ensemble.md).
 
@@ -284,13 +289,26 @@ predict:
 python applications/rollout_metrics_noisy_ic.py -c model.yml
 ```
 
-### PBS submission (Derecho / Casper)
+### Batch Job Submission
+
+To submit ensemble rollout jobs to the cluster use `credit submit --rollout`:
 
 ```bash
-python applications/rollout_metrics_noisy_ic.py -c model.yml -l 1
+# Submit 10 parallel PBS jobs, ensemble_size set in config
+credit submit --cluster derecho -c config.yml --rollout --jobs 10
+
+# Override ensemble size at submission time
+credit submit --cluster derecho -c config.yml --rollout --jobs 10 --ensemble-size 50
 ```
 
-The launch script is saved to `{save_forecast}/launch.sh`.
+`--jobs` splits init times across N independent PBS jobs. `ensemble_size` (config or `--ensemble-size`) sets members per init time.
+
+For the legacy metric-only scripts, use the `-l 1` flag:
+
+```
+python rollout_metrics_noisy_ics.py --config model.yml -l 1
+python rollout_metrics_noisy_models.py --config model.yml -l 1
+```
 
 ### Multi-GPU (DDP)
 
@@ -298,6 +316,8 @@ The launch script is saved to `{save_forecast}/launch.sh`.
 predict:
   mode: ddp
 ```
+
+## Metrics and Output
 
 ```bash
 torchrun --nproc_per_node=4 applications/rollout_metrics_noisy_ic.py -c model.yml

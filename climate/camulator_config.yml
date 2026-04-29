@@ -1,4 +1,4 @@
-# --------------------------------------------------------------------------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------------------------- #
 # This YAML file configures the training of a 1 or 6-hourly state-in-state-out Crossformer model
 # on NSF NCAR high-performance computing systems (casper.ucar.edu and derecho.hpc.ucar.edu).
 # 
@@ -13,7 +13,7 @@
 # such as spectral normalization, reflective padding, and tracer-specific postprocessing.
 #
 # Ensure compatibility with ERA5 data preprocessing workflows and metadata paths specified in this file.
-# --------------------------------------------------------------------------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------------------------- #
 
 
 # the location to save your workspace, it will have 
@@ -477,7 +477,7 @@ predict:
 
     forecasts:
         type: "custom"       # keep it as "custom". See also credit.forecast
-        start_year: 1981     # year of the first initialization (where rollout will start)
+        start_year: 2000     # year of the first initialization (where rollout will start)
         start_month: 1       # month of the first initialization
         start_day: 1         # day of the first initialization
         start_hours: [0]     # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
@@ -486,7 +486,7 @@ predict:
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days:  365           # forecast length, ignored for Climate rollout.
 
-    start_datetime: '1981-01-01 00:00:00'
+    start_datetime: '2000-01-01 00:00:00'
     climate_rescale_output: True
         
     # saved variables (rollout_to_netcdf.yml)
@@ -497,7 +497,7 @@ predict:
     # The location to store rollout predictions, the folder structure will be:
     # $save_forecast/$initialization_time/file.nc
     # each forecast lead time produces a file.nc
-    save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/new_pxshf/Post_003steps/'
+    save_forecast: '/glade/derecho/scratch/wchapman/CREDIT/new_pxshf/Get_Coupling/'
     
     # this keyword will apply a low-pass filter to all fields and each forecast step
     # it will reduce high-freq noise, but may impact performance
@@ -508,14 +508,14 @@ predict:
     climatology: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/ERA5_clim_1990_2019_6h_interp.nc'
 
     save_vars: ['PRECT','TS','CLDHGH','CLDLOW','CLDMED','TAUX','TAUY','U10','QFLX','FSNS','FLNS','FSNT','FLNT','SHFLX','LHFLX','TREFHT','PS','Qtot','U','V','T']
-    forcing_file: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate_branch_1980_2014.nc'
+    forcing_file: '/glade/derecho/scratch/wchapman/CAMULATOR_FORCING/b.e21.CREDIT_climate_cyclic_1yr.nc'
 
     
     run_fast_climate: False
-    init_cond_fast_climate: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/init_times/init_be21_condition_tensor_1981-01-01T00Z.pth'
+    init_cond_fast_climate: '/glade/derecho/scratch/wchapman/CAMULATOR_FORCING/init_be21_condition_tensor_2000-01-01T00Z.pth'
     inds_rmse_fast_climate: ['rmse_PRECT','rmse_TREFHT']
     seasonal_mean_fast_climate: '/glade/work/wchapman/miles_branchs/CESM_Spatial_PS/truth_be21_tensor_2013-01-01T00Z.pth'
-    timesteps_fast_climate: 200
+    timesteps_fast_climate: 50
     
     # deprecated
     # save_format: "nc"
