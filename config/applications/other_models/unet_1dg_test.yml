@@ -60,7 +60,7 @@ data:
     
     
 trainer:
-    type: era5
+    type: era5-gen1
 
     mode: ddp
     cpu_offload: False

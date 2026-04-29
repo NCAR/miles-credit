@@ -62,7 +62,7 @@ data:
     dataset_type: ERA5_MultiStep_Batcher # ERA5_and_Forcing_MultiStep MultiprocessingBatcherPrefetch ERA5_MultiStep_Batcher MultiprocessingBatcher
 
 trainer:
-    type: era5 # <---------- change to your type: single/multi-step training
+    type: era5-gen1 # <---------- change to your type: single/multi-step training
 
     mode: fsdp
     cpu_offload: False

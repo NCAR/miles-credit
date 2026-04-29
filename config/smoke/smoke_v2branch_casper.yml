@@ -84,7 +84,7 @@ loss:
     use_variable_weights: False
 
 trainer:
-    type: era5
+    type: era5-gen1
     mode: none
 
     load_weights: False

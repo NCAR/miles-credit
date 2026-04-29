@@ -488,7 +488,7 @@ trainer:
     # Choose the training routine
     # This is deprecated as of credit-2.0
     # Options: era5, or conus404
-    type: era5
+    type: era5-gen1
 
     # the keyword that controls GPU usage
     # fsdp: fully sharded data parallel

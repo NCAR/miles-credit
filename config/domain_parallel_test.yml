@@ -50,7 +50,7 @@ data:
     dataset_type: ERA5_MultiStep_Batcher
 
 trainer:
-    type: era5
+    type: era5-gen1
 
     mode: domain_parallel
     domain_parallel_size: 2
