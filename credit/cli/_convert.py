@@ -8,44 +8,45 @@ import yaml
 from ._common import _prompt, _prompt_bool, _repo_root
 
 
+class _FlowSeqDumper(yaml.Dumper):
+    """YAML dumper that writes lists of scalars as flow sequences [a, b, c]."""
+
+    def represent_sequence(self, tag, sequence, flow_style=None):
+        if all(isinstance(x, (int, float, str, bool, type(None))) for x in sequence):
+            flow_style = True
+        return super().represent_sequence(tag, sequence, flow_style=flow_style)
+
+
+def _yaml_dump(conf, f):
+    yaml.dump(conf, f, Dumper=_FlowSeqDumper, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
 _SPATIAL_TIME_DIMS = frozenset(("time", "lat", "lon", "latitude", "longitude", "x", "y"))
 
 
-def _detect_level_coord(glob_path: str) -> str | None:
-    """Return the vertical coordinate name by inspecting the first matching file.
-
-    Strips known spatial/time dimensions and returns whatever is left.
-    Returns None if the file can't be read or no vertical dim is found.
-    """
+def _zarr_dims(glob_path: str) -> list[str] | None:
+    """Return all dimension names from the first matching file, or None on failure."""
     import glob as _glob
 
     if not glob_path:
         return None
-
     candidates = sorted(_glob.glob(glob_path))
     if not candidates:
         return None
-
     first = candidates[0]
     try:
         import xarray as xr
 
-        if first.endswith(".zarr") or os.path.isdir(first):
-            ds = xr.open_zarr(first, consolidated=False)
-        else:
-            ds = xr.open_dataset(first, engine="netcdf4")
-
-        vert_dims = [d for d in ds.dims if d not in _SPATIAL_TIME_DIMS]
+        ds = (
+            xr.open_zarr(first, consolidated=False)
+            if (first.endswith(".zarr") or os.path.isdir(first))
+            else xr.open_dataset(first, engine="netcdf4")
+        )
+        dims = list(ds.dims)
         ds.close()
-
-        if len(vert_dims) == 1:
-            return vert_dims[0]
-        if len(vert_dims) > 1:
-            return vert_dims  # caller will prompt
+        return dims
     except Exception:
-        pass
-
-    return None
+        return None
 
 
 def _write_reload_config(config_path: str) -> str:
@@ -71,7 +72,7 @@ def _write_reload_config(config_path: str) -> str:
     reload_path = os.path.join(save_loc, "config_reload.yml")
 
     with open(reload_path, "w") as f:
-        yaml.dump(conf, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        _yaml_dump(conf, f)
 
     return reload_path
 
@@ -139,6 +140,7 @@ def _convert(args: argparse.Namespace) -> None:
         "static_first",
         "skip_periods",
         "one_shot",
+        "level_ids",
     }
     data = conf.get("data", {})
     if "source" not in data and _V1_DATA_FLAT_KEYS & set(data.keys()):
@@ -158,7 +160,7 @@ def _convert(args: argparse.Namespace) -> None:
         valid_years = data.get("valid_years") or [2018, 2019]
         n_levels = conf.get("model", {}).get("levels", 16)
         _DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
-        levels = [float(x) for x in data["level_ids"]] if "level_ids" in data else _DEFAULT_LEVELS_16[:n_levels]
+        levels = list(data["level_ids"]) if "level_ids" in data else _DEFAULT_LEVELS_16[:n_levels]
 
         era5_vars = {
             "prognostic": {
@@ -187,19 +189,11 @@ def _convert(args: argparse.Namespace) -> None:
 
         # Keep non-flat keys (forecast_len, valid_forecast_len, backprop_on_timestep, …)
         keep_keys = {k: v for k, v in data.items() if k not in _V1_DATA_FLAT_KEYS}
-        _detected = _detect_level_coord(prog_path)
-        if isinstance(_detected, list):
-            print(f"  Multiple vertical dims found in data: {_detected}")
-            _detected = None
-        if _detected is not None:
-            print(f"  Detected level_coord: '{_detected}'")
-            level_coord = _detected
-        else:
-            level_coord = _prompt("level_coord (vertical coordinate name in your data files)", default="").strip()
-            if not level_coord:
-                print(
-                    "  WARNING: level_coord left empty — edit data.source.ERA5.level_coord manually.", file=sys.stderr
-                )
+        level_coord = _prompt("level_coord (vertical coordinate name in your data files)").strip()
+        _all_dims = _zarr_dims(prog_path)
+        if _all_dims is not None and level_coord not in _all_dims:
+            print(f"  '{level_coord}' not found in file. Available dims: {_all_dims}", file=sys.stderr)
+            level_coord = _prompt("Choose from the above").strip()
 
         conf["data"] = {
             "source": {"ERA5": {"level_coord": level_coord, "levels": levels, "variables": era5_vars}},
@@ -279,45 +273,36 @@ def _convert(args: argparse.Namespace) -> None:
         print()
 
     # ------------------------------------------------------------------
-    # PBS / job settings
+    # PBS / job settings — skip entirely if pbs: already in config
     # ------------------------------------------------------------------
-    print("  --- PBS / job settings ---")
     pbs = conf.get("pbs", {})
+    if not pbs:
+        print("  --- PBS / job settings ---")
+        cluster = prompt("Cluster (casper/derecho)", default="derecho")
+        account = prompt(
+            "PBS account code",
+            default=os.environ.get("PBS_ACCOUNT") or "NAML0001",
+        )
+        conda = prompt("Conda env (name or full path)", default="")
+        walltime = prompt("Walltime (HH:MM:SS)", default="12:00:00")
+        job_name = prompt("Job name", default="credit_gen2")
 
-    cluster = prompt("Cluster (casper/derecho)", default="derecho")
-    account = prompt(
-        "PBS account code",
-        default=pbs.get("project") or pbs.get("account") or os.environ.get("PBS_ACCOUNT") or "NAML0001",
-    )
-    conda = prompt(
-        "Conda env (name or full path)", default=pbs.get("conda") or pbs.get("conda_env") or "credit-derecho"
-    )
-    walltime = prompt("Walltime (HH:MM:SS)", default=pbs.get("walltime") or "12:00:00")
-    job_name = prompt("Job name", default=pbs.get("job_name") or "credit_gen2")
+        new_pbs = {"project": account, "job_name": job_name, "walltime": walltime, "conda": conda}
 
-    new_pbs = {
-        "project": account,
-        "job_name": job_name,
-        "walltime": walltime,
-        "conda": conda,
-    }
+        if cluster == "derecho":
+            new_pbs["nodes"] = int(prompt("Nodes", default="1"))
+            new_pbs["ngpus"] = int(prompt("GPUs per node", default="4"))
+            new_pbs["ncpus"] = int(prompt("CPUs per node", default="64"))
+            new_pbs["mem"] = prompt("Memory per node", default="480GB")
+            new_pbs["queue"] = prompt("Queue", default="main")
+        else:
+            new_pbs["ngpus"] = int(prompt("GPUs", default="4"))
+            new_pbs["ncpus"] = int(prompt("CPUs per node", default="8"))
+            new_pbs["mem"] = prompt("Memory", default="128GB")
+            new_pbs["gpu_type"] = prompt("GPU type", default="a100_80gb")
+            new_pbs["queue"] = prompt("Queue", default="casper")
 
-    if cluster == "derecho":
-        nodes = int(prompt("Nodes", default=str(pbs.get("nodes") or 1)))
-        gpus = int(prompt("GPUs per node", default=str(pbs.get("ngpus") or pbs.get("gpus") or 4)))
-        cpus = int(prompt("CPUs per node", default=str(pbs.get("ncpus") or pbs.get("cpus") or 64)))
-        mem = prompt("Memory per node", default=pbs.get("mem") or "480GB")
-        queue = prompt("Queue", default=pbs.get("queue") or "main")
-        new_pbs.update({"nodes": nodes, "ngpus": gpus, "ncpus": cpus, "mem": mem, "queue": queue})
-    else:
-        gpus = int(prompt("GPUs", default=str(pbs.get("ngpus") or pbs.get("gpus") or 4)))
-        cpus = int(prompt("CPUs per node", default=str(pbs.get("ncpus") or pbs.get("cpus") or 8)))
-        mem = prompt("Memory", default=pbs.get("mem") or "128GB")
-        gpu_type = prompt("GPU type", default=pbs.get("gpu_type") or "a100_80gb")
-        queue = prompt("Queue", default=pbs.get("queue") or "casper")
-        new_pbs.update({"ngpus": gpus, "ncpus": cpus, "mem": mem, "gpu_type": gpu_type, "queue": queue})
-
-    conf["pbs"] = new_pbs
+        conf["pbs"] = new_pbs
 
     # ------------------------------------------------------------------
     # Output
@@ -328,7 +313,7 @@ def _convert(args: argparse.Namespace) -> None:
     out_path = prompt("Output config path", default=default_out)
 
     with open(out_path, "w") as f:
-        yaml.dump(conf, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        _yaml_dump(conf, f)
 
     print()
     print(f"  Saved → {out_path}")
