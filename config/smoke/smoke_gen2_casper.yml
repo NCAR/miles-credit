@@ -152,6 +152,12 @@ predict:
         duration: 4
         ic_interval_days: 1
         days: 2
+    realtime:
+        forecast_start_time: "2024-01-15 0000"
+        forecast_end_time: "2024-01-17 0000"
+        forecast_timestep: "6h"
+        use_gfs_init: true
+        initial_condition_path: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2/GFS_IC/'
     metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
     batch_size: 1
 

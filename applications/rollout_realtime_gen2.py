@@ -45,6 +45,7 @@ from credit.distributed import get_rank_info, setup, distributed_model_wrapper
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.nwp import build_GFS_init
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -174,6 +175,64 @@ def _save_worker(shm_name, arr_shape, arr_dtype, init_str, step, fhr_per_step, l
         print(f"  step={step:3d}  valid={utc_dt.strftime('%Y-%m-%d %HZ')}  fhr={fhr_per_step * step:3d}h")
     except Exception:
         print(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# GFS initial condition fetch
+# ---------------------------------------------------------------------------
+
+
+def run_gfs_init(conf, init_time: pd.Timestamp, n_procs: int = 1) -> str:
+    """Download GFS analysis for init_time, regrid to CREDIT grid, save as zarr.
+
+    Patches conf['data']['source']['ERA5']['variables']['prognostic']['path']
+    to the generated zarr so ERA5Dataset loads the GFS IC at step 0.
+    Returns the zarr path.
+    """
+    rt_conf = conf["predict"]["realtime"]
+    ic_path = rt_conf["initial_condition_path"]
+    os.makedirs(ic_path, exist_ok=True)
+
+    zarr_path = os.path.join(ic_path, f"gfs_init_{init_time.strftime('%Y%m%d_%H00')}.zarr")
+
+    if not os.path.exists(zarr_path):
+        base = os.path.abspath(os.path.dirname(__file__))
+        parent = os.path.basename(os.path.abspath(os.path.join(base, os.pardir)))
+        metadata_path = os.path.join(base, os.pardir, "metadata" if parent == "credit" else "credit/metadata")
+
+        lev_info_file = os.path.join(metadata_path, "ERA5_Lev_Info.nc")
+        credit_grid = xr.open_dataset(lev_info_file)
+        model_level_csv = os.path.join(metadata_path, "L137_model_level_indices.csv")
+        model_level_indices = pd.read_csv(model_level_csv)["model_level_indices"].values
+
+        prog = conf["data"]["source"]["ERA5"]["variables"].get("prognostic", {})
+        variables = prog.get("vars_3D", []) + prog.get("vars_2D", [])
+
+        now = pd.Timestamp.utcnow().tz_localize(None)
+        init_naive = init_time.tz_localize(None) if init_time.tzinfo is not None else init_time
+        gdas_base = (
+            "gs://global-forecast-system/"
+            if now - init_naive >= pd.Timedelta(days=10)
+            else "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/"
+        )
+
+        logger.info(f"Building GFS init for {init_time} from {gdas_base}")
+        gfs_ds = build_GFS_init(
+            output_grid=credit_grid,
+            date=init_time,
+            variables=variables,
+            model_level_file=lev_info_file,
+            model_levels=model_level_indices,
+            gdas_base_path=gdas_base,
+            n_procs=n_procs,
+        )
+        logger.info(f"Saving GFS init zarr to {zarr_path}")
+        gfs_ds.to_zarr(zarr_path, mode="w")
+    else:
+        logger.info(f"GFS init zarr already exists: {zarr_path}")
+
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = zarr_path
+    return zarr_path
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +488,10 @@ Examples:
     assert save_dir, "Specify --save-dir or set conf['predict']['save_forecast']."
     save_dir = os.path.expandvars(save_dir)
     os.makedirs(save_dir, exist_ok=True)
+
+    if conf.get("predict", {}).get("realtime", {}).get("use_gfs_init", False):
+        logger.info("use_gfs_init=True: fetching GFS analysis as initial condition")
+        run_gfs_init(conf, init_time, n_procs=args.num_cpus)
 
     seed_everything(conf["seed"])
     local_rank, world_rank, world_size = get_rank_info(conf["predict"]["mode"])

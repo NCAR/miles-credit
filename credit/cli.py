@@ -143,6 +143,19 @@ def _convert(args: argparse.Namespace) -> None:
     """Interactive v1 → v2 config converter."""
     import yaml
 
+    use_defaults = getattr(args, "defaults", False)
+    if use_defaults:
+
+        def prompt_bool(prompt, default=True):
+            return default
+
+        def prompt(prompt, default=None):
+            return str(default) if default is not None else ""
+
+    else:
+        prompt_bool = _prompt_bool
+        prompt = _prompt
+
     with open(args.config) as f:
         conf = yaml.safe_load(f)
 
@@ -177,6 +190,8 @@ def _convert(args: argparse.Namespace) -> None:
         "save_loc_surface",
         "save_loc_dynamic_forcing",
         "save_loc_static",
+        "save_loc_diagnostic",
+        "diagnostic_variables",
         "mean_path",
         "std_path",
         "train_years",
@@ -196,9 +211,11 @@ def _convert(args: argparse.Namespace) -> None:
         vars_2d = data.get("surface_variables") or []
         dyn_vars = data.get("dynamic_forcing_variables") or []
         static_vars = data.get("static_variables") or []
+        diag_vars = data.get("diagnostic_variables") or []
         prog_path = data.get("save_loc") or data.get("save_loc_surface") or ""
         dyn_path = data.get("save_loc_dynamic_forcing") or ""
         static_path = data.get("save_loc_static") or ""
+        diag_path = data.get("save_loc_diagnostic") or ""
         mean_path = data.get("mean_path") or ""
         std_path = data.get("std_path") or ""
         lead_time = int(data.get("lead_time_periods") or 6)
@@ -206,7 +223,7 @@ def _convert(args: argparse.Namespace) -> None:
         valid_years = data.get("valid_years") or [2018, 2019]
         n_levels = conf.get("model", {}).get("levels", 16)
         _DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
-        levels = _DEFAULT_LEVELS_16[:n_levels]
+        levels = [int(x) for x in data["level_ids"]] if "level_ids" in data else _DEFAULT_LEVELS_16[:n_levels]
 
         era5_vars = {
             "prognostic": {
@@ -224,7 +241,14 @@ def _convert(args: argparse.Namespace) -> None:
             }
         if static_vars:
             era5_vars["static"] = {"vars_2D": static_vars, "path": static_path}
-        era5_vars["diagnostic"] = None
+        if diag_vars:
+            era5_vars["diagnostic"] = {
+                "vars_2D": diag_vars,
+                "path": diag_path,
+                "filename_time_format": "%Y",
+            }
+        else:
+            era5_vars["diagnostic"] = None
 
         # Keep non-flat keys (forecast_len, valid_forecast_len, backprop_on_timestep, …)
         keep_keys = {k: v for k, v in data.items() if k not in _V1_DATA_FLAT_KEYS}
@@ -267,12 +291,15 @@ def _convert(args: argparse.Namespace) -> None:
     conf["data"]["valid_forecast_len"] = new_vfl
     changes.append(f"data.valid_forecast_len: {vfl} → {new_vfl}")
 
-    # backprop_on_timestep: v1 is 0-indexed, v2 is 1-indexed
+    # backprop_on_timestep: clamp to [1, forecast_len] so it is always valid
     bpt = conf.get("data", {}).get("backprop_on_timestep")
     if bpt is not None:
-        new_bpt = [t + 1 for t in bpt]
+        new_fl = conf["data"]["forecast_len"]
+        new_bpt = [t for t in bpt if 1 <= t <= new_fl]
+        if not new_bpt:
+            new_bpt = list(range(1, new_fl + 1))
         conf["data"]["backprop_on_timestep"] = new_bpt
-        changes.append(f"data.backprop_on_timestep: {bpt} → {new_bpt}  (1-indexed in v2)")
+        changes.append(f"data.backprop_on_timestep: {bpt} → {new_bpt}  (clamped to [1, {new_fl}])")
 
     print("  Auto-applied:")
     for c in changes:
@@ -284,13 +311,13 @@ def _convert(args: argparse.Namespace) -> None:
     # ------------------------------------------------------------------
     print("  --- New v2 trainer features ---")
 
-    use_ema = _prompt_bool("Enable EMA (exponential moving average of weights)? Recommended", default=True)
+    use_ema = prompt_bool("Enable EMA (exponential moving average of weights)? Recommended", default=True)
     conf["trainer"]["use_ema"] = use_ema
     if use_ema:
-        ema_decay = _prompt("EMA decay", default="0.9999")
+        ema_decay = prompt("EMA decay", default="0.9999")
         conf["trainer"]["ema_decay"] = float(ema_decay)
 
-    use_tb = _prompt_bool("Enable TensorBoard logging", default=True)
+    use_tb = prompt_bool("Enable TensorBoard logging", default=True)
     conf["trainer"]["use_tensorboard"] = use_tb
     print()
 
@@ -303,9 +330,9 @@ def _convert(args: argparse.Namespace) -> None:
 
     if is_ensemble:
         print(f"  --- Ensemble settings (detected: ensemble_size={ensemble_size}, loss={loss_type}) ---")
-        keep_ensemble = _prompt_bool("Keep ensemble training", default=True)
+        keep_ensemble = prompt_bool("Keep ensemble training", default=True)
         if keep_ensemble:
-            new_size = _prompt("Ensemble size", default=str(ensemble_size))
+            new_size = prompt("Ensemble size", default=str(ensemble_size))
             conf["trainer"]["ensemble_size"] = int(new_size)
         else:
             conf["trainer"]["ensemble_size"] = 1
@@ -318,16 +345,16 @@ def _convert(args: argparse.Namespace) -> None:
     print("  --- PBS / job settings ---")
     pbs = conf.get("pbs", {})
 
-    cluster = _prompt("Cluster (casper/derecho)", default="derecho")
-    account = _prompt(
+    cluster = prompt("Cluster (casper/derecho)", default="derecho")
+    account = prompt(
         "PBS account code",
         default=pbs.get("project") or pbs.get("account") or os.environ.get("PBS_ACCOUNT") or "NAML0001",
     )
-    conda = _prompt(
+    conda = prompt(
         "Conda env (name or full path)", default=pbs.get("conda") or pbs.get("conda_env") or "credit-derecho"
     )
-    walltime = _prompt("Walltime (HH:MM:SS)", default=pbs.get("walltime") or "12:00:00")
-    job_name = _prompt("Job name", default=pbs.get("job_name") or "credit_gen2")
+    walltime = prompt("Walltime (HH:MM:SS)", default=pbs.get("walltime") or "12:00:00")
+    job_name = prompt("Job name", default=pbs.get("job_name") or "credit_gen2")
 
     new_pbs = {
         "project": account,
@@ -337,18 +364,18 @@ def _convert(args: argparse.Namespace) -> None:
     }
 
     if cluster == "derecho":
-        nodes = int(_prompt("Nodes", default=str(pbs.get("nodes") or 1)))
-        gpus = int(_prompt("GPUs per node", default=str(pbs.get("ngpus") or pbs.get("gpus") or 4)))
-        cpus = int(_prompt("CPUs per node", default=str(pbs.get("ncpus") or pbs.get("cpus") or 64)))
-        mem = _prompt("Memory per node", default=pbs.get("mem") or "480GB")
-        queue = _prompt("Queue", default=pbs.get("queue") or "main")
+        nodes = int(prompt("Nodes", default=str(pbs.get("nodes") or 1)))
+        gpus = int(prompt("GPUs per node", default=str(pbs.get("ngpus") or pbs.get("gpus") or 4)))
+        cpus = int(prompt("CPUs per node", default=str(pbs.get("ncpus") or pbs.get("cpus") or 64)))
+        mem = prompt("Memory per node", default=pbs.get("mem") or "480GB")
+        queue = prompt("Queue", default=pbs.get("queue") or "main")
         new_pbs.update({"nodes": nodes, "ngpus": gpus, "ncpus": cpus, "mem": mem, "queue": queue})
     else:
-        gpus = int(_prompt("GPUs", default=str(pbs.get("ngpus") or pbs.get("gpus") or 4)))
-        cpus = int(_prompt("CPUs per node", default=str(pbs.get("ncpus") or pbs.get("cpus") or 8)))
-        mem = _prompt("Memory", default=pbs.get("mem") or "128GB")
-        gpu_type = _prompt("GPU type", default=pbs.get("gpu_type") or "a100_80gb")
-        queue = _prompt("Queue", default=pbs.get("queue") or "casper")
+        gpus = int(prompt("GPUs", default=str(pbs.get("ngpus") or pbs.get("gpus") or 4)))
+        cpus = int(prompt("CPUs per node", default=str(pbs.get("ncpus") or pbs.get("cpus") or 8)))
+        mem = prompt("Memory", default=pbs.get("mem") or "128GB")
+        gpu_type = prompt("GPU type", default=pbs.get("gpu_type") or "a100_80gb")
+        queue = prompt("Queue", default=pbs.get("queue") or "casper")
         new_pbs.update({"ngpus": gpus, "ncpus": cpus, "mem": mem, "gpu_type": gpu_type, "queue": queue})
 
     conf["pbs"] = new_pbs
@@ -359,7 +386,7 @@ def _convert(args: argparse.Namespace) -> None:
     print()
     base, ext = os.path.splitext(args.config)
     default_out = getattr(args, "output", None) or (f"{base}_gen2{ext}" if ext else f"{args.config}_gen2.yml")
-    out_path = _prompt("Output config path", default=default_out)
+    out_path = prompt("Output config path", default=default_out)
 
     with open(out_path, "w") as f:
         yaml.dump(conf, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
@@ -2508,7 +2535,7 @@ def _build_parser() -> argparse.ArgumentParser:
               - trainer.type: era5 → era5-gen2
               - data.forecast_len: +1  (v2 semantics: 1 = single step, v1 used 0)
               - data.valid_forecast_len: +1
-              - data.backprop_on_timestep: shifted to 1-indexed
+              - data.backprop_on_timestep: clamped to [1, forecast_len]
 
             Interactive prompts for new v2 features:
               - EMA (exponential moving average of weights)
@@ -2523,6 +2550,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="v1 config YAML to convert")
     p.add_argument("-o", "--output", default=None, metavar="OUTPUT", help="Output path (default: <input>_gen2.yml)")
+    p.add_argument("-y", "--defaults", action="store_true", help="Accept all defaults non-interactively")
 
     # ---- init ----
     # ---- metrics ----
