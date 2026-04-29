@@ -108,8 +108,9 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
 
-    mean_ds = xr.open_dataset(data_conf["mean_path"]).load()
-    std_ds = xr.open_dataset(data_conf["std_path"]).load()
+    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", data_conf)
+    mean_ds = xr.open_dataset(norm_args.get("mean_path", data_conf.get("mean_path"))).load()
+    std_ds = xr.open_dataset(norm_args.get("std_path", data_conf.get("std_path"))).load()
 
     def _stats(varname, is_3d):
         if varname not in mean_ds:
@@ -153,24 +154,24 @@ def _sample_to_batch(sample):
 # ---------------------------------------------------------------------------
 
 
-def _save_worker(shm_name, arr_shape, arr_dtype, init_str, step, lead_time_periods, lat, lon, meta_data, conf):
+def _save_worker(shm_name, arr_shape, arr_dtype, init_str, step, fhr_per_step, lat, lon, meta_data, conf):
     try:
         shm = SharedMemory(shm_name)
         y_np = np.ndarray(arr_shape, dtype=arr_dtype, buffer=shm.buf).copy()
         shm.unlink()
 
-        utc_dt = datetime.strptime(init_str, "%Y-%m-%dT%HZ") + timedelta(hours=lead_time_periods * step)
+        utc_dt = datetime.strptime(init_str, "%Y-%m-%dT%HZ") + timedelta(hours=fhr_per_step * step)
         y_t = torch.from_numpy(y_np)
         darray_upper_air, darray_single_level = make_xarray(y_t, utc_dt, lat, lon, conf)
         save_netcdf_increment(
             darray_upper_air,
             darray_single_level,
             init_str,
-            lead_time_periods * step,
+            fhr_per_step * step,
             meta_data,
             conf,
         )
-        print(f"  step={step:3d}  valid={utc_dt.strftime('%Y-%m-%d %HZ')}  fhr={lead_time_periods * step:3d}h")
+        print(f"  step={step:3d}  valid={utc_dt.strftime('%Y-%m-%d %HZ')}  fhr={fhr_per_step * step:3d}h")
     except Exception:
         print(traceback.format_exc())
 
@@ -198,8 +199,8 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     else:
         device = torch.device("cpu")
 
-    lead_time_periods = conf["data"]["lead_time_periods"]
     dt = pd.Timedelta(conf["data"]["timestep"])
+    fhr_per_step = int(dt.total_seconds() / 3600)
 
     # ---- v2 channel bookkeeping ----
     src = conf["data"]["source"]["ERA5"]
@@ -271,7 +272,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     init_str = init_time.strftime("%Y-%m-%dT%HZ")
     conf["predict"]["save_forecast"] = save_dir
 
-    logger.info(f"Forecast init: {init_str}  steps: {n_steps}  fhr_max: {n_steps * lead_time_periods}h")
+    logger.info(f"Forecast init: {init_str}  steps: {n_steps}  fhr_max: {n_steps * fhr_per_step}h")
     logger.info(f"Saving to: {save_dir}/{init_str}/")
 
     # ---- Load full initial state ----
@@ -305,7 +306,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
             shm_arr[:] = y_phys
             result = pool.apply_async(
                 _save_worker,
-                (shm.name, y_phys.shape, y_phys.dtype, init_str, step, lead_time_periods, lat, lon, meta_data, conf),
+                (shm.name, y_phys.shape, y_phys.dtype, init_str, step, fhr_per_step, lat, lon, meta_data, conf),
             )
             results.append(result)
 
@@ -419,9 +420,9 @@ Examples:
     if args.steps is not None:
         n_steps = args.steps
     else:
-        lead_time_periods = conf["data"]["lead_time_periods"]
+        fhr_per_step = int(pd.Timedelta(conf["data"]["timestep"]).total_seconds() / 3600)
         days = conf.get("predict", {}).get("forecasts", {}).get("days", 10)
-        n_steps = days * (24 // lead_time_periods)
+        n_steps = days * (24 // fhr_per_step)
 
     # ---- Save directory ----
     save_dir = args.save_dir or conf.get("predict", {}).get("save_forecast")
