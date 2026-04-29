@@ -84,7 +84,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to v2 YAML config")
     p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
-    p.add_argument("--jobs", type=int, default=10, metavar="N", help="Number of parallel PBS jobs (default: 10)")
+    p.add_argument("--jobs", type=int, default=1, metavar="N", help="Number of parallel PBS jobs (default: 1)")
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per job")
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per job")
     p.add_argument("--mem", default=None, help="Memory per job")
@@ -151,7 +151,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")
     p.add_argument("--dry-run", action="store_true", help="Print the PBS script without submitting")
-    p.add_argument("--jobs", type=int, default=10, metavar="N", help="Parallel PBS rollout jobs for --mode rollout")
+    p.add_argument(
+        "--jobs", type=int, default=1, metavar="N", help="Parallel PBS rollout jobs for --mode rollout (default: 1)"
+    )
     p.add_argument(
         "--init-time", dest="init_time", default=None, metavar="YYYY-MM-DDTHH", help="Init time for --mode realtime"
     )
