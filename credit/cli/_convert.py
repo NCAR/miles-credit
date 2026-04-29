@@ -8,23 +8,23 @@ import yaml
 from ._common import _prompt, _prompt_bool, _repo_root
 
 
-def _detect_level_coord(glob_path: str, levels: list) -> str:
-    """Return the vertical coordinate name by peeking at the first matching file.
+_SPATIAL_TIME_DIMS = frozenset(("time", "lat", "lon", "latitude", "longitude", "x", "y"))
 
-    Falls back to a heuristic (max(levels) <= 137 → 'hybrid') if the file
-    cannot be opened or has no obvious vertical dimension.
+
+def _detect_level_coord(glob_path: str) -> str | None:
+    """Return the vertical coordinate name by inspecting the first matching file.
+
+    Strips known spatial/time dimensions and returns whatever is left.
+    Returns None if the file can't be read or no vertical dim is found.
     """
     import glob as _glob
 
-    _fallback = "hybrid" if levels and max(levels) <= 137 else "level"
-
     if not glob_path:
-        return _fallback
+        return None
 
-    # Resolve the first matching path (glob_path may contain wildcards)
     candidates = sorted(_glob.glob(glob_path))
     if not candidates:
-        return _fallback
+        return None
 
     first = candidates[0]
     try:
@@ -35,22 +35,17 @@ def _detect_level_coord(glob_path: str, levels: list) -> str:
         else:
             ds = xr.open_dataset(first, engine="netcdf4")
 
-        # Look for a dimension that could be the vertical coordinate
-        _VERT_HINTS = ("hybrid", "level", "isobaricInhPa", "plev", "pressure_level", "lev")
-        for dim in ds.dims:
-            if dim in _VERT_HINTS:
-                ds.close()
-                return dim
-        # If nothing matched the hints, return the first non-spatial dim
-        for dim in ds.dims:
-            if dim not in ("time", "lat", "lon", "latitude", "longitude", "x", "y"):
-                ds.close()
-                return dim
+        vert_dims = [d for d in ds.dims if d not in _SPATIAL_TIME_DIMS]
         ds.close()
+
+        if len(vert_dims) == 1:
+            return vert_dims[0]
+        if len(vert_dims) > 1:
+            return vert_dims  # caller will prompt
     except Exception:
         pass
 
-    return _fallback
+    return None
 
 
 def _write_reload_config(config_path: str) -> str:
@@ -192,7 +187,19 @@ def _convert(args: argparse.Namespace) -> None:
 
         # Keep non-flat keys (forecast_len, valid_forecast_len, backprop_on_timestep, …)
         keep_keys = {k: v for k, v in data.items() if k not in _V1_DATA_FLAT_KEYS}
-        level_coord = _detect_level_coord(prog_path, levels)
+        _detected = _detect_level_coord(prog_path)
+        if isinstance(_detected, list):
+            print(f"  Multiple vertical dims found in data: {_detected}")
+            _detected = None
+        if _detected is not None:
+            print(f"  Detected level_coord: '{_detected}'")
+            level_coord = _detected
+        else:
+            level_coord = _prompt("level_coord (vertical coordinate name in your data files)", default="").strip()
+            if not level_coord:
+                print(
+                    "  WARNING: level_coord left empty — edit data.source.ERA5.level_coord manually.", file=sys.stderr
+                )
 
         conf["data"] = {
             "source": {"ERA5": {"level_coord": level_coord, "levels": levels, "variables": era5_vars}},
