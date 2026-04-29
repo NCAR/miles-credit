@@ -291,16 +291,6 @@ def _convert(args: argparse.Namespace) -> None:
     conf["data"]["valid_forecast_len"] = new_vfl
     changes.append(f"data.valid_forecast_len: {vfl} → {new_vfl}")
 
-    # backprop_on_timestep: clamp to [1, forecast_len] so it is always valid
-    bpt = conf.get("data", {}).get("backprop_on_timestep")
-    if bpt is not None:
-        new_fl = conf["data"]["forecast_len"]
-        new_bpt = [t for t in bpt if 1 <= t <= new_fl]
-        if not new_bpt:
-            new_bpt = list(range(1, new_fl + 1))
-        conf["data"]["backprop_on_timestep"] = new_bpt
-        changes.append(f"data.backprop_on_timestep: {bpt} → {new_bpt}  (clamped to [1, {new_fl}])")
-
     print("  Auto-applied:")
     for c in changes:
         print(f"    + {c}")
@@ -2535,7 +2525,7 @@ def _build_parser() -> argparse.ArgumentParser:
               - trainer.type: era5 → era5-gen2
               - data.forecast_len: +1  (v2 semantics: 1 = single step, v1 used 0)
               - data.valid_forecast_len: +1
-              - data.backprop_on_timestep: clamped to [1, forecast_len]
+
 
             Interactive prompts for new v2 features:
               - EMA (exponential moving average of weights)

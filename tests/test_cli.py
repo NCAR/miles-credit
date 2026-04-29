@@ -1290,7 +1290,7 @@ class TestConvertAutoTransform:
             result = yaml.safe_load(f)
         assert result["trainer"]["ensemble_size"] == 1
 
-    def test_backprop_on_timestep_shifted(self, tmp_path, monkeypatch):
+    def test_backprop_on_timestep_passthrough(self, tmp_path, monkeypatch):
         config_path = self._make_v1_conf(tmp_path)
         out_path = str(tmp_path / "v2.yml")
 
@@ -1319,7 +1319,7 @@ class TestConvertAutoTransform:
 
         with open(out_path) as f:
             result = yaml.safe_load(f)
-        assert result["data"]["backprop_on_timestep"] == [1, 2]  # [0,1] → [1,2]
+        assert result["data"]["backprop_on_timestep"] == [0, 1]  # passed through unchanged
 
 
 # ===========================================================================

@@ -91,10 +91,9 @@ class TrainerERA5Gen2(BaseTrainer):
 
         # forecast_len: 1 = 1 step (new semantics, unlike v1 where 0 = 1 step)
         self.forecast_len = data_conf["forecast_len"]
-        if "backprop_on_timestep" in data_conf:
-            self.backprop_on_timestep = data_conf["backprop_on_timestep"]
-        else:
-            self.backprop_on_timestep = list(range(1, self.forecast_len + 1))
+        trainer_conf = conf.get("trainer", {})
+        bpt = trainer_conf.get("backprop_on_timestep") or data_conf.get("backprop_on_timestep")
+        self.backprop_on_timestep = bpt if bpt is not None else list(range(1, self.forecast_len + 1))
 
         data_clamp = data_conf.get("data_clamp")
         if data_clamp is None:
