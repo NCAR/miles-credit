@@ -71,7 +71,7 @@ def estimate_dataloader_memory_gib(conf: dict) -> float:
         H = model_conf.get("image_height", 721)
         W = model_conf.get("image_width", 1440)
 
-        bytes_per_sample = H * W * total_ch * 4  # float32
+        bytes_per_sample = H * W * total_ch * 4  # float32 4 bytes
         bytes_per_sample *= 2  # input + target
 
         workers = trainer_conf.get("thread_workers", 4)
