@@ -8,6 +8,51 @@ import yaml
 from ._common import _prompt, _prompt_bool, _repo_root
 
 
+def _detect_level_coord(glob_path: str, levels: list) -> str:
+    """Return the vertical coordinate name by peeking at the first matching file.
+
+    Falls back to a heuristic (max(levels) <= 137 → 'hybrid') if the file
+    cannot be opened or has no obvious vertical dimension.
+    """
+    import glob as _glob
+
+    _fallback = "hybrid" if levels and max(levels) <= 137 else "level"
+
+    if not glob_path:
+        return _fallback
+
+    # Resolve the first matching path (glob_path may contain wildcards)
+    candidates = sorted(_glob.glob(glob_path))
+    if not candidates:
+        return _fallback
+
+    first = candidates[0]
+    try:
+        import xarray as xr
+
+        if first.endswith(".zarr") or os.path.isdir(first):
+            ds = xr.open_zarr(first, consolidated=False)
+        else:
+            ds = xr.open_dataset(first, engine="netcdf4")
+
+        # Look for a dimension that could be the vertical coordinate
+        _VERT_HINTS = ("hybrid", "level", "isobaricInhPa", "plev", "pressure_level", "lev")
+        for dim in ds.dims:
+            if dim in _VERT_HINTS:
+                ds.close()
+                return dim
+        # If nothing matched the hints, return the first non-spatial dim
+        for dim in ds.dims:
+            if dim not in ("time", "lat", "lon", "latitude", "longitude", "x", "y"):
+                ds.close()
+                return dim
+        ds.close()
+    except Exception:
+        pass
+
+    return _fallback
+
+
 def _write_reload_config(config_path: str) -> str:
     """Patch trainer reload fields and write a reload config next to the checkpoint.
 
@@ -147,19 +192,7 @@ def _convert(args: argparse.Namespace) -> None:
 
         # Keep non-flat keys (forecast_len, valid_forecast_len, backprop_on_timestep, …)
         keep_keys = {k: v for k, v in data.items() if k not in _V1_DATA_FLAT_KEYS}
-        _default_coord = "hybrid" if levels and max(levels) <= 137 else "level"
-        if not use_defaults:
-            _coord_hint = f"[{_default_coord}]"
-            _coord_ans = (
-                _prompt(
-                    f"level_coord — 'hybrid' for ERA5 model levels (1–137), 'level' for pressure levels {_coord_hint}",
-                    default=_default_coord,
-                ).strip()
-                or _default_coord
-            )
-            level_coord = _coord_ans if _coord_ans in ("hybrid", "level") else _default_coord
-        else:
-            level_coord = _default_coord
+        level_coord = _detect_level_coord(prog_path, levels)
 
         conf["data"] = {
             "source": {"ERA5": {"level_coord": level_coord, "levels": levels, "variables": era5_vars}},
