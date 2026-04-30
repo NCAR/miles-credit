@@ -204,22 +204,20 @@ class SphericalRandomField(torch.nn.Module):
         if variance_scale is None:
             variance_scale = length_scale ** (0.5 * (2 * smoothness - 2.0))
 
-        # lmax must match latitude_modes; v0.9.0 changed the default for equiangular
-        # grids to (nlat+1)//2 so we pin it explicitly for cross-version compatibility.
         self.inverse_sht = (
-            InverseRealSHT(
-                self.latitude_modes, self.longitude_modes, lmax=self.latitude_modes, grid=grid_type, norm="backward"
-            )
+            InverseRealSHT(self.latitude_modes, self.longitude_modes, grid=grid_type, norm="backward")
             .to(dtype=dtype)
             .to(device=device)
         )
 
-        # Compute square root of covariance eigenvalues
-        # Eigenvalues of spherical Laplacian: λ_j = j(j+1) for j = 0, 1, 2, ...
-        laplacian_eigenvals = torch.tensor([j * (j + 1) for j in range(self.latitude_modes)], device=device)
+        # Read back the lmax/mmax that torch_harmonics actually resolved (v0.9.0
+        # may truncate equiangular grids to (nlat+1)//2 regardless of what we pass).
+        actual_lmax = self.inverse_sht.lmax
+        actual_mmax = self.inverse_sht.mmax
 
-        # Reshape for broadcasting over all spherical harmonic modes
-        laplacian_eigenvals = laplacian_eigenvals.view(self.latitude_modes, 1).repeat(1, self.latitude_modes + 1)
+        # Compute square root of covariance eigenvalues using actual spectral dims.
+        laplacian_eigenvals = torch.tensor([j * (j + 1) for j in range(actual_lmax)], device=device)
+        laplacian_eigenvals = laplacian_eigenvals.view(actual_lmax, 1).repeat(1, actual_mmax)
 
         # Compute covariance eigenvalues: σ² * (λ/R² + τ²)^(-α)
         covariance_eigenvals = variance_scale * (
@@ -271,8 +269,8 @@ class SphericalRandomField(torch.nn.Module):
             noise_shape = torch.Size(
                 (
                     num_samples,
-                    self.latitude_modes,
-                    self.latitude_modes + 1,
+                    self.inverse_sht.lmax,
+                    self.inverse_sht.mmax,
                     2,  # Real and imaginary components
                 )
             )
