@@ -30,7 +30,7 @@ if _BRIDGESCALER_AVAILABLE:
     PREBLOCK_REGISTRY["bridgescaler_transform"] = BridgeScalerTransformer
 
 
-def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
+def build_preblocks(preblock_cfg: dict | None = None) -> nn.ModuleDict:
     """
     Instantiates all preblocks from the config's 'preblocks' section.
 
@@ -47,7 +47,7 @@ def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
     return nn.ModuleDict(
         {
             name: PREBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
-            for name, block_cfg in preblock_cfg.items()
+            for name, block_cfg in (preblock_cfg or {}).items()
         }
     )
 
