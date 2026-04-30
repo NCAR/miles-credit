@@ -88,7 +88,7 @@ def gather_tensor(tensor):
     return Gather.apply(tensor)
 
 
-class Trainer(BaseTrainer):
+class TrainerERA5Ensemble(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer class for handling the training, validation, and checkpointing of models.

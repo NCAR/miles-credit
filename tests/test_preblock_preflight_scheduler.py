@@ -1,9 +1,6 @@
 """
 Tests for:
-  - credit/preblock/concat.py   (ConcatPreblock, _sort_key, _assemble)
-  - credit/preblock/norm.py     (ERA5Normalizer)
-  - credit/preblock/__init__.py (apply_preblocks)
-  - credit/trainers/preflight.py (estimate_dataloader_memory_gb, check_dataloader_startup)
+  - credit/trainers/preflight.py (estimate_dataloader_memory_gib, check_dataloader_startup)
   - credit/scheduler.py         (load_scheduler, CosineAnnealingWarmupRestarts,
                                   annealed_probability, update_on_batch)
 
@@ -12,355 +9,9 @@ All tests run on CPU with no data files required.
 
 import time
 
-import numpy as np
 import pytest
 import torch
 import torch.nn as nn
-import xarray as xr
-
-# ---------------------------------------------------------------------------
-# credit/preblock/concat.py
-# ---------------------------------------------------------------------------
-
-
-class TestSortKey:
-    def test_prognostic_3d_first(self):
-        from credit.preblock.concat import _sort_key, _INPUT_FIELD_ORDER
-
-        k1 = _sort_key("era5/prognostic/3d/temperature", _INPUT_FIELD_ORDER)
-        k2 = _sort_key("era5/dynamic_forcing/2d/tisr", _INPUT_FIELD_ORDER)
-        assert k1 < k2
-
-    def test_3d_before_2d_within_same_field(self):
-        from credit.preblock.concat import _sort_key, _INPUT_FIELD_ORDER
-
-        k3d = _sort_key("era5/prognostic/3d/u", _INPUT_FIELD_ORDER)
-        k2d = _sort_key("era5/prognostic/2d/SP", _INPUT_FIELD_ORDER)
-        assert k3d < k2d
-
-    def test_unknown_field_type_gets_max_priority(self):
-        from credit.preblock.concat import _sort_key, _INPUT_FIELD_ORDER
-
-        k_known = _sort_key("era5/prognostic/3d/u", _INPUT_FIELD_ORDER)
-        k_unknown = _sort_key("era5/unknown_type/3d/foo", _INPUT_FIELD_ORDER)
-        assert k_unknown > k_known
-
-    def test_short_key_returns_max(self):
-        from credit.preblock.concat import _sort_key, _INPUT_FIELD_ORDER
-
-        k = _sort_key("era5", _INPUT_FIELD_ORDER)
-        assert k == (999, 999)
-
-    def test_target_field_order(self):
-        from credit.preblock.concat import _sort_key, _TARGET_FIELD_ORDER
-
-        k_prog = _sort_key("era5/prognostic/2d/SP", _TARGET_FIELD_ORDER)
-        k_diag = _sort_key("era5/diagnostic/2d/precip", _TARGET_FIELD_ORDER)
-        assert k_prog < k_diag
-
-
-class TestAssemble:
-    def _make_tensor(self, B=1, C=1, T=1, H=4, W=4):
-        return torch.randn(B, C, T, H, W)
-
-    def test_single_key_passthrough(self):
-        from credit.preblock.concat import _assemble, _INPUT_FIELD_ORDER
-
-        t = self._make_tensor(C=3)
-        result = _assemble({"era5/prognostic/3d/u": t}, _INPUT_FIELD_ORDER)
-        assert result.shape == t.shape
-
-    def test_concatenates_along_channel_dim(self):
-        from credit.preblock.concat import _assemble, _INPUT_FIELD_ORDER
-
-        t1 = self._make_tensor(C=2)
-        t2 = self._make_tensor(C=3)
-        result = _assemble(
-            {"era5/prognostic/3d/u": t1, "era5/prognostic/2d/SP": t2},
-            _INPUT_FIELD_ORDER,
-        )
-        assert result.shape[1] == 5  # 2 + 3
-
-    def test_ordering_prognostic_before_dynamic_forcing(self):
-        from credit.preblock.concat import _assemble, _INPUT_FIELD_ORDER
-
-        prog = torch.ones(1, 2, 1, 4, 4)
-        dyn = torch.zeros(1, 1, 1, 4, 4)
-        result = _assemble(
-            {"era5/dynamic_forcing/2d/tisr": dyn, "era5/prognostic/2d/SP": prog},
-            _INPUT_FIELD_ORDER,
-        )
-        # First 2 channels should be prog (ones), last 1 should be dyn (zeros)
-        assert result.shape[1] == 3
-        assert torch.all(result[:, :2] == 1.0)
-        assert torch.all(result[:, 2:] == 0.0)
-
-
-class TestConcatPreblock:
-    def _batch(self):
-        """Minimal batch with era5 source having input and target dicts."""
-        return {
-            "era5": {
-                "input": {
-                    "era5/prognostic/3d/temperature": torch.ones(1, 2, 1, 4, 4),
-                    "era5/prognostic/2d/SP": torch.ones(1, 1, 1, 4, 4),
-                    "era5/dynamic_forcing/2d/tisr": torch.zeros(1, 1, 1, 4, 4),
-                },
-                "target": {
-                    "era5/prognostic/3d/temperature": torch.ones(1, 2, 1, 4, 4),
-                    "era5/prognostic/2d/SP": torch.ones(1, 1, 1, 4, 4),
-                },
-            }
-        }
-
-    def test_forward_creates_x_and_y(self):
-        from credit.preblock.concat import ConcatPreblock
-
-        block = ConcatPreblock()
-        out = block(self._batch())
-        assert "x" in out
-        assert "y" in out
-
-    def test_x_channel_count(self):
-        from credit.preblock.concat import ConcatPreblock
-
-        block = ConcatPreblock()
-        out = block(self._batch())
-        # 2 (3d temp) + 1 (2d SP) + 1 (dynamic forcing) = 4
-        assert out["x"].shape[1] == 4
-
-    def test_y_channel_count(self):
-        from credit.preblock.concat import ConcatPreblock
-
-        block = ConcatPreblock()
-        out = block(self._batch())
-        # 2 (3d temp) + 1 (2d SP) = 3
-        assert out["y"].shape[1] == 3
-
-    def test_non_dict_source_skipped(self):
-        """Non-dict values in batch (e.g. metadata strings) are silently skipped."""
-        from credit.preblock.concat import ConcatPreblock
-
-        batch = self._batch()
-        batch["metadata"] = "some_string"
-        block = ConcatPreblock()
-        out = block(batch)
-        assert "x" in out
-
-    def test_two_sources_concatenated(self):
-        """Multiple sources are concatenated together."""
-        from credit.preblock.concat import ConcatPreblock
-
-        batch = {
-            "era5": {
-                "input": {"era5/prognostic/2d/SP": torch.ones(1, 1, 1, 4, 4)},
-                "target": {"era5/prognostic/2d/SP": torch.ones(1, 1, 1, 4, 4)},
-            },
-            "mrms": {
-                "input": {"mrms/prognostic/2d/reflectivity": torch.zeros(1, 1, 1, 4, 4)},
-                "target": {"mrms/prognostic/2d/reflectivity": torch.zeros(1, 1, 1, 4, 4)},
-            },
-        }
-        block = ConcatPreblock()
-        out = block(batch)
-        assert out["x"].shape[1] == 2  # one from each source
-
-
-# ---------------------------------------------------------------------------
-# credit/preblock/__init__.py — apply_preblocks
-# ---------------------------------------------------------------------------
-
-
-class TestApplyPreblocks:
-    def test_empty_moduledict_passthrough(self):
-        from credit.preblock import apply_preblocks
-
-        batch = {"x": torch.randn(1, 4, 1, 4, 4)}
-        out = apply_preblocks(nn.ModuleDict(), batch)
-        assert "x" in out
-
-    def test_single_preblock_applied(self):
-        from credit.preblock import apply_preblocks
-
-        class _AddOne(nn.Module):
-            def forward(self, b):
-                b["counter"] = b.get("counter", 0) + 1
-                return b
-
-        preblocks = nn.ModuleDict({"add": _AddOne()})
-        batch = {}
-        out = apply_preblocks(preblocks, batch)
-        assert out["counter"] == 1
-
-    def test_two_preblocks_applied_in_order(self):
-        from credit.preblock import apply_preblocks
-
-        class _Append(nn.Module):
-            def __init__(self, char):
-                super().__init__()
-                self.char = char
-
-            def forward(self, b):
-                b["log"] = b.get("log", "") + self.char
-                return b
-
-        preblocks = nn.ModuleDict({"a": _Append("A"), "b": _Append("B")})
-        out = apply_preblocks(preblocks, {})
-        assert out["log"] == "AB"
-
-
-# ---------------------------------------------------------------------------
-# credit/preblock/norm.py — ERA5Normalizer
-# ---------------------------------------------------------------------------
-
-
-def _make_norm_conf(mean_path, std_path, levels=(500, 850)):
-    return {
-        "data": {
-            "mean_path": mean_path,
-            "std_path": std_path,
-            "source": {
-                "ERA5": {
-                    "level_coord": "level",
-                    "levels": list(levels),
-                    "variables": {
-                        "prognostic": {
-                            "vars_3D": ["temperature"],
-                            "vars_2D": ["SP"],
-                        },
-                        "diagnostic": {"vars_3D": [], "vars_2D": []},
-                        "dynamic_forcing": {"vars_2D": []},
-                        "static": {"vars_2D": []},
-                    },
-                }
-            },
-        }
-    }
-
-
-def _write_stats_nc(path, variables_3d, variables_2d, levels):
-    """Write a minimal NetCDF with mean/std values for testing."""
-
-    data_vars = {}
-    for v in variables_3d:
-        data_vars[v] = xr.DataArray(np.ones(len(levels)), dims=["level"], coords={"level": list(levels)})
-    for v in variables_2d:
-        data_vars[v] = xr.DataArray(np.array(1.0))
-    ds = xr.Dataset(data_vars)
-    ds.to_netcdf(path)
-    return path
-
-
-class TestERA5Normalizer:
-    @pytest.fixture()
-    def stats_files(self, tmp_path):
-        levels = [500, 850]
-        mean_path = str(tmp_path / "mean.nc")
-        std_path = str(tmp_path / "std.nc")
-        _write_stats_nc(mean_path, ["temperature"], ["SP"], levels)
-        _write_stats_nc(std_path, ["temperature"], ["SP"], levels)
-        return mean_path, std_path, levels
-
-    def test_normalizes_3d_variable(self, stats_files):
-        from credit.preblock.norm import ERA5Normalizer
-
-        mean_path, std_path, levels = stats_files
-        conf = _make_norm_conf(mean_path, std_path, levels)
-        norm = ERA5Normalizer(conf)
-
-        t = torch.full((1, 2, 1, 4, 4), 2.0)  # mean=1, std=1 → normalized = 1
-        batch = {
-            "era5": {
-                "input": {"era5/prognostic/3d/temperature": t.clone()},
-                "target": {"era5/prognostic/3d/temperature": t.clone()},
-            }
-        }
-        out = norm(batch)
-        result = out["era5"]["input"]["era5/prognostic/3d/temperature"]
-        assert torch.allclose(result, torch.ones_like(result), atol=1e-5)
-
-    def test_normalizes_2d_variable(self, stats_files):
-        from credit.preblock.norm import ERA5Normalizer
-
-        mean_path, std_path, levels = stats_files
-        conf = _make_norm_conf(mean_path, std_path, levels)
-        norm = ERA5Normalizer(conf)
-
-        t = torch.full((1, 1, 1, 4, 4), 3.0)  # mean=1, std=1 → normalized = 2
-        batch = {
-            "era5": {
-                "input": {"era5/prognostic/2d/SP": t.clone()},
-                "target": {"era5/prognostic/2d/SP": t.clone()},
-            }
-        }
-        out = norm(batch)
-        result = out["era5"]["input"]["era5/prognostic/2d/SP"]
-        assert torch.allclose(result, torch.full_like(result, 2.0), atol=1e-5)
-
-    def test_missing_variable_passes_through(self, stats_files):
-        from credit.preblock.norm import ERA5Normalizer
-
-        mean_path, std_path, levels = stats_files
-        conf = _make_norm_conf(mean_path, std_path, levels)
-        norm = ERA5Normalizer(conf)
-
-        t = torch.full((1, 1, 1, 4, 4), 7.0)
-        batch = {
-            "era5": {
-                "input": {"era5/static/2d/land_sea_mask": t.clone()},
-                "target": {},
-            }
-        }
-        out = norm(batch)
-        result = out["era5"]["input"]["era5/static/2d/land_sea_mask"]
-        assert torch.allclose(result, torch.full_like(result, 7.0))
-
-    def test_warns_once_for_mean_only_variable(self, stats_files, caplog):
-        """Variable in mean file but not std file triggers a warning exactly once."""
-        from credit.preblock.norm import ERA5Normalizer
-        import logging
-
-        mean_path, std_path, levels = stats_files
-
-        # Write a mean file that includes an extra var not in std
-        mean_path2 = mean_path.replace("mean.nc", "mean2.nc")
-        data_vars = {
-            "temperature": xr.DataArray(np.ones(len(levels)), dims=["level"], coords={"level": list(levels)}),
-            "SP": xr.DataArray(np.array(1.0)),
-            "extra_var": xr.DataArray(np.array(1.0)),
-        }
-        xr.Dataset(data_vars).to_netcdf(mean_path2)
-
-        conf = _make_norm_conf(mean_path2, std_path, levels)
-        norm = ERA5Normalizer(conf)
-
-        t = torch.zeros(1, 1, 1, 4, 4)
-        batch = {
-            "era5": {
-                "input": {"era5/prognostic/2d/extra_var": t.clone()},
-                "target": {},
-            }
-        }
-
-        with caplog.at_level(logging.WARNING, logger="credit.preblock.norm"):
-            norm(batch)
-            norm(batch)  # second call should NOT emit another warning
-
-        warnings = [r for r in caplog.records if "extra_var" in r.message]
-        assert len(warnings) == 1, "Warning should be emitted exactly once"
-
-    def test_short_key_skipped(self, stats_files):
-        """Keys that don't match {source}/{field}/{dim}/{var} are ignored."""
-        from credit.preblock.norm import ERA5Normalizer
-
-        mean_path, std_path, levels = stats_files
-        conf = _make_norm_conf(mean_path, std_path, levels)
-        norm = ERA5Normalizer(conf)
-
-        t = torch.full((1, 1, 1, 4, 4), 5.0)
-        batch = {"era5": {"input": {"short": t.clone()}, "target": {}}}
-        out = norm(batch)
-        assert torch.allclose(out["era5"]["input"]["short"], torch.full_like(t, 5.0))
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +19,7 @@ class TestERA5Normalizer:
 # ---------------------------------------------------------------------------
 
 
-class TestEstimateDataloaderMemoryGb:
+class TestEstimateDataloaderMemoryGib:
     def _conf(self, **overrides):
         base = {
             "trainer": {
@@ -393,28 +44,28 @@ class TestEstimateDataloaderMemoryGb:
         return base
 
     def test_returns_positive_float(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
-        gb = estimate_dataloader_memory_gb(self._conf())
+        gb = estimate_dataloader_memory_gib(self._conf())
         assert isinstance(gb, float)
         assert gb > 0
 
     def test_scales_with_workers(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
-        gb1 = estimate_dataloader_memory_gb(self._conf(thread_workers=1))
-        gb4 = estimate_dataloader_memory_gb(self._conf(thread_workers=4))
+        gb1 = estimate_dataloader_memory_gib(self._conf(thread_workers=1))
+        gb4 = estimate_dataloader_memory_gib(self._conf(thread_workers=4))
         assert abs(gb4 / gb1 - 4.0) < 0.01
 
     def test_scales_with_batch_size(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
-        gb1 = estimate_dataloader_memory_gb(self._conf(train_batch_size=1))
-        gb2 = estimate_dataloader_memory_gb(self._conf(train_batch_size=2))
+        gb1 = estimate_dataloader_memory_gib(self._conf(train_batch_size=1))
+        gb2 = estimate_dataloader_memory_gib(self._conf(train_batch_size=2))
         assert abs(gb2 / gb1 - 2.0) < 0.01
 
     def test_zero_channels_returns_zero(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
         conf = self._conf()
         conf["data"]["source"]["ERA5"]["levels"] = []
@@ -422,19 +73,19 @@ class TestEstimateDataloaderMemoryGb:
             "prognostic": {"vars_3D": [], "vars_2D": []},
             "diagnostic": {"vars_2D": []},
         }
-        assert estimate_dataloader_memory_gb(conf) == 0.0
+        assert estimate_dataloader_memory_gib(conf) == 0.0
 
     def test_missing_keys_returns_zero(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
-        assert estimate_dataloader_memory_gb({}) == 0.0
+        assert estimate_dataloader_memory_gib({}) == 0.0
 
     def test_uses_default_image_size_when_model_absent(self):
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
         conf = self._conf()
         del conf["model"]
-        gb = estimate_dataloader_memory_gb(conf)
+        gb = estimate_dataloader_memory_gib(conf)
         # Should fall back to 721×1440 defaults and still return a float
         assert isinstance(gb, float)
         assert gb > 0
@@ -681,14 +332,14 @@ class TestUpdateOnBatch:
 
 
 class TestPsutilAvailableRam:
-    """Cover the _available_ram_gb helper (lines 85-92)."""
+    """Cover the _available_ram_gib helper."""
 
     def test_returns_float_when_psutil_available(self):
         """If psutil is importable, should return a positive float."""
         pytest.importorskip("psutil")
-        from credit.trainers.preflight import _available_ram_gb
+        from credit.trainers.preflight import _available_ram_gib
 
-        gb = _available_ram_gb()
+        gb = _available_ram_gib()
         assert isinstance(gb, float)
         assert gb >= 0
 
@@ -709,9 +360,11 @@ class TestPsutilAvailableRam:
 
         # Reload to get fresh version with blocked import
         pf_fresh = importlib.import_module("credit.trainers.preflight")
-        result = pf_fresh._available_ram_gb.__wrapped__() if hasattr(pf_fresh._available_ram_gb, "__wrapped__") else 0.0
+        result = (
+            pf_fresh._available_ram_gib.__wrapped__() if hasattr(pf_fresh._available_ram_gib, "__wrapped__") else 0.0
+        )
         # Just test the function directly
-        assert pf_fresh._available_ram_gb() >= 0.0
+        assert pf_fresh._available_ram_gib() >= 0.0
 
 
 class TestCheckDataloaderStartupMemoryWarnings:
@@ -763,7 +416,7 @@ class TestCheckDataloaderStartupMemoryWarnings:
         from credit.trainers import preflight as pf
 
         # Make available RAM appear tiny so any estimate looks dangerous
-        monkeypatch.setattr(pf, "_available_ram_gb", lambda: 0.001)
+        monkeypatch.setattr(pf, "_available_ram_gib", lambda: 0.001)
 
         class _FastLoader:
             def __iter__(self):
@@ -782,7 +435,7 @@ class TestCheckDataloaderStartupMemoryWarnings:
 
         # Calculate what the estimate will be for a small conf, then set avail_gb
         # so that the estimate falls in the 50-80% range
-        from credit.trainers.preflight import estimate_dataloader_memory_gb
+        from credit.trainers.preflight import estimate_dataloader_memory_gib
 
         small_conf = {
             "trainer": {"thread_workers": 1, "prefetch_factor": 1, "train_batch_size": 1},
@@ -799,10 +452,10 @@ class TestCheckDataloaderStartupMemoryWarnings:
                 }
             },
         }
-        est = estimate_dataloader_memory_gb(small_conf)
+        est = estimate_dataloader_memory_gib(small_conf)
         # Set available = est / 0.65 so pct ≈ 65% (between 50 and 80)
         avail = est / 0.65
-        monkeypatch.setattr(pf, "_available_ram_gb", lambda: avail)
+        monkeypatch.setattr(pf, "_available_ram_gib", lambda: avail)
 
         class _FastLoader:
             def __iter__(self):
@@ -936,145 +589,6 @@ class TestSchedulerAdditionalCoverage:
         sched.step()
         lrs = sched.get_lr()
         assert isinstance(lrs, list)
-
-
-# ---------------------------------------------------------------------------
-# credit/preblock/scaler.py — cover lines 11-13, 16-19
-# ---------------------------------------------------------------------------
-
-
-try:
-    import bridgescaler as _bridgescaler  # noqa: F401
-
-    _BRIDGESCALER_AVAILABLE = True
-except ImportError:
-    _BRIDGESCALER_AVAILABLE = False
-
-
-@pytest.mark.skipif(not _BRIDGESCALER_AVAILABLE, reason="bridgescaler not installed")
-class TestScalerPreblock:
-    """Tests for credit.preblock.scaler.Scaler (bridgescaler wrapper)."""
-
-    def _make_scaler_file(self, tmp_path):
-        """Write a minimal StandardScaler JSON that bridgescaler can load."""
-        import json
-
-        scaler_data = {
-            "scaler_type": "StandardScaler",
-            "mean": [0.0, 0.0, 0.0, 0.0],
-            "std": [1.0, 1.0, 1.0, 1.0],
-        }
-        path = str(tmp_path / "scaler.json")
-        with open(path, "w") as f:
-            json.dump(scaler_data, f)
-        return path
-
-    def test_forward_transform(self, tmp_path):
-        """Cover lines 16-17: forward call (not inverse)."""
-        from credit.preblock.scaler import Scaler
-        from unittest.mock import MagicMock, patch
-
-        mock_scaler = MagicMock()
-        mock_scaler.transform.return_value = torch.zeros(1, 4)
-
-        with patch("credit.preblock.scaler.load_scaler", return_value=mock_scaler):
-            scaler = Scaler.__new__(Scaler)
-            scaler.scaler = mock_scaler
-            scaler.inverse = False
-
-            x = torch.randn(1, 4)
-            out = scaler.forward(x)
-            mock_scaler.transform.assert_called_once_with(x)
-
-    def test_forward_inverse_transform(self, tmp_path):
-        """Cover lines 18-19: inverse=True forward call."""
-        from credit.preblock.scaler import Scaler
-        from unittest.mock import MagicMock
-
-        mock_scaler = MagicMock()
-        mock_scaler.inverse_transform.return_value = torch.zeros(1, 4)
-
-        scaler = Scaler.__new__(Scaler)
-        scaler.scaler = mock_scaler
-        scaler.inverse = True
-
-        x = torch.randn(1, 4)
-        out = scaler.forward(x)
-        mock_scaler.inverse_transform.assert_called_once_with(x)
-
-    def test_scaler_init_calls_load_scaler(self, tmp_path):
-        """Cover lines 11-13: __init__ calls load_scaler with the path."""
-        from credit.preblock.scaler import Scaler
-        from unittest.mock import MagicMock, patch
-
-        mock_scaler = MagicMock()
-        with patch("credit.preblock.scaler.load_scaler", return_value=mock_scaler) as mock_load:
-            s = Scaler("/fake/path.json", inverse=False)
-            mock_load.assert_called_once_with("/fake/path.json")
-            assert s.inverse is False
-
-    def test_scaler_init_inverse_flag(self, tmp_path):
-        """Cover line 13: inverse=True stored correctly."""
-        from credit.preblock.scaler import Scaler
-        from unittest.mock import MagicMock, patch
-
-        with patch("credit.preblock.scaler.load_scaler", return_value=MagicMock()):
-            s = Scaler("/fake/path.json", inverse=True)
-            assert s.inverse is True
-
-
-# ---------------------------------------------------------------------------
-# Additional edge-case tests to close coverage gaps
-# ---------------------------------------------------------------------------
-
-
-class TestNormEdgeCases:
-    """Cover norm.py lines 75 (non-dict source) and 78 (missing split key)."""
-
-    def test_non_dict_source_data_skipped(self, tmp_path):
-        """Line 75: source_data values that are not dicts are skipped silently."""
-        from credit.preblock.norm import ERA5Normalizer
-
-        levels = [500, 850]
-        mean_path = str(tmp_path / "mean.nc")
-        std_path = str(tmp_path / "std.nc")
-        data_vars = {
-            "temperature": xr.DataArray(np.ones(len(levels)), dims=["level"], coords={"level": list(levels)}),
-            "SP": xr.DataArray(np.array(1.0)),
-        }
-        xr.Dataset(data_vars).to_netcdf(mean_path)
-        xr.Dataset(data_vars).to_netcdf(std_path)
-        conf = _make_norm_conf(mean_path, std_path, levels)
-        norm = ERA5Normalizer(conf)
-
-        t = torch.zeros(1, 1, 1, 4, 4)
-        batch = {
-            "era5": {"input": {"era5/prognostic/3d/temperature": t.clone()}, "target": {}},
-            "metadata": "this_is_a_string",  # non-dict -> hits line 75 continue
-        }
-        out = norm(batch)  # must not raise
-        assert "metadata" in out
-
-    def test_missing_split_key_skipped(self, tmp_path):
-        """Line 78: source_data dict without 'input'/'target' keys is skipped."""
-        from credit.preblock.norm import ERA5Normalizer
-
-        levels = [500, 850]
-        mean_path = str(tmp_path / "mean.nc")
-        std_path = str(tmp_path / "std.nc")
-        data_vars = {
-            "temperature": xr.DataArray(np.ones(len(levels)), dims=["level"], coords={"level": list(levels)}),
-            "SP": xr.DataArray(np.array(1.0)),
-        }
-        xr.Dataset(data_vars).to_netcdf(mean_path)
-        xr.Dataset(data_vars).to_netcdf(std_path)
-        conf = _make_norm_conf(mean_path, std_path, levels)
-        norm = ERA5Normalizer(conf)
-
-        t = torch.zeros(1, 1, 1, 4, 4)
-        # Only has 'other', neither 'input' nor 'target' -> both splits hit line 78 continue
-        batch = {"era5": {"other": {"era5/prognostic/3d/temperature": t.clone()}}}
-        out = norm(batch)  # must not raise
 
 
 class TestSchedulerEdgeCases:

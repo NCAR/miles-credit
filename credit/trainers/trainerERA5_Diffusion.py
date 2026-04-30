@@ -23,7 +23,7 @@ import torch
 logger = logging.getLogger(__name__)
 
 
-class Trainer(BaseTrainer):
+class TrainerERA5Diffusion(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer class for handling the training, validation, and checkpointing of models.

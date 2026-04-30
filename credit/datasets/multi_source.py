@@ -3,11 +3,9 @@ multi_source.py
 ---------------
 MultiSourceDataset: primary entry point for all data loading.
 
-Wraps one or more registered source datasets (ERA5, MRMS, …) and returns a
-dict nested by source name.  Only sources whose keys appear under
-``config["source"]`` are instantiated; absent sources are silently skipped.
-The wrapper is always used as the entry point — even when only one source
-is configured.
+Wraps one or more registered source datasets and returns a dict nested by
+source name.  Only sources whose keys appear under ``config["source"]`` are
+instantiated; absent sources are silently skipped.
 
 Sample structure returned by __getitem__::
 
@@ -17,21 +15,7 @@ Sample structure returned by __getitem__::
             "target":   {"era5/prognostic/3d/T": tensor, ...},  # return_target only
             "metadata": {"input_datetime": int, "target_datetime": int},
         },
-        "mrms": {
-            "input":    {"mrms/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor, ...},
-            "target":   {"mrms/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor, ...},
-            "metadata": {"input_datetime": int, "target_datetime": int},
-        },
     }
-
-Pre-block pipeline (applied after the DataLoader)::
-
-    MultiSourceDataset
-        → ERA5ScalePreBlock   (scale on native ERA5 grid)
-        → MRMSScalePreBlock   (scale on native MRMS grid)
-        → MRMSRegridPreBlock  (regrid MRMS → ERA5 grid)
-        → MergePreBlock       (flatten nested dict → single input/target dict)
-        → Model
 
 Usage::
 
@@ -62,6 +46,7 @@ from torch.utils.data import Dataset
 
 from credit.datasets.era5 import ERA5Dataset
 from credit.datasets.MRMS import MRMSDataset
+from credit.datasets.hrrr import HRRRDataset
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +55,28 @@ logger = logging.getLogger(__name__)
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
     "MRMS": MRMSDataset,
+    "HRRR": HRRRDataset,
+    "HRRR_NAT": HRRRDataset,
+    "HRRR_SUBH": HRRRDataset,
 }
+
+
+def make_single_source_subconfig(config: dict, source_key: str) -> dict:
+    """
+    Return a modified config dict containing only the specified source.
+
+    This is used internally to instantiate each sub-dataset with a config
+    containing just its own source config block, to avoid confusion with
+    multisource config fields (e.g. HRRR vs HRRR_NAT vs HRRR_SUBH).
+
+    Args:
+        config: Original multisource config dict.
+        source_key: Key of the source to isolate (e.g., "HRRR").
+
+    Returns:
+        New config dict containing only the specified source's config block.
+    """
+    return {"source": {source_key: config["source"][source_key]}, **{k: v for k, v in config.items() if k != "source"}}
 
 
 class MultiSourceDataset(Dataset):
@@ -88,21 +94,20 @@ class MultiSourceDataset(Dataset):
         datetimes: DatetimeIndex of timestamps valid for *all* active sources
             (intersection of each source's own ``datetimes``).
         static_metadata: Per-source static metadata aggregated from each
-            sub-dataset's ``static_metadata`` attribute.  Example::
-
-                {
-                    "era5": {"levels": [1000, 850, 500, 300], "datetime_fmt": "unix_ns"},
-                    "mrms": {"datetime_fmt": "unix_ns"},
-                }
+            sub-dataset's ``static_metadata`` attribute.
     """
 
     def __init__(self, config: dict, return_target: bool = False) -> None:
         self.datasets: dict[str, Dataset] = {}
         source_cfg = config.get("source", {})
+        rest_cfg = {k: v for k, v in config.items() if k != "source"}
 
         for key, cls in _SOURCE_REGISTRY.items():
             if key in source_cfg:
-                self.datasets[key.lower()] = cls(config, return_target)
+                # Pass in just the sub-config for this source to avoid confusion
+                # with multisource datasets (e.g., HRRR and HRRR_NAT)
+                sub_config = make_single_source_subconfig(config, key)
+                self.datasets[key.lower()] = cls(sub_config, return_target)
                 logger.info("MultiSourceDataset: registered source '%s'", key.lower())
             else:
                 logger.debug("MultiSourceDataset: source '%s' not in config, skipping", key)
@@ -120,17 +125,13 @@ class MultiSourceDataset(Dataset):
     def __getitem__(self, args: tuple) -> dict:
         """Return a dict of per-source sample dicts.
 
-        The ``(t, i)`` tuple is passed unchanged to every active sub-dataset.
-        Each sub-dataset applies its own field-type / step-index logic
-        (e.g. ERA5 and MRMS both skip prognostic disk reads at ``i > 0``).
-
         Args:
             args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
                 or pd.Timestamp) and *i* is the within-sequence step index
                 produced by the sampler.
 
         Returns:
-            Dict keyed by lowercase source name.  Each value is the
+            Dict keyed by lowercase source name, each value being the
             sub-dataset's own sample dict::
 
                 {"input": {...}, "target": {...}, "metadata": {...}}
@@ -142,15 +143,10 @@ class MultiSourceDataset(Dataset):
     # ------------------------------------------------------------------
 
     def _intersect_timestamps(self) -> pd.DatetimeIndex:
-        """Return timestamps common to all active source datasets.
-
-        Returns:
-            Sorted DatetimeIndex containing only timestamps present in every
-            source's ``datetimes`` index.  Returns an empty DatetimeIndex
-            when no sources are configured.
-        """
+        """Return timestamps common to all active source datasets."""
         if not self.datasets:
             return pd.DatetimeIndex([])
+
         sets = [set(ds.datetimes) for ds in self.datasets.values()]
         common = set.intersection(*sets)
         if not common:

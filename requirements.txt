@@ -9,9 +9,6 @@ netcdf4
 torch
 torchvision
 pyyaml
-dask
-distributed
-dask-jobqueue
 zarr
 numcodecs
 einops
@@ -20,15 +17,12 @@ bridgescaler
 segmentation-models-pytorch
 haversine
 pvlib
-pre-commit
 torch-harmonics
 torch_geometric
 fsspec
 gcsfs
-metpy
-keras
-miles-guess
 h5py<=3.14.0
 h5netcdf
 torchmetrics
 s3fs
+numba

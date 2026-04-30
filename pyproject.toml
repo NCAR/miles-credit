@@ -25,13 +25,9 @@ dependencies = [
     "torchvision",
     "einops",
     "pyyaml",
-    "cartopy",
-    "dask",
-    "distributed",
-    "dask-jobqueue",
     "zarr",
+    "pygrib",
     "numcodecs",
-    "einops",
     "echo-opt",
     "bridgescaler",
     "segmentation-models-pytorch",
@@ -42,13 +38,12 @@ dependencies = [
     "torchmetrics",
     "fsspec",
     "gcsfs",
-    "miles-guess",
-    "keras",
-    "metpy",
+    "s3fs",
     "setuptools_scm",
     "setuptools",
-    "s3fs",
-    "tensorboard"
+    "numba",
+    "tensorboard",
+    "properscoring"
 ]
 
 [project.optional-dependencies]
@@ -66,6 +61,10 @@ develop = ["pre-commit",
     "ruff",
     "pytest"]
 
+ptype = ["metpy",
+         "miles-guess",
+         "keras"]
+
 ask    = ["anthropic>=0.40", "groq>=0.9", "openai>=1.0", "google-generativeai>=0.8"]
 agent  = ["anthropic>=0.40"]
 serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
@@ -73,7 +72,8 @@ serve  = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 [tool.setuptools]
 
 packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets",
-    "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
+    "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean",
+    "credit.ensemble", "credit.verification"]
 
 [tool.setuptools.package-data]
 "credit.metadata" = ["*.yaml", "*.yml", "*.nc", "*.csv"]
@@ -85,13 +85,14 @@ version_file = "credit/_version.py"
 # Unified CLI (recommended)
 credit = "credit.cli:main"
 
-# V2 entry points
-credit_train_v2 = "credit.applications.train_v2:main_cli"
-credit_rollout_realtime_v2 = "credit.applications.rollout_realtime_v2:main"
-credit_rollout_to_netcdf_v2 = "credit.applications.rollout_to_netcdf_v2:main"
+# Gen2 entry points
+credit_train_gen2 = "credit.applications.train_gen2:main_cli"
+credit_rollout_realtime_gen2 = "credit.applications.rollout_realtime_gen2:main"
+credit_rollout_to_netcdf_gen2 = "credit.applications.rollout_to_netcdf_gen2:main"
 
-# Legacy v1 entry points
-credit_train = "credit.applications.train:main_cli"
+# Gen1 entry points
+credit_train_gen1 = "credit.applications.train_gen1:main_cli"
+credit_train = "credit.applications.train_gen1:main_cli"  # backward-compat alias
 credit_rollout_realtime = "credit.applications.rollout_realtime:main_cli"
 credit_gfs_init = "credit.applications.gfs_init:main"
 credit_gefs_init = "credit.applications.gefs_init:main"
@@ -117,4 +118,3 @@ ignore = ["D417", "F841"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-

@@ -102,7 +102,6 @@ def full_state_pressure_interpolation(
         else:
             a_model = mod_lev_ds[a_model_name].values[valid_levels]
             a_half_full = mod_lev_ds[a_half_name].values
-        a_model = mod_lev_ds[a_model_name].values[valid_levels]
         b_model = mod_lev_ds[b_model_name].values[valid_levels]
         b_half_full = mod_lev_ds[b_half_name].values
 
@@ -427,7 +426,7 @@ def create_reduced_pressure_grid(surface_pressure, model_a_full, model_b_full):
     return pressure_3d, pressure_3d_half
 
 
-@njit
+@njit(cache=True)
 def geopotential_from_model_vars(
     surface_geopotential,
     surface_pressure,
@@ -815,7 +814,7 @@ def mean_sea_level_pressure_simple(surface_pressure_pa, temperature_k, surface_g
             mslp[i, j] = surface_pressure_pa[i, j]
         else:
             temp = temperature_k[i, j]
-            tto = temp + LAPSE_RATE * sgp
+            tto = temp + LAPSE_RATE * sgp / GRAVITY
             alpha_local = ALPHA
             if (temp <= 290.5) and (tto > 290.5):
                 alpha_local = RDGAS * (290.5 - temp) / sgp
