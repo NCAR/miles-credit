@@ -3,6 +3,7 @@ import xarray as xr
 import numpy as np
 import logging
 
+from credit.domain_parallel.manager import get_domain_parallel_manager
 from credit.losses.base_losses import base_losses
 from credit.losses.spectral import SpectralLoss2D
 from credit.losses.power import PSDLoss
@@ -195,6 +196,34 @@ class VariableTotalLoss2D(torch.nn.Module):
         else:
             self.loss_fn = base_losses(conf, reduction="none", validation=False)
 
+    def _lat_weights_for_target(self, target):
+        if self.lat_weights is None:
+            return None
+
+        weights = self.lat_weights
+        target_h = target.shape[-2]
+        weights_h = weights.shape[-2]
+
+        if weights_h == target_h:
+            return weights
+
+        manager = get_domain_parallel_manager()
+        if manager is None or manager.domain_parallel_size <= 1:
+            raise ValueError(f"Latitude weights height ({weights_h}) does not match target height ({target_h}).")
+
+        if weights_h % manager.domain_parallel_size != 0:
+            raise ValueError(
+                f"Latitude weights height ({weights_h}) is not divisible by "
+                f"domain_parallel_size ({manager.domain_parallel_size})."
+            )
+
+        shard_h = weights_h // manager.domain_parallel_size
+        if shard_h != target_h:
+            raise ValueError(f"Latitude weights shard height ({shard_h}) does not match target height ({target_h}).")
+
+        start = manager.domain_rank * shard_h
+        return weights.narrow(-2, start, shard_h).contiguous()
+
     def forward(self, target, pred):
         """Calculate the total loss for the given target and prediction.
 
@@ -212,14 +241,15 @@ class VariableTotalLoss2D(torch.nn.Module):
         """
         # User defined loss
         loss = self.loss_fn(target, pred)
+        lat_weights = self._lat_weights_for_target(target)
 
         # Latitutde and variable weights
         loss_dict = {}
         for i, var in enumerate(self.vars):
             var_loss = loss[:, i]
 
-            if self.lat_weights is not None:
-                var_loss = torch.mul(var_loss, self.lat_weights.to(target.device))
+            if lat_weights is not None:
+                var_loss = torch.mul(var_loss, lat_weights.to(device=target.device, dtype=var_loss.dtype))
 
             if self.var_weights is not None:
                 var_loss *= self.var_weights[i].to(target.device)
@@ -230,9 +260,9 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         # Add the spectral loss
         if not self.validation and self.use_power_loss:
-            loss += self.power_lambda_reg * self.power_loss(target, pred, weights=self.lat_weights)
+            loss += self.power_lambda_reg * self.power_loss(target, pred, weights=lat_weights)
 
         if not self.validation and self.use_spectral_loss:
-            loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=self.lat_weights).mean()
+            loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=lat_weights).mean()
 
         return loss

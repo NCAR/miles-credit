@@ -51,7 +51,8 @@ model:
     patch_height: 1
     frame_patch_size: 1
 
-    dim: [32, 64, 128, 256]
+    dim: [8, 16, 32, 64]
+    dim_head: 8
     depth: [2, 2, 2, 2]
     global_window_size: [8, 4, 2, 1]
     local_window_size: 4

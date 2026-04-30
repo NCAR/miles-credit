@@ -116,7 +116,7 @@ trainer:
     valid_thread_workers: 0
 
 model:
-    type: "crossformer"
+    type: "wxformer"
     frames: 1
     image_height: 721
     image_width: 1440
@@ -130,7 +130,8 @@ model:
     patch_height: 1
     frame_patch_size: 1
 
-    dim: [32, 64, 128, 256]
+    dim: [8, 16, 32, 64]
+    dim_head: 8
     depth: [2, 2, 2, 2]
     # 721+80=801 -> floor/2 -> 400 (=10×40), 1440+160=1600 -> /2 -> 800 (=10×80)
     global_window_size: [10, 5, 2, 1]

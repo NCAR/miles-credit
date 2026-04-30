@@ -415,9 +415,14 @@ class BaseTrainer(ABC):
         # Preflight: check DataLoader memory and first-batch latency (rank-0 only)
         timeout_s = conf.get("trainer", {}).get("dataloader_timeout_s", 300)
         check_dataloader_startup(conf, train_loader, rank=self.rank, timeout_s=timeout_s)
+        if self.distributed and torch.distributed.is_initialized():
+            torch.distributed.barrier()
 
         # Preflight: synthetic forward/backward/optimizer step to measure peak VRAM
-        check_model_gpu_memory(conf, self.model, optimizer, rank=self.rank)
+        if self.distributed:
+            logger.info("Skipping rank-local GPU memory preflight for distributed training.")
+        else:
+            check_model_gpu_memory(conf, self.model, optimizer, rank=self.rank)
 
         for epoch in range(start_epoch, epoch_limit):
             # Backup previous epoch's checkpoint

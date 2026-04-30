@@ -117,7 +117,7 @@ trainer:
     valid_thread_workers: 0
 
 model:
-    type: "crossformer"
+    type: "wxformer"
     frames: 1
     image_height: 181
     image_width: 360
@@ -131,7 +131,8 @@ model:
     patch_height: 1
     frame_patch_size: 1
 
-    dim: [64, 128, 256, 512]
+    dim: [8, 16, 32, 64]
+    dim_head: 8
     depth: [2, 2, 4, 2]
     # 181+60=241 -> floor/2 -> 120 (=8×15, 3×40), 360+24=384 -> /2 -> 192 (=8×24, 3×64)
     # window sizes must divide [120,192], [60,96], [30,48], [15,24]
