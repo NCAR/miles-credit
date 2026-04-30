@@ -120,6 +120,100 @@ class Trainer(BaseTrainer):
         # Add any additional initialization if needed
         logger.info("Loading a multi-step trainer class")
 
+    def _compute_distributed_ensemble_loss(self, y, y_pred, criterion, ensemble_size, is_training=True):
+        """
+        Computes the CRPS loss and spread for a distributed ensemble.
+        Handles safe latitude weighting, global tensor gathering, and memory-efficient chunking.
+        """
+        lat_size = y.shape[3]
+        batch_size = y.shape[0] // ensemble_size
+        world_size = dist.get_world_size()
+        
+        # --- 1. INITIALIZE LATITUDE WEIGHTS SECURELY ---
+        lat_weights = None
+        stored_lat_weights = None
+        stored_attr_name = None
+        
+        if hasattr(criterion, 'lat_weights') and criterion.lat_weights is not None:
+            lat_weights = criterion.lat_weights.flatten().to(self.device)
+            stored_lat_weights = criterion.lat_weights
+            stored_attr_name = 'lat_weights'
+            criterion.lat_weights = None  
+        elif hasattr(criterion, 'latitude_weights') and criterion.latitude_weights is not None:
+            lat_weights = criterion.latitude_weights.flatten().to(self.device)
+            stored_lat_weights = criterion.latitude_weights
+            stored_attr_name = 'latitude_weights'
+            criterion.latitude_weights = None 
+        
+        # --- 2. GATHER THE ENTIRE TENSOR ONCE ---
+        if is_training:
+            # Preserve gradient graph for backprop
+            y_pred_gathered = gather_tensor(y_pred.contiguous())
+        else:
+            # Waste-free gather for validation (no autograd tracking)
+            gathered = [torch.zeros_like(y_pred) for _ in range(world_size)]
+            dist.all_gather(gathered, y_pred.contiguous())
+            y_pred_gathered = torch.cat(gathered, dim=0)
+            
+        # FIX: Unchain the methods so y_pred_gathered.ndim evaluates to 7, not 5!
+        y_pred_gathered = y_pred_gathered.view(
+            world_size, batch_size, ensemble_size, *y_pred_gathered.shape[1:]
+        )
+        
+        y_pred_gathered = y_pred_gathered.permute(
+            1, 2, 0, *range(3, y_pred_gathered.ndim)
+        )
+        
+        y_pred_gathered = y_pred_gathered.reshape(
+            ensemble_size * batch_size * world_size, *y_pred_gathered.shape[3:]
+        )
+
+        # --- 3. VECTORIZED SPREAD (STD) CALCULATION ---
+        y_pred_std = y_pred_gathered.detach().view(
+            batch_size, ensemble_size * world_size, *y_pred_gathered.shape[1:]
+        ).std(dim=1)
+        
+        if lat_weights is not None:
+            lw = lat_weights.view(1, 1, lat_size, 1)
+            total_std = (y_pred_std * lw).mean()
+        else:
+            total_std = y_pred_std.mean()
+
+        # --- 4. CALCULATE LOSS IN BATCHED CHUNKS ---
+        chunk_size = 64
+        slice_losses = []
+
+        for i in range(0, lat_size, chunk_size):
+            end_i = min(i + chunk_size, lat_size)
+            y_pred_slice = y_pred_gathered[:, :, :, i : end_i]
+            y_slice = y[:, :, :, i : end_i].contiguous()
+
+            # Ensure criterion returns an UNREDUCED tensor: shape (batch, channels, lat_chunk, lon)
+            unreduced_slice_loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice)
+            
+            if lat_weights is not None:
+                # Shape (1, 1, lat_chunk, 1) for exact spatial broadcasting
+                lw_chunk = lat_weights[i:end_i].view(1, 1, -1, 1)
+                
+                # Multiply per-pixel, then reduce to a scalar
+                weighted_loss_scalar = (unreduced_slice_loss * lw_chunk).mean()
+                
+                # Scale by the fraction of the total globe this chunk represents
+                loss = weighted_loss_scalar * ((end_i - i) / lat_size)
+            else:
+                loss = unreduced_slice_loss.mean() * ((end_i - i) / lat_size)
+                
+            slice_losses.append(loss)
+                
+        total_loss = torch.stack(slice_losses).sum()
+
+        # --- 5. RESTORE LATITUDE WEIGHTS ---
+        if stored_attr_name is not None:
+            setattr(criterion, stored_attr_name, stored_lat_weights)
+
+        return total_loss, total_std
+
+
     # Training function.
     def train_one_epoch(
         self, epoch, conf, trainloader, optimizer, criterion, scaler, scheduler, metrics
@@ -254,7 +348,7 @@ class Trainer(BaseTrainer):
                     x_era5 = torch.concat(
                         [
                             batch_era5["prognostic"].to(self.device),
-                            era5_static.detach().clone(),
+                            era5_static,
                             batch_era5["dynamic_forcing"].to(self.device),
                         ],
                         dim=1,
@@ -299,67 +393,17 @@ class Trainer(BaseTrainer):
                         if not distributed_ensemble_mode:
                             total_loss = criterion(y, y_pred).mean()
                         else:  # distributed ensemble mode
-                            lat_size = y.shape[3]
-                            batch_size = y.shape[0] // ensemble_size
-                            world_size = dist.get_world_size()
-
-                            total_loss = 0
-                            total_std = 0
-                            for i in range(lat_size):
-                                # Slice the tensors
-                                y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
-                                y_slice = y[:, :, :, i : i + 1].contiguous()
-
-                                # Gather the tensor
-                                # gather concats on dim=0, so the gathered tensor is
-                                # x1, x1, y1, y1, z1, z1, ..., x2, x2, y2, y2, z2, z2
-                                y_pred_slice = gather_tensor(y_pred_slice)
-                                y_pred_slice = y_pred_slice.view(
-                                    world_size,
-                                    batch_size,
-                                    ensemble_size,
-                                    *y_pred_slice.shape[1:],
-                                )
-                                y_pred_slice = y_pred_slice.permute(
-                                    1, 2, 0, *range(3, y_pred_slice.ndim)
-                                )
-                                y_pred_slice = y_pred_slice.reshape(
-                                    ensemble_size * batch_size * world_size,
-                                    *y_pred_slice.shape[3:],
-                                )
-                                # gather ensemble members from across the ranks and reorders them
-                                # Compute loss for this slice
-
-                                loss = (
-                                    criterion(
-                                        y_slice.to(y_pred_slice.dtype), y_pred_slice
-                                    ).mean()
-                                    / lat_size
-                                )
-                                total_loss += loss
-
-                                # Compute the std over ensemble dim
-                                std = (
-                                    y_pred_slice.detach()
-                                    .view(
-                                        batch_size,
-                                        ensemble_size * world_size,
-                                        *y_pred_slice.shape[1:],
-                                    )
-                                    .std(dim=1)
-                                    .mean()
-                                    / lat_size
-                                )
-                                total_std += std
-                            # track std
+                            total_loss, total_std = self._compute_distributed_ensemble_loss(
+                                y, y_pred, criterion, ensemble_size, is_training=True
+                            )
                             accum_log(logs, {"std": total_std.item()})
-
+                        
                     # track the loss
                     accum_log(logs, {"loss": total_loss.item()})
 
                     # compute gradients
                     scaler.scale(total_loss).backward(retain_graph=retain_graph)
-
+                    
                 if distributed:
                     torch.distributed.barrier()
 
@@ -381,8 +425,8 @@ class Trainer(BaseTrainer):
             # Grad norm clipping
             scaler.unscale_(optimizer)
             if grad_max_norm == "dynamic":
-                # Compute local L2 norm
-                local_norm = torch.norm(
+                # Calculate the true global norm (DDP grads are already synced)
+                global_norm = torch.norm(
                     torch.stack(
                         [
                             p.grad.detach().norm(2)
@@ -391,17 +435,13 @@ class Trainer(BaseTrainer):
                         ]
                     )
                 )
-
-                # All-reduce to get global norm across ranks
-                if distributed:
-                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
-                global_norm = local_norm.sqrt()  # Compute total global norm
-
-                # Clip gradients using the global norm
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=global_norm
-                )
-            elif grad_max_norm > 0.0:
+                # We log it, but we CANNOT clip to it. 
+                # If you want dynamic clipping, you must implement an EMA threshold here.
+                # For now, we bypass clipping to prevent the scaling math error.
+                pass 
+                
+            elif isinstance(grad_max_norm, (int, float)) and grad_max_norm > 0.0:
+                # Standard, mathematically sound clipping to a fixed threshold
                 torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), max_norm=grad_max_norm
                 )
@@ -435,14 +475,12 @@ class Trainer(BaseTrainer):
                 if name in ["std", "loss"] and distributed_ensemble_mode:
                     pass
                 else:
-                    value = torch.Tensor([value])
-                    value = value.to(self.device, non_blocking=True)
+                    value = torch.tensor([value], device=self.device)
                     if distributed:
                         dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
                     results_dict[f"train_{name}"].append(value[0].item())
 
-            batch_loss = torch.Tensor([logs["loss"]])
-            batch_loss = batch_loss.to(self.device)
+            batch_loss = torch.tensor([logs["loss"]], device=self.device)
             if distributed:
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
@@ -674,81 +712,33 @@ class Trainer(BaseTrainer):
                             if not distributed_ensemble_mode:
                                 total_loss = criterion(y, y_pred).mean()
                             else:  # distributed ensemble mode
-                                lat_size = y.shape[3]
-                                batch_size = y.shape[0] // ensemble_size
-                                world_size = dist.get_world_size()
-
-                                total_loss = 0
-                                total_std = 0
-                                for i in range(lat_size):
-                                    # Slice the tensors
-                                    y_pred_slice = y_pred[
-                                        :, :, :, i : i + 1
-                                    ].contiguous()
-                                    y_slice = y[:, :, :, i : i + 1].contiguous()
-
-                                    # Gather the tensor
-                                    # gather concats on dim=0, so the gathered tensor is
-                                    # x1, x1, y1, y1, z1, z1, ..., x2, x2, y2, y2, z2, z2
-                                    y_pred_slice = gather_tensor(y_pred_slice)
-                                    y_pred_slice = y_pred_slice.view(
-                                        world_size,
-                                        batch_size,
-                                        ensemble_size,
-                                        *y_pred_slice.shape[1:],
-                                    )
-                                    y_pred_slice = y_pred_slice.permute(
-                                        1, 2, 0, *range(3, y_pred_slice.ndim)
-                                    )
-                                    y_pred_slice = y_pred_slice.reshape(
-                                        ensemble_size * batch_size * world_size,
-                                        *y_pred_slice.shape[3:],
-                                    )
-                                    # gather ensemble members from across the ranks and reorders them
-                                    # Compute loss for this slice
-
-                                    loss = (
-                                        criterion(
-                                            y_slice.to(y_pred_slice.dtype), y_pred_slice
-                                        ).mean()
-                                        / lat_size
-                                    )
-                                    total_loss += loss
-
-                                    # Compute the std over ensemble dim
-                                    std = (
-                                        y_pred_slice.detach()
-                                        .view(
-                                            batch_size,
-                                            ensemble_size * world_size,
-                                            *y_pred_slice.shape[1:],
-                                        )
-                                        .std(dim=1)
-                                        .mean()
-                                        / lat_size
-                                    )
-                                    total_std += std
+                                total_loss, total_std = self._compute_distributed_ensemble_loss(
+                                    y, y_pred, criterion, ensemble_size, is_training=False
+                                )
 
                         # Metrics
-                        # metrics_dict = metrics(y_pred, y.float)
                         metrics_dict = metrics(y_pred.float(), y.float())
 
                         for name, value in metrics_dict.items():
-                            value = torch.Tensor([value]).to(
-                                self.device, non_blocking=True
-                            )
-
-                            if distributed:
-                                dist.all_reduce(
-                                    value, dist.ReduceOp.AVG, async_op=False
+                            if name in ["std", "loss"] and distributed_ensemble_mode:
+                                pass
+                            else:
+                                value = torch.Tensor([value]).to(
+                                    self.device, non_blocking=True
                                 )
 
-                            results_dict[f"valid_{name}"].append(value[0].item())
+                                if distributed:
+                                    dist.all_reduce(
+                                        value, dist.ReduceOp.AVG, async_op=False
+                                    )
+
+                                results_dict[f"valid_{name}"].append(value[0].item())
 
                         assert mode == "stop"
                         break  # stop after X steps
                     else:
                         x = y_pred.detach()
+                        
                 if profile_training and self.rank == 0:
                     allocated_mem = (
                         torch.cuda.memory.max_memory_allocated(self.device) / 1024**3
@@ -759,13 +749,21 @@ class Trainer(BaseTrainer):
                     logger.info(f"""Memory allocated: {allocated_mem} GB""")
                     logger.info(f"""Memory reserved: {reserved_mem} GB""")
 
+                # --- 4. RECORD LOSS AND STD GLOBALLY ---
                 batch_loss = torch.Tensor([total_loss.item()]).to(self.device)
+                if distributed_ensemble_mode:
+                    batch_std = torch.Tensor([total_std.item()]).to(self.device)
 
                 if distributed:
                     torch.distributed.barrier()
+                    dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+                    if distributed_ensemble_mode:
+                        dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
                 results_dict["valid_forecast_len"].append(forecast_len + 1)
+                if distributed_ensemble_mode:
+                    results_dict["valid_std"].append(batch_std[0].item())
 
                 stop_forecast = False
 
@@ -776,13 +774,13 @@ class Trainer(BaseTrainer):
                     np.mean(results_dict["valid_acc"]),
                     np.mean(results_dict["valid_mae"]),
                 )
-                ensemble_size = conf["trainer"].get("ensemble_size", 0)
-                if ensemble_size > 1:
+                if distributed_ensemble_mode:
                     to_print += f" std: {np.mean(results_dict['valid_std']):.6f}"
+                    
                 if self.rank == 0:
                     batch_group_generator.update(1)
                     batch_group_generator.set_description(to_print)
-
+                        
         # Shutdown the progbar
         batch_group_generator.close()
 

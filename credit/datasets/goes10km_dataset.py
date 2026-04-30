@@ -24,7 +24,7 @@ class GOES10kmDataset(Dataset):
         padding: bool = True,
         era5dataset: Dataset = None,
         evaluate: bool = False,
-        valid_init_dir="/glade/derecho/scratch/dkimpara/goes-cloud-dataset/valid_init_times",
+        valid_init_dir="/glade/derecho/scratch/bagherio/cloud.dir/goes-cloud-dataset/valid_init_times",
         scaler_ds_path="/glade/derecho/scratch/dkimpara/goes-cloud-dataset/data_stats.nc",
     ):
         """
