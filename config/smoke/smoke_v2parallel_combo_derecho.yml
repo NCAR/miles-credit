@@ -92,7 +92,7 @@ loss:
     use_variable_weights: False
 
 trainer:
-    type: era5-v2
+    type: era5-gen2
     mode: none
 
     # 2 domain shards × 2 FSDP2 replicas = 4 GPUs

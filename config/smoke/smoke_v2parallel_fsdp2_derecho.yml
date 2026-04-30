@@ -96,7 +96,7 @@ loss:
     use_variable_weights: False
 
 trainer:
-    type: era5-v2
+    type: era5-gen2
     mode: none
 
     # V2 parallelism block — drives distributed_model_wrapper_v2 in train_gen2.py
