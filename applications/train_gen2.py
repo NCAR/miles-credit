@@ -22,11 +22,11 @@ from argparse import ArgumentParser
 
 import torch
 
-from credit.distributed import distributed_model_wrapper, distributed_model_wrapper_v2, setup, get_rank_info
+from credit.distributed import distributed_model_wrapper_v2, setup, get_rank_info
 from credit.seed import seed_everything
 from credit.losses import load_loss
 from credit.trainers import load_trainer
-from credit.pbs import launch_script, launch_script_mpi, launch_script_torchrun
+from credit.pbs import launch_script, launch_script_torchrun
 from credit.models import load_model
 from credit.metrics import LatWeightedMetrics
 from credit.trainers.utils import (
@@ -89,35 +89,23 @@ def main_cli():
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
         shutil.copy(config, os.path.join(save_loc, "model.yml"))
 
-    trainer_conf = conf["trainer"]
-    has_v2_parallelism = "parallelism" in trainer_conf
-
     if launch:
         script_path = Path(__file__).absolute()
-        if conf["pbs"]["queue"] == "casper":
+        if conf["pbs"].get("queue", "").startswith("casper"):
             logging.info("Launching to PBS on Casper")
             launch_script(config, script_path)
-        elif has_v2_parallelism:
+        else:
             logging.info("Launching to Derecho via torchrun")
             launch_script_torchrun(config, script_path)
-        else:
-            logging.info("Launching to Derecho via MPI")
-            launch_script_mpi(config, script_path)
         sys.exit()
 
-    # For the v2 parallelism block, rank info comes from MPI/torchrun env vars
-    # (same detection path as "ddp"); for legacy mode, use the mode string directly.
-    rank_mode = "ddp" if has_v2_parallelism else trainer_conf.get("mode", "none")
-    local_rank, world_rank, world_size = get_rank_info(rank_mode)
+    local_rank, world_rank, world_size = get_rank_info("ddp")
     rank = world_rank
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
-    if has_v2_parallelism:
-        if world_size > 1:
-            setup(rank, world_size, "ddp", backend)
-    elif trainer_conf.get("mode", "none") in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
-        setup(rank, world_size, trainer_conf["mode"], backend)
+    if world_size > 1:
+        setup(rank, world_size, "ddp", backend)
 
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
@@ -145,12 +133,7 @@ def main_cli():
     if conf["trainer"].get("compile", False):
         m = torch.compile(m)
 
-    if has_v2_parallelism:
-        model = distributed_model_wrapper_v2(conf, m, device)
-    elif trainer_conf.get("mode", "none") in ["ddp", "fsdp", "domain_parallel", "fsdp+domain_parallel"]:
-        model = distributed_model_wrapper(conf, m, device)
-    else:
-        model = m
+    model = distributed_model_wrapper_v2(conf, m, device)
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 

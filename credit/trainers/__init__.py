@@ -4,7 +4,6 @@ import logging
 # Import trainer classes
 from credit.trainers.trainerERA5gen1 import TrainerERA5Gen1
 from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2
-from credit.trainers.trainerERA5v2 import Trainer as TrainerERA5v2
 from credit.trainers.trainerERA5_Diffusion import TrainerERA5Diffusion
 from credit.trainers.trainerERA5_ensemble import TrainerERA5Ensemble
 from credit.trainers.trainer_downscaling import TrainerDownscaling
@@ -38,10 +37,6 @@ trainer_types = {
     "era5-gen2": (
         TrainerERA5Gen2,
         "ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.",
-    ),
-    "era5-v2": (
-        TrainerERA5v2,
-        "ERA5 v2 trainer with FSDP2/domain/tensor parallelism support.",
     ),
     "era5-diffusion": (
         TrainerERA5Diffusion,
