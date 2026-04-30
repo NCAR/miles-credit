@@ -270,7 +270,10 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
         torch.cuda.reset_peak_memory_stats(device)
 
         x = torch.zeros(B, C_in, H, W, device=device)
-        y_hat = model(x)
+        # Unwrap DDP/FSDP so the synthetic pass runs on the inner module directly.
+        # This avoids triggering NCCL collectives that non-zero ranks never join.
+        inner = getattr(model, "module", model)
+        y_hat = inner(x)
         loss = y_hat.mean()
         loss.backward()
         optimizer.step()

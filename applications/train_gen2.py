@@ -108,8 +108,8 @@ def main_cli():
         setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
+        device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
+        torch.cuda.set_device(local_rank % torch.cuda.device_count())
         torch.backends.cudnn.benchmark = True
     else:
         device = torch.device("cpu")
