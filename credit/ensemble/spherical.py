@@ -204,9 +204,12 @@ class SphericalRandomField(torch.nn.Module):
         if variance_scale is None:
             variance_scale = length_scale ** (0.5 * (2 * smoothness - 2.0))
 
-        # Initialize inverse spherical harmonic transform
+        # lmax must match latitude_modes; v0.9.0 changed the default for equiangular
+        # grids to (nlat+1)//2 so we pin it explicitly for cross-version compatibility.
         self.inverse_sht = (
-            InverseRealSHT(self.latitude_modes, self.longitude_modes, grid=grid_type, norm="backward")
+            InverseRealSHT(
+                self.latitude_modes, self.longitude_modes, lmax=self.latitude_modes, grid=grid_type, norm="backward"
+            )
             .to(dtype=dtype)
             .to(device=device)
         )
