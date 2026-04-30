@@ -133,11 +133,16 @@ class BaseTrainer(ABC):
         trainer_conf = conf["trainer"]
         self.save_loc = os.path.expandvars(conf["save_loc"])
         self.mode = trainer_conf.get("mode", "none")
-        # V2 parallelism block: promote mode to "fsdp2" so checkpoint uses DCP path
+        # V2 parallelism block: promote mode so checkpoint/AMP use the right path
         _p = trainer_conf.get("parallelism", {})
-        if _p.get("data") == "fsdp2":
+        _data_mode = _p.get("data", "none")
+        if _data_mode == "fsdp2":
             self.mode = "fsdp2"
-        self.distributed = self.mode in ("fsdp", "ddp", "fsdp2")
+        elif _data_mode == "ddp" and self.mode not in ("ddp", "fsdp", "fsdp2"):
+            self.mode = "ddp"
+        self.distributed = self.mode in ("fsdp", "ddp", "fsdp2", "domain_parallel", "fsdp+domain_parallel") or (
+            int(_p.get("domain", 1)) > 1 or int(_p.get("tensor", 1)) > 1
+        )
         self.start_epoch = trainer_conf.get("start_epoch", 0)
         self.epochs = trainer_conf.get("epochs", 70)
         self.skip_validation = trainer_conf.get("skip_validation", False)
