@@ -202,6 +202,117 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
             pass
 
 
+def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"):
+    """Generates and optionally launches a PBS script using torchrun.
+
+    Preferred over launch_script_mpi for FSDP2 / v2-parallelism jobs — torchrun
+    manages rendezvous and sets LOCAL_RANK / RANK / WORLD_SIZE automatically.
+    Single-node jobs use c10d + localhost; multi-node jobs broadcast the head
+    node IP for the rendezvous endpoint.
+
+    Args:
+        config_file (str): Path to the YAML config file.
+        script_path (str): Path to the training script (e.g., applications/train_gen2.py).
+        launch (bool): If True, submit with qsub. Defaults to True.
+        backend (str): torch.distributed backend. Defaults to 'nccl'.
+    """
+    with open(config_file) as cf:
+        config = yaml.load(cf, Loader=yaml.FullLoader)
+
+    pbs_options = config.get("pbs", {})
+    user = os.environ.get("USER")
+    num_nodes = pbs_options.get("nodes", 1)
+    num_gpus = pbs_options.get("ngpus", 4)
+
+    save_loc = os.path.expandvars(config["save_loc"])
+    os.makedirs(save_loc, exist_ok=True)
+    config_save_path = os.path.join(save_loc, "model.yml")
+
+    try:
+        shutil.copy(config_file, config_save_path)
+    except shutil.SameFileError:
+        pass
+
+    conda = pbs_options.get("conda", "credit")
+    # Resolve torchrun from the conda env's bin directory
+    if "/" in conda:
+        torchrun = f"{conda}/bin/torchrun"
+    else:
+        torchrun = f"$(conda info --base)/envs/{conda}/bin/torchrun"
+
+    rdzv_block = (
+        '--rdzv-backend=c10d \\\n    --rdzv-endpoint="localhost:29500"'
+        if num_nodes == 1
+        else ('--rdzv-backend=c10d \\\n    --rdzv-id=credit_job \\\n    --rdzv-endpoint="${head_node_ip}:29500"')
+    )
+
+    head_node_section = (
+        ""
+        if num_nodes == 1
+        else """
+nodes=( $( cat $PBS_NODEFILE ) )
+head_node=${nodes[0]}
+head_node_ip=$(ssh $head_node hostname -i | awk '{print $1}')
+"""
+    )
+
+    script = f"""#!/bin/bash -l
+#PBS -A {pbs_options.get("project", "NAML0001")}
+#PBS -N {pbs_options.get("job_name", "credit_v2")}
+#PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
+#PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 64)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "480GB")}
+#PBS -q {pbs_options.get("queue", "develop@desched1")}
+#PBS -j oe
+#PBS -k eod
+
+module --force purge
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+
+TORCHRUN={torchrun}
+{head_node_section}
+export PYTHONPATH="{os.path.dirname(str(script_path))}:${{PYTHONPATH:-}}"
+export LOGLEVEL=INFO
+export NCCL_DEBUG=WARN
+export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+
+echo "=== CREDIT v2 parallelism (torchrun) ==="
+echo "Host   : $(hostname)"
+echo "Date   : $(date)"
+echo "Nodes  : {num_nodes}  GPUs/node: {num_gpus}"
+
+${{TORCHRUN}} \\
+    --nnodes={num_nodes} \\
+    --nproc-per-node={num_gpus} \\
+    {rdzv_block} \\
+    {script_path} \\
+        -c {config_save_path}
+
+echo "Done at $(date)"
+"""
+    script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)
+
+    with open("launch.sh", "w") as f:
+        f.write(script)
+
+    if launch:
+        jobid = subprocess.Popen(
+            "qsub launch.sh",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).communicate()[0]
+        jobid = jobid.decode("utf-8").strip("\n")
+        logger.info(jobid)
+
+        dst = os.path.join(save_loc, "launch.sh")
+        try:
+            shutil.copy("launch.sh", dst)
+        except shutil.SameFileError:
+            pass
+
+    return
+
+
 def get_num_cpus():
     if "glade" in os.getcwd():
         num_cpus = subprocess.run(

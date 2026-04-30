@@ -26,7 +26,7 @@ from credit.distributed import distributed_model_wrapper, distributed_model_wrap
 from credit.seed import seed_everything
 from credit.losses import load_loss
 from credit.trainers import load_trainer
-from credit.pbs import launch_script, launch_script_mpi
+from credit.pbs import launch_script, launch_script_mpi, launch_script_torchrun
 from credit.models import load_model
 from credit.metrics import LatWeightedMetrics
 from credit.trainers.utils import (
@@ -89,18 +89,21 @@ def main_cli():
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
         shutil.copy(config, os.path.join(save_loc, "model.yml"))
 
+    trainer_conf = conf["trainer"]
+    has_v2_parallelism = "parallelism" in trainer_conf
+
     if launch:
         script_path = Path(__file__).absolute()
         if conf["pbs"]["queue"] == "casper":
             logging.info("Launching to PBS on Casper")
             launch_script(config, script_path)
+        elif has_v2_parallelism:
+            logging.info("Launching to Derecho via torchrun")
+            launch_script_torchrun(config, script_path)
         else:
-            logging.info("Launching to PBS on Derecho")
+            logging.info("Launching to Derecho via MPI")
             launch_script_mpi(config, script_path)
         sys.exit()
-
-    trainer_conf = conf["trainer"]
-    has_v2_parallelism = "parallelism" in trainer_conf
 
     # For the v2 parallelism block, rank info comes from MPI/torchrun env vars
     # (same detection path as "ddp"); for legacy mode, use the mode string directly.

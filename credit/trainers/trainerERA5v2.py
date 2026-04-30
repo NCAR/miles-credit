@@ -5,13 +5,12 @@ from collections import defaultdict
 import numpy as np
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 import tqdm
 
 import optuna
 
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-from credit.preblock import ConcatPreblock, ERA5Normalizer, apply_preblocks
+from credit.preblock import build_preblocks, apply_preblocks
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
@@ -168,12 +167,9 @@ class Trainer(BaseTrainer):
             self._domain_image_h = None
             self._domain_image_w = None
 
-        # ---- Preblock: normalize then assemble batch field tensors into x and y ----
-        preblocks = {}
-        if conf.get("data", {}).get("scaler_type") == "std_new":
-            preblocks["norm"] = ERA5Normalizer(conf)
-        preblocks["concat"] = ConcatPreblock()
-        self.preblocks = nn.ModuleDict(preblocks)
+        # ---- Preblocks: built from config's preblocks section ----
+        # apply_preblocks always appends ConcatToTensor at the end; do not add it here.
+        self.preblocks = build_preblocks(conf.get("preblocks", {}))
 
         # ---- Postblock conservation fixers ----
         post_conf = conf.get("model", {}).get("post_conf", {})
@@ -304,10 +300,14 @@ class Trainer(BaseTrainer):
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
-                batch = apply_preblocks(self.preblocks, batch)
+                # apply_preblocks returns (input_tensor, target_tensor, metadata)
+                # each tensor is (B, C, T, H, W); flatten T into C for the model
+                x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
+                x_raw = x_raw.flatten(1, 2)
+                y_raw = y_raw.flatten(1, 2)
 
                 if t == 1:
-                    x = batch["x"].to(self.device).float()
+                    x = x_raw.to(self.device).float()
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
                     if self._domain_pre_pad is not None:
@@ -315,7 +315,7 @@ class Trainer(BaseTrainer):
                     x = _shard_spatial(x, self.domain_manager)
                 else:
                     # Roll x forward: take new batch's forcing/static, replace prog with y_pred
-                    x_new = batch["x"].to(self.device).float()
+                    x_new = x_raw.to(self.device).float()
                     if self.ensemble_size > 1:
                         x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
                     if self._domain_pre_pad is not None:
@@ -368,7 +368,7 @@ class Trainer(BaseTrainer):
 
                 # backprop on specified timesteps
                 if t in self.backprop_on_timestep:
-                    y = batch["y"].to(self.device).float()
+                    y = y_raw.to(self.device).float()
                     if self._domain_pre_pad is not None:
                         y = self._domain_pre_pad.pad(y)
                         y = _shard_spatial(y, self.domain_manager)
@@ -501,10 +501,12 @@ class Trainer(BaseTrainer):
 
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
-                    batch = apply_preblocks(self.preblocks, batch)
+                    x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
+                    x_raw = x_raw.flatten(1, 2)
+                    y_raw = y_raw.flatten(1, 2)
 
                     if t == 1:
-                        x = batch["x"].to(self.device).float()
+                        x = x_raw.to(self.device).float()
                         if self.ensemble_size > 1:
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
                         if self._domain_pre_pad is not None:
@@ -512,7 +514,7 @@ class Trainer(BaseTrainer):
                         x = _shard_spatial(x, self.domain_manager)
                     else:
                         # Roll x forward for multi-step validation rollout
-                        x_new = batch["x"].to(self.device).float()
+                        x_new = x_raw.to(self.device).float()
                         if self.ensemble_size > 1:
                             x_new = torch.repeat_interleave(x_new, self.ensemble_size, 0)
                         if self._domain_pre_pad is not None:
@@ -558,7 +560,7 @@ class Trainer(BaseTrainer):
 
                     # compute loss and metrics only at the final rollout step
                     if t == self.valid_forecast_len:
-                        y = batch["y"].to(self.device).float()
+                        y = y_raw.to(self.device).float()
                         if self._domain_pre_pad is not None:
                             y = self._domain_pre_pad.pad(y)
                             y = _shard_spatial(y, self.domain_manager)
