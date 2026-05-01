@@ -188,7 +188,7 @@ model:
   # With pad_lat=[30,30] and pad_lon=[12,12]:
   #   stage dims H=[120,60,30,15], W=[192,96,48,24] — all divisible by 8 and 3.
   global_window_size: [ 8, 4, 2, 1 ]
-  local_window_size: 3
+  local_window_size: 4
   cross_embed_kernel_sizes:
     - [ 4, 8, 16, 32 ]
     - [ 2, 4 ]
@@ -206,7 +206,7 @@ model:
     activate: True
     mode: earth          # spherical (latitude-wrapping) padding
     pad_lat: [ 37, 38 ]
-    pad_lon: [ 76, 76 ]
+    pad_lon: [ 12, 12 ]
 
   
 # ---- Loss ---- #

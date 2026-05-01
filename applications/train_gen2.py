@@ -31,7 +31,6 @@ from credit.models import load_model
 from credit.metrics import LatWeightedMetrics
 from credit.trainers.utils import (
     inject_flat_var_keys,
-    inject_postblock_info,
     load_dataset,
     load_dataloader,
     load_model_states_and_optimizer,
@@ -128,8 +127,11 @@ def main_cli():
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
     inject_flat_var_keys(conf)
-    inject_postblock_info(conf)
-
+    if "post_conf" in conf["model"]:
+        warnings.warn(
+            "Gen 2 training does not support Gen 1 postblocks. Any postblocks included in the conf will be ignored."
+        )
+        conf["model"].pop("post_conf", None)
     m = load_model(conf)
     m.to(device)
 
