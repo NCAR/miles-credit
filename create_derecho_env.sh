@@ -25,8 +25,10 @@ set -e
 # via pip risks an undesirable torch update.)
 module load ncarenv/24.12
 module load gcc
-module load conda mkl
+module load conda
+module load mkl
 module list
+export ESMFMKFILE="/glade/work/dgagne/esmf-8.9.1/lib/libO/Linux.gfortran.64.mpiuni.default/esmf.mk"
 topdir=$(git rev-parse --show-toplevel)
 CREDIT_ENV_NAME=${CREDIT_ENV_NAME:-"credit-derecho"}
 yml=$(mktemp --tmpdir=${topdir} credit-derecho-tmp-XXXXXXXXXX.yml)
@@ -83,6 +85,21 @@ echo "Using pip constraints:"
 cat "${constraint_file}"
 pip install --constraint "${constraint_file}" -e .
 rm -f "${constraint_file}"
+
+#----------------------------------------------------------------------
+# Add activation file with appropriate modules to conda activation path
+activate_shell="${CONDA_PREFIX}/etc/conda/activate.d/esmf_activate.sh"
+
+cat << EOF > ${activate_shell}
+module load ncarenv/24.12 
+module load gcc 
+module load mkl
+export ESMFMKFILE="/glade/work/dgagne/esmf-8.9.1/lib/libO/Linux.gfortran.64.mpiuni.default/esmf.mk"
+EOF
+
+# Install esmpy and xesmf. Built against DJ's install of esmf since module loaded esmf wasn't working properly
+pip install /glade/work/dgagne/esmf-8.9.1/src/addon/esmpy/
+pip install xesmf
 
 conda-tree deptree --small
 pipdeptree --depth 3
