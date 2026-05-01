@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from datetime import datetime
 from credit.losses.weighted_loss import latitude_weights
+from credit.domain_parallel.sharding import shard_tensor as _shard_lat
 
 
 class LatWeightedMetrics:
@@ -35,8 +36,10 @@ class LatWeightedMetrics:
             pred = transform(pred)
             y = transform(y)
 
-        # Get latitude and variable weights
+        # Get latitude and variable weights; slice to local domain shard if active
         w_lat = self.w_lat.to(dtype=pred.dtype, device=pred.device) if self.w_lat is not None else 1.0
+        if self.w_lat is not None:
+            w_lat = _shard_lat(w_lat, dim=1)  # (1, H_global, 1) → (1, H_local, 1)
         w_var = self.w_var.to(dtype=pred.dtype, device=pred.device) if self.w_var is not None else 1.0
 
         if clim is not None:
@@ -133,8 +136,10 @@ class LatWeightedMetricsClimatology:
             pred = transform(pred)
             y = transform(y)
 
-        # Get latitude and variable weights to device
+        # Get latitude and variable weights to device; slice to local domain shard if active
         w_lat = self.w_lat.to(dtype=pred.dtype, device=pred.device) if self.w_lat is not None else 1.0
+        if self.w_lat is not None:
+            w_lat = _shard_lat(w_lat, dim=1)
         w_var = self.w_var.to(dtype=pred.dtype, device=pred.device) if self.w_var is not None else 1.0
 
         loss_dict = {}

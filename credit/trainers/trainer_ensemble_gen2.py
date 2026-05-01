@@ -14,7 +14,7 @@ from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixe
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
-from credit.trainers.utils import accum_log, cycle
+from credit.trainers.utils import accum_log, apply_gradient_checkpointing, cycle
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,15 @@ class TrainerEnsembleGen2(BaseTrainer):
         self.valid_forecast_len = data_valid.get("forecast_len", self.forecast_len)
 
         self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
+
+        gc_conf = conf.get("trainer", {}).get("gradient_checkpointing", False)
+        if gc_conf is not False and gc_conf is not None:
+            block_names = gc_conf if isinstance(gc_conf, list) else None
+            n_wrapped = apply_gradient_checkpointing(model, block_names)
+            logger.info(
+                f"Gradient checkpointing enabled: {n_wrapped} blocks wrapped"
+                f" (patterns={block_names or ['Block', 'Layer', 'Encoder', 'Decoder', 'Attention']})"
+            )
 
     def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         """

@@ -16,6 +16,48 @@ from credit.models.checkpoint import (
 )
 
 
+def apply_gradient_checkpointing(model, block_class_names=None):
+    """Wrap model blocks with gradient checkpointing to trade compute for activation memory.
+
+    Halving activation memory via checkpointing lets the physical batch size grow,
+    which directly amortizes the per-sample ring-shift communication cost in
+    ensemble training.
+
+    Args:
+        model: The (possibly DDP-wrapped) model.
+        block_class_names: List of class-name substrings to checkpoint. Defaults to
+            ["Block", "Layer", "Encoder", "Decoder", "Attention"] if None.
+
+    Returns:
+        Number of modules wrapped.
+    """
+    if block_class_names is None:
+        block_class_names = ["Block", "Layer", "Encoder", "Decoder", "Attention"]
+
+    base = model.module if hasattr(model, "module") else model
+
+    def _wrap(module):
+        orig_forward = module.forward
+
+        def _checkpointed(*args, **kwargs):
+            return torch.utils.checkpoint.checkpoint(orig_forward, *args, use_reentrant=False, **kwargs)
+
+        module.forward = _checkpointed
+
+    def _recurse(module):
+        count = 0
+        for child in module.children():
+            if any(pat in type(child).__name__ for pat in block_class_names):
+                _wrap(child)
+                count += 1
+            else:
+                count += _recurse(child)
+        return count
+
+    n = _recurse(base)
+    return n
+
+
 def cleanup():
     dist.destroy_process_group()
 
