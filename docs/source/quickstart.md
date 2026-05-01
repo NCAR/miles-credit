@@ -12,11 +12,12 @@ Every command is copy-pasteable.
 **NCAR users on Casper** — pre-built environment, no conda create needed:
 
 ```bash
-conda activate /glade/u/home/schreck/.conda/envs/credit-casper
+conda activate /glade/campaign/cisl/aiml/credit/conda_envs/credit-casper
 
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
-pip install -e . --no-deps
+# Installs credit into the .local directory in your home directory.
+pip install --user -e .
 ```
 :::
 
@@ -24,11 +25,11 @@ pip install -e . --no-deps
 **NCAR users on Derecho:**
 
 ```bash
-conda activate /glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221
+conda activate /glade/campaign/cisl/aiml/credit/conda_envs/credit-derecho
 
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
-pip install -e . --no-deps
+pip install --user -e .
 ```
 :::
 
@@ -36,12 +37,12 @@ pip install -e . --no-deps
 **Other systems:**
 
 ```bash
-conda create -n credit python=3.11
+conda create -n credit python=3.12
 conda activate credit
 pip install miles-credit
 ```
 
-Or install the development branch:
+Or install the main development branch:
 
 ```bash
 git clone https://github.com/NCAR/miles-credit.git

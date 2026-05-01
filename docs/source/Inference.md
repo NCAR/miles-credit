@@ -3,7 +3,7 @@
 ## Prediction Ingredients
 Before beginning rollouts of a CREDIT model, you will need the following ingredients/files 
 available on your machine.
-1. 🌎Initial conditions for upper air and surface variables in Zarr format. If running processed ERA5 
+1. 🌎 Initial conditions for upper air and surface variables in Zarr format. If running processed ERA5 
 on Derecho or Casper, you can access the processed files at 
 `/glade/campaign/cisl/aiml/credit/era5_zarr/`. The `y_TOTAL*.zarr` and `SixHourly_y_TOTAL*.zarr` 
 are at 0.28 degree grid spacing, and `SixHourly_y_ONEdeg*.zarr` for 1 degree data.
