@@ -23,6 +23,8 @@ set -e
 # containing Derecho-specific torch & MPI bits.
 # (install torchmetrics at this point too, installing it later
 # via pip risks an undesirable torch update.)
+module load ncarenv/24.12
+module load gcc
 module load conda mkl
 module list
 topdir=$(git rev-parse --show-toplevel)
