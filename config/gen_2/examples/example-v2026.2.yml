@@ -205,8 +205,8 @@ model:
   padding_conf:
     activate: True
     mode: earth          # spherical (latitude-wrapping) padding
-    pad_lat: [ 37, 38 ]
-    pad_lon: [ 76, 76 ]
+    pad_lat: [ 30, 30 ]
+    pad_lon: [ 12, 12 ]
 
   post_conf:
     activate: True
