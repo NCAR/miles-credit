@@ -31,6 +31,7 @@ from credit.models import load_model
 from credit.metrics import LatWeightedMetrics
 from credit.trainers.utils import (
     inject_flat_var_keys,
+    inject_postblock_info,
     load_dataset,
     load_dataloader,
     load_model_states_and_optimizer,
@@ -126,6 +127,8 @@ def main_cli():
 
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
+    inject_flat_var_keys(conf)
+    inject_postblock_info(conf)
 
     m = load_model(conf)
     m.to(device)
@@ -139,8 +142,6 @@ def main_cli():
         model = m
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
-
-    inject_flat_var_keys(conf)
 
     train_criterion = load_loss(conf)
     valid_criterion = load_loss(conf, validation=True)
