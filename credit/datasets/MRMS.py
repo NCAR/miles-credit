@@ -309,7 +309,7 @@ class MRMSDataset(Dataset):
                 arr = self._load_local_var(field_type, vname, t)
 
             tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-            sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
+            sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor[:, :, 0:640, 0:1280]
 
     def _load_local_var(self, field_type: str, vname: str, t: pd.Timestamp):
         """Load a single variable from a local NetCDF or Zarr file.

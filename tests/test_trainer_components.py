@@ -334,7 +334,7 @@ class TestTrainerSubclassInstantiation:
         assert t.forecast_len == 1
 
     def test_era5_ensemble_trainer_init(self):
-        from credit.trainers.trainerERA5_ensemble import TrainerERA5Ensemble as Trainer
+        from credit.trainers.trainer_ensemble_gen1 import TrainerEnsembleGen1 as Trainer
 
         Trainer(_tiny_model(), rank=0, conf=_minimal_conf())
 

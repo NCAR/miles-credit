@@ -2,6 +2,7 @@ import logging
 from credit.losses.base_losses import base_losses
 from credit.losses.weighted_loss import VariableTotalLoss2D
 from credit.losses.downscaling_loss import DownscalingLoss
+from credit.losses.crps import Gather as Gather, gather_tensor as gather_tensor, ring_crps_loss as ring_crps_loss
 
 
 logger = logging.getLogger(__name__)

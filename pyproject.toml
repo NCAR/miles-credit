@@ -42,7 +42,8 @@ dependencies = [
     "setuptools_scm",
     "setuptools",
     "numba",
-    "tensorboard"
+    "tensorboard",
+    "properscoring"
 ]
 
 [project.optional-dependencies]
@@ -70,7 +71,8 @@ agent  = ["anthropic>=0.40"]
 [tool.setuptools]
 
 packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets",
-    "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
+    "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean",
+    "credit.ensemble", "credit.verification"]
 
 [tool.setuptools.package-data]
 "credit.metadata" = ["*.yaml", "*.yml", "*.nc", "*.csv"]
