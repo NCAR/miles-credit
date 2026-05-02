@@ -44,7 +44,7 @@ jobs:
         with:
           version: latest
           esmpy: true
-          cache: true
+          cache: false
       - name: Print ESMF Info
         run: |
           cat ${ESMFMKFILE}

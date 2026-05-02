@@ -24,7 +24,7 @@ command.
     * gcc (gnu compilers for C, C++, and Fortran)
     * netcdf (for reading and writing netCDF files)
     * wget (for downloading files from the internet)
-    * mpich (for MPI distributed training support)
+    * mpich or openmpi (for MPI distributed training support)
 ### Linux
 1. Install the following dependencies with your OS package manager or ask your sysadmins to make sure
 they are installed:
@@ -91,7 +91,7 @@ can be found [here](https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#
 ## Installing CREDIT
 Clone miles-credit from github and install using pip:
 ```bash
-git clone git@github.com:NCAR/miles-credit.git
+git clone https://github.com:NCAR/miles-credit.git
 cd miles-credit
 pip install -e .
 ```
@@ -107,4 +107,4 @@ cd miles-credit
 pytest .
 ```
 
-If all tests pass, run `applications/rollout_to_netcdf.py` on a test case.
+If all tests pass, run `credit_train config/example-v2026.1.0.yml` on a test case.

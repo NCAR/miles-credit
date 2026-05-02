@@ -406,6 +406,10 @@ class BaseTrainer(ABC):
         # Preflight: synthetic forward/backward/optimizer step to measure peak VRAM
         check_model_gpu_memory(conf, self.model, optimizer, rank=self.rank)
 
+        # Re-sync all ranks after rank-0-only preflight before training begins
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.barrier()
+
         for epoch in range(start_epoch, epoch_limit):
             # Backup previous epoch's checkpoint
             if epoch > start_epoch and self.save_backup_weights and self.rank == 0:

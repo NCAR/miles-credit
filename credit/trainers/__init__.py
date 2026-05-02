@@ -26,7 +26,11 @@ logger = logging.getLogger(__name__)
 
 # Define trainer types and their corresponding classes
 trainer_types = {
-    "era5": (
+    "era5-gen1": (
+        TrainerERA5Gen1,
+        "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
+    ),
+    "era5": (  # backward-compat alias for era5-gen1
         TrainerERA5Gen1,
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
     ),

@@ -3,7 +3,7 @@
 ## Prediction Ingredients
 Before beginning rollouts of a CREDIT model, you will need the following ingredients/files 
 available on your machine.
-1. 🌎Initial conditions for upper air and surface variables in Zarr format. If running processed ERA5 
+1. 🌎 Initial conditions for upper air and surface variables in Zarr format. If running processed ERA5 
 on Derecho or Casper, you can access the processed files at 
 `/glade/campaign/cisl/aiml/credit/era5_zarr/`. The `y_TOTAL*.zarr` and `SixHourly_y_TOTAL*.zarr` 
 are at 0.28 degree grid spacing, and `SixHourly_y_ONEdeg*.zarr` for 1 degree data.
@@ -193,3 +193,112 @@ predict:
     shuffle: True
     chunksizes: [1, *height, *width]
 ```
+
+---
+
+## Running Rollouts with the v2 Data Schema
+
+If you trained with `trainer.type: era5-gen2`, use the v2 rollout commands.
+The same YAML config used for training drives inference — no separate rollout config is needed.
+
+### Batch rollout to NetCDF
+
+`credit rollout` steps the model forward over a set of historical initial conditions
+and writes one NetCDF file per forecast:
+
+```bash
+credit rollout -c config/wxformer_1dg_6hr_v2.yml
+```
+
+To run on multiple GPUs pass `--mode ddp`:
+
+```bash
+credit rollout -c config/wxformer_1dg_6hr_v2.yml --mode ddp
+```
+
+The `predict` block in your config controls which dates are run and where output goes:
+
+```yaml
+predict:
+    mode: ddp           # none | ddp
+    batch_size: 4       # initial conditions per GPU per batch
+    ensemble_size: 1    # > 1 enables ensemble inference (requires ensemble model)
+    forecasts:
+        type: "custom"
+        start_year: 2020
+        start_month: 1
+        start_day: 1
+        start_hours: [0, 12]   # UTC hours to initialise each day
+        duration: 1             # forecast length in days
+        days: 1                 # number of days to run from start date
+    metadata: '/path/to/credit/metadata/era5.yaml'
+    save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/my_run'
+    use_laplace_filter: False
+```
+
+Output files land in `save_forecast/`. Filename format is
+`<YYYY><MM><DD><HH>Z_<lead_hours>h.nc`.
+
+### Realtime forecast from a single init time
+
+`credit realtime` runs one forecast from a user-specified initialisation time,
+writing output as it steps (useful for operational or near-realtime use):
+
+```bash
+credit realtime -c config/wxformer_1dg_6hr_v2.yml \
+    --init-time 2024-01-15T00 \
+    --steps 40
+```
+
+`--steps 40` = 40 × 6 h = 10-day forecast. Output lands in `predict.save_forecast`.
+
+To override the output directory:
+
+```bash
+credit realtime -c config.yml --init-time 2024-06-01T12 --steps 40 \
+    --save-dir /tmp/test_forecast
+```
+
+### Quick sanity-check after training
+
+The fastest way to verify a freshly trained model produces sensible output:
+
+```bash
+# Plot 2m temperature in physical units (Kelvin) — recommended starting point
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T --denorm
+
+# Multiple fields at once
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T SP --denorm
+
+# 3D variable: temperature at level index 5 (pressure-level ordering)
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field temperature --level 5 --denorm
+
+# Point at a specific checkpoint or date
+credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T \
+    --checkpoint /glade/derecho/scratch/$USER/CREDIT_runs/my_run/checkpoint.pt \
+    --sample-date 2020-06-15T00 --denorm
+```
+
+Each PNG is saved to `<save_loc>/plots/` and shows **truth | prediction | difference**
+as a global map.
+
+`--denorm` converts outputs from normalised (σ) units to physical units using the
+mean and std files from your config — e.g. Kelvin for temperature, Pascals for surface
+pressure. Without `--denorm` the colourbar is in standard-deviation units, which is
+useful for diagnosing normalisation issues but harder to interpret at a glance.
+
+**What to look for:**
+
+| Symptom | Likely cause |
+|---------|-------------|
+| Loss > 100 or NaN | Normalisation broken — check mean/std paths |
+| Prediction is uniform (no structure) | Too few epochs or learning rate too high |
+| Tiling / grid artefacts in prediction | Normal at early epochs for window-based models; disappears with training |
+| Difference panel is smooth and small | Training is going well |
+
+### NCAR data paths
+
+The built-in v2 configs already point to the shared ERA5 archive at
+`/glade/campaign/cisl/aiml/ksha/CREDIT_data/` and the shared metadata at
+`/glade/u/home/akn7/miles-credit/credit/metadata/era5.yaml`.
+No path edits are needed for NCAR users.
