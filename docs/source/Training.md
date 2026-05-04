@@ -250,6 +250,78 @@ tensorboard --logdir /glade/derecho/scratch/$USER/my_run/tensorboard
 
 See [Monitoring with TensorBoard](tensorboard.md) for port-forwarding instructions for Casper and Derecho.
 
+### Gen2 parallelism: FSDP2, tensor parallel, and domain parallel
+
+The gen2 trainer supports three independent parallelism axes, controlled by a
+`parallelism:` block inside `trainer:`.
+
+```yaml
+trainer:
+    type: era5-gen2
+    parallelism:
+        data:   fsdp2   # "fsdp2" | "ddp" | "none"
+        tensor: 1       # tensor-parallel degree (1 = disabled)
+        domain: 1       # domain-parallel degree (1 = disabled)
+```
+
+The three axes compose freely. With `N` total GPUs:
+`dp_size = N / (tensor × domain)`, where `dp_size` is the number of FSDP2 or DDP
+data-parallel replicas.
+
+**Data parallelism (`data:`)** — `fsdp2` shards model parameters and gradients
+across the data-parallel group using PyTorch FSDP2. This is the recommended default
+for large models. Use `ddp` if you need gradient debugging or the model fits
+comfortably in one GPU's memory. Note that `amp: False` is required with `fsdp2`
+because FSDP2 uses its own `MixedPrecisionPolicy` internally.
+
+**Tensor parallelism (`tensor:`)** — splits each weight matrix column-wise across
+`tensor` GPUs within a node. This reduces per-GPU activation memory at the cost of
+intra-node all-reduce communication. Values of 2 or 4 are typical. Tensor parallel
+degree must divide evenly into the total GPU count.
+
+**Domain parallelism (`domain:`)** — shards the spatial H dimension across `domain`
+GPUs. Each rank processes a latitude band of height `H_padded / domain`. This is
+useful when a single forward pass at high resolution exceeds GPU memory even with
+FSDP2. First, we pre-pad the full tensor to a window-divisible height, then shard
+before the model forward pass, and finally gather and unpad the outputs.
+
+#### Padding constraint for domain parallel
+
+When `domain > 1`, the padded image height must satisfy:
+
+```
+H_padded % (domain × local_window_size × product_of_strides) == 0
+```
+
+For WXFormer with `local_window_size: 10` and `cross_embed_strides: [2, 2, 2, 2]`
+(product = 16), the constraint is `H_padded % (domain × 160) == 0`. Set `pad_lat`
+in `padding_conf` so that `image_height + sum(pad_lat)` meets this requirement. For
+example, with `domain: 2` and `image_height: 640`, `pad_lat: [160, 160]` gives
+`H_padded = 960`, `960 % 320 = 0`.
+
+#### Common configurations
+
+| Mode | Config | GPUs | When to use |
+|------|--------|------|-------------|
+| FSDP2 only | `data: fsdp2, tensor: 1, domain: 1` | any | Default for large models |
+| DDP | `data: ddp, tensor: 1, domain: 1` | any | Small models, debugging |
+| FSDP2 + TP | `data: fsdp2, tensor: 2, domain: 1` | 4+ | Reduce activation memory |
+| FSDP2 + domain | `data: fsdp2, tensor: 1, domain: 2` | 4+ | Very large spatial resolution |
+| TP + domain | `data: none, tensor: 2, domain: 2` | 4 | Maximum memory reduction |
+
+#### Submitting a parallel job
+
+`credit submit` detects the `parallelism:` block and generates a `torchrun` launch
+automatically. No extra flags are needed:
+
+```bash
+credit submit --cluster derecho -c config.yml --gpus 4
+```
+
+The generated script uses `torchrun --standalone --nproc-per-node=4`. For multi-node
+runs, set `nodes: 2` (or more) in the `pbs:` block and `credit submit` handles the
+`--nnodes` and `--rdzv` arguments.
+
 ### Job submission
 
 The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`.
