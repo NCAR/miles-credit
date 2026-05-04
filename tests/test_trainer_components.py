@@ -8,8 +8,18 @@ import pytest
 import torch
 import torch.nn as nn
 
-from credit.trainers.base_trainer import EMATracker, BaseTrainer
-from credit.scheduler import LinearWarmupCosineScheduler
+try:
+    from credit.trainers.base_trainer import EMATracker, BaseTrainer
+    from credit.scheduler import LinearWarmupCosineScheduler
+
+    _TRAINER_GEN2_AVAILABLE = True
+except ImportError:
+    _TRAINER_GEN2_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _TRAINER_GEN2_AVAILABLE,
+    reason="EMATracker / LinearWarmupCosineScheduler not available until v2/trainer-preblocks is merged",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -55,14 +65,16 @@ def _minimal_conf(**trainer_overrides):
     }
 
 
-class _ConcreteTrainer(BaseTrainer):
-    """Minimal concrete subclass so we can instantiate BaseTrainer."""
+if _TRAINER_GEN2_AVAILABLE:
 
-    def train_one_epoch(self, *a, **kw):
-        pass
+    class _ConcreteTrainer(BaseTrainer):
+        """Minimal concrete subclass so we can instantiate BaseTrainer."""
 
-    def validate(self, *a, **kw):
-        return {}
+        def train_one_epoch(self, *a, **kw):
+            pass
+
+        def validate(self, *a, **kw):
+            return {}
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +301,7 @@ def _era5_gen2_conf(**overrides):
     base = _minimal_conf()
     base["data"] = {
         "forecast_len": 1,
+        "scaler_type": "std_new",
         "source": {
             "ERA5": {
                 "levels": [500, 850],
@@ -300,6 +313,8 @@ def _era5_gen2_conf(**overrides):
                 },
             }
         },
+        "mean_path": "/dev/null",
+        "std_path": "/dev/null",
     }
     base.update(overrides)
     return base
@@ -383,6 +398,7 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
     base["data"] = {
         "forecast_len": forecast_len,
         "retain_graph": False,
+        "scaler_type": "std_new",
         "source": {
             "ERA5": {
                 "levels": [],
@@ -394,6 +410,8 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
                 },
             }
         },
+        "mean_path": "/dev/null",
+        "std_path": "/dev/null",
     }
     return base
 
