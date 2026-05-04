@@ -279,6 +279,15 @@ because FSDP2 uses its own `MixedPrecisionPolicy` internally.
 intra-node all-reduce communication. Values of 2 or 4 are typical. Tensor parallel
 degree must divide evenly into the total GPU count.
 
+:::{note}
+**WXFormer only.** Tensor parallelism currently requires model-specific layer
+detection to identify which projections receive column-parallel vs. row-parallel
+treatment. We have done this work for WXFormer (`FeedForward`, `Attention`,
+`to_qkv`/`to_out`). Other models (graph UNet, CAMulator, etc.) are not yet
+supported — setting `tensor > 1` with a non-WXFormer model will silently skip
+TP and run as `tensor: 1`. Generalization to all CREDIT models is planned.
+:::
+
 **Domain parallelism (`domain:`)** — shards the spatial H dimension across `domain`
 GPUs. Each rank processes a latitude band of height `H_padded / domain`. This is
 useful when a single forward pass at high resolution exceeds GPU memory even with
