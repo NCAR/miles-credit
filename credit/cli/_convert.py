@@ -326,10 +326,10 @@ def _init(args: argparse.Namespace) -> None:
     import shutil
 
     templates = {
-        ("0.25deg", "wxformer"): "config/wxformer_1dg_6hr.yml",
-        ("0.25deg", "crossformer"): "config/wxformer_1dg_6hr.yml",
-        ("1deg", "wxformer"): "config/wxformer_1dg_6hr.yml",
-        ("1deg", "crossformer"): "config/wxformer_1dg_6hr.yml",
+        ("0.25deg", "wxformer"): "config/gen_2/examples/wxformer_era5_025deg_6hr.yml",
+        ("0.25deg", "crossformer"): "config/gen_2/examples/wxformer_era5_025deg_6hr.yml",
+        ("1deg", "wxformer"): "config/gen_2/examples/example-v2026.2.yml",
+        ("1deg", "crossformer"): "config/gen_2/examples/example-v2026.2.yml",
     }
 
     repo = _repo_root()

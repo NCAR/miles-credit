@@ -88,7 +88,7 @@ Variable types of **periodic forcing variables** and **static variables** do not
 ## Test the validity of your data preparation
 Once the data is prepared and registered in the YAML config file. You can run the following code for a quick test:
 ```python
-from credit.parser import credit_main_parser, training_data_check
+from credit.parser import credit_main_parser, training_data_check, predict_data_check
 import yaml 
 
 # load your config
