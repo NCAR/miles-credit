@@ -49,10 +49,10 @@ def build_postblocks(postblock_cfg: dict | None = None) -> nn.ModuleDict:
 
 
 def apply_postblocks(postblocks: nn.ModuleDict, y_pred: torch.Tensor, metadata: dict) -> dict:
-    """Reconstructs ``y_pred`` into a variable dict, then applies all postblocks.
+    """Applies all postblocks. Downstream postblocks require the "Reconstruct" postblock to be run in the config first.
 
-    ``Reconstruct`` is always run first (hardcoded via the registry).
-    All registered postblocks then run sequentially on the resulting dict.
+    All registered postblocks are run sequentially on the resulting dict after reconstuct is called. If no postblocks
+    are present, the raw tensor is returned.
 
     Args:
         postblocks: ``nn.ModuleDict`` built by ``build_postblocks``.
@@ -64,9 +64,11 @@ def apply_postblocks(postblocks: nn.ModuleDict, y_pred: torch.Tensor, metadata: 
         Dict with keys ``"prediction"`` and ``"metadata"``, possibly further
         transformed by registered postblocks.
     """
-    batch = POSTBLOCK_REGISTRY["reconstruct"]()(y_pred, metadata)
 
     for postblock in postblocks.values():
-        batch = postblock(batch)
+        if isinstance(postblock, Reconstruct):
+            y_pred = postblock(y_pred, metadata)
+        else:
+            y_pred = postblock(y_pred)
 
-    return batch
+    return y_pred
