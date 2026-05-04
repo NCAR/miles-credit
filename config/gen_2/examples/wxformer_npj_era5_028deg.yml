@@ -52,7 +52,7 @@ data:
 trainer:
     type: standard # <---------- change to your type
 
-    mode: fsdp2
+    mode: fsdp
     cpu_offload: False
     activation_checkpoint: True
 
