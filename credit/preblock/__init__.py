@@ -53,10 +53,7 @@ def build_preblocks(preblock_cfg: dict | None = None) -> nn.ModuleDict:
 
 
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
-    """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
-
-    Concatenation is always performed last via ConcatToTensor and is not configurable.
-    """
+    """Sequentially applies transform preblocks (dict→dict)."""
     for preblock in preblocks.values():
         batch = preblock(batch)
-    return PREBLOCK_REGISTRY["concat"]()(batch)
+    return batch
