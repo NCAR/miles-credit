@@ -208,15 +208,11 @@ def _build_pbs_script(
                 head_node="${{nodes_arr[0]}}"
                 head_node_ip=$(ssh "${{head_node}}" hostname -i | awk '{{print $1}}')
                 echo "Head node : ${{head_node_ip}}"
-                RDZV_PORT=$(( RANDOM % 10000 + 20000 ))
+                MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
 
+                MASTER_ADDR=${{head_node_ip}} MASTER_PORT=${{MASTER_PORT}} \\
                 mpiexec -n "${{total_gpus}}" --ppn {args.gpus} --cpu-bind none \\
-                    torchrun \\
-                        --nnodes={nodes} \\
-                        --nproc-per-node={args.gpus} \\
-                        --rdzv-backend=c10d \\
-                        --rdzv-endpoint="${{head_node_ip}}:${{RDZV_PORT}}" \\
-                    ${{REPO}}/credit/applications/train_gen2.py -c ${{CONFIG}}
+                    python ${{REPO}}/credit/applications/train_gen2.py -c ${{CONFIG}}
             """)
 
         return header + launch
