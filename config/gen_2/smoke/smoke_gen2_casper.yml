@@ -43,7 +43,7 @@ preblocks:
       std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/std_6h_1979_2018_16lev_0.25deg.nc"
 
 model:
-    type: "wxformer"
+    type: "crossformer"
     frames: 1
     image_height: 640
     image_width: 1280
@@ -57,8 +57,7 @@ model:
     patch_height: 1
     frame_patch_size: 1
 
-    dim: [8, 16, 32, 64]
-    dim_head: 8
+    dim: [32, 64, 128, 256]
     depth: [2, 2, 2, 2]
     global_window_size: [10, 5, 2, 1]
     local_window_size: 10
