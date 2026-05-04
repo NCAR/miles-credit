@@ -305,8 +305,9 @@ example, with `domain: 2` and `image_height: 640`, `pad_lat: [160, 160]` gives
 |------|--------|------|-------------|
 | FSDP2 only | `data: fsdp2, tensor: 1, domain: 1` | any | Default for large models |
 | DDP | `data: ddp, tensor: 1, domain: 1` | any | Small models, debugging |
-| FSDP2 + TP | `data: fsdp2, tensor: 2, domain: 1` | 4+ | Reduce activation memory |
+| Domain + DDP | `data: ddp, tensor: 1, domain: 2` | 4+ | Spatial sharding with data parallel |
 | FSDP2 + domain | `data: fsdp2, tensor: 1, domain: 2` | 4+ | Very large spatial resolution |
+| FSDP2 + TP | `data: fsdp2, tensor: 2, domain: 1` | 4+ | Reduce activation memory |
 | TP + domain | `data: none, tensor: 2, domain: 2` | 4 | Maximum memory reduction |
 
 #### Submitting a parallel job
