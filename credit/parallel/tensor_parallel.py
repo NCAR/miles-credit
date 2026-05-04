@@ -1,29 +1,25 @@
-"""Tensor Parallelism for CREDIT v2 WXFormer models.
+"""Tensor Parallelism for CREDIT v2 models.
 
-Applies column/row parallelism to the two dense linear bottlenecks in each
-transformer block:
+Applies column/row parallelism to transformer blocks that opt in by declaring
+two class attributes:
 
-  FeedForward / FeedForwardSwiGLU (Conv2d k=1):
-    proj_up   (or layers[1]) → TpColConv2d  (output channels sharded)
-    proj_out  (or layers[4]) → TpRowConv2d  (input channels sharded, all_reduce)
+    class MyBlock(nn.Module):
+        _tp_col = "proj_up"   # attribute path for the column-parallel layer
+        _tp_row = "proj_out"  # attribute path for the row-parallel layer
 
-  GridAttention (nn.Linear):
-    to_qkv  → TpColLinear   (output features sharded → Q/K/V heads split)
-    to_out  → TpRowLinear   (input features sharded, all_reduce)
+Paths may be dotted (e.g. ``"layers.1"``) to address layers nested inside a
+Sequential or other container.
 
-  Window Attention (Conv2d k=1):
-    to_qkv  → TpColConv2d
-    to_out  → TpRowConv2d
+The column-parallel layer receives the full input and produces a sharded output
+(no all_reduce). The row-parallel layer receives the sharded input and issues an
+all_reduce SUM so the rest of the graph sees the full output.
 
-All other layers (norms, convolutions with spatial extent, embeddings,
-PixelShuffle) are left unchanged — they are either local operations or
-too expensive to partition.
+Supported layer types: ``nn.Conv2d`` (kernel 1×1 only) and ``nn.Linear``.
 
 Gradient flow:
-  - TPColConv2d / TPColLinear: no all_reduce needed (output is sharded,
+  - TpColConv2d / TpColLinear: no all_reduce (output is sharded,
     consumed by the paired Row layer).
-  - TPRowConv2d / TPRowLinear: all_reduce SUM over tp_group before returning,
-    so the rest of the graph sees the full reduced output.
+  - TpRowConv2d / TpRowLinear: all_reduce SUM over tp_group before returning.
 
 Usage:
     from credit.parallel import apply_tensor_parallel
@@ -197,53 +193,49 @@ def _tp_group_from_mesh(tp_mesh):
     return tp_mesh.get_group()
 
 
-def _convert_feedforward(ff_module, tp_group):
-    """Convert FeedForward (Sequential with two 1x1 Conv2d) to TP."""
-    # layers: LayerNorm, Conv2d(dim→dim*mult), GELU, Dropout, Conv2d(dim*mult→dim)
-    seq = ff_module.layers
-    for i, layer in enumerate(seq):
-        if isinstance(layer, nn.Conv2d) and layer.kernel_size in ((1, 1), 1):
-            first_conv_idx = i
-            break
+# ---------------------------------------------------------------------------
+# Generic path helpers (dotted paths like "layers.1" into Sequentials)
+# ---------------------------------------------------------------------------
+
+
+def _rgetattr(obj, path: str):
+    """Get a nested attribute/index using a dotted path."""
+    for part in path.split("."):
+        obj = obj[int(part)] if part.isdigit() else getattr(obj, part)
+    return obj
+
+
+def _rsetattr(obj, path: str, val) -> None:
+    """Set a nested attribute/index using a dotted path."""
+    parts = path.split(".")
+    for part in parts[:-1]:
+        obj = obj[int(part)] if part.isdigit() else getattr(obj, part)
+    last = parts[-1]
+    if last.isdigit():
+        obj[int(last)] = val
     else:
-        return ff_module
-
-    # Find the two Conv2d layers (first = Col, second = Row)
-    conv_indices = [i for i, layer in enumerate(seq) if isinstance(layer, nn.Conv2d)]
-    if len(conv_indices) < 2:
-        return ff_module
-
-    col_idx, row_idx = conv_indices[0], conv_indices[-1]
-    seq[col_idx] = TpColConv2d(seq[col_idx], tp_group)
-    seq[row_idx] = TpRowConv2d(seq[row_idx], tp_group)
-    return ff_module
+        setattr(obj, last, val)
 
 
-def _convert_swiglu(swiglu_module, tp_group):
-    """Convert FeedForwardSwiGLU to TP."""
-    # proj_up: Conv2d(dim, hidden*2, 1) → Col (output sharded, gate+val both sharded)
-    # proj_out: Conv2d(hidden, dim, 1) → Row (input is hidden//tp, all_reduce)
-    swiglu_module.proj_up = TpColConv2d(swiglu_module.proj_up, tp_group)
-    swiglu_module.proj_out = TpRowConv2d(swiglu_module.proj_out, tp_group)
-    return swiglu_module
+# ---------------------------------------------------------------------------
+# Generic col/row dispatchers
+# ---------------------------------------------------------------------------
 
 
-def _convert_grid_attention(attn_module, tp_group):
-    """Convert GridAttention to TP (uses nn.Linear — clean column/row split)."""
-    # to_qkv: Linear(dim, inner_dim*3) → Col
-    # to_out: Linear(inner_dim, dim) → Row
-    attn_module.to_qkv = TpColLinear(attn_module.to_qkv, tp_group)
-    attn_module.to_out = TpRowLinear(attn_module.to_out, tp_group)
-    return attn_module
+def _to_col_parallel(layer: nn.Module, tp_group):
+    if isinstance(layer, nn.Conv2d):
+        return TpColConv2d(layer, tp_group)
+    if isinstance(layer, nn.Linear):
+        return TpColLinear(layer, tp_group)
+    raise TypeError(f"_to_col_parallel: unsupported layer type {type(layer)}")
 
 
-def _convert_window_attention(attn_module, tp_group):
-    """Convert window Attention (Conv2d k=1 QKV) to TP."""
-    # to_qkv: Conv2d(dim, inner_dim*3, 1) → Col
-    # to_out: Conv2d(inner_dim, dim, 1) → Row
-    attn_module.to_qkv = TpColConv2d(attn_module.to_qkv, tp_group)
-    attn_module.to_out = TpRowConv2d(attn_module.to_out, tp_group)
-    return attn_module
+def _to_row_parallel(layer: nn.Module, tp_group):
+    if isinstance(layer, nn.Conv2d):
+        return TpRowConv2d(layer, tp_group)
+    if isinstance(layer, nn.Linear):
+        return TpRowLinear(layer, tp_group)
+    raise TypeError(f"_to_row_parallel: unsupported layer type {type(layer)}")
 
 
 # ---------------------------------------------------------------------------
@@ -252,39 +244,53 @@ def _convert_window_attention(attn_module, tp_group):
 
 
 def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
-    """Walk model and apply TP to all eligible transformer blocks.
+    """Walk model and apply TP to all blocks that declare ``_tp_col``/``_tp_row``.
+
+    Any ``nn.Module`` subclass can opt in by setting two class attributes::
+
+        class MyBlock(nn.Module):
+            _tp_col = "proj_up"   # dotted path to the column-parallel layer
+            _tp_row = "proj_out"  # dotted path to the row-parallel layer
+
+    Paths may address layers inside Sequentials (e.g. ``"layers.1"``).
+    Supported layer types: ``nn.Conv2d`` (1×1 only) and ``nn.Linear``.
 
     Converts in-place. Safe to call before apply_fsdp2.
 
     Args:
-        model: The model to convert (e.g. CrossFormer / WXFormer).
+        model: The model to convert.
         tp_mesh: 1-D DeviceMesh for the tensor-parallel dimension.
 
     Returns:
         model (same object, modified in-place).
     """
-    try:
-        from credit.models.wxformer.crossformer import (
-            FeedForward,
-            Attention,
-        )
-    except ImportError:
-        logger.warning("crossformer not found — tensor parallelism skipped")
-        return model
-
     tp_group = _tp_group_from_mesh(tp_mesh)
+    count = 0
 
-    counts = {"ff": 0, "window_attn": 0}
+    seen = set()
+    for module in model.modules():
+        mid = id(module)
+        if mid in seen:
+            continue
+        seen.add(mid)
 
-    # Walk named children; replace in parent
-    for parent_name, parent in model.named_modules():
-        for name, module in list(parent.named_children()):
-            if isinstance(module, FeedForward):
-                setattr(parent, name, _convert_feedforward(module, tp_group))
-                counts["ff"] += 1
-            elif isinstance(module, Attention):
-                setattr(parent, name, _convert_window_attention(module, tp_group))
-                counts["window_attn"] += 1
+        col_path = getattr(type(module), "_tp_col", None)
+        row_path = getattr(type(module), "_tp_row", None)
+        if col_path is None or row_path is None:
+            continue
 
-    logger.info(f"Tensor parallelism applied: {counts['ff']} FF, {counts['window_attn']} WindowAttn")
+        col_layer = _rgetattr(module, col_path)
+        row_layer = _rgetattr(module, row_path)
+        _rsetattr(module, col_path, _to_col_parallel(col_layer, tp_group))
+        _rsetattr(module, row_path, _to_row_parallel(row_layer, tp_group))
+        count += 1
+
+    if count == 0:
+        logger.warning(
+            "apply_tensor_parallel: no blocks with _tp_col/_tp_row found — "
+            "tensor parallelism had no effect. Add these class attributes to "
+            "your model's transformer blocks to enable TP."
+        )
+    else:
+        logger.info(f"Tensor parallelism applied to {count} block(s)")
     return model

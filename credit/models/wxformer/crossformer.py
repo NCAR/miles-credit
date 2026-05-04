@@ -202,6 +202,9 @@ class LayerNorm(nn.Module):
 
 
 class FeedForward(nn.Module):
+    _tp_col = "layers.1"  # Conv2d(dim → dim*mult) — output channels sharded
+    _tp_row = "layers.4"  # Conv2d(dim*mult → dim) — input channels sharded + all_reduce
+
     def __init__(self, dim, mult=4, dropout=0.0):
         super(FeedForward, self).__init__()
         self.layers = nn.Sequential(
@@ -220,6 +223,9 @@ class Attention(nn.Module):
     """
     Attention module for the CrossFormer model.
 
+    Tensor parallelism opt-in: ``to_qkv`` is column-parallel (output sharded),
+    ``to_out`` is row-parallel (input sharded, all_reduce).
+
     This module performs either short-range or long-range attention on the input tensor.
     It uses a dynamic positional bias to incorporate relative positional information.
 
@@ -230,6 +236,9 @@ class Attention(nn.Module):
         dim_head (int, optional): Dimension of each attention head. Defaults to 32.
         dropout (float, optional): Dropout rate. Defaults to 0.0.
     """
+
+    _tp_col = "to_qkv"  # Conv2d(dim → inner_dim*3) — output channels sharded
+    _tp_row = "to_out"  # Conv2d(inner_dim → dim) — input channels sharded + all_reduce
 
     def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0):
         super().__init__()
