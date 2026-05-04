@@ -2,7 +2,7 @@ import logging
 
 import torch
 from credit.models.base_model import BaseModel
-from credit.postblock import PostBlock
+from credit.postblock._postblock import PostBlock
 
 logger = logging.getLogger(__name__)
 
