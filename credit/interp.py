@@ -814,7 +814,7 @@ def mean_sea_level_pressure_simple(surface_pressure_pa, temperature_k, surface_g
             mslp[i, j] = surface_pressure_pa[i, j]
         else:
             temp = temperature_k[i, j]
-            tto = temp + LAPSE_RATE * sgp
+            tto = temp + LAPSE_RATE * sgp / GRAVITY
             alpha_local = ALPHA
             if (temp <= 290.5) and (tto > 290.5):
                 alpha_local = RDGAS * (290.5 - temp) / sgp

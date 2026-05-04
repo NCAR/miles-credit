@@ -63,11 +63,11 @@ data section of the config file to point to the GFS initial conditions zarr file
 only outputs one forecast at a time.
 
 ## Rollout to netCDF for ERA5 initiated forecasts
-`credit_rollout_to_netcdf` enables you to generate forecasts for many initialization times using 
-processed ERA5 data as initial conditions. It can be run either in serial or parallel mode with
-both single node and multi node support (MPI-enabled PyTorch required). 
+`credit rollout` generates forecasts for many initialization times using processed ERA5 data as
+initial conditions. It supports deterministic and ensemble rollouts, serial and parallel modes,
+single and multi-node execution.
 
-To run `credit_rollout_to_netcdf` include the following section in your config file.
+Add the following section to your config file:
 
 ```yaml
 predict:
@@ -82,14 +82,47 @@ predict:
                              # duration should be divisible by the number of GPUs
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 10             # forecast lead time as days (1 means 24-hour forecast)
+    ensemble_size: 1         # set > 1 to save ensemble members to NetCDF
 ```
 
-To submit the rollout script as a PBS job, use `credit_rollout_to_netcdf -l 1 -c <config file>`.
+### Running locally
 
-To issue predictions on multiple GPUs on a single node:
-`torchrun credit_rollout_to_netcdf -c <confg file>`
+```bash
+# Deterministic rollout (reads ensemble_size from config)
+credit rollout -c config.yml
 
-For multi-node rollouts with MPI (MPI-enabled PyTorch required):
+# Ensemble rollout — override ensemble_size from the CLI
+credit rollout -c config.yml --ensemble-size 50
+
+# Multi-GPU on a single node
+credit rollout -c config.yml -m ddp
+```
+
+### Submitting PBS jobs
+
+Use `credit submit` to submit rollout jobs to the cluster. The `--rollout` flag switches from
+training submission to parallel rollout submission. `--jobs N` splits init times across N
+independent PBS jobs (all start at once, no afterok chain).
+
+```bash
+# Submit 10 parallel rollout jobs on Casper (deterministic or ensemble — set by config)
+credit submit --cluster casper -c config.yml --rollout --jobs 10
+
+# Override ensemble size at submission time
+credit submit --cluster casper -c config.yml --rollout --jobs 10 --gpus 1
+
+# Dry run — inspect the PBS scripts before submitting
+credit submit --cluster casper -c config.yml --rollout --jobs 10 --dry-run
+```
+
+`--jobs` controls how many PBS nodes split the init-time work. `ensemble_size` in the config
+(or `--ensemble-size` at the CLI) controls how many ensemble members are run per init time.
+These are independent settings.
+
+### Multi-node rollout (MPI)
+
+For MPI-enabled PyTorch installations:
+
 ```bash
 nodes=( $( cat $PBS_NODEFILE ) )
 head_node=${nodes[0]}
@@ -97,7 +130,7 @@ head_node_ip=$(ssh $head_node hostname -i | awk '{print $1}')
 export NUM_RANKS=32
 MASTER_ADDR=$head_node_ip
 MASTER_PORT=1234
-mpiexec -n $NUM_RANKS -ppn 4 --cpu-bind none python rollout_to_netcdf.py -c <config file>
+mpiexec -n $NUM_RANKS -ppn 4 --cpu-bind none python applications/rollout_to_netcdf_v2.py -c config.yml
 ```
 ## Interpolation to constant pressure and height above ground levels
 Both `credit_rollout_realtime` and `credit_rollout_to_netcdf` support vertical interpolation to constant

@@ -10,13 +10,12 @@ seed: 1000
 data:
     # upper-air variables
     variables: ['T', 'U', 'V', 'Q']
-#    save_loc: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL*'
-    save_loc: "/glade/derecho/scratch/cbecker/gfs_init_20250304_all.zarr"
+    # save_loc and save_loc_surface are set automatically by rollout_realtime when use_gfs_init: true
+    save_loc: "/glade/derecho/scratch/cbecker/CREDIT/GFS_IC/gfs_init_20250304_0600.zarr"
 
     # surface variables
     surface_variables: ['SP', 't2m', 'Z500', 'T500','U500', 'V500', 'Q500']
-#    save_loc_surface_surface: '/glade/derecho/scratch/ksha/CREDIT_data/ERA5_mlevel_arXiv/SixHourly_y_TOTAL*'
-    save_loc_surface: "/glade/derecho/scratch/cbecker/gfs_init_20250304_all.zarr"
+    save_loc_surface: "/glade/derecho/scratch/cbecker/CREDIT/GFS_IC/gfs_init_20250304_0600.zarr"
 
     # dynamic forcing variables
     dynamic_forcing_variables: ['tsi']
@@ -164,9 +163,12 @@ predict:
                              # duration should be divisible by the number of GPUs
                              # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
         days: 2              # forecast lead time as days (1 means 24-
-    forecast_start_time: "2025-03-03 0600"
-    forecast_end_time: "2025-03-05 0000"
-    forecast_timestep: "6h"
+    realtime:
+        forecast_start_time: "2025-03-04 0600"
+        forecast_end_time: "2025-03-06 0000"
+        forecast_timestep: "6h"
+        use_gfs_init: true
+        initial_condition_path: '/glade/derecho/scratch/cbecker/CREDIT/GFS_IC/'
 
     save_forecast: '/glade/derecho/scratch/cbecker/CREDIT/wxformer_6h/'
     save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']

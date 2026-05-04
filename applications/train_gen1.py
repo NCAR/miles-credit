@@ -275,7 +275,7 @@ def main(rank, world_size, conf, backend=None, trial=False):
 
     # Initialize a trainer object
     trainer_cls = load_trainer(conf)
-    trainer = trainer_cls(model, rank)
+    trainer = trainer_cls(model, rank, conf)
 
     # Fit the model
     result = trainer.fit(
