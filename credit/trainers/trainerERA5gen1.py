@@ -11,7 +11,7 @@ from torch.utils.data import IterableDataset
 import optuna
 
 from credit.data import concat_and_reshape, reshape_only
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock._postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle

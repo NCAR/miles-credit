@@ -9,7 +9,7 @@ import tqdm
 
 import optuna
 
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock._postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer

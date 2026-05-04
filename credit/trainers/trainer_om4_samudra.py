@@ -10,7 +10,7 @@ from torch.utils.data import IterableDataset
 from credit.scheduler import update_on_batch
 from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock._postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 import optuna
 
