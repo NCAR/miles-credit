@@ -352,6 +352,8 @@ def distributed_model_wrapper_v2(conf: dict, model, device):
     data_mode = p["data"]
     tp_size = int(p.get("tensor", 1))
     domain_size = int(p.get("domain", 1))
+    _world_size = dist.get_world_size() if dist.is_initialized() else 1
+    dp_size = _world_size // max(tp_size * domain_size, 1)
 
     # Validation
     if domain_size > 1 and data_mode == "none" and tp_size == 1:
@@ -399,12 +401,23 @@ def distributed_model_wrapper_v2(conf: dict, model, device):
     dp_mesh = submeshes.get("dp")
 
     if data_mode == "fsdp2":
-        from credit.parallel import apply_fsdp2
+        if dp_size <= 1:
+            # FSDP2 with dp=1 is a no-op for gradient sync and converts params to
+            # DTensors, which breaks sync_domain_gradients when domain > 1.
+            logging.warning(
+                f"[V2] FSDP2 requested but dp_size={dp_size} (world={dist.get_world_size()}, "
+                f"tensor={tp_size}, domain={domain_size}). Skipping FSDP2 — use data=none or "
+                "increase GPUs so dp_size > 1."
+            )
+            if domain_manager is not None:
+                model._domain_parallel_manager = domain_manager
+        else:
+            from credit.parallel import apply_fsdp2
 
-        model = apply_fsdp2(model, dp_mesh, conf)
-        if domain_manager is not None:
-            model._domain_parallel_manager = domain_manager
-        logging.info("[V2] FSDP2 applied over dp_mesh")
+            model = apply_fsdp2(model, dp_mesh, conf)
+            if domain_manager is not None:
+                model._domain_parallel_manager = domain_manager
+            logging.info("[V2] FSDP2 applied over dp_mesh")
 
     elif data_mode == "ddp":
         dp_group = dp_mesh.get_group() if dp_mesh is not None else None
