@@ -11,6 +11,7 @@ Content:
 import os
 import copy
 import inspect
+import importlib.util
 import warnings
 from glob import glob
 from collections import Counter
@@ -21,6 +22,29 @@ from credit.datasets.downscaling_dataset import DownscalingDataset
 # from credit.datasets.datamap import DataMap
 from credit.datasets.count_channels import count_channels
 # from credit.transforms_downscaling import DataTransforms
+
+
+def load_custom_model_modules(conf):
+    """Import every file listed under ``custom_models`` in the config.
+
+    Each file is executed as a standalone module.  The expected use-case is
+    that each file contains one or more classes decorated with
+    ``@register_model``, so the import triggers registration as a side-effect.
+
+    Args:
+        conf (dict): Top-level config dict.  If ``custom_models`` is absent or
+            empty this function is a no-op.
+
+    Raises:
+        FileNotFoundError: If a listed path does not exist on disk.
+    """
+    for raw_path in conf.get("custom_models", []):
+        path = os.path.expandvars(raw_path)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"custom_models: file not found: {path!r}")
+        spec = importlib.util.spec_from_file_location("_credit_custom_model", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
 
 def validate_args(function, argdict, context, ignore=[]):
@@ -103,6 +127,8 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         - applications/rollout_to_netcdf.py
 
     """
+
+    load_custom_model_modules(conf)
 
     # many config options don't apply when downscaling to regional
     is_downscaling = "datasets" in conf["data"]
