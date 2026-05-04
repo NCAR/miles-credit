@@ -10,7 +10,7 @@ set -euo pipefail
 REPO=/glade/work/schreck/repos/miles-credit-main
 git -C "${REPO}" checkout v2/fsdp2-parallel --quiet
 
-BASE_CONFIG=${REPO}/config/fsdp2_parallel_test.yml
+BASE_CONFIG=${REPO}/config/gen_2/smoke/fsdp2_parallel_test.yml
 CONDA_ENV=/glade/work/schreck/conda-envs/credit-main-casper
 ACCOUNT=NAML0001
 SCRATCH=/glade/derecho/scratch/schreck/CREDIT_runs/train_sweep

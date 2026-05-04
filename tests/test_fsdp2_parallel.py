@@ -39,7 +39,7 @@ def _make_manager(rank, n):
 # _shard_spatial
 # ---------------------------------------------------------------------------
 
-from credit.trainers.trainerERA5v2 import _shard_spatial  # noqa: E402
+from credit.trainers.trainerERA5gen2 import _shard_spatial  # noqa: E402
 
 
 class TestShardSpatial:
@@ -82,7 +82,7 @@ class TestShardSpatial:
 # _unpad_shard_interp
 # ---------------------------------------------------------------------------
 
-from credit.trainers.trainerERA5v2 import _unpad_shard_interp  # noqa: E402
+from credit.trainers.trainerERA5gen2 import _unpad_shard_interp  # noqa: E402
 
 
 def _make_padding_opt(pad_ns=(0, 0), pad_we=(0, 0)):

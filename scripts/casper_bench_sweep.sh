@@ -14,7 +14,7 @@
 # Usage: qsub scripts/casper_bench_sweep.sh
 
 REPO=/glade/work/schreck/repos/miles-credit-main
-CONFIG=${REPO}/config/fsdp2_parallel_test.yml
+CONFIG=${REPO}/config/gen_2/smoke/fsdp2_parallel_test.yml
 NGPUS=4
 
 conda activate /glade/work/schreck/conda-envs/credit-main-casper

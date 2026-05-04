@@ -5,7 +5,7 @@ using synthetic data. No real ERA5 data required.
 
 Usage (torchrun):
     torchrun --standalone --nproc-per-node=4 applications/benchmark_parallelism.py \
-        -c config/fsdp2_parallel_test.yml \
+        -c config/gen_2/smoke/fsdp2_parallel_test.yml \
         [--data fsdp2] [--tensor 2] [--domain 1] \
         [--warmup 5] [--steps 20]
 

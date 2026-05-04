@@ -10,7 +10,7 @@
 set -euo pipefail
 
 REPO=/glade/work/schreck/repos/miles-credit-main
-BASE_CONFIG=${REPO}/config/fsdp2_parallel_test.yml
+BASE_CONFIG=${REPO}/config/gen_2/smoke/fsdp2_parallel_test.yml
 ACCOUNT=${PBS_ACCOUNT:-NAML0001}
 CONDA_ENV=/glade/work/schreck/conda-envs/credit-main-derecho
 QUEUE=${DERECHO_QUEUE:-develop}   # develop for fast turnaround; swap to main for production

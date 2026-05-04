@@ -20,7 +20,7 @@ REPO=/glade/work/schreck/repos/miles-credit-main
 # Ensure repo is on the branch that has train_v2.py and fsdp2_parallel_test.yml
 git -C "${REPO}" checkout v2/fsdp2-parallel --quiet
 
-BASE_CONFIG=${REPO}/config/fsdp2_parallel_test.yml
+BASE_CONFIG=${REPO}/config/gen_2/smoke/fsdp2_parallel_test.yml
 CONDA_ENV=/glade/work/schreck/conda-envs/credit-main-derecho
 ACCOUNT=NAML0001
 SCRATCH=/glade/derecho/scratch/schreck/CREDIT_runs/derecho_train_sweep

@@ -13,7 +13,7 @@
 # Usage: qsub scripts/derecho_fsdp2_test.sh
 
 REPO=/glade/work/schreck/repos/miles-credit-main
-CONFIG=${REPO}/config/fsdp2_parallel_test.yml
+CONFIG=${REPO}/config/gen_2/smoke/fsdp2_parallel_test.yml
 NGPUS=4
 
 module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 \
