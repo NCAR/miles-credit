@@ -141,7 +141,7 @@ trainer:
     # Choose the training routine
     # This is deprecated as of credit-2.0
     # Use universal with all of the above dataset_types
-    type: era5
+    type: era5-gen1
 
     # the keyword that controls GPU usage
     # fsdp: fully sharded data parallel

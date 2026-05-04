@@ -22,6 +22,8 @@ weather prediction models built on the CrossFormer attention backbone.
 
 ### Deterministic training
 
+In your config set:
+
 ```yaml
 model:
   type: wxformer
@@ -35,6 +37,9 @@ model:
 ```
 
 ### Ensemble fine-tuning
+
+1. Train a deterministic `wxformer` checkpoint to convergence.
+2. Switch the config type:
 
 ```yaml
 model:

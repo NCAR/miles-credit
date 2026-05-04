@@ -1,0 +1,457 @@
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+=== CREDIT v2 parallelism (torchrun) ===
+Host   : deg0055
+Date   : Thu Apr 30 09:25:22 AM MDT 2026
+Nodes  : 1  GPUs/node: 4
+I0430 09:25:39.312000 44554 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train_gen2.py
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : localhost:29500
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /glade/derecho/scratch/schreck/tmp/torchelastic_1kyg2y8g
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0430 09:25:39.316000 44554 site-packages/torch/distributed/launcher/api.py:199] 
+I0430 09:25:39.339000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0430 09:25:39.339000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523] [default] Rendezvous complete for workers. Result:
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   restart_count=0
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_addr=deg0055.hsn.de.hpc.ucar.edu
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_port=37013
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_rank=0
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_world_size=1
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   local_ranks=[0, 1, 2, 3]
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_ranks=[0, 1, 2, 3]
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_ranks=[0, 1, 2, 3]
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_world_sizes=[4, 4, 4, 4]
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_world_sizes=[4, 4, 4, 4]
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523]   event_log_handler=null
+I0430 09:25:39.537000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:523] 
+I0430 09:25:39.538000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:685] [default] Starting worker group
+I0430 09:25:39.538000 44554 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:296] use_agent_store: True
+I0430 09:25:39.539000 44554 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:192] Environment variable 'TORCHELASTIC_ENABLE_FILE_TIMER' not found. Do not start FileTimerServer.
+I0430 09:25:39.539000 44554 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:236] Environment variable 'TORCHELASTIC_HEALTH_CHECK_PORT' not found. Do not start health check.
+WARNING:root:Legacy model imports unavailable (numba/NumPy conflict or missing dep): No module named 'credit.models.crossformer.crossformer'; 'credit.models.crossformer' is not a package.
+WARNING:root:Legacy model imports unavailable (numba/NumPy conflict or missing dep): No module named 'credit.models.crossformer.crossformer'; 'credit.models.crossformer' is not a package.
+WARNING:root:Legacy model imports unavailable (numba/NumPy conflict or missing dep): No module named 'credit.models.crossformer.crossformer'; 'credit.models.crossformer' is not a package.
+WARNING:root:Legacy model imports unavailable (numba/NumPy conflict or missing dep): No module named 'credit.models.crossformer.crossformer'; 'credit.models.crossformer' is not a package.
+WARNING:root:BridgeScalerTransformer unavailable (numba/NumPy conflict): cannot import name 'load_scaler_dict' from 'bridgescaler' (/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/bridgescaler/__init__.py)
+WARNING:root:BridgeScalerTransformer unavailable (numba/NumPy conflict): cannot import name 'load_scaler_dict' from 'bridgescaler' (/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/bridgescaler/__init__.py)
+WARNING:root:BridgeScalerTransformer unavailable (numba/NumPy conflict): cannot import name 'load_scaler_dict' from 'bridgescaler' (/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/bridgescaler/__init__.py)
+WARNING:root:BridgeScalerTransformer unavailable (numba/NumPy conflict): cannot import name 'load_scaler_dict' from 'bridgescaler' (/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/bridgescaler/__init__.py)
+INFO:root:Running DDP on rank 3 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 3 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 2 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 2 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 1 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 1 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 0 with world_size 4 using nccl.
+INFO:root:Running DDP on rank 0 with world_size 4 using nccl.
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'domain': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'domain': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'domain': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'domain': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'domain': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'domain': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'domain': 2} (world=4, data_mode=fsdp2)
+INFO:credit.parallel.mesh:DeviceMesh: {'dp': 2, 'domain': 2} (world=4, data_mode=fsdp2)
+INFO:credit.domain_parallel.manager:DomainParallelManager: rank=2, domain_rank=0/2, dp_rank=1/2, shard_dim=-2
+INFO:credit.domain_parallel.manager:DomainParallelManager: rank=1, domain_rank=1/2, dp_rank=0/2, shard_dim=-2
+INFO:credit.domain_parallel.manager:DomainParallelManager: rank=0, domain_rank=0/2, dp_rank=0/2, shard_dim=-2
+INFO:credit.domain_parallel.manager:DomainParallelManager: rank=2, domain_rank=0/2, dp_rank=1/2, shard_dim=-2
+INFO:credit.domain_parallel.manager:DomainParallelManager: rank=3, domain_rank=1/2, dp_rank=1/2, shard_dim=-2
+INFO:credit.domain_parallel.manager:DomainParallelManager: rank=1, domain_rank=1/2, dp_rank=0/2, shard_dim=-2
+INFO:credit.domain_parallel.manager:DomainParallelManager: rank=0, domain_rank=0/2, dp_rank=0/2, shard_dim=-2
+INFO:credit.domain_parallel.manager:DomainParallelManager: rank=3, domain_rank=1/2, dp_rank=1/2, shard_dim=-2
+INFO:credit.domain_parallel.convert:Domain-parallel conversion: replaced 16 Conv2d, 0 Conv3d, 1 ConvTranspose2d, 0 ConvTranspose3d, 6 GroupNorm, 0 custom layers
+INFO:credit.domain_parallel.convert:Domain-parallel conversion: replaced 16 Conv2d, 0 Conv3d, 1 ConvTranspose2d, 0 ConvTranspose3d, 6 GroupNorm, 0 custom layers
+INFO:root:[V2] Domain parallelism: 2 shards, 2 data-parallel replicas
+INFO:root:[V2] Domain parallelism: 2 shards, 2 data-parallel replicas
+INFO:credit.domain_parallel.convert:Domain-parallel conversion: replaced 16 Conv2d, 0 Conv3d, 1 ConvTranspose2d, 0 ConvTranspose3d, 6 GroupNorm, 0 custom layers
+INFO:credit.domain_parallel.convert:Domain-parallel conversion: replaced 16 Conv2d, 0 Conv3d, 1 ConvTranspose2d, 0 ConvTranspose3d, 6 GroupNorm, 0 custom layers
+INFO:credit.domain_parallel.convert:Domain-parallel conversion: replaced 16 Conv2d, 0 Conv3d, 1 ConvTranspose2d, 0 ConvTranspose3d, 6 GroupNorm, 0 custom layers
+INFO:credit.domain_parallel.convert:Domain-parallel conversion: replaced 16 Conv2d, 0 Conv3d, 1 ConvTranspose2d, 0 ConvTranspose3d, 6 GroupNorm, 0 custom layers
+INFO:credit.domain_parallel.convert:Domain-parallel conversion: replaced 16 Conv2d, 0 Conv3d, 1 ConvTranspose2d, 0 ConvTranspose3d, 6 GroupNorm, 0 custom layers
+INFO:root:[V2] Domain parallelism: 2 shards, 2 data-parallel replicas
+INFO:credit.domain_parallel.convert:Domain-parallel conversion: replaced 16 Conv2d, 0 Conv3d, 1 ConvTranspose2d, 0 ConvTranspose3d, 6 GroupNorm, 0 custom layers
+INFO:root:[V2] Domain parallelism: 2 shards, 2 data-parallel replicas
+INFO:root:[V2] Domain parallelism: 2 shards, 2 data-parallel replicas
+INFO:root:[V2] Domain parallelism: 2 shards, 2 data-parallel replicas
+INFO:root:[V2] Domain parallelism: 2 shards, 2 data-parallel replicas
+INFO:root:[V2] Domain parallelism: 2 shards, 2 data-parallel replicas
+INFO:credit.parallel.fsdp2:FSDP2: sharded 0 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 0 submodules + top-level model
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+[rank0]:[W430 09:26:38.439305545 ProcessGroupNCCL.cpp:5023] [PG ID 0 PG GUID 0 Rank 0]  using GPU 0 as device used by this process is currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. You can specify device_id in init_process_group() to force use of a particular device.
+INFO:credit.parallel.fsdp2:FSDP2: sharded 0 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 0 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 0 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 0 submodules + top-level model
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+[rank2]:[W430 09:26:38.440324017 ProcessGroupNCCL.cpp:5023] [PG ID 0 PG GUID 0 Rank 2]  using GPU 2 as device used by this process is currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. You can specify device_id in init_process_group() to force use of a particular device.
+[rank3]:[W430 09:26:38.440326913 ProcessGroupNCCL.cpp:5023] [PG ID 0 PG GUID 0 Rank 3]  using GPU 3 as device used by this process is currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. You can specify device_id in init_process_group() to force use of a particular device.
+INFO:credit.parallel.fsdp2:FSDP2: sharded 0 submodules + top-level model
+INFO:credit.parallel.fsdp2:FSDP2: sharded 0 submodules + top-level model
+INFO:root:[V2] FSDP2 applied over dp_mesh
+INFO:root:[V2] FSDP2 applied over dp_mesh
+[rank1]:[W430 09:26:38.440995468 ProcessGroupNCCL.cpp:5023] [PG ID 0 PG GUID 0 Rank 1]  using GPU 1 as device used by this process is currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. You can specify device_id in init_process_group() to force use of a particular device.
+NCCL version 2.21.5+cuda12.3
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+DEBUG:numcodecs:Registering codec 'fill_hdf_strings'
+DEBUG:numcodecs:Registering codec 'fill_hdf_strings'
+DEBUG:numcodecs:Registering codec 'grib'
+DEBUG:numcodecs:Registering codec 'fill_hdf_strings'
+DEBUG:numcodecs:Registering codec 'fill_hdf_strings'
+DEBUG:numcodecs:Registering codec 'grib'
+DEBUG:numcodecs:Registering codec 'grib'
+DEBUG:numcodecs:Registering codec 'grib'
+DEBUG:numcodecs:Registering codec 'FITSAscii'
+DEBUG:numcodecs:Registering codec 'FITSVarBintable'
+DEBUG:numcodecs:Registering codec 'FITSAscii'
+DEBUG:numcodecs:Registering codec 'FITSAscii'
+DEBUG:numcodecs:Registering codec 'FITSVarBintable'
+DEBUG:numcodecs:Registering codec 'FITSAscii'
+DEBUG:numcodecs:Registering codec 'FITSVarBintable'
+DEBUG:numcodecs:Registering codec 'FITSVarBintable'
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+  0%|          | 0/5 [00:00<?, ?it/s]  0%|          | 0/5 [00:00<?, ?it/s]  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:batch indices: [444]
+DEBUG:credit.samplers:batch indices: [490]
+DEBUG:credit.samplers:batch indices: [2807]
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+NCCL version 2.21.5+cuda12.3
+INFO:credit.trainers.preflight:Preflight: first batch ready in 13.4s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 13.4s.
+NCCL version 2.21.5+cuda12.3
+INFO:credit.trainers.preflight:GPU memory check: peak 10073 MiB / 40441 MiB (25%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.preflight:GPU memory check: peak 10073 MiB / 40441 MiB (25%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:num indices: 730
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+[rank1]:[E430 09:37:01.625310001 ProcessGroupNCCL.cpp:685] [Rank 1] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=13, OpType=ALLREDUCE, NumelIn=8, NumelOut=8, Timeout(ms)=600000) ran for 600069 milliseconds before timing out.
+[rank1]:[E430 09:37:01.649108669 ProcessGroupNCCL.cpp:2252] [PG ID 3 PG GUID 5 Rank 1]  failure detected by watchdog at work sequence id: 13 PG status: last enqueued work: 464, last completed work: 24
+[rank1]:[E430 09:37:01.649150760 ProcessGroupNCCL.cpp:732] Stack trace of the failed collective not found, potentially because FlightRecorder is disabled. You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.
+[rank1]:[E430 09:37:01.649196349 ProcessGroupNCCL.cpp:2584] [PG ID 3 PG GUID 5 Rank 1] First PG on this rank to signal dumping.
+[rank1]:[E430 09:37:01.680684389 ProcessGroupNCCL.cpp:685] [Rank 1] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=2, OpType=ALLREDUCE, NumelIn=1, NumelOut=1, Timeout(ms)=600000) ran for 600089 milliseconds before timing out.
+[rank1]:[E430 09:37:01.680830021 ProcessGroupNCCL.cpp:2252] [PG ID 0 PG GUID 0(default_pg) Rank 1]  failure detected by watchdog at work sequence id: 2 PG status: last enqueued work: 2, last completed work: 1
+[rank1]:[E430 09:37:01.680858175 ProcessGroupNCCL.cpp:732] Stack trace of the failed collective not found, potentially because FlightRecorder is disabled. You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.
+[rank3]:[E430 09:37:02.836390741 ProcessGroupNCCL.cpp:685] [Rank 3] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=2, OpType=ALLREDUCE, NumelIn=1, NumelOut=1, Timeout(ms)=600000) ran for 600013 milliseconds before timing out.
+[rank3]:[E430 09:37:02.852621543 ProcessGroupNCCL.cpp:2252] [PG ID 0 PG GUID 0(default_pg) Rank 3]  failure detected by watchdog at work sequence id: 2 PG status: last enqueued work: 2, last completed work: 1
+[rank3]:[E430 09:37:02.852648656 ProcessGroupNCCL.cpp:732] Stack trace of the failed collective not found, potentially because FlightRecorder is disabled. You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.
+[rank3]:[E430 09:37:02.852726176 ProcessGroupNCCL.cpp:2584] [PG ID 0 PG GUID 0(default_pg) Rank 3] First PG on this rank to signal dumping.
+[rank2]:[E430 09:37:02.878768790 ProcessGroupNCCL.cpp:685] [Rank 2] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=2, OpType=ALLREDUCE, NumelIn=1, NumelOut=1, Timeout(ms)=600000) ran for 600051 milliseconds before timing out.
+[rank2]:[E430 09:37:02.879087577 ProcessGroupNCCL.cpp:2252] [PG ID 0 PG GUID 0(default_pg) Rank 2]  failure detected by watchdog at work sequence id: 2 PG status: last enqueued work: 2, last completed work: 1
+[rank2]:[E430 09:37:02.879112977 ProcessGroupNCCL.cpp:732] Stack trace of the failed collective not found, potentially because FlightRecorder is disabled. You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.
+[rank2]:[E430 09:37:02.879160679 ProcessGroupNCCL.cpp:2584] [PG ID 0 PG GUID 0(default_pg) Rank 2] First PG on this rank to signal dumping.
+[rank2]:[E430 09:37:02.154429296 ProcessGroupNCCL.cpp:1870] [PG ID 0 PG GUID 0(default_pg) Rank 2] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 2, last completed NCCL work: 1.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank1]:[E430 09:37:02.185428349 ProcessGroupNCCL.cpp:1870] [PG ID 0 PG GUID 0(default_pg) Rank 1] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 2, last completed NCCL work: 1.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank0]:[E430 09:37:02.185553100 ProcessGroupNCCL.cpp:1806] [PG ID 0 PG GUID 0(default_pg) Rank 0] Observed flight recorder dump signal from another rank via TCPStore.
+[rank0]:[E430 09:37:02.185761795 ProcessGroupNCCL.cpp:1870] [PG ID 0 PG GUID 0(default_pg) Rank 0] Received a dump signal due to a collective timeout from  rank 2 and we will try our best to dump the debug info. Last enqueued NCCL work: 1, last completed NCCL work: 1.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank2]:[E430 09:37:02.223740074 ProcessGroupNCCL.cpp:1589] [PG ID 0 PG GUID 0(default_pg) Rank 2] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1
+[rank1]:[E430 09:37:02.223746236 ProcessGroupNCCL.cpp:1589] [PG ID 0 PG GUID 0(default_pg) Rank 1] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1
+[rank0]:[E430 09:37:02.223765102 ProcessGroupNCCL.cpp:1589] [PG ID 0 PG GUID 0(default_pg) Rank 0] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1
+[rank3]:[E430 09:37:02.358763060 ProcessGroupNCCL.cpp:1870] [PG ID 0 PG GUID 0(default_pg) Rank 3] Received a dump signal due to a collective timeout from this local rank and we will try our best to dump the debug info. Last enqueued NCCL work: 2, last completed NCCL work: 1.This is most likely caused by incorrect usages of collectives, e.g., wrong sizes used across ranks, the order of collectives is not same for all ranks or the scheduled collective, for some reason, didn't run. Additionally, this can be caused by GIL deadlock or other reasons such as network errors or bugs in the communications library (e.g. NCCL), etc. 
+[rank3]:[E430 09:37:02.358994428 ProcessGroupNCCL.cpp:1589] [PG ID 0 PG GUID 0(default_pg) Rank 3] ProcessGroupNCCL preparing to dump debug info. Include stack trace: 1
+[rank0]:[E430 09:37:08.459010821 ProcessGroupNCCL.cpp:685] [Rank 0] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=3, OpType=_ALLGATHER_BASE, NumelIn=2898868, NumelOut=5797736, Timeout(ms)=600000) ran for 600027 milliseconds before timing out.
+[rank0]:[E430 09:37:08.459427097 ProcessGroupNCCL.cpp:2252] [PG ID 1 PG GUID 1(mesh_dp) Rank 0]  failure detected by watchdog at work sequence id: 3 PG status: last enqueued work: 3, last completed work: 2
+[rank0]:[E430 09:37:08.459466874 ProcessGroupNCCL.cpp:732] Stack trace of the failed collective not found, potentially because FlightRecorder is disabled. You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.
+[rank0]:[E430 09:37:08.519912443 ProcessGroupNCCL.cpp:685] [Rank 0] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=25, OpType=COALESCED, NumelIn=18446744073709551615, NumelOut=18446744073709551615, Timeout(ms)=600000) ran for 600079 milliseconds before timing out.
+[rank0]:[E430 09:37:08.520076060 ProcessGroupNCCL.cpp:2252] [PG ID 3 PG GUID 5 Rank 0]  failure detected by watchdog at work sequence id: 25 PG status: last enqueued work: 28, last completed work: 24
+[rank0]:[E430 09:37:08.520107301 ProcessGroupNCCL.cpp:732] Stack trace of the failed collective not found, potentially because FlightRecorder is disabled. You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.
+[rank0]:[E430 09:38:10.266817462 ProcessGroupNCCL.cpp:746] [Rank 0] Some NCCL operations have failed or timed out. Due to the asynchronous nature of CUDA kernels, subsequent GPU operations might run on corrupted/incomplete data.
+[rank0]:[E430 09:38:10.266878180 ProcessGroupNCCL.cpp:760] [Rank 0] To avoid data inconsistency, we are taking the entire process down.
+[rank0]:[E430 09:38:10.267104298 ProcessGroupNCCL.cpp:746] [Rank 0] Some NCCL operations have failed or timed out. Due to the asynchronous nature of CUDA kernels, subsequent GPU operations might run on corrupted/incomplete data.
+[rank0]:[E430 09:38:10.267136069 ProcessGroupNCCL.cpp:760] [Rank 0] To avoid data inconsistency, we are taking the entire process down.
+[rank0]:[E430 09:38:10.337901796 ProcessGroupNCCL.cpp:2068] [PG ID 3 PG GUID 5 Rank 0] Process group watchdog thread terminated with exception: [Rank 0] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=25, OpType=COALESCED, NumelIn=18446744073709551615, NumelOut=18446744073709551615, Timeout(ms)=600000) ran for 600079 milliseconds before timing out.
+Exception raised from checkTimeout at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:688 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14ee1ba970c4 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x24f (0x14ee1d54a66f in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x16d1 (0x14ee1d54e421 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0xd2 (0x14ee1d54f882 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xdd0d3 (0x14ee3feb50d3 in /glade/u/apps/casper/24.12/spack/opt/spack/gcc/12.4.0/5b5c/lib64/libstdc++.so.6)
+frame #5: <unknown function> + 0xa6f6c (0x14ee46ddff6c in /lib64/libc.so.6)
+frame #6: <unknown function> + 0x12e338 (0x14ee46e67338 in /lib64/libc.so.6)
+
+[rank0]:[E430 09:38:10.338904218 ProcessGroupNCCL.cpp:2068] [PG ID 1 PG GUID 1(mesh_dp) Rank 0] Process group watchdog thread terminated with exception: [Rank 0] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=3, OpType=_ALLGATHER_BASE, NumelIn=2898868, NumelOut=5797736, Timeout(ms)=600000) ran for 600027 milliseconds before timing out.
+Exception raised from checkTimeout at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:688 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14ee1ba970c4 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x24f (0x14ee1d54a66f in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x16d1 (0x14ee1d54e421 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0xd2 (0x14ee1d54f882 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xdd0d3 (0x14ee3feb50d3 in /glade/u/apps/casper/24.12/spack/opt/spack/gcc/12.4.0/5b5c/lib64/libstdc++.so.6)
+frame #5: <unknown function> + 0xa6f6c (0x14ee46ddff6c in /lib64/libc.so.6)
+frame #6: <unknown function> + 0x12e338 (0x14ee46e67338 in /lib64/libc.so.6)
+
+terminate called after throwing an instance of 'c10::DistBackendError'
+terminate called after throwing an instance of 'c10::DistBackendError'
+  what():  [PG ID 3 PG GUID 5 Rank 0] Process group watchdog thread terminated with exception: [Rank 0] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=25, OpType=COALESCED, NumelIn=18446744073709551615, NumelOut=18446744073709551615, Timeout(ms)=600000) ran for 600079 milliseconds before timing out.
+Exception raised from checkTimeout at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:688 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14ee1ba970c4 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x24f (0x14ee1d54a66f in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x16d1 (0x14ee1d54e421 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0xd2 (0x14ee1d54f882 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xdd0d3 (0x14ee3feb50d3 in /glade/u/apps/casper/24.12/spack/opt/spack/gcc/12.4.0/5b5c/lib64/libstdc++.so.6)
+frame #5: <unknown function> + 0xa6f6c (0x14ee46ddff6c in /lib64/libc.so.6)
+frame #6: <unknown function> + 0x12e338 (0x14ee46e67338 in /lib64/libc.so.6)
+
+Exception raised from run at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:2074 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14ee1ba970c4 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x13261b2 (0x14ee1d5261b2 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #2: <unknown function> + 0xe5a3dd (0x14ee1d05a3dd in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #3: <unknown function> + 0xdd0d3 (0x14ee3feb50d3 in /glade/u/apps/casper/24.12/spack/opt/spack/gcc/12.4.0/5b5c/lib64/libstdc++.so.6)
+frame #4: <unknown function> + 0xa6f6c (0x14ee46ddff6c in /lib64/libc.so.6)
+frame #5: <unknown function> + 0x12e338 (0x14ee46e67338 in /lib64/libc.so.6)
+
+  what():  [PG ID 1 PG GUID 1(mesh_dp) Rank 0] Process group watchdog thread terminated with exception: [Rank 0] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=3, OpType=_ALLGATHER_BASE, NumelIn=2898868, NumelOut=5797736, Timeout(ms)=600000) ran for 600027 milliseconds before timing out.
+Exception raised from checkTimeout at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:688 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14ee1ba970c4 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x24f (0x14ee1d54a66f in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::Watchdog::runLoop() + 0x16d1 (0x14ee1d54e421 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::Watchdog::run() + 0xd2 (0x14ee1d54f882 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xdd0d3 (0x14ee3feb50d3 in /glade/u/apps/casper/24.12/spack/opt/spack/gcc/12.4.0/5b5c/lib64/libstdc++.so.6)
+frame #5: <unknown function> + 0xa6f6c (0x14ee46ddff6c in /lib64/libc.so.6)
+frame #6: <unknown function> + 0x12e338 (0x14ee46e67338 in /lib64/libc.so.6)
+
+Exception raised from run at /glade/work/benkirk/consulting/conda-recipes/src_builds/derecho-pytorch-mpi/pytorch-v2.8.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:2074 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0x84 (0x14ee1ba970c4 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x13261b2 (0x14ee1d5261b2 in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #2: <unknown function> + 0xe5a3dd (0x14ee1d05a3dd in /glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so)
+frame #3: <unknown function> + 0xdd0d3 (0x14ee3feb50d3 in /glade/u/apps/casper/24.12/spack/opt/spack/gcc/12.4.0/5b5c/lib64/libstdc++.so.6)
+frame #4: <unknown function> + 0xa6f6c (0x14ee46ddff6c in /lib64/libc.so.6)
+frame #5: <unknown function> + 0x12e338 (0x14ee46e67338 in /lib64/libc.so.6)
+W0430 09:38:33.151000 44554 site-packages/torch/distributed/elastic/agent/server/api.py:723] Received 15 death signal, shutting down workers
+W0430 09:38:33.181000 44554 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 47935 closing signal SIGTERM
+W0430 09:38:33.181000 44554 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 47936 closing signal SIGTERM
+W0430 09:38:33.182000 44554 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 47937 closing signal SIGTERM
+W0430 09:38:33.184000 44554 site-packages/torch/distributed/elastic/multiprocessing/api.py:900] Sending process 47938 closing signal SIGTERM

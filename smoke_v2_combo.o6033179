@@ -1,0 +1,399 @@
+
+Inactive Modules:
+  1) cray-mpich/8.1.32     3) hdf5/1.14.6        5) ncarcompilers/1.1.0
+  2) craype/2.7.34         4) intel/2025.2.1     6) netcdf/4.9.3
+
+Due to MODULEPATH changes, the following have been reloaded:
+  1) conda/latest
+
+The following have been reloaded with a version change:
+  1) cuda/12.9.0 => cuda/12.3.2                 3) ncarenv/25.10 => ncarenv/24.12
+  2) libfabric/1.22.0 => libfabric/1.15.2.0
+
+=== CREDIT v2 parallelism (torchrun) ===
+Host   : deg0068
+Date   : Fri May  1 07:38:26 AM MDT 2026
+Nodes  : 1  GPUs/node: 4
+I0501 07:38:48.056000 123121 site-packages/torch/distributed/run.py:657] Using nproc_per_node=4.
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199] Starting elastic_operator with launch configs:
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   entrypoint         : /glade/work/schreck/repos/miles-credit-main/applications/train_gen2.py
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   min_nodes          : 1
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   max_nodes          : 1
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   nproc_per_node     : 4
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   run_id             : none
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   rdzv_backend       : c10d
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   rdzv_endpoint      : localhost:29500
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   rdzv_configs       : {'timeout': 900}
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   max_restarts       : 0
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   monitor_interval   : 0.1
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   log_dir            : /glade/derecho/scratch/schreck/tmp/torchelastic_omhpq5pr
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   metrics_cfg        : {}
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199]   event_log_handler  : null
+I0501 07:38:48.059000 123121 site-packages/torch/distributed/launcher/api.py:199] 
+I0501 07:38:48.118000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:869] [default] starting workers for entrypoint: python
+I0501 07:38:48.119000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:677] [default] Rendezvous'ing worker group
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523] [default] Rendezvous complete for workers. Result:
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   restart_count=0
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_addr=deg0068.hsn.de.hpc.ucar.edu
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   master_port=41945
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_rank=0
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   group_world_size=1
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   local_ranks=[0, 1, 2, 3]
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_ranks=[0, 1, 2, 3]
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_ranks=[0, 1, 2, 3]
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   role_world_sizes=[4, 4, 4, 4]
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   global_world_sizes=[4, 4, 4, 4]
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523]   event_log_handler=null
+I0501 07:38:48.404000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:523] 
+I0501 07:38:48.405000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:685] [default] Starting worker group
+I0501 07:38:48.405000 123121 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:296] use_agent_store: True
+I0501 07:38:48.406000 123121 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:192] Environment variable 'TORCHELASTIC_ENABLE_FILE_TIMER' not found. Do not start FileTimerServer.
+I0501 07:38:48.406000 123121 site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py:236] Environment variable 'TORCHELASTIC_HEALTH_CHECK_PORT' not found. Do not start health check.
+WARNING:root:BridgeScalerTransformer unavailable (numba/NumPy conflict): cannot import name 'load_scaler_dict' from 'bridgescaler' (/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/bridgescaler/__init__.py)
+WARNING:root:BridgeScalerTransformer unavailable (numba/NumPy conflict): cannot import name 'load_scaler_dict' from 'bridgescaler' (/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/bridgescaler/__init__.py)
+WARNING:root:BridgeScalerTransformer unavailable (numba/NumPy conflict): cannot import name 'load_scaler_dict' from 'bridgescaler' (/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/bridgescaler/__init__.py)
+WARNING:root:BridgeScalerTransformer unavailable (numba/NumPy conflict): cannot import name 'load_scaler_dict' from 'bridgescaler' (/glade/work/schreck/conda-envs/credit-main-derecho/lib/python3.11/site-packages/bridgescaler/__init__.py)
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'era5'
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'MRMS' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_NAT' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+DEBUG:credit.datasets.multi_source:MultiSourceDataset: source 'HRRR_SUBH' not in config, skipping
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models:Loading the WXFormer deterministic model ...
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.models.wxformer.crossformer:Adding spectral norm to all conv and linear layers
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+DEBUG:numcodecs:Registering codec 'fill_hdf_strings'
+DEBUG:numcodecs:Registering codec 'fill_hdf_strings'
+DEBUG:numcodecs:Registering codec 'fill_hdf_strings'
+DEBUG:numcodecs:Registering codec 'fill_hdf_strings'
+DEBUG:numcodecs:Registering codec 'grib'
+DEBUG:numcodecs:Registering codec 'grib'
+DEBUG:numcodecs:Registering codec 'grib'
+DEBUG:numcodecs:Registering codec 'grib'
+DEBUG:numcodecs:Registering codec 'FITSAscii'
+DEBUG:numcodecs:Registering codec 'FITSAscii'
+DEBUG:numcodecs:Registering codec 'FITSAscii'
+DEBUG:numcodecs:Registering codec 'FITSVarBintable'
+DEBUG:numcodecs:Registering codec 'FITSAscii'
+DEBUG:numcodecs:Registering codec 'FITSVarBintable'
+DEBUG:numcodecs:Registering codec 'FITSVarBintable'
+DEBUG:numcodecs:Registering codec 'FITSVarBintable'
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses:Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.weighted_loss:Using latitude weights in loss calculations
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.base_trainer:Training metric: valid_loss (direction: min)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.preblock.norm:ERA5Normalizer: loaded stats for 12 variables
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:DataLoader memory estimate: 3.5 GiB (workers=4 × prefetch=2 × batch=1)
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+INFO:credit.trainers.preflight:Preflight: first batch ready in 11.8s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 11.8s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 11.8s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 11.8s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 11.8s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 11.8s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 11.9s.
+INFO:credit.trainers.preflight:Preflight: first batch ready in 11.9s.
+INFO:credit.trainers.preflight:GPU memory check: peak 8855 MiB / 40441 MiB (22%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.preflight:GPU memory check: peak 8855 MiB / 40441 MiB (22%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.preflight:GPU memory check: peak 8855 MiB / 40441 MiB (22%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.preflight:GPU memory check: peak 8855 MiB / 40441 MiB (22%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.preflight:GPU memory check: peak 8855 MiB / 40441 MiB (22%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.preflight:GPU memory check: peak 8855 MiB / 40441 MiB (22%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.preflight:GPU memory check: peak 8855 MiB / 40441 MiB (22%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.preflight:GPU memory check: peak 8855 MiB / 40441 MiB (22%) for batch_size=1, H=640, W=1280, C_in=74
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.base_trainer:Beginning epoch 0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
+  0%|          | 0/5 [00:00<?, ?it/s]  0%|          | 0/5 [00:00<?, ?it/s]  0%|          | 0/5 [00:00<?, ?it/s]  0%|          | 0/5 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:num indices: 2920
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:credit.samplers:batch indices: [987]
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+ 20%|██        | 1/5 [00:11<00:46, 11.75s/it]Epoch: 0 train_loss: 1.167003 train_acc: -0.011984 train_mae: 0.820851 lr: 0.000001000000:  20%|██        | 1/5 [00:11<00:46, 11.75s/it] 20%|██        | 1/5 [00:11<00:47, 11.95s/it]Epoch: 0 train_loss: 1.167003 train_acc: -0.011984 train_mae: 0.820851 lr: 0.000001000000:  20%|██        | 1/5 [00:11<00:47, 11.95s/it] 20%|██        | 1/5 [00:11<00:47, 11.98s/it]Epoch: 0 train_loss: 1.167003 train_acc: -0.011984 train_mae: 0.820851 lr: 0.000001000000:  20%|██        | 1/5 [00:11<00:47, 11.98s/it] 20%|██        | 1/5 [00:14<00:59, 14.87s/it]Epoch: 0 train_loss: 1.167003 train_acc: -0.011984 train_mae: 0.820851 lr: 0.000001000000:  20%|██        | 1/5 [00:14<00:59, 14.87s/it]Epoch: 0 train_loss: 1.167003 train_acc: -0.011984 train_mae: 0.820851 lr: 0.000001000000:  40%|████      | 2/5 [00:16<00:23,  7.76s/it]Epoch: 0 train_loss: 1.133927 train_acc: -0.016207 train_mae: 0.815382 lr: 0.000100900000:  40%|████      | 2/5 [00:16<00:23,  7.76s/it]Epoch: 0 train_loss: 1.167003 train_acc: -0.011984 train_mae: 0.820851 lr: 0.000001000000:  40%|████      | 2/5 [00:16<00:23,  7.80s/it]Epoch: 0 train_loss: 1.133927 train_acc: -0.016207 train_mae: 0.815382 lr: 0.000100900000:  40%|████      | 2/5 [00:16<00:23,  7.80s/it]Epoch: 0 train_loss: 1.167003 train_acc: -0.011984 train_mae: 0.820851 lr: 0.000001000000:  40%|████      | 2/5 [00:17<00:25,  8.43s/it]Epoch: 0 train_loss: 1.133927 train_acc: -0.016207 train_mae: 0.815382 lr: 0.000100900000:  40%|████      | 2/5 [00:17<00:25,  8.43s/it]Epoch: 0 train_loss: 1.167003 train_acc: -0.011984 train_mae: 0.820851 lr: 0.000001000000:  40%|████      | 2/5 [00:18<00:25,  8.39s/it]Epoch: 0 train_loss: 1.133927 train_acc: -0.016207 train_mae: 0.815382 lr: 0.000100900000:  40%|████      | 2/5 [00:18<00:25,  8.39s/it]Epoch: 0 train_loss: 1.133927 train_acc: -0.016207 train_mae: 0.815382 lr: 0.000100900000:  60%|██████    | 3/5 [00:21<00:12,  6.33s/it]Epoch: 0 train_loss: 1.218284 train_acc: 0.003990 train_mae: 0.842004 lr: 0.000200800000:  60%|██████    | 3/5 [00:21<00:12,  6.33s/it] Epoch: 0 train_loss: 1.133927 train_acc: -0.016207 train_mae: 0.815382 lr: 0.000100900000:  60%|██████    | 3/5 [00:21<00:12,  6.40s/it]Epoch: 0 train_loss: 1.218284 train_acc: 0.003990 train_mae: 0.842004 lr: 0.000200800000:  60%|██████    | 3/5 [00:21<00:12,  6.40s/it] Epoch: 0 train_loss: 1.133927 train_acc: -0.016207 train_mae: 0.815382 lr: 0.000100900000:  60%|██████    | 3/5 [00:22<00:13,  6.67s/it]Epoch: 0 train_loss: 1.218284 train_acc: 0.003990 train_mae: 0.842004 lr: 0.000200800000:  60%|██████    | 3/5 [00:22<00:13,  6.67s/it] Epoch: 0 train_loss: 1.133927 train_acc: -0.016207 train_mae: 0.815382 lr: 0.000100900000:  60%|██████    | 3/5 [00:22<00:12,  6.45s/it]Epoch: 0 train_loss: 1.218284 train_acc: 0.003990 train_mae: 0.842004 lr: 0.000200800000:  60%|██████    | 3/5 [00:22<00:12,  6.45s/it] Epoch: 0 train_loss: 1.218284 train_acc: 0.003990 train_mae: 0.842004 lr: 0.000200800000:  80%|████████  | 4/5 [00:25<00:05,  5.58s/it]Epoch: 0 train_loss: 1.198858 train_acc: 0.014356 train_mae: 0.837377 lr: 0.000300700000:  80%|████████  | 4/5 [00:25<00:05,  5.58s/it]Epoch: 0 train_loss: 1.218284 train_acc: 0.003990 train_mae: 0.842004 lr: 0.000200800000:  80%|████████  | 4/5 [00:26<00:05,  5.72s/it]Epoch: 0 train_loss: 1.198858 train_acc: 0.014356 train_mae: 0.837377 lr: 0.000300700000:  80%|████████  | 4/5 [00:26<00:05,  5.72s/it]Epoch: 0 train_loss: 1.218284 train_acc: 0.003990 train_mae: 0.842004 lr: 0.000200800000:  80%|████████  | 4/5 [00:26<00:05,  5.67s/it]Epoch: 0 train_loss: 1.198858 train_acc: 0.014356 train_mae: 0.837377 lr: 0.000300700000:  80%|████████  | 4/5 [00:26<00:05,  5.67s/it]Epoch: 0 train_loss: 1.218284 train_acc: 0.003990 train_mae: 0.842004 lr: 0.000200800000:  80%|████████  | 4/5 [00:26<00:05,  5.40s/it]Epoch: 0 train_loss: 1.198858 train_acc: 0.014356 train_mae: 0.837377 lr: 0.000300700000:  80%|████████  | 4/5 [00:26<00:05,  5.40s/it]Epoch: 0 train_loss: 1.198858 train_acc: 0.014356 train_mae: 0.837377 lr: 0.000300700000: 100%|██████████| 5/5 [00:30<00:00,  5.27s/it]Epoch: 0 train_loss: 1.204848 train_acc: 0.022947 train_mae: 0.839449 lr: 0.000400600000: 100%|██████████| 5/5 [00:30<00:00,  5.27s/it]Epoch: 0 train_loss: 1.204848 train_acc: 0.022947 train_mae: 0.839449 lr: 0.000400600000: 100%|██████████| 5/5 [00:30<00:00,  6.10s/it]
+Epoch: 0 train_loss: 1.198858 train_acc: 0.014356 train_mae: 0.837377 lr: 0.000300700000: 100%|██████████| 5/5 [00:30<00:00,  5.28s/it]Epoch: 0 train_loss: 1.204848 train_acc: 0.022947 train_mae: 0.839449 lr: 0.000400600000: 100%|██████████| 5/5 [00:30<00:00,  5.28s/it]Epoch: 0 train_loss: 1.204848 train_acc: 0.022947 train_mae: 0.839449 lr: 0.000400600000: 100%|██████████| 5/5 [00:30<00:00,  6.15s/it]
+Epoch: 0 train_loss: 1.198858 train_acc: 0.014356 train_mae: 0.837377 lr: 0.000300700000: 100%|██████████| 5/5 [00:30<00:00,  5.13s/it]Epoch: 0 train_loss: 1.204848 train_acc: 0.022947 train_mae: 0.839449 lr: 0.000400600000: 100%|██████████| 5/5 [00:30<00:00,  5.13s/it]Epoch: 0 train_loss: 1.204848 train_acc: 0.022947 train_mae: 0.839449 lr: 0.000400600000: 100%|██████████| 5/5 [00:30<00:00,  6.16s/it]
+Epoch: 0 train_loss: 1.198858 train_acc: 0.014356 train_mae: 0.837377 lr: 0.000300700000: 100%|██████████| 5/5 [00:30<00:00,  4.95s/it]Epoch: 0 train_loss: 1.204848 train_acc: 0.022947 train_mae: 0.839449 lr: 0.000400600000: 100%|██████████| 5/5 [00:30<00:00,  4.95s/it]Epoch: 0 train_loss: 1.204848 train_acc: 0.022947 train_mae: 0.839449 lr: 0.000400600000: 100%|██████████| 5/5 [00:30<00:00,  6.16s/it]
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 2916
+DEBUG:credit.samplers:num indices: 2916
+DEBUG:credit.samplers:batch indices: [0]
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 2916
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 2916
+DEBUG:credit.samplers:num indices: 2916
+DEBUG:credit.samplers:batch indices: [0]
+  0%|          | 0/2 [00:00<?, ?it/s]DEBUG:credit.samplers:num indices: 2916
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:credit.samplers:num indices: 2916
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:credit.samplers:batch indices: [0]
+DEBUG:credit.samplers:num indices: 2916
+DEBUG:credit.samplers:batch indices: [0]
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:zarr.core.sync:Creating Zarr event loop
+DEBUG:asyncio:Using selector: EpollSelector
+ 50%|█████     | 1/2 [00:05<00:05,  5.84s/it]Epoch: 0 valid_loss: 1.325438 valid_acc: 0.073729 valid_mae: 0.891325:  50%|█████     | 1/2 [00:05<00:05,  5.84s/it] 50%|█████     | 1/2 [00:06<00:06,  6.24s/it]Epoch: 0 valid_loss: 1.325438 valid_acc: 0.073729 valid_mae: 0.891325:  50%|█████     | 1/2 [00:06<00:06,  6.24s/it] 50%|█████     | 1/2 [00:05<00:05,  5.89s/it]Epoch: 0 valid_loss: 1.325438 valid_acc: 0.073729 valid_mae: 0.891325:  50%|█████     | 1/2 [00:05<00:05,  5.89s/it] 50%|█████     | 1/2 [00:05<00:05,  5.96s/it]Epoch: 0 valid_loss: 1.325438 valid_acc: 0.073729 valid_mae: 0.891325:  50%|█████     | 1/2 [00:05<00:05,  5.96s/it]Epoch: 0 valid_loss: 1.325438 valid_acc: 0.073729 valid_mae: 0.891325: 100%|██████████| 2/2 [00:07<00:00,  3.60s/it]Epoch: 0 valid_loss: 1.324743 valid_acc: 0.074599 valid_mae: 0.890606: 100%|██████████| 2/2 [00:07<00:00,  3.60s/it]Epoch: 0 valid_loss: 1.324743 valid_acc: 0.074599 valid_mae: 0.890606: 100%|██████████| 2/2 [00:07<00:00,  4.00s/it]
+Epoch: 0 valid_loss: 1.325438 valid_acc: 0.073729 valid_mae: 0.891325: 100%|██████████| 2/2 [00:07<00:00,  3.49s/it]Epoch: 0 valid_loss: 1.324743 valid_acc: 0.074599 valid_mae: 0.890606: 100%|██████████| 2/2 [00:07<00:00,  3.49s/it]Epoch: 0 valid_loss: 1.324743 valid_acc: 0.074599 valid_mae: 0.890606: 100%|██████████| 2/2 [00:07<00:00,  3.85s/it]
+Epoch: 0 valid_loss: 1.325438 valid_acc: 0.073729 valid_mae: 0.891325: 100%|██████████| 2/2 [00:07<00:00,  3.49s/it]Epoch: 0 valid_loss: 1.324743 valid_acc: 0.074599 valid_mae: 0.890606: 100%|██████████| 2/2 [00:07<00:00,  3.49s/it]Epoch: 0 valid_loss: 1.324743 valid_acc: 0.074599 valid_mae: 0.890606: 100%|██████████| 2/2 [00:07<00:00,  3.84s/it]
+Epoch: 0 valid_loss: 1.325438 valid_acc: 0.073729 valid_mae: 0.891325: 100%|██████████| 2/2 [00:07<00:00,  3.53s/it]Epoch: 0 valid_loss: 1.324743 valid_acc: 0.074599 valid_mae: 0.890606: 100%|██████████| 2/2 [00:07<00:00,  3.53s/it]Epoch: 0 valid_loss: 1.324743 valid_acc: 0.074599 valid_mae: 0.890606: 100%|██████████| 2/2 [00:07<00:00,  3.89s/it]
+INFO:credit.trainers.base_trainer:Saving checkpoint to /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_combo
+INFO:credit.trainers.base_trainer:Saving checkpoint to /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_combo
+INFO:credit.trainers.base_trainer:Saving checkpoint to /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_combo
+INFO:credit.trainers.base_trainer:Saving checkpoint to /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_combo
+INFO:credit.trainers.base_trainer:Saving checkpoint to /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_combo
+INFO:credit.trainers.base_trainer:Saving checkpoint to /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_combo
+INFO:credit.trainers.base_trainer:Saving checkpoint to /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_combo
+INFO:credit.trainers.base_trainer:Saving checkpoint to /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_combo
+I0501 07:41:20.510000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:888] [default] worker group successfully finished. Waiting 300 seconds for other agents to finish.
+I0501 07:41:20.510000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:941] Local worker group finished (WorkerState.SUCCEEDED). Waiting 300 seconds for other agents to finish
+I0501 07:41:20.511000 123121 site-packages/torch/distributed/elastic/agent/server/api.py:955] Done waiting for other agents. Elapsed: 0.00022459030151367188 seconds
+Done at Fri May  1 07:41:20 AM MDT 2026

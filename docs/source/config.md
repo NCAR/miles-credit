@@ -323,7 +323,7 @@ The `trainer` section controls how CREDIT handles **GPU parallelism, gradient up
 
 ```yaml
 trainer:
-    type: era5 # era5 or conus404 (in development)
+    type: era5-gen1 # era5-gen1, era5-gen2, or conus404
     mode: none  # Options: "none" (single GPU), "fsdp" (fully sharded), "ddp" (distributed)
 ```
 

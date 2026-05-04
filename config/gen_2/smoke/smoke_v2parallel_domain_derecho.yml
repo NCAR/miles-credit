@@ -77,12 +77,15 @@ model:
     use_spectral_norm: True
     interp: True
 
-    # Domain-parallel pre-pad: trainer detects this and applies padding to the
-    # full tensor BEFORE sharding so each shard sees consistent padded dimensions.
+    # Domain-parallel pre-pad: trainer pads the full tensor BEFORE sharding so
+    # each shard sees window-divisible dimensions.
+    # Constraint: H_padded % (domain * local_window_size * product(strides)) == 0
+    # = 2 * 10 * 16 = 320. Base H=640, so pad_lat total must give H % 320 == 0.
+    # pad_lat [160,160] → H=960, shard=480, 480/16=30, 30%10=0 ✓
     padding_conf:
         activate: True
         mode: "earth"
-        pad_lat: [80, 80]
+        pad_lat: [160, 160]
         pad_lon: [80, 80]
 
     post_conf:

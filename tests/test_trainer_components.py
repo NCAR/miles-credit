@@ -697,7 +697,7 @@ class TestLoadTrainer:
         from credit.trainers import load_trainer
         from credit.trainers.trainerERA5gen1 import TrainerERA5Gen1 as Trainer
 
-        result = load_trainer({"trainer": {"type": "era5"}})
+        result = load_trainer({"trainer": {"type": "era5-gen1"}})
         assert result is Trainer
 
     def test_valid_era5v2_type_returns_class(self):
@@ -731,9 +731,9 @@ class TestLoadTrainer:
         """load_trainer deep-copies conf internally; the caller's dict must be unchanged."""
         from credit.trainers import load_trainer
 
-        conf = {"trainer": {"type": "era5", "extra_key": 99}}
+        conf = {"trainer": {"type": "era5-gen1", "extra_key": 99}}
         load_trainer(conf)
-        assert conf["trainer"]["type"] == "era5"
+        assert conf["trainer"]["type"] == "era5-gen1"
         assert conf["trainer"]["extra_key"] == 99
 
 
