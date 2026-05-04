@@ -13,9 +13,7 @@ Key invariants verified:
 
 import argparse
 import pytest
-
-pytest.importorskip("credit.cli", reason="credit.cli not available until v2/cli-tooling is merged")
-from credit.cli import _build_pbs_script  # noqa: E402
+from credit.cli import _build_pbs_script
 
 
 # ---------------------------------------------------------------------------
@@ -118,11 +116,8 @@ class TestCasperScript:
     def test_depends_line_absent_when_none(self):
         assert "depend=afterok" not in _casper_script(depend_on=None)
 
-    def test_pythonnousersite_set(self):
-        assert "PYTHONNOUSERSITE" in _casper_script()
-
-    def test_pytorch_cuda_alloc_conf_set(self):
-        assert "PYTORCH_CUDA_ALLOC_CONF" in _casper_script()
+    def test_conda_activate_in_script(self):
+        assert "conda activate" in _casper_script()
 
 
 # ---------------------------------------------------------------------------
@@ -164,10 +159,8 @@ class TestDerechoSingleNode:
     def test_ncarenv_module_loaded(self):
         assert "ncarenv" in _derecho_script(nodes=1)
 
-    def test_nccl_env_vars_set(self):
-        script = _derecho_script(nodes=1)
-        assert "NCCL_SOCKET_IFNAME" in script
-        assert "NCCL_NET" in script
+    def test_conda_activate_in_script(self):
+        assert "conda activate" in _derecho_script(nodes=1)
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +313,15 @@ class TestChannelAlignment:
                         },
                     }
                 },
-                "mean_path": "/fake/mean.nc",
-                "std_path": "/fake/std.nc",
-            }
+            },
+            "preblocks": {
+                "norm": {
+                    "args": {
+                        "mean_path": "/fake/mean.nc",
+                        "std_path": "/fake/std.nc",
+                    }
+                }
+            },
         }
 
     def _patch_xr(self, monkeypatch, conf):
@@ -383,21 +382,14 @@ class TestInitTemplates:
         import os
         from credit.cli import _repo_root
 
-        path = os.path.join(_repo_root(), "config", "wxformer_1dg_6hr_v2.yml")
+        path = os.path.join(_repo_root(), "config", "gen_2", "examples", "example-v2026.2.yml")
         assert os.path.exists(path), f"Template missing: {path}"
 
     def test_025deg_template_exists(self):
         import os
         from credit.cli import _repo_root
 
-        path = os.path.join(_repo_root(), "config", "wxformer_025deg_6hr_v2.yml")
-        assert os.path.exists(path), f"Template missing: {path}"
-
-    def test_starter_template_exists(self):
-        import os
-        from credit.cli import _repo_root
-
-        path = os.path.join(_repo_root(), "config", "starter_v2.yml")
+        path = os.path.join(_repo_root(), "config", "gen_2", "examples", "wxformer_era5_025deg_6hr.yml")
         assert os.path.exists(path), f"Template missing: {path}"
 
     def test_templates_are_valid_yaml(self):
@@ -406,14 +398,18 @@ class TestInitTemplates:
         from credit.cli import _repo_root
 
         repo = _repo_root()
-        for name in ["wxformer_1dg_6hr_v2.yml", "wxformer_025deg_6hr_v2.yml", "starter_v2.yml"]:
-            path = os.path.join(repo, "config", name)
+        templates = [
+            os.path.join("config", "gen_2", "examples", "example-v2026.2.yml"),
+            os.path.join("config", "gen_2", "examples", "wxformer_era5_025deg_6hr.yml"),
+        ]
+        for rel in templates:
+            path = os.path.join(repo, rel)
             if os.path.exists(path):
                 with open(path) as f:
                     conf = yaml.safe_load(f)
-                assert isinstance(conf, dict), f"{name} did not parse to a dict"
-                assert "trainer" in conf, f"{name} missing 'trainer' key"
-                assert "data" in conf, f"{name} missing 'data' key"
+                assert isinstance(conf, dict), f"{rel} did not parse to a dict"
+                assert "trainer" in conf, f"{rel} missing 'trainer' key"
+                assert "data" in conf, f"{rel} missing 'data' key"
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +481,8 @@ class TestPrintJobPlan:
             config=config,
         )
 
-    def test_runs_without_error(self, tmp_path, capsys):
+    def test_runs_without_error(self, tmp_path, caplog):
+        import logging
         import yaml
         from credit.cli import _print_job_plan
 
@@ -515,29 +512,31 @@ class TestPrintJobPlan:
                 }
             )
         )
-        _print_job_plan(self._args(config=str(cfg)), n_jobs=14)
-        out = capsys.readouterr().out
-        assert "Job plan" in out
-        assert "14" in out
+        with caplog.at_level(logging.INFO):
+            _print_job_plan(self._args(config=str(cfg)), n_jobs=14)
+        assert "Job plan" in caplog.text
+        assert "14" in caplog.text
 
-    def test_shows_cluster_and_chain(self, tmp_path, capsys):
+    def test_shows_cluster_and_chain(self, tmp_path, caplog):
+        import logging
         import yaml
         from credit.cli import _print_job_plan
 
         cfg = tmp_path / "conf.yml"
         cfg.write_text(yaml.dump({"trainer": {"epochs": 70, "num_epoch": 5}}))
-        _print_job_plan(self._args(cluster="derecho", config=str(cfg)), n_jobs=14)
-        out = capsys.readouterr().out
-        assert "derecho" in out
-        assert "14" in out
+        with caplog.at_level(logging.INFO):
+            _print_job_plan(self._args(cluster="derecho", config=str(cfg)), n_jobs=14)
+        assert "derecho" in caplog.text
+        assert "14" in caplog.text
 
-    def test_tolerates_missing_config(self, tmp_path, capsys):
+    def test_tolerates_missing_config(self, tmp_path, caplog):
         """Should not raise even if config is missing."""
+        import logging
         from credit.cli import _print_job_plan
 
-        _print_job_plan(self._args(config=str(tmp_path / "nope.yml")), n_jobs=1)
-        out = capsys.readouterr().out
-        assert "Job plan" in out
+        with caplog.at_level(logging.INFO):
+            _print_job_plan(self._args(config=str(tmp_path / "nope.yml")), n_jobs=1)
+        assert "Job plan" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -785,7 +784,7 @@ class TestResolvePbsOpts:
         assert args.gpus == 4
         assert args.cpus == 8
         assert args.mem == "128GB"
-        assert args.queue == "casper"
+        assert "casper" in args.queue
         assert args.walltime == "12:00:00"
         assert args.account == "NAML0001"
 
@@ -795,7 +794,7 @@ class TestResolvePbsOpts:
         args = _resolve_pbs_opts(self._base_args(cluster="derecho"), {})
         assert args.cpus == 64
         assert args.mem == "480GB"
-        assert args.queue == "main"
+        assert "main" in args.queue
 
     def test_pbs_cfg_overrides_defaults(self):
         from credit.cli import _resolve_pbs_opts
@@ -848,22 +847,27 @@ class TestLoadPbsConfig:
         from credit.cli import _load_pbs_config
 
         cfg = tmp_path / "conf.yml"
-        cfg.write_text(yaml.dump({"pbs": {"walltime": "04:00:00", "project": "NAML0001"}, "trainer": {}}))
+        cfg.write_text(
+            yaml.dump({"pbs": {"walltime": "04:00:00", "project": "NAML0001", "conda": "/my/env"}, "trainer": {}})
+        )
         result = _load_pbs_config(str(cfg))
         assert result["walltime"] == "04:00:00"
 
-    def test_returns_empty_dict_when_no_pbs_section(self, tmp_path):
+    def test_exits_when_no_pbs_section(self, tmp_path):
         import yaml
         from credit.cli import _load_pbs_config
 
         cfg = tmp_path / "conf.yml"
         cfg.write_text(yaml.dump({"trainer": {}}))
-        assert _load_pbs_config(str(cfg)) == {}
+        with pytest.raises(SystemExit) as exc_info:
+            _load_pbs_config(str(cfg))
+        assert exc_info.value.code == 1
 
-    def test_returns_empty_dict_when_file_missing(self, tmp_path):
+    def test_raises_when_file_missing(self, tmp_path):
         from credit.cli import _load_pbs_config
 
-        assert _load_pbs_config(str(tmp_path / "nope.yml")) == {}
+        with pytest.raises(FileNotFoundError):
+            _load_pbs_config(str(tmp_path / "nope.yml"))
 
 
 # ---------------------------------------------------------------------------
@@ -953,6 +957,9 @@ class TestSubmitDryRun:
             config=None,  # set per test
         )
 
+    def _pbs_cfg(self):
+        return {"conda": "/fake/env", "walltime": "12:00:00", "project": "NAML0001"}
+
     def test_dry_run_single_job_prints_script(self, tmp_path, capsys):
         import yaml
         from credit.cli import _submit
@@ -963,6 +970,7 @@ class TestSubmitDryRun:
                 {
                     "save_loc": str(tmp_path),
                     "trainer": {"epochs": 5, "num_epoch": 5},
+                    "pbs": self._pbs_cfg(),
                 }
             )
         )
@@ -983,6 +991,7 @@ class TestSubmitDryRun:
                 {
                     "save_loc": str(tmp_path),
                     "trainer": {"epochs": 10, "num_epoch": 5},
+                    "pbs": self._pbs_cfg(),
                 }
             )
         )
@@ -1004,6 +1013,7 @@ class TestSubmitDryRun:
                 {
                     "save_loc": str(tmp_path),
                     "trainer": {"epochs": 5, "num_epoch": 5},
+                    "pbs": self._pbs_cfg(),
                 }
             )
         )

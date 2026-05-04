@@ -8,8 +8,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-pytest.importorskip("credit.cli", reason="credit.cli not available until v2/cli-tooling is merged")
-
 
 # ---------------------------------------------------------------------------
 # Minimal config fixture
@@ -35,9 +33,15 @@ def _make_conf(vars_3d=None, vars_2d=None, diag_2d=None, n_levels=3):
                     },
                 }
             },
-            "mean_path": "/fake/mean.nc",
-            "std_path": "/fake/std.nc",
-        }
+        },
+        "preblocks": {
+            "norm": {
+                "args": {
+                    "mean_path": "/fake/mean.nc",
+                    "std_path": "/fake/std.nc",
+                }
+            }
+        },
     }
 
 
