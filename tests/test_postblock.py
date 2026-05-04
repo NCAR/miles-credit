@@ -9,9 +9,9 @@ import os
 import logging
 
 import torch
-from credit.postblock import GlobalWaterFixer, PostBlock
+from credit.postblock._postblock import GlobalWaterFixer, PostBlock
 from credit.skebs import BackscatterFCNN
-from credit.postblock import TracerFixer, GlobalMassFixer, GlobalEnergyFixer, GlobalEnergyFixerUpDown
+from credit.postblock._postblock import TracerFixer, GlobalMassFixer, GlobalEnergyFixer, GlobalEnergyFixerUpDown
 from credit.parser import credit_main_parser
 
 
