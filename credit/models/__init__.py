@@ -9,7 +9,11 @@ from credit.models.camulator import Camulator
 from credit.models.unet import SegmentationModel
 from credit.models.fuxi import Fuxi
 from credit.models.swin import SwinTransformerV2Cr
-from credit.models.graph import GraphResTransfGRU
+
+try:
+    from credit.models.graph import GraphResTransfGRU
+except ImportError:
+    GraphResTransfGRU = None
 from credit.models.debugger_model import DebuggerModel
 from credit.models.wxformer.crossformer import CrossFormer as WXFormer
 from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
@@ -54,7 +58,9 @@ model_types = {
     "unet": (SegmentationModel, "Loading a unet model"),
     "fuxi": (Fuxi, "Loading Fuxi model"),
     "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
-    "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model"),
+    "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model")
+    if GraphResTransfGRU is not None
+    else None,
     "debugger": (DebuggerModel, "Loading the debugger model"),
     "wrf": (WRFTransformer, "Loading WRF Transformer"),
     "dscale": (DscaleTransformer, "Loading downscaling Transformer"),
@@ -83,6 +89,21 @@ def load_fsdp_or_checkpoint_policy(conf):
             FeedForward,
             CrossEmbedLayer,
         }
+    elif "wxformer" in conf["model"]["type"]:
+        from credit.models.wxformer.crossformer import (
+            Attention,
+            DynamicPositionBias,
+            FeedForward,
+            CrossEmbedLayer,
+        )
+
+        transformer_layers_cls = {
+            Attention,
+            DynamicPositionBias,
+            FeedForward,
+            CrossEmbedLayer,
+        }
+
     elif "unet" in conf["model"]["type"]:
         from credit.models.crossformer import (
             Attention,
@@ -121,7 +142,7 @@ def load_fsdp_or_checkpoint_policy(conf):
     # other models not supported
     else:
         raise OSError(
-            "You asked for FSDP but only crossformer, swin, and fuxi are currently supported.",
+            "You asked for FSDP but only crossformer, wxformer, swin, and fuxi are currently supported.",
             "See credit/models/__init__.py for examples on adding new models",
         )
 
@@ -217,7 +238,13 @@ def load_model(conf, load_weights=False, model_name=False):
             **diffusion_config,
         )
     elif model_type in model_types:
-        model, message = model_types[model_type]
+        entry = model_types[model_type]
+        if entry is None:
+            raise ImportError(
+                f"Model type '{model_type}' requires optional dependencies that are not installed. "
+                f"Install torch_geometric and fsspec to use this model."
+            )
+        model, message = entry
         logger.info(message)
         if load_weights:
             if model_name:

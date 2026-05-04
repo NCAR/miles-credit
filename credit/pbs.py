@@ -8,13 +8,14 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 
-def launch_script(config_file, script_path, launch=True):
-    """Generates and optionally launches a PBS script for a single-node job.
+def launch_script(config_file, script_path, launch=True, backend="nccl"):
+    """Generates and optionally launches a PBS script for a single-node MPI job on Casper.
 
     Args:
         config_file (str): Path to the YAML configuration file.
         script_path (str): Path to the script that will be executed by the PBS job.
         launch (bool, optional): If True, the PBS job will be submitted to the queue. Defaults to True.
+        backend (str, optional): Backend for distributed training. Defaults to 'nccl'.
     """
 
     # Load the configuration file
@@ -24,13 +25,15 @@ def launch_script(config_file, script_path, launch=True):
     # Extract PBS options from the config
     pbs_options = config["pbs"]
 
+    num_gpus = pbs_options.get("ngpus", 1)
+
     save_loc = os.path.expandvars(config["save_loc"])
     config_save_path = os.path.join(save_loc, "model.yml")
 
     # Generate the PBS script
     script = f"""#!/bin/bash -l
     #PBS -N {pbs_options["job_name"]}
-    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={pbs_options["ngpus"]}:mem={pbs_options["mem"]}:gpu_type={pbs_options["gpu_type"]}  
+    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}:gpu_type={pbs_options["gpu_type"]}
     #PBS -l walltime={pbs_options["walltime"]}
     #PBS -A {pbs_options["project"]}
     #PBS -q {pbs_options["queue"]}
@@ -41,7 +44,7 @@ def launch_script(config_file, script_path, launch=True):
 
     conda activate {pbs_options["conda"]}
 
-    python {script_path} -c {config_save_path}
+    mpirun -np {num_gpus} --bind-to none python {script_path} -c {config_save_path} --backend {backend}
     """
 
     script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)

@@ -12,6 +12,8 @@ CREDIT is a machine learning-based research platform for understanding the best 
 
 CREDIT enables users to train, run, and evaluate AI-based numerical weather and climate models. This documentation will guide you through installation, configuration, training, inference, evaluation, and extending the system with custom datasets and models.
 
+**New here?** Start with the `Quickstart <quickstart.html>`_ — it gets you from zero to a running training job in under 10 minutes.
+
 **What you'll find here:**
 
 - How to install CREDIT from source
@@ -27,6 +29,7 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    :maxdepth: 2
    :caption: Getting Started
 
+   Quickstart <quickstart.md>
    Getting Started <getting-started.md>
    Installing CREDIT from source <installation.md>
 
@@ -41,7 +44,10 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    :caption: Training and Inference
 
    Training a Model <Training.md>
+   Monitoring with TensorBoard <tensorboard.md>
    Running Inference <Inference.md>
+   Forecast API Server <serve.md>
+   AI Agent <agent.md>
    Evaluation and Metrics <Evaluation.md>
    Ensemble Training <Ensembles.md>
    Ensemble Inference <EnsemblesInference.md>

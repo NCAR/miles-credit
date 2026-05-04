@@ -3,7 +3,9 @@ import yaml
 import argparse
 import xarray as xr
 import os
-from os.path import join
+import numpy as np
+from os.path import join, expandvars
+from importlib.resources import files
 import pandas as pd
 
 
@@ -15,38 +17,48 @@ def main():
     with open(args.config) as config_file:
         config = yaml.safe_load(config_file)
     n_procs = args.proc
-    os.makedirs(config["predict"]["initial_condition_path"], exist_ok=True)
-    base_path = os.path.abspath(os.path.dirname(__file__))
-    if os.path.basename(os.path.abspath(os.path.join(base_path, os.pardir))) == "credit":
-        metadata_path = os.path.join(base_path, os.pardir, "metadata")
+    initial_condition_path = str(expandvars(config["predict"]["initial_condition_path"]))
+    os.makedirs(initial_condition_path, exist_ok=True)
+    metadata_path = str(files("credit.metadata"))
+    credit_grid = xr.open_dataset(config["predict"]["static_fields"])
+    model_levels = np.array(config["data"]["level_ids"])
+    if "model_level_file" in config["predict"]:
+        model_level_file = config["predict"]["model_level_file"]
     else:
-        metadata_path = os.path.join(base_path, os.pardir, "credit", "metadata")
-    credit_grid = xr.open_dataset(os.path.join(metadata_path, "ERA5_Lev_Info.nc"))
-    model_levels = pd.read_csv(os.path.join(metadata_path, "L137_model_level_indices.csv"))
-    model_level_indices = model_levels["model_level_indices"].values
+        model_level_file = join(metadata_path, "ERA5_Lev_Info.nc")
     variables = config["data"]["variables"] + config["data"]["surface_variables"]
-    date = pd.Timestamp(config["predict"]["realtime"]["forecast_start_time"], tz="UTC")
-    # now_date = pd.Timestamp.utcnow()
-    # if now_date - date >= pd.Timedelta(days=10):
+    init_date = pd.Timestamp(config["predict"]["realtime"]["forecast_start_time"], tz="UTC")
     gdas_base_path = "gs://global-forecast-system/"
-    # else:
-    #    gdas_base_path = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/"
-
+    if "variable_mapping" in config["predict"]:
+        variable_mapping = config["predict"]["variable_mapping"]
+    else:
+        # Default is wchapmanera5 to preserve backwards compatibility with original CREDIT models.
+        variable_mapping = "wchapmanera5"
     gfs_init = build_GFS_init(
         output_grid=credit_grid,
-        date=date,
+        date=init_date,
         variables=variables,
-        model_level_indices=model_level_indices,
+        model_levels=model_levels,
+        model_level_file=model_level_file,
         gdas_base_path=gdas_base_path,
+        variable_mapping=variable_mapping,
         n_procs=n_procs,
     )
-
-    gfs_init.to_zarr(
-        join(
-            config["predict"]["initial_condition_path"],
-            f"gfs_init_{date.strftime('%Y%m%d_%H00')}.zarr",
-        )
+    date_str = init_date.strftime("%Y%m%d_%H00")
+    out_file = join(initial_condition_path, f"gfs_init_{date_str}.zarr")
+    gfs_init.to_zarr(out_file, mode="w")
+    config["data"]["save_loc"] = out_file
+    config["data"]["save_loc_surface"] = out_file
+    config["data"]["save_loc_diagnostic"] = out_file
+    real_config = args.config.replace(".yml", "_realtime.yml")
+    print(
+        f"Saving realtime config to {real_config}. Update data:save_loc_dynamic_forcing to point to appropriate solar netcdf files."
     )
+    print(
+        "See /glade/campaign/cisl/aiml/credit/ for pre-generated files, or use credit_calc_global_solar to produce your own."
+    )
+    with open(real_config, "w") as out_config_file:
+        yaml.dump(config, out_config_file, default_flow_style=False, sort_keys=False)
 
 
 if __name__ == "__main__":

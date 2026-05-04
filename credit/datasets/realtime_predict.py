@@ -90,6 +90,7 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
 
         # dynamic forcing
         dyn_forcing_files = None
+        self.dyn_forcing_files = None
         if filename_dyn_forcing is not None:
             dyn_forcing_files = {}
             filename_dyn_forcing = sorted(filename_dyn_forcing)

@@ -1,0 +1,31 @@
+gfs_map:
+  tmp: T
+  spfh: Qtot
+  ugrd: U
+  vgrd: V
+  tmp2m: TREFHT
+  ugrd10m: U10
+  vgrd10m: V10
+  pressfc: PS
+
+level_map:
+  T500: T
+  U500: U
+  V500: V
+  Q500: Qtot
+  Z500: Z
+
+upper_air:
+  - "T"
+  - "Qtot"
+  - "U"
+  - "V"
+  - "Z"
+
+surface:
+  - "PS"
+  - "TREFHT"
+  - "U10"
+  - "V10"
+
+

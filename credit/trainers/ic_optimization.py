@@ -226,7 +226,7 @@ class TimeStepper:
         return self.dataset[0]  # __getitem__ uses forecast_step_counts[0] internally
 
 
-class Trainer(BaseTrainer):
+class TrainerIC(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int):
         """
         Trainer class for handling the training, validation, and checkpointing of models.

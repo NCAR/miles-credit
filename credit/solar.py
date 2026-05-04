@@ -173,6 +173,7 @@ def get_solar_radiation_loc(
     end_date: str,
     step_freq: str = "1h",
     sub_freq: str = "10Min",
+    solar_var: str = "tsi",
 ) -> xr.Dataset:
     """
     Calculate total solar irradiance at a single location over a range of times. Solar irradiance is integrated
@@ -218,7 +219,7 @@ def get_solar_radiation_loc(
         step_rad.reshape(-1, 1, 1),
         coords={"time": step_dates, "latitude": [lat], "longitude": [lon]},
         dims=("time", "latitude", "longitude"),
-        name="tsi",
+        name=solar_var,
         attrs={
             "standard_name": "solar_irradiance",
             "long_name": "total solar irradiance",
@@ -237,7 +238,7 @@ def get_solar_radiation_loc(
             "units": "",
         },
     )
-    out_rad_ds = xr.Dataset({"tsi": out_rad_da, "coszen": zenith_da})
+    out_rad_ds = xr.Dataset({solar_var: out_rad_da, "coszen": zenith_da})
     return out_rad_ds
 
 

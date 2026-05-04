@@ -1,3 +1,10 @@
+"""
+concat.py
+---------
+ConcatToTensor: end-of-chain preblock that collapses a nested batch dict into a
+flat (x, y, metadata) tuple. Used by build_preblocks/apply_preblocks.
+"""
+
 import torch
 from credit.preblock.base import BasePreblock
 

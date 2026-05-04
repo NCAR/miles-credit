@@ -7,12 +7,14 @@ import torch
 
 from credit.models import load_model
 from credit.models.unet import SegmentationModel
-from credit.models.crossformer import CrossFormer
+from credit.models.wxformer.crossformer import CrossFormer
 from credit.models.fuxi import Fuxi
 from credit.parser import credit_main_parser
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
-CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
+CONFIG_FILE_DIR = os.path.join(
+    "/".join(os.path.abspath(__file__).split("/")[:-2]), "config/gen_1/applications/other_models/"
+)
 
 
 def test_unet():
