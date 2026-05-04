@@ -1,54 +1,0 @@
-
-Inactive Modules:
-  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
-  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
-
-Due to MODULEPATH changes, the following have been reloaded:
-  1) conda/latest
-
-The following have been reloaded with a version change:
-  1) ncarenv/25.10 => ncarenv/24.12
-
-CUDA_VISIBLE_DEVICES=GPU-d58548c4-c53e-2f91-7795-c918aef5e804,GPU-8f5eee06-d1ae-bace-6c18-e7813353e500
-0, NVIDIA A100-SXM4-80GB
-1, NVIDIA A100-SXM4-80GB
-pbs_attach: process 43793 attached to job: 3391067.casper-pbs
-
-Inactive Modules:
-  1) cuda/12.9.0     3) intel/2025.2.1          5) netcdf/4.9.3      7) ucx/1.19.0
-  2) hdf5/1.14.6     4) ncarcompilers/1.1.0     6) openmpi/5.0.8
-
-Due to MODULEPATH changes, the following have been reloaded:
-  1) conda/latest
-
-The following have been reloaded with a version change:
-  1) ncarenv/25.10 => ncarenv/24.12
-
-INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'mrms'
-INFO:credit.datasets.multi_source:MultiSourceDataset: registered source 'mrms'
-INFO:credit.models:Loading the CrossFormer model with a conv decoder head and skip connections ...
-INFO:credit.models:Loading the CrossFormer model with a conv decoder head and skip connections ...
-INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
-INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
-INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
-INFO:credit.trainers.base_trainer:Training metric: train_loss (direction: min)
-INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
-INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
-INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
-INFO:credit.losses.base_losses:Loaded the mse loss function with parameters: {'reduction': 'none'}
-INFO:credit.trainers:ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.
-INFO:credit.trainers.base_trainer:Training metric: train_loss (direction: min)
-INFO:credit.trainers.trainerERA5gen2:Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)
-INFO:credit.trainers.preflight:Preflight: fetching first training batch (timeout=300s) …
-INFO:credit.trainers.preflight:Preflight: first batch ready in 4.0s.
-INFO:credit.trainers.preflight:Preflight: first batch ready in 4.0s.
-WARNING:credit.trainers.preflight:check_model_gpu_memory: synthetic GPU pass failed (element 0 of tensors does not require grad and does not have a grad_fn); skipping.
-INFO:credit.trainers.base_trainer:Beginning epoch 0
-INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
-  0%|          | 0/4 [00:00<?, ?it/s]WARNING:credit.trainers.preflight:check_model_gpu_memory: synthetic GPU pass failed (element 0 of tensors does not require grad and does not have a grad_fn); skipping.
-INFO:credit.trainers.base_trainer:Beginning epoch 0
-INFO:credit.trainers.trainerERA5gen2:Using grad-max-norm value: 1.0
-  0%|          | 0/4 [00:00<?, ?it/s] 25%|██▌       | 1/4 [00:08<00:25,  8.64s/it]Epoch: 0 train_loss: 15.810076 train_acc: 0.000000 train_mae: 2.021231 lr: 0.000001000000:  25%|██▌       | 1/4 [00:08<00:25,  8.64s/it] 25%|██▌       | 1/4 [00:08<00:25,  8.64s/it]Epoch: 0 train_loss: 15.810076 train_acc: 0.000000 train_mae: 2.021231 lr: 0.000001000000:  25%|██▌       | 1/4 [00:08<00:25,  8.64s/it]Epoch: 0 train_loss: 15.810076 train_acc: 0.000000 train_mae: 2.021231 lr: 0.000001000000:  50%|█████     | 2/4 [00:11<00:10,  5.05s/it]Epoch: 0 train_loss: 9.785615 train_acc: 0.000000 train_mae: 1.777604 lr: 0.000100900000:  50%|█████     | 2/4 [00:11<00:10,  5.05s/it] Epoch: 0 train_loss: 15.810076 train_acc: 0.000000 train_mae: 2.021231 lr: 0.000001000000:  50%|█████     | 2/4 [00:11<00:10,  5.05s/it]Epoch: 0 train_loss: 9.785615 train_acc: 0.000000 train_mae: 1.777604 lr: 0.000100900000:  50%|█████     | 2/4 [00:11<00:10,  5.05s/it] Epoch: 0 train_loss: 9.785615 train_acc: 0.000000 train_mae: 1.777604 lr: 0.000100900000:  75%|███████▌  | 3/4 [00:13<00:03,  3.84s/it]Epoch: 0 train_loss: 8.436269 train_acc: 0.000000 train_mae: 1.771188 lr: 0.000200800000:  75%|███████▌  | 3/4 [00:13<00:03,  3.84s/it]Epoch: 0 train_loss: 9.785615 train_acc: 0.000000 train_mae: 1.777604 lr: 0.000100900000:  75%|███████▌  | 3/4 [00:13<00:03,  3.84s/it]Epoch: 0 train_loss: 8.436269 train_acc: 0.000000 train_mae: 1.771188 lr: 0.000200800000:  75%|███████▌  | 3/4 [00:13<00:03,  3.84s/it]Epoch: 0 train_loss: 8.436269 train_acc: 0.000000 train_mae: 1.771188 lr: 0.000200800000: 100%|██████████| 4/4 [00:16<00:00,  3.35s/it]Epoch: 0 train_loss: 10.777356 train_acc: 0.000000 train_mae: 1.831770 lr: 0.000300700000: 100%|██████████| 4/4 [00:16<00:00,  3.35s/it]Epoch: 0 train_loss: 10.777356 train_acc: 0.000000 train_mae: 1.831770 lr: 0.000300700000: 100%|██████████| 4/4 [00:16<00:00,  4.05s/it]
-Epoch: 0 train_loss: 8.436269 train_acc: 0.000000 train_mae: 1.771188 lr: 0.000200800000: 100%|██████████| 4/4 [00:16<00:00,  3.35s/it]Epoch: 0 train_loss: 10.777356 train_acc: 0.000000 train_mae: 1.831770 lr: 0.000300700000: 100%|██████████| 4/4 [00:16<00:00,  3.35s/it]Epoch: 0 train_loss: 10.777356 train_acc: 0.000000 train_mae: 1.831770 lr: 0.000300700000: 100%|██████████| 4/4 [00:16<00:00,  4.05s/it]
-INFO:credit.trainers.base_trainer:Saving checkpoint to ./
-INFO:credit.trainers.base_trainer:Saving checkpoint to ./
