@@ -42,7 +42,7 @@ jobs:
         env:
           ESMF_NETCDF: nc-config
         with:
-          version: latest
+          version: 8.9.1
           esmpy: true
           cache: false
       - name: Print ESMF Info
