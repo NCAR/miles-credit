@@ -46,6 +46,7 @@ from torch.utils.data import Dataset
 
 from credit.datasets.era5 import ERA5Dataset
 from credit.datasets.MRMS import MRMSDataset
+from credit.datasets.hrrr import HRRRDataset
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,28 @@ logger = logging.getLogger(__name__)
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
     "MRMS": MRMSDataset,
+    "HRRR": HRRRDataset,
+    "HRRR_NAT": HRRRDataset,
+    "HRRR_SUBH": HRRRDataset,
 }
+
+
+def make_single_source_subconfig(config: dict, source_key: str) -> dict:
+    """
+    Return a modified config dict containing only the specified source.
+
+    This is used internally to instantiate each sub-dataset with a config
+    containing just its own source config block, to avoid confusion with
+    multisource config fields (e.g. HRRR vs HRRR_NAT vs HRRR_SUBH).
+
+    Args:
+        config: Original multisource config dict.
+        source_key: Key of the source to isolate (e.g., "HRRR").
+
+    Returns:
+        New config dict containing only the specified source's config block.
+    """
+    return {"source": {source_key: config["source"][source_key]}, **{k: v for k, v in config.items() if k != "source"}}
 
 
 class MultiSourceDataset(Dataset):
@@ -78,10 +100,14 @@ class MultiSourceDataset(Dataset):
     def __init__(self, config: dict, return_target: bool = False) -> None:
         self.datasets: dict[str, Dataset] = {}
         source_cfg = config.get("source", {})
+        rest_cfg = {k: v for k, v in config.items() if k != "source"}
 
         for key, cls in _SOURCE_REGISTRY.items():
             if key in source_cfg:
-                self.datasets[key.lower()] = cls(config, return_target)
+                # Pass in just the sub-config for this source to avoid confusion
+                # with multisource datasets (e.g., HRRR and HRRR_NAT)
+                sub_config = make_single_source_subconfig(config, key)
+                self.datasets[key.lower()] = cls(sub_config, return_target)
                 logger.info("MultiSourceDataset: registered source '%s'", key.lower())
             else:
                 logger.debug("MultiSourceDataset: source '%s' not in config, skipping", key)
@@ -120,6 +146,7 @@ class MultiSourceDataset(Dataset):
         """Return timestamps common to all active source datasets."""
         if not self.datasets:
             return pd.DatetimeIndex([])
+
         sets = [set(ds.datetimes) for ds in self.datasets.values()]
         common = set.intersection(*sets)
         if not common:

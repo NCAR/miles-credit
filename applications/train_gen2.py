@@ -108,8 +108,8 @@ def main_cli():
         setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
+        device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
+        torch.cuda.set_device(local_rank % torch.cuda.device_count())
         torch.backends.cudnn.benchmark = True
     else:
         device = torch.device("cpu")
@@ -126,7 +126,12 @@ def main_cli():
 
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
-
+    inject_flat_var_keys(conf)
+    if "post_conf" in conf["model"]:
+        warnings.warn(
+            "Gen 2 training does not support Gen 1 postblocks. Any postblocks included in the conf will be ignored."
+        )
+        conf["model"].pop("post_conf", None)
     m = load_model(conf)
     m.to(device)
 
@@ -139,8 +144,6 @@ def main_cli():
         model = m
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
-
-    inject_flat_var_keys(conf)
 
     train_criterion = load_loss(conf)
     valid_criterion = load_loss(conf, validation=True)
