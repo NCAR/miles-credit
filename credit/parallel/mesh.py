@@ -107,8 +107,8 @@ def parse_parallelism_conf(conf: dict) -> dict:
         "fsdp": {"data": "fsdp2", "tensor": 1, "domain": 1},
         "ddp": {"data": "ddp", "tensor": 1, "domain": 1},
         "none": {"data": "none", "tensor": 1, "domain": 1},
-        "domain_parallel": {"data": "none", "tensor": 1, "domain": trainer.get("domain_parallel_size", 2)},
-        "fsdp+domain_parallel": {"data": "fsdp2", "tensor": 1, "domain": trainer.get("domain_parallel_size", 2)},
+        "domain_parallel": {"data": "none", "tensor": 1, "domain": trainer.get("domain_parallel_size", 1)},
+        "fsdp+domain_parallel": {"data": "fsdp2", "tensor": 1, "domain": trainer.get("domain_parallel_size", 1)},
     }
     result = mapping.get(mode, {"data": "none", "tensor": 1, "domain": 1})
     logger.debug(f"Inferred parallelism from legacy mode='{mode}': {result}")

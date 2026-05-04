@@ -50,13 +50,13 @@ def apply_fsdp2(model: nn.Module, dp_mesh, conf: dict) -> nn.Module:
 
     ac_conf = conf.get("trainer", {}).get("activation_checkpoint", False)
 
-    shard_types = _get_shard_types()
+    # AC must come before fully_shard so the CheckpointWrapper is what gets sharded.
+    if ac_conf:
+        _apply_activation_checkpointing(model)
 
     count = 0
     for module in model.modules():
-        if shard_types and isinstance(module, tuple(shard_types)):
-            if ac_conf:
-                _apply_activation_checkpoint(module)
+        if _is_shardable(module, ac_conf):
             fully_shard(module, **kwargs)
             count += 1
 
@@ -148,29 +148,52 @@ def _parse_dtype(s: str) -> torch.dtype:
     return mapping[s]
 
 
-def _get_shard_types():
-    """Return model block types that should get their own FSDP2 shard."""
-    types = []
-    try:
-        from credit.models.crossformer.crossformer import Transformer as V1Transformer
+def _has_fsdp2_shard(module: nn.Module) -> bool:
+    """Return True if module opted into per-block FSDP2 sharding.
 
-        types.append(V1Transformer)
-    except ImportError:
-        pass
-    return types
+    Any nn.Module subclass can opt in by declaring::
+
+        class MyBlock(nn.Module):
+            _fsdp2_shard = True
+    """
+    return bool(getattr(type(module), "_fsdp2_shard", False))
 
 
-def _apply_activation_checkpoint(module: nn.Module) -> None:
-    """Apply no-reentrant activation checkpointing to a module."""
+def _apply_activation_checkpointing(model: nn.Module) -> None:
+    """Apply no-reentrant AC to all modules that declared ``_fsdp2_shard = True``.
+
+    Uses apply_activation_checkpointing so replacements happen in-place in parent
+    modules. Must be called before fully_shard so the CheckpointWrapper is what
+    gets sharded.
+    """
+    import functools
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-        checkpoint_wrapper,
         CheckpointImpl,
+        apply_activation_checkpointing,
+        checkpoint_wrapper,
     )
 
-    try:
-        checkpoint_wrapper(module, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
-    except Exception as e:
-        logger.warning(f"Activation checkpoint failed for {type(module).__name__}: {e}")
+    wrapper = functools.partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
+    apply_activation_checkpointing(
+        model,
+        checkpoint_wrapper_fn=wrapper,
+        check_fn=_has_fsdp2_shard,
+    )
+    logger.info("FSDP2: activation checkpointing applied to _fsdp2_shard blocks")
+
+
+def _is_shardable(module: nn.Module, ac_enabled: bool) -> bool:
+    """Return True if module should receive its own FSDP2 shard.
+
+    With AC enabled, shard_type blocks are wrapped in CheckpointWrapper.
+    We shard the CheckpointWrapper, not the inner module — otherwise
+    model.modules() visits both and fully_shard is called twice on the
+    same parameters, corrupting the mesh state.
+    """
+    if ac_enabled:
+        inner = getattr(module, "_checkpoint_wrapped_module", None)
+        return inner is not None and _has_fsdp2_shard(inner)
+    return _has_fsdp2_shard(module)
 
 
 # ---------------------------------------------------------------------------

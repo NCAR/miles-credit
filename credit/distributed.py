@@ -433,30 +433,23 @@ def distributed_model_wrapper_v2(conf: dict, model, device):
     if conf.get("trainer", {}).get("activation_checkpoint", False) and data_mode != "fsdp2":
         _apply_activation_checkpointing_v2(model, conf)
 
-    torch.distributed.barrier()
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
     return model
 
 
 def _apply_activation_checkpointing_v2(model, conf):
-    """Apply no-reentrant AC to transformer-like blocks (non-FSDP2 path)."""
+    """Apply no-reentrant AC to blocks that opt in via _fsdp2_shard = True (non-FSDP2 path)."""
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-        checkpoint_wrapper,
         CheckpointImpl,
         apply_activation_checkpointing,
+        checkpoint_wrapper,
     )
     import functools
 
-    try:
-        from credit.models.crossformer.crossformer import Transformer as V1Transformer
-
-        block_types = (V1Transformer,)
-    except ImportError:
-        return
+    def _has_shard_attr(m):
+        return bool(getattr(type(m), "_fsdp2_shard", False))
 
     wrapper = functools.partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
-    apply_activation_checkpointing(
-        model,
-        checkpoint_wrapper_fn=wrapper,
-        check_fn=lambda m: isinstance(m, block_types),
-    )
+    apply_activation_checkpointing(model, checkpoint_wrapper_fn=wrapper, check_fn=_has_shard_attr)
     logging.info("[V2] Activation checkpointing applied")

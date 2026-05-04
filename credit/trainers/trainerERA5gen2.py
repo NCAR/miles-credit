@@ -184,6 +184,8 @@ class TrainerERA5Gen2(BaseTrainer):
                 self.batches_per_epoch if 0 < self.batches_per_epoch < dataset_batches else dataset_batches
             )
 
+        grad_accum_every = self.conf.get("trainer", {}).get("grad_accum_every", 1)
+
         batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
         self.model.train()
 
@@ -241,10 +243,13 @@ class TrainerERA5Gen2(BaseTrainer):
                 _amp = self.amp and self.mode != "fsdp2"
                 if self._domain_pre_pad is not None:
                     self._raw_model._skip_internal_padding = True
-                with torch.autocast(device_type="cuda", enabled=_amp):
-                    y_pred = self.model(x)
+                try:
+                    with torch.autocast(device_type="cuda", enabled=_amp):
+                        y_pred = self.model(x)
+                finally:
+                    if self._domain_pre_pad is not None:
+                        self._raw_model._skip_internal_padding = False
                 if self._domain_pre_pad is not None:
-                    self._raw_model._skip_internal_padding = False
                     y_pred = unpad_shard_interp(
                         y_pred,
                         self._domain_pre_pad,
@@ -295,31 +300,34 @@ class TrainerERA5Gen2(BaseTrainer):
                     with torch.autocast(device_type="cuda", enabled=_amp):
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()
                     accum_log(logs, {"loss": loss.item()})
-                    scaler.scale(loss).backward(retain_graph=self.retain_graph)
-                    sync_domain_gradients(self.model, self.domain_manager)
+                    scaler.scale(loss / grad_accum_every).backward(retain_graph=self.retain_graph)
 
-                if self.distributed:
-                    torch.distributed.barrier()
+            if self.distributed:
+                torch.distributed.barrier()
 
-            # optimizer step
-            scaler.unscale_(optimizer)
-            if self.grad_max_norm == "dynamic":
-                local_norm = torch.norm(
-                    torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
-                )
-                if self.distributed:
-                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
-                global_norm = local_norm.sqrt()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
-            elif self.grad_max_norm > 0.0:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
+            # Sync domain gradients and step at accumulation boundary so that
+            # sync_domain_gradients sees the fully-accumulated gradient rather
+            # than a partial sum from a single backward call.
+            if (steps + 1) % grad_accum_every == 0 or steps == batches_per_epoch - 1:
+                sync_domain_gradients(self.model, self.domain_manager)
+                scaler.unscale_(optimizer)
+                if self.grad_max_norm == "dynamic":
+                    local_norm = torch.norm(
+                        torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
+                    )
+                    if self.distributed:
+                        dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
+                    global_norm = local_norm.sqrt()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
+                elif self.grad_max_norm > 0.0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
 
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
 
-            if self.ema is not None:
-                self.ema.update(self.model)
+                if self.ema is not None:
+                    self.ema.update(self.model)
 
             # collect metrics
             if y_pred is not None and y is not None:
@@ -434,9 +442,12 @@ class TrainerERA5Gen2(BaseTrainer):
 
                     if self._domain_pre_pad is not None:
                         self._raw_model._skip_internal_padding = True
-                    y_pred = self.model(x.float())
+                    try:
+                        y_pred = self.model(x.float())
+                    finally:
+                        if self._domain_pre_pad is not None:
+                            self._raw_model._skip_internal_padding = False
                     if self._domain_pre_pad is not None:
-                        self._raw_model._skip_internal_padding = False
                         y_pred = unpad_shard_interp(
                             y_pred,
                             self._domain_pre_pad,

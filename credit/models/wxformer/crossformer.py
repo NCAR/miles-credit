@@ -67,6 +67,8 @@ class CubeEmbedding(nn.Module):
 
 
 class UpBlock(nn.Module):
+    _fsdp2_shard = True
+
     def __init__(
         self,
         in_chans,
@@ -108,6 +110,8 @@ class UpBlock(nn.Module):
 
 
 class UpBlockPS(nn.Module):
+    _fsdp2_shard = True
+
     def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2):
         super().__init__()
         # sub-pixel conv at low res
@@ -240,6 +244,14 @@ class Attention(nn.Module):
     _tp_col = "to_qkv"  # Conv2d(dim → inner_dim*3) — output channels sharded
     _tp_row = "to_out"  # Conv2d(inner_dim → dim) — input channels sharded + all_reduce
 
+    @staticmethod
+    def _tp_constraints(instance, tp_size):
+        if instance.heads % tp_size != 0:
+            raise ValueError(
+                f"Attention TP: heads={instance.heads} not divisible by tp_size={tp_size}. "
+                f"Choose a TP degree that divides {instance.heads}, or increase dim_head."
+            )
+
     def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0):
         super().__init__()
         assert attn_type in {
@@ -363,6 +375,8 @@ class Attention(nn.Module):
 
 
 class Transformer(nn.Module):
+    _fsdp2_shard = True
+
     def __init__(
         self,
         dim,

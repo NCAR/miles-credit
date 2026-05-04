@@ -1,12 +1,17 @@
 """Domain-parallel utility functions shared across all trainers."""
 
+import logging
 import torch.distributed as dist
+
+logger = logging.getLogger(__name__)
 
 
 def get_domain_manager(model):
-    for candidate in (model, getattr(model, "module", None)):
-        if candidate is not None and hasattr(candidate, "_domain_parallel_manager"):
-            return candidate._domain_parallel_manager
+    m = model
+    while m is not None:
+        if hasattr(m, "_domain_parallel_manager"):
+            return m._domain_parallel_manager
+        m = getattr(m, "module", None)
     return None
 
 
@@ -48,6 +53,11 @@ def unpad_shard_interp(y_pred, padding_opt, manager, image_h, image_w):
         y_pred = y_pred[..., pad_top:end_h, :]
     shard_h = image_h // n
     if y_pred.shape[-2] != shard_h or y_pred.shape[-1] != image_w:
+        logger.warning(
+            f"unpad_shard_interp: shape mismatch after unpadding "
+            f"({y_pred.shape[-2]}×{y_pred.shape[-1]} vs {shard_h}×{image_w}); "
+            "falling back to bilinear interpolation — check padding config"
+        )
         y_pred = F.interpolate(y_pred, size=(shard_h, image_w), mode="bilinear", align_corners=False)
     if squeezed:
         y_pred = y_pred.unsqueeze(2)
@@ -61,6 +71,9 @@ def sync_domain_gradients(model, manager):
     for p in model.parameters():
         if p.grad is not None:
             grad = p.grad
+            # With FSDP2, p.grad is a DTensor. to_local() returns the local shard
+            # as a view of the underlying storage (Shard placement), so the
+            # in-place all_reduce updates the DTensor's local data correctly.
             if hasattr(grad, "to_local"):
                 grad = grad.to_local()
             dist.all_reduce(grad, op=dist.ReduceOp.AVG, group=group)
