@@ -89,6 +89,21 @@ def load_fsdp_or_checkpoint_policy(conf):
             FeedForward,
             CrossEmbedLayer,
         }
+    elif "wxformer" in conf["model"]["type"]:
+        from credit.models.wxformer.crossformer import (
+            Attention,
+            DynamicPositionBias,
+            FeedForward,
+            CrossEmbedLayer,
+        )
+
+        transformer_layers_cls = {
+            Attention,
+            DynamicPositionBias,
+            FeedForward,
+            CrossEmbedLayer,
+        }
+
     elif "unet" in conf["model"]["type"]:
         from credit.models.crossformer import (
             Attention,
@@ -127,7 +142,7 @@ def load_fsdp_or_checkpoint_policy(conf):
     # other models not supported
     else:
         raise OSError(
-            "You asked for FSDP but only crossformer, swin, and fuxi are currently supported.",
+            "You asked for FSDP but only crossformer, wxformer, swin, and fuxi are currently supported.",
             "See credit/models/__init__.py for examples on adding new models",
         )
 
