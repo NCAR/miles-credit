@@ -631,8 +631,7 @@ class CrossFormer(BaseModel):
         if self.use_post_block:  # copy tensor to feed into postBlock later
             x_copy = x.clone().detach()
 
-        _skip_pad = getattr(self, "_skip_internal_padding", False)
-        if self.use_padding and not _skip_pad:
+        if self.use_padding:
             x = self.padding_opt.pad(x)
 
         if self.patch_width > 1 and self.patch_height > 1:
@@ -662,10 +661,10 @@ class CrossFormer(BaseModel):
 
         x = self.up_block4(x)
 
-        if self.use_padding and not _skip_pad:
+        if self.use_padding:
             x = self.padding_opt.unpad(x)
 
-        if self.use_interp and not _skip_pad:
+        if self.use_interp:
             x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
         b, _, h, w = x.shape

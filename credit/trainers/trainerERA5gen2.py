@@ -120,6 +120,10 @@ class TrainerERA5Gen2(BaseTrainer):
             self._domain_pre_pad = raw_m.padding_opt
             self._domain_image_h = raw_m.image_height
             self._domain_image_w = raw_m.image_width
+            # Disable internal pad/unpad/interp — trainer owns all spatial transforms
+            # when domain parallel is active. Works for any model without per-model shims.
+            raw_m.use_padding = False
+            raw_m.use_interp = False
         else:
             self._domain_pre_pad = None
             self._domain_image_h = None
