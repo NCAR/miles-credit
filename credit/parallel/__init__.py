@@ -26,5 +26,15 @@ Usage (called from distributed_model_wrapper_v2):
 from .mesh import build_device_mesh
 from .fsdp2 import apply_fsdp2
 from .tensor_parallel import apply_tensor_parallel
+from .domain import get_domain_manager, get_raw_model, shard_spatial, unpad_shard_interp, sync_domain_gradients
 
-__all__ = ["build_device_mesh", "apply_fsdp2", "apply_tensor_parallel"]
+__all__ = [
+    "build_device_mesh",
+    "apply_fsdp2",
+    "apply_tensor_parallel",
+    "get_domain_manager",
+    "get_raw_model",
+    "shard_spatial",
+    "unpad_shard_interp",
+    "sync_domain_gradients",
+]

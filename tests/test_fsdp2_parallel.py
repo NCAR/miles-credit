@@ -2,8 +2,8 @@
 
 These tests cover:
   - Mesh dimension math (no dist init required)
-  - _shard_spatial correctness with a mock DomainParallelManager
-  - _unpad_shard_interp shape recovery
+  - shard_spatial correctness with a mock DomainParallelManager
+  - unpad_shard_interp shape recovery
   - Parallelism config validation
 """
 
@@ -36,28 +36,28 @@ def _make_manager(rank, n):
 
 
 # ---------------------------------------------------------------------------
-# _shard_spatial
+# shard_spatial
 # ---------------------------------------------------------------------------
 
-from credit.trainers.trainerERA5gen2 import _shard_spatial  # noqa: E402
+from credit.parallel.domain import shard_spatial, unpad_shard_interp  # noqa: E402
 
 
 class TestShardSpatial:
     def test_no_manager_passthrough(self):
         x = torch.randn(2, 4, 8, 16)
-        assert _shard_spatial(x, None) is x
+        assert shard_spatial(x, None) is x
 
     def test_single_domain_passthrough(self):
         m = _make_manager(0, 1)
         x = torch.randn(2, 4, 8, 16)
-        assert _shard_spatial(x, m) is x
+        assert shard_spatial(x, m) is x
 
     def test_shard_splits_h_evenly(self):
         H, W = 8, 16
         x = torch.arange(H * W).float().reshape(1, 1, H, W)
         for rank in range(2):
             m = _make_manager(rank, 2)
-            shard = _shard_spatial(x, m)
+            shard = shard_spatial(x, m)
             assert shard.shape == (1, 1, H // 2, W)
             expected = x[..., rank * (H // 2) : (rank + 1) * (H // 2), :]
             assert torch.equal(shard, expected)
@@ -66,23 +66,21 @@ class TestShardSpatial:
         m = _make_manager(0, 3)
         x = torch.randn(1, 1, 8, 16)  # 8 % 3 != 0
         with pytest.raises(ValueError, match="divisible"):
-            _shard_spatial(x, m)
+            shard_spatial(x, m)
 
     def test_4d_and_5d_input(self):
         m = _make_manager(0, 2)
         x4 = torch.randn(2, 3, 8, 16)
         x5 = torch.randn(2, 3, 1, 8, 16)
-        s4 = _shard_spatial(x4, m)
-        s5 = _shard_spatial(x5, m)
+        s4 = shard_spatial(x4, m)
+        s5 = shard_spatial(x5, m)
         assert s4.shape == (2, 3, 4, 16)
         assert s5.shape == (2, 3, 1, 4, 16)
 
 
 # ---------------------------------------------------------------------------
-# _unpad_shard_interp
+# unpad_shard_interp
 # ---------------------------------------------------------------------------
-
-from credit.trainers.trainerERA5gen2 import _unpad_shard_interp  # noqa: E402
 
 
 def _make_padding_opt(pad_ns=(0, 0), pad_we=(0, 0)):
@@ -98,7 +96,7 @@ class TestUnpadShardInterp:
         m = _make_manager(0, 2)
         p = _make_padding_opt()
         x = torch.randn(1, 3, 4, 16)  # already shard_h=4 of total H=8
-        out = _unpad_shard_interp(x, p, m, image_h=8, image_w=16)
+        out = unpad_shard_interp(x, p, m, image_h=8, image_w=16)
         assert out.shape == (1, 3, 4, 16)
 
     def test_w_padding_removed(self):
@@ -106,7 +104,7 @@ class TestUnpadShardInterp:
         p = _make_padding_opt(pad_we=(2, 3))
         # width = 16 + 2 + 3 = 21 (padded), should return width = 16
         x = torch.randn(1, 3, 4, 21)
-        out = _unpad_shard_interp(x, p, m, image_h=8, image_w=16)
+        out = unpad_shard_interp(x, p, m, image_h=8, image_w=16)
         assert out.shape[-1] == 16
 
     def test_h_padding_removed_first_rank(self):
@@ -116,14 +114,14 @@ class TestUnpadShardInterp:
         # shard_h target = 8 // 2 = 4; input has extra rows from top+bot padding
         # First rank: lose top=2, keep bot (interior boundary)
         x = torch.randn(1, 3, 8, 16)
-        out = _unpad_shard_interp(x, p, m, image_h=8, image_w=16)
+        out = unpad_shard_interp(x, p, m, image_h=8, image_w=16)
         assert out.shape[-2] == 4
 
     def test_5d_input_unsqueezed(self):
         m = _make_manager(0, 2)
         p = _make_padding_opt()
         x = torch.randn(1, 3, 1, 4, 16)
-        out = _unpad_shard_interp(x, p, m, image_h=8, image_w=16)
+        out = unpad_shard_interp(x, p, m, image_h=8, image_w=16)
         assert out.dim() == 5
         assert out.shape == (1, 3, 1, 4, 16)
 

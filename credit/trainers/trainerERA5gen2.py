@@ -9,6 +9,13 @@ import tqdm
 
 import optuna
 
+from credit.parallel.domain import (
+    get_domain_manager,
+    get_raw_model,
+    shard_spatial,
+    unpad_shard_interp,
+    sync_domain_gradients,
+)
 from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.scheduler import update_on_batch
@@ -16,75 +23,6 @@ from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
 
 logger = logging.getLogger(__name__)
-
-
-# ── Domain-parallel helpers ───────────────────────────────────────────────────
-
-
-def _get_domain_manager(model):
-    for candidate in (model, getattr(model, "module", None)):
-        if candidate is not None and hasattr(candidate, "_domain_parallel_manager"):
-            return candidate._domain_parallel_manager
-    return None
-
-
-def _get_raw_model(model):
-    m = model
-    while hasattr(m, "module"):
-        m = m.module
-    return m
-
-
-def _shard_spatial(tensor, manager):
-    if manager is None or manager.domain_parallel_size <= 1:
-        return tensor
-    from credit.domain_parallel.sharding import shard_tensor
-
-    n = manager.domain_parallel_size
-    h = tensor.shape[-2]
-    if h % n != 0:
-        raise ValueError(f"Domain parallel requires image_height ({h}) divisible by domain_parallel_size ({n}).")
-    return shard_tensor(tensor, dim=-2, manager=manager)
-
-
-def _unpad_shard_interp(y_pred, padding_opt, manager, image_h, image_w):
-    import torch.nn.functional as F
-
-    squeezed = y_pred.dim() == 5
-    if squeezed:
-        y_pred = y_pred.squeeze(2)
-    n = manager.domain_parallel_size
-    pw = padding_opt.pad_WE
-    if any(v > 0 for v in pw):
-        end_w = -pw[1] if pw[1] > 0 else None
-        y_pred = y_pred[..., pw[0] : end_w]
-    ph = padding_opt.pad_NS
-    pad_top = ph[0] if manager.is_first_domain_rank else 0
-    pad_bot = ph[1] if manager.is_last_domain_rank else 0
-    if pad_top > 0 or pad_bot > 0:
-        end_h = -pad_bot if pad_bot > 0 else None
-        y_pred = y_pred[..., pad_top:end_h, :]
-    shard_h = image_h // n
-    if y_pred.shape[-2] != shard_h or y_pred.shape[-1] != image_w:
-        y_pred = F.interpolate(y_pred, size=(shard_h, image_w), mode="bilinear", align_corners=False)
-    if squeezed:
-        y_pred = y_pred.unsqueeze(2)
-    return y_pred
-
-
-def _sync_domain_gradients(model, manager):
-    if manager is None or manager.domain_parallel_size <= 1:
-        return
-    group = manager.domain_group
-    for p in model.parameters():
-        if p.grad is not None:
-            grad = p.grad
-            if hasattr(grad, "to_local"):
-                grad = grad.to_local()
-            dist.all_reduce(grad, op=dist.ReduceOp.AVG, group=group)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TrainerERA5Gen2(BaseTrainer):
@@ -109,8 +47,8 @@ class TrainerERA5Gen2(BaseTrainer):
         logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
 
         # ---- Domain parallel manager (None when not using domain parallel) ----
-        self.domain_manager = _get_domain_manager(model)
-        self._raw_model = _get_raw_model(model)
+        self.domain_manager = get_domain_manager(model)
+        self._raw_model = get_raw_model(model)
         raw_m = self._raw_model
         if (
             self.domain_manager is not None
@@ -273,7 +211,7 @@ class TrainerERA5Gen2(BaseTrainer):
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
                     if self._domain_pre_pad is not None:
                         x = self._domain_pre_pad.pad(x)
-                    x = _shard_spatial(x, self.domain_manager)
+                    x = shard_spatial(x, self.domain_manager)
                 else:
                     # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
                     # Build full input: start from previous x, update dynfrc and
@@ -284,7 +222,7 @@ class TrainerERA5Gen2(BaseTrainer):
                         x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                     if self._domain_pre_pad is not None:
                         x_dynfrc = self._domain_pre_pad.pad(x_dynfrc)
-                    x_dynfrc = _shard_spatial(x_dynfrc, self.domain_manager)
+                    x_dynfrc = shard_spatial(x_dynfrc, self.domain_manager)
                     n_dynfrc = x_dynfrc.shape[1]
                     n_prog = x.shape[1] - self.static_dim_size
                     y_pred_prog = y_pred[:, :n_prog, ...]
@@ -307,7 +245,7 @@ class TrainerERA5Gen2(BaseTrainer):
                     y_pred = self.model(x)
                 if self._domain_pre_pad is not None:
                     self._raw_model._skip_internal_padding = False
-                    y_pred = _unpad_shard_interp(
+                    y_pred = unpad_shard_interp(
                         y_pred,
                         self._domain_pre_pad,
                         self.domain_manager,
@@ -341,8 +279,8 @@ class TrainerERA5Gen2(BaseTrainer):
                     y = y_raw.to(self.device).float()
                     if self._domain_pre_pad is not None:
                         y = self._domain_pre_pad.pad(y)
-                        y = _shard_spatial(y, self.domain_manager)
-                        y = _unpad_shard_interp(
+                        y = shard_spatial(y, self.domain_manager)
+                        y = unpad_shard_interp(
                             y,
                             self._domain_pre_pad,
                             self.domain_manager,
@@ -350,7 +288,7 @@ class TrainerERA5Gen2(BaseTrainer):
                             self._domain_image_w,
                         )
                     else:
-                        y = _shard_spatial(y, self.domain_manager)
+                        y = shard_spatial(y, self.domain_manager)
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
@@ -358,7 +296,7 @@ class TrainerERA5Gen2(BaseTrainer):
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()
                     accum_log(logs, {"loss": loss.item()})
                     scaler.scale(loss).backward(retain_graph=self.retain_graph)
-                    _sync_domain_gradients(self.model, self.domain_manager)
+                    sync_domain_gradients(self.model, self.domain_manager)
 
                 if self.distributed:
                     torch.distributed.barrier()
@@ -473,7 +411,7 @@ class TrainerERA5Gen2(BaseTrainer):
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
                         if self._domain_pre_pad is not None:
                             x = self._domain_pre_pad.pad(x)
-                        x = _shard_spatial(x, self.domain_manager)
+                        x = shard_spatial(x, self.domain_manager)
                     else:
                         # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
                         # Build full input: start from previous x, update dynfrc and
@@ -483,7 +421,7 @@ class TrainerERA5Gen2(BaseTrainer):
                             x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                         if self._domain_pre_pad is not None:
                             x_dynfrc = self._domain_pre_pad.pad(x_dynfrc)
-                        x_dynfrc = _shard_spatial(x_dynfrc, self.domain_manager)
+                        x_dynfrc = shard_spatial(x_dynfrc, self.domain_manager)
                         n_dynfrc = x_dynfrc.shape[1]
                         n_prog = x.shape[1] - self.static_dim_size
                         x_new = x.clone()
@@ -499,7 +437,7 @@ class TrainerERA5Gen2(BaseTrainer):
                     y_pred = self.model(x.float())
                     if self._domain_pre_pad is not None:
                         self._raw_model._skip_internal_padding = False
-                        y_pred = _unpad_shard_interp(
+                        y_pred = unpad_shard_interp(
                             y_pred,
                             self._domain_pre_pad,
                             self.domain_manager,
@@ -533,8 +471,8 @@ class TrainerERA5Gen2(BaseTrainer):
                         y = y_raw.to(self.device).float()
                         if self._domain_pre_pad is not None:
                             y = self._domain_pre_pad.pad(y)
-                            y = _shard_spatial(y, self.domain_manager)
-                            y = _unpad_shard_interp(
+                            y = shard_spatial(y, self.domain_manager)
+                            y = unpad_shard_interp(
                                 y,
                                 self._domain_pre_pad,
                                 self.domain_manager,
@@ -542,7 +480,7 @@ class TrainerERA5Gen2(BaseTrainer):
                                 self._domain_image_w,
                             )
                         else:
-                            y = _shard_spatial(y, self.domain_manager)
+                            y = shard_spatial(y, self.domain_manager)
                         if self.flag_clamp:
                             y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
