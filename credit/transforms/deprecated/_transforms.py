@@ -15,8 +15,8 @@ import torch
 from credit.data import Sample, device_compatible_to
 
 try:
-    from bridgescaler import read_scaler
-except (ImportError, Exception):
+    from bridgescaler import read_scaler  # optional dependency
+except ImportError:
     read_scaler = None
 
 logger = logging.getLogger(__name__)
