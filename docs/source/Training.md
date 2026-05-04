@@ -279,14 +279,43 @@ because FSDP2 uses its own `MixedPrecisionPolicy` internally.
 intra-node all-reduce communication. Values of 2 or 4 are typical. Tensor parallel
 degree must divide evenly into the total GPU count.
 
-:::{note}
-**WXFormer only.** Tensor parallelism currently requires model-specific layer
-detection to identify which projections receive column-parallel vs. row-parallel
-treatment. We have done this work for WXFormer (`FeedForward`, `Attention`,
-`to_qkv`/`to_out`). Other models (graph UNet, CAMulator, etc.) are not yet
-supported — setting `tensor > 1` with a non-WXFormer model will silently skip
-TP and run as `tensor: 1`. Generalization to all CREDIT models is planned.
-:::
+**Adding TP support to a new model** — tensor parallelism uses an opt-in protocol.
+Any `nn.Module` block that wants TP support declares two class attributes pointing
+to its column-parallel and row-parallel projection layers:
+
+```python
+class MyBlock(nn.Module):
+    _tp_col = "proj_up"   # attribute path for the column-parallel layer
+    _tp_row = "proj_out"  # attribute path for the row-parallel layer
+    ...
+```
+
+The path is resolved with `getattr`, so dotted paths work for layers nested
+inside a `Sequential` (e.g. `"layers.1"`). Supported layer types are
+`nn.Conv2d` (1×1 kernels only) and `nn.Linear`.
+
+The column-parallel layer receives the **full** input and produces a
+**sharded** output (no all-reduce). The row-parallel layer receives the
+sharded input and issues an `all_reduce SUM`, so the rest of the graph
+sees the full output. This is the standard Megatron-style col→row pairing.
+
+WXFormer ships with this already wired up. `FeedForward` and `Attention`
+in `credit/models/wxformer/crossformer.py` declare:
+
+```python
+class FeedForward(nn.Module):
+    _tp_col = "layers.1"  # Conv2d(dim → dim*mult)
+    _tp_row = "layers.4"  # Conv2d(dim*mult → dim)
+
+class Attention(nn.Module):
+    _tp_col = "to_qkv"   # Conv2d(dim → inner_dim*3)
+    _tp_row = "to_out"   # Conv2d(inner_dim → dim)
+```
+
+Any model block that does **not** declare `_tp_col`/`_tp_row` is left
+unchanged when `tensor > 1`. If no blocks in the model declare these
+attributes, a warning is logged and TP is a no-op. There is no silent
+wrong-answer failure mode.
 
 **Domain parallelism (`domain:`)** — shards the spatial H dimension across `domain`
 GPUs. Each rank processes a latitude band of height `H_padded / domain`. This is
