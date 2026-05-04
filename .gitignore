@@ -176,3 +176,4 @@ wb2_figs/
 
 # MAC DS_Store files
 .DS_Store
+checkpoint.pt
