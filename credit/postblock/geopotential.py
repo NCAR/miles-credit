@@ -60,5 +60,5 @@ def geopotential(
     geopotential_interfaces = surface_geopotential + torch.cumsum(RDGAS * virtual_temperature * dlogp, dim=0)
     geopotential_top = geopotential_interfaces[-1] + RDGAS * virtual_temperature[-1] * 2.0 * np.log(2.0)
     geopotential_interfaces = torch.concat([geopotential_interfaces, geopotential_top], dim=0)
-    geopotential_centers = 0.5 * (geopotential_interfaces[:-1] + RDGAS * virtual_temperature)
+    geopotential_centers = 0.5 * (geopotential_interfaces[:-1] + RDGAS * virtual_temperature * dlogp_center)
     return geopotential_centers
