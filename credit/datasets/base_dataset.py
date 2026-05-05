@@ -10,6 +10,7 @@ BaseDataset: A PyTorch Dataset class for:
 """
 
 import logging
+from typing import Any
 
 import pandas as pd
 
@@ -46,7 +47,7 @@ class BaseDataset(Dataset):
                 #  vars_2D: ...
               # OPTIONAL: Override the clock bounds for this dataset
               start_datetime: "2012-04-03T00:00Z"
-            
+
             # <YourName2>_<DatasetType2>: # Multiple datasets (see multi_source)
 
           # These parameters set the overall clock of the sampler
@@ -57,14 +58,14 @@ class BaseDataset(Dataset):
     ```
     """
 
-    def __init__(self, data_config: dict, return_target: bool = False) -> None:
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
         """
-        
+
 
         Args:
             data_config: Dict containing the configuration for the dataset. See class docstring for expected structure.
             return_target: Whether to return the target (t+1) in addition to the input (t). This should be True for supervised learning and False for self-supervised learning.
-        
+
         """
 
         # Enforce types
@@ -72,17 +73,18 @@ class BaseDataset(Dataset):
             raise TypeError(f"Expected data_config to be a dict, but got {type(data_config)}")
         if not isinstance(return_target, bool):
             raise TypeError(f"Expected return_target to be a bool, but got {type(return_target)}")
-        
+
         # The config for the data source
         if "source" not in data_config:
             raise KeyError(
-                "Expected 'source' key in data_config, but it was not found. Likely you provided " + 
-                "a subconfig or a higher level config. Checks: " +
-                f" 'data' in config: {'data' in data_config}, " +
-                f" Full data_config provided: \n{data_config}")
+                "Expected 'source' key in data_config, but it was not found. Likely you provided "
+                + "a subconfig or a higher level config. Checks: "
+                + f" 'data' in config: {'data' in data_config}, "
+                + f" Full data_config provided: \n{data_config}"
+            )
 
         source_cfg = data_config["source"]
-        
+
         self.dt: pd.Timedelta = self._load_dt(data_config)
         self.num_forecast_steps: int = self._load_num_forecast_steps(data_config)
 
@@ -92,18 +94,19 @@ class BaseDataset(Dataset):
 
         self.return_target: bool = return_target
 
-        assert "variables" in source_cfg, "Expected 'variables' key in source config, but it was not found. " + \
-            f"Full source config provided: \n{source_cfg}"
+        assert "variables" in source_cfg, (
+            "Expected 'variables' key in source config, but it was not found. "
+            + f"Full source config provided: \n{source_cfg}"
+        )
 
-        self.var_dict: dict = {}
+        self.var_dict: dict[str, Any] = {}
         for field_type, d in source_cfg["variables"].items():
             self._register_field(field_type, d)
 
-        
     def __len__(self) -> int:
         return len(self.datetimes)
 
-    def __getitem__(self, args: tuple) -> dict:
+    def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
         """Return a nested input/target sample dict.
 
         Args:
@@ -122,7 +125,7 @@ class BaseDataset(Dataset):
         t = pd.Timestamp(t)
         t_target = t + self.dt
 
-        input_data: dict = {}
+        input_data: dict[str, Any] = {}
 
         # Dynamic forcing is loaded at every step
         if "dynamic_forcing" in self.var_dict:
@@ -135,14 +138,14 @@ class BaseDataset(Dataset):
             if "prognostic" in self.var_dict:
                 self._extract_field("prognostic", t, input_data)
 
-        sample: dict = {
+        sample: dict[str, Any] = {
             "input": input_data,
             "metadata": {"input_datetime": int(t.value)},
         }
 
         # Optionally load t+1 as the supervised target
         if self.return_target:
-            target_data: dict = {}
+            target_data: dict[str, Any] = {}
             for field_type in ("prognostic", "diagnostic"):
                 if self.file_dict.get(field_type) and field_type in self.var_dict:
                     self._extract_field(field_type, t_target, target_data)
@@ -157,29 +160,30 @@ class BaseDataset(Dataset):
     # ------------------------------------------------------------------
 
     # 1. Clock Parameters: dt, num_forecast_steps, start_datetime, end_datetime
-    # Likely you will not need to change these for a new dataset. You may 
+    # Likely you will not need to change these for a new dataset. You may
     # need to make a new helper if:
     # 1. You would like to apply Quality Control checks that limit the datetimes
     #    from which to sample from (see _build_timestamps below)
-    # 2. You would like to enforce time bounds automatically for your dataset. 
+    # 2. You would like to enforce time bounds automatically for your dataset.
     #    You may want to do this with super() to have base functionality.
+    #
+    # Note we have a separate _load_... function for each variable in an effort
+    # to have a more specific warning message.
 
-    def _check_in_data_config(self, config: dict, key: str) -> None:
+    def _check_in_data_config(self, config: dict[str, Any], key: str) -> None:
         """
         Check that a key is in the data config. If not, raise an error since this is required for any dataset.
         """
         if key not in config:
-            raise KeyError(
-                f"{key} must be specified in the config for any inheritance of Base Dataset."
-            )
-        
-    def _in_source_config(self, config: dict, key: str) -> bool:
+            raise KeyError(f"{key} must be specified in the config for any inheritance of Base Dataset.")
+
+    def _in_source_config(self, config: dict[str, Any], key: str) -> bool:
         """
         Helper check that a key is in the source config.
         """
         return "source" in config and key in config["source"]
 
-    def _load_dt(self, config: dict, dt_key: str = "timestep") -> pd.Timedelta:
+    def _load_dt(self, config: dict[str, Any], dt_key: str = "timestep") -> pd.Timedelta:
         """
         The timestep (dt) is a required parameter for any dataset, and is used to build the clock of the sampler.
         In general, the timestep in the data config should be the smallest timestep across all sources.
@@ -192,21 +196,21 @@ class BaseDataset(Dataset):
             dt_in_source = pd.Timedelta(config["source"][dt_key])
             if dt_in_source < dt_in_data:
                 logging.warning(
-                    f"In loading for class {self.__class__.__name__}, " +
-                    f"{dt_key} in source ({dt_in_source}) " + 
-                    f"is smaller than {dt_key} in data ({dt_in_data}). " +
-                    f"Using {dt_in_source} as the timestep for this dataset. " +
-                    "Generally, the data timestep should be the smallest timestep across all sources."
+                    f"In loading for class {self.__class__.__name__}, "
+                    + f"{dt_key} in source ({dt_in_source}) "
+                    + f"is smaller than {dt_key} in data ({dt_in_data}). "
+                    + f"Using {dt_in_source} as the timestep for this dataset. "
+                    + "Generally, the data timestep should be the smallest timestep across all sources."
                 )
             return dt_in_source
-        
+
         return dt_in_data
-        
-    def _load_num_forecast_steps(self, config: dict, num_forecast_steps_key: str = "forecast_len") -> int:
+
+    def _load_num_forecast_steps(self, config: dict[str, Any], num_forecast_steps_key: str = "forecast_len") -> int:
         """
-        The number of forecast steps (num_forecast_steps) is a required parameter for any dataset, and 
-        is used in the sampler. In general, the number of forecast steps in the data config should be 
-        the largest across all sources, since this determines how far forward the sampler needs to roll 
+        The number of forecast steps (num_forecast_steps) is a required parameter for any dataset, and
+        is used in the sampler. In general, the number of forecast steps in the data config should be
+        the largest across all sources, since this determines how far forward the sampler needs to roll
         out. The inherited dataset may not be able to rollout further.
         """
         self._check_in_data_config(config, num_forecast_steps_key)
@@ -216,21 +220,21 @@ class BaseDataset(Dataset):
             num_forecast_steps_in_source = config["source"][num_forecast_steps_key]
             if num_forecast_steps_in_source > num_forecast_steps_in_data:
                 logging.warning(
-                    f"In loading for class {self.__class__.__name__}, " +
-                    f"{num_forecast_steps_key} in source ({num_forecast_steps_in_source}) " + 
-                    f"is greater than {num_forecast_steps_key} in data ({num_forecast_steps_in_data}). " +
-                    f"Using {num_forecast_steps_in_source} as the number of forecast steps for this dataset." +
-                    "Generally, the number of forecast steps in data should be the largest across all sources."
+                    f"In loading for class {self.__class__.__name__}, "
+                    + f"{num_forecast_steps_key} in source ({num_forecast_steps_in_source}) "
+                    + f"is greater than {num_forecast_steps_key} in data ({num_forecast_steps_in_data}). "
+                    + f"Using {num_forecast_steps_in_source} as the number of forecast steps for this dataset."
+                    + "Generally, the number of forecast steps in data should be the largest across all sources."
                 )
             return num_forecast_steps_in_source
-        
+
         return num_forecast_steps_in_data
-    
-    def _load_start_datetime(self, config: dict, start_datetime_key: str = "start_datetime") -> pd.Timestamp:
+
+    def _load_start_datetime(self, config: dict[str, Any], start_datetime_key: str = "start_datetime") -> pd.Timestamp:
         """
-        The start_datetime is a required parameter for any dataset, and is used in the sampler. In general, 
-        the start_datetime in the data config should be the earliest across all sources, since this determines 
-        the earliest point in time that the sampler can draw from. The inherited dataset may not be able to go 
+        The start_datetime is a required parameter for any dataset, and is used in the sampler. In general,
+        the start_datetime in the data config should be the earliest across all sources, since this determines
+        the earliest point in time that the sampler can draw from. The inherited dataset may not be able to go
         as far back.
         """
         self._check_in_data_config(config, start_datetime_key)
@@ -240,17 +244,17 @@ class BaseDataset(Dataset):
             start_datetime_in_source = pd.Timestamp(config["source"][start_datetime_key])
             if start_datetime_in_source < start_datetime_in_data:
                 logging.warning(
-                    f"In loading for class {self.__class__.__name__}, " +
-                    f"{start_datetime_key} in source ({start_datetime_in_source}) " + 
-                    f"is earlier than {start_datetime_key} in data ({start_datetime_in_data}). " + 
-                    f"Using {start_datetime_in_source} as the start_datetime for this dataset." + 
-                    "Generally, the start_datetime in data should be the earliest across all sources."
+                    f"In loading for class {self.__class__.__name__}, "
+                    + f"{start_datetime_key} in source ({start_datetime_in_source}) "
+                    + f"is earlier than {start_datetime_key} in data ({start_datetime_in_data}). "
+                    + f"Using {start_datetime_in_source} as the start_datetime for this dataset."
+                    + "Generally, the start_datetime in data should be the earliest across all sources."
                 )
             return start_datetime_in_source
-        
+
         return start_datetime_in_data
-    
-    def _load_end_datetime(self, config: dict, end_datetime_key: str = "end_datetime") -> pd.Timestamp:
+
+    def _load_end_datetime(self, config: dict[str, Any], end_datetime_key: str = "end_datetime") -> pd.Timestamp:
         """
         The end_datetime is a required parameter for any dataset, and is used in the sampler. In general,
         the end_datetime in the data config should be the latest across all sources, since this determines
@@ -264,14 +268,14 @@ class BaseDataset(Dataset):
             end_datetime_in_source = pd.Timestamp(config["source"][end_datetime_key])
             if end_datetime_in_source > end_datetime_in_data:
                 logging.warning(
-                    f"In loading for class {self.__class__.__name__}, " +
-                    f"{end_datetime_key} in source ({end_datetime_in_source}) " + 
-                    f"is later than {end_datetime_key} in data ({end_datetime_in_data}). " + 
-                    f"Using {end_datetime_in_source} as the end_datetime for this dataset." + 
-                    "Generally, the end_datetime in data should be the latest across all sources."
+                    f"In loading for class {self.__class__.__name__}, "
+                    + f"{end_datetime_key} in source ({end_datetime_in_source}) "
+                    + f"is later than {end_datetime_key} in data ({end_datetime_in_data}). "
+                    + f"Using {end_datetime_in_source} as the end_datetime for this dataset."
+                    + "Generally, the end_datetime in data should be the latest across all sources."
                 )
             return end_datetime_in_source
-        
+
         return end_datetime_in_data
 
     def _build_timestamps(self) -> pd.DatetimeIndex:
@@ -286,8 +290,8 @@ class BaseDataset(Dataset):
             self.end_datetime - self.num_forecast_steps * self.dt,
             freq=self.dt,
         )
-    
+
     # 2. Registering fields
-    
-    def _register_field(self, field_type: str, d: dict | None) -> None:
+
+    def _register_field(self, field_type: str, d: dict[str, Any] | None) -> None:
         raise NotImplementedError("To-Do")
