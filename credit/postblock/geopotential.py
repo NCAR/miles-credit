@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import xarray as xr
 
 
 def pressure_on_interfaces(surface_pressure: torch.Tensor, model_a_half: torch.Tensor, model_b_half: torch.Tensor):
@@ -29,7 +30,7 @@ def geopotential(
     temperature: torch.Tensor,
     specific_humidity: torch.Tensor,
     model_a_half: torch.Tensor,
-    model_b_half,
+    model_b_half: torch.Tensor,
 ):
     """
     Calculate geopotential (m**2 s**-2) from hybrid sigma-pressure atmospheric level data.
@@ -38,15 +39,15 @@ def geopotential(
     dimension such that pressure increases with increasing index value (top of atmosphere to surface).
 
     Args:
-        surface_geopotential (torch.Tensor):
-        surface_pressure:
-        temperature:
-        specific_humidity:
-        model_a_half:
-        model_b_half:
+        surface_geopotential (torch.Tensor): surface geopotential (m**2 s**-2)
+        surface_pressure (torch.Tensor): surface pressure (Pa)
+        temperature (torch.Tensor): temperature (K)
+        specific_humidity (torch.Tensor): specific humidity (kg kg**-1)
+        model_a_half (torch.Tensor): pressure component a at each model level interface (Pa)
+        model_b_half (torch.Tensor): sigma component b at each model level interface (unitless)
 
     Returns:
-
+        geopotential (torch.Tensor): geopotential on each model level (m**2 s**-2)
     """
     RDGAS = 287.06
     GAMMA = 0.609133
@@ -62,3 +63,38 @@ def geopotential(
     geopotential_interfaces = torch.concat([geopotential_interfaces, geopotential_top], dim=0)
     geopotential_centers = 0.5 * (geopotential_interfaces[:-1] + RDGAS * virtual_temperature * dlogp_center)
     return geopotential_centers
+
+
+class GeopotentialDiagnostic(torch.nn.Module):
+    def __init__(
+        self,
+        surface_geopotential_var: str,
+        surface_pressure_var: str,
+        temperature_var: str,
+        specific_humidity_var: str,
+        level_info_file: str,
+        model_a_half_var: str,
+        model_b_half_var: str,
+    ):
+        super().__init__()
+        self.surface_geopotential_var = surface_geopotential_var
+        self.surface_geopotential_var = surface_pressure_var
+        self.temperature_var = temperature_var
+        self.specific_humidity_var = specific_humidity_var
+        self.level_info_file = level_info_file
+        self.model_a_half_var = model_a_half_var
+        self.model_b_half_var = model_b_half_var
+        with xr.open_dataset(self.level_info_file) as level_info:
+            self.model_a_half = torch.Tensor(level_info[self.model_a_half_var].values)
+            self.model_b_half = torch.Tensor(level_info[self.model_a_half_var].values)
+        return
+
+    def forward(self, x):
+        return geopotential(
+            x[self.surface_geopotential_var],
+            x[self.surface_geopotential_var],
+            x[self.temperature_var],
+            x[self.specific_humidity_var],
+            self.model_a_half,
+            self.model_b_half,
+        )
