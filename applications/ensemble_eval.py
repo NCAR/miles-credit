@@ -23,7 +23,7 @@ import xarray as xr
 import yaml
 
 from credit.pbs import launch_script, launch_script_mpi, get_num_cpus
-from credit.verification.ensemble import binned_spread_skill, rank_histogram_apply, spread_error
+from credit.verification.ensemble import binned_spread_skill, spread_error
 from credit.verification.standard import average_div_rot_spectrum, average_zonal_spectrum
 from credit.xr_sampler import XRSamplerByYear
 
@@ -157,8 +157,8 @@ def _do_special_eval_on_variable(w_lat, conf, fh, da_pred, da_true, variable, le
     result_dict = result_dict | binned_dict
 
     # rank histogram
-    rank_hist = rank_histogram_apply(da_pred, da_true)
-    result_dict[f"rank_hist_{variable_name}"] = rank_hist
+    # rank_hist = rank_histogram_apply(da_pred, da_true)
+    # result_dict[f"rank_hist_{variable_name}"] = rank_hist
 
     # insert other computations below
 
