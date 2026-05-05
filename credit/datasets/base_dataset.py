@@ -58,6 +58,14 @@ class BaseDataset(Dataset):
     """
 
     def __init__(self, data_config: dict, return_target: bool = False) -> None:
+        """
+        
+
+        Args:
+            data_config: Dict containing the configuration for the dataset. See class docstring for expected structure.
+            return_target: Whether to return the target (t+1) in addition to the input (t). This should be True for supervised learning and False for self-supervised learning.
+        
+        """
 
         # Enforce types
         if not isinstance(data_config, dict):
@@ -82,6 +90,12 @@ class BaseDataset(Dataset):
         self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config)
         self.datetimes: pd.DatetimeIndex = self._build_timestamps()
 
+        self.return_target: bool = return_target
+
+        assert "variables" in source_cfg, "Expected 'variables' key in source config, but it was not found. " + \
+            f"Full source config provided: \n{source_cfg}"
+
+        self.var_dict: dict = {}
         for field_type, d in source_cfg["variables"].items():
             self._register_field(field_type, d)
 
