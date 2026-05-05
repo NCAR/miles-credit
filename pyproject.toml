@@ -42,7 +42,9 @@ dependencies = [
     "setuptools_scm",
     "setuptools",
     "numba",
-    "tensorboard"
+    "tensorboard",
+    "fastapi",
+    "overrides"
 ]
 
 [project.optional-dependencies]

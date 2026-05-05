@@ -28,7 +28,7 @@ from credit.models.checkpoint import TorchFSDPCheckpointIO
 from credit.scheduler import update_on_batch, update_on_epoch
 from credit.trainers.utils import cleanup, accum_log, cycle
 from credit.trainers.base_trainer import BaseTrainer
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
 logger = logging.getLogger(__name__)
 
