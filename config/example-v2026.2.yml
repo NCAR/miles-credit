@@ -15,6 +15,14 @@
 save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2'
 seed: 1000
 
+# ---- Optional: register custom model classes ---- #
+# List Python files that define @register_model-decorated classes.
+# Each file is imported before load_model runs, making its model types
+# available as any built-in type.  $USER / $WORK env vars are expanded.
+#
+# custom_models:
+#   - '/path/to/my_experiment/models.py'
+
 
 # ---- USER SETTINGS: training data ---- #
 # Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.

@@ -20,7 +20,9 @@ from credit.datasets.downscaling_dataset import DownscalingDataset
 
 # from credit.datasets.datamap import DataMap
 from credit.datasets.count_channels import count_channels
+
 # from credit.transforms_downscaling import DataTransforms
+from credit.models import load_custom_model_modules
 
 
 def validate_args(function, argdict, context, ignore=[]):
@@ -103,6 +105,8 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         - applications/rollout_to_netcdf.py
 
     """
+
+    load_custom_model_modules(conf)
 
     # many config options don't apply when downscaling to regional
     is_downscaling = "datasets" in conf["data"]
