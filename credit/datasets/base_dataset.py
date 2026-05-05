@@ -11,7 +11,7 @@ BaseDataset: A PyTorch Dataset class for:
 
 from glob import glob
 import logging
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import pandas as pd
 
@@ -394,7 +394,7 @@ class BaseDataset(Dataset[Any]):
             KeyError: If *field_type* is not a recognised field type.
             ValueError: If *field_config* defines neither ``vars_3D`` nor ``vars_2D``.
         """
-        if field_type not in VALID_FIELD_TYPES:
+        if field_type not in get_args(VALID_FIELD_TYPES):
             raise KeyError(
                 f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
                 f"Valid options are: {VALID_FIELD_TYPES}"
