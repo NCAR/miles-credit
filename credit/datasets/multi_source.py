@@ -46,6 +46,7 @@ from torch.utils.data import Dataset
 
 from credit.datasets.era5 import ERA5Dataset
 from credit.datasets.MRMS import MRMSDataset
+from credit.datasets.goes import GOESDataset
 from credit.datasets.hrrr import HRRRDataset
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ logger = logging.getLogger(__name__)
 _SOURCE_REGISTRY: dict[str, type] = {
     "ERA5": ERA5Dataset,
     "MRMS": MRMSDataset,
+    "GOES": GOESDataset,
     "HRRR": HRRRDataset,
     "HRRR_NAT": HRRRDataset,
     "HRRR_SUBH": HRRRDataset,
