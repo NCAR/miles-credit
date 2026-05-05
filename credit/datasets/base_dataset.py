@@ -87,7 +87,7 @@ class BaseDataset(Dataset):
 
         
     def __len__(self) -> int:
-        raise NotImplementedError("To-Do")
+        return len(self.datetimes)
 
     def __getitem__(self, args: tuple) -> dict:
         """Return a nested input/target sample dict.
@@ -143,6 +143,12 @@ class BaseDataset(Dataset):
     # ------------------------------------------------------------------
 
     # 1. Clock Parameters: dt, num_forecast_steps, start_datetime, end_datetime
+    # Likely you will not need to change these for a new dataset. You may 
+    # need to make a new helper if:
+    # 1. You would like to apply Quality Control checks that limit the datetimes
+    #    from which to sample from (see _build_timestamps below)
+    # 2. You would like to enforce time bounds automatically for your dataset. 
+    #    You may want to do this with super() to have base functionality.
 
     def _check_in_data_config(self, config: dict, key: str) -> None:
         """
@@ -179,6 +185,8 @@ class BaseDataset(Dataset):
                     "Generally, the data timestep should be the smallest timestep across all sources."
                 )
             return dt_in_source
+        
+        return dt_in_data
         
     def _load_num_forecast_steps(self, config: dict, num_forecast_steps_key: str = "forecast_len") -> int:
         """
