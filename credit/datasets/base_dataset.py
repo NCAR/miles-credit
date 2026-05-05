@@ -9,12 +9,19 @@ BaseDataset: A PyTorch Dataset class for:
 
 """
 
+from glob import glob
 import logging
 from typing import Any
 
 import pandas as pd
 
 from torch.utils.data import Dataset
+
+from credit.datasets._file_utils import _find_file, _map_files
+
+logger = logging.getLogger(__name__)
+
+VALID_FIELD_TYPES = {"prognostic", "dynamic_forcing", "static", "diagnostic"}
 
 
 class BaseDataset(Dataset[Any]):
@@ -297,7 +304,39 @@ class BaseDataset(Dataset[Any]):
     # 2. Registering fields
 
     def _register_field(self, field_type: str, d: dict[str, Any] | None) -> None:
-        raise NotImplementedError("To-Do")
+        """Validate and register one field type from the config variables block.
+
+        Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
+
+        Args:
+            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            d: Field-type config dict, or ``None`` / null to disable the field.
+
+        Raises:
+            KeyError: If *field_type* is not a recognised field type.
+            ValueError: If *d* defines neither ``vars_3D`` nor ``vars_2D``.
+        """
+        if field_type not in VALID_FIELD_TYPES:
+            raise KeyError(
+                f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
+                f"Valid options are: {sorted(VALID_FIELD_TYPES)}"
+            )
+        if not isinstance(d, dict):
+            # null / disabled field
+            self.file_dict[field_type] = None
+            return
+
+        if not d.get("vars_3D") and not d.get("vars_2D"):
+            raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
+
+        files = sorted(glob(d.get("path", "")))
+        time_fmt: str = d.get("filename_time_format", "%Y")
+        self.file_dict[field_type] = _map_files(files, time_fmt) if files else None
+        self.var_dict[field_type] = {
+            "vars_3D": d.get("vars_3D") or [],
+            "vars_2D": d.get("vars_2D") or [],
+        }
     
 
     def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: dict[str, Any]) -> None:
