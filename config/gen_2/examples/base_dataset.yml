@@ -1,0 +1,14 @@
+# Example for base dataset.
+
+data:
+  source:
+    AnExample_Base:
+      variables:
+        prognostic:
+          vars_3D: ["u", "v", "t"]
+          vars_2D: ["z", "msl"]
+  
+  timestep: "6h"
+  start_datetime: "2021-06-01 00:00"
+  end_datetime: "2021-06-30 18:00"
+  forecast_len: 3

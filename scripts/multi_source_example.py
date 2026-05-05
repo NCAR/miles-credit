@@ -1,9 +1,13 @@
 import yaml
+import pathlib
 from credit.datasets.multi_source import MultiSourceDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
 
-with open("../config/multi_source_data.yaml", "r") as f:
+BASE_DIR = pathlib.Path(__file__).resolve().parent
+config_path = BASE_DIR.parent / "config" / "gen_2" / "examples" / "multi_source_data.yaml"
+
+with open(config_path, "r") as f:
     config = yaml.safe_load(f)
 
 nfs = config["data"]["forecast_len"]
