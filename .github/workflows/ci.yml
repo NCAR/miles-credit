@@ -52,9 +52,9 @@ jobs:
         run: | 
           python -m pip install --upgrade pip 
           pip install uv
-          uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          uv pip install ".[develop]" 
-          uv pip install pytest pytest-cov
+          uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --system
+          uv pip install ".[develop]" --system
+          uv pip install pytest pytest-cov --system
     #      pip install xesmf
       - name: Run tests
         run: |
