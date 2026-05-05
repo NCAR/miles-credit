@@ -26,7 +26,7 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 
 from credit.seed import seed_everything
-from credit.loss import VariableTotalLoss2D
+from credit.losses import VariableTotalLoss2D
 from credit.data import ERA5_and_Forcing_Dataset
 from credit.transforms import load_transforms
 from credit.scheduler import load_scheduler, annealed_probability

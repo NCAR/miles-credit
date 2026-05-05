@@ -30,7 +30,10 @@ jobs:
         echo "Running debug job for PR on self-hosted runner"
         git log -1
         chmod -R 777 ./tests/CI_CIRRUS/*
-        conda run -n credit pip install -e .
+        conda run -n credit pip install uv
+        conda run -n credit uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cuda129
+        conda run -n credit uv pip install --upgrade -r requirements.txt
+        conda run -n credit uv pip install -e .
         ./tests/CI_CIRRUS/dateChange.sh /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml
         export PATH=/home/ubuntu/.local/bin:$PATH
         conda run -n credit credit_gfs_init -c /__w/miles-credit/miles-credit/tests/CI_CIRRUS/model_predict_CI.yml -p 4

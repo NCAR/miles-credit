@@ -525,6 +525,7 @@ class TestERA5Gen2MultiStepTraining:
         from unittest.mock import patch
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
         from credit.preblock import apply_preblocks
+        from credit.preblock.concat import ConcatToTensor
 
         B, C, H, W = 1, 4, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -554,7 +555,7 @@ class TestERA5Gen2MultiStepTraining:
 
         def _patched_apply(preblocks, batch):
             result = original_apply(preblocks, batch)
-            x_raw, y_raw, _ = result
+            x_raw, _, __ = ConcatToTensor()(result)
             step[0] += 1
             if step[0] == 1:
                 x_at_step1_out[0] = x_raw.clone()

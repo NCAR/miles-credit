@@ -6,7 +6,6 @@ train.py
 import os
 import sys
 import yaml
-import wandb
 import optuna
 import shutil
 import logging
@@ -22,7 +21,7 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 
 from credit.seed import seed_everything
-from credit.loss import VariableTotalLoss2D
+from credit.losses import VariableTotalLoss2D
 
 from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
@@ -408,6 +407,8 @@ if __name__ == "__main__":
         sys.exit()
 
     if use_wandb:  # this needs updated
+        import wandb
+
         wandb.init(
             # set the wandb project where this run will be logged
             project="Derecho parallelism",
