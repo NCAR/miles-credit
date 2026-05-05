@@ -90,7 +90,53 @@ class BaseDataset(Dataset):
         raise NotImplementedError("To-Do")
 
     def __getitem__(self, args: tuple) -> dict:
-        raise NotImplementedError("To-Do")
+        """Return a nested input/target sample dict.
+
+        Args:
+            args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
+                or pd.Timestamp) and *i* is the within-sequence step index
+                produced by the sampler. When ``i == 0`` prognostic and static
+                fields are loaded in addition to dynamic forcing.
+
+        Returns:
+            Dict with keys ``"input"``, ``"metadata"``, and optionally
+            ``"target"`` (when ``return_target=True``). Both ``"input"`` and
+            ``"target"`` are dicts of per-variable tensors keyed by
+            ``"{source}/{field_type}/{dim}/{varname}"``.
+        """
+        t, i = args
+        t = pd.Timestamp(t)
+        t_target = t + self.dt
+
+        input_data: dict = {}
+
+        # Dynamic forcing is loaded at every step
+        if "dynamic_forcing" in self.var_dict:
+            self._extract_field("dynamic_forcing", t, input_data)
+
+        # Prognostic + static are only needed at the initial step
+        if i == 0:
+            if "static" in self.var_dict:
+                self._extract_field("static", t, input_data)
+            if "prognostic" in self.var_dict:
+                self._extract_field("prognostic", t, input_data)
+
+        sample: dict = {
+            "input": input_data,
+            "metadata": {"input_datetime": int(t.value)},
+        }
+
+        # Optionally load t+1 as the supervised target
+        if self.return_target:
+            target_data: dict = {}
+            for field_type in ("prognostic", "diagnostic"):
+                if self.file_dict.get(field_type) and field_type in self.var_dict:
+                    self._extract_field(field_type, t_target, target_data)
+
+            sample["target"] = target_data
+            sample["metadata"]["target_datetime"] = int(t_target.value)
+
+        return sample
 
     # ------------------------------------------------------------------
     # Private helpers
