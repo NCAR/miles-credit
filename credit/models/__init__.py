@@ -220,9 +220,32 @@ def load_fsdp_or_checkpoint_policy(conf):
     return transformer_layers_cls
 
 
+def load_custom_model_modules(conf):
+    """Import every file listed under ``custom_models`` in the config.
+
+    Each file is executed as a standalone module.  The expected use-case is
+    that each file contains one or more classes decorated with
+    ``@register_model``, so the import triggers registration as a side-effect.
+
+    Args:
+        conf (dict): Top-level config dict.  If ``custom_models`` is absent or
+            empty this function is a no-op.
+
+    Raises:
+        FileNotFoundError: If a listed path does not exist on disk.
+    """
+    for raw_path in conf.get("custom_models", []):
+        path = os.path.expandvars(raw_path)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"custom_models: file not found: {path!r}")
+        spec = importlib.util.spec_from_file_location("_credit_custom_model", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+
 def load_model(conf, load_weights=False, model_name=False):
     conf = copy.deepcopy(conf)
-
+    load_custom_model_modules(conf)
     model_conf = conf["model"]
 
     if "type" not in model_conf:
