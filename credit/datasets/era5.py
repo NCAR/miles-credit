@@ -71,13 +71,14 @@ import zarr
 from torch.utils.data import Dataset
 
 from credit.datasets._file_utils import _find_file, _map_files
+from credit.datasets.base_dataset import BaseDataset
 
 logger = logging.getLogger(__name__)
 
 VALID_FIELD_TYPES = {"prognostic", "dynamic_forcing", "static", "diagnostic"}
 
 
-class ERA5Dataset(Dataset):
+class ERA5Dataset(BaseDataset):
     """PyTorch Dataset for processed ERA5 data with nested input/target structure.
 
     See module docstring for full description of output format and file naming.
@@ -148,96 +149,11 @@ class ERA5Dataset(Dataset):
     # Dataset interface
     # ------------------------------------------------------------------
 
-    def __len__(self) -> int:
-        return len(self.datetimes)
-
-    def __getitem__(self, args: tuple) -> dict:
-        """Return a nested input/target sample dict.
-
-        Args:
-            args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
-                or pd.Timestamp) and *i* is the within-sequence step index
-                produced by the sampler. When ``i == 0`` prognostic and static
-                fields are loaded in addition to dynamic forcing.
-
-        Returns:
-            Dict with keys ``"input"``, ``"metadata"``, and optionally
-            ``"target"`` (when ``return_target=True``). Both ``"input"`` and
-            ``"target"`` are dicts of per-variable tensors keyed by
-            ``"era5/{field_type}/{dim}/{varname}"``.
-        """
-        t, i = args
-        t = pd.Timestamp(t)
-        t_target = t + self.dt
-
-        input_data: dict = {}
-
-        # Dynamic forcing is loaded at every step
-        if "dynamic_forcing" in self.var_dict:
-            self._extract_field("dynamic_forcing", t, input_data)
-
-        # Prognostic + static are only needed at the initial step
-        if i == 0:
-            if "static" in self.var_dict:
-                self._extract_field("static", t, input_data)
-            if "prognostic" in self.var_dict:
-                self._extract_field("prognostic", t, input_data)
-
-        sample: dict = {
-            "input": input_data,
-            "metadata": {"input_datetime": int(t.value)},
-        }
-
-        # Optionally load t+1 as the supervised target
-        if self.return_target:
-            target_data: dict = {}
-            for field_type in ("prognostic", "diagnostic"):
-                if self.file_dict.get(field_type) and field_type in self.var_dict:
-                    self._extract_field(field_type, t_target, target_data)
-
-            sample["target"] = target_data
-            sample["metadata"]["target_datetime"] = int(t_target.value)
-
-        return sample
+    # inheriting from BaseDataset
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def _register_field(self, field_type: str, d: dict | None) -> None:
-        """Validate and register one field type from the config variables block.
-
-        Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
-
-        Args:
-            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
-                ``"static"``, ``"diagnostic"``.
-            d: Field-type config dict, or ``None`` / null to disable the field.
-
-        Raises:
-            KeyError: If *field_type* is not a recognised field type.
-            ValueError: If *d* defines neither ``vars_3D`` nor ``vars_2D``.
-        """
-        if field_type not in VALID_FIELD_TYPES:
-            raise KeyError(
-                f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
-                f"Valid options are: {sorted(VALID_FIELD_TYPES)}"
-            )
-        if not isinstance(d, dict):
-            # null / disabled field
-            self.file_dict[field_type] = None
-            return
-
-        if not d.get("vars_3D") and not d.get("vars_2D"):
-            raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
-
-        files = sorted(glob(d.get("path", "")))
-        time_fmt: str = d.get("filename_time_format", "%Y")
-        self.file_dict[field_type] = _map_files(files, time_fmt) if files else None
-        self.var_dict[field_type] = {
-            "vars_3D": d.get("vars_3D") or [],
-            "vars_2D": d.get("vars_2D") or [],
-        }
 
     def _build_timestamps(self) -> pd.DatetimeIndex:
         """Return valid initialisation timestamps for the dataset.
