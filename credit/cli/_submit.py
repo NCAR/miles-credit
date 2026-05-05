@@ -194,9 +194,13 @@ def _build_pbs_script(
             cd ${{REPO}}
         """)
 
+        conda_env = args.conda_env
+        torchrun = f"{conda_env}/bin/torchrun" if os.path.isdir(conda_env) else _find_torchrun()
+        cuda_devices = ",".join(str(i) for i in range(args.gpus))
+
         if nodes == 1:
             launch = textwrap.dedent(f"""\
-                torchrun \\
+                {torchrun} \\
                     --standalone \\
                     --nnodes=1 \\
                     --nproc-per-node={args.gpus} \\
@@ -209,6 +213,22 @@ def _build_pbs_script(
                 head_node_ip=$(ssh "${{head_node}}" hostname -i | awk '{{print $1}}')
                 echo "Head node : ${{head_node_ip}}"
                 MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
+
+                export CUDA_VISIBLE_DEVICES={cuda_devices}
+                export MPICH_GPU_SUPPORT_ENABLED=1
+                export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+                export MPICH_OFI_NIC_POLICY=GPU
+                export MPICH_RDMA_ENABLED_CUDA=1
+                export NCCL_SOCKET_IFNAME=hsn
+                export NCCL_IB_DISABLE=1
+                export NCCL_CROSS_NIC=1
+                export NCCL_NCHANNELS_PER_NET_PEER=4
+                export NCCL_NET="AWS Libfabric"
+                export NCCL_NET_GDR_LEVEL=PBH
+                export FI_CXI_DISABLE_HOST_REGISTER=1
+                export FI_CXI_OPTIMIZED_MRS=false
+                export FI_MR_CACHE_MONITOR=userfaultfd
+                export FI_CXI_DEFAULT_CQ_SIZE=131072
 
                 MASTER_ADDR=${{head_node_ip}} MASTER_PORT=${{MASTER_PORT}} \\
                 mpiexec -n "${{total_gpus}}" --ppn {args.gpus} --cpu-bind none \\
@@ -384,11 +404,12 @@ def _build_realtime_pbs_script(
 
             REPO={repo}
             CONFIG={config}
+            TORCHRUN={args.conda_env + "/bin/torchrun" if os.path.isdir(args.conda_env) else _find_torchrun()}
 
             echo "Realtime forecast — init: {init_time}  steps: {steps}"
             echo "Config  : ${{CONFIG}}"
 
-            torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
                 ${{REPO}}/credit/applications/rollout_realtime_gen2.py \\
                 -c ${{CONFIG}} --init-time {init_time} --steps {steps}
         """)
@@ -553,11 +574,12 @@ def _build_rollout_pbs_script(
 
             REPO={repo}
             CONFIG={config}
+            TORCHRUN={args.conda_env + "/bin/torchrun" if os.path.isdir(args.conda_env) else _find_torchrun()}
 
             echo "Ensemble rollout — subset {subset} of {n_subsets}"
             echo "Config  : ${{CONFIG}}"
 
-            torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
                 ${{REPO}}/credit/applications/rollout_to_netcdf_gen2.py \\
                 -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
         """)
