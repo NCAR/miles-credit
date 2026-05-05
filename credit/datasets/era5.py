@@ -331,7 +331,7 @@ class ERA5Dataset(Dataset):
 class ARCOERA5Dataset(Dataset):
     """PyTorch Dataset for Google Cloud ARCO ERA5 data with nested input/target structure.
 
-    See module docstring for full description of output format and file naming.
+    See the module docstring for a full description of the output format and file naming.
 
     Example YAML configuration::
 
@@ -630,6 +630,338 @@ class ARCOERA5Dataset(Dataset):
             ts: Pandas Timestamp to convert.
             calendar: cftime calendar string read from the dataset
                 (e.g. ``"noleap"``, ``"gregorian"``, ``"proleptic_gregorian"``).
+
+        Returns:
+            cftime.datetime with the specified calendar.
+        """
+        return cftime.datetime(
+            ts.year,
+            ts.month,
+            ts.day,
+            ts.hour,
+            ts.minute,
+            ts.second,
+            calendar=calendar,
+        )
+
+
+_WB2_ERA5_BASE = "gs://weatherbench2/datasets/era5"
+
+_WB2_ERA5_STORE_PATHS: dict[str, str] = {
+    "1440x721": f"{_WB2_ERA5_BASE}/1959-2023_01_10-wb13-6h-1440x721_with_derived_variables.zarr",
+    "240x121": f"{_WB2_ERA5_BASE}/1959-2023_01_10-6h-240x121_equiangular_with_poles_conservative.zarr",
+    "64x32": f"{_WB2_ERA5_BASE}/1959-2023_01_10-6h-64x32_equiangular_conservative.zarr",
+    "full": f"{_WB2_ERA5_BASE}/1959-2023_01_10-full_37-1h-0p25deg-chunk-1.zarr",
+}
+
+# Default pressure levels (hPa) available in each store.
+# "1440x721", "240x121", and "64x32" carry the 13 WeatherBench2 pressure levels.
+# "full" carries the standard ERA5 37 pressure levels.
+_WB2_ERA5_DEFAULT_LEVELS: dict[str, list[int]] = {
+    "1440x721": [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000],
+    "240x121": [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000],
+    "64x32": [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000],
+    "full": [
+        1,
+        2,
+        3,
+        5,
+        7,
+        10,
+        20,
+        30,
+        50,
+        70,
+        100,
+        125,
+        150,
+        175,
+        200,
+        225,
+        250,
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600,
+        650,
+        700,
+        750,
+        775,
+        800,
+        825,
+        850,
+        875,
+        900,
+        925,
+        950,
+        975,
+        1000,
+    ],
+}
+
+
+class WeatherBench2ERA5Dataset(Dataset):
+    """PyTorch Dataset for WeatherBench2 ERA5 data on Google Cloud Storage.
+
+    Provides access to ERA5 reanalysis data prepared for the WeatherBench2
+    benchmark at multiple resolutions. All data is read lazily from public
+    Google Cloud Storage zarr stores (anonymous access, no credentials required).
+
+    Available resolutions:
+
+    +--------------+-------------------+------------+------------------+
+    | ``resolution`` | Grid              | Approx deg | Timestep         |
+    +==============+===================+============+==================+
+    | ``"1440x721"`` | 1440 × 721 global | 0.25°      | 6-hourly, 13 lev |
+    +--------------+-------------------+------------+------------------+
+    | ``"240x121"``  | 240 × 121 global  | 1.5°       | 6-hourly, 13 lev |
+    +--------------+-------------------+------------+------------------+
+    | ``"64x32"``    | 64 × 32 global    | ~5.6°      | 6-hourly, 13 lev |
+    +--------------+-------------------+------------+------------------+
+    | ``"full"``     | 1440 × 721 global | 0.25°      | hourly, 37 lev   |
+    +--------------+-------------------+------------+------------------+
+
+    See ``_WB2_ERA5_DEFAULT_LEVELS`` for default pressure levels per resolution.
+
+    Example YAML configuration::
+
+        data:
+          source:
+            WeatherBench2_ERA5:
+              resolution: "1440x721"   # optional; overridden by the resolution kwarg
+              level_coord: "level"
+              levels: [50, 100, 200, 500, 850, 1000]  # optional; defaults to all available
+              variables:
+                prognostic:
+                  vars_3D: ["temperature", "u_component_of_wind", "v_component_of_wind",
+                             "specific_humidity"]
+                  vars_2D: ["surface_pressure", "2m_temperature"]
+                dynamic_forcing:
+                  vars_2D: ["total_precipitation_6hr"]
+                static:
+                  vars_2D: ["geopotential_at_surface"]
+                diagnostic: null
+
+          start_datetime: "2017-01-01"
+          end_datetime:   "2019-12-31"
+          timestep: "6h"
+          forecast_len: 1
+
+    Output key format::
+
+        "weatherbench2_era5/{field_type}/{dim}/{varname}"
+
+    Assumptions:
+        1. Non-static variables have a "time" dimension in the zarr store.
+        2. 3D pressure-level variables have a "level" coordinate (hPa).
+        3. Dimension order: (time, level, latitude, longitude) for 3D;
+           (time, latitude, longitude) for 2D; (latitude, longitude) for static.
+    """
+
+    def __init__(
+        self,
+        data_config: dict,
+        resolution: str = "1440x721",
+        return_target: bool = False,
+    ) -> None:
+        source_cfg = data_config["source"]["WeatherBench2_ERA5"]
+
+        # Config key takes precedence over the kwarg default.
+        self.resolution: str = source_cfg.get("resolution", resolution)
+        if self.resolution not in _WB2_ERA5_STORE_PATHS:
+            raise ValueError(f"Invalid resolution '{self.resolution}'. Valid options: {sorted(_WB2_ERA5_STORE_PATHS)}")
+
+        self.store_path: str = _WB2_ERA5_STORE_PATHS[self.resolution]
+        self.level_coord: str = source_cfg.get("level_coord", "level")
+        self.levels: list[int] = source_cfg.get("levels") or _WB2_ERA5_DEFAULT_LEVELS[self.resolution]
+        self.source_name: str = "weatherbench2_era5"
+        self.return_target: bool = return_target
+        self.static_metadata: dict = {
+            "levels": self.levels,
+            "datetime_fmt": "unix_ns",
+        }
+
+        self.dt = pd.Timedelta(data_config["timestep"])
+        self.num_forecast_steps: int = data_config["forecast_len"]
+
+        self.start_datetime = pd.Timestamp(data_config["start_datetime"])
+        self.end_datetime = pd.Timestamp(data_config["end_datetime"])
+        self.datetimes: pd.DatetimeIndex = self._build_timestamps()
+
+        self.var_dict: dict[str, dict[str, list[str]]] = {}
+        for field_type, d in source_cfg["variables"].items():
+            self._register_field(field_type, d)
+
+        # Initialised lazily on the first __getitem__ call (worker-safe).
+        self.fs = None
+        self.store = None
+
+    # ------------------------------------------------------------------
+    # Dataset interface
+    # ------------------------------------------------------------------
+
+    def __len__(self) -> int:
+        return len(self.datetimes)
+
+    def __getitem__(self, args: tuple) -> dict:
+        """Return a nested input/target sample dict.
+
+        Args:
+            args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
+                or pd.Timestamp) and *i* is the within-sequence step index
+                produced by the sampler. When ``i == 0`` prognostic and static
+                fields are loaded in addition to dynamic forcing.
+
+        Returns:
+            Dict with keys ``"input"``, ``"metadata"``, and optionally
+            ``"target"`` (when ``return_target=True``). Both ``"input"`` and
+            ``"target"`` are dicts of per-variable tensors keyed by
+            ``"weatherbench2_era5/{field_type}/{dim}/{varname}"``.
+        """
+        t, i = args
+        t = pd.Timestamp(t)
+        t_target = t + self.dt
+        if self.fs is None:
+            self._init_fs()
+
+        input_data: dict = {}
+
+        if "dynamic_forcing" in self.var_dict:
+            self._extract_field("dynamic_forcing", t, input_data)
+
+        if i == 0:
+            if "static" in self.var_dict:
+                self._extract_field("static", t, input_data)
+            if "prognostic" in self.var_dict:
+                self._extract_field("prognostic", t, input_data)
+
+        sample: dict = {
+            "input": input_data,
+            "metadata": {"input_datetime": int(t.value)},
+        }
+
+        if self.return_target:
+            target_data: dict = {}
+            for field_type in ("prognostic", "diagnostic"):
+                if field_type in self.var_dict:
+                    self._extract_field(field_type, t_target, target_data)
+            sample["target"] = target_data
+            sample["metadata"]["target_datetime"] = int(t_target.value)
+
+        return sample
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _init_fs(self) -> None:
+        fs_config = {
+            "cache_timeout": -1,
+            "token": "anon",  # noqa: S106 # nosec B106
+            "access": "read_only",
+            "block_size": 8**20,
+            "asynchronous": True,
+            "skip_instance_cache": True,
+        }
+        self.fs = GCSFileSystem(**fs_config)
+        self.store = zarr.storage.FsspecStore(fs=self.fs, path=self.store_path)
+
+    def _register_field(self, field_type: str, d: dict | None) -> None:
+        """Validate and register one field type from the config variables block.
+
+        Args:
+            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            d: Field-type config dict, or ``None`` / null to disable the field.
+
+        Raises:
+            KeyError: If *field_type* is not a recognised field type.
+            ValueError: If *d* defines neither ``vars_3D`` nor ``vars_2D``.
+        """
+        if not isinstance(d, dict):
+            return
+
+        if field_type not in VALID_FIELD_TYPES:
+            raise KeyError(f"Unknown field_type '{field_type}'. Valid options are: {sorted(VALID_FIELD_TYPES)}")
+
+        if not d.get("vars_3D") and not d.get("vars_2D"):
+            raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
+
+        self.var_dict[field_type] = {
+            "vars_3D": d.get("vars_3D") or [],
+            "vars_2D": d.get("vars_2D") or [],
+        }
+
+    def _build_timestamps(self) -> pd.DatetimeIndex:
+        """Return valid initialisation timestamps for the dataset.
+
+        Returns:
+            DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
+            the forecast horizon, at the configured timestep frequency.
+        """
+        return pd.date_range(
+            self.start_datetime,
+            self.end_datetime - self.num_forecast_steps * self.dt,
+            freq=self.dt,
+        )
+
+    def _extract_field(
+        self,
+        field_type: str,
+        t: pd.Timestamp,
+        sample: dict,
+    ) -> None:
+        """Open the zarr store and extract variables for *field_type* at time *t*.
+
+        Keys written to *sample*:
+
+        - ``"weatherbench2_era5/{field_type}/3d/{varname}"`` — shape ``(n_levels, 1, lat, lon)``
+        - ``"weatherbench2_era5/{field_type}/2d/{varname}"`` — shape ``(1, 1, lat, lon)``
+
+        Args:
+            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            t: Timestamp to select.
+            sample: Dict to write variable tensors into (modified in place).
+        """
+        if field_type not in self.var_dict:
+            return
+
+        vd = self.var_dict[field_type]
+        vars_3D: list[str] = vd["vars_3D"]
+        vars_2D: list[str] = vd["vars_2D"]
+
+        with xr.open_zarr(self.store, chunks=None) as ds:
+            if "time" in ds.dims:
+                if isinstance(ds.time.values[0], cftime.datetime):
+                    calendar = ds.time.values[0].calendar
+                    t_sel = self._to_cftime(t, calendar)
+                else:
+                    t_sel = t
+                ds_t = ds.sel(time=t_sel)
+            else:
+                ds_t = ds
+
+            for vname in vars_3D:
+                arr = ds_t[vname].sel({self.level_coord: self.levels}).values
+                tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
+                sample[f"{self.source_name}/{field_type}/3d/{vname}"] = tensor
+
+            for vname in vars_2D:
+                arr = ds_t[vname].values
+                tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+                sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
+
+    @staticmethod
+    def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:
+        """Convert a pandas Timestamp to a cftime.datetime.
+
+        Args:
+            ts: Pandas Timestamp to convert.
+            calendar: cftime calendar string (e.g. ``"noleap"``, ``"gregorian"``).
 
         Returns:
             cftime.datetime with the specified calendar.
