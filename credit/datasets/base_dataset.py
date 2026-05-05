@@ -11,7 +11,7 @@ BaseDataset: A PyTorch Dataset class for:
 
 from glob import glob
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 
@@ -21,7 +21,7 @@ from credit.datasets._file_utils import _map_files  # pyright: ignore[reportPriv
 
 logger = logging.getLogger(__name__)
 
-VALID_FIELD_TYPES = {"prognostic", "dynamic_forcing", "static", "diagnostic"}
+VALID_FIELD_TYPES = Literal["prognostic", "dynamic_forcing", "static", "diagnostic"]
 
 
 class BaseDataset(Dataset[Any]):
@@ -125,7 +125,7 @@ class BaseDataset(Dataset[Any]):
         # We take the first one we find here, but this can be overridden in a child class if needed.
         curr_source_name = list(data_config["source"].keys())[0]
         if len(data_config["source"]) > 1:
-            logging.warning(
+            raise ValueError(
                 f"Multiple sources found in config for class {self.__class__.__name__}, but BaseDataset is only designed to handle one source. "
                 + f"Using the first source found: {curr_source_name}. If you would like to use multiple sources, you should reference multisource "
                 + "dataset class that inherits from BaseDataset and **overrides** the __init__ method to handle multiple sources. \n"
@@ -159,10 +159,10 @@ class BaseDataset(Dataset[Any]):
         # TO-DO: Better description and type hints for these dicts.
         self.file_dict: dict[str, Any] = {}
         self.var_dict: dict[str, Any] = {}
-        for field_type, d in curr_source_cfg["variables"].items():
+        for field_type, field_config in curr_source_cfg["variables"].items():
             # Notice that we are expecting to call the same _register_field method for each field type.
             # Check or override this method as needed based on the expected structure of your config for each field type.
-            self._register_field(field_type, d)
+            self._register_field(field_type, field_config)
 
     def __len__(self) -> int:
         return len(self.datetimes)
@@ -379,39 +379,40 @@ class BaseDataset(Dataset[Any]):
     # ---------------
     # 2. Registering fields
 
-    def _register_field(self, field_type: str, d: dict[str, Any] | None) -> None:
+    def _register_field(self, field_type: VALID_FIELD_TYPES,
+                        field_config: dict[str, Any] | None) -> None:
         """Validate and register one field type from the config variables block.
 
         Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
 
         Args:
-            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+            field_type: One of VALID_FIELD_TYPES, namely: ``"prognostic"``, ``"dynamic_forcing"``,
                 ``"static"``, ``"diagnostic"``.
-            d: Field-type config dict, or ``None`` / null to disable the field.
+            field_config: Field-type config dict, or ``None`` / null to disable the field.
 
         Raises:
             KeyError: If *field_type* is not a recognised field type.
-            ValueError: If *d* defines neither ``vars_3D`` nor ``vars_2D``.
+            ValueError: If *field_config* defines neither ``vars_3D`` nor ``vars_2D``.
         """
         if field_type not in VALID_FIELD_TYPES:
             raise KeyError(
                 f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
-                f"Valid options are: {sorted(VALID_FIELD_TYPES)}"
+                f"Valid options are: {VALID_FIELD_TYPES}"
             )
-        if not isinstance(d, dict):
+        if not isinstance(field_config, dict):
             # null / disabled field
             self.file_dict[field_type] = None
             return
 
-        if not d.get("vars_3D") and not d.get("vars_2D"):
+        if not field_config.get("vars_3D") and not field_config.get("vars_2D"):
             raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
 
-        files = sorted(glob(d.get("path", "")))
-        time_fmt: str = d.get("filename_time_format", "%Y")
+        files = sorted(glob(field_config.get("path", "")))
+        time_fmt: str = field_config.get("filename_time_format", "%Y")
         self.file_dict[field_type] = _map_files(files, time_fmt) if files else None
         self.var_dict[field_type] = {
-            "vars_3D": d.get("vars_3D") or [],
-            "vars_2D": d.get("vars_2D") or [],
+            "vars_3D": field_config.get("vars_3D") or [],
+            "vars_2D": field_config.get("vars_2D") or [],
         }
 
     def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: dict[str, Any]) -> None:
