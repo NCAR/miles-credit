@@ -17,7 +17,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 
 
-class BaseDataset(Dataset):
+class BaseDataset(Dataset[Any]):
     """PyTorch Dataset class for CREDIT that  enables:
     1. Type hinting and annotations throughout CREDIT
     2. Scaffolding the development of future datasets
@@ -69,9 +69,9 @@ class BaseDataset(Dataset):
         """
 
         # Enforce types
-        if not isinstance(data_config, dict):
+        if not isinstance(data_config, dict): # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"Expected data_config to be a dict, but got {type(data_config)}")
-        if not isinstance(return_target, bool):
+        if not isinstance(return_target, bool): # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"Expected return_target to be a bool, but got {type(return_target)}")
 
         # The config for the data source
@@ -99,6 +99,7 @@ class BaseDataset(Dataset):
             + f"Full source config provided: \n{source_cfg}"
         )
 
+        self.file_dict: dict[str, Any] = {}
         self.var_dict: dict[str, Any] = {}
         for field_type, d in source_cfg["variables"].items():
             self._register_field(field_type, d)
@@ -147,6 +148,8 @@ class BaseDataset(Dataset):
         if self.return_target:
             target_data: dict[str, Any] = {}
             for field_type in ("prognostic", "diagnostic"):
+                if not self.file_dict:
+                    continue
                 if self.file_dict.get(field_type) and field_type in self.var_dict:
                     self._extract_field(field_type, t_target, target_data)
 
@@ -294,4 +297,11 @@ class BaseDataset(Dataset):
     # 2. Registering fields
 
     def _register_field(self, field_type: str, d: dict[str, Any] | None) -> None:
+        raise NotImplementedError("To-Do")
+    
+
+    def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: dict[str, Any]) -> None:
+        logging.error("You are using the default _extract_field method in BaseDataset, which does not actually extract any data. " \
+        "You should implement this method in your inherited dataset class to extract the data for each field type. Your inherited " \
+        "class is of type: " + self.__class__.__name__ + ". ")
         raise NotImplementedError("To-Do")
