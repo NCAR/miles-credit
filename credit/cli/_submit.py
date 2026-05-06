@@ -195,7 +195,7 @@ def _build_pbs_script(
         """)
 
         conda_env = args.conda_env
-        torchrun = f"{conda_env}/bin/torchrun" if os.path.isdir(conda_env) else _find_torchrun()
+        torchrun = f"{conda_env}/bin/torchrun" if (conda_env and os.path.isdir(conda_env)) else _find_torchrun()
         cuda_devices = ",".join(str(i) for i in range(args.gpus))
 
         if nodes == 1:
@@ -404,7 +404,7 @@ def _build_realtime_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={args.conda_env + "/bin/torchrun" if os.path.isdir(args.conda_env) else _find_torchrun()}
+            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
 
             echo "Realtime forecast — init: {init_time}  steps: {steps}"
             echo "Config  : ${{CONFIG}}"
@@ -574,7 +574,7 @@ def _build_rollout_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={args.conda_env + "/bin/torchrun" if os.path.isdir(args.conda_env) else _find_torchrun()}
+            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
 
             echo "Ensemble rollout — subset {subset} of {n_subsets}"
             echo "Config  : ${{CONFIG}}"
