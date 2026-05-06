@@ -70,12 +70,8 @@ from gcsfs import GCSFileSystem
 import zarr
 from torch.utils.data import Dataset
 
-from credit.datasets._file_utils import _find_file, _map_files
+from credit.datasets._utils import _find_file, _map_files, _to_cftime
 from credit.datasets.base_dataset import BaseDataset
-
-logger = logging.getLogger(__name__)
-
-VALID_FIELD_TYPES = {"prognostic", "dynamic_forcing", "static", "diagnostic"}
 
 
 class ERA5Dataset(BaseDataset):
@@ -143,7 +139,7 @@ class ERA5Dataset(BaseDataset):
         self.var_dict: dict[str, dict[str, list[str]]] = {}
 
         for field_type, d in source_cfg["variables"].items():
-            self._register_field(field_type, d)
+            self._register_field(field_type, "local", d)
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -154,19 +150,6 @@ class ERA5Dataset(BaseDataset):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def _build_timestamps(self) -> pd.DatetimeIndex:
-        """Return valid initialisation timestamps for the dataset.
-
-        Returns:
-            DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
-            the forecast horizon, at the configured timestep frequency.
-        """
-        return pd.date_range(
-            self.start_datetime,
-            self.end_datetime - self.num_forecast_steps * self.dt,
-            freq=self.dt,
-        )
 
     def _extract_field(
         self,
@@ -221,30 +204,8 @@ class ERA5Dataset(BaseDataset):
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
                 sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
 
-    @staticmethod
-    def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:
-        """Convert a pandas Timestamp to a cftime.datetime.
 
-        Args:
-            ts: Pandas Timestamp to convert.
-            calendar: cftime calendar string read from the dataset
-                (e.g. ``"noleap"``, ``"gregorian"``, ``"proleptic_gregorian"``).
-
-        Returns:
-            cftime.datetime with the specified calendar.
-        """
-        return cftime.datetime(
-            ts.year,
-            ts.month,
-            ts.day,
-            ts.hour,
-            ts.minute,
-            ts.second,
-            calendar=calendar,
-        )
-
-
-class ARCOERA5Dataset(Dataset):
+class ARCOERA5Dataset(BaseDataset):
     """PyTorch Dataset for Google Cloud ARCO ERA5 data with nested input/target structure.
 
     See module docstring for full description of output format and file naming.
@@ -324,10 +285,11 @@ class ARCOERA5Dataset(Dataset):
         self.datetimes: pd.DatetimeIndex = self._build_timestamps()
 
         # file_dict maps field_type → sorted list of (start, end, path) intervals
+        self.file_dict: dict = {}
         self.var_dict: dict[str, dict[str, list[str]]] = {}
 
         for field_type, d in source_cfg["variables"].items():
-            self._register_field(field_type, d)
+            self._register_field(field_type, "remote", d)
         # Initialize on first call to __getitem__
         self.fs = None
         self.mod_level_store = None
@@ -337,60 +299,7 @@ class ARCOERA5Dataset(Dataset):
     # Dataset interface
     # ------------------------------------------------------------------
 
-    def __len__(self) -> int:
-        return len(self.datetimes)
-
-    def __getitem__(self, args: tuple) -> dict:
-        """
-        Return a nested input/target sample dict.
-
-        Args:
-            args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
-                or pd.Timestamp) and *i* is the within-sequence step index
-                produced by the sampler. When ``i == 0`` prognostic and static
-                fields are loaded in addition to dynamic forcing.
-
-        Returns:
-            Dict with keys ``"input"``, ``"metadata"``, and optionally
-            ``"target"`` (when ``return_target=True``). Both ``"input"`` and
-            ``"target"`` are dicts of per-variable tensors keyed by
-            ``"arco_era5/{field_type}/{dim}/{varname}"``.
-        """
-        t, i = args
-        t = pd.Timestamp(t)
-        t_target = t + self.dt
-        if self.fs is None:
-            self._init_fs()
-
-        input_data: dict = {}
-
-        # Dynamic forcing is loaded at every step
-        if "dynamic_forcing" in self.var_dict:
-            self._extract_field("dynamic_forcing", t, input_data)
-
-        # Prognostic + static are only needed at the initial step
-        if i == 0:
-            if "static" in self.var_dict:
-                self._extract_field("static", t, input_data)
-            if "prognostic" in self.var_dict:
-                self._extract_field("prognostic", t, input_data)
-
-        sample: dict = {
-            "input": input_data,
-            "metadata": {"input_datetime": int(t.value)},
-        }
-
-        # Optionally load t+1 as the supervised target
-        if self.return_target:
-            target_data: dict = {}
-            for field_type in ("prognostic", "diagnostic"):
-                if field_type in self.var_dict:
-                    self._extract_field(field_type, t_target, target_data)
-
-            sample["target"] = target_data
-            sample["metadata"]["target_datetime"] = int(t_target.value)
-
-        return sample
+    # inheriting from BaseDataset
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -408,50 +317,38 @@ class ARCOERA5Dataset(Dataset):
         self.pres_level_store = zarr.storage.FsspecStore(fs=self.fs, path=self.pressure_lev_era5_path)
         self.mod_level_store = zarr.storage.FsspecStore(fs=self.fs, path=self.model_lev_era5_path)
 
-    def _register_field(self, field_type: str, d: dict | None) -> None:
-        """
-        Validate and register one field type from the config variables block.
+    # def _register_field(self, field_type: str, d: dict | None) -> None:
+    #     """
+    #     Validate and register one field type from the config variables block.
 
-        Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
+    #     Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
 
-        Args:
-            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
-                ``"static"``, ``"diagnostic"``.
-            d: Field-type config dict, or ``None`` / null to disable the field.
+    #     Args:
+    #         field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+    #             ``"static"``, ``"diagnostic"``.
+    #         d: Field-type config dict, or ``None`` / null to disable the field.
 
-        Raises:
-            KeyError: If *field_type* is not a recognised field type.
-            ValueError: If *d* defines neither ``vars_3D`` nor ``vars_2D``.
-        """
-        if not isinstance(d, dict):
-            return
+    #     Raises:
+    #         KeyError: If *field_type* is not a recognised field type.
+    #         ValueError: If *d* defines neither ``vars_3D`` nor ``vars_2D``.
+    #     """
+    #     if not isinstance(d, dict):
+    #         return
 
-        if field_type not in VALID_FIELD_TYPES:
-            raise KeyError(
-                f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
-                f"Valid options are: {sorted(VALID_FIELD_TYPES)}"
-            )
+    #     if field_type not in VALID_FIELD_TYPES:
+    #         raise KeyError(
+    #             f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
+    #             f"Valid options are: {sorted(VALID_FIELD_TYPES)}"
+    #         )
 
-        if not d.get("vars_3D") and not d.get("vars_2D"):
-            raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
+    #     if not d.get("vars_3D") and not d.get("vars_2D"):
+    #         raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
 
-        self.var_dict[field_type] = {
-            "vars_3D": d.get("vars_3D") or [],
-            "vars_2D": d.get("vars_2D") or [],
-        }
-
-    def _build_timestamps(self) -> pd.DatetimeIndex:
-        """Return valid initialisation timestamps for the dataset.
-
-        Returns:
-            DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
-            the forecast horizon, at the configured timestep frequency.
-        """
-        return pd.date_range(
-            self.start_datetime,
-            self.end_datetime - self.num_forecast_steps * self.dt,
-            freq=self.dt,
-        )
+    #     self.file_dict[field_type] = True
+    #     self.var_dict[field_type] = {
+    #         "vars_3D": d.get("vars_3D") or [],
+    #         "vars_2D": d.get("vars_2D") or [],
+    #     }
 
     def _extract_field(
         self,
@@ -475,6 +372,9 @@ class ARCOERA5Dataset(Dataset):
                 - 3D variable: ``(n_levels, 1, lat, lon)``
                 - 2D variable: ``(1, 1, lat, lon)``
         """
+        if self.fs is None:
+            self._init_fs()
+
         vd = self.var_dict[field_type]
         vars_3D: list[str] = vd["vars_3D"]
         vars_2D: list[str] = vd["vars_2D"]
@@ -537,25 +437,3 @@ class ARCOERA5Dataset(Dataset):
                     arr = ds_t[vname].values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
                     sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
-
-    @staticmethod
-    def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:
-        """Convert a pandas Timestamp to a cftime.datetime.
-
-        Args:
-            ts: Pandas Timestamp to convert.
-            calendar: cftime calendar string read from the dataset
-                (e.g. ``"noleap"``, ``"gregorian"``, ``"proleptic_gregorian"``).
-
-        Returns:
-            cftime.datetime with the specified calendar.
-        """
-        return cftime.datetime(
-            ts.year,
-            ts.month,
-            ts.day,
-            ts.hour,
-            ts.minute,
-            ts.second,
-            calendar=calendar,
-        )
