@@ -16,6 +16,7 @@ from typing import Any, Literal, get_args
 import pandas as pd
 
 from torch.utils.data import Dataset
+import torch
 
 from credit.datasets._file_utils import _map_files  # pyright: ignore[reportPrivateUsage]
 
@@ -121,17 +122,17 @@ class BaseDataset(Dataset[Any]):
         #       variables: ...
         # Unless we are parsing through a multi-source config, we expect only one source to be defined in the config.
         # We take the first one we find here, but this can be overridden in a child class if needed.
-        curr_source_name = list(data_config["source"].keys())[0]
+        self.curr_source_name = list(data_config["source"].keys())[0]
         if len(data_config["source"]) > 1:
             raise ValueError(
                 f"Multiple sources found in config for class {self.__class__.__name__}, but BaseDataset is only designed to handle one source. "
-                + f"Using the first source found: {curr_source_name}. If you would like to use multiple sources, you should reference multisource "
+                + f"Using the first source found: {self.curr_source_name}. If you would like to use multiple sources, you should reference multisource "
                 + "dataset class that inherits from BaseDataset and **overrides** the __init__ method to handle multiple sources. \n"
                 + f"Full data_config provided: \n{data_config}\n"
                 + f"Full source config: \n{data_config['source']}\n"
-                + f"Curr source config: \n{data_config['source'][curr_source_name]}"
+                + f"Curr source config: \n{data_config['source'][self.curr_source_name]}"
             )
-        curr_source_cfg = data_config["source"][curr_source_name]
+        curr_source_cfg = data_config["source"][self.curr_source_name]
 
         # Now we start loading the parameters for the dataset, starting with the clock parameters.
         self.dt: pd.Timedelta = self._load_dt(data_config, curr_source_cfg)
@@ -417,9 +418,28 @@ class BaseDataset(Dataset[Any]):
         }
 
     def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: dict[str, Any]) -> None:
+        """
+        Base extract field method, which should be overridden in the inherited dataset class to extract the data for 
+        each field type. The method should populate data_dict with the extracted data for the given field type and 
+        timestamp. The keys in data_dict should follow the format: "{self.curr_source_name}/{field_type}/{dim}/{varname}".
+        """
         logging.error(
             "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "
             "You should implement this method in your inherited dataset class to extract the data for each field type. Your inherited "
             "class is of type: " + self.__class__.__name__ + ". "
         )
-        raise NotImplementedError("To-Do")
+
+        # A 3D variable should have dimensions (n_levels, 1, n_lat, n_lon).
+        # A 2D variable should have dimensions (1, 1, n_lat, n_lon).
+        n_lat = 10
+        n_lon = 15
+        n_levels = 5
+
+
+        if field_type in self.var_dict:
+            for var_2d in self.var_dict[field_type].get("vars_2D", []):
+                key = f"{self.curr_source_name}/{field_type}/2d/{var_2d}"
+                data_dict[key] = torch.ones(1, 1, n_lat, n_lon)
+            for var_3d in self.var_dict[field_type].get("vars_3D", []):
+                key = f"{self.curr_source_name}/{field_type}/3d/{var_3d}"
+                data_dict[key] = torch.ones(n_levels, 1, n_lat, n_lon)
