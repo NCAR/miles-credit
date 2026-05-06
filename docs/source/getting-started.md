@@ -66,12 +66,6 @@ dependencies for development.
 pip install -e ".[develop]"
 ```
 
-:::{important}
-macOS users will need to ensure that the required compilers are present and properly configured before installing
-miles-credit for versions requiring pySTEPS (miles-credit > 2025.2.0).
-See this [note in the pySTEPS documentation](https://pysteps.readthedocs.io/en/latest/user_guide/install_pysteps.html#osx-users-gcc-compiler) for details.
-:::
-
 ## Installation on Derecho
 If you want to build a conda environment and install a Derecho-compatible version of PyTorch, run
 the `create_derecho_env.sh` script.
