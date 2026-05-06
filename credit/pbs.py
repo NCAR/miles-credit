@@ -267,7 +267,6 @@ export LOGLEVEL=INFO
 export NCCL_DEBUG=WARN
 export CUDA_VISIBLE_DEVICES={cuda_devices}
 
-echo "=== CREDIT v2 parallelism ==="
 echo "Host   : $(hostname)"
 echo "Date   : $(date)"
 echo "Nodes  : {num_nodes}  GPUs/node: {num_gpus}"
