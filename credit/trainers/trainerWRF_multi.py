@@ -3,7 +3,6 @@ import logging
 from collections import defaultdict
 
 import numpy as np
-import torch
 import torch.distributed as dist
 import torch.fft
 import tqdm

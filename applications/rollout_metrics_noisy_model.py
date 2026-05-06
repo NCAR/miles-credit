@@ -36,7 +36,7 @@ from credit.models.checkpoint import load_model_state, load_state_dict_error_han
 from credit.parser import credit_main_parser, predict_data_check
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
-from credit.postblock import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
 from credit.seed import seed_everything
 from credit.transforms import Normalize_ERA5_and_Forcing, load_transforms
 from credit.ensemble.crps import calculate_crps_per_channel

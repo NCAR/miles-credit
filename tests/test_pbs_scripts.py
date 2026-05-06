@@ -175,6 +175,12 @@ class TestDerechoMultiNode:
     def test_no_standalone(self):
         assert "--standalone" not in _derecho_script(nodes=4)
 
+    def test_calls_python_directly(self):
+        assert "python " in _derecho_script(nodes=4)
+
+    def test_no_rdzv_backend(self):
+        assert "--rdzv-backend" not in _derecho_script(nodes=4)
+
     def test_ppn_matches_gpus(self):
         assert "--ppn 2" in _derecho_script(nodes=4, gpus=2)
 

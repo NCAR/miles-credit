@@ -30,7 +30,7 @@ if _BRIDGESCALER_AVAILABLE:
     PREBLOCK_REGISTRY["bridgescaler_transform"] = BridgeScalerTransformer
 
 
-def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
+def build_preblocks(preblock_cfg: dict | None = None) -> nn.ModuleDict:
     """
     Instantiates all preblocks from the config's 'preblocks' section.
 
@@ -47,16 +47,13 @@ def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
     return nn.ModuleDict(
         {
             name: PREBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
-            for name, block_cfg in preblock_cfg.items()
+            for name, block_cfg in (preblock_cfg or {}).items()
         }
     )
 
 
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
-    """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
-
-    Concatenation is always performed last via ConcatToTensor and is not configurable.
-    """
+    """Sequentially applies transform preblocks (dict→dict)."""
     for preblock in preblocks.values():
         batch = preblock(batch)
-    return PREBLOCK_REGISTRY["concat"]()(batch)
+    return batch

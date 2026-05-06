@@ -9,8 +9,9 @@ import tqdm
 
 import optuna
 
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.preblock import build_preblocks, apply_preblocks
+from credit.preblock.concat import ConcatToTensor
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
@@ -171,7 +172,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
-                x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
+                x_raw, y_raw, _ = ConcatToTensor()(apply_preblocks(self.preblocks, batch))
                 # ERA5Dataset outputs 5D tensors (B, C, frames, H, W); collapse frames dim
                 if x_raw.dim() == 5:
                     x_raw = x_raw.flatten(1, 2)
@@ -338,7 +339,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
-                    x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
+                    x_raw, y_raw, _ = ConcatToTensor()(apply_preblocks(self.preblocks, batch))
                     # ERA5Dataset outputs 5D tensors (B, C, frames, H, W); collapse frames dim
                     if x_raw.dim() == 5:
                         x_raw = x_raw.flatten(1, 2)

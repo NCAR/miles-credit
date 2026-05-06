@@ -16,7 +16,7 @@ import os
 import shutil
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 
 import numpy as np
 import pandas as pd
@@ -352,7 +352,7 @@ class BaseTrainer(ABC):
         scaler: GradScaler,
         scheduler: LRScheduler,
         metrics: Dict[str, Any],
-        rollout_scheduler: Optional[callable] = None,
+        rollout_scheduler: Optional[Callable] = None,
         trial: bool = False,
     ) -> Dict[str, Any]:
         """

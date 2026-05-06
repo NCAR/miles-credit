@@ -26,3 +26,4 @@ h5netcdf
 torchmetrics
 s3fs
 numba
+fastapi

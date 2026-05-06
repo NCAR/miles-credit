@@ -44,7 +44,7 @@ from credit.seed import seed_everything
 from credit.distributed import get_rank_info, setup, distributed_model_wrapper
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.nwp import build_GFS_init
 
 logger = logging.getLogger(__name__)

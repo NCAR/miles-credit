@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
-from credit.postblock import PostBlock
+from credit.postblock.gen1 import PostBlock
 from timm.layers import DropPath, Mlp, to_2tuple, _assert
 from credit.models.base_model import BaseModel
 

@@ -11,7 +11,7 @@ import pandas as pd
 from torch.utils.data import IterableDataset
 from credit.trainers.base_trainer import BaseTrainer
 from credit.data import concat_and_reshape, reshape_only
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from torch.optim.lr_scheduler import CosineAnnealingLR  # , CosineAnnealingWarmRestarts
 from credit.output import load_metadata, make_xarray
 from credit.transforms import Normalize_ERA5_and_Forcing
