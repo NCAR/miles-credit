@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import xarray as xr
+from credit.metadata import get_meta_file_path
 
 
 def pressure_on_interfaces(surface_pressure: torch.Tensor, model_a_half: torch.Tensor, model_b_half: torch.Tensor):
@@ -18,8 +19,8 @@ def pressure_on_interfaces(surface_pressure: torch.Tensor, model_a_half: torch.T
     Returns:
         Pressure on each model level interface.
     """
-    model_a_3d = model_a_half.reshape(-1, 1, 1)
-    model_b_3d = model_b_half.reshape(-1, 1, 1)
+    model_a_3d = model_a_half.reshape(1, -1, 1, 1, 1)
+    model_b_3d = model_b_half.reshape(1, -1, 1, 1, 1)
     pressure_3d_half = model_a_3d + model_b_3d * surface_pressure
     return pressure_3d_half
 
@@ -68,20 +69,22 @@ def geopotential(
 class GeopotentialDiagnostic(torch.nn.Module):
     def __init__(
         self,
-        surface_geopotential_var: str,
-        surface_pressure_var: str,
-        temperature_var: str,
-        specific_humidity_var: str,
-        level_info_file: str,
-        model_a_half_var: str,
-        model_b_half_var: str,
+        output_name: str = "geopotential",
+        surface_geopotential_var: str = "geopotential_at_surface",
+        surface_pressure_var: str = "surface_pressure",
+        temperature_var: str = "temperature",
+        specific_humidity_var: str = "specific_humidity",
+        level_info_file: str = "ERA5_Lev_Info.nc",
+        model_a_half_var: str = "a_half",
+        model_b_half_var: str = "b_half",
     ):
         super().__init__()
+        self.output_name = output_name
         self.surface_geopotential_var = surface_geopotential_var
         self.surface_geopotential_var = surface_pressure_var
         self.temperature_var = temperature_var
         self.specific_humidity_var = specific_humidity_var
-        self.level_info_file = level_info_file
+        self.level_info_file = get_meta_file_path(level_info_file)
         self.model_a_half_var = model_a_half_var
         self.model_b_half_var = model_b_half_var
         with xr.open_dataset(self.level_info_file) as level_info:
@@ -89,12 +92,16 @@ class GeopotentialDiagnostic(torch.nn.Module):
             self.model_b_half = torch.Tensor(level_info[self.model_a_half_var].values)
         return
 
-    def forward(self, x):
-        return geopotential(
-            x[self.surface_geopotential_var],
-            x[self.surface_geopotential_var],
-            x[self.temperature_var],
-            x[self.specific_humidity_var],
+    def forward(self, pred_dict: dict):
+        pred = pred_dict["prediction"]
+        vgeo = torch.vmap(geopotential, 0)
+        geo_out = vgeo(
+            pred[self.surface_geopotential_var],
+            pred[self.surface_geopotential_var],
+            pred[self.temperature_var],
+            pred[self.specific_humidity_var],
             self.model_a_half,
             self.model_b_half,
         )
+        pred[self.output_name] = geo_out
+        return pred_dict
