@@ -280,7 +280,7 @@ def predict(rank, world_size, conf, p):
             # Step 0: load full initial state
             sample_full = dataset[(t0, 0)]
             batch_full = _sample_to_batch(sample_full)
-            x = apply_preblocks(preblocks, batch_full)["input"].to(device).float()  # (1, C_in, 1, H, W)
+            x = apply_preblocks(preblocks, batch_full, device=device)["input"].float()  # (1, C_in, 1, H, W)
 
             x_init = None
             results = []
@@ -320,7 +320,7 @@ def predict(rank, world_size, conf, p):
                     t_next = t0 + step * dt
                     sample_frc = dataset[(t_next, 1)]  # loads only dynamic_forcing
                     batch_frc = _sample_to_batch(sample_frc)
-                    x_frc = apply_preblocks(preblocks, batch_frc)["input"].to(device).float()  # (1, n_dyn, 1, H, W)
+                    x_frc = apply_preblocks(preblocks, batch_frc, device=device)["input"].float()  # (1, n_dyn, 1, H, W)
 
                     # ERA5Dataset insertion order: [dynfrc | static | prog]
                     x[:, :n_dyn, ...] = x_frc  # update dynamic forcing

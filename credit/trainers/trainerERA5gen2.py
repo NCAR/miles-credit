@@ -171,7 +171,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
-                _batch = apply_preblocks(self.preblocks, batch)
+                _batch = apply_preblocks(self.preblocks, batch, device=self.device)
                 x_raw, y_raw = _batch["input"], _batch["target"]
                 # ERA5Dataset outputs 5D tensors (B, C, frames, H, W); collapse frames dim
                 if x_raw.dim() == 5:
@@ -179,7 +179,7 @@ class TrainerERA5Gen2(BaseTrainer):
                     y_raw = y_raw.flatten(1, 2)
 
                 if t == 1:
-                    x = x_raw.to(self.device).float()
+                    x = x_raw.float()
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
                 else:
@@ -187,7 +187,7 @@ class TrainerERA5Gen2(BaseTrainer):
                     # Build full input: start from previous x, update dynfrc and
                     # prognostic slices; static channels stay unchanged.
                     # ERA5Dataset insertion order: [dynfrc | static | prog]
-                    x_dynfrc = x_raw.to(self.device).float()
+                    x_dynfrc = x_raw.float()
                     if self.ensemble_size > 1:
                         x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                     n_dynfrc = x_dynfrc.shape[1]
@@ -229,7 +229,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 # backprop on specified timesteps
                 if t in self.backprop_on_timestep:
-                    y = y_raw.to(self.device).float()
+                    y = y_raw.float()
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
@@ -339,7 +339,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
-                    _batch = apply_preblocks(self.preblocks, batch)
+                    _batch = apply_preblocks(self.preblocks, batch, device=self.device)
                     x_raw, y_raw = _batch["input"], _batch["target"]
                     # ERA5Dataset outputs 5D tensors (B, C, frames, H, W); collapse frames dim
                     if x_raw.dim() == 5:
@@ -347,14 +347,14 @@ class TrainerERA5Gen2(BaseTrainer):
                         y_raw = y_raw.flatten(1, 2)
 
                     if t == 1:
-                        x = x_raw.to(self.device).float()
+                        x = x_raw.float()
                         if self.ensemble_size > 1:
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
                     else:
                         # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
                         # Build full input: start from previous x, update dynfrc and
                         # prognostic slices; static channels stay unchanged.
-                        x_dynfrc = x_raw.to(self.device).float()
+                        x_dynfrc = x_raw.float()
                         if self.ensemble_size > 1:
                             x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                         n_dynfrc = x_dynfrc.shape[1]
@@ -392,7 +392,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                     # compute loss and metrics only at the final rollout step
                     if t == self.valid_forecast_len:
-                        y = y_raw.to(self.device).float()
+                        y = y_raw.float()
                         if self.flag_clamp:
                             y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 

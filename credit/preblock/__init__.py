@@ -1,5 +1,6 @@
 import logging
 
+import torch
 import torch.nn as nn
 
 from credit.preblock.log import LogTransform
@@ -52,18 +53,22 @@ def build_preblocks(preblock_cfg: dict | None = None) -> nn.ModuleDict:
     )
 
 
-def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
+def apply_preblocks(preblocks: nn.ModuleDict, batch: dict, device=None):
     """Sequentially applies transform preblocks (dict→dict).
 
-    Returns:
-        (x, target, meta) where target is None if no "target" data_type was present in the batch.
+    Returns a dict with keys:
+        "input"  — concatenated tensor (if concat preblock present) or nested batch dict
+        "meta"   — metadata dict (only present if concat preblock ran)
+        "target" — target tensor (only present if target data was in the batch)
+
+    Tensors in the output are moved to ``device`` unless the concat preblock was
+    configured with ``to_device: false``.
     """
     if not preblocks:
-        raise RuntimeError(
-            'No preblocks configured. "preblocks" must be present in the config, with "concat" as the final preblock.'
-        )
+        raise RuntimeError('No preblocks configured. "preblocks" must be present in the config.')
     meta = None
     target = None
+    to_device = True
     for preblock in preblocks.values():
         result = preblock(batch)
         if isinstance(result, tuple):
@@ -73,11 +78,16 @@ def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
                 batch, meta = result
         else:
             batch = result
-    if meta is None:
-        raise RuntimeError(
-            'Metadata missing. "concat" must be present as the final preblock to concatenate data and prepare metadata.'
-        )
-    out = {"input": batch, "meta": meta}
+        if hasattr(preblock, "to_device"):
+            to_device = preblock.to_device
+
+    out = {"input": batch}
+    if meta is not None:
+        out["meta"] = meta
     if target is not None:
         out["target"] = target
+
+    if device is not None and to_device:
+        out = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in out.items()}
+
     return out

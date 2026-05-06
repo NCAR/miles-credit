@@ -414,6 +414,7 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
+    base["preblocks"] = {"concat": {"type": "concat"}}
     return base
 
 

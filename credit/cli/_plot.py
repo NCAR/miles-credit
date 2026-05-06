@@ -150,8 +150,8 @@ def _plot(args) -> None:
     sample = dataset[(ts, 0)]
     batch = default_collate([sample])
     preblocks = build_preblocks(conf.get("preblocks", {}))
-    _batch = apply_preblocks(preblocks, batch)
-    x, y, meta = _batch["input"].to(device), _batch["target"].to(device), _batch["meta"]
+    _batch = apply_preblocks(preblocks, batch, device=device)
+    x, y, meta = _batch["input"], _batch["target"], _batch["meta"]
     with torch.no_grad():
         y_pred = model(x)
 

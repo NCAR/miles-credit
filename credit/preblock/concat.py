@@ -46,8 +46,13 @@ class ConcatToTensor(BasePreblock):
     Example config::
 
         type: "concatenate_to_tensor"
-        args: {}
+        args:
+          to_device: true   # set false to skip .to(device) in apply_preblocks
     """
+
+    def __init__(self, to_device: bool = True):
+        super().__init__()
+        self.to_device = to_device
 
     def forward(self, batch):
         input_tensors = []
