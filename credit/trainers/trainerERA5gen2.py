@@ -9,9 +9,10 @@ import tqdm
 
 import optuna
 
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.preblock.concat import ConcatToTensor
+from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
@@ -75,18 +76,13 @@ class TrainerERA5Gen2(BaseTrainer):
                 self.opt_energy = GlobalEnergyFixer(post_conf)
 
         # ---- Data schema extraction (new nested schema) ----
+        self.slices, _ = build_channel_layout(conf)
         data_conf = conf["data"]
         source = next(iter(data_conf["source"].values()))
         vars_conf = source["variables"]
-        prog = vars_conf.get("prognostic") or {}
         diag = vars_conf.get("diagnostic") or {}
-        dyn = vars_conf.get("dynamic_forcing") or {}
-        static_v = vars_conf.get("static") or {}
         num_levels = len(source.get("levels", []))
         self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
-
-        # Forcing+static input channel count (last channels of x, not predicted by model)
-        self.static_dim_size = len(dyn.get("vars_2D", [])) + len(static_v.get("vars_2D", []))
 
         self.retain_graph = data_conf.get("retain_graph", False)
 
@@ -184,21 +180,12 @@ class TrainerERA5Gen2(BaseTrainer):
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
                 else:
                     # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
-                    # Build full input: start from previous x, update dynfrc and
-                    # prognostic slices; static channels stay unchanged.
-                    # ERA5Dataset insertion order: [dynfrc | static | prog]
+                    # update_x replaces dynfrc and prognostic slices; static stays.
                     x_dynfrc = x_raw.to(self.device).float()
                     if self.ensemble_size > 1:
                         x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
-                    n_dynfrc = x_dynfrc.shape[1]
-                    n_prog = x.shape[1] - self.static_dim_size
-                    y_pred_prog = y_pred[:, :n_prog, ...]
-                    if not self.retain_graph:
-                        y_pred_prog = y_pred_prog.detach()
-                    x_new = x.clone()
-                    x_new[:, :n_dynfrc, ...] = x_dynfrc
-                    x_new[:, self.static_dim_size :, ...] = y_pred_prog
-                    x = x_new
+                    y_pred_in = y_pred if self.retain_graph else y_pred.detach()
+                    x = update_x(x, x_dynfrc, y_pred_in, self.slices)
 
                 if self.flag_clamp:
                     x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
@@ -351,17 +338,11 @@ class TrainerERA5Gen2(BaseTrainer):
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
                     else:
                         # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
-                        # Build full input: start from previous x, update dynfrc and
-                        # prognostic slices; static channels stay unchanged.
+                        # update_x replaces dynfrc and prognostic slices; static stays.
                         x_dynfrc = x_raw.to(self.device).float()
                         if self.ensemble_size > 1:
                             x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
-                        n_dynfrc = x_dynfrc.shape[1]
-                        n_prog = x.shape[1] - self.static_dim_size
-                        x_new = x.clone()
-                        x_new[:, :n_dynfrc, ...] = x_dynfrc
-                        x_new[:, self.static_dim_size :, ...] = y_pred[:, :n_prog, ...].detach()
-                        x = x_new
+                        x = update_x(x, x_dynfrc, y_pred.detach(), self.slices)
 
                     if self.flag_clamp:
                         x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
