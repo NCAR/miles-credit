@@ -3,8 +3,8 @@
 # New nested data schema: source.ERA5.variables.{prognostic, dynamic_forcing, static}
 # Data: ~0.28-degree (640×1280) ERA5 model-level data
 # Grid: 640 x 1280, 16 model levels
-# preblocks.v1_compat (concat_v1) reorders channels to V1 trainer order [prog|static|dynfrc]
-# so that V1-trained checkpoints receive the channel layout they expect.
+# Variable groups are listed in V1 trainer order (prog → static → dynfrc), which matches the canonical
+# FIELD_TYPE_RANK used by ConcatToTensor — so V1-trained checkpoints receive the correct channel layout.
 # --------------------------------------------------------------------------------------------------------------------- #
 save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_npj_1h'
 
@@ -19,15 +19,15 @@ data:
           vars_2D: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
           path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
 
-        diagnostic: null
+        static:
+          vars_2D: ['Z_GDS4_SFC', 'LSM']
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/static_norm_old.nc'
 
         dynamic_forcing:
           vars_2D: ['tsi']
           path: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
 
-        static:
-          vars_2D: ['Z_GDS4_SFC', 'LSM']
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/static_norm_old.nc'
+        diagnostic: null
 
   start_datetime: "1979-01-01"
   end_datetime: "2018-12-31"
@@ -45,8 +45,6 @@ preblocks:
     args:
       mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
       std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
-  v1_compat:
-    type: concat_v1
 
 trainer:
   type: era5-gen2
