@@ -337,8 +337,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     # ---- Load full initial state ----
     sample_full = dataset[(init_time, 0)]
     batch_full = _sample_to_batch(sample_full)
-    x, _ = apply_preblocks(preblocks, batch_full)
-    x = x.to(device).float()  # (1, C_in, 1, H, W)
+    x = apply_preblocks(preblocks, batch_full)["input"].to(device).float()  # (1, C_in, 1, H, W)
 
     results = []
     x_init = None
@@ -374,8 +373,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
                 t_next = init_time + step * dt
                 sample_frc = dataset[(t_next, 1)]  # only dynamic_forcing
                 batch_frc = _sample_to_batch(sample_frc)
-                x_frc, _ = apply_preblocks(preblocks, batch_frc)
-                x_frc = x_frc.to(device).float()
+                x_frc = apply_preblocks(preblocks, batch_frc)["input"].to(device).float()
 
                 # ERA5Dataset insertion order: [dynfrc | static | prog]
                 x[:, :n_dyn, ...] = x_frc
