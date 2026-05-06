@@ -19,8 +19,6 @@ from torch.utils.data import Dataset
 
 from credit.datasets._file_utils import _map_files  # pyright: ignore[reportPrivateUsage]
 
-logger = logging.getLogger(__name__)
-
 VALID_FIELD_TYPES = Literal["prognostic", "dynamic_forcing", "static", "diagnostic"]
 
 
