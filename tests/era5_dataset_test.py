@@ -82,9 +82,7 @@ def patch_era5_io_multiyear(monkeypatch, annual_xr_dataset):
     Patch glob + xarray open so ERA5Dataset sees
     multiple yearly files and routes correctly.
     """
-    ERA5_MODULE = "credit.datasets.era5"
-
-    monkeypatch.setattr(f"{ERA5_MODULE}.glob", lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"])
+    monkeypatch.setattr("credit.datasets.base_dataset.glob", lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"])
 
     def fake_open_dataset(path, **kwargs):
         for year in (2022, 2023):
@@ -102,9 +100,7 @@ def patch_refactor_io_multiyear(monkeypatch, annual_xr_dataset):
     """
     Same patching as above but targets the refactored module path.
     """
-    ERA5_MODULE = "credit.datasets.era5"
-
-    monkeypatch.setattr(f"{ERA5_MODULE}.glob", lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"])
+    monkeypatch.setattr("credit.datasets.base_dataset.glob", lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"])
 
     def fake_open_dataset(path, **kwargs):
         for year in (2022, 2023):
