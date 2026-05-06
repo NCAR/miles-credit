@@ -9,7 +9,7 @@ import pytest
 import pandas as pd
 from typing import Any, Dict, List
 
-from credit.datasets.base_dataset import BaseDataset
+from credit.datasets.base_dataset import AbstractBaseDataset, BaseDataset
 
 # ---------------------------------------------------------------------------
 # Test Fixtures
@@ -28,6 +28,7 @@ def minimal_config() -> Dict[str, Any]:
             "TestSource_Base": {
                 "variables": {
                     "prognostic": {
+                        "vars_3D": ["T", "U", "V", "Q"],
                         "vars_2D": ["t2m"],
                         "path": "/fake/prognostic/*.nc",
                     },
@@ -53,7 +54,9 @@ def minimal_config() -> Dict[str, Any]:
 def multi_source_config(minimal_config: Dict[str, Any]) -> Dict[str, Any]:
     """Provides a config with multiple sources to test error handling."""
     config = minimal_config.copy()
-    config["source"]["Another_Source"] = {"variables": {"prognostic": {"vars_2D": ["t2m"], "path": "/fake/prognostic/*.nc"}}}
+    config["source"]["Another_Source"] = {
+        "variables": {"prognostic": {"vars_2D": ["t2m"], "path": "/fake/prognostic/*.nc"}}
+    }
     return config
 
 
@@ -182,7 +185,9 @@ def test_load_clock_params_missing_raises_keyerror(minimal_config: Dict[str, Any
             BaseDataset(config)
 
 
-def test_load_dt_warning(minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture) -> None:
+def test_load_dt_warning(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture
+) -> None:
     """Test warning when source timestep is smaller than data timestep."""
     config = minimal_config.copy()
     config["source"]["TestSource_Base"]["timestep"] = "1h"  # smaller than 6h
@@ -252,6 +257,8 @@ def test_getitem_step0(minimal_config: Dict[str, Any], patch_base_dataset_io: No
     assert "input" in sample
     inp = sample["input"]
     assert "TestSource_Base/prognostic/2d/t2m" in inp
+    assert "TestSource_Base/prognostic/3d/T" in inp
+    assert "TestSource_Base/prognostic/3d/U" in inp
     assert "TestSource_Base/static/2d/lsm" in inp
     assert "TestSource_Base/dynamic_forcing/2d/msl" in inp
     assert "metadata" in sample
@@ -266,6 +273,7 @@ def test_getitem_step1(minimal_config: Dict[str, Any], patch_base_dataset_io: No
     assert "input" in sample
     inp = sample["input"]
     assert "TestSource_Base/prognostic/2d/t2m" not in inp
+    assert "TestSource_Base/prognostic/3d/T" not in inp
     assert "TestSource_Base/static/2d/lsm" not in inp
     assert "TestSource_Base/dynamic_forcing/2d/msl" in inp
 
@@ -278,6 +286,8 @@ def test_getitem_return_target_true(minimal_config: Dict[str, Any], patch_base_d
     assert "target" in sample
     tgt = sample["target"]
     assert "TestSource_Base/prognostic/2d/t2m" in tgt
+    assert "TestSource_Base/prognostic/3d/T" in tgt
+    assert "TestSource_Base/prognostic/3d/U" in tgt
     assert "TestSource_Base/diagnostic/2d/tp" in tgt
     # Static and dynamic forcing should not be in target
     assert "TestSource_Base/static/2d/lsm" not in tgt
@@ -291,3 +301,20 @@ def test_getitem_return_target_false(minimal_config: Dict[str, Any], patch_base_
     sample = ds[(ds.datetimes[0], 0)]
     assert "target" not in sample
     assert "target_datetime" not in sample["metadata"]
+
+
+def test_abstract_base_dataset_methods_raise_error() -> None:
+    """Test that methods of AbstractBaseDataset raise NotImplementedError."""
+
+    dataset = AbstractBaseDataset(data_config={})
+
+    with pytest.raises(NotImplementedError):
+        len(dataset)
+    with pytest.raises(NotImplementedError):
+        dataset[(pd.Timestamp("2023-01-01"), 0)]
+    with pytest.raises(NotImplementedError):
+        dataset._build_timestamps()  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(NotImplementedError):
+        dataset._register_field("prognostic", {})  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(NotImplementedError):
+        dataset._extract_field("prognostic", pd.Timestamp("2023-01-01"), {})  # pyright: ignore[reportPrivateUsage]

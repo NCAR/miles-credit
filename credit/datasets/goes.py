@@ -40,7 +40,7 @@ import torch
 from torch.utils.data import Dataset
 import xarray as xr
 
-from credit.datasets._file_utils import _infer_period_freq, _find_file
+from credit.datasets._utils import _infer_period_freq, _find_file
 
 logger = logging.getLogger(__name__)
 

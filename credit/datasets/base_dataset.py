@@ -23,7 +23,49 @@ from credit.datasets._utils import _map_files  # pyright: ignore[reportPrivateUs
 VALID_FIELD_TYPES = Literal["prognostic", "dynamic_forcing", "static", "diagnostic"]
 
 
-class BaseDataset(Dataset[Any]):
+class AbstractBaseDataset(Dataset[Any]):
+    """Abstract base dataset class based on PyTorch Dataset class for CREDIT.
+
+    This class defines the expected methods and attributes for any dataset in CREDIT,
+    but does not provide any implementation. The BaseDataset class inherits from this
+    class and provides a minimal implementation. Any future dataset should inherit from
+    either AbstractBaseDataset or BaseDataset depending on the level of functionality needed.
+    """
+
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        # The name of this source in the config
+        self.curr_source_name: str
+
+        # Setting the clock for sampling
+        self.dt: pd.Timedelta
+        self.num_forecast_steps: int
+        self.start_datetime: pd.Timestamp
+        self.end_datetime: pd.Timestamp
+        self.datetimes: pd.DatetimeIndex
+
+        # Getting the data
+        self.return_target: bool
+        self.mode: str
+        self.file_dict: dict[str, Any]
+        self.var_dict: dict[str, Any]
+
+    def __len__(self) -> int:
+        raise NotImplementedError
+
+    def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def _build_timestamps(self) -> pd.DatetimeIndex:
+        raise NotImplementedError
+
+    def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
+        raise NotImplementedError
+
+    def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: dict[str, Any]) -> None:
+        raise NotImplementedError
+
+
+class BaseDataset(AbstractBaseDataset):
     """PyTorch Dataset class for CREDIT that  enables:
     1. Type hinting and annotations throughout CREDIT
     2. Scaffolding the development of future datasets
@@ -151,14 +193,18 @@ class BaseDataset(Dataset[Any]):
             + f"Full source config provided: \n{curr_source_cfg}"
         )
 
+        # Select if the data is being loaded from local files or remote files.
+        if "mode" not in curr_source_cfg:
+            self.mode = "local"
+        else:
+            self.mode = curr_source_cfg["mode"]
+
         # By default, we suggest that the inherited dataset use both file_dict and var_dict.
         # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
-        #   tuples produced by _map_files. _extract_field can then use the list to find the 
+        #   tuples produced by _map_files. _extract_field can then use the list to find the
         #   appropriate file for a given timestamp.
-        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field 
+        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field
         #   can then use this to know which variables to extract for each field type from the file.
-        #
-        # TO-DO: Better description and type hints for these dicts.
         self.file_dict: dict[str, Any] = {}
         self.var_dict: dict[str, Any] = {}
         for field_type, field_config in curr_source_cfg["variables"].items():
@@ -167,6 +213,7 @@ class BaseDataset(Dataset[Any]):
             self._register_field(field_type, field_config)
 
     def __len__(self) -> int:
+        """For a CREDIT dataset, the length is the number of unique datetimes that can be sampled from."""
         return len(self.datetimes)
 
     def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
@@ -381,8 +428,7 @@ class BaseDataset(Dataset[Any]):
     # ---------------
     # 2. Registering fields
 
-    def _register_field(self, field_type: VALID_FIELD_TYPES,
-                        mode: str, field_config: dict[str, Any] | None) -> None:
+    def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
         """Validate and register one field type from the config variables block.
 
         Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
@@ -398,8 +444,7 @@ class BaseDataset(Dataset[Any]):
         """
         if field_type not in get_args(VALID_FIELD_TYPES):
             raise KeyError(
-                f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
-                f"Valid options are: {VALID_FIELD_TYPES}"
+                f"Unknown field_type '{field_type}' in config['source']['ERA5']. Valid options are: {VALID_FIELD_TYPES}"
             )
         if not isinstance(field_config, dict):
             # null / disabled field
@@ -409,11 +454,11 @@ class BaseDataset(Dataset[Any]):
         if not field_config.get("vars_3D") and not field_config.get("vars_2D"):
             raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
 
-        if mode == "local":
+        if self.mode == "local":
             files = sorted(glob(field_config.get("path", "")))
             time_fmt: str = field_config.get("filename_time_format", "%Y")
             self.file_dict[field_type] = _map_files(files, time_fmt) if files else None
-        elif mode == "remote":
+        elif self.mode == "remote":
             self.file_dict[field_type] = True
         self.var_dict[field_type] = {
             "vars_3D": field_config.get("vars_3D") or [],
@@ -422,8 +467,8 @@ class BaseDataset(Dataset[Any]):
 
     def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: dict[str, Any]) -> None:
         """
-        Base extract field method, which should be overridden in the inherited dataset class to extract the data for 
-        each field type. The method should populate data_dict with the extracted data for the given field type and 
+        Base extract field method, which should be overridden in the inherited dataset class to extract the data for
+        each field type. The method should populate data_dict with the extracted data for the given field type and
         timestamp. The keys in data_dict should follow the format: "{self.curr_source_name}/{field_type}/{dim}/{varname}".
         """
         logging.error(
@@ -437,7 +482,6 @@ class BaseDataset(Dataset[Any]):
         n_lat = 10
         n_lon = 15
         n_levels = 5
-
 
         if field_type in self.var_dict:
             for var_2d in self.var_dict[field_type].get("vars_2D", []):

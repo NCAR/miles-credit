@@ -64,7 +64,7 @@ import torch
 import xarray as xr
 from torch.utils.data import Dataset
 
-from credit.datasets._file_utils import _find_file, _map_files
+from credit.datasets._utils import _find_file, _map_files
 
 logger = logging.getLogger(__name__)
 
