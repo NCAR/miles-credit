@@ -18,7 +18,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 import torch
 
-from credit.datasets._file_utils import _map_files  # pyright: ignore[reportPrivateUsage]
+from credit.datasets._utils import _map_files  # pyright: ignore[reportPrivateUsage]
 
 VALID_FIELD_TYPES = Literal["prognostic", "dynamic_forcing", "static", "diagnostic"]
 
@@ -382,7 +382,7 @@ class BaseDataset(Dataset[Any]):
     # 2. Registering fields
 
     def _register_field(self, field_type: VALID_FIELD_TYPES,
-                        field_config: dict[str, Any] | None) -> None:
+                        mode: str, field_config: dict[str, Any] | None) -> None:
         """Validate and register one field type from the config variables block.
 
         Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
@@ -409,9 +409,12 @@ class BaseDataset(Dataset[Any]):
         if not field_config.get("vars_3D") and not field_config.get("vars_2D"):
             raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
 
-        files = sorted(glob(field_config.get("path", "")))
-        time_fmt: str = field_config.get("filename_time_format", "%Y")
-        self.file_dict[field_type] = _map_files(files, time_fmt) if files else None
+        if mode == "local":
+            files = sorted(glob(field_config.get("path", "")))
+            time_fmt: str = field_config.get("filename_time_format", "%Y")
+            self.file_dict[field_type] = _map_files(files, time_fmt) if files else None
+        elif mode == "remote":
+            self.file_dict[field_type] = True
         self.var_dict[field_type] = {
             "vars_3D": field_config.get("vars_3D") or [],
             "vars_2D": field_config.get("vars_2D") or [],
