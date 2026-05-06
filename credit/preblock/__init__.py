@@ -5,7 +5,7 @@ import torch.nn as nn
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
 from credit.preblock.regrid import Regridder
-from credit.preblock.concat import ConcatToTensor
+from credit.preblock.concat import ConcatToTensor, ConcatToTensorV1
 from credit.preblock.norm import ERA5Normalizer
 
 # bridgescaler is an optional dependency; guard against environments without it
@@ -23,6 +23,7 @@ PREBLOCK_REGISTRY = {
     "sqrt_transform": SqrtTransform,
     "regrid": Regridder,
     "concat": ConcatToTensor,
+    "concat_v1": ConcatToTensorV1,
     "era5_normalizer": ERA5Normalizer,
 }
 
@@ -41,22 +42,34 @@ def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
                 'era5_z_transform':   {'type': 'z_transform',   'args': {...}},
             }
 
+    If a block with type ``concat_v1`` is present it is stored under the
+    reserved key ``_concat_override`` and used by ``apply_preblocks`` in place
+    of the default ``ConcatToTensor``.  This is the mechanism for running
+    ``rollout_to_netcdf_gen2.py`` against a V1-trained checkpoint.
+
     Returns:
         nn.ModuleDict of instantiated preblocks, ordered as in config.
     """
-    return nn.ModuleDict(
-        {
-            name: PREBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
-            for name, block_cfg in preblock_cfg.items()
-        }
-    )
+    blocks = {}
+    for name, block_cfg in preblock_cfg.items():
+        block_type = block_cfg["type"]
+        if block_type == "concat_v1":
+            blocks["_concat_override"] = PREBLOCK_REGISTRY["concat_v1"](**(block_cfg.get("args") or {}))
+        else:
+            blocks[name] = PREBLOCK_REGISTRY[block_type](**(block_cfg.get("args") or {}))
+    return nn.ModuleDict(blocks)
 
 
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
     """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
 
-    Concatenation is always performed last via ConcatToTensor and is not configurable.
+    The concat step defaults to ConcatToTensor (V2 channel order: [dynfrc|static|prog]).
+    If build_preblocks stored a ``_concat_override`` (e.g. ConcatToTensorV1), that is
+    used instead, producing [prog|static|dynfrc] for V1-trained model compatibility.
     """
-    for preblock in preblocks.values():
+    for name, preblock in preblocks.items():
+        if name == "_concat_override":
+            continue
         batch = preblock(batch)
-    return PREBLOCK_REGISTRY["concat"]()(batch)
+    concat_fn = preblocks["_concat_override"] if "_concat_override" in preblocks else PREBLOCK_REGISTRY["concat"]()
+    return concat_fn(batch)
