@@ -12,43 +12,37 @@ logger = logging.getLogger(__name__)
 class V1InputAdapter(nn.Module):
     """Wraps a V1-trained model to accept V2-ordered input channels.
 
-    ERA5Dataset inserts channels as [dynfrc | static | prog]. V1-trained models
-    expect [prog | static | dynfrc]. This wrapper permutes x before the model
-    forward so x stays in V2 order everywhere else (trainer, rollout update).
+    Applies a precomputed channel permutation before the forward pass so a
+    model trained on V1 group order [prognostic | static | dynamic_forcing]
+    sees its expected layout.  The permutation is built by _maybe_wrap_v1
+    using build_channel_layout, so it works for any config-defined V2 order.
 
-    Enable with  model.v1_channel_order: true  in the YAML config. Only
-    supports history_len=1 (T=1) inputs.
+    Enable with  model.v1_channel_order: true  in the YAML config.
     """
 
-    def __init__(self, model: nn.Module, n_prog: int, n_static: int, n_dyn: int):
+    def __init__(self, model: nn.Module, perm: torch.Tensor):
         super().__init__()
         self.model = model
-        perm = torch.cat(
-            [
-                torch.arange(n_dyn + n_static, n_dyn + n_static + n_prog),
-                torch.arange(n_dyn, n_dyn + n_static),
-                torch.arange(n_dyn),
-            ]
-        )
         self.register_buffer("_v1_perm", perm)
 
     def forward(self, x, **kwargs):
         return self.model(x[:, self._v1_perm, ...], **kwargs)
 
 
+# V1 trainers concatenated channel groups in this order.
+_V1_GROUP_ORDER = ["prognostic", "static", "dynamic_forcing"]
+
+
 def _maybe_wrap_v1(model: nn.Module, conf: dict, v1_channel_order: bool) -> nn.Module:
     if not v1_channel_order:
         return model
-    src_conf = next(iter(conf["data"]["source"].values()))
-    v = src_conf["variables"]
-    prog = v.get("prognostic") or {}
-    dyn = v.get("dynamic_forcing") or {}
-    sta = v.get("static") or {}
-    n_levels = len(src_conf["levels"])
-    n_prog = len(prog.get("vars_3D", [])) * n_levels + len(prog.get("vars_2D", []))
-    n_dyn = len(dyn.get("vars_2D", []))
-    n_static = len(sta.get("vars_2D", []))
-    return V1InputAdapter(model, n_prog, n_static, n_dyn)
+    from credit.datasets.channel_layout import build_channel_layout
+
+    slices, _ = build_channel_layout(conf)
+    perm = torch.cat(
+        [torch.arange(slices[name].start, slices[name].stop) for name in _V1_GROUP_ORDER if name in slices]
+    )
+    return V1InputAdapter(model, perm)
 
 
 class BaseModel(nn.Module):
