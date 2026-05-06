@@ -9,15 +9,15 @@ Sample structure returned by __getitem__:
 
     {
         "input": {
-            "era5/prognostic/3d/T":        tensor,  # (n_levels, 1, lat, lon)
-            "era5/prognostic/2d/SP":       tensor,  # (1,        1, lat, lon)
-            "era5/dynamic_forcing/2d/tsi": tensor,
-            "era5/static/2d/LSM":          tensor,
+            "{USER_PROVIDE}/era5/prognostic/3d/T":        tensor,  # (n_levels, 1, lat, lon)
+            "{USER_PROVIDE}/era5/prognostic/2d/SP":       tensor,  # (1,        1, lat, lon)
+            "{USER_PROVIDE}/era5/dynamic_forcing/2d/tsi": tensor,
+            "{USER_PROVIDE}/era5/static/2d/LSM":          tensor,
             ...
         },
         "target": {                                  # only when return_target=True
-            "era5/prognostic/3d/T":        tensor,
-            "era5/prognostic/2d/SP":       tensor,
+            "{USER_PROVIDE}/era5/prognostic/3d/T":        tensor,
+            "{USER_PROVIDE}/era5/prognostic/2d/SP":       tensor,
             ...
         },
         "metadata": {
@@ -27,9 +27,9 @@ Sample structure returned by __getitem__:
     }
 
 Output key format (flat, slash-delimited):
-    "{source}/{field_type}/{dim}/{varname}"
+    "{USER_PROVIDE}/{dataset_name}/{field_type}/{dim}/{varname}"
 
-    source    : "era5"
+    dataset_name: "era5"
     field_type: "prognostic" | "dynamic_forcing" | "static" | "diagnostic"
     dim       : "2d"  (surface / single-level)
                 "3d"  (multi-level upper-air)
@@ -82,7 +82,7 @@ class ERA5Dataset(BaseDataset):
 
         data:
           source:
-            ERA5:
+            {USER_PROVIDE}:
               dataset_name: "era5"
               level_coord: "level"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
@@ -123,8 +123,6 @@ class ERA5Dataset(BaseDataset):
             f"Expected dataset_name 'era5' in config for ERA5Dataset, got '{self.curr_source_cfg['dataset_name']}'"
         )
         self.dataset_name = "era5"
-
-        self.source_name: str = "era5"
         self.level_coord: str = self.curr_source_cfg["level_coord"]
         self.levels: list[int] = self.curr_source_cfg["levels"]
         self.return_target: bool = return_target
@@ -132,20 +130,6 @@ class ERA5Dataset(BaseDataset):
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
-
-        # self.dt = pd.Timedelta(data_config["timestep"])
-        # self.num_forecast_steps: int = data_config["forecast_len"]
-
-        # self.start_datetime = pd.Timestamp(data_config["start_datetime"])
-        # self.end_datetime = pd.Timestamp(data_config["end_datetime"])
-        # self.datetimes: pd.DatetimeIndex = self._build_timestamps()
-
-        # # file_dict maps field_type → sorted list of (start, end, path) intervals
-        # self.file_dict: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, str]] | None] = {}
-        # self.var_dict: dict[str, dict[str, list[str]]] = {}
-
-        # for field_type, d in source_cfg["variables"].items():
-        #     self._register_field(field_type, d)
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -165,8 +149,8 @@ class ERA5Dataset(BaseDataset):
     ) -> None:
         """Open the dataset for *field_type* at time *t* and populate *sample*.
 
-        Keys written are ``"era5/{field_type}/3d/{varname}"`` for 3D variables
-        and ``"era5/{field_type}/2d/{varname}"`` for 2D variables.
+        Keys written are ``"{USER_PROVIDE}/{dataset_name}/{field_type}/3d/{varname}"`` for 3D variables
+        and ``"{USER_PROVIDE}/{dataset_name}/{field_type}/2d/{varname}"`` for 2D variables.
 
         Args:
             field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
@@ -220,7 +204,7 @@ class ARCOERA5Dataset(BaseDataset):
 
         data:
           source:
-            ARCO_ERA5:
+            {USER_PROVIDE}:
               dataset_name: "arco_era5"
               level_coord: "hybrid"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
@@ -256,7 +240,6 @@ class ARCOERA5Dataset(BaseDataset):
             f"Expected dataset_name 'arco_era5' in config for ARCOERA5Dataset, got '{self.curr_source_cfg['dataset_name']}'"
         )
         self.dataset_name = "arco_era5"
-
         self.pressure_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
         self.model_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/model-level-1h-0p25deg.zarr-v1"
         self.model_lev_vars = [
@@ -275,7 +258,6 @@ class ARCOERA5Dataset(BaseDataset):
             "vertical_velocity",
             "vorticity",
         ]
-        # self.source_name: str = "arco_era5"
         self.level_coord: str = self.curr_source_cfg[
             "level_coord"
         ]  # hybrid for model levels and level for pressure levels
@@ -292,17 +274,6 @@ class ARCOERA5Dataset(BaseDataset):
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
-
-        # self.dt = pd.Timedelta(data_config["timestep"])
-        # self.num_forecast_steps: int = data_config["forecast_len"]
-
-        # self.start_datetime = pd.Timestamp(data_config["start_datetime"])
-        # self.end_datetime = pd.Timestamp(data_config["end_datetime"])
-        # self.datetimes: pd.DatetimeIndex = self._build_timestamps()
-
-        # # file_dict maps field_type → sorted list of (start, end, path) intervals
-        # self.file_dict: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, str]]] = {}
-        # self.var_dict: dict[str, dict[str, list[str]]] = {}
 
         self.mode = "remote"
 
@@ -336,39 +307,6 @@ class ARCOERA5Dataset(BaseDataset):
         self.pres_level_store = zarr.storage.FsspecStore(fs=self.fs, path=self.pressure_lev_era5_path)
         self.mod_level_store = zarr.storage.FsspecStore(fs=self.fs, path=self.model_lev_era5_path)
 
-    # def _register_field(self, field_type: str, d: dict | None) -> None:
-    #     """
-    #     Validate and register one field type from the config variables block.
-
-    #     Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
-
-    #     Args:
-    #         field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
-    #             ``"static"``, ``"diagnostic"``.
-    #         d: Field-type config dict, or ``None`` / null to disable the field.
-
-    #     Raises:
-    #         KeyError: If *field_type* is not a recognised field type.
-    #         ValueError: If *d* defines neither ``vars_3D`` nor ``vars_2D``.
-    #     """
-    #     if not isinstance(d, dict):
-    #         return
-
-    #     if field_type not in VALID_FIELD_TYPES:
-    #         raise KeyError(
-    #             f"Unknown field_type '{field_type}' in config['source']['ERA5']. "
-    #             f"Valid options are: {sorted(VALID_FIELD_TYPES)}"
-    #         )
-
-    #     if not d.get("vars_3D") and not d.get("vars_2D"):
-    #         raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
-
-    #     self.file_dict[field_type] = True
-    #     self.var_dict[field_type] = {
-    #         "vars_3D": d.get("vars_3D") or [],
-    #         "vars_2D": d.get("vars_2D") or [],
-    #     }
-
     def _extract_field(
         self,
         field_type: str,
@@ -378,8 +316,8 @@ class ARCOERA5Dataset(BaseDataset):
         """
         Open the dataset for *field_type* at time *t* and populate *sample*.
 
-        Keys written are ``"era5/{field_type}/3d/{varname}"`` for 3D variables
-        and ``"era5/{field_type}/2d/{varname}"`` for 2D variables.
+        Keys written are ``"{USER_PROVIDED}/{dataset_name}/{field_type}/3d/{varname}"`` for 3D variables
+        and ``"{USER_PROVIDED}/{dataset_name}/{field_type}/2d/{varname}"`` for 2D variables.
 
         Args:
             field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
