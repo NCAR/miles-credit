@@ -69,7 +69,7 @@ import xarray as xr
 from gcsfs import GCSFileSystem
 import zarr
 
-from credit.datasets._utils import _find_file
+from credit.datasets._utils import _find_file, _to_cftime  # pyright: ignore[reportPrivateUsage]
 from credit.datasets.base_dataset import BaseDataset
 
 
@@ -191,7 +191,7 @@ class ERA5Dataset(BaseDataset):
             if "time" in ds.dims:
                 if isinstance(ds.time.values[0], cftime.datetime):
                     calendar = ds.time.values[0].calendar
-                    t_sel = self._to_cftime(t, calendar)
+                    t_sel = _to_cftime(t, calendar)
                 else:
                     t_sel = t
                 ds_t = ds.sel(time=t_sel)
@@ -202,13 +202,13 @@ class ERA5Dataset(BaseDataset):
             for vname in vars_3D:
                 arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                sample[f"{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
+                sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
 
             # 2D variables: (lat, lon) → (1, 1, lat, lon)
             for vname in vars_2D:
                 arr = ds_t[vname].values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                sample[f"{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
+                sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
 
 
 class ARCOERA5Dataset(BaseDataset):
@@ -403,7 +403,7 @@ class ARCOERA5Dataset(BaseDataset):
                 if "time" in ds.dims:
                     if isinstance(ds.time.values[0], cftime.datetime):
                         calendar = ds.time.values[0].calendar
-                        t_sel = self._to_cftime(t, calendar)
+                        t_sel = _to_cftime(t, calendar)
                     else:
                         t_sel = t
                     ds_t = ds.sel(time=t_sel)
@@ -414,20 +414,20 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_3D:
                     arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                    sample[f"{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
+                    sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
 
                 # 2D variables: (lat, lon) → (1, 1, lat, lon)
                 for vname in vars_2D:
                     arr = ds_t[vname].values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                    sample[f"{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
+                    sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
         else:
             with xr.open_zarr(self.mod_level_store, chunks=None) as ds:
                 # Select the time step; static fields have no time dim
                 if "time" in ds.dims:
                     if isinstance(ds.time.values[0], cftime.datetime):
                         calendar = ds.time.values[0].calendar
-                        t_sel = self._to_cftime(t, calendar)
+                        t_sel = _to_cftime(t, calendar)
                     else:
                         t_sel = t
                     ds_t = ds.sel(time=t_sel)
@@ -438,14 +438,14 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_3D:
                     arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                    sample[f"{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
+                    sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
 
             with xr.open_zarr(self.pres_level_store, chunks=None) as ds:
                 # Select the time step; static fields have no time dim
                 if "time" in ds.dims:
                     if isinstance(ds.time.values[0], cftime.datetime):
                         calendar = ds.time.values[0].calendar
-                        t_sel = self._to_cftime(t, calendar)
+                        t_sel = _to_cftime(t, calendar)
                     else:
                         t_sel = t
                     ds_t = ds.sel(time=t_sel)
@@ -455,4 +455,4 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_2D:
                     arr = ds_t[vname].values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                    sample[f"{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
+                    sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{vname}"] = tensor

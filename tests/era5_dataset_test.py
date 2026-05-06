@@ -94,7 +94,7 @@ def patch_era5_io_multiyear(
 
     monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
 
-    def fake_open_dataset(path: str, **kwargs) -> xr.Dataset:
+    def fake_open_dataset(path: str) -> xr.Dataset:
         for year in (2022, 2023):
             if str(year) in path:
                 return annual_xr_dataset[year]
@@ -120,7 +120,7 @@ def patch_refactor_io_multiyear(
 
     monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
 
-    def fake_open_dataset(path: str, **kwargs) -> xr.Dataset:
+    def fake_open_dataset(path: str) -> xr.Dataset:
         for year in (2022, 2023):
             if str(year) in path:
                 return annual_xr_dataset[year]
@@ -139,7 +139,7 @@ def minimal_config() -> dict[str, Any]:
         "start_datetime": "2022-12-25",
         "end_datetime": "2023-01-05",
         "source": {
-            "ERA5": {
+            "Test_ERA5": {
                 "dataset_name": "era5",
                 "level_coord": "level",
                 "levels": [1000, 850, 500, 300],
@@ -175,7 +175,7 @@ def minimal_arco_era5_config() -> dict[str, Any]:
         "start_datetime": "2022-12-25",
         "end_datetime": "2023-01-05",
         "source": {
-            "ARCO_ERA5": {
+            "Test_ARCO_ERA5": {
                 "dataset_name": "arco_era5",
                 "level_coord": "level",
                 "levels": [1000, 850],
@@ -204,12 +204,12 @@ def minimal_arco_era5_config() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_dataset_len(minimal_config: dict[str, Any], patch_era5_io_multiyear: dict[int, xr.Dataset]):
+def test_dataset_len(minimal_config: dict[str, Any]):
     ds: ERA5Dataset = ERA5Dataset(minimal_config)
     assert len(ds) > 0
 
 
-def test_return_target(minimal_config: dict[str, Any], patch_era5_io_multiyear: dict[int, xr.Dataset]):
+def test_return_target(minimal_config: dict[str, Any]):
     ds: ERA5Dataset = ERA5Dataset(minimal_config, return_target=True)
     t: pd.Timestamp = ds.datetimes[0]
 
@@ -228,10 +228,10 @@ def test_tensor_shapes(minimal_config: dict[str, Any], patch_era5_io_multiyear: 
     x = sample["input"]
     y = sample["target"]
 
-    assert x["era5/prognostic/3d/T"].ndim == 4
-    assert x["era5/prognostic/3d/T"].shape == (4, 1, 21, 41)
-    assert y["era5/prognostic/3d/T"].ndim == x["era5/prognostic/3d/T"].ndim
-    assert y["era5/prognostic/3d/T"].shape == (4, 1, 21, 41)
+    assert x["Test_ERA5/era5/prognostic/3d/T"].ndim == 4
+    assert x["Test_ERA5/era5/prognostic/3d/T"].shape == (4, 1, 21, 41)
+    assert y["Test_ERA5/era5/prognostic/3d/T"].ndim == x["Test_ERA5/era5/prognostic/3d/T"].ndim
+    assert y["Test_ERA5/era5/prognostic/3d/T"].shape == (4, 1, 21, 41)
 
 
 def test_datetimes(minimal_config: dict[str, Any], patch_era5_io_multiyear: dict[int, xr.Dataset]):
@@ -265,11 +265,11 @@ def test_refactor_key_format_step0(minimal_config: dict[str, Any], patch_refacto
     sample: dict[str, Any] = ds[(t, 0)]
 
     inp = sample["input"]
-    assert "era5/prognostic/3d/T" in inp
-    assert "era5/prognostic/3d/U" in inp
-    assert "era5/prognostic/2d/SP" in inp
-    assert "era5/dynamic_forcing/2d/tsi" in inp
-    assert "era5/static/2d/LSM" in inp
+    assert "Test_ERA5/era5/prognostic/3d/T" in inp
+    assert "Test_ERA5/era5/prognostic/3d/U" in inp
+    assert "Test_ERA5/era5/prognostic/2d/SP" in inp
+    assert "Test_ERA5/era5/dynamic_forcing/2d/tsi" in inp
+    assert "Test_ERA5/era5/static/2d/LSM" in inp
     assert "metadata" in sample
 
 
@@ -280,10 +280,10 @@ def test_refactor_key_format_step1(minimal_config: dict[str, Any], patch_refacto
     sample: dict[str, Any] = ds[(t, 1)]
 
     inp = sample["input"]
-    assert "era5/dynamic_forcing/2d/tsi" in inp
-    assert "era5/prognostic/3d/T" not in inp
-    assert "era5/prognostic/2d/SP" not in inp
-    assert "era5/static/2d/LSM" not in inp
+    assert "Test_ERA5/era5/dynamic_forcing/2d/tsi" in inp
+    assert "Test_ERA5/era5/prognostic/3d/T" not in inp
+    assert "Test_ERA5/era5/prognostic/2d/SP" not in inp
+    assert "Test_ERA5/era5/static/2d/LSM" not in inp
     assert "metadata" in sample
 
 
@@ -293,10 +293,10 @@ def test_refactor_3d_tensor_shape(minimal_config: dict[str, Any], patch_refactor
     t: pd.Timestamp = ds.datetimes[0]
     sample: dict[str, Any] = ds[(t, 0)]
 
-    n_levels = len(minimal_config["source"]["ERA5"]["levels"])  # 4
+    n_levels = len(minimal_config["source"]["Test_ERA5"]["levels"])  # 4
     lat, lon = 21, 41
 
-    t_tensor = sample["input"]["era5/prognostic/3d/T"]
+    t_tensor = sample["input"]["Test_ERA5/era5/prognostic/3d/T"]
     assert t_tensor.shape == (n_levels, 1, lat, lon), f"Expected ({n_levels}, 1, {lat}, {lon}), got {t_tensor.shape}"
     assert t_tensor.dtype == torch.float32
 
@@ -309,7 +309,11 @@ def test_refactor_2d_tensor_shape(minimal_config: dict[str, Any], patch_refactor
 
     lat, lon = 21, 41
 
-    for key in ("era5/prognostic/2d/SP", "era5/dynamic_forcing/2d/tsi", "era5/static/2d/LSM"):
+    for key in (
+        "Test_ERA5/era5/prognostic/2d/SP",
+        "Test_ERA5/era5/dynamic_forcing/2d/tsi",
+        "Test_ERA5/era5/static/2d/LSM",
+    ):
         assert key in sample["input"]
         tensor = sample["input"][key]
         assert tensor.shape == (1, 1, lat, lon), f"{key}: expected (1, 1, {lat}, {lon}), got {tensor.shape}"
@@ -345,13 +349,13 @@ def test_refactor_target_keys(minimal_config: dict[str, Any], patch_refactor_io_
     sample: dict[str, Any] = ds[(t, 0)]
 
     tgt = sample["target"]
-    assert "era5/prognostic/3d/T" in tgt
-    assert "era5/prognostic/3d/U" in tgt
-    assert "era5/prognostic/2d/SP" in tgt
-    assert "era5/diagnostic/2d/TP" in tgt
+    assert "Test_ERA5/era5/prognostic/3d/T" in tgt
+    assert "Test_ERA5/era5/prognostic/3d/U" in tgt
+    assert "Test_ERA5/era5/prognostic/2d/SP" in tgt
+    assert "Test_ERA5/era5/diagnostic/2d/TP" in tgt
     # static and dynamic_forcing should not appear in target
-    assert "era5/static/2d/LSM" not in tgt
-    assert "era5/dynamic_forcing/2d/tsi" not in tgt
+    assert "Test_ERA5/era5/static/2d/LSM" not in tgt
+    assert "Test_ERA5/era5/dynamic_forcing/2d/tsi" not in tgt
 
 
 def test_refactor_target_tensor_shapes(
@@ -362,13 +366,13 @@ def test_refactor_target_tensor_shapes(
     t: pd.Timestamp = ds.datetimes[0]
     sample: dict[str, Any] = ds[(t, 0)]
 
-    n_levels = len(minimal_config["source"]["ERA5"]["levels"])  # 4
+    n_levels = len(minimal_config["source"]["Test_ERA5"]["levels"])  # 4
     lat, lon = 21, 41
 
     tgt = sample["target"]
-    assert tgt["era5/prognostic/3d/T"].shape == (n_levels, 1, lat, lon)
-    assert tgt["era5/prognostic/2d/SP"].shape == (1, 1, lat, lon)
-    assert tgt["era5/diagnostic/2d/TP"].shape == (1, 1, lat, lon)
+    assert tgt["Test_ERA5/era5/prognostic/3d/T"].shape == (n_levels, 1, lat, lon)
+    assert tgt["Test_ERA5/era5/prognostic/2d/SP"].shape == (1, 1, lat, lon)
+    assert tgt["Test_ERA5/era5/diagnostic/2d/TP"].shape == (1, 1, lat, lon)
 
 
 def test_refactor_metadata_datetimes(
@@ -396,7 +400,7 @@ def test_refactor_static_metadata(minimal_config: dict[str, Any], patch_refactor
     ds: ERA5Dataset = ERA5Dataset(minimal_config, return_target=False)
 
     assert hasattr(ds, "static_metadata")
-    assert ds.static_metadata["levels"] == minimal_config["source"]["ERA5"]["levels"]
+    assert ds.static_metadata["levels"] == minimal_config["source"]["Test_ERA5"]["levels"]
     assert ds.static_metadata["datetime_fmt"] == "unix_ns"
 
 
@@ -406,15 +410,15 @@ def test_refactor_null_diagnostic(
     """Setting diagnostic: null in config should produce an empty target for that field."""
     cfg = dict(minimal_config)
     cfg["source"] = dict(minimal_config["source"])
-    cfg["source"]["ERA5"] = dict(minimal_config["source"]["ERA5"])
-    cfg["source"]["ERA5"]["variables"] = dict(minimal_config["source"]["ERA5"]["variables"])
-    cfg["source"]["ERA5"]["variables"]["diagnostic"] = None
+    cfg["source"]["Test_ERA5"] = dict(minimal_config["source"]["Test_ERA5"])
+    cfg["source"]["Test_ERA5"]["variables"] = dict(minimal_config["source"]["Test_ERA5"]["variables"])
+    cfg["source"]["Test_ERA5"]["variables"]["diagnostic"] = None
 
     ds: ERA5Dataset = ERA5Dataset(cfg, return_target=True)
     t: pd.Timestamp = ds.datetimes[0]
     sample: dict[str, Any] = ds[(t, 0)]
 
-    assert "era5/diagnostic/2d/TP" not in sample["target"]
+    assert "Test_ERA5/era5/diagnostic/2d/TP" not in sample["target"]
 
 
 def test_refactor_dataloader_default_collate(
@@ -444,29 +448,29 @@ def test_refactor_dataloader_default_collate(
 
     batch = next(iter(loader))
 
-    n_levels = len(minimal_config["source"]["ERA5"]["levels"])  # 4
+    n_levels = len(minimal_config["source"]["Test_ERA5"]["levels"])  # 4
     lat, lon = 21, 41
 
-    if "era5/prognostic/3d/T" in batch["input"]:
-        assert batch["input"]["era5/prognostic/3d/T"].shape == (2, n_levels, 1, lat, lon)
-    if "era5/dynamic_forcing/2d/tsi" in batch["input"]:
-        assert batch["input"]["era5/dynamic_forcing/2d/tsi"].shape == (2, 1, 1, lat, lon)
-    if "era5/prognostic/3d/T" in batch["target"]:
-        assert batch["target"]["era5/prognostic/3d/T"].shape == (2, n_levels, 1, lat, lon)
+    if "Test_ERA5/era5/prognostic/3d/T" in batch["input"]:
+        assert batch["input"]["Test_ERA5/era5/prognostic/3d/T"].shape == (2, n_levels, 1, lat, lon)
+    if "Test_ERA5/era5/dynamic_forcing/2d/tsi" in batch["input"]:
+        assert batch["input"]["Test_ERA5/era5/dynamic_forcing/2d/tsi"].shape == (2, 1, 1, lat, lon)
+    if "Test_ERA5/era5/prognostic/3d/T" in batch["target"]:
+        assert batch["target"]["Test_ERA5/era5/prognostic/3d/T"].shape == (2, n_levels, 1, lat, lon)
 
 
-def test_arco_era5_single_load(minimal_arco_era5_config):
+def test_arco_era5_single_load(minimal_arco_era5_config: dict[str, Any]):
     arco_ds: ARCOERA5Dataset = ARCOERA5Dataset(minimal_arco_era5_config, return_target=True)
     sample = arco_ds[(pd.Timestamp("2022-12-31 00:00"), 0)]
     assert isinstance(sample, dict)
     assert "input" in sample
     assert "metadata" in sample
     assert "target" in sample
-    assert sample["input"]["arco_era5/prognostic/3d/temperature"].shape == (
-        len(minimal_arco_era5_config["source"]["ARCO_ERA5"]["levels"]),
+    assert sample["input"]["Test_ARCO_ERA5/arco_era5/prognostic/3d/temperature"].shape == (
+        len(minimal_arco_era5_config["source"]["Test_ARCO_ERA5"]["levels"]),
         1,
         721,
         1440,
     )
-    assert sample["target"]["arco_era5/prognostic/3d/temperature"].min() > 200
-    assert ~torch.any(torch.isnan(sample["target"]["arco_era5/prognostic/3d/temperature"]))
+    assert sample["target"]["Test_ARCO_ERA5/arco_era5/prognostic/3d/temperature"].min() > 200
+    assert ~torch.any(torch.isnan(sample["target"]["Test_ARCO_ERA5/arco_era5/prognostic/3d/temperature"]))
