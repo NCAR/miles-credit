@@ -61,15 +61,14 @@ def build_preblocks(preblock_cfg: dict) -> nn.ModuleDict:
 
 
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
-    """Sequentially applies transform preblocks (dict→dict), then concatenates to tensors.
+    """Sequentially applies transform preblocks (dict→dict).
 
-    The concat step defaults to ConcatToTensor (V2 channel order: [dynfrc|static|prog]).
-    If build_preblocks stored a ``_concat_override`` (e.g. ConcatToTensorV1), that is
-    used instead, producing [prog|static|dynfrc] for V1-trained model compatibility.
+    Skips the reserved ``_concat_override`` key — that entry is used by callers
+    (e.g. rollout_to_netcdf_gen2) to select the right ConcatToTensor variant;
+    it is not itself a transform preblock.
     """
     for name, preblock in preblocks.items():
         if name == "_concat_override":
             continue
         batch = preblock(batch)
-    concat_fn = preblocks["_concat_override"] if "_concat_override" in preblocks else PREBLOCK_REGISTRY["concat"]()
-    return concat_fn(batch)
+    return batch

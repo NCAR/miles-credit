@@ -255,17 +255,18 @@ def _convert(args: argparse.Namespace) -> None:
     print()
 
     # ------------------------------------------------------------------
-    # V1 checkpoint compatibility
+    # V1 checkpoint compatibility (only relevant when loading weights)
     # ------------------------------------------------------------------
-    print("  --- V1 checkpoint compatibility ---")
-    has_v1_ckpt = prompt_bool(
-        "Are you loading a V1-trained checkpoint (fine-tune or rollout with pretrained weights)?",
-        default=False,
-    )
-    if has_v1_ckpt:
-        conf.setdefault("preblocks", {})["v1_compat"] = {"type": "concat_v1"}
-        print("    + preblocks.v1_compat: concat_v1  (reorders channels to V1 trainer order)")
-    print()
+    if conf.get("trainer", {}).get("load_weights", False):
+        print("  --- V1 checkpoint compatibility ---")
+        has_v1_ckpt = prompt_bool(
+            "Is this checkpoint from the V1 trainer (ERA5_MultiStep_Batcher)?",
+            default=False,
+        )
+        if has_v1_ckpt:
+            conf.setdefault("preblocks", {})["v1_compat"] = {"type": "concat_v1"}
+            print("    + preblocks.v1_compat: concat_v1  (reorders channels to V1 trainer order)")
+        print()
 
     # ------------------------------------------------------------------
     # Ensemble detection
