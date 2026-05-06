@@ -58,6 +58,8 @@ class ConcatToTensor(BasePreblock):
     """
 
     def forward(self, batch):
+        if isinstance(batch, tuple):
+            return batch
         input_tensors = []
         target_tensors = []
         metadata = {}
