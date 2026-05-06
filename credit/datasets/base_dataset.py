@@ -151,8 +151,11 @@ class BaseDataset(Dataset[Any]):
         )
 
         # By default, we suggest that the inherited dataset use both file_dict and var_dict.
-        # file_dict maps field_type to sorted list of (start, end, path) intervals.
-        # var_dict handles the 3D and 2D variables for each field type.
+        # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
+        #   tuples produced by _map_files. _extract_field can then use the list to find the 
+        #   appropriate file for a given timestamp.
+        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field 
+        #   can then use this to know which variables to extract for each field type from the file.
         #
         # TO-DO: Better description and type hints for these dicts.
         self.file_dict: dict[str, Any] = {}
