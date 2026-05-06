@@ -9,6 +9,48 @@ from credit.models.checkpoint import load_state_dict_error_handler
 logger = logging.getLogger(__name__)
 
 
+class V1InputAdapter(nn.Module):
+    """Wraps a V1-trained model to accept V2-ordered input channels.
+
+    ERA5Dataset inserts channels as [dynfrc | static | prog]. V1-trained models
+    expect [prog | static | dynfrc]. This wrapper permutes x before the model
+    forward so x stays in V2 order everywhere else (trainer, rollout update).
+
+    Enable with  model.v1_channel_order: true  in the YAML config. Only
+    supports history_len=1 (T=1) inputs.
+    """
+
+    def __init__(self, model: nn.Module, n_prog: int, n_static: int, n_dyn: int):
+        super().__init__()
+        self.model = model
+        perm = torch.cat(
+            [
+                torch.arange(n_dyn + n_static, n_dyn + n_static + n_prog),
+                torch.arange(n_dyn, n_dyn + n_static),
+                torch.arange(n_dyn),
+            ]
+        )
+        self.register_buffer("_v1_perm", perm)
+
+    def forward(self, x, **kwargs):
+        return self.model(x[:, self._v1_perm, ...], **kwargs)
+
+
+def _maybe_wrap_v1(model: nn.Module, conf: dict, v1_channel_order: bool) -> nn.Module:
+    if not v1_channel_order:
+        return model
+    src_conf = next(iter(conf["data"]["source"].values()))
+    v = src_conf["variables"]
+    prog = v.get("prognostic") or {}
+    dyn = v.get("dynamic_forcing") or {}
+    sta = v.get("static") or {}
+    n_levels = len(src_conf["levels"])
+    n_prog = len(prog.get("vars_3D", [])) * n_levels + len(prog.get("vars_2D", []))
+    n_dyn = len(dyn.get("vars_2D", []))
+    n_static = len(sta.get("vars_2D", []))
+    return V1InputAdapter(model, n_prog, n_static, n_dyn)
+
+
 class BaseModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -76,6 +118,7 @@ class BaseModel(nn.Module):
 
         if "type" in conf["model"]:
             del conf["model"]["type"]
+        v1 = conf["model"].pop("v1_channel_order", False)
 
         model_class = cls(**conf["model"])
         if "model_state_dict" in checkpoint.keys():
@@ -84,7 +127,7 @@ class BaseModel(nn.Module):
             load_msg = model_class.load_state_dict(checkpoint, strict=False)
         load_state_dict_error_handler(load_msg)
 
-        return model_class
+        return _maybe_wrap_v1(model_class, conf, v1)
 
     @classmethod
     def load_model_name(cls, conf, model_name):
@@ -110,13 +153,14 @@ class BaseModel(nn.Module):
 
         if "type" in conf["model"]:
             del conf["model"]["type"]
+        v1 = conf["model"].pop("v1_channel_order", False)
 
         model_class = cls(**conf["model"])
 
         load_msg = model_class.load_state_dict(checkpoint if fsdp else checkpoint["model_state_dict"], strict=False)
         load_state_dict_error_handler(load_msg)
 
-        return model_class
+        return _maybe_wrap_v1(model_class, conf, v1)
 
     def save_model(self, conf):
         save_loc = os.path.expandvars(conf["save_loc"])
