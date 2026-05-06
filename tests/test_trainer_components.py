@@ -316,6 +316,7 @@ def _era5_gen2_conf(**overrides):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
+    base["preblocks"] = {"concat": {"type": "concat"}}
     base.update(overrides)
     return base
 
