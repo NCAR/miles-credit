@@ -3,11 +3,6 @@ concat.py
 ---------
 ConcatToTensor: end-of-chain preblock that collapses a nested batch dict into a
 flat (x, y, metadata) tuple. Used by build_preblocks/apply_preblocks.
-
-ConcatToTensorV1: same, but concatenates in V1-trainer channel order
-[prog | static | dynfrc] instead of ERA5Dataset insertion order
-[dynfrc | static | prog].  Use this when running rollout_to_netcdf_gen2.py
-with a checkpoint that was trained by the V1 trainer (ERA5_MultiStep_Batcher).
 """
 
 import torch
@@ -15,9 +10,6 @@ from credit.preblock.base import BasePreblock
 
 # Field types the model predicts (used to build the "output" channel map).
 _PREDICTABLE_FIELD_TYPES = {"prognostic", "diagnostic"}
-
-# V1 trainer concatenation order: prognostic first, then static, then dynamic_forcing.
-_V1_FIELD_ORDER = ("prognostic", "diagnostic", "static", "dynamic_forcing")
 
 
 class ConcatToTensor(BasePreblock):
@@ -100,90 +92,6 @@ class ConcatToTensor(BasePreblock):
                 elif data_type == "target":
                     for tensor in variables.values():
                         target_tensors.append(tensor)
-
-        if not input_tensors:
-            raise ValueError("No 'input' tensors found in batch.")
-
-        metadata["_channel_map"] = {
-            "input": input_channel_map,
-            "output": output_channel_map,
-        }
-
-        input_tensor = torch.cat(input_tensors, dim=1)
-
-        if target_tensors:
-            target_tensor = torch.cat(target_tensors, dim=1)
-            return input_tensor, target_tensor, metadata
-
-        return input_tensor, metadata
-
-
-class ConcatToTensorV1(BasePreblock):
-    """Concat preblock that produces V1-trainer channel order: [prog | static | dynfrc].
-
-    ERA5Dataset inserts keys in [dynfrc | static | prog] order.  This block
-    regroups them so that a checkpoint trained with the V1 trainer
-    (ERA5_MultiStep_Batcher) receives channels in the order it expects.
-
-    Within each group the original ERA5Dataset insertion order is preserved,
-    so U/V/T/Q level ordering and surface variable ordering are unchanged.
-
-    Use this as the ``concat_v1`` preblock in a V2 rollout config that targets
-    a V1-trained model::
-
-        preblocks:
-          norm:
-            type: era5_normalizer
-            args: {mean_path: ..., std_path: ...}
-          v1_compat:
-            type: concat_v1
-    """
-
-    def forward(self, batch):
-        groups = {ft: [] for ft in _V1_FIELD_ORDER}
-        metadata = {}
-        target_tensors = []
-
-        for source, data_types in batch.items():
-            for data_type, variables in data_types.items():
-                if data_type == "metadata":
-                    metadata[source] = variables
-                elif data_type == "input":
-                    for var_key, tensor in variables.items():
-                        # Key format: source/field_type/dim/varname
-                        parts = var_key.split("/")
-                        field_type = parts[1] if len(parts) >= 2 else "prognostic"
-                        if field_type in groups:
-                            groups[field_type].append((var_key, tensor))
-                        else:
-                            groups["prognostic"].append((var_key, tensor))
-                elif data_type == "target":
-                    for tensor in variables.values():
-                        target_tensors.append(tensor)
-
-        input_tensors = []
-        input_channel_map = {}
-        output_channel_map = {}
-        input_cursor = 0
-        output_cursor = 0
-
-        for field_type in _V1_FIELD_ORDER:
-            for var_key, tensor in groups[field_type]:
-                input_tensors.append(tensor)
-                n_levels, T = tensor.shape[1], tensor.shape[2]
-                n_ch = n_levels * T
-                input_channel_map[var_key] = {
-                    "slice": slice(input_cursor, input_cursor + n_ch),
-                    "orig_shape": (n_levels, T),
-                }
-                input_cursor += n_ch
-                parts = var_key.split("/")
-                if len(parts) >= 2 and parts[1] in _PREDICTABLE_FIELD_TYPES:
-                    output_channel_map[var_key] = {
-                        "slice": slice(output_cursor, output_cursor + n_ch),
-                        "orig_shape": (n_levels, T),
-                    }
-                    output_cursor += n_ch
 
         if not input_tensors:
             raise ValueError("No 'input' tensors found in batch.")

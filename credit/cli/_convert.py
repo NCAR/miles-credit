@@ -264,8 +264,8 @@ def _convert(args: argparse.Namespace) -> None:
             default=False,
         )
         if has_v1_ckpt:
-            conf.setdefault("preblocks", {})["v1_compat"] = {"type": "concat_v1"}
-            print("    + preblocks.v1_compat: concat_v1  (reorders channels to V1 trainer order)")
+            conf.setdefault("model", {})["v1_channel_order"] = True
+            print("    + model.v1_channel_order: true  (wraps model to permute channels to V1 trainer order)")
         print()
 
     # ------------------------------------------------------------------
