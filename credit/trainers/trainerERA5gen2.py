@@ -9,7 +9,7 @@ import tqdm
 
 import optuna
 
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.preblock.concat import ConcatToTensor
 from credit.datasets.channel_layout import build_channel_layout, update_x
