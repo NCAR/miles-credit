@@ -54,6 +54,19 @@ def build_preblocks(preblock_cfg: dict | None = None) -> nn.ModuleDict:
 
 def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
     """Sequentially applies transform preblocks (dict→dict)."""
+    if not preblocks:
+        raise RuntimeError(
+            'No preblocks configured. "preblocks" must be present in the config, with "concat" as the final preblock.'
+        )
+    meta = None
     for preblock in preblocks.values():
-        batch = preblock(batch)
-    return batch
+        result = preblock(batch)
+        if isinstance(result, tuple):
+            batch, meta = result
+        else:
+            batch = result
+    if meta is None:
+        raise RuntimeError(
+            'Metadata missing. "concat" must be present as the final preblock to concatenate data and prepare metadata.'
+        )
+    return batch, meta

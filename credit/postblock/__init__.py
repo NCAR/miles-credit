@@ -65,10 +65,18 @@ def apply_postblocks(postblocks: nn.ModuleDict, y_pred: torch.Tensor, metadata: 
         transformed by registered postblocks.
     """
 
-    for postblock in postblocks.values():
-        if isinstance(postblock, Reconstruct):
-            y_pred = postblock(y_pred, metadata)
-        else:
-            y_pred = postblock(y_pred)
-
+    blocks = list(postblocks.values())
+    if not blocks:
+        raise RuntimeError(
+            'No postblocks configured. "postblocks" must be present in the config, '
+            'with "reconstruct" as the first postblock.'
+        )
+    if not isinstance(blocks[0], Reconstruct):
+        raise RuntimeError(
+            '"reconstruct" must be present as the first postblock '
+            "to reconstruct the output tensor into a named variable dict."
+        )
+    y_pred = blocks[0](y_pred, metadata)
+    for postblock in blocks[1:]:
+        y_pred = postblock(y_pred)
     return y_pred
