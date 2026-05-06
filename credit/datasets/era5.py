@@ -9,15 +9,15 @@ Sample structure returned by __getitem__:
 
     {
         "input": {
-            "{USER_PROVIDE}/era5/prognostic/3d/T":        tensor,  # (n_levels, 1, lat, lon)
-            "{USER_PROVIDE}/era5/prognostic/2d/SP":       tensor,  # (1,        1, lat, lon)
-            "{USER_PROVIDE}/era5/dynamic_forcing/2d/tsi": tensor,
-            "{USER_PROVIDE}/era5/static/2d/LSM":          tensor,
+            "{USER_PROVIDED}/era5/prognostic/3d/T":        tensor,  # (n_levels, 1, lat, lon)
+            "{USER_PROVIDED}/era5/prognostic/2d/SP":       tensor,  # (1,        1, lat, lon)
+            "{USER_PROVIDED}/era5/dynamic_forcing/2d/tsi": tensor,
+            "{USER_PROVIDED}/era5/static/2d/LSM":          tensor,
             ...
         },
         "target": {                                  # only when return_target=True
-            "{USER_PROVIDE}/era5/prognostic/3d/T":        tensor,
-            "{USER_PROVIDE}/era5/prognostic/2d/SP":       tensor,
+            "{USER_PROVIDED}/era5/prognostic/3d/T":        tensor,
+            "{USER_PROVIDED}/era5/prognostic/2d/SP":       tensor,
             ...
         },
         "metadata": {
@@ -27,7 +27,7 @@ Sample structure returned by __getitem__:
     }
 
 Output key format (flat, slash-delimited):
-    "{USER_PROVIDE}/{dataset_name}/{field_type}/{dim}/{varname}"
+    "{USER_PROVIDED}/{dataset_name}/{field_type}/{dim}/{varname}"
 
     dataset_name: "era5"
     field_type: "prognostic" | "dynamic_forcing" | "static" | "diagnostic"
@@ -82,7 +82,7 @@ class ERA5Dataset(BaseDataset):
 
         data:
           source:
-            {USER_PROVIDE}:
+            {USER_PROVIDED}:
               dataset_name: "era5"
               level_coord: "level"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
@@ -149,8 +149,8 @@ class ERA5Dataset(BaseDataset):
     ) -> None:
         """Open the dataset for *field_type* at time *t* and populate *sample*.
 
-        Keys written are ``"{USER_PROVIDE}/{dataset_name}/{field_type}/3d/{varname}"`` for 3D variables
-        and ``"{USER_PROVIDE}/{dataset_name}/{field_type}/2d/{varname}"`` for 2D variables.
+        Keys written are ``"{USER_PROVIDED}/{dataset_name}/{field_type}/3d/{varname}"`` for 3D variables
+        and ``"{USER_PROVIDED}/{dataset_name}/{field_type}/2d/{varname}"`` for 2D variables.
 
         Args:
             field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
@@ -204,7 +204,7 @@ class ARCOERA5Dataset(BaseDataset):
 
         data:
           source:
-            {USER_PROVIDE}:
+            {USER_PROVIDED}:
               dataset_name: "arco_era5"
               level_coord: "hybrid"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
