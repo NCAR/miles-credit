@@ -17,7 +17,6 @@ dependencies = [
     "scikit-learn",
     "h5py<=3.14.0",
     "pyarrow",
-    "pysteps",
     "xarray",
     "netcdf4",
     "h5netcdf",

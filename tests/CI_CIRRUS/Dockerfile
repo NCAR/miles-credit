@@ -25,7 +25,7 @@ RUN echo ". ${CONDA_DIR}/etc/profile.d/conda.sh" >> /etc/bash.bashrc
 
 # Create Conda environment with Python + pysteps + build tools
 RUN conda create -n credit python=3.11 -c conda-forge -y && \
-    conda run -n credit conda install -c conda-forge pysteps pip setuptools wheel esmf esmpy yaml -y && \
+    conda run -n credit conda install -c conda-forge pip setuptools wheel esmf esmpy yaml -y && \
     conda clean -afy && \
     conda run -n credit python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
 #    conda install -n credit -y -c conda-forge "hdf5=*=nompi_*" "libnetcdf=*=nompi_*" "netcdf4=*=nompi_*" && \
