@@ -9,42 +9,6 @@ from credit.models.checkpoint import load_state_dict_error_handler
 logger = logging.getLogger(__name__)
 
 
-class V1InputAdapter(nn.Module):
-    """Wraps a V1-trained model to accept V2-ordered input channels.
-
-    Applies a precomputed channel permutation before the forward pass so a
-    model trained on V1 group order [prognostic | static | dynamic_forcing]
-    sees its expected layout.  The permutation is built by _maybe_wrap_v1
-    using build_channel_layout, so it works for any config-defined V2 order.
-
-    Enable with  model.v1_channel_order: true  in the YAML config.
-    """
-
-    def __init__(self, model: nn.Module, perm: torch.Tensor):
-        super().__init__()
-        self.model = model
-        self.register_buffer("_v1_perm", perm)
-
-    def forward(self, x, **kwargs):
-        return self.model(x[:, self._v1_perm, ...], **kwargs)
-
-
-# V1 trainers concatenated channel groups in this order.
-_V1_GROUP_ORDER = ["prognostic", "static", "dynamic_forcing"]
-
-
-def _maybe_wrap_v1(model: nn.Module, conf: dict, v1_channel_order: bool) -> nn.Module:
-    if not v1_channel_order:
-        return model
-    from credit.datasets.channel_layout import build_channel_layout
-
-    slices, _ = build_channel_layout(conf)
-    perm = torch.cat(
-        [torch.arange(slices[name].start, slices[name].stop) for name in _V1_GROUP_ORDER if name in slices]
-    )
-    return V1InputAdapter(model, perm)
-
-
 class BaseModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -112,7 +76,6 @@ class BaseModel(nn.Module):
 
         if "type" in conf["model"]:
             del conf["model"]["type"]
-        v1 = conf["model"].pop("v1_channel_order", False)
 
         model_class = cls(**conf["model"])
         if "model_state_dict" in checkpoint.keys():
@@ -121,7 +84,7 @@ class BaseModel(nn.Module):
             load_msg = model_class.load_state_dict(checkpoint, strict=False)
         load_state_dict_error_handler(load_msg)
 
-        return _maybe_wrap_v1(model_class, conf, v1)
+        return model_class
 
     @classmethod
     def load_model_name(cls, conf, model_name):
@@ -147,14 +110,13 @@ class BaseModel(nn.Module):
 
         if "type" in conf["model"]:
             del conf["model"]["type"]
-        v1 = conf["model"].pop("v1_channel_order", False)
 
         model_class = cls(**conf["model"])
 
         load_msg = model_class.load_state_dict(checkpoint if fsdp else checkpoint["model_state_dict"], strict=False)
         load_state_dict_error_handler(load_msg)
 
-        return _maybe_wrap_v1(model_class, conf, v1)
+        return model_class
 
     def save_model(self, conf):
         save_loc = os.path.expandvars(conf["save_loc"])

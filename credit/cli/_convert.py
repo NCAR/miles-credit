@@ -255,20 +255,6 @@ def _convert(args: argparse.Namespace) -> None:
     print()
 
     # ------------------------------------------------------------------
-    # V1 checkpoint compatibility (only relevant when loading weights)
-    # ------------------------------------------------------------------
-    if conf.get("trainer", {}).get("load_weights", False):
-        print("  --- V1 checkpoint compatibility ---")
-        has_v1_ckpt = prompt_bool(
-            "Is this checkpoint from the V1 trainer (ERA5_MultiStep_Batcher)?",
-            default=False,
-        )
-        if has_v1_ckpt:
-            conf.setdefault("model", {})["v1_channel_order"] = True
-            print("    + model.v1_channel_order: true  (wraps model to permute channels to V1 trainer order)")
-        print()
-
-    # ------------------------------------------------------------------
     # Ensemble detection
     # ------------------------------------------------------------------
     ensemble_size = conf.get("trainer", {}).get("ensemble_size", 1)

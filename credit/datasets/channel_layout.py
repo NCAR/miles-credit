@@ -25,8 +25,8 @@ Usage
 # Groups absent from the config are ignored; unknown groups sort to the end.
 FIELD_TYPE_RANK: dict[str, int] = {
     "prognostic": 0,
-    "dynamic_forcing": 1,
-    "static": 2,
+    "static": 1,
+    "dynamic_forcing": 2,
     "diagnostic": 3,
 }
 
