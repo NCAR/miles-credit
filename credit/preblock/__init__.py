@@ -77,4 +77,7 @@ def apply_preblocks(preblocks: nn.ModuleDict, batch: dict):
         raise RuntimeError(
             'Metadata missing. "concat" must be present as the final preblock to concatenate data and prepare metadata.'
         )
-    return batch, target, meta
+    out = {"input": batch, "meta": meta}
+    if target is not None:
+        out["target"] = target
+    return out
