@@ -215,20 +215,6 @@ def _build_pbs_script(
                 MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
 
                 export CUDA_VISIBLE_DEVICES={cuda_devices}
-                export MPICH_GPU_SUPPORT_ENABLED=1
-                export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
-                export MPICH_OFI_NIC_POLICY=GPU
-                export MPICH_RDMA_ENABLED_CUDA=1
-                export NCCL_SOCKET_IFNAME=hsn
-                export NCCL_IB_DISABLE=1
-                export NCCL_CROSS_NIC=1
-                export NCCL_NCHANNELS_PER_NET_PEER=4
-                export NCCL_NET="AWS Libfabric"
-                export NCCL_NET_GDR_LEVEL=PBH
-                export FI_CXI_DISABLE_HOST_REGISTER=1
-                export FI_CXI_OPTIMIZED_MRS=false
-                export FI_MR_CACHE_MONITOR=userfaultfd
-                export FI_CXI_DEFAULT_CQ_SIZE=131072
 
                 MASTER_ADDR=${{head_node_ip}} MASTER_PORT=${{MASTER_PORT}} \\
                 mpiexec -n "${{total_gpus}}" --ppn {args.gpus} --cpu-bind none \\
