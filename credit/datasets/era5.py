@@ -59,18 +59,17 @@ File naming:
 
 from __future__ import annotations
 
+from typing import Any
+
 import cftime
-import logging
-from glob import glob
 
 import pandas as pd
 import torch
 import xarray as xr
 from gcsfs import GCSFileSystem
 import zarr
-from torch.utils.data import Dataset
 
-from credit.datasets._utils import _find_file, _map_files, _to_cftime
+from credit.datasets._utils import _find_file
 from credit.datasets.base_dataset import BaseDataset
 
 
@@ -84,6 +83,7 @@ class ERA5Dataset(BaseDataset):
         data:
           source:
             ERA5:
+              dataset_name: "era5"
               level_coord: "level"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
               variables:
@@ -115,31 +115,37 @@ class ERA5Dataset(BaseDataset):
            (time, latitude, longitude) for 2D; (latitude, longitude) for static.
     """
 
-    def __init__(self, config: dict, return_target: bool = False) -> None:
-        source_cfg = config["source"]["ERA5"]
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        # Super constructor to inherit common config parsing and timestamp generation logic
+        super().__init__(data_config, return_target)
+
+        assert self.curr_source_cfg["dataset_name"] == "era5", (
+            f"Expected dataset_name 'era5' in config for ERA5Dataset, got '{self.curr_source_cfg['dataset_name']}'"
+        )
+        self.dataset_name = "era5"
 
         self.source_name: str = "era5"
-        self.level_coord: str = source_cfg["level_coord"]
-        self.levels: list[int] = source_cfg["levels"]
+        self.level_coord: str = self.curr_source_cfg["level_coord"]
+        self.levels: list[int] = self.curr_source_cfg["levels"]
         self.return_target: bool = return_target
-        self.static_metadata: dict = {
+        self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
 
-        self.dt = pd.Timedelta(config["timestep"])
-        self.num_forecast_steps: int = config["forecast_len"]
+        # self.dt = pd.Timedelta(data_config["timestep"])
+        # self.num_forecast_steps: int = data_config["forecast_len"]
 
-        self.start_datetime = pd.Timestamp(config["start_datetime"])
-        self.end_datetime = pd.Timestamp(config["end_datetime"])
-        self.datetimes: pd.DatetimeIndex = self._build_timestamps()
+        # self.start_datetime = pd.Timestamp(data_config["start_datetime"])
+        # self.end_datetime = pd.Timestamp(data_config["end_datetime"])
+        # self.datetimes: pd.DatetimeIndex = self._build_timestamps()
 
-        # file_dict maps field_type → sorted list of (start, end, path) intervals
-        self.file_dict: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, str]] | None] = {}
-        self.var_dict: dict[str, dict[str, list[str]]] = {}
+        # # file_dict maps field_type → sorted list of (start, end, path) intervals
+        # self.file_dict: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, str]] | None] = {}
+        # self.var_dict: dict[str, dict[str, list[str]]] = {}
 
-        for field_type, d in source_cfg["variables"].items():
-            self._register_field(field_type, "local", d)
+        # for field_type, d in source_cfg["variables"].items():
+        #     self._register_field(field_type, d)
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -155,7 +161,7 @@ class ERA5Dataset(BaseDataset):
         self,
         field_type: str,
         t: pd.Timestamp,
-        sample: dict,
+        sample: dict[str, Any],
     ) -> None:
         """Open the dataset for *field_type* at time *t* and populate *sample*.
 
@@ -196,13 +202,13 @@ class ERA5Dataset(BaseDataset):
             for vname in vars_3D:
                 arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                sample[f"{self.source_name}/{field_type}/3d/{vname}"] = tensor
+                sample[f"{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
 
             # 2D variables: (lat, lon) → (1, 1, lat, lon)
             for vname in vars_2D:
                 arr = ds_t[vname].values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
+                sample[f"{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
 
 
 class ARCOERA5Dataset(BaseDataset):
@@ -215,6 +221,7 @@ class ARCOERA5Dataset(BaseDataset):
         data:
           source:
             ARCO_ERA5:
+              dataset_name: "arco_era5"
               level_coord: "hybrid"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
               variables:
@@ -241,8 +248,15 @@ class ARCOERA5Dataset(BaseDataset):
            (time, latitude, longitude) for 2D; (latitude, longitude) for static.
     """
 
-    def __init__(self, data_config: dict, return_target: bool = False) -> None:
-        source_cfg = data_config["source"]["ARCO_ERA5"]
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        # Super constructor to inherit common config parsing and timestamp generation logic
+        super().__init__(data_config, return_target)
+
+        assert self.curr_source_cfg["dataset_name"] == "arco_era5", (
+            f"Expected dataset_name 'arco_era5' in config for ARCOERA5Dataset, got '{self.curr_source_cfg['dataset_name']}'"
+        )
+        self.dataset_name = "arco_era5"
+
         self.pressure_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
         self.model_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/model-level-1h-0p25deg.zarr-v1"
         self.model_lev_vars = [
@@ -261,35 +275,40 @@ class ARCOERA5Dataset(BaseDataset):
             "vertical_velocity",
             "vorticity",
         ]
-        self.source_name: str = "arco_era5"
-        self.level_coord: str = source_cfg["level_coord"]  # hybrid for model levels and level for pressure levels
-        if "levels" not in source_cfg:
+        # self.source_name: str = "arco_era5"
+        self.level_coord: str = self.curr_source_cfg[
+            "level_coord"
+        ]  # hybrid for model levels and level for pressure levels
+        if "levels" not in self.curr_source_cfg:
             # Assume all levels are being requested
             if self.level_coord == "hybrid":
                 self.levels: list[int] = list(range(1, 138))
             else:
                 self.levels: list[int] = [1, 2, 3, 5, 7, 10, 20, 30, 50, 70] + list(range(100, 1025, 25))
         else:
-            self.levels: list[int] = source_cfg["levels"]
+            self.levels: list[int] = self.curr_source_cfg["levels"]
         self.return_target: bool = return_target
-        self.static_metadata: dict = {
+        self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
 
-        self.dt = pd.Timedelta(data_config["timestep"])
-        self.num_forecast_steps: int = data_config["forecast_len"]
+        # self.dt = pd.Timedelta(data_config["timestep"])
+        # self.num_forecast_steps: int = data_config["forecast_len"]
 
-        self.start_datetime = pd.Timestamp(data_config["start_datetime"])
-        self.end_datetime = pd.Timestamp(data_config["end_datetime"])
-        self.datetimes: pd.DatetimeIndex = self._build_timestamps()
+        # self.start_datetime = pd.Timestamp(data_config["start_datetime"])
+        # self.end_datetime = pd.Timestamp(data_config["end_datetime"])
+        # self.datetimes: pd.DatetimeIndex = self._build_timestamps()
 
-        # file_dict maps field_type → sorted list of (start, end, path) intervals
-        self.file_dict: dict = {}
-        self.var_dict: dict[str, dict[str, list[str]]] = {}
+        # # file_dict maps field_type → sorted list of (start, end, path) intervals
+        # self.file_dict: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, str]]] = {}
+        # self.var_dict: dict[str, dict[str, list[str]]] = {}
 
-        for field_type, d in source_cfg["variables"].items():
-            self._register_field(field_type, "remote", d)
+        self.mode = "remote"
+
+        for field_type, d in self.curr_source_cfg["variables"].items():
+            self._register_field(field_type, d)
+
         # Initialize on first call to __getitem__
         self.fs = None
         self.mod_level_store = None
@@ -305,7 +324,7 @@ class ARCOERA5Dataset(BaseDataset):
     # Private helpers
     # ------------------------------------------------------------------
     def _init_fs(self):
-        fs_config = {
+        fs_config: dict[str, Any] = {
             "cache_timeout": -1,
             "token": "anon",  # noqa: S106 # nosec B106
             "access": "read_only",
@@ -354,7 +373,7 @@ class ARCOERA5Dataset(BaseDataset):
         self,
         field_type: str,
         t: pd.Timestamp,
-        sample: dict,
+        sample: dict[str, Any],
     ) -> None:
         """
         Open the dataset for *field_type* at time *t* and populate *sample*.
@@ -395,13 +414,13 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_3D:
                     arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                    sample[f"{self.source_name}/{field_type}/3d/{vname}"] = tensor
+                    sample[f"{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
 
                 # 2D variables: (lat, lon) → (1, 1, lat, lon)
                 for vname in vars_2D:
                     arr = ds_t[vname].values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                    sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
+                    sample[f"{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
         else:
             with xr.open_zarr(self.mod_level_store, chunks=None) as ds:
                 # Select the time step; static fields have no time dim
@@ -419,7 +438,7 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_3D:
                     arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                    sample[f"{self.source_name}/{field_type}/3d/{vname}"] = tensor
+                    sample[f"{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
 
             with xr.open_zarr(self.pres_level_store, chunks=None) as ds:
                 # Select the time step; static fields have no time dim
@@ -436,4 +455,4 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_2D:
                     arr = ds_t[vname].values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                    sample[f"{self.source_name}/{field_type}/2d/{vname}"] = tensor
+                    sample[f"{self.dataset_name}/{field_type}/2d/{vname}"] = tensor

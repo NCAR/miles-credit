@@ -35,6 +35,7 @@ class AbstractBaseDataset(Dataset[Any]):
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
         # The name of this source in the config
         self.curr_source_name: str
+        self.dataset_name: str
 
         # Setting the clock for sampling
         self.dt: pd.Timedelta
@@ -61,7 +62,7 @@ class AbstractBaseDataset(Dataset[Any]):
     def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
         raise NotImplementedError
 
-    def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: dict[str, Any]) -> None:
+    def _extract_field(self, field_type: str, t: pd.Timestamp, sample: dict[str, Any]) -> None:
         raise NotImplementedError
 
 
@@ -174,30 +175,32 @@ class BaseDataset(AbstractBaseDataset):
                 + f"Full source config: \n{data_config['source']}\n"
                 + f"Curr source config: \n{data_config['source'][self.curr_source_name]}"
             )
-        curr_source_cfg = data_config["source"][self.curr_source_name]
+        self.curr_source_cfg = data_config["source"][self.curr_source_name]
+
+        self.dataset_name = "base"
 
         # Now we start loading the parameters for the dataset, starting with the clock parameters.
-        self.dt: pd.Timedelta = self._load_dt(data_config, curr_source_cfg)
-        self.num_forecast_steps: int = self._load_num_forecast_steps(data_config, curr_source_cfg)
+        self.dt: pd.Timedelta = self._load_dt(data_config, self.curr_source_cfg)
+        self.num_forecast_steps: int = self._load_num_forecast_steps(data_config, self.curr_source_cfg)
 
-        self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, curr_source_cfg)
-        self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, curr_source_cfg)
+        self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+        self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
         self.datetimes: pd.DatetimeIndex = self._build_timestamps()
 
         # Set the return target flag based on the argument passed to init.
         self.return_target: bool = return_target
 
         # Now we load the variables for the dataset.
-        assert "variables" in curr_source_cfg, (
+        assert "variables" in self.curr_source_cfg, (
             "Expected 'variables' key in source config, but it was not found. "
-            + f"Full source config provided: \n{curr_source_cfg}"
+            + f"Full source config provided: \n{self.curr_source_cfg}"
         )
 
         # Select if the data is being loaded from local files or remote files.
-        if "mode" not in curr_source_cfg:
+        if "mode" not in self.curr_source_cfg:
             self.mode = "local"
         else:
-            self.mode = curr_source_cfg["mode"]
+            self.mode = self.curr_source_cfg["mode"]
 
         # By default, we suggest that the inherited dataset use both file_dict and var_dict.
         # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
@@ -207,7 +210,7 @@ class BaseDataset(AbstractBaseDataset):
         #   can then use this to know which variables to extract for each field type from the file.
         self.file_dict: dict[str, Any] = {}
         self.var_dict: dict[str, Any] = {}
-        for field_type, field_config in curr_source_cfg["variables"].items():
+        for field_type, field_config in self.curr_source_cfg["variables"].items():
             # Notice that we are expecting to call the same _register_field method for each field type.
             # Check or override this method as needed based on the expected structure of your config for each field type.
             self._register_field(field_type, field_config)
@@ -456,7 +459,7 @@ class BaseDataset(AbstractBaseDataset):
             "vars_2D": field_config.get("vars_2D") or [],
         }
 
-    def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: dict[str, Any]) -> None:
+    def _extract_field(self, field_type: str, t: pd.Timestamp, sample: dict[str, Any]) -> None:
         """
         Base extract field method, which should be overridden in the inherited dataset class to extract the data for
         each field type. The method should populate data_dict with the extracted data for the given field type and
@@ -477,7 +480,7 @@ class BaseDataset(AbstractBaseDataset):
         if field_type in self.var_dict:
             for var_2d in self.var_dict[field_type].get("vars_2D", []):
                 key = f"{self.curr_source_name}/{field_type}/2d/{var_2d}"
-                data_dict[key] = torch.ones(1, 1, n_lat, n_lon)
+                sample[key] = torch.ones(1, 1, n_lat, n_lon)
             for var_3d in self.var_dict[field_type].get("vars_3D", []):
                 key = f"{self.curr_source_name}/{field_type}/3d/{var_3d}"
-                data_dict[key] = torch.ones(n_levels, 1, n_lat, n_lon)
+                sample[key] = torch.ones(n_levels, 1, n_lat, n_lon)

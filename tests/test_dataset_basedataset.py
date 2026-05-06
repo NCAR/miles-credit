@@ -119,13 +119,13 @@ def test_init_empty_source_dict(minimal_config: Dict[str, Any]) -> None:
         BaseDataset(config)
 
 
-def test_init_multiple_sources_raises_error(multi_source_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_init_multiple_sources_raises_error(multi_source_config: Dict[str, Any]) -> None:
     """Test that BaseDataset (by default) raises ValueError for multiple sources."""
     with pytest.raises(ValueError, match="Multiple sources found in config"):
         BaseDataset(multi_source_config)
 
 
-def test_init_missing_variables_key(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_init_missing_variables_key(minimal_config: Dict[str, Any]) -> None:
     """Test that __init__ raises AssertionError if 'variables' is missing."""
     config = minimal_config.copy()
     del config["source"]["TestSource_Base"]["variables"]
@@ -162,7 +162,7 @@ def test_load_clock_params_override_from_source(minimal_config: Dict[str, Any], 
     assert ds.end_datetime == pd.Timestamp("2023-01-01T12:00:00Z")
 
 
-def test_load_clock_params_missing_raises_keyerror(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_load_clock_params_missing_raises_keyerror(minimal_config: Dict[str, Any]) -> None:
     """Test that missing required clock params raises KeyError."""
     for key in ["timestep", "forecast_len", "start_datetime", "end_datetime"]:
         config = minimal_config.copy()
@@ -234,7 +234,7 @@ def test_register_field_success(minimal_config: Dict[str, Any], patch_base_datas
     assert ds.file_dict["prognostic"] is not None
 
 
-def test_register_field_invalid_type(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_register_field_invalid_type(minimal_config: Dict[str, Any]) -> None:
     """Test that an invalid field type raises KeyError."""
     config = minimal_config.copy()
     config["source"]["TestSource_Base"]["variables"]["invalid_field"] = {"vars_2D": ["x"]}
@@ -242,7 +242,7 @@ def test_register_field_invalid_type(minimal_config: Dict[str, Any], patch_base_
         BaseDataset(config)
 
 
-def test_register_field_null_config(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_register_field_null_config(minimal_config: Dict[str, Any]) -> None:
     """Test that a null field config is handled correctly."""
     config = minimal_config.copy()
     config["source"]["TestSource_Base"]["variables"]["prognostic"] = None
@@ -251,7 +251,7 @@ def test_register_field_null_config(minimal_config: Dict[str, Any], patch_base_d
     assert "prognostic" not in ds.var_dict
 
 
-def test_register_field_missing_vars(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_register_field_missing_vars(minimal_config: Dict[str, Any]) -> None:
     """Test that a field with no vars_2D or vars_3D raises ValueError."""
     config = minimal_config.copy()
     config["source"]["TestSource_Base"]["variables"]["prognostic"] = {"path": "/fake/*.nc"}
