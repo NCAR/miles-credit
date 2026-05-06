@@ -166,6 +166,7 @@ def _build_pbs_script(
 
     else:  # derecho
         nodes = args.nodes
+        cuda_devices = ",".join(str(i) for i in range(args.gpus))
         header = textwrap.dedent(f"""\
             #!/bin/bash
             #PBS -A {args.account}
@@ -209,6 +210,8 @@ def _build_pbs_script(
                 head_node_ip=$(ssh "${{head_node}}" hostname -i | awk '{{print $1}}')
                 echo "Head node : ${{head_node_ip}}"
                 MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
+
+                export CUDA_VISIBLE_DEVICES={cuda_devices}
 
                 MASTER_ADDR=${{head_node_ip}} MASTER_PORT=${{MASTER_PORT}} \\
                 mpiexec -n "${{total_gpus}}" --ppn {args.gpus} --cpu-bind none \\
