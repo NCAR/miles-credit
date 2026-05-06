@@ -255,6 +255,19 @@ def _convert(args: argparse.Namespace) -> None:
     print()
 
     # ------------------------------------------------------------------
+    # V1 checkpoint compatibility
+    # ------------------------------------------------------------------
+    print("  --- V1 checkpoint compatibility ---")
+    has_v1_ckpt = prompt_bool(
+        "Are you loading a V1-trained checkpoint (fine-tune or rollout with pretrained weights)?",
+        default=False,
+    )
+    if has_v1_ckpt:
+        conf.setdefault("preblocks", {})["v1_compat"] = {"type": "concat_v1"}
+        print("    + preblocks.v1_compat: concat_v1  (reorders channels to V1 trainer order)")
+    print()
+
+    # ------------------------------------------------------------------
     # Ensemble detection
     # ------------------------------------------------------------------
     ensemble_size = conf.get("trainer", {}).get("ensemble_size", 1)
