@@ -257,15 +257,6 @@ class BaseDataset(AbstractBaseDataset):
         if self.return_target:
             target_data: dict[str, Any] = {}
             for field_type in ("prognostic", "diagnostic"):
-                if not self.file_dict:
-                    # If file_dict is empty.
-                    logging.warning(
-                        f"file_dict is empty in __getitem__ for class {self.__class__.__name__}. "
-                        + "This likely means that _register_field or file_dict is not properly implemented for this dataset, "
-                        "since it should populate file_dict. Since file_dict is empty, no fields will be extracted for the target. "
-                        + f"Full file_dict: {self.file_dict}"
-                    )
-                    continue
                 if self.file_dict.get(field_type) and field_type in self.var_dict:
                     self._extract_field(field_type, t_target, target_data)
 

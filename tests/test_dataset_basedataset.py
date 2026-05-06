@@ -60,20 +60,6 @@ def multi_source_config(minimal_config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-# class ConcreteBaseDataset(BaseDataset):
-#     """A concrete implementation of BaseDataset for testing purposes."""
-
-#     def _extract_field(self, field_type: str, t: pd.Timestamp, data_dict: Dict[str, Any]) -> None:
-#         """Mock implementation that adds dummy data."""
-#         if field_type in self.var_dict:
-#             for var_2d in self.var_dict[field_type].get("vars_2D", []):
-#                 key = f"TestSource_Base/{field_type}/2d/{var_2d}"
-#                 data_dict[key] = torch.ones(1, 1, 10, 10)
-#             for var_3d in self.var_dict[field_type].get("vars_3D", []):
-#                 key = f"TestSource_Base/{field_type}/3d/{var_3d}"
-#                 data_dict[key] = torch.ones(5, 1, 10, 10)
-
-
 @pytest.fixture
 def patch_base_dataset_io(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patches glob and _map_files for BaseDataset tests."""
@@ -190,9 +176,48 @@ def test_load_dt_warning(
 ) -> None:
     """Test warning when source timestep is smaller than data timestep."""
     config = minimal_config.copy()
+    original_dt = config["timestep"]
     config["source"]["TestSource_Base"]["timestep"] = "1h"  # smaller than 6h
+    # Check smaller to ensure the test is valid
+    assert config["source"]["TestSource_Base"]["timestep"] < original_dt
     BaseDataset(config)
     assert "is smaller than" in caplog.text
+
+
+def test_load_forecast_len_warning(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test warning when source forecast_len is greater than data forecast_len."""
+    config = minimal_config.copy()
+    original_forecast_len = config["forecast_len"]
+    config["source"]["TestSource_Base"]["forecast_len"] = 5  # greater than 1
+    assert config["source"]["TestSource_Base"]["forecast_len"] > original_forecast_len
+    BaseDataset(config)
+    assert "is greater than" in caplog.text
+
+
+def test_load_start_datetime_warning(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test warning when source start_datetime is earlier than data start_datetime."""
+    config = minimal_config.copy()
+    original_start = config["start_datetime"]
+    config["source"]["TestSource_Base"]["start_datetime"] = "2000-01-01T00:00:00Z"  # earlier than 2022-12-31
+    assert config["source"]["TestSource_Base"]["start_datetime"] < original_start
+    BaseDataset(config)
+    assert "is earlier than" in caplog.text
+
+
+def test_load_end_datetime_warning(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test warning when source end_datetime is later than data end_datetime."""
+    config = minimal_config.copy()
+    original_end = config["end_datetime"]
+    config["source"]["TestSource_Base"]["end_datetime"] = "2100-01-01T12:00:00Z"  # later than 2023-01-02
+    assert config["source"]["TestSource_Base"]["end_datetime"] > original_end
+    BaseDataset(config)
+    assert "is later than" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +259,19 @@ def test_register_field_missing_vars(minimal_config: Dict[str, Any], patch_base_
         BaseDataset(config)
 
 
+def test_mode_setting(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """Test that mode is set correctly based on config."""
+    config = minimal_config.copy()
+    # Default should be local
+    ds_local = BaseDataset(config)
+    assert ds_local.mode == "local"
+
+    # Explicitly set to remote
+    config["source"]["TestSource_Base"]["mode"] = "remote"
+    ds_remote = BaseDataset(config)
+    assert ds_remote.mode == "remote"
+
+
 # ---------------------------------------------------------------------------
 # __len__ and __getitem__ tests
 # ---------------------------------------------------------------------------
@@ -249,10 +287,15 @@ def test_len(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> Non
     assert len(ds) == 5
 
 
-def test_getitem_step0(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_getitem_step0(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture
+) -> None:
     """Test __getitem__ at step i=0 loads prognostic, static, and dynamic_forcing."""
     ds = BaseDataset(minimal_config)
-    sample = ds[(ds.datetimes[0], 0)]
+
+    with caplog.at_level("ERROR"):
+        sample = ds[(ds.datetimes[0], 0)]
+        assert "You are using the default _extract_field method in BaseDataset" in caplog.text
 
     assert "input" in sample
     inp = sample["input"]
@@ -265,10 +308,15 @@ def test_getitem_step0(minimal_config: Dict[str, Any], patch_base_dataset_io: No
     assert "input_datetime" in sample["metadata"]
 
 
-def test_getitem_step1(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_getitem_step1(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture
+) -> None:
     """Test __getitem__ at step i>0 only loads dynamic_forcing."""
     ds = BaseDataset(minimal_config)
-    sample = ds[(ds.datetimes[0], 1)]
+
+    with caplog.at_level("ERROR"):
+        sample = ds[(ds.datetimes[0], 1)]
+        assert "You are using the default _extract_field method in BaseDataset" in caplog.text
 
     assert "input" in sample
     inp = sample["input"]
@@ -278,10 +326,15 @@ def test_getitem_step1(minimal_config: Dict[str, Any], patch_base_dataset_io: No
     assert "TestSource_Base/dynamic_forcing/2d/msl" in inp
 
 
-def test_getitem_return_target_true(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+def test_getitem_return_target_true(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture
+) -> None:
     """Test __getitem__ with return_target=True."""
     ds = BaseDataset(minimal_config, return_target=True)
-    sample = ds[(ds.datetimes[0], 0)]
+
+    with caplog.at_level("ERROR"):
+        sample = ds[(ds.datetimes[0], 0)]
+        assert "You are using the default _extract_field method in BaseDataset" in caplog.text
 
     assert "target" in sample
     tgt = sample["target"]
@@ -301,6 +354,11 @@ def test_getitem_return_target_false(minimal_config: Dict[str, Any], patch_base_
     sample = ds[(ds.datetimes[0], 0)]
     assert "target" not in sample
     assert "target_datetime" not in sample["metadata"]
+
+
+# ---------------------------------------------------------------------------
+# AbstractBaseDataset method tests
+# ---------------------------------------------------------------------------
 
 
 def test_abstract_base_dataset_methods_raise_error() -> None:
