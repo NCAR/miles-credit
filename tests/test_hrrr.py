@@ -4,8 +4,8 @@ tests/test_hrrr.py
 Unit tests for credit/datasets/hrrr.py covering path helpers, .idx parsers,
 and product-specific entry-map functions.
 
-Remote/dataset integration tests are skipped unless the environment variable
-``HRRR_TEST_REMOTE=1`` is set (they hit real AWS endpoints).
+Remote/dataset integration tests are run unless the environment variable
+``SKIP_REMOTE=1`` is set (they hit real AWS endpoints).
 """
 
 import os

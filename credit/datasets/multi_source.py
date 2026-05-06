@@ -40,6 +40,7 @@ Extending with a new source::
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import pandas as pd
 from torch.utils.data import Dataset
@@ -63,7 +64,7 @@ _SOURCE_REGISTRY: dict[str, type] = {
 }
 
 
-def make_single_source_subconfig(config: dict, source_key: str) -> dict:
+def make_single_source_subconfig(config: dict[str, Any], source_key: str) -> dict[str, Any]:
     """
     Return a modified config dict containing only the specified source.
 
@@ -81,7 +82,7 @@ def make_single_source_subconfig(config: dict, source_key: str) -> dict:
     return {"source": {source_key: config["source"][source_key]}, **{k: v for k, v in config.items() if k != "source"}}
 
 
-class MultiSourceDataset(Dataset):
+class MultiSourceDataset(Dataset[Any]):
     """PyTorch Dataset that combines multiple source datasets.
 
     Instantiates one sub-dataset per source key found in ``config["source"]``,
@@ -99,10 +100,9 @@ class MultiSourceDataset(Dataset):
             sub-dataset's ``static_metadata`` attribute.
     """
 
-    def __init__(self, config: dict, return_target: bool = False) -> None:
-        self.datasets: dict[str, Dataset] = {}
+    def __init__(self, config: dict[str, Any], return_target: bool = False) -> None:
+        self.datasets: dict[str, Dataset[Any]] = {}
         source_cfg = config.get("source", {})
-        rest_cfg = {k: v for k, v in config.items() if k != "source"}
 
         for key, cls in _SOURCE_REGISTRY.items():
             if key in source_cfg:
@@ -115,7 +115,9 @@ class MultiSourceDataset(Dataset):
                 logger.debug("MultiSourceDataset: source '%s' not in config, skipping", key)
 
         self.datetimes: pd.DatetimeIndex = self._intersect_timestamps()
-        self.static_metadata: dict[str, dict] = {name: ds.static_metadata for name, ds in self.datasets.items()}
+        self.static_metadata: dict[str, dict[str, Any]] = {
+            name: ds.static_metadata for name, ds in self.datasets.items()
+        }
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -124,7 +126,7 @@ class MultiSourceDataset(Dataset):
     def __len__(self) -> int:
         return len(self.datetimes)
 
-    def __getitem__(self, args: tuple) -> dict:
+    def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, dict[str, Any]]:
         """Return a dict of per-source sample dicts.
 
         Args:
