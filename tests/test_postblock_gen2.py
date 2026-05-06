@@ -39,7 +39,7 @@ def test_geopotential():
     geopotential_layer = GeopotentialDiagnostic()
 
     batch = next(iter(mdl))
-    batch["prediction"] = batch["input"]
+    batch["prediction"] = batch["arco_era5"]["input"]
     updated_batch = geopotential_layer(batch)
     print(updated_batch)
     assert geopotential_layer.output_name in updated_batch["prediction"]
