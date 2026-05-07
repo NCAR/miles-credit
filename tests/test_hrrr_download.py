@@ -7,6 +7,8 @@ Remote/dataset integration tests are skipped unless the environment variable
 ``HRRR_TEST_REMOTE=1`` is set (they hit real AWS endpoints).
 """
 
+from typing import Any
+
 import os
 import pathlib
 import time
@@ -20,10 +22,11 @@ from credit.datasets.hrrr_download import download_hrrr, get_specific_product_co
 # ---------------------------------------------------------------------------
 
 
-def _make_multisource_config():
+def _make_multisource_config() -> dict[str, Any]:
     return {
         "source": {
-            "HRRR": {
+            "Test_HRRR": {
+                "dataset_name": "hrrr",
                 "mode": "local",
                 "base_path": "/path/to/hrrr",
                 "forecast_hour": 0,
@@ -32,7 +35,8 @@ def _make_multisource_config():
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                 },
             },
-            "HRRR_NAT": {
+            "Test_HRRR_NAT": {
+                "dataset_name": "hrrr_nat",
                 "mode": "local",
                 "base_path": "/path/to/hrrr_nat",
                 "forecast_hour": 0,
@@ -41,7 +45,8 @@ def _make_multisource_config():
                     "dynamic_forcing": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                 },
             },
-            "HRRR_SUBH": {
+            "Test_HRRR_SUBH": {
+                "dataset_name": "hrrr_subhf",
                 "mode": "local",
                 "base_path": "/path/to/hrrr_subhf",
                 "forecast_hour": 0,
@@ -81,19 +86,20 @@ REASON_SKIP_REMOTE = "Set SKIP_HRRR_REMOTE=1 to skip remote tests"
 
 
 @pytest.fixture(scope="session")
-def _make_base_path(tmp_path_factory):
+def _make_base_path(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
     return tmp_path_factory.mktemp("hrrr_test")
 
 
 @pytest.fixture(scope="session")
-def _make_config_download_factory(_make_base_path):
+def _make_config_download_factory(_make_base_path: pathlib.Path) -> Any:
     """
     Set up a factory since we will want to modify the config for different tests,
     but we want to share the same base path across tests.
     """
 
-    def _make_config_download(source_key="HRRR", **extra_source):
-        source_defaults = {
+    def _make_config_download(source_key: str = "HRRR", **extra_source) -> dict[str, Any]:
+        source_defaults: dict[str, Any] = {
+            "dataset_name": source_key.lower(),
             "mode": "local",
             "base_path": _make_base_path,
             "forecast_hour": 0,
@@ -103,7 +109,7 @@ def _make_config_download_factory(_make_base_path):
             },
         }
         source_defaults.update(extra_source)
-        resulting_config = {
+        resulting_config: dict[str, Any] = {
             "source": {source_key: source_defaults},
             "start_datetime": "2022-01-01 01:00",
             "end_datetime": "2022-01-01 02:00",
@@ -118,19 +124,19 @@ def _make_config_download_factory(_make_base_path):
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_download_hrrr(_make_config_download_factory):
     time_start_make_config = time.time()
-    config = _make_config_download_factory(source_key="HRRR")
+    data_config = _make_config_download_factory(source_key="HRRR")
     time_end_make_config = time.time()
     # Will print if test fails
     print(f"\nMake config took {time_end_make_config - time_start_make_config:.2f} seconds")
 
     time_start_download = time.time()
-    download_hrrr(config=config, overwrite=True, num_workers=1)
+    download_hrrr(data_config=data_config, overwrite=True, num_workers=1)
     time_end_download = time.time()
     # Will print if test fails
     print(f"Download took {time_end_download - time_start_download:.2f} seconds")
 
     # Check the temporary directory for the expected files.
-    tmp_dir = pathlib.Path(config["source"]["HRRR"]["base_path"])
+    tmp_dir = pathlib.Path(data_config["source"]["HRRR"]["base_path"])
     assert tmp_dir.exists()
     assert tmp_dir.is_dir()
 
@@ -143,8 +149,8 @@ def test_download_hrrr(_make_config_download_factory):
     #       hrrr.t02z.wrfprsf00.grib2
     #       hrrr.t02z.wrfprsf00.grib2.idx
 
-    print("Config:")
-    for key, value in config.items():
+    print("Data config:")
+    for key, value in data_config.items():
         print(f"  {key}: {value}")
 
     print(f"Contents of {tmp_dir}:")
@@ -170,19 +176,19 @@ def test_download_hrrr(_make_config_download_factory):
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_download_hrrr_subhf(_make_config_download_factory):
     time_start_make_config = time.time()
-    config = _make_config_download_factory(source_key="HRRR_SUBH")
+    data_config = _make_config_download_factory(source_key="HRRR_SUBH")
     time_end_make_config = time.time()
     # Will print if test fails
     print(f"\nMake config took {time_end_make_config - time_start_make_config:.2f} seconds")
 
     time_start_download = time.time()
-    download_hrrr(config=config, overwrite=True, num_workers=2)
+    download_hrrr(data_config=data_config, overwrite=True, num_workers=2)
     time_end_download = time.time()
     # Will print if test fails
     print(f"Download took {time_end_download - time_start_download:.2f} seconds")
 
     # Check the temporary directory for the expected files.
-    tmp_dir = pathlib.Path(config["source"]["HRRR_SUBH"]["base_path"])
+    tmp_dir = pathlib.Path(data_config["source"]["HRRR_SUBH"]["base_path"])
     assert tmp_dir.exists()
     assert tmp_dir.is_dir()
 
@@ -195,8 +201,8 @@ def test_download_hrrr_subhf(_make_config_download_factory):
     #       hrrr.t01z.wrfsubhf01.grib2
     #       hrrr.t01z.wrfsubhf01.grib2.idx
 
-    print("Config:")
-    for key, value in config.items():
+    print("Data config:")
+    for key, value in data_config.items():
         print(f"  {key}: {value}")
 
     print(f"Contents of {tmp_dir}:")

@@ -120,7 +120,7 @@ Example YAML (wrfsubhf, remote mode — 15-min output)::
 
 from __future__ import annotations
 
-from typing import Any, get_args
+from typing import Any, Callable
 
 import logging
 import os
@@ -379,13 +379,14 @@ def _build_prs_entry_map(
     """Return a ``{pressure_level_hPa: idx_entry}`` dict for a pressure-level variable."""
     result: dict[float, dict[str, str | None]] = {}
     for e in idx_entries:
-        if e["var"] == idx_name and e["level"].endswith(" mb"):
+        # If level is in the entry, it should be a string like "500 mb"
+        if e["var"] == idx_name and e["level"].endswith(" mb"):  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportOptionalMemberAccess]
             try:
-                lv_f = float(e["level"].replace(" mb", ""))
+                lv_f = float(e["level"].replace(" mb", ""))  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType, reportOptionalMemberAccess]
             except ValueError:
                 logging.debug(f"Skipping idx entry with non-float pressure level: {e['level']}")
                 continue
-            result[lv_f] = e
+            result[lv_f] = e  # pyright: ignore[reportArgumentType]
     return result
 
 
@@ -433,13 +434,14 @@ def _build_nat_entry_map(
     """
     result: dict[int, dict[str, str | None]] = {}
     for e in idx_entries:
-        if e["var"] == idx_name and e["level"].endswith(" hybrid level"):
+        # If level is in the entry, it should be a string like "10 hybrid level"
+        if e["var"] == idx_name and e["level"].endswith(" hybrid level"):  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportOptionalMemberAccess]
             try:
-                lv = int(e["level"].replace(" hybrid level", ""))
+                lv = int(e["level"].replace(" hybrid level", ""))  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType, reportOptionalMemberAccess]
             except ValueError:
                 logging.debug(f"Skipping idx entry with non-integer hybrid level: {e['level']}")
                 continue
-            result[lv] = e
+            result[lv] = e  # pyright: ignore[reportArgumentType]
     return result
 
 
@@ -548,8 +550,9 @@ def _load_idx_local(grib2_path: str) -> list[dict[str, str | int | None]]:
 def _to_float32(values: np.ndarray) -> np.ndarray:
     """Return float32, replacing masked values with NaN."""
     if hasattr(values, "filled"):
-        values = values.filled(np.nan)
-    return values.astype(np.float32)
+        # Pylance cannot currently handle the hasattr check for masked arrays, so we ignore the type issues here.
+        values = values.filled(np.nan)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
+    return values.astype(np.float32)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
 
 # ---------------------------------------------------------------------------
@@ -559,6 +562,9 @@ def _to_float32(values: np.ndarray) -> np.ndarray:
 
 def _validate_product_request(dataset_name: str) -> str:
     """Validate the dataset request config, raising ValueError for invalid requests."""
+    # Convert to upper case for case-insensitive matching
+    dataset_name = dataset_name.upper()
+
     if dataset_name not in VALID_PRODUCTS:
         raise ValueError(
             f"Unknown HRRR product '{dataset_name}' in config['source']."
@@ -638,7 +644,13 @@ class HRRRDataset(BaseDataset):
             return_target: Whether to include a ``"target"`` key in each sample.
         """
         super().__init__(data_config)
-        self.dataset_name = "hrrr"
+
+        if "dataset_name" not in self.curr_source_cfg:
+            raise ValueError(
+                f"Missing 'dataset_name' in config['source']['{self.curr_source_name}']. "
+                + f"Expected one of: {list(VALID_PRODUCTS.keys())}"
+            )
+        self.dataset_name = self.curr_source_cfg["dataset_name"]
 
         product = _validate_product_request(self.dataset_name)
 
@@ -663,9 +675,11 @@ class HRRRDataset(BaseDataset):
                 f"Missing 'base_path'. A config['source']['{self.curr_source_name}']['base_path'] is required for local mode"
             )
 
-        self.var_dict: dict[str, dict[str, list[str] | None]] = {}
-        for field_type, d in self.curr_source_cfg.get("variables", {}).items():
-            self._register_field(field_type, d)
+        # self.var_dict: dict[str, dict[str, list[str] | None]] = {}
+        # for field_type, field_config in self.curr_source_cfg.get("variables", {}).items():
+        #     self._register_field(field_type, field_config)
+
+        super().init_register_all_fields()
 
         self.static_metadata: dict[str, Any] = {
             "levels": self.global_levels,
@@ -804,31 +818,43 @@ class HRRRDataset(BaseDataset):
     #         freq=self.dt,
     #     )
 
-    def _register_field(self, field_type: str, field_config: dict[str, list[str] | None] | None) -> None:
-        if field_type not in get_args(VALID_FIELD_TYPES):
-            raise KeyError(f"Unknown field_type '{field_type}'. Valid options: {sorted(VALID_FIELD_TYPES)}")
-        if not isinstance(field_config, dict):
-            logging.debug(f"Provided dictionary of incorrect type: {type(field_config)}. Object is {field_config}")
-            return
+    def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, list[str] | None] | None) -> None:
+        # if field_type not in get_args(VALID_FIELD_TYPES):
+        #     raise KeyError(f"Unknown field_type '{field_type}'. Valid options: {sorted(VALID_FIELD_TYPES)}")
+        # if not isinstance(field_config, dict):
+        #     logging.debug(f"Provided dictionary of incorrect type: {type(field_config)}. Object is {field_config}")
+        #     return
 
-        vars_3d: list[str] = field_config.get("vars_3D") or []
-        vars_2d: list[str] = field_config.get("vars_2D") or []
-        if not vars_3d and not vars_2d:
-            raise ValueError(f"Field '{field_type}' must define vars_3D and/or vars_2D")
+        # vars_3d: list[str] = field_config.get("vars_3D") or []
+        # vars_2d: list[str] = field_config.get("vars_2D") or []
+        # if not vars_3d and not vars_2d:
+        #     raise ValueError(f"Field '{field_type}' must define vars_3D and/or vars_2D")
 
-        for vname in vars_3d + vars_2d:
-            if vname not in VAR_REGISTRY:
-                raise KeyError(f"Variable '{vname}' is not in VAR_REGISTRY. Available: {sorted(VAR_REGISTRY)}")
+        # for vname in vars_3d + vars_2d:
+        #     if vname not in VAR_REGISTRY:
+        #         raise KeyError(f"Variable '{vname}' is not in VAR_REGISTRY. Available: {sorted(VAR_REGISTRY)}")
 
-        self.var_dict[field_type] = {
-            "vars_3D": vars_3d,
-            "vars_2D": vars_2d,
-            "levels": field_config.get("levels", self.curr_source_cfg.get("levels", None)),
-        }
+        # self.var_dict[field_type] = {
+        #     "vars_3D": vars_3d,
+        #     "vars_2D": vars_2d,
+        #     "levels": field_config.get("levels", self.curr_source_cfg.get("levels", None)),
+        # }
+        super()._register_field(field_type, field_config)
+
+        # Add the levels to the var_dict entry
+        if field_config is not None:
+            vars_3d: list[str] = field_config.get("vars_3D") or []
+            vars_2d: list[str] = field_config.get("vars_2D") or []
+            for vname in vars_3d + vars_2d:
+                if vname not in VAR_REGISTRY:
+                    raise KeyError(f"Variable '{vname}' is not in VAR_REGISTRY. Available: {sorted(VAR_REGISTRY)}")
+
+            levels = field_config.get("levels", self.curr_source_cfg.get("levels", None))
+            self.var_dict[field_type]["levels"] = levels
 
     def _extract_field(
         self,
-        field_type: str,
+        field_type: VALID_FIELD_TYPES,
         t: pd.Timestamp,
         sample: dict[str, Any],
     ) -> None:
@@ -877,24 +903,29 @@ class HRRRDataset(BaseDataset):
             session = self._get_session()
 
             def _fetcher(entry: dict[str, str | int | None]) -> bytes:
+                assert isinstance(entry["byte_start"], int)
+                assert isinstance(entry["byte_end"], int) or entry["byte_end"] is None
                 return _fetch_message(https_url, entry["byte_start"], entry["byte_end"], session)
         else:
+            assert self.base_path is not None
             path = _hrrr_local_path(self.base_path, file_t, ff, self.product)
             if path not in self._idx_cache:
                 self._idx_cache[path] = _load_idx_local(path)
             idx_entries = self._idx_cache[path]
 
             def _fetcher(entry: dict[str, str | int | None]) -> bytes:
+                assert isinstance(entry["byte_start"], int)
+                assert isinstance(entry["byte_end"], int) or entry["byte_end"] is None
                 return _fetch_bytes_local(path, entry["byte_start"], entry["byte_end"])
 
         self._extract_from_idx(field_type, idx_entries, _fetcher, vd, sample, step_min=step_min)
 
     def _extract_from_idx(
         self,
-        field_type: str,
+        field_type: VALID_FIELD_TYPES,
         idx_entries: list[dict[str, str | int | None]],
-        fetcher,
-        vd: dict[str, list[str] | None],
+        fetcher: Callable[[dict[str, str | int | None]], bytes],
+        vd: dict[str, list[str | int]],
         sample: dict[str, Any],
         step_min: int | None = None,
     ) -> None:
@@ -916,7 +947,7 @@ class HRRRDataset(BaseDataset):
                 used when ``self.product == "wrfsubhf"``.
         """
         try:
-            import pygrib  # noqa: PLC0415
+            import pygrib  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs]
         except ImportError as exc:
             raise ImportError("pygrib is required: pip install pygrib") from exc
 
@@ -934,7 +965,7 @@ class HRRRDataset(BaseDataset):
         # ------------------------------------------------------------------
         # Build fetch plan: list of (var_name, is_3d, level_value|None, entry)
         # ------------------------------------------------------------------
-        fetch_plan: list[tuple] = []
+        fetch_plan: list[tuple[str, bool, int | None, dict[str, str | int | None]]] = []
 
         for vname in vd["vars_3D"]:
             reg = VAR_REGISTRY[vname]
@@ -1011,11 +1042,9 @@ class HRRRDataset(BaseDataset):
 
         for vname in vd["vars_3D"]:
             stacked = np.stack(arrs_3d[vname])  # (n_levels, y, x)
-            sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{vname}"] = torch.tensor(
-                stacked, dtype=torch.float32
-            ).unsqueeze(1)
+            vname_key = self._get_field_name(field_type, "3d", vname)
+            sample[vname_key] = torch.tensor(stacked, dtype=torch.float32).unsqueeze(1)
 
         for vname in vd["vars_2D"]:
-            sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{vname}"] = (
-                torch.tensor(arr_2d[vname], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-            )
+            vname_key = self._get_field_name(field_type, "2d", vname)
+            sample[vname_key] = torch.tensor(arr_2d[vname], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
