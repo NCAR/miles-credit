@@ -273,8 +273,7 @@ def predict(rank, world_size, conf, p):
             # Step 0: load full initial state
             sample_full = dataset[(t0, 0)]
             batch_full = _sample_to_batch(sample_full)
-            x, _ = apply_preblocks(preblocks, batch_full)
-            x = x.to(device).float()  # (1, C_in, 1, H, W)
+            x = apply_preblocks(preblocks, batch_full, device=device)["input"].float()  # (1, C_in, 1, H, W)
 
             x_init = None
             results = []
@@ -314,8 +313,7 @@ def predict(rank, world_size, conf, p):
                     t_next = t0 + step * dt
                     sample_frc = dataset[(t_next, 1)]  # loads only dynamic_forcing
                     batch_frc = _sample_to_batch(sample_frc)
-                    x_frc, _ = apply_preblocks(preblocks, batch_frc)
-                    x_frc = x_frc.to(device).float()  # (1, n_dyn, 1, H, W)
+                    x_frc = apply_preblocks(preblocks, batch_frc, device=device)["input"].float()  # (1, n_dyn, 1, H, W)
                     x = update_x(x, x_frc, y_pred.detach(), slices)
 
             for result in results:
