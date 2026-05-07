@@ -38,6 +38,7 @@ import xarray as xr
 from tqdm import tqdm
 
 from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
@@ -262,16 +263,8 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     fhr_per_step = int(dt.total_seconds() / 3600)
 
     # ---- v2 channel bookkeeping ----
-    src = conf["data"]["source"]["ERA5"]
-    v = src["variables"]
-    prog = v.get("prognostic") or {}
-    dyn = v.get("dynamic_forcing") or {}
-    n_levels = len(src["levels"])
-    # ERA5Dataset input insertion order: [dynfrc | static | prog]
-    n_prog = len(prog.get("vars_3D", [])) * n_levels + len(prog.get("vars_2D", []))
-    n_dyn = len(dyn.get("vars_2D", []))
-    n_static = len(v.get("static", {}).get("vars_2D", []))
-    static_dim_size = n_dyn + n_static
+    slices, _ = build_channel_layout(conf)
+    n_prog = slices["prognostic"].stop - slices["prognostic"].start
 
     # ---- Preblocks ----
     preblocks = build_preblocks(conf.get("preblocks", {}))
@@ -337,8 +330,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     # ---- Load full initial state ----
     sample_full = dataset[(init_time, 0)]
     batch_full = _sample_to_batch(sample_full)
-    x, _ = apply_preblocks(preblocks, batch_full)
-    x = x.to(device).float()  # (1, C_in, 1, H, W)
+    x = apply_preblocks(preblocks, batch_full, device=device)["input"].float()  # (1, C_in, 1, H, W)
 
     results = []
     x_init = None
@@ -374,13 +366,9 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
                 t_next = init_time + step * dt
                 sample_frc = dataset[(t_next, 1)]  # only dynamic_forcing
                 batch_frc = _sample_to_batch(sample_frc)
-                x_frc, _ = apply_preblocks(preblocks, batch_frc)
-                x_frc = x_frc.to(device).float()
-
-                # ERA5Dataset insertion order: [dynfrc | static | prog]
-                x[:, :n_dyn, ...] = x_frc
-                x[:, static_dim_size:, ...] = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
-                # x[:, n_dyn:static_dim_size, ...] — static unchanged
+                x_frc = apply_preblocks(preblocks, batch_frc, device=device)["input"].float()
+                y_prog = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
+                x = update_x(x, x_frc, y_prog, slices)
 
     for r in results:
         r.get()

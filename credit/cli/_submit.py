@@ -194,9 +194,13 @@ def _build_pbs_script(
             cd ${{REPO}}
         """)
 
+        conda_env = args.conda_env
+        torchrun = f"{conda_env}/bin/torchrun" if (conda_env and os.path.isdir(conda_env)) else _find_torchrun()
+        cuda_devices = ",".join(str(i) for i in range(args.gpus))
+
         if nodes == 1:
             launch = textwrap.dedent(f"""\
-                torchrun \\
+                {torchrun} \\
                     --standalone \\
                     --nnodes=1 \\
                     --nproc-per-node={args.gpus} \\
@@ -209,6 +213,8 @@ def _build_pbs_script(
                 head_node_ip=$(ssh "${{head_node}}" hostname -i | awk '{{print $1}}')
                 echo "Head node : ${{head_node_ip}}"
                 MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
+
+                export CUDA_VISIBLE_DEVICES={cuda_devices}
 
                 MASTER_ADDR=${{head_node_ip}} MASTER_PORT=${{MASTER_PORT}} \\
                 mpiexec -n "${{total_gpus}}" --ppn {args.gpus} --cpu-bind none \\
@@ -384,11 +390,12 @@ def _build_realtime_pbs_script(
 
             REPO={repo}
             CONFIG={config}
+            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
 
             echo "Realtime forecast — init: {init_time}  steps: {steps}"
             echo "Config  : ${{CONFIG}}"
 
-            torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
                 ${{REPO}}/credit/applications/rollout_realtime_gen2.py \\
                 -c ${{CONFIG}} --init-time {init_time} --steps {steps}
         """)
@@ -553,11 +560,12 @@ def _build_rollout_pbs_script(
 
             REPO={repo}
             CONFIG={config}
+            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
 
             echo "Ensemble rollout — subset {subset} of {n_subsets}"
             echo "Config  : ${{CONFIG}}"
 
-            torchrun --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
                 ${{REPO}}/credit/applications/rollout_to_netcdf_gen2.py \\
                 -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
         """)
