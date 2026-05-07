@@ -41,17 +41,23 @@ class Reconstruct(BasePostblock):
     def forward(self, y_pred: torch.Tensor, metadata: dict) -> dict:
         output_map = metadata["_channel_map"]["output"]
 
+        # Flatten time dim if y_pred arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
+        if y_pred.dim() == 5:
+            y_pred = y_pred.flatten(1, 2)
+
         prediction = {}
         for var_key, info in output_map.items():
             ch_slice = info["slice"]
-            n_levels, T = info["orig_shape"]
+            n_levels, n_time = info["orig_shape"]
 
-            # Slice the flat channel dim: (B, n_levels*T, H, W)
+            # Slice the flat channel dim: (B, n_levels*n_time, H, W)
             var_tensor = y_pred[:, ch_slice, ...]
 
-            # Restore level and time dims: (B, n_levels, T, H, W)
-            var_tensor = var_tensor.unflatten(1, (n_levels, T))
+            # Restore level and time dims: (B, n_levels, n_time, H, W)
+            var_tensor = var_tensor.unflatten(1, (n_levels, n_time))
 
-            prediction[var_key] = var_tensor
+            # Build nested dict matching input convention: source/data_type/dim/var_name
+            source, data_type, dim, var_name = var_key.split("/")
+            prediction.setdefault(source, {}).setdefault(data_type, {}).setdefault(dim, {})[var_name] = var_tensor
 
         return {"prediction": prediction, "metadata": metadata}

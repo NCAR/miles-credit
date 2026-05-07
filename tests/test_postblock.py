@@ -261,6 +261,96 @@ def test_GlobalEnergyFixerUpDown_rand():
     assert y_pred_fix.shape == y_pred.shape
 
 
+class TestReconstruct:
+    """Tests for credit.postblock.reconstruct.Reconstruct."""
+
+    def _output_map(self):
+        """Minimal channel map matching ConcatToTensor output format.
+
+        Simulates: one 3D variable (4 levels) and one 2D surface variable.
+        Slash-joined key format: source/data_type/dim/var_name.
+        """
+        return {
+            "arco_era5/prognostic/3d/temperature": {"slice": slice(0, 4), "orig_shape": (4, 1)},
+            "arco_era5/prognostic/2d/surface_pressure": {"slice": slice(4, 5), "orig_shape": (1, 1)},
+        }
+
+    def _metadata(self, output_map):
+        return {"_channel_map": {"output": output_map}}
+
+    def test_nested_dict_structure(self):
+        """Output mirrors apply_preblocks input convention: source/data_type/dim/var_name."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        metadata = self._metadata(self._output_map())
+        result = Reconstruct()(torch.randn(2, 5, 8, 8), metadata)
+
+        pred = result["prediction"]
+        assert "arco_era5" in pred
+        assert "prognostic" in pred["arco_era5"]
+        assert "3d" in pred["arco_era5"]["prognostic"]
+        assert "2d" in pred["arco_era5"]["prognostic"]
+        assert "temperature" in pred["arco_era5"]["prognostic"]["3d"]
+        assert "surface_pressure" in pred["arco_era5"]["prognostic"]["2d"]
+
+    def test_tensor_shapes_4d_input(self):
+        """3D var → (B, n_levels, 1, H, W), 2D var → (B, 1, 1, H, W)."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        B, H, W = 2, 8, 8
+        metadata = self._metadata(self._output_map())
+        result = Reconstruct()(torch.randn(B, 5, H, W), metadata)
+
+        pred = result["prediction"]
+        assert pred["arco_era5"]["prognostic"]["3d"]["temperature"].shape == (B, 4, 1, H, W)
+        assert pred["arco_era5"]["prognostic"]["2d"]["surface_pressure"].shape == (B, 1, 1, H, W)
+
+    def test_5d_input_no_extra_dim(self):
+        """5D y_pred (B, C, 1, H, W) produces the same shape as 4D — no spurious singleton."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        B, H, W = 2, 8, 8
+        metadata = self._metadata(self._output_map())
+        y_pred_4d = torch.randn(B, 5, H, W)
+        y_pred_5d = y_pred_4d.unsqueeze(2)  # (B, 5, 1, H, W)
+
+        result_4d = Reconstruct()(y_pred_4d, metadata)
+        result_5d = Reconstruct()(y_pred_5d, metadata)
+
+        shape_4d = result_4d["prediction"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape
+        shape_5d = result_5d["prediction"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape
+        assert shape_4d == shape_5d == (B, 4, 1, H, W)
+
+    def test_values_match_input_channels(self):
+        """Reconstructed tensors contain exactly the channels sliced from y_pred."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        B, H, W = 1, 4, 4
+        metadata = self._metadata(self._output_map())
+        y_pred = torch.randn(B, 5, H, W)
+
+        result = Reconstruct()(y_pred, metadata)
+        pred = result["prediction"]
+
+        assert torch.equal(
+            pred["arco_era5"]["prognostic"]["3d"]["temperature"],
+            y_pred[:, 0:4].unflatten(1, (4, 1)),
+        )
+        assert torch.equal(
+            pred["arco_era5"]["prognostic"]["2d"]["surface_pressure"],
+            y_pred[:, 4:5].unflatten(1, (1, 1)),
+        )
+
+    def test_metadata_passthrough(self):
+        """metadata dict is returned unchanged."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        metadata = self._metadata(self._output_map())
+        metadata["extra_key"] = "sentinel"
+        result = Reconstruct()(torch.randn(1, 5, 4, 4), metadata)
+        assert result["metadata"] is metadata
+
+
 if __name__ == "__main__":
     # Set up logger to print stuff
     root = logging.getLogger()
