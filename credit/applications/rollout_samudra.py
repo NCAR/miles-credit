@@ -22,19 +22,18 @@ import torch
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info
-from credit.datasets import setup_data_loading
-from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
-from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoader
-from credit.data import concat_and_reshape, reshape_only
-from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
+from credit.datasets.om4_multistep_batcher import Predict_Ocean_Batcher
+from credit.datasets.load_dataset_and_dataloader import BatchForecastLenSamplerSamudra, collate_fn
+from torch.utils.data import DataLoader
+from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
 from credit.forecast import load_forecasts
 from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
-from credit.parser import credit_main_parser, predict_data_check
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.parser import credit_main_parser
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 
 class ForecastProcessor:
-    def __init__(self, conf, device):
+    def __init__(self, conf, state_transformer, device):
         self.conf = conf
         self.device = device
 
@@ -54,11 +53,7 @@ class ForecastProcessor:
         self.lead_time_periods = conf["data"]["lead_time_periods"]
 
         # transform and ToTensor class
-        if conf["data"]["scaler_type"] == "std_new":
-            self.state_transformer = Normalize_ERA5_and_Forcing(conf)
-        else:
-            print("Scaler type {} not supported".format(conf["data"]["scaler_type"]))
-            raise
+        self.state_transformer = state_transformer
 
         # get lat/lons from x-array
         self.latlons = xr.open_dataset(conf["loss"]["latitude_weights"]).load()
@@ -77,7 +72,14 @@ class ForecastProcessor:
         try:
             # Transform predictions
             conf = self.conf
-            y_pred = self.state_transformer.inverse_transform(y_pred)
+            if isinstance(y_pred, torch.Tensor):
+                y_pred = self.state_transformer.unnormalize_tensor_prognostics(y_pred)
+            elif isinstance(y_pred, np.ndarray):
+                y_pred = self.state_transformer.unnormalize_numpy_prognostics(y_pred)
+            elif isinstance(y_pred, xr.Dataset):
+                y_pred = self.state_transformer.unnormalize_prognostics(y_pred)
+            else:
+                raise ValueError(f"Unsupported prediction type: {type(y_pred)}")
 
             # This will fail if not using torch multiprocessing AND using a GPU
             if "use_laplace_filter" in conf["predict"] and conf["predict"]["use_laplace_filter"]:
@@ -85,7 +87,7 @@ class ForecastProcessor:
 
             # Calculate correct datetime for current forecast
             utc_datetimes = [
-                datetime.utcfromtimestamp(datetimes[i].item()) + timedelta(hours=self.lead_time_periods)
+                datetime.utcfromtimestamp(datetimes[i].item() / 1e9) + timedelta(hours=self.lead_time_periods)
                 for i in range(self.batch_size)
             ]
 
@@ -137,9 +139,6 @@ def predict(rank, world_size, conf, p):
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["predict"]["mode"])
 
-    # Set up dataloading
-    data_config = setup_data_loading(conf)
-
     # infer device id from rank
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
@@ -153,10 +152,10 @@ def predict(rank, world_size, conf, p):
     seed_everything(conf["seed"])
 
     # number of input time frames
-    history_len = conf["data"]["history_len"]
+    history_len = conf["data"]["input_length"]
 
     # length of forecast steps
-    lead_time_periods = conf["data"]["lead_time_periods"]
+    # lead_time_periods = conf["data"]["lead_time_periods"]
 
     # batch size
     batch_size = conf["predict"].get("batch_size", 1)
@@ -166,16 +165,18 @@ def predict(rank, world_size, conf, p):
 
     # number of diagnostic variables
     varnum_diag = len(conf["data"]["diagnostic_variables"])
+    input_length = conf["data"]["input_length"]
+    output_length = conf["data"]["output_length"]
 
     # number of dynamic forcing + forcing + static
     static_dim_size = (
-        len(conf["data"]["dynamic_forcing_variables"])
-        + len(conf["data"]["forcing_variables"])
-        + len(conf["data"]["static_variables"])
+        len(conf["data"].get("dynamic_forcing_variables", []))
+        + len(conf["data"].get("forcing_variables", []))
+        + len(conf["data"].get("static_variables", []))
     )
 
     # postblock opts outside of model
-    post_conf = conf["model"]["post_conf"]
+    post_conf = conf["model"].get("post_conf", {"activate": False})
     flag_mass_conserve = False
     flag_water_conserve = False
     flag_energy_conserve = False
@@ -199,8 +200,11 @@ def predict(rank, world_size, conf, p):
                 flag_energy_conserve = True
                 opt_energy = GlobalEnergyFixer(post_conf)
 
+    # Post-block wet mask
+    opt_wet = WetMaskBlock(conf)
+
     # clamp to remove outliers
-    if conf["data"]["data_clamp"] is None:
+    if conf["data"].get("data_clamp", None) is None:
         flag_clamp = False
     else:
         flag_clamp = True
@@ -208,43 +212,37 @@ def predict(rank, world_size, conf, p):
         clamp_max = float(conf["data"]["data_clamp"][1])
 
     # Load the forecasts we wish to compute
-    forecasts = conf["predict"]["forecasts"]  # load_forecasts(conf)
-
+    forecasts = load_forecasts(conf)
     if len(forecasts) < batch_size:
         logger.warning(
             f"number of forecast init times {len(forecasts)} is less than batch_size {batch_size}, will result in under-utilization"
         )
 
-    dataset = Predict_Dataset_Batcher(
-        varname_upper_air=data_config["varname_upper_air"],
-        varname_surface=data_config["varname_surface"],
-        varname_dyn_forcing=data_config["varname_dyn_forcing"],
-        varname_forcing=data_config["varname_forcing"],
-        varname_static=data_config["varname_static"],
-        varname_diagnostic=data_config["varname_diagnostic"],
-        filenames=data_config["all_ERA_files"],
-        filename_surface=data_config["surface_files"],
-        filename_dyn_forcing=data_config["dyn_forcing_files"],
-        filename_forcing=data_config["forcing_files"],
-        filename_static=data_config["static_files"],
-        filename_diagnostic=data_config["diagnostic_files"],
-        fcst_datetime=forecasts,
-        lead_time_periods=lead_time_periods,
-        history_len=data_config["history_len"],
-        skip_periods=data_config["skip_periods"],
-        transform=load_transforms(conf),
-        sst_forcing=data_config["sst_forcing"],
-        batch_size=batch_size,
+    dataset = Predict_Ocean_Batcher(
+        conf,
+        forecast_windows=forecasts,
+        seed=conf["seed"],
         rank=rank,
         world_size=world_size,
-        skip_target=True,
+        batch_size=batch_size,
+        shuffle=False,
     )
 
-    # Use a custom DataLoader so we get the len correct
-    data_loader = BatchForecastLenDataLoader(dataset)
+    # Use a custom sampler so we get the len correct
+    sampler = BatchForecastLenSamplerSamudra(dataset)
+
+    data_loader = DataLoader(
+        dataset,
+        num_workers=0,  # Do not try to mix mp as Pool from main is used here for data processing
+        collate_fn=collate_fn,
+        sampler=sampler,  # Ensure len is correct
+    )
 
     # Class for saving in parallel
-    result_processor = ForecastProcessor(conf, device)
+    result_processor = ForecastProcessor(conf, dataset.normalize, device)
+
+    # Load the wet-mask
+    wet_mask = dataset.wet[None, :, None, :, :].to(device)
 
     # Warning -- see next line
     distributed = conf["predict"]["mode"] in ["ddp", "fsdp"]
@@ -282,30 +280,29 @@ def predict(rank, world_size, conf, p):
 
         # model inference loop
         for batch in data_loader:
-            batch_size = batch["datetime"].shape[0]
+            batch_size = batch["input_datetime"].shape[0]
             forecast_step = batch["forecast_step"].item()
 
             # Initial input processing
             if forecast_step == 1:
                 # Process the entire batch at once
                 init_datetimes = [
-                    datetime.utcfromtimestamp(batch["datetime"][i].item()).strftime("%Y-%m-%dT%HZ")
+                    datetime.utcfromtimestamp(batch["input_datetime"][i].item() / 1e9).strftime("%Y-%m-%dT%HZ")
                     for i in range(batch_size)
                 ]
+
                 save_datetimes[forecast_count : forecast_count + batch_size] = init_datetimes
 
-                if "x_surf" in batch:
-                    x = concat_and_reshape(batch["x"], batch["x_surf"]).to(device).float()
-                else:
-                    x = reshape_only(batch["x"]).to(device).float()
+                x = batch["input"].to(device)
 
                 # create ensemble:
                 if ensemble_size > 1:
                     x = torch.repeat_interleave(x, ensemble_size, 0)
 
-            # Add forcing and static variables for the entire batch
-            if "x_forcing_static" in batch:
-                x_forcing_batch = batch["x_forcing_static"].to(device).permute(0, 2, 1, 3, 4).float()
+            else:
+                # Add forcing and static variables for the entire batch
+                x_forcing_batch = batch["input"][:, -len(conf["data"]["dynamic_forcing_variables"]) :].to(device)
+
                 if ensemble_size > 1:
                     x_forcing_batch = torch.repeat_interleave(x_forcing_batch, ensemble_size, 0)
                 x = torch.cat((x, x_forcing_batch), dim=1)
@@ -316,6 +313,9 @@ def predict(rank, world_size, conf, p):
 
             # Model inference on the entire batch
             y_pred = model(x.float())
+
+            # Apply wet mask post-block
+            y_pred = opt_wet(y_pred)
 
             # Post-processing blocks
             if flag_mass_conserve:
@@ -335,13 +335,17 @@ def predict(rank, world_size, conf, p):
                 input_dict = opt_energy(input_dict)
                 y_pred = input_dict["y_pred"]
 
+            # Lastly, multiply by the wet-mask
+            y_pred = y_pred * wet_mask
+
+            # Save the results
             result = p.apply_async(
                 result_processor.process,
                 (
                     y_pred.cpu(),
                     forecast_step,
                     forecast_count,
-                    batch["datetime"],
+                    batch["input_datetime"],
                     save_datetimes,
                 ),
             )
@@ -359,7 +363,8 @@ def predict(rank, world_size, conf, p):
             # multi-step in
             else:
                 if static_dim_size == 0:
-                    x_detach = x[:, :, 1:, ...].detach()
+                    length = output_length if output_length > input_length else input_length
+                    x_detach = x[:, :, length:, ...].detach()
                 else:
                     x_detach = x[:, :-static_dim_size, 1:, ...].detach()
 
@@ -479,8 +484,7 @@ def main():
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     # handling config args
-    conf = credit_main_parser(conf, parse_training=False, parse_predict=True, print_summary=False)
-    predict_data_check(conf, print_summary=False)
+    conf = credit_main_parser(conf, parse_training=False, parse_predict=False, print_summary=False)
 
     # create a save location for rollout
     assert "save_forecast" in conf["predict"], "Please specify the output dir through conf['predict']['save_forecast']"
@@ -507,28 +511,20 @@ def main():
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    forecasts = load_forecasts(conf)
+    #     wandb.init(
+    #         # set the wandb project where this run will be logged
+    #         project="Derecho parallelism",
+    #         name=f"Worker {os.environ["RANK"]} {os.environ["WORLD_SIZE"]}"
+    #         # track hyperparameters and run metadata
+    #         config=conf
+    #     )
+
     if number_of_subsets > 0:
+        forecasts = load_forecasts(conf)
         if number_of_subsets > 0 and subset >= 0:
             subsets = np.array_split(forecasts, number_of_subsets)
-            forecasts = subsets[subset - 1].tolist()  # Select the subset based on subset_size
-
-            def fmt_datetime(dt_str):
-                return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%dT%HZ")
-
-            subforecast_list = []
-            # Ensure forecasts is a list of tuples
-            for k, (start_date, end_date) in enumerate(forecasts):
-                start_fmt = fmt_datetime(start_date)
-                forecast_dir = os.path.join(conf["predict"]["save_forecast"], start_fmt)
-                if os.path.isdir(forecast_dir):
-                    print(f"✅ Exists: {forecast_dir}")
-                else:
-                    print(f"❌ Missing: {forecast_dir}")
-                    subforecast_list.append(forecasts[k])
-            conf["predict"]["forecasts"] = list(subforecast_list)
-    else:
-        conf["predict"]["forecasts"] = forecasts
+            forecasts = subsets[subset - 1]  # Select the subset based on subset_size
+            conf["predict"]["forecasts"] = forecasts
 
     seed = conf["seed"]
     seed_everything(seed)
