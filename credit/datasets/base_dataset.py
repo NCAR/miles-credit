@@ -67,8 +67,10 @@ class AbstractBaseDataset(Dataset[Any]):
 
     def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
         raise NotImplementedError
-    
-    def _get_file_source(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]) -> dict[str, Any]:
+
+    def _get_file_source(
+        self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]
+    ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         raise NotImplementedError
 
     def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
@@ -443,10 +445,11 @@ class BaseDataset(AbstractBaseDataset):
             )
 
         # Now we load the variables for the dataset.
-        assert "variables" in self.curr_source_cfg, (
-            "Expected 'variables' key in source config, but it was not found. "
-            + f"Full source config provided: \n{self.curr_source_cfg}"
-        )
+        if "variables" not in self.curr_source_cfg:
+            raise KeyError(
+                "Expected 'variables' key in source config, but it was not found. "
+                + f"Full source config provided: \n{self.curr_source_cfg}"
+            )
 
         # By default, we suggest that the inherited dataset use both file_dict and var_dict.
         # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
@@ -494,7 +497,9 @@ class BaseDataset(AbstractBaseDataset):
 
         self.file_dict[field_type] = self._get_file_source(field_type, field_config)
 
-    def _get_file_source(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]) -> dict[str, Any]:
+    def _get_file_source(
+        self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]
+    ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         """Return the file source for a field. Override in subclasses for different modes/backends.
 
             Args:

@@ -44,11 +44,11 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import os
-from typing import NamedTuple
+from typing import NamedTuple, Any
 
 import pandas as pd
 
-from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request
+from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request  # pyright: ignore[reportPrivateUsage]
 from credit.datasets.multi_source import make_single_source_subconfig
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def _download_one(task: _DownloadTask) -> str:
     Runs in a worker process — imports s3fs locally so the pool workers don't
     need to inherit an open filesystem object from the parent.
     """
-    import s3fs  # noqa: PLC0415
+    import s3fs  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
 
     if os.path.exists(task.local_path) and not task.overwrite:
         return f"skip  {task.local_path}"
@@ -92,7 +92,7 @@ def _download_one(task: _DownloadTask) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_specific_product_config(config: dict, product: str) -> dict:
+def get_specific_product_config(config: dict[str, Any], product: str) -> dict[str, Any]:
     """
     Separate the config to only the requested product, so that we can pass it to the download function.
 
@@ -119,7 +119,7 @@ def get_specific_product_config(config: dict, product: str) -> dict:
 
 
 def download_hrrr(
-    config: dict,
+    data_config: dict[str, Any],
     num_workers: int = 4,
     overwrite: bool = False,
 ) -> None:
@@ -130,7 +130,7 @@ def download_hrrr(
     ``HRRRDataset`` in ``mode: "local"`` can use fast byte-range reads.
 
     Args:
-        config: Top-level ``data`` config dict (same object passed to
+        data_config: Top-level ``data`` config dict (same object passed to
             ``HRRRDataset``).
         num_workers: Number of parallel download workers.  Each worker opens
             its own ``s3fs`` connection.  Default ``4``.
@@ -142,11 +142,22 @@ def download_hrrr(
         KeyError: If the config is missing required fields.
         ValueError: If *product* is not a recognised HRRR product.
     """
-    config_key, product = _validate_product_request(config)
-    source_cfg = config["source"][config_key]
+    curr_source_name = next(iter(data_config["source"]))
+    if len(data_config["source"]) > 1:
+        raise ValueError(
+            f"Multiple sources found in config. Please provide a config with a single source. Found sources: {list(data_config['source'].keys())}"
+        )
+
+    source_cfg = data_config["source"][curr_source_name]
+
+    assert "dataset_name" in source_cfg, (
+        f"Missing required field for dataset_name. Found fields: {list(source_cfg.keys())}"
+    )
+    dataset_name = source_cfg["dataset_name"]
+    product = _validate_product_request(dataset_name)
 
     try:
-        import s3fs  # noqa: PLC0415
+        import s3fs  # noqa: PLC0415  # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
 
         del s3fs
     except ImportError as exc:
@@ -155,11 +166,11 @@ def download_hrrr(
     base_path: str = source_cfg["base_path"]
     forecast_hour: int = int(source_cfg.get("forecast_hour", 0))
 
-    dt = pd.Timedelta(config["timestep"])
-    num_steps: int = config.get("forecast_len", 0)
+    dt = pd.Timedelta(data_config["timestep"])
+    num_steps: int = data_config.get("forecast_len", 0)
     timestamps = pd.date_range(
-        pd.Timestamp(config["start_datetime"]),
-        pd.Timestamp(config["end_datetime"]) - num_steps * dt,
+        pd.Timestamp(data_config["start_datetime"]),
+        pd.Timestamp(data_config["end_datetime"]) - num_steps * dt,
         freq=dt,
     )
 

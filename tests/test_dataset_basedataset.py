@@ -129,7 +129,7 @@ def test_init_missing_variables_key(minimal_config: Dict[str, Any]) -> None:
     """Test that __init__ raises AssertionError if 'variables' is missing."""
     config = minimal_config.copy()
     del config["source"]["TestSource_Base"]["variables"]
-    with pytest.raises(AssertionError, match="Expected 'variables' key in source config"):
+    with pytest.raises(KeyError, match="Expected 'variables' key in source config"):
         BaseDataset(config)
 
 
@@ -270,7 +270,7 @@ def test_register_field_missing_vars(minimal_config: Dict[str, Any]) -> None:
 def test_mode_setting(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """Test that mode is set correctly based on config."""
     config = minimal_config.copy()
-    # Default should be empty
+    # Default should be local
     ds_local = BaseDataset(config)
     assert ds_local.mode == "local"
 
@@ -278,6 +278,11 @@ def test_mode_setting(minimal_config: Dict[str, Any], patch_base_dataset_io: Non
     config["source"]["TestSource_Base"]["mode"] = "remote"
     ds_remote = BaseDataset(config)
     assert ds_remote.mode == "remote"
+
+    # Set to something that is not 'local' or 'remote' should raise ValueError
+    config["source"]["TestSource_Base"]["mode"] = "invalid_mode"
+    with pytest.raises(ValueError, match="Unknown mode 'invalid_mode'"):
+        BaseDataset(config)
 
 
 # ---------------------------------------------------------------------------
@@ -392,5 +397,7 @@ def test_abstract_base_dataset_methods_raise_error() -> None:
         dataset.init_register_all_fields()  # pyright: ignore[reportPrivateUsage]
     with pytest.raises(NotImplementedError):
         dataset._register_field("prognostic", {})  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(NotImplementedError):
+        dataset._get_file_source("dynamic_forcing", {})  # pyright: ignore[reportPrivateUsage]
     with pytest.raises(NotImplementedError):
         dataset._extract_field("prognostic", pd.Timestamp("2023-01-01"), {})  # pyright: ignore[reportPrivateUsage]
