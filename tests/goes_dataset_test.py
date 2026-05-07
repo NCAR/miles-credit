@@ -105,7 +105,8 @@ def minimal_config():
         "start_datetime": "2021-06-01",
         "end_datetime": "2021-06-02",
         "source": {
-            "GOES": {
+            "TEST_GOES": {
+                "dataset_name": "goes",
                 "goes_id": "goes16",
                 "mode": "local",
                 "product": "ABI-L2-MCMIPC",
@@ -150,8 +151,8 @@ def test_goes_key_format(minimal_config, patch_goes_io):
     sample = ds[(t, 0)]
 
     inp = sample["input"]
-    assert f"goes16/prognostic/2d/{CMI_C04}" in inp
-    assert f"goes16/prognostic/2d/{CMI_C07}" in inp
+    assert f"TEST_GOES/goes/prognostic/2d/{CMI_C04}" in inp
+    assert f"TEST_GOES/goes/prognostic/2d/{CMI_C07}" in inp
     assert "metadata" in sample
 
 
@@ -166,8 +167,8 @@ def test_goes_prognostic_loaded_at_step0(minimal_config, patch_goes_io):
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    assert f"goes16/prognostic/2d/{CMI_C04}" in sample["input"]
-    assert f"goes16/prognostic/2d/{CMI_C07}" in sample["input"]
+    assert f"TEST_GOES/goes/prognostic/2d/{CMI_C04}" in sample["input"]
+    assert f"TEST_GOES/goes/prognostic/2d/{CMI_C07}" in sample["input"]
 
 
 def test_goes_prognostic_absent_at_step1(minimal_config, patch_goes_io):
@@ -227,8 +228,8 @@ def test_goes_target_keys(minimal_config, patch_goes_io):
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    assert f"goes16/prognostic/2d/{CMI_C04}" in sample["target"]
-    assert f"goes16/prognostic/2d/{CMI_C07}" in sample["target"]
+    assert f"TEST_GOES/goes/prognostic/2d/{CMI_C04}" in sample["target"]
+    assert f"TEST_GOES/goes/prognostic/2d/{CMI_C07}" in sample["target"]
 
 
 def test_goes_target_tensor_shapes(minimal_config, patch_goes_io):
@@ -297,8 +298,8 @@ def test_goes_extent_applied(minimal_config, patch_goes_io, monkeypatch, latlon_
     cfg = {
         **minimal_config,
         "source": {
-            "GOES": {
-                **minimal_config["source"]["GOES"],
+            "TEST_GOES": {
+                **minimal_config["source"]["TEST_GOES"],
                 "extent": [-130, -95, 20, 55],  # roughly half the fake lon range
             }
         },
@@ -308,7 +309,7 @@ def test_goes_extent_applied(minimal_config, patch_goes_io, monkeypatch, latlon_
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    key = f"goes16/prognostic/2d/{CMI_C04}"
+    key = f"TEST_GOES/goes/prognostic/2d/{CMI_C04}"
     tensor = sample["input"][key]
 
     # At least one spatial dim should be strictly smaller than the full grid
@@ -343,6 +344,6 @@ def test_goes_dataloader_default_collate(minimal_config, patch_goes_io):
 
     batch = next(iter(loader))
 
-    key = f"goes16/prognostic/2d/{CMI_C04}"
+    key = f"TEST_GOES/goes/prognostic/2d/{CMI_C04}"
     assert batch["input"][key].shape == (2, 1, 1, NY, NX)
     assert batch["target"][key].shape == (2, 1, 1, NY, NX)
