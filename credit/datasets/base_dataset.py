@@ -263,7 +263,8 @@ class BaseDataset(AbstractBaseDataset):
         if self.return_target:
             target_data: dict[str, Any] = {}
             for field_type in ("prognostic", "diagnostic"):
-                if self.file_dict.get(field_type) and field_type in self.var_dict:
+                # if self.file_dict.get(field_type) and
+                if field_type in self.var_dict:
                     self._extract_field(field_type, t_target, target_data)
 
             sample["target"] = target_data

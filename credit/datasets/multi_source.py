@@ -46,6 +46,7 @@ import pandas as pd
 
 from credit.datasets.base_dataset import AbstractBaseDataset
 
+from credit.datasets.base_dataset import BaseDataset
 from credit.datasets.era5 import ERA5Dataset
 from credit.datasets.era5 import ARCOERA5Dataset
 from credit.datasets.mrms import MRMSDataset
@@ -57,6 +58,7 @@ logger = logging.getLogger(__name__)
 # Maps config["source"] keys to Dataset classes.
 # Add entries here to register new data sources.
 _SOURCE_REGISTRY: dict[str, type] = {
+    "BASE": BaseDataset,  # for placeholders, testing, and examples
     "ERA5": ERA5Dataset,
     "ARCO_ERA5": ARCOERA5Dataset,
     "MRMS": MRMSDataset,
@@ -143,7 +145,7 @@ class MultiSourceDataset(AbstractBaseDataset):
             # with multisource datasets (e.g., HRRR and HRRR_NAT)
             sub_config = make_single_source_subconfig(config, user_dataset_name)
             # Route to the appropriate dataset class based on the "dataset_name" field in the sub-config
-            cls = route_to_dataset_class(sub_config)
+            cls = route_to_dataset_class(sub_config["source"][user_dataset_name])
             self.datasets[user_dataset_name] = cls(sub_config, return_target)
             logger.info(f"MultiSourceDataset: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
 
@@ -186,7 +188,7 @@ class MultiSourceDataset(AbstractBaseDataset):
             return pd.DatetimeIndex([])
 
         sets: list[set[pd.Timestamp]] = [set(ds.datetimes) for ds in self.datasets.values()]
-        common = set.intersection(*sets)
+        common = sets[0].intersection(*sets[1:])
         if not common:
             logger.warning(
                 "MultiSourceDataset: timestamp intersection across sources is empty. "
