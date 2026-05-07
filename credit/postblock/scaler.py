@@ -22,14 +22,15 @@ class BridgeScalerTransformer(BasePostblock):
             method: "inverse_transform"
     """
 
-    def __init__(self, scaler_path: str, variables: list[str], method: str):
+    def __init__(self, scaler_path: str, variables: list[str], method: str, key: str = "prediction"):
 
         super().__init__()
         self.variables = variables
         self.method = method
         self.scaler_path = scaler_path
+        self.key = key
         self.scaler = load_scaler(scaler_path)
 
     def forward(self, batch: dict) -> dict:
-
-        return scale_var_dict(batch, self.scaler, self.method, self.variables)
+        batch[self.key] = scale_var_dict(batch[self.key], self.scaler, self.method, self.variables)
+        return batch

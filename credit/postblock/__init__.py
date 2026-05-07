@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 from credit.postblock.reconstruct import Reconstruct
@@ -48,23 +47,22 @@ def build_postblocks(postblock_cfg: dict | None = None) -> nn.ModuleDict:
     return nn.ModuleDict(modules)
 
 
-def apply_postblocks(postblocks: nn.ModuleDict, y_pred: torch.Tensor, metadata: dict) -> dict:
-    """Applies all postblocks. Downstream postblocks require the "Reconstruct" postblock to be run in the config first.
+def apply_postblocks(postblocks: nn.ModuleDict, batch_dict: dict) -> dict:
+    """Applies all postblocks sequentially on a shared batch dict.
 
-    All registered postblocks are run sequentially on the resulting dict after reconstuct is called. If no postblocks
-    are present, the raw tensor is returned.
+    The caller is responsible for adding ``"prediction"`` (flat model output
+    tensor) to ``batch_dict`` before calling this function. Any additional data
+    needed by postblocks (e.g. ``"_raw"`` for a pre-transform batch) should
+    also be added to ``batch_dict`` by the caller beforehand.
 
     Args:
-        postblocks: ``nn.ModuleDict`` built by ``build_postblocks``.
-        y_pred:     Flat model output tensor, shape ``(B, C, H, W)``.
-        metadata:   Metadata dict from ``apply_preblocks``, must contain
-                    ``metadata["_channel_map"]["output"]``.
+        postblocks:  ``nn.ModuleDict`` built by ``build_postblocks``.
+        batch_dict:  Dict containing at minimum ``"prediction"`` and ``"meta"``.
 
     Returns:
-        Dict with keys ``"prediction"`` and ``"metadata"``, possibly further
-        transformed by registered postblocks.
+        The same ``batch_dict`` after all postblocks have run. ``"prediction"``
+        will be a nested variable dict after ``Reconstruct`` runs.
     """
-
     blocks = list(postblocks.values())
     if not blocks:
         raise RuntimeError(
@@ -76,7 +74,8 @@ def apply_postblocks(postblocks: nn.ModuleDict, y_pred: torch.Tensor, metadata: 
             '"reconstruct" must be present as the first postblock '
             "to reconstruct the output tensor into a named variable dict."
         )
-    y_pred = blocks[0](y_pred, metadata)
-    for postblock in blocks[1:]:
-        y_pred = postblock(y_pred)
-    return y_pred
+
+    for block in blocks:
+        batch_dict = block(batch_dict)
+
+    return batch_dict

@@ -13,8 +13,9 @@ class WetMaskBlock(nn.Module):
     This encourages the model to focus learning on ocean regions.
     """
 
-    def __init__(self, conf):
+    def __init__(self, conf, key: str = "prediction"):
         super().__init__()
+        self.key = key
 
         data_path = conf["data"]["data_path"]
         data_means_path = conf["data"]["mean_path"]
@@ -51,26 +52,24 @@ class WetMaskBlock(nn.Module):
         self.register_buffer("wet_mask", wet.float())  # Main 3D ocean mask
         self.register_buffer("wet_surface_mask", wet_surface.float())  # Surface mask
 
-    def forward(self, predictions):
+    def forward(self, batch: dict) -> dict:
         """
-        Apply wet mask to predictions with gradient influence
+        Apply wet mask to predictions with gradient influence.
 
         Args:
-            predictions: tensor of shape (batch, n_vars, time, lat, lon)
+            batch: dict containing a tensor at ``batch[self.key]`` of shape
+                   (batch, n_vars, time, lat, lon).
 
         Returns:
-            masked_predictions: same shape, with land values set to zero
+            The same dict with ``batch[self.key]`` masked (land=0, ocean preserved).
         """
-        # Use the 3D wet mask for full predictions
-        # wet_mask shape depends on your data structure - adjust as needed
+        predictions = batch[self.key]
+
         if len(self.wet_mask.shape) == 4:  # (vars, levels, lat, lon)
-            # Flatten to (total_vars, lat, lon) to match prediction channels
             mask_flat = self.wet_mask.view(-1, self.wet_mask.shape[-2], self.wet_mask.shape[-1])
             mask_expanded = mask_flat.unsqueeze(0).unsqueeze(2)  # (1, vars, 1, lat, lon)
         else:  # Already (vars, lat, lon)
             mask_expanded = self.wet_mask.unsqueeze(0).unsqueeze(2)  # (1, vars, 1, lat, lon)
 
-        # Apply mask (ocean=1 preserves values, land=0 zeros out)
-        masked_predictions = predictions * mask_expanded.to(predictions.device)
-
-        return masked_predictions
+        batch[self.key] = predictions * mask_expanded.to(predictions.device)
+        return batch

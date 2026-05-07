@@ -278,12 +278,18 @@ class TestReconstruct:
     def _metadata(self, output_map):
         return {"_channel_map": {"output": output_map}}
 
+    def _batch_dict(self, y_pred, extra=None):
+        """Minimal batch_dict as the caller would build before apply_postblocks."""
+        d = {"prediction": y_pred, "meta": self._metadata(self._output_map())}
+        if extra:
+            d.update(extra)
+        return d
+
     def test_nested_dict_structure(self):
         """Output mirrors apply_preblocks input convention: source/data_type/dim/var_name."""
         from credit.postblock.reconstruct import Reconstruct
 
-        metadata = self._metadata(self._output_map())
-        result = Reconstruct()(torch.randn(2, 5, 8, 8), metadata)
+        result = Reconstruct()(self._batch_dict(torch.randn(2, 5, 8, 8)))
 
         pred = result["prediction"]
         assert "arco_era5" in pred
@@ -298,8 +304,7 @@ class TestReconstruct:
         from credit.postblock.reconstruct import Reconstruct
 
         B, H, W = 2, 8, 8
-        metadata = self._metadata(self._output_map())
-        result = Reconstruct()(torch.randn(B, 5, H, W), metadata)
+        result = Reconstruct()(self._batch_dict(torch.randn(B, 5, H, W)))
 
         pred = result["prediction"]
         assert pred["arco_era5"]["prognostic"]["3d"]["temperature"].shape == (B, 4, 1, H, W)
@@ -310,12 +315,11 @@ class TestReconstruct:
         from credit.postblock.reconstruct import Reconstruct
 
         B, H, W = 2, 8, 8
-        metadata = self._metadata(self._output_map())
         y_pred_4d = torch.randn(B, 5, H, W)
         y_pred_5d = y_pred_4d.unsqueeze(2)  # (B, 5, 1, H, W)
 
-        result_4d = Reconstruct()(y_pred_4d, metadata)
-        result_5d = Reconstruct()(y_pred_5d, metadata)
+        result_4d = Reconstruct()(self._batch_dict(y_pred_4d))
+        result_5d = Reconstruct()(self._batch_dict(y_pred_5d))
 
         shape_4d = result_4d["prediction"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape
         shape_5d = result_5d["prediction"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape
@@ -326,10 +330,8 @@ class TestReconstruct:
         from credit.postblock.reconstruct import Reconstruct
 
         B, H, W = 1, 4, 4
-        metadata = self._metadata(self._output_map())
         y_pred = torch.randn(B, 5, H, W)
-
-        result = Reconstruct()(y_pred, metadata)
+        result = Reconstruct()(self._batch_dict(y_pred))
         pred = result["prediction"]
 
         assert torch.equal(
@@ -341,14 +343,24 @@ class TestReconstruct:
             y_pred[:, 4:5].unflatten(1, (1, 1)),
         )
 
-    def test_metadata_passthrough(self):
-        """metadata dict is returned unchanged."""
+    def test_other_keys_pass_through(self):
+        """Keys other than 'prediction' are preserved unchanged."""
         from credit.postblock.reconstruct import Reconstruct
 
-        metadata = self._metadata(self._output_map())
-        metadata["extra_key"] = "sentinel"
-        result = Reconstruct()(torch.randn(1, 5, 4, 4), metadata)
-        assert result["metadata"] is metadata
+        raw = {"era5": {"input": {}}}
+        batch = self._batch_dict(torch.randn(1, 5, 4, 4), extra={"input": torch.zeros(1), "_raw": raw})
+        result = Reconstruct()(batch)
+        assert result["_raw"] is raw
+        assert "input" in result
+
+    def test_metadata_passthrough(self):
+        """meta dict is returned at the same key, unchanged."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        batch = self._batch_dict(torch.randn(1, 5, 4, 4))
+        original_meta = batch["meta"]
+        result = Reconstruct()(batch)
+        assert result["meta"] is original_meta
 
 
 if __name__ == "__main__":
