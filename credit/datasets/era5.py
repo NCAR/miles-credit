@@ -131,6 +131,9 @@ class ERA5Dataset(BaseDataset):
             "datetime_fmt": "unix_ns",
         }
 
+        self.mode = "local"
+        self.init_register_all_fields()
+
     # ------------------------------------------------------------------
     # Dataset interface
     # ------------------------------------------------------------------
@@ -269,18 +272,15 @@ class ARCOERA5Dataset(BaseDataset):
                 self.levels: list[int] = [1, 2, 3, 5, 7, 10, 20, 30, 50, 70] + list(range(100, 1025, 25))
         else:
             self.levels: list[int] = self.curr_source_cfg["levels"]
-        self.return_target: bool = return_target
         self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
 
         self.mode = "remote"
+        self.init_register_all_fields()
 
-        for field_type, d in self.curr_source_cfg["variables"].items():
-            self._register_field(field_type, d)
-
-        # Initialize on first call to __getitem__
+        # Initialize the s3fs on the first call to _extract_field within __getitem__
         self.fs = None
         self.mod_level_store = None
         self.pres_level_store = None
