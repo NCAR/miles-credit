@@ -658,8 +658,6 @@ class HRRRDataset(BaseDataset):
         # self.end_datetime = pd.Timestamp(data_config["end_datetime"])
         # self.datetimes: pd.DatetimeIndex = self._build_timestamps()
 
-        super().__post_init__()
-
         if self.mode == "local" and self.base_path is None:
             raise ValueError(
                 f"Missing 'base_path'. A config['source']['{self.curr_source_name}']['base_path'] is required for local mode"

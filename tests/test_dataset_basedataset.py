@@ -227,11 +227,19 @@ def test_load_end_datetime_warning(
 
 def test_register_field_success(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """Test successful field registration."""
-    ds = BaseDataset(minimal_config)
-    assert "prognostic" in ds.var_dict
-    assert "prognostic" in ds.file_dict
-    assert ds.var_dict["prognostic"]["vars_2D"] == ["t2m"]
-    assert ds.file_dict["prognostic"] is not None
+    config = minimal_config.copy()
+    config["source"]["TestSource_Base"]["mode"] = "remote"
+    ds = BaseDataset(config)
+    assert "prognostic" in ds.var_dict, (
+        f"Expected 'prognostic' in var_dict, got {ds.var_dict.keys()}. \nFull var_dict: \n{ds.var_dict}"
+    )
+    assert "prognostic" in ds.file_dict, (
+        f"Expected 'prognostic' in file_dict, got {ds.file_dict.keys()}. \nFull file_dict: \n{ds.file_dict.keys()}"
+    )
+    assert ds.var_dict["prognostic"]["vars_2D"] == ["t2m"], (
+        f"Expected vars_2D ['t2m'], got {ds.var_dict['prognostic']['vars_2D']}"
+    )
+    assert ds.file_dict["prognostic"] is not None, "Expected file_dict['prognostic'] to be set, got None"
 
 
 def test_register_field_invalid_type(minimal_config: Dict[str, Any]) -> None:
@@ -262,9 +270,9 @@ def test_register_field_missing_vars(minimal_config: Dict[str, Any]) -> None:
 def test_mode_setting(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """Test that mode is set correctly based on config."""
     config = minimal_config.copy()
-    # Default should be local
+    # Default should be empty
     ds_local = BaseDataset(config)
-    assert ds_local.mode == "local"
+    assert ds_local.mode == ""
 
     # Explicitly set to remote
     config["source"]["TestSource_Base"]["mode"] = "remote"
@@ -330,27 +338,33 @@ def test_getitem_return_target_true(
     minimal_config: Dict[str, Any], patch_base_dataset_io: None, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Test __getitem__ with return_target=True."""
-    ds = BaseDataset(minimal_config, return_target=True)
+    config = minimal_config.copy()
 
-    with caplog.at_level("ERROR"):
-        sample = ds[(ds.datetimes[0], 0)]
-        assert "You are using the default _extract_field method in BaseDataset" in caplog.text
+    for mode in ["local", "remote"]:
+        config["source"]["TestSource_Base"]["mode"] = mode
+        ds = BaseDataset(config, return_target=True)
 
-    assert "target" in sample
-    tgt = sample["target"]
-    assert "TestSource_Base/base/prognostic/2d/t2m" in tgt
-    assert "TestSource_Base/base/prognostic/3d/T" in tgt
-    assert "TestSource_Base/base/prognostic/3d/U" in tgt
-    assert "TestSource_Base/base/diagnostic/2d/tp" in tgt
-    # Static and dynamic forcing should not be in target
-    assert "TestSource_Base/base/static/2d/lsm" not in tgt
-    assert "TestSource_Base/base/dynamic_forcing/2d/msl" not in tgt
-    assert "target_datetime" in sample["metadata"]
+        with caplog.at_level("ERROR"):
+            sample = ds[(ds.datetimes[0], 0)]
+            assert "You are using the default _extract_field method in BaseDataset" in caplog.text
+
+        assert "target" in sample
+        tgt = sample["target"]
+        assert "TestSource_Base/base/prognostic/2d/t2m" in tgt
+        assert "TestSource_Base/base/prognostic/3d/T" in tgt
+        assert "TestSource_Base/base/prognostic/3d/U" in tgt
+        assert "TestSource_Base/base/diagnostic/2d/tp" in tgt
+        # Static and dynamic forcing should not be in target
+        assert "TestSource_Base/base/static/2d/lsm" not in tgt
+        assert "TestSource_Base/base/dynamic_forcing/2d/msl" not in tgt
+        assert "target_datetime" in sample["metadata"]
 
 
 def test_getitem_return_target_false(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """Test __getitem__ with return_target=False."""
-    ds = BaseDataset(minimal_config, return_target=False)
+    config = minimal_config.copy()
+    config["source"]["TestSource_Base"]["mode"] = "remote"
+    ds = BaseDataset(config, return_target=False)
     sample = ds[(ds.datetimes[0], 0)]
     assert "target" not in sample
     assert "target_datetime" not in sample["metadata"]
@@ -372,6 +386,10 @@ def test_abstract_base_dataset_methods_raise_error() -> None:
         dataset[(pd.Timestamp("2023-01-01"), 0)]
     with pytest.raises(NotImplementedError):
         dataset._build_timestamps()  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(NotImplementedError):
+        dataset._get_field_name("diagnostic", "2d", "t2m")  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(NotImplementedError):
+        dataset.init_register_all_fields()  # pyright: ignore[reportPrivateUsage]
     with pytest.raises(NotImplementedError):
         dataset._register_field("prognostic", {})  # pyright: ignore[reportPrivateUsage]
     with pytest.raises(NotImplementedError):

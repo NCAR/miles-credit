@@ -59,10 +59,16 @@ class AbstractBaseDataset(Dataset[Any]):
     def _build_timestamps(self) -> pd.DatetimeIndex:
         raise NotImplementedError
 
+    def _get_field_name(self, field_type: VALID_FIELD_TYPES, dim_str: str, vname: str) -> str:
+        raise NotImplementedError
+
+    def init_register_all_fields(self) -> None:
+        raise NotImplementedError
+
     def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
         raise NotImplementedError
 
-    def _extract_field(self, field_type: str, t: pd.Timestamp, sample: dict[str, Any]) -> None:
+    def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
         raise NotImplementedError
 
 
@@ -177,8 +183,7 @@ class BaseDataset(AbstractBaseDataset):
             )
         self.curr_source_cfg = data_config["source"][self.curr_source_name]
 
-        if self.dataset_name == "":
-            self.dataset_name = "base"
+        self.dataset_name = "base"
 
         # Now we start loading the parameters for the dataset, starting with the clock parameters.
         self.dt: pd.Timedelta = self._load_dt(data_config, self.curr_source_cfg)
@@ -191,32 +196,16 @@ class BaseDataset(AbstractBaseDataset):
         # Set the return target flag based on the argument passed to init.
         self.return_target: bool = return_target
 
-    def __post_init__(self) -> None:
-
-        # Now we load the variables for the dataset.
-        assert "variables" in self.curr_source_cfg, (
-            "Expected 'variables' key in source config, but it was not found. "
-            + f"Full source config provided: \n{self.curr_source_cfg}"
-        )
-
         # Select if the data is being loaded from local files or remote files.
-        if "mode" not in self.curr_source_cfg:
-            self.mode = "local"
-        else:
+        self.mode = ""
+        if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
 
-        # By default, we suggest that the inherited dataset use both file_dict and var_dict.
-        # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
-        #   tuples produced by _map_files. _extract_field can then use the list to find the
-        #   appropriate file for a given timestamp.
-        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field
-        #   can then use this to know which variables to extract for each field type from the file.
-        self.file_dict: dict[str, Any] = {}
-        self.var_dict: dict[str, Any] = {}
-        for field_type, field_config in self.curr_source_cfg["variables"].items():
-            # Notice that we are expecting to call the same _register_field method for each field type.
-            # Check or override this method as needed based on the expected structure of your config for each field type.
-            self._register_field(field_type, field_config)
+        # Only if this is __NOT__ an inherited class, we will immediately run init_register_all_fields.
+        # In an inherited class, you should call super().init_register_all_fields() at the end of your
+        # __init__ method after you have set up any additional parameters needed for your
+        if type(self) is BaseDataset:
+            self.init_register_all_fields()
 
     def __len__(self) -> int:
         """For a CREDIT dataset, the length is the number of unique datetimes that can be sampled from."""
@@ -425,6 +414,50 @@ class BaseDataset(AbstractBaseDataset):
     # ---------------
     # 2. Registering fields
 
+    def _get_field_name(self, field_type: VALID_FIELD_TYPES, dim_str: str, vname: str) -> str:
+        """Get the field name and enforce a consistent convention across datasets
+
+        Args:
+            field_type (VALID_FIELD_TYPES): The field type (e.g., "prognostic")
+            dim_str (str): The dimension string (e.g., "3d" or "2d")
+            vname (str): The variable name (e.g., "T" or "t2m")
+
+        Returns:
+            str: The key string that will be used to access the field variable
+        """
+        # Cast 3D to 3d, etc. (as needed)
+        dim_str = dim_str.lower()
+        # Do not change the case on everything else!
+        return f"{self.curr_source_name}/{self.dataset_name}/{field_type}/{dim_str}/{vname}"
+
+    def init_register_all_fields(self) -> None:
+
+        if self.dataset_name == "base":
+            logging.error(
+                f"You are currently using a dataset name of {self.dataset_name} for class {self.__class__.__name__}, "
+                "which is the default name for the BaseDataset class. Likely, you did not set the dataset_name attribute "
+                "in the __init__ method of your inherited dataset class, which may cause issues downstream! "
+            )
+
+        # Now we load the variables for the dataset.
+        assert "variables" in self.curr_source_cfg, (
+            "Expected 'variables' key in source config, but it was not found. "
+            + f"Full source config provided: \n{self.curr_source_cfg}"
+        )
+
+        # By default, we suggest that the inherited dataset use both file_dict and var_dict.
+        # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
+        #   tuples produced by _map_files. _extract_field can then use the list to find the
+        #   appropriate file for a given timestamp.
+        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field
+        #   can then use this to know which variables to extract for each field type from the file.
+        self.file_dict: dict[str, Any] = {}
+        self.var_dict: dict[str, Any] = {}
+        for field_type, field_config in self.curr_source_cfg["variables"].items():
+            # Notice that we are expecting to call the same _register_field method for each field type.
+            # Check or override this method as needed based on the expected structure of your config for each field type.
+            self._register_field(field_type, field_config)
+
     def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
         """Validate and register one field type from the config variables block.
 
@@ -462,7 +495,7 @@ class BaseDataset(AbstractBaseDataset):
             "vars_2D": field_config.get("vars_2D") or [],
         }
 
-    def _extract_field(self, field_type: str, t: pd.Timestamp, sample: dict[str, Any]) -> None:
+    def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
         """
         Base extract field method, which should be overridden in the inherited dataset class to extract the data for
         each field type. The method should populate data_dict with the extracted data for the given field type and
@@ -482,8 +515,8 @@ class BaseDataset(AbstractBaseDataset):
 
         if field_type in self.var_dict:
             for var_2d in self.var_dict[field_type].get("vars_2D", []):
-                key = f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{var_2d}"
+                key = self._get_field_name(field_type, "2d", var_2d)
                 sample[key] = torch.ones(1, 1, n_lat, n_lon)
             for var_3d in self.var_dict[field_type].get("vars_3D", []):
-                key = f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{var_3d}"
+                key = self._get_field_name(field_type, "3d", var_3d)
                 sample[key] = torch.ones(n_levels, 1, n_lat, n_lon)
