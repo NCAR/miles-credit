@@ -67,6 +67,9 @@ class AbstractBaseDataset(Dataset[Any]):
 
     def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
         raise NotImplementedError
+    
+    def _get_file_source(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
 
     def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
         raise NotImplementedError
@@ -197,7 +200,7 @@ class BaseDataset(AbstractBaseDataset):
         self.return_target: bool = return_target
 
         # Select if the data is being loaded from local files or remote files.
-        self.mode = ""
+        self.mode = "local"
         if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
 
@@ -484,16 +487,31 @@ class BaseDataset(AbstractBaseDataset):
         if not field_config.get("vars_3D") and not field_config.get("vars_2D"):
             raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
 
-        if self.mode == "local":
-            files = sorted(glob(field_config.get("path", "")))
-            time_fmt: str = field_config.get("filename_time_format", "%Y")
-            self.file_dict[field_type] = _map_files(files, time_fmt) if files else None
-        elif self.mode == "remote":
-            self.file_dict[field_type] = True
         self.var_dict[field_type] = {
             "vars_3D": field_config.get("vars_3D") or [],
             "vars_2D": field_config.get("vars_2D") or [],
         }
+
+        self.file_dict[field_type] = self._get_file_source(field_type, field_config)
+
+    def _get_file_source(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]) -> dict[str, Any]:
+        """Return the file source for a field. Override in subclasses for different modes/backends.
+
+            Args:
+            field_type: One of VALID_FIELD_TYPES.
+            field_config: Validated field-type config dict.
+
+        Raises:
+            ValueError: If ``self.mode`` is not a recognised mode.
+        """
+        if self.mode == "local":
+            files = sorted(glob(field_config.get("path", "")))
+            time_fmt: str = field_config.get("filename_time_format", "%Y")
+            return _map_files(files, time_fmt) if files else None
+        elif self.mode == "remote":
+            return True
+        else:
+            raise ValueError(f"Unknown mode '{self.mode}'. Expected 'local' or 'remote'.")
 
     def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
         """
