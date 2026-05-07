@@ -64,8 +64,6 @@ def apply_preblocks(preblocks: nn.ModuleDict, batch: dict, device=None):
     Tensors in the output are moved to ``device`` unless the concat preblock was
     configured with ``to_device: false``.
     """
-    if not preblocks:
-        raise RuntimeError('No preblocks configured. "preblocks" must be present in the config.')
     meta = None
     target = None
     to_device = True
@@ -78,7 +76,7 @@ def apply_preblocks(preblocks: nn.ModuleDict, batch: dict, device=None):
                 batch, meta = result
         else:
             batch = result
-        if hasattr(preblock, "to_device"):
+        if isinstance(preblock, ConcatToTensor):
             to_device = preblock.to_device
 
     out = {"input": batch}
