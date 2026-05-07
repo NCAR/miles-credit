@@ -4,7 +4,12 @@ import xarray as xr
 from credit.metadata import get_meta_file_path
 
 
-def pressure_on_interfaces(surface_pressure: torch.Tensor, model_a_half: torch.Tensor, model_b_half: torch.Tensor):
+def pressure_on_interfaces(
+    surface_pressure: torch.Tensor,
+    model_a_half: torch.Tensor,
+    model_b_half: torch.Tensor,
+    model_top_pressure: float = 1.0,
+):
     """
     Calculate pressure on the interfaces of atmospheric hybrid sigma-pressure model levels.
     Conversion is `pressure_3d = a + b * SP`.
@@ -15,13 +20,13 @@ def pressure_on_interfaces(surface_pressure: torch.Tensor, model_a_half: torch.T
         surface_pressure (torch.Tensor): (time, latitude, longitude) or (latitude, longitude) grid in units of Pa.
         model_a_half (torch.Tensor): coefficient a at each model level interface in units of Pa.
         model_b_half (torch.Tensor): coefficient b at each model level interface, which is unitless.
+        model_top_pressure (float): pressure at model top (default 1 Pa).
 
     Returns:
         Pressure on each model level interface.
     """
-    model_a_3d = model_a_half.reshape(1, -1, 1, 1, 1)
-    model_b_3d = model_b_half.reshape(1, -1, 1, 1, 1)
-    pressure_3d_half = model_a_3d + model_b_3d * surface_pressure
+    pressure_3d_half = model_a_half + model_b_half * surface_pressure
+    pressure_3d_half = torch.where(pressure_3d_half > 0, pressure_3d_half, model_top_pressure)
     return pressure_3d_half
 
 
@@ -51,18 +56,17 @@ def geopotential(
         geopotential (torch.Tensor): geopotential on each model level (m**2 s**-2)
     """
     RDGAS = 287.06
-    GAMMA = 0.609133
+    RVGAS = 461.51
+    GAMMA = RVGAS / RDGAS - 1.0
     pressure_inter = pressure_on_interfaces(surface_pressure, model_a_half, model_b_half)
-    pi_upper = pressure_inter[:-1][::-1]
-    pi_lower = pressure_inter[1:][::-1]
-    pressure_center = 0.5 * (pi_upper + pi_lower)
+    pi_upper = torch.flip(pressure_inter[:-1], (0,))
+    pi_lower = torch.flip(pressure_inter[1:], (0,))
     dlogp = torch.log(pi_lower / pi_upper)
-    dlogp_center = torch.log(pi_lower / pressure_center)
-    virtual_temperature = (temperature * (1.0 + GAMMA * specific_humidity))[::-1]
+    alpha = 1.0 - ((pi_upper / (pi_lower - pi_upper)) * dlogp)
+    virtual_temperature = torch.flip((temperature * (1.0 + GAMMA * specific_humidity)), (0,))
     geopotential_interfaces = surface_geopotential + torch.cumsum(RDGAS * virtual_temperature * dlogp, dim=0)
-    geopotential_top = geopotential_interfaces[-1] + RDGAS * virtual_temperature[-1] * 2.0 * np.log(2.0)
-    geopotential_interfaces = torch.concat([geopotential_interfaces, geopotential_top], dim=0)
-    geopotential_centers = 0.5 * (geopotential_interfaces[:-1] + RDGAS * virtual_temperature * dlogp_center)
+    geopotential_centers = geopotential_interfaces + RDGAS * virtual_temperature * alpha
+    geopotential_centers = torch.flip(geopotential_centers, (0,))
     return geopotential_centers
 
 
@@ -81,7 +85,7 @@ class GeopotentialDiagnostic(torch.nn.Module):
         super().__init__()
         self.output_name = output_name
         self.surface_geopotential_var = surface_geopotential_var
-        self.surface_geopotential_var = surface_pressure_var
+        self.surface_pressure_var = surface_pressure_var
         self.temperature_var = temperature_var
         self.specific_humidity_var = specific_humidity_var
         self.level_info_file = get_meta_file_path(level_info_file)
@@ -89,19 +93,29 @@ class GeopotentialDiagnostic(torch.nn.Module):
         self.model_b_half_var = model_b_half_var
         with xr.open_dataset(self.level_info_file) as level_info:
             self.model_a_half = torch.Tensor(level_info[self.model_a_half_var].values)
-            self.model_b_half = torch.Tensor(level_info[self.model_a_half_var].values)
+            self.model_b_half = torch.Tensor(level_info[self.model_b_half_var].values)
         return
 
-    def forward(self, pred_dict: dict):
+    def forward(self, pred_dict: dict, chunk_size=1000):
         pred = pred_dict["prediction"]
-        vgeo = torch.vmap(geopotential, 0)
+        pred_shape = pred[self.temperature_var].shape
+        pred_flat = {}
+        for input_var in [
+            self.surface_geopotential_var,
+            self.surface_pressure_var,
+            self.temperature_var,
+            self.specific_humidity_var,
+        ]:
+            pred_per = torch.permute(pred[input_var], (0, 2, 3, 4, 5, 1))
+            pred_flat[input_var] = pred_per.reshape(np.prod(pred_per.shape[:-1]), pred_per.shape[-1])
+        vgeo = torch.vmap(geopotential, (0, 0, 0, 0, None, None), chunk_size=chunk_size)
         geo_out = vgeo(
-            pred[self.surface_geopotential_var],
-            pred[self.surface_geopotential_var],
-            pred[self.temperature_var],
-            pred[self.specific_humidity_var],
+            pred_flat[self.surface_geopotential_var],
+            pred_flat[self.surface_pressure_var],
+            pred_flat[self.temperature_var],
+            pred_flat[self.specific_humidity_var],
             self.model_a_half,
             self.model_b_half,
-        )
-        pred[self.output_name] = geo_out
+        ).reshape(pred_shape[0], pred_shape[2], pred_shape[3], pred_shape[4], pred_shape[5], pred_shape[1])
+        pred[self.output_name] = torch.permute(geo_out, (0, 5, 1, 2, 3, 4))
         return pred_dict

@@ -1,7 +1,10 @@
 from credit.postblock.geopotential import GeopotentialDiagnostic
 from credit.datasets.multi_source import MultiSourceDataset
 from credit.trainers.utils import load_dataloader
+from credit.preblock import ConcatToTensor
+from credit.postblock import Reconstruct
 import yaml
+from copy import deepcopy
 
 
 conf_str = """
@@ -36,10 +39,13 @@ conf = yaml.safe_load(conf_str)
 def test_geopotential():
     msd = MultiSourceDataset(conf["data"])
     mdl = load_dataloader(conf, msd, 0, 1, True)
-    geopotential_layer = GeopotentialDiagnostic()
 
     batch = next(iter(mdl))
-    batch["prediction"] = batch["arco_era5"]["input"]
-    updated_batch = geopotential_layer(batch)
-    print(updated_batch)
-    assert geopotential_layer.output_name in updated_batch["prediction"]
+    ct = ConcatToTensor()
+    batch_tensor, meta = ct(batch)
+    meta_2 = deepcopy(meta)
+    meta_2["_channel_map"]["output"] = meta_2["_channel_map"]["input"]
+    recon = Reconstruct()
+    output = recon(batch_tensor, meta_2)
+    geopotential_layer = GeopotentialDiagnostic(output_name=batch.keys()[0] + "/derived_diagnostic/3d/geopotential")
+    diagnosed = geopotential_layer(output)
