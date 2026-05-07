@@ -441,7 +441,7 @@ class GOESDataset(BaseDataset):
         if self.mode == "local":
             return self._collect_GOES_file_path(base_dir=base_dir)
         elif self.mode == "remote":
-            return sself._collect_GOES_file_path()
+            return self._collect_GOES_file_path()
 
     def _extract_field(
         self,
