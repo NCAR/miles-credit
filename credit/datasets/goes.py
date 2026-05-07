@@ -308,7 +308,7 @@ class GOESDataset(BaseDataset):
     # Dataset interface
     # ------------------------------------------------------------------
 
-    # inheriting from BaseDataset
+    # inheriting from BaseDataset (_len_ and _getitem_ implementations)
 
     # ------------------------------------------------------------------
     # Private helpers

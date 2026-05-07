@@ -48,7 +48,7 @@ from credit.datasets.base_dataset import AbstractBaseDataset
 
 from credit.datasets.era5 import ERA5Dataset
 from credit.datasets.era5 import ARCOERA5Dataset
-from credit.datasets.MRMS import MRMSDataset
+from credit.datasets.mrms import MRMSDataset
 from credit.datasets.goes import GOESDataset
 from credit.datasets.hrrr import HRRRDataset
 
