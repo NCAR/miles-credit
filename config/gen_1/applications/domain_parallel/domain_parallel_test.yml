@@ -1,0 +1,174 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# Domain parallel test config - 2 GPU test using ERA5 1deg 6h data
+# Based on example-v2026.1.0.yml with minimal settings for quick testing
+# --------------------------------------------------------------------------------------------------------------------- #
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/domain_parallel_test/'
+seed: 1000
+
+data:
+    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    level_ids: [1., 9., 19.,  29.,  39.,  49.,  59.,  69.,  79.,  89.,  97., 104.,
+           111., 116., 122., 126., 131., 136.]
+
+    surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+    save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+    dynamic_forcing_variables: ['toa_incident_solar_radiation', 'land_sea_CI_mask']
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+    diagnostic_variables: ['total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation', 'surface_latent_heat_flux', 'surface_net_solar_radiation',
+                          'surface_net_thermal_radiation', 'surface_sensible_heat_flux']
+    save_loc_diagnostic: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+
+    save_loc_forcing: '/glade/campaign/cisl/aiml/ksha/CREDIT/forcing_norm_6h.nc'
+
+    static_variables: ["z_norm", "land_sea_mask"]
+    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    save_loc_physics: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+
+    train_years: [2000, 2002]
+    valid_years: [2014, 2015]
+
+    scaler_type: 'std_new'
+
+    history_len: 1
+    valid_history_len: 1
+
+    forecast_len: 0
+    valid_forecast_len: 0
+
+    one_shot: False
+    lead_time_periods: 6
+    skip_periods: null
+    static_first: False
+
+    dataset_type: ERA5_MultiStep_Batcher
+
+trainer:
+    type: era5-gen1
+
+    mode: domain_parallel
+    domain_parallel_size: 2
+
+    cpu_offload: False
+    activation_checkpoint: False
+
+    load_weights: False
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+
+    skip_validation: False
+    update_learning_rate: False
+
+    save_backup_weights: False
+    save_best_weights: False
+
+    learning_rate: 1.0e-04
+    weight_decay: 0
+
+    train_batch_size: 2
+    valid_batch_size: 2
+
+    batches_per_epoch: 2
+    valid_batches_per_epoch: 1
+    stopping_patience: 999
+
+    start_epoch: 0
+    num_epoch: 1
+    reload_epoch: False
+    epochs: 1
+
+    use_scheduler: True
+    scheduler:
+      scheduler_type: cosine-annealing
+      T_max: 1
+      last_epoch: -1
+
+    amp: False
+    grad_accum_every: 1
+    grad_max_norm: 1.0
+
+    thread_workers: 2
+    valid_thread_workers: 1
+
+model:
+    type: "wxformer"
+    frames: 1
+    image_height: 181
+    image_width: 360
+    levels: 18
+    channels: 4
+    surface_channels: 4
+    input_only_channels: 3
+    output_only_channels: 8
+
+    patch_width: 1
+    patch_height: 1
+    frame_patch_size: 1
+
+    dim: [32, 64, 128, 256]
+    depth: [2, 2, 2, 2]
+    global_window_size: [8, 4, 2, 1]
+    local_window_size: 4
+    cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+    cross_embed_strides: [2, 2, 2, 2]
+    attn_dropout: 0.
+    ff_dropout: 0.
+    upsample_with_ps: True
+
+    use_spectral_norm: True
+    upsample_v_conv: True
+    decoder_attention_type: "scse"
+
+    interp: False
+
+    padding_conf:
+        activate: True
+        mode: earth
+        pad_lat: [37, 38]
+        pad_lon: [76, 76]
+
+    post_conf:
+        activate: False
+        skebs:
+            activate: False
+        tracer_fixer:
+            activate: False
+        global_mass_fixer:
+            activate: False
+        global_water_fixer:
+            activate: False
+        global_energy_fixer:
+            activate: False
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+
+    use_power_loss: False
+    use_spectral_loss: False
+
+    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
+    use_latitude_weights: False
+    use_variable_weights: False
+
+pbs:
+    conda: "credit-derecho"
+    project: "NAML0001"
+    job_name: "dp_test"
+    walltime: "00:30:00"
+    nodes: 1
+    ncpus: 8
+    ngpus: 2
+    mem: '120GB'
+    queue: 'main'

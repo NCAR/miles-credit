@@ -8,13 +8,14 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 
-def launch_script(config_file, script_path, launch=True):
-    """Generates and optionally launches a PBS script for a single-node job.
+def launch_script(config_file, script_path, launch=True, backend="nccl"):
+    """Generates and optionally launches a PBS script for a single-node MPI job on Casper.
 
     Args:
         config_file (str): Path to the YAML configuration file.
         script_path (str): Path to the script that will be executed by the PBS job.
         launch (bool, optional): If True, the PBS job will be submitted to the queue. Defaults to True.
+        backend (str, optional): Backend for distributed training. Defaults to 'nccl'.
     """
 
     # Load the configuration file
@@ -24,13 +25,15 @@ def launch_script(config_file, script_path, launch=True):
     # Extract PBS options from the config
     pbs_options = config["pbs"]
 
+    num_gpus = pbs_options.get("ngpus", 1)
+
     save_loc = os.path.expandvars(config["save_loc"])
     config_save_path = os.path.join(save_loc, "model.yml")
 
     # Generate the PBS script
     script = f"""#!/bin/bash -l
     #PBS -N {pbs_options["job_name"]}
-    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={pbs_options["ngpus"]}:mem={pbs_options["mem"]}:gpu_type={pbs_options["gpu_type"]}  
+    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}:gpu_type={pbs_options["gpu_type"]}
     #PBS -l walltime={pbs_options["walltime"]}
     #PBS -A {pbs_options["project"]}
     #PBS -q {pbs_options["queue"]}
@@ -41,7 +44,7 @@ def launch_script(config_file, script_path, launch=True):
 
     conda activate {pbs_options["conda"]}
 
-    python {script_path} -c {config_save_path}
+    mpirun -np {num_gpus} --bind-to none python {script_path} -c {config_save_path} --backend {backend}
     """
 
     script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)
@@ -132,24 +135,6 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     export CUDA_VISIBLE_DEVICES={cuda_devices}
 
-    export NCCL_SOCKET_IFNAME=hsn
-    export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
-    export MPICH_OFI_NIC_POLICY=GPU
-    export MPICH_GPU_SUPPORT_ENABLED=1
-
-    export NCCL_IB_DISABLE=1
-    export NCCL_CROSS_NIC=1
-    export NCCL_NCHANNELS_PER_NET_PEER=4
-
-    export MPICH_RDMA_ENABLED_CUDA=1
-    export NCCL_NET="AWS Libfabric"
-    export NCCL_NET_GDR_LEVEL=PBH
-
-    export FI_CXI_DISABLE_HOST_REGISTER=1
-    export FI_CXI_OPTIMIZED_MRS=false
-    export FI_MR_CACHE_MONITOR=userfaultfd
-    export FI_CXI_DEFAULT_CQ_SIZE=131072
-
     # logger.info the results
     echo "Number of nodes: {num_nodes}"
     echo "Number of GPUs per node: {num_gpus}"
@@ -200,6 +185,118 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
             logger.info(f"Generated the new script at {destination_path}")
         except shutil.SameFileError:
             pass
+
+
+def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"):
+    """Generates and optionally launches a PBS script using torchrun.
+
+    Preferred over launch_script_mpi for FSDP2 / v2-parallelism jobs — torchrun
+    manages rendezvous and sets LOCAL_RANK / RANK / WORLD_SIZE automatically.
+    Single-node jobs use c10d + localhost; multi-node jobs broadcast the head
+    node IP for the rendezvous endpoint.
+
+    Args:
+        config_file (str): Path to the YAML config file.
+        script_path (str): Path to the training script (e.g., applications/train_gen2.py).
+        launch (bool): If True, submit with qsub. Defaults to True.
+        backend (str): torch.distributed backend. Defaults to 'nccl'.
+    """
+    with open(config_file) as cf:
+        config = yaml.load(cf, Loader=yaml.FullLoader)
+
+    pbs_options = config.get("pbs", {})
+    user = os.environ.get("USER")
+    num_nodes = pbs_options.get("nodes", 1)
+    num_gpus = pbs_options.get("ngpus", 4)
+
+    save_loc = os.path.expandvars(config["save_loc"])
+    os.makedirs(save_loc, exist_ok=True)
+    config_save_path = os.path.join(save_loc, "model.yml")
+
+    try:
+        shutil.copy(config_file, config_save_path)
+    except shutil.SameFileError:
+        pass
+
+    conda = pbs_options.get("conda", "credit")
+    # Resolve torchrun from the conda env's bin directory
+    if "/" in conda:
+        torchrun = f"{conda}/bin/torchrun"
+    else:
+        torchrun = f"$(conda info --base)/envs/{conda}/bin/torchrun"
+
+    total_ranks = num_nodes * num_gpus
+    cuda_devices = ",".join(str(i) for i in range(num_gpus))
+
+    launch_cmd = (
+        f"${{TORCHRUN}} \\\n"
+        f"    --nnodes=1 \\\n"
+        f"    --nproc-per-node={num_gpus} \\\n"
+        f"    --rdzv-backend=c10d \\\n"
+        f'    --rdzv-endpoint="localhost:29500" \\\n'
+        f"    {script_path} \\\n"
+        f"        -c {config_save_path}"
+        if num_nodes == 1
+        else (
+            f"nodes=( $( cat $PBS_NODEFILE ) )\n"
+            f"head_node=${{nodes[0]}}\n"
+            f"head_node_ip=$(ssh $head_node hostname -i | awk '{{print $1}}')\n\n"
+            f"MASTER_ADDR=$head_node_ip MASTER_PORT=29500 \\\n"
+            f"mpiexec -n {total_ranks} --ppn {num_gpus} --cpu-bind none \\\n"
+            f"    {torchrun.replace('/bin/torchrun', '/bin/python')} {script_path} \\\n"
+            f"        -c {config_save_path}"
+        )
+    )
+
+    torchrun_line = f"TORCHRUN={torchrun}\n" if num_nodes == 1 else ""
+
+    script = f"""#!/bin/bash -l
+#PBS -A {pbs_options.get("project", "NAML0001")}
+#PBS -N {pbs_options.get("job_name", "credit_v2")}
+#PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
+#PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 64)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "480GB")}
+#PBS -q {pbs_options.get("queue", "develop@desched1")}
+#PBS -j oe
+#PBS -k eod
+
+module --force purge
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+
+{torchrun_line}export PYTHONPATH="{os.path.dirname(str(script_path))}:${{PYTHONPATH:-}}"
+export LOGLEVEL=INFO
+export NCCL_DEBUG=WARN
+export CUDA_VISIBLE_DEVICES={cuda_devices}
+
+echo "Host   : $(hostname)"
+echo "Date   : $(date)"
+echo "Nodes  : {num_nodes}  GPUs/node: {num_gpus}"
+
+{launch_cmd}
+
+echo "Done at $(date)"
+"""
+    script = re.sub(r"^\s+", "", script, flags=re.MULTILINE)
+
+    with open("launch.sh", "w") as f:
+        f.write(script)
+
+    if launch:
+        jobid = subprocess.Popen(
+            "qsub launch.sh",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).communicate()[0]
+        jobid = jobid.decode("utf-8").strip("\n")
+        logger.info(jobid)
+
+        dst = os.path.join(save_loc, "launch.sh")
+        try:
+            shutil.copy("launch.sh", dst)
+        except shutil.SameFileError:
+            pass
+
+    return
 
 
 def get_num_cpus():

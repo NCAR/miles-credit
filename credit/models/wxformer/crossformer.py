@@ -7,7 +7,7 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
-from credit.postblock import PostBlock
+from credit.postblock.gen1 import PostBlock
 from credit.boundary_padding import TensorPadding
 from credit.models.unet_attention_modules import load_unet_attention
 
@@ -23,7 +23,8 @@ def cast_tuple(val, length=1):
 def apply_spectral_norm(model):
     for module in model.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
-            nn.utils.spectral_norm(module)
+            if module.weight.numel() > 0:
+                nn.utils.spectral_norm(module)
 
 
 # cube embedding
@@ -236,6 +237,11 @@ class Attention(nn.Module):
             "short",
             "long",
         }, "attention type must be one of local or distant"
+        if dim < dim_head:
+            raise ValueError(
+                f"Attention: dim={dim} is smaller than dim_head={dim_head}; "
+                f"set dim_head <= {dim} or increase the smallest dim in the model."
+            )
         heads = dim // dim_head
         self.heads = heads
         self.scale = dim_head**-0.5

@@ -1,13 +1,12 @@
 #!/bin/bash -l
 #PBS -N credit_solar
 #PBS -l select=4:ncpus=128:mpiprocs=128:ngpus=0
-#PBS -l walltime=01:00:00
+#PBS -l walltime=03:00:00
 #PBS -A NAML0001
 #PBS -q main
 #PBS -l job_priority=regular
 #PBS -j oe
 #PBS -k eod
-#PBS -J 2026-2027
 #module load conda craype/2.7.31 cray-mpich/8.1.29
 module load conda cray-mpich mkl
 conda activate credit-derecho
@@ -16,8 +15,8 @@ cd ..
 export MPICH_GPU_SUPPORT_ENABLED=0
 export MPICH_OFI_NIC_POLICY="NUMA"
 mpiexec -n 512 -ppn 128 python -u applications/calc_global_solar.py \
-  -s "${PBS_ARRAY_INDEX}-01-01" \
-  -e "${PBS_ARRAY_INDEX}-12-31 23:00" \
+  -s "2023-01-01" \
+  -e "2023-12-31 23:00" \
   -i /glade/campaign/cisl/aiml/credit/static_scalers/static_whole_20250416.nc  \
   -t 1h \
   -u 10Min \

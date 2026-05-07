@@ -1,21 +1,23 @@
 import torch
-import torch.nn as nn
 import numpy as np
 import xarray as xr
+from credit.preblock.base import BasePreblock
 
 
-class Regrid(nn.Module):
+class Regridder(BasePreblock):
     """
-    Regridding layer using weights file provide by the ESMF library.
+    Regridding layer using weights file provided by the ESMF library.
     Args:
         weight_file: path to weights file
+        variables: list of variable keys to regrid (e.g. ['era5/prognostic/3d/T'])
+        data_types: list of data types to process (default: ['input', 'target'])
         reshape_to_xy: whether to reshape the flattened array back to xy coordinates
-        flip_axis (list, tuple, or None): whether to flip any axis of the input data. If flipping is desired set a list
-                                          of axis to flip (e.g. [-1, -2])
+        flip_axis (list, tuple, or None): axes to flip before regridding (e.g. [-1, -2])
     """
 
-    def __init__(self, weight_file, reshape_to_xy=True, flip_axis=None):
-
+    def __init__(
+        self, weight_file, variables: list[str], data_types: list[str] = None, reshape_to_xy=True, flip_axis=None
+    ):
         super().__init__()
         with xr.open_dataset(weight_file) as grid_weights:
             rows = grid_weights["row"].values - 1  # ESMF indices are 1-based
@@ -36,8 +38,14 @@ class Regrid(nn.Module):
                 # Irregular unstructured: output stays flat, no 2D shape needed
                 dst_shape = None
 
+        self.variables = variables
+        self.data_types = data_types or ["input", "target"]
         self.reshape_to_xy = reshape_to_xy
         self.flip_axis = flip_axis
+
+        invalid = set(self.data_types) - set(self.VALID_DATA_TYPES)
+        if invalid:
+            raise ValueError(f"Invalid data_types {invalid}. Valid options are {self.VALID_DATA_TYPES}.")
         # store as buffers (CPU tensors)
         self.register_buffer("row", torch.from_numpy(rows.astype(np.int64)), persistent=True)
         self.register_buffer("col", torch.from_numpy(cols.astype(np.int64)), persistent=True)
@@ -50,7 +58,6 @@ class Regrid(nn.Module):
         self._W_device = None
 
     def _get_W(self, device):
-
         if self._W is not None and self._W_device == device:
             return self._W
 
@@ -63,8 +70,7 @@ class Regrid(nn.Module):
         self._W_device = device
         return W
 
-    def forward(self, x):
-
+    def _regrid(self, x: torch.Tensor) -> torch.Tensor:
         device = x.device
         W = self._get_W(device)
         if self.flip_axis is not None:
@@ -78,3 +84,19 @@ class Regrid(nn.Module):
             return y_flat.reshape(*lead_shape, ny, nx)
         else:
             return y_flat
+
+    def forward(self, batch: dict) -> dict:
+        for var_key in self.variables:
+            source = var_key.split("/")[0]
+
+            if source not in batch:
+                raise KeyError(f"Regridder: source '{source}' not found in batch.")
+
+            for data_type in self.data_types:
+                if data_type not in batch[source]:
+                    continue
+                if var_key not in batch[source][data_type]:
+                    continue
+                batch[source][data_type][var_key] = self._regrid(batch[source][data_type][var_key])
+
+        return batch

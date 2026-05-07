@@ -34,7 +34,7 @@ from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.parser import credit_main_parser
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 import traceback
 
 
@@ -292,10 +292,8 @@ def predict(rank, world_size, conf, p):
             # Clamp if needed
             if flag_clamp:
                 x = torch.clamp(x, min=clamp_min, max=clamp_max)
-
             # Model inference on the entire batch
             y_pred = model(x.float())
-
             # Post-processing blocks
             if flag_mass_conserve:
                 if forecast_step == 1:
@@ -336,7 +334,7 @@ def predict(rank, world_size, conf, p):
             # use previous step y_pred as the next step input
             if history_len == 1:
                 # cut diagnostic vars from y_pred, they are not inputs
-                if "y_diag" in batch:
+                if varnum_diag > 0:
                     x = y_pred[:, :-varnum_diag, ...].detach()
                 else:
                     x = y_pred.detach()

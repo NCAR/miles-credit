@@ -2,17 +2,21 @@
 
 import os
 import yaml
+import pytest
 
 import torch
 
-from credit.models import load_model
+from credit.models import load_model, register_model
+from credit.parser import load_custom_model_modules
 from credit.models.unet import SegmentationModel
-from credit.models.crossformer import CrossFormer
+from credit.models.wxformer.crossformer import CrossFormer
 from credit.models.fuxi import Fuxi
 from credit.parser import credit_main_parser
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
-CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
+CONFIG_FILE_DIR = os.path.join(
+    "/".join(os.path.abspath(__file__).split("/")[:-2]), "config/gen_1/applications/other_models/"
+)
 
 
 def test_unet():
@@ -134,6 +138,73 @@ def test_fuxi():
     y_pred = model(input_tensor)
     assert y_pred.shape == torch.Size([1, out_channels, 1, image_height, image_width])
     assert not torch.isnan(y_pred).any()
+
+
+def test_register_model():
+    """Test that register_model decorator adds a custom model to the registry."""
+
+    @register_model("test_custom_model", "Loading test custom model ...")
+    class CustomModel(torch.nn.Module):
+        def __init__(self, hidden_dim=32):
+            super().__init__()
+            self.fc = torch.nn.Linear(hidden_dim, hidden_dim)
+
+        def forward(self, x):
+            return self.fc(x)
+
+    conf = {"model": {"type": "test_custom_model", "hidden_dim": 16}, "save_loc": "/tmp"}
+    model = load_model(conf)
+
+    assert isinstance(model, CustomModel)
+    assert model.fc.in_features == 16
+
+
+def test_load_custom_model_modules(tmp_path):
+    """Test that load_custom_model_modules imports a file and registers its model."""
+    module_file = tmp_path / "custom_models.py"
+    module_file.write_text(
+        "import torch.nn as nn\n"
+        "from credit.models import register_model\n"
+        "\n"
+        "@register_model('file_registered_model')\n"
+        "class FileRegisteredModel(nn.Module):\n"
+        "    def __init__(self, size=8):\n"
+        "        super().__init__()\n"
+        "        self.fc = nn.Linear(size, size)\n"
+    )
+
+    load_custom_model_modules({"custom_models": [str(module_file)]})
+
+    conf = {"model": {"type": "file_registered_model", "size": 4}, "save_loc": "/tmp"}
+    model = load_model(conf)
+    assert model.fc.in_features == 4
+
+
+def test_load_custom_model_modules_missing_file():
+    """Test that a missing path raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError, match="custom_models"):
+        load_custom_model_modules({"custom_models": ["/nonexistent/path/models.py"]})
+
+
+def test_register_model_overwrite(caplog):
+    """Test that registering a duplicate key logs a warning and overwrites."""
+    import logging
+
+    @register_model("test_overwrite_model")
+    class ModelV1(torch.nn.Module):
+        pass
+
+    with caplog.at_level(logging.WARNING, logger="credit.models"):
+
+        @register_model("test_overwrite_model")
+        class ModelV2(torch.nn.Module):
+            pass
+
+    assert any("test_overwrite_model" in msg for msg in caplog.messages)
+
+    conf = {"model": {"type": "test_overwrite_model"}, "save_loc": "/tmp"}
+    model = load_model(conf)
+    assert isinstance(model, ModelV2)
 
 
 if __name__ == "__main__":

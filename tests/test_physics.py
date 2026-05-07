@@ -11,7 +11,7 @@ CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2
 
 def test_pressure_on_mlevs():
     # test on gh actions
-    level_info = xr.open_dataset(os.path.join(TEST_FILE_DIR, "data/level_info_test.nc"))
+    level_info = xr.open_dataset(os.path.join(TEST_FILE_DIR, "data/level_info_test_small.nc"))
     a_vals, b_vals = level_info["a_model"], level_info["b_model"]
 
     device = "cpu"
