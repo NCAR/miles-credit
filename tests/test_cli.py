@@ -414,6 +414,7 @@ class TestBuildPbsScript:
         args = _derecho_args(nodes=2)
         script = _build_pbs_script(args, "/path/to/config.yml", "/path/to/repo")
         assert "mpiexec" in script
+        assert "--rdzv-backend" not in script
         assert "python " in script
 
     def test_depend_on_added(self):
