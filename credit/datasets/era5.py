@@ -188,13 +188,15 @@ class ERA5Dataset(BaseDataset):
             for vname in vars_3D:
                 arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
-
+                key = self._get_field_name(field_type, "3d", vname)
+                sample[key] = tensor
+ 
             # 2D variables: (lat, lon) → (1, 1, lat, lon)
             for vname in vars_2D:
                 arr = ds_t[vname].values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
+                key = self._get_field_name(field_type, "2d", vname)
+                sample[key] = tensor
 
 
 class ARCOERA5Dataset(BaseDataset):
@@ -351,13 +353,15 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_3D:
                     arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                    sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
+                    key = self._get_field_name(field_type, "3d", vname)
+                    sample[key] = tensor
 
                 # 2D variables: (lat, lon) → (1, 1, lat, lon)
                 for vname in vars_2D:
                     arr = ds_t[vname].values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                    sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
+                    key = self._get_field_name(field_type, "2d", vname)
+                    sample[key] = tensor
         else:
             with xr.open_zarr(self.mod_level_store, chunks=None) as ds:
                 # Select the time step; static fields have no time dim
@@ -375,7 +379,8 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_3D:
                     arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                    sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{vname}"] = tensor
+                    key = self._get_field_name(field_type, "3d", vname)
+                    sample[key] = tensor
 
             with xr.open_zarr(self.pres_level_store, chunks=None) as ds:
                 # Select the time step; static fields have no time dim
@@ -392,4 +397,5 @@ class ARCOERA5Dataset(BaseDataset):
                 for vname in vars_2D:
                     arr = ds_t[vname].values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                    sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{vname}"] = tensor
+                    key = self._get_field_name(field_type, "2d", vname)
+                    sample[key] = tensor
