@@ -8,7 +8,7 @@ def pressure_on_interfaces(
     surface_pressure: torch.Tensor,
     model_a_half: torch.Tensor,
     model_b_half: torch.Tensor,
-    model_top_pressure: float = 1.0,
+    model_top_pressure: float = 0.57,
 ):
     """
     Calculate pressure on the interfaces of atmospheric hybrid sigma-pressure model levels.
@@ -25,7 +25,9 @@ def pressure_on_interfaces(
     Returns:
         Pressure on each model level interface.
     """
-    pressure_3d_half = model_a_half + model_b_half * surface_pressure
+    model_a_3d = model_a_half
+    model_b_3d = model_b_half
+    pressure_3d_half = model_a_3d + model_b_3d * surface_pressure
     pressure_3d_half = torch.where(pressure_3d_half > 0, pressure_3d_half, model_top_pressure)
     return pressure_3d_half
 
@@ -63,9 +65,10 @@ def geopotential(
     pi_lower = torch.flip(pressure_inter[1:], (0,))
     dlogp = torch.log(pi_lower / pi_upper)
     alpha = 1.0 - ((pi_upper / (pi_lower - pi_upper)) * dlogp)
-    virtual_temperature = torch.flip((temperature * (1.0 + GAMMA * specific_humidity)), (0,))
+    virtual_temperature = torch.flip(temperature * (1.0 + GAMMA * specific_humidity), (0,))
     geopotential_interfaces = surface_geopotential + torch.cumsum(RDGAS * virtual_temperature * dlogp, dim=0)
-    geopotential_centers = geopotential_interfaces + RDGAS * virtual_temperature * alpha
+    # I flipped the sign here, and it lines up much better with ERA5 geopotential
+    geopotential_centers = geopotential_interfaces - RDGAS * virtual_temperature * alpha
     geopotential_centers = torch.flip(geopotential_centers, (0,))
     return geopotential_centers
 

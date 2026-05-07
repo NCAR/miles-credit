@@ -39,7 +39,6 @@ conf = yaml.safe_load(conf_str)
 def test_geopotential():
     msd = MultiSourceDataset(conf["data"])
     mdl = load_dataloader(conf, msd, 0, 1, True)
-
     batch = next(iter(mdl))
     ct = ConcatToTensor()
     batch_tensor, meta = ct(batch)
@@ -47,5 +46,17 @@ def test_geopotential():
     meta_2["_channel_map"]["output"] = meta_2["_channel_map"]["input"]
     recon = Reconstruct()
     output = recon(batch_tensor, meta_2)
-    geopotential_layer = GeopotentialDiagnostic(output_name=batch.keys()[0] + "/derived_diagnostic/3d/geopotential")
+    output_var_name = "arco_era5/derived_diagnostic/3d/geopotential"
+    geopotential_layer = GeopotentialDiagnostic(
+        output_name=output_var_name,
+        surface_geopotential_var="arco_era5/static/2d/geopotential_at_surface",
+        surface_pressure_var="arco_era5/prognostic/2d/surface_pressure",
+        temperature_var="arco_era5/prognostic/3d/temperature",
+        specific_humidity_var="arco_era5/prognostic/3d/specific_total_mass",
+        level_info_file="ERA5_Lev_Info.nc",
+        model_a_half_var="a_half",
+        model_b_half_var="b_half",
+    )
     diagnosed = geopotential_layer(output)
+    assert output_var_name in diagnosed["predict"].keys()
+    assert diagnosed["predict"][output_var_name].shape == diagnosed["predict"][geopotential_layer.temperature_var].shape
