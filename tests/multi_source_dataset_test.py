@@ -34,104 +34,6 @@ DATETIMES_SUBSET = pd.date_range("2020-06-01", "2022-12-31", freq="12h")
 BASE1_KEYS = ["Base1/base/prognostic/3d/T", "Base1/base/prognostic/3d/U", "Base1/base/prognostic/2d/t2m"]
 BASE2_KEYS = ["Base2/base/dynamic_forcing/2d/d2m", "Base2/base/diagnostic/3d/V"]
 BASE3_KEYS = ["Base3/base/diagnostic/3d/V", "Base3/base/static/2d/orog"]
-# MRMS_KEY = "mrms/prognostic/2d/QPE"
-# ERA5_SHAPE = (4, 1, 8, 8)  # (n_levels, 1, lat, lon)
-# MRMS_SHAPE = (1, 1, 50, 100)
-
-
-# ---------------------------------------------------------------------------
-# Fake sub-datasets
-# ---------------------------------------------------------------------------
-
-
-# class _FakeERA5:
-#     """Minimal ERA5Dataset stand-in."""
-
-#     datetimes = DATETIMES
-
-#     def __init__(self, config, return_target=False):
-#         self.return_target = return_target
-#         self.static_metadata = {"levels": [1000, 850, 500, 300], "datetime_fmt": "unix_ns"}
-
-#     def __len__(self):
-#         return len(self.datetimes)
-
-#     def __getitem__(self, args):
-#         sample = {
-#             "input": {ERA5_KEY: torch.zeros(*ERA5_SHAPE)},
-#             "metadata": {"input_datetime": 0},
-#         }
-#         if self.return_target:
-#             sample["target"] = {ERA5_KEY: torch.zeros(*ERA5_SHAPE)}
-#             sample["metadata"]["target_datetime"] = 1
-#         return sample
-
-
-# class _FakeMRMS:
-#     """Minimal MRMSDataset stand-in."""
-
-#     datetimes = DATETIMES
-
-#     def __init__(self, config, return_target=False):
-#         self.return_target = return_target
-#         self.static_metadata = {"datetime_fmt": "unix_ns"}
-
-#     def __len__(self):
-#         return len(self.datetimes)
-
-#     def __getitem__(self, args):
-#         sample = {
-#             "input": {MRMS_KEY: torch.zeros(*MRMS_SHAPE)},
-#             "metadata": {"input_datetime": 0},
-#         }
-#         if self.return_target:
-#             sample["target"] = {MRMS_KEY: torch.zeros(*MRMS_SHAPE)}
-#             sample["metadata"]["target_datetime"] = 1
-#         return sample
-
-
-# class _FakeMRMSSubset:
-#     """MRMS stand-in whose datetimes are a strict subset of ERA5's."""
-
-#     datetimes = DATETIMES[::2]  # every other timestamp
-
-#     def __init__(self, config, return_target=False):
-#         self.return_target = return_target
-#         self.static_metadata = {"datetime_fmt": "unix_ns"}
-
-#     def __len__(self):
-#         return len(self.datetimes)
-
-#     def __getitem__(self, args):
-#         sample = {
-#             "input": {MRMS_KEY: torch.zeros(*MRMS_SHAPE)},
-#             "metadata": {"input_datetime": 0},
-#         }
-#         if self.return_target:
-#             sample["target"] = {MRMS_KEY: torch.zeros(*MRMS_SHAPE)}
-#             sample["metadata"]["target_datetime"] = 1
-#         return sample
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-# @pytest.fixture
-# def patch_sources(monkeypatch: pytest.MonkeyPatch):
-#     """Replace _SOURCE_REGISTRY with lightweight fakes."""
-#     import credit.datasets.multi_source as ms
-
-#     monkeypatch.setattr(ms, "_SOURCE_REGISTRY", {"ERA5": _FakeERA5, "MRMS": _FakeMRMS})
-
-
-# @pytest.fixture
-# def patch_sources_subset(monkeypatch: pytest.MonkeyPatch):
-#     """MRMS has a strict subset of ERA5 timestamps — tests intersection."""
-#     import credit.datasets.multi_source as ms
-
-#     monkeypatch.setattr(ms, "_SOURCE_REGISTRY", {"ERA5": _FakeERA5, "MRMS": _FakeMRMSSubset})
 
 
 @pytest.fixture
@@ -213,17 +115,6 @@ def one_source_config() -> dict[str, Any]:
         "start_datetime": "2024-06-01",
         "end_datetime": "2024-06-02",
     }
-
-
-# @pytest.fixture
-# def mrms_only_config():
-#     return {
-#         "source": {"MRMS": {}},
-#         "timestep": "6h",
-#         "forecast_len": 1,
-#         "start_datetime": "2024-06-01",
-#         "end_datetime": "2024-06-02",
-#     }
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +267,7 @@ def test_multi_source_timestamp_intersection_time_subsets(multi_config_time_subs
 
 def test_multi_source_dataloader_default_collate(multi_config):
     """DataLoader + DistributedMultiStepBatchSampler should work without custom collate."""
-    batch_size = 7
+    batch_size = 7  # Something different than the other dimensions
 
     ds = MultiSourceDataset(multi_config, return_target=True)
     sampler = DistributedMultiStepBatchSampler(

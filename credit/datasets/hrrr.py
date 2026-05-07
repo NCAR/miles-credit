@@ -573,38 +573,6 @@ def _validate_product_request(dataset_name: str) -> str:
     return VALID_PRODUCTS[dataset_name]
 
 
-# def _validate_product_request(data_config: dict[str, Any]) -> tuple[str, str]:
-#     """Validate the dataset request config, raising ValueError for invalid requests."""
-#     # Get the configuration key from the source config:
-#     if "source" not in data_config:
-#         raise ValueError(f"Missing 'source' key in config: {data_config}")
-
-#     # config_key: Key under ``config["source"]`` containing this
-#     #         product's settings.  Defaults to ``"HRRR"`` for the
-#     #         pressure-level product; pass ``"HRRR_NAT"`` or
-#     #         ``"HRRR_SUBH"`` for the other products.
-#     if len(data_config["source"]) != 1:
-#         raise ValueError("Expected exactly one source in config['source'], " + f"got: {data_config['source'].keys()}")
-#     # Extract the single config key
-#     source_config = data_config["source"]
-
-#     # Get the dataset name
-#     assert "dataset_name" in source_config, "Missing 'dataset_name' in source config"
-#     dataset_name = source_config["dataset_name"]
-
-#     # product: HRRR product to load.  One of ``VALID_PRODUCTS``:
-#     #         ``"wrfprsf"`` (pressure-level, default), ``"wrfnatf"``
-#     #         (native/hybrid-sigma levels), or ``"wrfsubhf"`` (15-min
-#     #         sub-hourly surface).
-#     if dataset_name not in VALID_PRODUCTS:
-#         raise ValueError(
-#             f"Unknown HRRR product '{dataset_name}' in config['source']." + f"Valid products mapped as: {VALID_PRODUCTS}"
-#         )
-#     product = VALID_PRODUCTS[dataset_name]
-
-#     return dataset_name, product
-
-
 # ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
@@ -765,80 +733,11 @@ class HRRRDataset(BaseDataset):
         )
         return self._spatial_slice
 
-    # def __len__(self) -> int:
-    #     return len(self.datetimes)
-
-    # def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
-    #     """Return a nested input/target sample dict.
-
-    #     Args:
-    #         args: ``(t, i)`` where *t* is the init timestamp (nanoseconds or
-    #             ``pd.Timestamp``) and *i* is the within-sequence step index.
-
-    #     Returns:
-    #         Dict with ``"input"``, ``"metadata"``, and optionally ``"target"``.
-    #     """
-    #     t, i = args
-    #     t = pd.Timestamp(t)
-    #     t_target = t + self.dt
-
-    #     input_data: dict[str, Any] = {}
-    #     self._extract_field("dynamic_forcing", t, input_data)
-
-    #     # Prognostic + static are only needed at the initial step
-    #     if i == 0:
-    #         if "static" in self.var_dict:
-    #             self._extract_field("static", t, input_data)
-    #         if "prognostic" in self.var_dict:
-    #             self._extract_field("prognostic", t, input_data)
-
-    #     sample: dict[str, Any] = {
-    #         "input": input_data,
-    #         "metadata": {"input_datetime": int(t.value)},
-    #     }
-
-    #     if self.return_target:
-    #         target_data: dict[str, Any] = {}
-    #         for ft in ("prognostic", "diagnostic"):
-    #             if ft in self.var_dict:
-    #                 self._extract_field(ft, t_target, target_data)
-    #         sample["target"] = target_data
-    #         sample["metadata"]["target_datetime"] = int(t_target.value)
-
-    #     return sample
-
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    # def _build_timestamps(self) -> pd.DatetimeIndex:
-    #     return pd.date_range(
-    #         self.start_datetime,
-    #         self.end_datetime - self.num_forecast_steps * self.dt,
-    #         freq=self.dt,
-    #     )
-
     def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, list[str] | None] | None) -> None:
-        # if field_type not in get_args(VALID_FIELD_TYPES):
-        #     raise KeyError(f"Unknown field_type '{field_type}'. Valid options: {sorted(VALID_FIELD_TYPES)}")
-        # if not isinstance(field_config, dict):
-        #     logging.debug(f"Provided dictionary of incorrect type: {type(field_config)}. Object is {field_config}")
-        #     return
-
-        # vars_3d: list[str] = field_config.get("vars_3D") or []
-        # vars_2d: list[str] = field_config.get("vars_2D") or []
-        # if not vars_3d and not vars_2d:
-        #     raise ValueError(f"Field '{field_type}' must define vars_3D and/or vars_2D")
-
-        # for vname in vars_3d + vars_2d:
-        #     if vname not in VAR_REGISTRY:
-        #         raise KeyError(f"Variable '{vname}' is not in VAR_REGISTRY. Available: {sorted(VAR_REGISTRY)}")
-
-        # self.var_dict[field_type] = {
-        #     "vars_3D": vars_3d,
-        #     "vars_2D": vars_2d,
-        #     "levels": field_config.get("levels", self.curr_source_cfg.get("levels", None)),
-        # }
         super()._register_field(field_type, field_config)
 
         # Add the levels to the var_dict entry
