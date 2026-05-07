@@ -1,192 +1,175 @@
-# Gen2 config for the wchapman model level ERA5 data used for the original CREDIT models.
+# --------------------------------------------------------------------------------------------------------------------- #
+# Gen2 config for the wchapman model-level ERA5 data used in the original CREDIT/NPJ paper models (V1-trained).
+# New nested data schema: source.ERA5.variables.{prognostic, dynamic_forcing, static}
+# Data: ~0.28-degree (640×1280) ERA5 model-level data
+# Grid: 640 x 1280, 16 model levels
+# Variable groups are listed in V1 trainer order (prog → static → dynfrc), which matches the canonical
+# FIELD_TYPE_RANK used by ConcatToTensor — so V1-trained checkpoints receive the correct channel layout.
+# --------------------------------------------------------------------------------------------------------------------- #
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_npj_1h'
+
 data:
-    source:
-        ERA5:
-            level_coord: "level"
-            levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
-            variables:
-                prognostic:
-                    vars_3D: ['U','V','T','Q']
-                    vars_2D: ['SP','t2m', 'V500','U500','T500','Z500','Q500']
-                    path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
-    
-                diagnostic: null
-    
-                dynamic_forcing:
-                    vars_2D: ['tsi']
-                    path: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
-    
-                static:
-                    vars_2D: ['Z_GDS4_SFC','LSM']
-                    path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/static_norm_old.nc'
+  source:
+    ERA5:
+      level_coord: "level"
+      levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+      variables:
+        prognostic:
+          vars_3D: ['U', 'V', 'T', 'Q']
+          vars_2D: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
+          path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
 
-    start_datetime: "2021-12-31"
-    end_datetime: "2022-01-05"
-    timestep: "1h"
+        static:
+          vars_2D: ['Z_GDS4_SFC', 'LSM']
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/static_norm_old.nc'
 
-    # state-in-state-out
-    history_len: 1
-    valid_history_len: 1
+        dynamic_forcing:
+          vars_2D: ['tsi']
+          path: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
 
-    # single step
-    forecast_len: 0
-    valid_forecast_len: 0
+        diagnostic: null
 
-    one_shot: False
-    lead_time_periods: 1
-    skip_periods: null
+  start_datetime: "1979-01-01"
+  end_datetime: "2018-12-31"
+  timestep: "1h"
 
-    # compatible with the old 'std'
-    static_first: True
+  history_len: 1
+  forecast_len: 1
 
-    # mean / std path
-    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
-    # regular z-score version
-    # std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_1h_1979_2018_16lev_0.25deg.nc'
-    # residual norm version
-    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
+  one_shot: False
+  skip_periods: null
 
-
-    scaler_type: 'std_new'
+preblocks:
+  norm:
+    type: era5_normalizer
+    args:
+      mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/mean_1h_1979_2018_16lev_0.25deg.nc'
+      std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
 
 trainer:
-    type: standard # <---------- change to your type
+  type: era5-gen2
 
-    mode: fsdp
-    cpu_offload: False
-    activation_checkpoint: True
+  mode: fsdp
+  cpu_offload: False
+  activation_checkpoint: True
 
-    load_weights: True
-    load_optimizer: False
-    load_scaler: False
-    load_sheduler: False
+  load_weights: True
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
 
-    skip_validation: False
-    update_learning_rate: False
+  skip_validation: False
+  update_learning_rate: False
 
-    save_backup_weights: True
-    save_best_weights: True
+  save_backup_weights: True
+  save_best_weights: True
 
-    learning_rate: 1.0e-06 # <-- change to your lr
-    weight_decay: 0
+  learning_rate: 1.0e-06
+  weight_decay: 0
 
-    train_batch_size: 1
-    valid_batch_size: 1
+  train_batch_size: 1
+  valid_batch_size: 1
 
-    batches_per_epoch: 1000
-    valid_batches_per_epoch: 0
-    stopping_patience: 999
+  batches_per_epoch: 1000
+  valid_batches_per_epoch: 0
+  stopping_patience: 999
 
-    start_epoch: 0
-    num_epoch: 1
-    reload_epoch: True
-    epochs: &epochs 3
+  start_epoch: 0
+  num_epoch: 1
+  reload_epoch: True
+  epochs: &epochs 3
 
-    use_scheduler: True
-    scheduler: {'scheduler_type': 'cosine-annealing', 'T_max': *epochs,  'last_epoch': -1}
+  use_ema: True
+  ema_decay: 0.9999
+  use_tensorboard: True
 
-    amp: False
-    grad_accum_every: 1
-    grad_max_norm: 1.0
+  use_scheduler: True
+  scheduler: {scheduler_type: 'cosine-annealing', T_max: *epochs, last_epoch: -1}
 
-    # number of workers
-    thread_workers: 4
-    valid_thread_workers: 0
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 1.0
+
+  thread_workers: 4
+  valid_thread_workers: 0
 
 model:
-    # wxformer example
-    type: "wxformer"
-    frames: 1                         # number of input states (default: 1)
-    image_height: 640                 # number of latitude grids (default: 640)
-    image_width: 1280                 # number of longitude grids (default: 1280)
-    levels: 16                        # number of upper-air variable levels (default: 15)
-    channels: 4                       # upper-air variable channels
-    surface_channels: 7               # surface variable channels
-    input_only_channels: 3            # dynamic forcing, forcing, static channels
-    output_only_channels: 0           # diagnostic variable channels
+  type: "wxformer"
+  frames: 1
+  image_height: 640
+  image_width: 1280
+  levels: 16
+  channels: 4
+  surface_channels: 7
+  input_only_channels: 3
+  output_only_channels: 0
 
-    patch_width: 1                    # number of latitude grids in each 3D patch (default: 1)
-    patch_height: 1                   # number of longitude grids in each 3D patch (default: 1)
-    frame_patch_size: 1               # number of input states in each 3D patch (default: 1)
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
 
-    dim: [128, 256, 512, 1024]        # Dimensionality of each layer
-    depth: [2, 2, 8, 2]               # Depth of each layer
-    global_window_size: [10, 5, 2, 1] # Global window size for each layer
-    local_window_size: 10             # Local window size
-    cross_embed_kernel_sizes:         # kernel sizes for cross-embedding
+  dim: [128, 256, 512, 1024]
+  depth: [2, 2, 8, 2]
+  global_window_size: [10, 5, 2, 1]
+  local_window_size: 10
+  cross_embed_kernel_sizes:
     - [4, 8, 16, 32]
     - [2, 4]
     - [2, 4]
     - [2, 4]
-    cross_embed_strides: [2, 2, 2, 2] # Strides for cross-embedding (default: [4, 2, 2, 2])
-    attn_dropout: 0.                  # Dropout probability for attention layers (default: 0.0)
-    ff_dropout: 0.                    # Dropout probability for feed-forward layers (default: 0.0)
+  cross_embed_strides: [2, 2, 2, 2]
+  attn_dropout: 0.
+  ff_dropout: 0.
 
-    # =============================================================== #
-    # New
+  interp: False
 
-    # use interpolation to match the output size
-    interp: False
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: 80
+    pad_lon: 80
 
-    # map boundary padding
-    padding_conf:
-        activate: True
-        mode: earth
-        pad_lat: 80
-        pad_lon: 80
-
-    post_conf:
-        activate: True
-
-        tracer_fixer:
-            activate: True
-            denorm: True
-            tracer_name: ['Q', 'Q500']
-            tracer_thres: [1e-8, 1e-8]
+  post_conf:
+    activate: True
+    tracer_fixer:
+      activate: True
+      denorm: True
+      tracer_name: ['Q', 'Q500']
+      tracer_thres: [1e-8, 1e-8]
 
 loss:
-    # the main training loss
-    training_loss: "mse"
+  training_loss: "mse"
 
-    # power loss (x), spectral_loss (x)
-    use_power_loss: False
-    use_spectral_loss: False
+  use_power_loss: False
+  use_spectral_loss: False
 
-    # use latitude weighting
-    use_latitude_weights: True
-    latitude_weights: "/glade/campaign/cisl/aiml/credit/static_scalers/LSM_static_variables_ERA5_zhght.nc"
+  use_latitude_weights: True
+  latitude_weights: "/glade/campaign/cisl/aiml/credit/static_scalers/LSM_static_variables_ERA5_zhght.nc"
 
-    # turn-off variable weighting
-    use_variable_weights: False
+  use_variable_weights: False
 
 predict:
-    forecasts:
-        type: "custom"       # keep it as "custom"
-        start_year: 2020     # year of the first initialization (where rollout will start)
-        start_month: 1       # month of the first initialization
-        start_day: 1         # day of the first initialization
-        start_hours: [0, 12] # hour-of-day for each initialization, 0 for 00Z, 12 for 12Z
-        duration: 30         # number of days to initialize, starting from the (year, mon, day) above
-                             # duration should be divisible by the number of GPUs
-                             # (e.g., duration: 384 for 365-day rollout using 32 GPUs)
-        days: 2              # forecast lead time as days (1 means 24-hour forecast)
+  forecasts:
+    type: "custom"
+    start_year: 2020
+    start_month: 1
+    start_day: 1
+    start_hours: [0, 12]
+    duration: 30
+    days: 2
 
-    save_forecast: '/glade/derecho/scratch/$USER/finetune/wxformer_1h/'
-    save_vars: ['SP','t2m','V500','U500','T500','Z500','Q500']
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_npj_1h'
+  save_vars: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
 
-    # turn-off low-pass filter
-    use_laplace_filter: False
-
-    # deprecated
-    # save_format: "nc"
+  use_laplace_filter: False
 
 pbs: #derecho
-    conda: "credit-derecho"
-    project: "NAML0001"
-    job_name: "wxformer_1h"
-    walltime: "12:00:00"
-    nodes: 8
-    ncpus: 64
-    ngpus: 4
-    mem: '480GB'
-    queue: 'main'
+  conda: "credit-derecho"
+  project: "NAML0001"
+  job_name: "wxformer_npj_1h"
+  walltime: "12:00:00"
+  nodes: 8
+  ncpus: 64
+  ngpus: 4
+  mem: '480GB'
+  queue: 'main'

@@ -33,6 +33,7 @@ import torch
 import xarray as xr
 
 from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
@@ -206,19 +207,11 @@ def predict(rank, world_size, conf, p):
     seed_everything(conf["seed"])
 
     # ---- Data schema helpers ----
+    slices, _ = build_channel_layout(conf)
     src = conf["data"]["source"]["ERA5"]
     v = src["variables"]
-    prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
-    dyn = v.get("dynamic_forcing") or {}
-    static_v = v.get("static") or {}
     n_levels = len(src["levels"])
-
-    # channel counts — ERA5Dataset input insertion order: [dynfrc | static | prog]
-    n_prog = len(prog.get("vars_3D", [])) * n_levels + len(prog.get("vars_2D", []))
-    n_dyn = len(dyn.get("vars_2D", []))
-    n_static = len(static_v.get("vars_2D", []))
-    static_dim_size = n_dyn + n_static  # channels before prognostic in x
     varnum_diag = len(diag.get("vars_2D", [])) + len(diag.get("vars_3D", [])) * n_levels
 
     lead_time_periods = conf["data"].get("lead_time_periods") or int(
@@ -323,11 +316,7 @@ def predict(rank, world_size, conf, p):
                     batch_frc = _sample_to_batch(sample_frc)
                     x_frc, _ = apply_preblocks(preblocks, batch_frc)
                     x_frc = x_frc.to(device).float()  # (1, n_dyn, 1, H, W)
-
-                    # ERA5Dataset insertion order: [dynfrc | static | prog]
-                    x[:, :n_dyn, ...] = x_frc  # update dynamic forcing
-                    x[:, static_dim_size:, ...] = y_pred[:, :n_prog, ...].detach()  # update prognostic
-                    # x[:, n_dyn:static_dim_size, ...] stays (static)
+                    x = update_x(x, x_frc, y_pred.detach(), slices)
 
             for result in results:
                 result.get()
