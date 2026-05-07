@@ -92,30 +92,30 @@ def _download_one(task: _DownloadTask) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_specific_product_config(config: dict[str, Any], product: str) -> dict[str, Any]:
-    """
-    Separate the config to only the requested product, so that we can pass it to the download function.
+# def get_specific_product_config(config: dict[str, Any], product: str) -> dict[str, Any]:
+#     """
+#     Separate the config to only the requested product, so that we can pass it to the download function.
 
-    Args:
-        config: Top-level ``data`` config dict.
-        product: Product to extract config for.  One of "wrfprsf", "wrfnatf", or "wrfsubhf".
+#     Args:
+#         config: Top-level ``data`` config dict.
+#         product: Product to extract config for.  One of "wrfprsf", "wrfnatf", or "wrfsubhf".
 
-    Returns:
-        A new config dict with only the requested product's source config, and the same top-level fields.
-    """
-    from credit.datasets.hrrr import VALID_PRODUCTS  # noqa: PLC0415
+#     Returns:
+#         A new config dict with only the requested product's source config, and the same top-level fields.
+#     """
+#     from credit.datasets.hrrr import VALID_PRODUCTS  # noqa: PLC0415
 
-    valid_keys_or_vals = set(VALID_PRODUCTS.keys()) | set(VALID_PRODUCTS.values())
+#     valid_keys_or_vals = set(VALID_PRODUCTS.keys()) | set(VALID_PRODUCTS.values())
 
-    if product not in valid_keys_or_vals:
-        raise ValueError(f"Invalid product: {product}. Must be one of {valid_keys_or_vals}")
+#     if product not in valid_keys_or_vals:
+#         raise ValueError(f"Invalid product: {product}. Must be one of {valid_keys_or_vals}")
 
-    if product in VALID_PRODUCTS:
-        config_key = product
-    else:  # Look up the config key corresponding to the requested product value (invert dictionary)
-        config_key = next(key for key, val in VALID_PRODUCTS.items() if val == product)
+#     if product in VALID_PRODUCTS:
+#         config_key = product
+#     else:  # Look up the config key corresponding to the requested product value (invert dictionary)
+#         config_key = next(key for key, val in VALID_PRODUCTS.items() if val == product)
 
-    return make_single_source_subconfig(config, config_key)
+#     return make_single_source_subconfig(config, config_key)
 
 
 def download_hrrr(
@@ -239,12 +239,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Download HRRR grib2 data from AWS S3.")
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config file.")
-    parser.add_argument(
-        "--product",
-        default=None,
-        choices=["HRRR", "wrfprsf", "HRRR_NAT", "wrfnatf", "HRRR_SUBH", "wrfsubhf"],
-        help="HRRR product to download (default: use config, assuming single source). Note, HRRR=wrfprsf, HRRR_NAT=wrfnatf, and HRRR_SUBH=wrfsubhf.",
-    )
+    # parser.add_argument(
+    #     "--product",
+    #     default=None,
+    #     choices=["HRRR", "wrfprsf", "HRRR_NAT", "wrfnatf", "HRRR_SUBH", "wrfsubhf"],
+    #     help="HRRR product to download (default: use config, assuming single source). Note, HRRR=wrfprsf, HRRR_NAT=wrfnatf, and HRRR_SUBH=wrfsubhf.",
+    # )
+    parser.add_argument("--source_name", default=None, help="Name of the source in the data config to download.")
     parser.add_argument(
         "--num_workers",
         type=int,
@@ -264,7 +265,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    if args.product is not None:
-        cfg["data"] = get_specific_product_config(cfg["data"], args.product)
+    if args.source_name is not None:
+        cfg["data"] = make_single_source_subconfig(cfg["data"], args.source_name)
 
     download_hrrr(cfg["data"], num_workers=args.num_workers, overwrite=args.overwrite)

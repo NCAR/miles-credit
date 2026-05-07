@@ -43,7 +43,8 @@ import logging
 from typing import Any
 
 import pandas as pd
-from torch.utils.data import Dataset
+
+from credit.datasets.base_dataset import AbstractBaseDataset
 
 from credit.datasets.era5 import ERA5Dataset
 from credit.datasets.era5 import ARCOERA5Dataset
@@ -66,7 +67,7 @@ _SOURCE_REGISTRY: dict[str, type] = {
 }
 
 
-def make_single_source_subconfig(config: dict[str, Any], source_key: str) -> dict[str, Any]:
+def make_single_source_subconfig(config: dict[str, Any], user_dataset_name: str) -> dict[str, Any]:
     """
     Return a modified config dict containing only the specified source.
 
@@ -76,22 +77,51 @@ def make_single_source_subconfig(config: dict[str, Any], source_key: str) -> dic
 
     Args:
         config: Original multisource config dict.
-        source_key: Key of the source to isolate (e.g., "HRRR").
+        user_dataset_name: Unique dataset name specified by the user in config["source"] (e.g. "Example_ERA5").
 
     Returns:
         New config dict containing only the specified source's config block.
     """
-    return {"source": {source_key: config["source"][source_key]}, **{k: v for k, v in config.items() if k != "source"}}
+    return {
+        "source": {user_dataset_name: config["source"][user_dataset_name]},
+        **{k: v for k, v in config.items() if k != "source"},
+    }
 
 
-class MultiSourceDataset(Dataset[Any]):
-    """PyTorch Dataset that combines multiple source datasets.
+def route_to_dataset_class(source_cfg: dict[str, Any]) -> type:
+    """
+    Return the appropriate Dataset class based on the "dataset_name" field in the source config.
+
+    Args:
+        source_cfg: Config dict for a single source (e.g. config["source"]["Example_ERA5"]).
+
+    Returns:
+        Dataset class corresponding to the "dataset_name" field.
+
+    Raises:
+        ValueError: If the "dataset_name" field is missing or does not correspond to a registered dataset.
+    """
+    dataset_name = source_cfg.get("dataset_name", "").upper()
+    if not dataset_name:
+        raise ValueError("Source config must contain a 'dataset_name' field.")
+    cls = _SOURCE_REGISTRY.get(dataset_name)
+    if not cls:
+        raise ValueError(
+            f"Unrecognized dataset_name '{dataset_name}' in source config. Must be one of: {list(_SOURCE_REGISTRY.keys())}"
+        )
+    return cls
+
+
+class MultiSourceDataset(AbstractBaseDataset):
+    """CREDIT Dataset that combines multiple source datasets.
 
     Instantiates one sub-dataset per source key found in ``config["source"]``,
     computes the intersection of their valid timestamps, and delegates each
     ``__getitem__`` call to all active sub-datasets.
 
     See module docstring for full output structure and usage examples.
+
+    Note that we inherit from AbstractBaseDataset _rather_ than BaseDataset.
 
     Attributes:
         datasets: Ordered mapping of lowercase source name to its Dataset
@@ -103,20 +133,22 @@ class MultiSourceDataset(Dataset[Any]):
     """
 
     def __init__(self, config: dict[str, Any], return_target: bool = False) -> None:
-        self.datasets: dict[str, Dataset[Any]] = {}
+        self.datasets: dict[str, AbstractBaseDataset] = {}
         source_cfg = config.get("source", {})
 
-        for key, cls in _SOURCE_REGISTRY.items():
-            if key in source_cfg:
-                # Pass in just the sub-config for this source to avoid confusion
-                # with multisource datasets (e.g., HRRR and HRRR_NAT)
-                sub_config = make_single_source_subconfig(config, key)
-                self.datasets[key.lower()] = cls(sub_config, return_target)
-                logger.info("MultiSourceDataset: registered source '%s'", key.lower())
-            else:
-                logger.debug("MultiSourceDataset: source '%s' not in config, skipping", key)
+        # Loop through all the options in the source config. These will have user
+        # provided (unique) names.
+        for user_dataset_name in source_cfg.keys():
+            # Pass in just the sub-config for this source to avoid confusion
+            # with multisource datasets (e.g., HRRR and HRRR_NAT)
+            sub_config = make_single_source_subconfig(config, user_dataset_name)
+            # Route to the appropriate dataset class based on the "dataset_name" field in the sub-config
+            cls = route_to_dataset_class(sub_config)
+            self.datasets[user_dataset_name] = cls(sub_config, return_target)
+            logger.info(f"MultiSourceDataset: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
 
         self.datetimes: pd.DatetimeIndex = self._intersect_timestamps()
+
         self.static_metadata: dict[str, dict[str, Any]] = {
             name: ds.static_metadata for name, ds in self.datasets.items()
         }
@@ -153,7 +185,7 @@ class MultiSourceDataset(Dataset[Any]):
         if not self.datasets:
             return pd.DatetimeIndex([])
 
-        sets = [set(ds.datetimes) for ds in self.datasets.values()]
+        sets: list[set[pd.Timestamp]] = [set(ds.datetimes) for ds in self.datasets.values()]
         common = set.intersection(*sets)
         if not common:
             logger.warning(

@@ -3,8 +3,8 @@ tests/test_hrrr_download.py
 ------------------
 Unit tests for credit/datasets/hrrr_download.py.
 
-Remote/dataset integration tests are skipped unless the environment variable
-``HRRR_TEST_REMOTE=1`` is set (they hit real AWS endpoints).
+Remote/dataset integration tests are run unless the environment variable
+``SKIP_REMOTE=1`` is set (they hit real AWS endpoints).
 """
 
 from typing import Any
@@ -15,7 +15,8 @@ import time
 
 import pytest
 
-from credit.datasets.hrrr_download import download_hrrr, get_specific_product_config
+from credit.datasets.hrrr_download import download_hrrr
+from credit.datasets.multi_source import make_single_source_subconfig
 
 # ---------------------------------------------------------------------------
 # Parsing tests
@@ -64,17 +65,18 @@ def _make_multisource_config() -> dict[str, Any]:
 
 
 def test_get_specific_product_config():
-    config = _make_multisource_config()
+    data_config = _make_multisource_config()
+
+    dataset_names_check = ["hrrr", "hrrr_nat", "hrrr_subhf"]
 
     # Main HRRR
-    hrrr_paired_opts = [("HRRR", "wrfprsf"), ("HRRR_NAT", "wrfnatf"), ("HRRR_SUBH", "wrfsubhf")]
-    for product_key_tuple in hrrr_paired_opts:
-        main_key = product_key_tuple[0]
-        for product in product_key_tuple:
-            subconfig = get_specific_product_config(config, product)
-            assert len(subconfig["source"]) == 1
-            assert main_key in subconfig["source"]
-            assert subconfig["source"][main_key] == config["source"][main_key]
+    for source, dsn_check in zip(data_config["source"].keys(), dataset_names_check):
+        subconfig = make_single_source_subconfig(data_config, source)
+        assert len(subconfig["source"]) == 1
+        assert source in subconfig["source"]
+        assert subconfig["source"][source] == data_config["source"][source]
+
+        assert subconfig["source"][source]["dataset_name"] == dsn_check
 
 
 # ---------------------------------------------------------------------------

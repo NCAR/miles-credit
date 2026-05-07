@@ -50,6 +50,9 @@ class AbstractBaseDataset(Dataset[Any]):
         self.file_dict: dict[str, Any]
         self.var_dict: dict[str, Any]
 
+        # Placeholder for static metadata
+        self.static_metadata: dict[str, Any]
+
     def __len__(self) -> int:
         raise NotImplementedError
 
@@ -205,6 +208,9 @@ class BaseDataset(AbstractBaseDataset):
         self.mode = "local"
         if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
+
+        # Placeholder for static metadata
+        self.static_metadata: dict[str, Any] = {}
 
         # Only if this is __NOT__ an inherited class, we will immediately run init_register_all_fields.
         # In an inherited class, you should call super().init_register_all_fields() at the end of your
