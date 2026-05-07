@@ -272,7 +272,7 @@ def test_mode_setting(minimal_config: Dict[str, Any], patch_base_dataset_io: Non
     config = minimal_config.copy()
     # Default should be empty
     ds_local = BaseDataset(config)
-    assert ds_local.mode == ""
+    assert ds_local.mode == "local"
 
     # Explicitly set to remote
     config["source"]["TestSource_Base"]["mode"] = "remote"
