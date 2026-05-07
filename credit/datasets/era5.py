@@ -125,7 +125,6 @@ class ERA5Dataset(BaseDataset):
         self.dataset_name = "era5"
         self.level_coord: str = self.curr_source_cfg["level_coord"]
         self.levels: list[int] = self.curr_source_cfg["levels"]
-        self.return_target: bool = return_target
         self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
