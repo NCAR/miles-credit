@@ -11,6 +11,8 @@ Remote/dataset integration tests are run unless the environment variable
 import os
 import textwrap
 
+from typing import Any
+
 import pandas as pd
 import numpy as np
 
@@ -18,16 +20,16 @@ import pytest
 
 from credit.datasets.hrrr import (
     VALID_PRODUCTS,
-    _HRRR_HTTPS_BASE,
-    _build_nat_entry_map,
-    _build_prs_entry_map,
-    _find_subhf_entry,
-    _hrrr_local_path,
-    _hrrr_s3_uri,
-    _parse_idx,
-    _resolve_nat_levels,
-    _resolve_pressure_levels,
-    _s3_uri_to_https,
+    _HRRR_HTTPS_BASE,  # pyright: ignore[reportPrivateUsage]
+    _build_nat_entry_map,  # pyright: ignore[reportPrivateUsage]
+    _build_prs_entry_map,  # pyright: ignore[reportPrivateUsage]
+    _find_subhf_entry,  # pyright: ignore[reportPrivateUsage]
+    _hrrr_local_path,  # pyright: ignore[reportPrivateUsage]
+    _hrrr_s3_uri,  # pyright: ignore[reportPrivateUsage]
+    _parse_idx,  # pyright: ignore[reportPrivateUsage]
+    _resolve_nat_levels,  # pyright: ignore[reportPrivateUsage]
+    _resolve_pressure_levels,  # pyright: ignore[reportPrivateUsage]
+    _s3_uri_to_https,  # pyright: ignore[reportPrivateUsage]
     HRRRDataset,
 )
 
@@ -192,7 +194,7 @@ def test_parse_idx_malformed_line():
 # ---------------------------------------------------------------------------
 
 
-def _make_prs_entries():
+def _make_prs_entries() -> list[dict[str, str | int | None]]:
     return [
         {"var": "TMP", "level": "500 mb", "step": "anl", "byte_start": 0, "byte_end": 100},
         {"var": "TMP", "level": "700 mb", "step": "anl", "byte_start": 101, "byte_end": 200},
@@ -238,7 +240,7 @@ def test_resolve_pressure_levels_missing():
 # ---------------------------------------------------------------------------
 
 
-def _make_nat_entries():
+def _make_nat_entries() -> list[dict[str, str | int | None]]:
     return [
         {"var": "TMP", "level": "10 hybrid level", "step": "anl", "byte_start": 0, "byte_end": 100},
         {"var": "TMP", "level": "20 hybrid level", "step": "anl", "byte_start": 101, "byte_end": 200},
@@ -293,7 +295,7 @@ def test_resolve_nat_levels_missing():
 # ---------------------------------------------------------------------------
 
 
-def _make_subhf_entries():
+def _make_subhf_entries() -> list[dict[str, str | int | None]]:
     return [
         {"var": "TMP", "level": "2 m above ground", "step": "15 min fcst", "byte_start": 0, "byte_end": 100},
         {"var": "TMP", "level": "2 m above ground", "step": "30 min fcst", "byte_start": 101, "byte_end": 200},
@@ -326,8 +328,9 @@ def test_find_subhf_entry_miss():
 # ---------------------------------------------------------------------------
 
 
-def _make_config(source_key="HRRR", **extra_source):
-    source_defaults = {
+def _make_config(source_key: str = "HRRR", **extra_source: Any) -> dict[str, Any]:
+    source_defaults: dict[str, Any] = {
+        "dataset_name": source_key.lower(),
         "mode": "remote",
         "forecast_hour": 0,
         "levels": [500, 700, 850],
@@ -336,8 +339,9 @@ def _make_config(source_key="HRRR", **extra_source):
         },
     }
     source_defaults.update(extra_source)
+    test_source_key = f"Test_{source_key}"
     return {
-        "source": {source_key: source_defaults},
+        "source": {test_source_key: source_defaults},
         "start_datetime": "2022-01-01 00:00",
         "end_datetime": "2022-01-02 00:00",
         "timestep": "1h",
@@ -349,7 +353,7 @@ def test_hrrr_dataset_wrfprsf_defaults():
     cfg = _make_config("HRRR")
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfprsf"
-    assert ds.source_name == "hrrr"
+    assert ds.dataset_name == "hrrr"
     assert len(ds) == 25  # 2022-01-01 00:00 … 2022-01-02 00:00 inclusive (25 h)
 
 
@@ -357,7 +361,7 @@ def test_hrrr_dataset_wrfnatf():
     cfg = _make_config("HRRR_NAT", variables={"prognostic": {"vars_3D": ["T", "U"], "vars_2D": []}})
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfnatf"
-    assert ds.source_name == "hrrr_nat"
+    assert ds.dataset_name == "hrrr_nat"
 
 
 def test_hrrr_dataset_wrfsubhf():
@@ -368,7 +372,7 @@ def test_hrrr_dataset_wrfsubhf():
     cfg["timestep"] = "15min"
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfsubhf"
-    assert ds.source_name == "hrrr_subh"
+    assert ds.dataset_name == "hrrr_subh"
 
 
 def test_hrrr_dataset_invalid_product():
@@ -405,7 +409,7 @@ def test_hrrr_dataset_only_one_of_multiple_sources():
     other_dataset_name = ["ERA5", "MRMS", "NOT_VALID_DATASET"]
 
     for other in other_dataset_name:
-        multi_source_cfg = {
+        multi_source_cfg: dict[str, Any] = {
             "source": {
                 other: cfg["source"]["HRRR"],
                 "HRRR": cfg["source"]["HRRR"],
@@ -543,7 +547,7 @@ def _make_small_inner_extent_dict():
     }
 
 
-def _make_extent_from_dict(extent_dict):
+def _make_extent_from_dict(extent_dict: dict[str, float]) -> list[float]:
     return [extent_dict["lon_min"], extent_dict["lon_max"], extent_dict["lat_min"], extent_dict["lat_max"]]
 
 
@@ -859,8 +863,12 @@ def test_hrrr_remote_wrfprsf_getitem():
     ds = HRRRDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
-    assert "hrrr/prognostic/3d/T" in sample["input"]
-    assert sample["input"]["hrrr/prognostic/3d/T"].shape == (2, 1, *sample["input"]["hrrr/prognostic/3d/T"].shape[2:])
+    assert "Test_HRRR/hrrr/prognostic/3d/T" in sample["input"]
+    assert sample["input"]["Test_HRRR/hrrr/prognostic/3d/T"].shape == (
+        2,
+        1,
+        *sample["input"]["Test_HRRR/hrrr/prognostic/3d/T"].shape[2:],
+    )
 
 
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
@@ -873,7 +881,7 @@ def test_hrrr_remote_wrfnatf_getitem():
     ds = HRRRDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
-    assert "hrrr_nat/prognostic/3d/T" in sample["input"]
+    assert "Test_HRRR_NAT/hrrr_nat/prognostic/3d/T" in sample["input"]
 
 
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
@@ -886,7 +894,7 @@ def test_hrrr_remote_wrfsubhf_getitem():
     ds = HRRRDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
-    assert "hrrr_subh/prognostic/2d/t2m" in sample["input"]
+    assert "Test_HRRR_SUBH/hrrr_subh/prognostic/2d/t2m" in sample["input"]
 
 
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
@@ -925,8 +933,8 @@ def test_hrrr_remote_return_target_true():
     assert "input" in sample
     assert "target" in sample
     assert "metadata" in sample
-    assert "hrrr/prognostic/3d/T" in sample["input"]
-    assert "hrrr/prognostic/3d/T" in sample["target"]
+    assert "Test_HRRR/hrrr/prognostic/3d/T" in sample["input"]
+    assert "Test_HRRR/hrrr/prognostic/3d/T" in sample["target"]
 
 
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)

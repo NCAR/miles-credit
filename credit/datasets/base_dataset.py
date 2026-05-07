@@ -165,7 +165,7 @@ class BaseDataset(AbstractBaseDataset):
         #       variables: ...
         # Unless we are parsing through a multi-source config, we expect only one source to be defined in the config.
         # We take the first one we find here, but this can be overridden in a child class if needed.
-        self.curr_source_name = list(data_config["source"].keys())[0]
+        self.curr_source_name = next(iter(data_config["source"]))
         if len(data_config["source"]) > 1:
             raise ValueError(
                 f"Multiple sources found in config for class {self.__class__.__name__}, but BaseDataset is only designed to handle one source. "
@@ -177,7 +177,8 @@ class BaseDataset(AbstractBaseDataset):
             )
         self.curr_source_cfg = data_config["source"][self.curr_source_name]
 
-        self.dataset_name = "base"
+        if self.dataset_name == "":
+            self.dataset_name = "base"
 
         # Now we start loading the parameters for the dataset, starting with the clock parameters.
         self.dt: pd.Timedelta = self._load_dt(data_config, self.curr_source_cfg)
@@ -189,6 +190,8 @@ class BaseDataset(AbstractBaseDataset):
 
         # Set the return target flag based on the argument passed to init.
         self.return_target: bool = return_target
+
+    def __post_init__(self) -> None:
 
         # Now we load the variables for the dataset.
         assert "variables" in self.curr_source_cfg, (
@@ -463,7 +466,7 @@ class BaseDataset(AbstractBaseDataset):
         """
         Base extract field method, which should be overridden in the inherited dataset class to extract the data for
         each field type. The method should populate data_dict with the extracted data for the given field type and
-        timestamp. The keys in data_dict should follow the format: "{self.curr_source_name}/{field_type}/{dim}/{varname}".
+        timestamp. The keys in data_dict should follow the format: "{self.curr_source_name}/{self.dataset_name}/{field_type}/{dim}/{varname}".
         """
         logging.error(
             "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "
@@ -479,8 +482,8 @@ class BaseDataset(AbstractBaseDataset):
 
         if field_type in self.var_dict:
             for var_2d in self.var_dict[field_type].get("vars_2D", []):
-                key = f"{self.curr_source_name}/{field_type}/2d/{var_2d}"
+                key = f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{var_2d}"
                 sample[key] = torch.ones(1, 1, n_lat, n_lon)
             for var_3d in self.var_dict[field_type].get("vars_3D", []):
-                key = f"{self.curr_source_name}/{field_type}/3d/{var_3d}"
+                key = f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{var_3d}"
                 sample[key] = torch.ones(n_levels, 1, n_lat, n_lon)

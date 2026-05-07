@@ -66,7 +66,8 @@ Example YAML (wrfprsf, local mode)::
 
     data:
       source:
-        HRRR:
+        Example_HRRR:
+          dataset_name: "HRRR"
           mode: "local"
           base_path: "/data/hrrr"
           forecast_hour: 0
@@ -86,7 +87,8 @@ Example YAML (wrfnatf, remote mode)::
 
     data:
       source:
-        HRRR_NAT:
+        Example_HRRR_NAT:
+          dataset_name: "HRRR_NAT"
           mode: "remote"
           forecast_hour: 0
           levels: [10, 20, 30, 40, 50]   # hybrid level indices 1–65
@@ -103,7 +105,8 @@ Example YAML (wrfsubhf, remote mode — 15-min output)::
 
     data:
       source:
-        HRRR_SUBH:
+        Example_HRRR_SUBH:
+          dataset_name: "HRRR_SUBH"
           mode: "remote"
           variables:
             prognostic:
@@ -117,6 +120,8 @@ Example YAML (wrfsubhf, remote mode — 15-min output)::
 
 from __future__ import annotations
 
+from typing import Any, get_args
+
 import logging
 import os
 from collections import defaultdict
@@ -125,11 +130,12 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
+
+from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
 
 logger = logging.getLogger(__name__)
 
-VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing", "static"}
+# VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing", "static"}
 
 # V3+ S3 path includes a 'conus/' subdirectory; v1/v2 does not
 _HRRR_V3_CUTOFF = pd.Timestamp("2018-07-12")
@@ -150,7 +156,7 @@ _HRRR_HTTPS_BASE = f"https://{_S3_BUCKET}.s3.amazonaws.com"
 #:
 #:     from credit.datasets.hrrr import VAR_REGISTRY
 #:     VAR_REGISTRY["MYVAR"] = {"idx_name": "MYVAR", "idx_level": "surface"}
-VAR_REGISTRY: dict[str, dict] = {
+VAR_REGISTRY: dict[str, dict[str, str | None]] = {
     # -------------------------------------------------------------------------
     # Pressure-level variables  (idx_level=None → matched as "{N} mb")
     # -------------------------------------------------------------------------
@@ -284,13 +290,13 @@ def _s3_uri_to_https(s3_uri: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _parse_idx(text: str) -> list[dict]:
+def _parse_idx(text: str) -> list[dict[str, str | int | None]]:
     """Parse a HRRR ``.idx`` inventory file into a list of message entries.
 
     Each entry dict has keys: ``var``, ``level``, ``byte_start``, ``byte_end``
     (``None`` for the last entry, meaning read to EOF).
     """
-    entries = []
+    entries: list[dict[str, str | int | None]] = []
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -308,11 +314,13 @@ def _parse_idx(text: str) -> list[dict]:
             }
         )
     for i in range(len(entries) - 1):
-        entries[i]["byte_end"] = entries[i + 1]["byte_start"] - 1
+        assert isinstance(entries[i]["byte_start"], int) and isinstance(entries[i + 1]["byte_start"], int)
+        entries[i]["byte_end"] = entries[i + 1]["byte_start"] - 1  # pyright: ignore[reportOperatorIssue]
+
     return entries
 
 
-def _fetch_idx(s3_uri: str) -> list[dict]:
+def _fetch_idx(s3_uri: str) -> list[dict[str, str | int | None]]:
     """Fetch and parse the ``.idx`` sidecar for a HRRR grib2 file via HTTPS.
 
     Raises:
@@ -338,7 +346,7 @@ def _fetch_message(
     https_url: str,
     byte_start: int,
     byte_end: int | None,
-    session=None,
+    session=None,  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType] # We import requests inside
 ) -> bytes:
     """Fetch a single GRIB message via an HTTP Range request.
 
@@ -365,9 +373,11 @@ def _fetch_message(
     return resp.content
 
 
-def _build_prs_entry_map(idx_entries: list[dict], idx_name: str) -> dict[float, dict]:
+def _build_prs_entry_map(
+    idx_entries: list[dict[str, str | int | None]], idx_name: str
+) -> dict[float, dict[str, str | None]]:
     """Return a ``{pressure_level_hPa: idx_entry}`` dict for a pressure-level variable."""
-    result: dict[float, dict] = {}
+    result: dict[float, dict[str, str | None]] = {}
     for e in idx_entries:
         if e["var"] == idx_name and e["level"].endswith(" mb"):
             try:
@@ -381,7 +391,7 @@ def _build_prs_entry_map(idx_entries: list[dict], idx_name: str) -> dict[float, 
 
 def _resolve_pressure_levels(
     requested: list[int] | None,
-    prs_map: dict[float, dict],
+    prs_map: dict[float, dict[str, str | None]],
     var_name: str,
 ) -> list[float]:
     """Return the float pressure levels to fetch, validating against available."""
@@ -409,7 +419,9 @@ def _resolve_pressure_levels(
 # ---------------------------------------------------------------------------
 
 
-def _build_nat_entry_map(idx_entries: list[dict], idx_name: str) -> dict[int, dict]:
+def _build_nat_entry_map(
+    idx_entries: list[dict[str, str | int | None]], idx_name: str
+) -> dict[int, dict[str, str | None]]:
     """Return ``{hybrid_level_index: idx_entry}`` for a wrfnatf variable.
 
     HRRR native-level ``.idx`` entries look like::
@@ -419,7 +431,7 @@ def _build_nat_entry_map(idx_entries: list[dict], idx_name: str) -> dict[int, di
     i.e. ``level`` ends with ``" hybrid level"`` and the prefix is the integer
     level index (1-65, bottom-up).
     """
-    result: dict[int, dict] = {}
+    result: dict[int, dict[str, str | None]] = {}
     for e in idx_entries:
         if e["var"] == idx_name and e["level"].endswith(" hybrid level"):
             try:
@@ -433,7 +445,7 @@ def _build_nat_entry_map(idx_entries: list[dict], idx_name: str) -> dict[int, di
 
 def _resolve_nat_levels(
     requested: list[int] | None,
-    nat_map: dict[int, dict],
+    nat_map: dict[int, dict[str, str | None]],
     var_name: str,
 ) -> list[int]:
     """Return native level indices to fetch, validating against available."""
@@ -457,11 +469,11 @@ def _resolve_nat_levels(
 
 
 def _find_subhf_entry(
-    idx_entries: list[dict],
+    idx_entries: list[dict[str, str | int | None]],
     idx_name: str,
     idx_level: str,
     step_min: int,
-) -> dict:
+) -> dict[str, str | int | None]:
     """Return the idx entry for a wrfsubhf variable at a specific sub-step.
 
     Sub-hourly ``.idx`` entries have a ``step`` field like ``"15 min fcst"``,
@@ -509,7 +521,7 @@ def _fetch_bytes_local(path: str, byte_start: int, byte_end: int | None) -> byte
         return f.read()
 
 
-def _load_idx_local(grib2_path: str) -> list[dict]:
+def _load_idx_local(grib2_path: str) -> list[dict[str, str | int | None]]:
     """Read and parse the ``.idx`` sidecar from local disk.
 
     Expects the index at ``{grib2_path}.idx``.  Download it alongside the
@@ -545,32 +557,46 @@ def _to_float32(values: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _validate_product_request(config: dict) -> tuple[str, str]:
+def _validate_product_request(dataset_name: str) -> str:
     """Validate the dataset request config, raising ValueError for invalid requests."""
-    # Get the configuration key from the source config:
-    if "source" not in config:
-        raise ValueError(f"Missing 'source' key in config: {config}")
-
-    # config_key: Key under ``config["source"]`` containing this
-    #         product's settings.  Defaults to ``"HRRR"`` for the
-    #         pressure-level product; pass ``"HRRR_NAT"`` or
-    #         ``"HRRR_SUBH"`` for the other products.
-    if len(config["source"]) != 1:
-        raise ValueError("Expected exactly one source in config['source'], " + f"got: {config['source'].keys()}")
-    # Extract the single config key
-    (config_key,) = config["source"]
-
-    # product: HRRR product to load.  One of ``VALID_PRODUCTS``:
-    #         ``"wrfprsf"`` (pressure-level, default), ``"wrfnatf"``
-    #         (native/hybrid-sigma levels), or ``"wrfsubhf"`` (15-min
-    #         sub-hourly surface).
-    if config_key not in VALID_PRODUCTS:
+    if dataset_name not in VALID_PRODUCTS:
         raise ValueError(
-            f"Unknown HRRR product '{config_key}' in config['source']." + f"Valid products mapped as: {VALID_PRODUCTS}"
+            f"Unknown HRRR product '{dataset_name}' in config['source']."
+            + f"Valid products mapped as: {VALID_PRODUCTS}"
         )
-    product = VALID_PRODUCTS[config_key]
+    return VALID_PRODUCTS[dataset_name]
 
-    return config_key, product
+
+# def _validate_product_request(data_config: dict[str, Any]) -> tuple[str, str]:
+#     """Validate the dataset request config, raising ValueError for invalid requests."""
+#     # Get the configuration key from the source config:
+#     if "source" not in data_config:
+#         raise ValueError(f"Missing 'source' key in config: {data_config}")
+
+#     # config_key: Key under ``config["source"]`` containing this
+#     #         product's settings.  Defaults to ``"HRRR"`` for the
+#     #         pressure-level product; pass ``"HRRR_NAT"`` or
+#     #         ``"HRRR_SUBH"`` for the other products.
+#     if len(data_config["source"]) != 1:
+#         raise ValueError("Expected exactly one source in config['source'], " + f"got: {data_config['source'].keys()}")
+#     # Extract the single config key
+#     source_config = data_config["source"]
+
+#     # Get the dataset name
+#     assert "dataset_name" in source_config, "Missing 'dataset_name' in source config"
+#     dataset_name = source_config["dataset_name"]
+
+#     # product: HRRR product to load.  One of ``VALID_PRODUCTS``:
+#     #         ``"wrfprsf"`` (pressure-level, default), ``"wrfnatf"``
+#     #         (native/hybrid-sigma levels), or ``"wrfsubhf"`` (15-min
+#     #         sub-hourly surface).
+#     if dataset_name not in VALID_PRODUCTS:
+#         raise ValueError(
+#             f"Unknown HRRR product '{dataset_name}' in config['source']." + f"Valid products mapped as: {VALID_PRODUCTS}"
+#         )
+#     product = VALID_PRODUCTS[dataset_name]
+
+#     return dataset_name, product
 
 
 # ---------------------------------------------------------------------------
@@ -578,8 +604,8 @@ def _validate_product_request(config: dict) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
-class HRRRDataset(Dataset):
-    """PyTorch Dataset for HRRR GRIB2 data (wrfprsf / wrfnatf / wrfsubhf).
+class HRRRDataset(BaseDataset):
+    """CREDIT Dataset for HRRR GRIB2 data (wrfprsf / wrfnatf / wrfsubhf).
 
     Implements the same field-type semantics as MRMSDataset:
 
@@ -604,52 +630,46 @@ class HRRRDataset(Dataset):
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
 
-    def __init__(self, config: dict, return_target: bool = False) -> None:
-        """Initialise HRRRDataset.
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        """Initialize HRRRDataset.
 
         Args:
-            config: Top-level ``data`` config dict.
+            data_config: Top-level ``data`` config dict.
             return_target: Whether to include a ``"target"`` key in each sample.
         """
-        config_key, product = _validate_product_request(config)
-        source_cfg = config["source"][config_key]
+        super().__init__(data_config)
+        self.dataset_name = "hrrr"
+
+        product = _validate_product_request(self.dataset_name)
 
         self.product: str = product
-        self.source_name: str = config_key.lower()
-        self.return_target: bool = return_target
-        self.mode: str = source_cfg.get("mode", "local")
-        self.base_path: str | None = source_cfg.get("base_path", None)
-        self.forecast_hour: int = int(source_cfg.get("forecast_hour", 0))
-        self.extent: list[float] | None = source_cfg.get("extent", None)
-        self.global_levels: list[int] | None = source_cfg.get("levels", None)
-        self.num_fetch_workers: int = int(source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
 
-        self.dt = pd.Timedelta(config["timestep"])
-        self.num_forecast_steps: int = config["forecast_len"]
-        self.start_datetime = pd.Timestamp(config["start_datetime"])
-        self.end_datetime = pd.Timestamp(config["end_datetime"])
-        self.datetimes: pd.DatetimeIndex = self._build_timestamps()
+        self.return_target: bool = return_target
+        self.mode: str = self.curr_source_cfg.get("mode", "local")
+        self.base_path: str | None = self.curr_source_cfg.get("base_path", None)
+        self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
+        self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
+        self.global_levels: list[int] | None = self.curr_source_cfg.get("levels", None)
+        self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
+
+        # self.dt = pd.Timedelta(data_config["timestep"])
+        # self.num_forecast_steps: int = data_config["forecast_len"]
+        # self.start_datetime = pd.Timestamp(data_config["start_datetime"])
+        # self.end_datetime = pd.Timestamp(data_config["end_datetime"])
+        # self.datetimes: pd.DatetimeIndex = self._build_timestamps()
+
+        super().__post_init__()
 
         if self.mode == "local" and self.base_path is None:
             raise ValueError(
-                f"Missing 'base_path'. A config['source']['{config_key}']['base_path'] is required for local mode"
+                f"Missing 'base_path'. A config['source']['{self.curr_source_name}']['base_path'] is required for local mode"
             )
 
-        if "variables" not in source_cfg:
-            raise KeyError(
-                f"Missing 'variables' key in config['source']['{config_key}']" + f"Current keys: {source_cfg.keys()}"
-            )
-        if len(source_cfg["variables"]) == 0:
-            raise ValueError(
-                f"No variables specified under config['source']['{config_key}']['variables']"
-                + f"Current dictionary: {source_cfg['variables']}"
-            )
-
-        self.var_dict: dict[str, dict] = {}
-        for field_type, d in source_cfg.get("variables", {}).items():
+        self.var_dict: dict[str, dict[str, list[str] | None]] = {}
+        for field_type, d in self.curr_source_cfg.get("variables", {}).items():
             self._register_field(field_type, d)
 
-        self.static_metadata: dict = {
+        self.static_metadata: dict[str, Any] = {
             "levels": self.global_levels,
             "forecast_hour": self.forecast_hour,
             "datetime_fmt": "unix_ns",
@@ -657,7 +677,7 @@ class HRRRDataset(Dataset):
 
         # Caches — all created lazily so they are fork-safe when DataLoader
         # spins up worker processes after __init__.
-        self._idx_cache: dict[str, list[dict]] = {}
+        self._idx_cache: dict[str, list[dict[str, str | int | None]]] = {}
         self._http_session = None  # requests.Session; built on first remote call
         self._spatial_slice: tuple[slice, slice] | None = None  # extent → (row, col) slices
 
@@ -733,68 +753,68 @@ class HRRRDataset(Dataset):
         )
         return self._spatial_slice
 
-    def __len__(self) -> int:
-        return len(self.datetimes)
+    # def __len__(self) -> int:
+    #     return len(self.datetimes)
 
-    def __getitem__(self, args: tuple) -> dict:
-        """Return a nested input/target sample dict.
+    # def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
+    #     """Return a nested input/target sample dict.
 
-        Args:
-            args: ``(t, i)`` where *t* is the init timestamp (nanoseconds or
-                ``pd.Timestamp``) and *i* is the within-sequence step index.
+    #     Args:
+    #         args: ``(t, i)`` where *t* is the init timestamp (nanoseconds or
+    #             ``pd.Timestamp``) and *i* is the within-sequence step index.
 
-        Returns:
-            Dict with ``"input"``, ``"metadata"``, and optionally ``"target"``.
-        """
-        t, i = args
-        t = pd.Timestamp(t)
-        t_target = t + self.dt
+    #     Returns:
+    #         Dict with ``"input"``, ``"metadata"``, and optionally ``"target"``.
+    #     """
+    #     t, i = args
+    #     t = pd.Timestamp(t)
+    #     t_target = t + self.dt
 
-        input_data: dict = {}
-        self._extract_field("dynamic_forcing", t, input_data)
+    #     input_data: dict[str, Any] = {}
+    #     self._extract_field("dynamic_forcing", t, input_data)
 
-        # Prognostic + static are only needed at the initial step
-        if i == 0:
-            if "static" in self.var_dict:
-                self._extract_field("static", t, input_data)
-            if "prognostic" in self.var_dict:
-                self._extract_field("prognostic", t, input_data)
+    #     # Prognostic + static are only needed at the initial step
+    #     if i == 0:
+    #         if "static" in self.var_dict:
+    #             self._extract_field("static", t, input_data)
+    #         if "prognostic" in self.var_dict:
+    #             self._extract_field("prognostic", t, input_data)
 
-        sample: dict = {
-            "input": input_data,
-            "metadata": {"input_datetime": int(t.value)},
-        }
+    #     sample: dict[str, Any] = {
+    #         "input": input_data,
+    #         "metadata": {"input_datetime": int(t.value)},
+    #     }
 
-        if self.return_target:
-            target_data: dict = {}
-            for ft in ("prognostic", "diagnostic"):
-                if ft in self.var_dict:
-                    self._extract_field(ft, t_target, target_data)
-            sample["target"] = target_data
-            sample["metadata"]["target_datetime"] = int(t_target.value)
+    #     if self.return_target:
+    #         target_data: dict[str, Any] = {}
+    #         for ft in ("prognostic", "diagnostic"):
+    #             if ft in self.var_dict:
+    #                 self._extract_field(ft, t_target, target_data)
+    #         sample["target"] = target_data
+    #         sample["metadata"]["target_datetime"] = int(t_target.value)
 
-        return sample
+    #     return sample
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_timestamps(self) -> pd.DatetimeIndex:
-        return pd.date_range(
-            self.start_datetime,
-            self.end_datetime - self.num_forecast_steps * self.dt,
-            freq=self.dt,
-        )
+    # def _build_timestamps(self) -> pd.DatetimeIndex:
+    #     return pd.date_range(
+    #         self.start_datetime,
+    #         self.end_datetime - self.num_forecast_steps * self.dt,
+    #         freq=self.dt,
+    #     )
 
-    def _register_field(self, field_type: str, d: dict | None) -> None:
-        if field_type not in VALID_FIELD_TYPES:
+    def _register_field(self, field_type: str, field_config: dict[str, list[str] | None] | None) -> None:
+        if field_type not in get_args(VALID_FIELD_TYPES):
             raise KeyError(f"Unknown field_type '{field_type}'. Valid options: {sorted(VALID_FIELD_TYPES)}")
-        if not isinstance(d, dict):
-            logging.debug(f"Provided dictionary of incorrect type: {type(d)}. Object is {d}")
+        if not isinstance(field_config, dict):
+            logging.debug(f"Provided dictionary of incorrect type: {type(field_config)}. Object is {field_config}")
             return
 
-        vars_3d: list[str] = d.get("vars_3D") or []
-        vars_2d: list[str] = d.get("vars_2D") or []
+        vars_3d: list[str] = field_config.get("vars_3D") or []
+        vars_2d: list[str] = field_config.get("vars_2D") or []
         if not vars_3d and not vars_2d:
             raise ValueError(f"Field '{field_type}' must define vars_3D and/or vars_2D")
 
@@ -805,14 +825,14 @@ class HRRRDataset(Dataset):
         self.var_dict[field_type] = {
             "vars_3D": vars_3d,
             "vars_2D": vars_2d,
-            "levels": d.get("levels", self.global_levels),
+            "levels": field_config.get("levels", self.curr_source_cfg.get("levels", None)),
         }
 
     def _extract_field(
         self,
         field_type: str,
         t: pd.Timestamp,
-        sample: dict,
+        sample: dict[str, Any],
     ) -> None:
         """Load all variables for *field_type* at time *t* into *sample*.
 
@@ -858,7 +878,7 @@ class HRRRDataset(Dataset):
             https_url = _s3_uri_to_https(s3_uri)
             session = self._get_session()
 
-            def _fetcher(entry: dict) -> bytes:
+            def _fetcher(entry: dict[str, str | int | None]) -> bytes:
                 return _fetch_message(https_url, entry["byte_start"], entry["byte_end"], session)
         else:
             path = _hrrr_local_path(self.base_path, file_t, ff, self.product)
@@ -866,7 +886,7 @@ class HRRRDataset(Dataset):
                 self._idx_cache[path] = _load_idx_local(path)
             idx_entries = self._idx_cache[path]
 
-            def _fetcher(entry: dict) -> bytes:
+            def _fetcher(entry: dict[str, str | int | None]) -> bytes:
                 return _fetch_bytes_local(path, entry["byte_start"], entry["byte_end"])
 
         self._extract_from_idx(field_type, idx_entries, _fetcher, vd, sample, step_min=step_min)
@@ -874,10 +894,10 @@ class HRRRDataset(Dataset):
     def _extract_from_idx(
         self,
         field_type: str,
-        idx_entries: list[dict],
+        idx_entries: list[dict[str, str | int | None]],
         fetcher,
-        vd: dict,
-        sample: dict,
+        vd: dict[str, list[str] | None],
+        sample: dict[str, Any],
         step_min: int | None = None,
     ) -> None:
         """Shared fetch-plan → parallel byte fetch → decode → tensor pipeline.
@@ -993,11 +1013,11 @@ class HRRRDataset(Dataset):
 
         for vname in vd["vars_3D"]:
             stacked = np.stack(arrs_3d[vname])  # (n_levels, y, x)
-            sample[f"{self.source_name}/{field_type}/3d/{vname}"] = torch.tensor(
+            sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/3d/{vname}"] = torch.tensor(
                 stacked, dtype=torch.float32
             ).unsqueeze(1)
 
         for vname in vd["vars_2D"]:
-            sample[f"{self.source_name}/{field_type}/2d/{vname}"] = (
+            sample[f"{self.curr_source_name}/{self.dataset_name}/{field_type}/2d/{vname}"] = (
                 torch.tensor(arr_2d[vname], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
             )
