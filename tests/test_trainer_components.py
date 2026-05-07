@@ -316,6 +316,7 @@ def _era5_gen2_conf(**overrides):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
+    base["preblocks"] = {"concat": {"type": "concat"}}
     base.update(overrides)
     return base
 
@@ -413,6 +414,7 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
+    base["preblocks"] = {"concat": {"type": "concat"}}
     return base
 
 
@@ -525,7 +527,6 @@ class TestERA5Gen2MultiStepTraining:
         from unittest.mock import patch
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
         from credit.preblock import apply_preblocks
-        from credit.preblock.concat import ConcatToTensor
 
         B, C, H, W = 1, 4, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -553,9 +554,9 @@ class TestERA5Gen2MultiStepTraining:
 
         original_apply = apply_preblocks
 
-        def _patched_apply(preblocks, batch):
-            result = original_apply(preblocks, batch)
-            x_raw, _, __ = ConcatToTensor()(result)
+        def _patched_apply(preblocks, batch, device=None):
+            result = original_apply(preblocks, batch, device=device)
+            x_raw = result["input"]
             step[0] += 1
             if step[0] == 1:
                 x_at_step1_out[0] = x_raw.clone()
@@ -623,6 +624,7 @@ class TestERA5Gen2MultiStepTraining:
                 }
             },
         }
+        conf["preblocks"] = {"concat": {"type": "concat"}}
 
         # Model: outputs N_PROG channels, all zeros — makes y_pred easy to check.
         # Multiply by self.w so the output has a grad_fn for backprop.
