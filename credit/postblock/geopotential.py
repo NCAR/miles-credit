@@ -101,7 +101,7 @@ class GeopotentialDiagnostic(torch.nn.Module):
 
     def forward(self, pred_dict: dict, chunk_size=1000):
         pred = pred_dict["prediction"]
-        pred_shape = pred[self.temperature_var].shape
+        pred_shape = list(pred[self.temperature_var].shape)  # (B, n_levels, n_time, H, W)
         pred_flat = {}
         for input_var in [
             self.surface_geopotential_var,
@@ -109,8 +109,10 @@ class GeopotentialDiagnostic(torch.nn.Module):
             self.temperature_var,
             self.specific_humidity_var,
         ]:
-            pred_per = torch.permute(pred[input_var], (0, 2, 3, 4, 5, 1))
-            pred_flat[input_var] = pred_per.reshape(np.prod(pred_per.shape[:-1]), pred_per.shape[-1])
+            new_dim_order = tuple([0] + list(range(2, len(pred[input_var].shape))) + [1])
+            pred_per = torch.permute(pred[input_var], new_dim_order)  # (B, n_time, H, W, n_levels)
+            total_shape = np.prod(pred_per.shape[:-1])
+            pred_flat[input_var] = pred_per.reshape(total_shape, pred_per.shape[-1])
         vgeo = torch.vmap(geopotential, (0, 0, 0, 0, None, None), chunk_size=chunk_size)
         geo_out = vgeo(
             pred_flat[self.surface_geopotential_var],
@@ -119,6 +121,7 @@ class GeopotentialDiagnostic(torch.nn.Module):
             pred_flat[self.specific_humidity_var],
             self.model_a_half,
             self.model_b_half,
-        ).reshape(pred_shape[0], pred_shape[2], pred_shape[3], pred_shape[4], pred_shape[5], pred_shape[1])
-        pred[self.output_name] = torch.permute(geo_out, (0, 5, 1, 2, 3, 4))
+        ).reshape(*[pred_shape[0]] + pred_shape[2:] + [pred_shape[1]])  # (B, n_time, H, W, n_levels)
+        final_dim_order = tuple([0] + [len(pred_shape)] + list(range(1, len(pred_shape) - 1)))
+        pred[self.output_name] = torch.permute(geo_out, final_dim_order)
         return pred_dict

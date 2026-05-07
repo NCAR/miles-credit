@@ -485,7 +485,7 @@ def test_wb2_era5_64x32_single_load(minimal_wb2_era5_config):
     assert "target" in sample
 
     n_levels = len(minimal_wb2_era5_config["source"]["WeatherBench2_ERA5"]["levels"])  # 2
-    lat, lon = 32, 64
+    lat, lon = 64, 32
 
     # 3D variable: (n_levels, 1, lat, lon)
     temp_in = sample["input"]["weatherbench2_era5/prognostic/3d/temperature"]

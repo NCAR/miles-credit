@@ -45,18 +45,20 @@ def test_geopotential():
     meta_2 = deepcopy(meta)
     meta_2["_channel_map"]["output"] = meta_2["_channel_map"]["input"]
     recon = Reconstruct()
-    output = recon(batch_tensor, meta_2)
+    output = recon({"prediction": batch_tensor, "meta": meta_2})
     output_var_name = "arco_era5/derived_diagnostic/3d/geopotential"
     geopotential_layer = GeopotentialDiagnostic(
         output_name=output_var_name,
         surface_geopotential_var="arco_era5/static/2d/geopotential_at_surface",
         surface_pressure_var="arco_era5/prognostic/2d/surface_pressure",
         temperature_var="arco_era5/prognostic/3d/temperature",
-        specific_humidity_var="arco_era5/prognostic/3d/specific_total_mass",
+        specific_humidity_var="arco_era5/prognostic/3d/specific_humidity",
         level_info_file="ERA5_Lev_Info.nc",
         model_a_half_var="a_half",
         model_b_half_var="b_half",
     )
     diagnosed = geopotential_layer(output)
-    assert output_var_name in diagnosed["predict"].keys()
-    assert diagnosed["predict"][output_var_name].shape == diagnosed["predict"][geopotential_layer.temperature_var].shape
+    pred = diagnosed["prediction"]
+    geo = pred["arco_era5/derived_diagnostic/3d/geopotential"]
+    temp = pred["arco_era5/prognostic/3d/temperature"]
+    assert geo.shape == temp.shape
