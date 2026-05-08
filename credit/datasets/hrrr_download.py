@@ -60,6 +60,12 @@ logger = logging.getLogger(__name__)
 
 
 class _DownloadTask(NamedTuple):
+    """Simple struct for downloading HRRR data
+
+    Args:
+        NamedTuple: Lightweight immutable struct for named parameters.
+    """
+
     s3_uri: str
     local_path: str
     overwrite: bool
@@ -70,6 +76,15 @@ def _download_one(task: _DownloadTask) -> str:
 
     Runs in a worker process — imports s3fs locally so the pool workers don't
     need to inherit an open filesystem object from the parent.
+
+    Args:
+        task (_DownloadTask): Specifications for HRRR download (see _DownloadTask).
+
+    Returns:
+        str: Status string indicating the result of the download attempt, formatted as:
+            - "ok    {local_path}" if the file was successfully downloaded.
+            - "skip  {local_path}" if the file already exists and overwrite is False.
+            - "miss  {s3_uri}" if the file was not found on S3
     """
     import s3fs  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
 
@@ -104,11 +119,11 @@ def download_hrrr(
     ``HRRRDataset`` in ``mode: "local"`` can use fast byte-range reads.
 
     Args:
-        data_config: Top-level ``data`` config dict (same object passed to
+        data_config (dict[str, Any]): Top-level ``data`` config dict (same object passed to
             ``HRRRDataset``).
-        num_workers: Number of parallel download workers.  Each worker opens
+        num_workers (int, optional): Number of parallel download workers.  Each worker opens
             its own ``s3fs`` connection.  Default ``4``.
-        overwrite: Re-download files that already exist on disk. Default
+        overwrite (bool, optional): Re-download files that already exist on disk. Default
             ``False`` (skip existing files).
 
     Raises:
@@ -207,6 +222,10 @@ def download_hrrr(
 
 
 if __name__ == "__main__":
+    """
+    The code below defines the CLI for the HRRR download
+    """
+
     import argparse
 
     import yaml

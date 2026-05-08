@@ -1,7 +1,7 @@
 """
 base_dataset.py
 -------------------------------------------------------
-BaseDataset: A PyTorch Dataset class for:
+AbstractBaseDataset and BaseDataset: A PyTorch Dataset class for:
 1. Type hinting and annotations throughout CREDIT
 2. Scaffolding the development of future datasets
 3. Provide a minimal implementation of a Dataset for testing
@@ -30,6 +30,11 @@ class AbstractBaseDataset(Dataset[Any]):
     but does not provide any implementation. The BaseDataset class inherits from this
     class and provides a minimal implementation. Any future dataset should inherit from
     either AbstractBaseDataset or BaseDataset depending on the level of functionality needed.
+
+    For generality, the inheritance is from torch.utils.data.Dataset[Any], however
+    there may be benefits to stricter typing than Any for consistency in the
+    get item return, especially if torch supports dataset type accelerations in future
+    releases.
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
@@ -86,7 +91,6 @@ class BaseDataset(AbstractBaseDataset):
     2. Scaffolding the development of future datasets
     3. Provide a minimal implementation of a Dataset for testing
 
-
     Minimal YAML config for a dataset will have the following stucture:
 
     ```yaml
@@ -95,6 +99,7 @@ class BaseDataset(AbstractBaseDataset):
             Example_Base: # Notice format is <YourName>_<DatasetType>:
               # PARAMETERS FOR THIS DATASET TYPE
               # Ex: levels: [10, 20, 30]
+              dataset_name: "base"  # Needs to match per type of dataset!
               variables:
                 prognostic: null
                 #  vars_3D: ['T', 'U', 'V', 'Q'] # Your 3D variables
@@ -125,18 +130,20 @@ class BaseDataset(AbstractBaseDataset):
         """
         This initializes the BaseDataset class, which is designed to provide base functionality for datasets in CREDIT.
         For most datasets, you should inherit from this class and include a super().__init__(data_config, return_target)
-        call in your __init__ to take advantage of the base functionality. _However_, you do not want to use
-        super().__init__ if you need to handle multiple sources in your dataset, since the init for BaseDataset is
-        designed to handle one source. For multisource, you should still inherit from BaseDataset for type hinting and
-        annotations.
+        call in your __init__ and self.init_register_all_fields() to take advantage of the base functionality.
+
+        _However_, you do not want to use super().__init__ if you need to handle multiple sources in your dataset, since
+        the init for BaseDataset is designed to handle one source. For multisource, you should inherit from
+        AbstractBaseDataset for type hinting and annotations.
 
         Depending on your dataset you will likely want to override or extend the following methods:
-        1. _extract_field:
-                This method is not implemented in BaseDataset, so you will need to implement this method to extract the data for
-                each field type. This is where the main logic of loading the data.
-        2. _register_field:
-                If the structure of your config for each field type is different from the expected structure in
-                BaseDataset, you will need to override this method to properly populate file_dict and var_dict for your dataset.
+        1. _get_file_source:
+                This method tells the dataset how to find the actual data, which is generally different for different datasets
+                and modes (e.g., local vs. remote).
+        2. _extract_field:
+                This method tells the dataset how to extract the data from the files and organize them accordingly. To
+                match dictionary key conventions across datasets, we suggest using the _get_field_name helper to create
+                the keys for the extracted data.
         3. _build_timestamps:
                 If you would like to apply Quality Control checks that limit the datetimes from which to sample from.
                 You may also want to enforce time bounds automatically for your dataset here.
@@ -176,9 +183,11 @@ class BaseDataset(AbstractBaseDataset):
         #   source:
         #     <current_source_name>:
         #       # parameters for this source
+        #       dataset_name: ...
         #       variables: ...
-        # Unless we are parsing through a multi-source config, we expect only one source to be defined in the config.
-        # We take the first one we find here, but this can be overridden in a child class if needed.
+        # Unless we are parsing through a multi-source config (for which you should not inherit from BaseDataset),
+        # we expect only one source to be defined in the config. To be pythonic, we can use next & iter to get this
+        # source entry.
         self.curr_source_name = next(iter(data_config["source"]))
         if len(data_config["source"]) > 1:
             raise ValueError(
@@ -191,7 +200,9 @@ class BaseDataset(AbstractBaseDataset):
             )
         self.curr_source_cfg = data_config["source"][self.curr_source_name]
 
-        self.dataset_name = "base"
+        # You should definitely change this in an inherited dataset
+        if type(self) is BaseDataset:
+            self.dataset_name = "base"
 
         # Now we start loading the parameters for the dataset, starting with the clock parameters.
         self.dt: pd.Timedelta = self._load_dt(data_config, self.curr_source_cfg)
@@ -219,7 +230,11 @@ class BaseDataset(AbstractBaseDataset):
             self.init_register_all_fields()
 
     def __len__(self) -> int:
-        """For a CREDIT dataset, the length is the number of unique datetimes that can be sampled from."""
+        """For a CREDIT dataset, the length is the number of unique datetimes that can be sampled from.
+
+        Returns:
+            int: Dataset length
+        """
         return len(self.datetimes)
 
     def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
@@ -288,26 +303,46 @@ class BaseDataset(AbstractBaseDataset):
     # Note we have a separate _load_... function for each variable in an effort
     # to have a more specific warning message.
 
-    def _check_in_data_config(self, config: dict[str, Any], key: str) -> None:
+    def _check_in_data_config(self, data_config: dict[str, Any], key: str) -> None:
+        """Check that a key is in the data config. If not, raise an error since this is required for any dataset.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            key (str): The key to check (e.g., "timestep")
+
+        Raises:
+            KeyError: When the key is not found in the data config
         """
-        Check that a key is in the data config. If not, raise an error since this is required for any dataset.
-        """
-        if key not in config:
+        if key not in data_config:
             raise KeyError(f"{key} must be specified in the config for any inheritance of Base Dataset.")
 
     def _in_source_config(self, data_config: dict[str, Any], curr_source_cfg: dict[str, Any], key: str) -> bool:
-        """
-        Helper check that a key is in the source config.
+        """Helper to determine if a key is in the source config.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_cfg (dict[str, Any]): Portion of the config under a specific source
+            key (str): The key to check (e.g., "timestep")
+
+        Returns:
+            bool: True if the key is in the source config, False otherwise
         """
         return "source" in data_config and key in curr_source_cfg
 
     def _load_dt(
         self, data_config: dict[str, Any], curr_source_config: dict[str, Any], dt_key: str = "timestep"
     ) -> pd.Timedelta:
-        """
-        The timestep (dt) is a required parameter for any dataset, and is used to build the clock of the sampler.
+        """The timestep (dt) is a required parameter for any dataset, and is used to build the clock of the sampler.
         In general, the timestep in the data config should be the smallest timestep across all sources.
         The inherited dataset may need a coarser timestep (e.g., in the case of multi-source datasets).
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            dt_key (str, optional): The key for the timestep parameter. Defaults to "timestep".
+
+        Returns:
+            pd.Timedelta: The timestep for the dataset
         """
         self._check_in_data_config(data_config, dt_key)
         dt_in_data = pd.Timedelta(data_config[dt_key])
@@ -332,11 +367,18 @@ class BaseDataset(AbstractBaseDataset):
         curr_source_config: dict[str, Any],
         num_forecast_steps_key: str = "forecast_len",
     ) -> int:
-        """
-        The number of forecast steps (num_forecast_steps) is a required parameter for any dataset, and
+        """The number of forecast steps (num_forecast_steps) is a required parameter for any dataset, and
         is used in the sampler. In general, the number of forecast steps in the data config should be
         the largest across all sources, since this determines how far forward the sampler needs to roll
         out. The inherited dataset may not be able to rollout further.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            num_forecast_steps_key (str, optional): The key for the number of forecast steps parameter. Defaults to "forecast_len".
+
+        Returns:
+            int: The number of forecast steps (i.e., length ahead) for the dataset
         """
         self._check_in_data_config(data_config, num_forecast_steps_key)
         num_forecast_steps_in_data = data_config[num_forecast_steps_key]
@@ -361,12 +403,20 @@ class BaseDataset(AbstractBaseDataset):
         curr_source_config: dict[str, Any],
         start_datetime_key: str = "start_datetime",
     ) -> pd.Timestamp:
-        """
-        The start_datetime is a required parameter for any dataset, and is used in the sampler. In general,
+        """The start_datetime is a required parameter for any dataset, and is used in the sampler. In general,
         the start_datetime in the data config should be the earliest across all sources, since this determines
         the earliest point in time that the sampler can draw from. The inherited dataset may not be able to go
         as far back.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            start_datetime_key (str, optional): The key for the start datetime parameter. Defaults to "start_datetime".
+
+        Returns:
+            pd.Timestamp: The start datetime for the dataset
         """
+
         self._check_in_data_config(data_config, start_datetime_key)
         start_datetime_in_data = pd.Timestamp(data_config[start_datetime_key])
 
@@ -387,12 +437,20 @@ class BaseDataset(AbstractBaseDataset):
     def _load_end_datetime(
         self, data_config: dict[str, Any], curr_source_config: dict[str, Any], end_datetime_key: str = "end_datetime"
     ) -> pd.Timestamp:
-        """
-        The end_datetime is a required parameter for any dataset, and is used in the sampler. In general,
+        """The end_datetime is a required parameter for any dataset, and is used in the sampler. In general,
         the end_datetime in the data config should be the latest across all sources, since this determines
         the latest point in time that the sampler can draw from. The inherited dataset may not be able to go
         as far forward.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            end_datetime_key (str, optional): The key for the end datetime parameter. Defaults to "end_datetime".
+
+        Returns:
+            pd.Timestamp: The end datetime for the dataset
         """
+
         self._check_in_data_config(data_config, end_datetime_key)
         end_datetime_in_data = pd.Timestamp(data_config[end_datetime_key])
 
@@ -412,10 +470,18 @@ class BaseDataset(AbstractBaseDataset):
 
     def _build_timestamps(self) -> pd.DatetimeIndex:
         """Return timestamps for the dataset using the class parameters.
+        The timestamps should ensure that there are enough future timesteps to
+        rollout based on num_forecast_steps and the dt timestep length, and
+        should be at the configured timestep frequency.
+
+        Note: Please override this method if you would like to apply Quality Control
+        checks that limit the datetimes from which to sample from, or if you would
+        like to enforce time bounds automatically for your dataset. You can use
+        super() to have base functionality in these cases.
 
         Returns:
-            DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
-            the forecast horizon, at the configured timestep frequency.
+            pd.DatetimeIndex: DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
+                the forecast horizon, at the configured timestep frequency.
         """
         return pd.date_range(
             self.start_datetime,
@@ -427,7 +493,9 @@ class BaseDataset(AbstractBaseDataset):
     # 2. Registering fields
 
     def _get_field_name(self, field_type: VALID_FIELD_TYPES, dim_str: str, vname: str) -> str:
-        """Get the field name and enforce a consistent convention across datasets
+        """Get the field name and enforce a consistent convention across datasets.
+
+        The convention for the field name is: ``"{user's current source name}/{dataset_name}/{field_type}/{dim_str}/{vname}"``.
 
         Args:
             field_type (VALID_FIELD_TYPES): The field type (e.g., "prognostic")
@@ -443,6 +511,11 @@ class BaseDataset(AbstractBaseDataset):
         return f"{self.curr_source_name}/{self.dataset_name}/{field_type}/{dim_str}/{vname}"
 
     def init_register_all_fields(self) -> None:
+        """Initialize and register all fields for the dataset.
+
+        Raises:
+            KeyError: If the config does not include any variables.
+        """
 
         if self.dataset_name == "base":
             logging.error(
@@ -509,12 +582,18 @@ class BaseDataset(AbstractBaseDataset):
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         """Return the file source for a field. Override in subclasses for different modes/backends.
 
-            Args:
-            field_type: One of VALID_FIELD_TYPES.
-            field_config: Validated field-type config dict.
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
+            field_config (dict[str, Any]): Validated field-type config dict.
 
         Raises:
             ValueError: If ``self.mode`` is not a recognised mode.
+
+        Returns:
+            list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None: Depending on the mode and field type,
+                this method may return a list of (start_time, end_time, file_path) tuples produced by _map_files,
+                a boolean indicating the presence of the field (e.g., for remote data), or None if the field is disabled.
+                The expected return type should be consistent within a dataset class.
         """
         if self.mode == "local":
             files = sorted(glob(field_config.get("path", "")))
@@ -526,10 +605,16 @@ class BaseDataset(AbstractBaseDataset):
             raise ValueError(f"Unknown mode '{self.mode}'. Expected 'local' or 'remote'.")
 
     def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
-        """
-        Base extract field method, which should be overridden in the inherited dataset class to extract the data for
+        """Base extract field method, which should be overridden in the inherited dataset class to extract the data for
         each field type. The method should populate data_dict with the extracted data for the given field type and
-        timestamp. The keys in data_dict should follow the format: "{self.curr_source_name}/{self.dataset_name}/{field_type}/{dim}/{varname}".
+        timestamp. The keys in data_dict should follow the format in _get_field_name.
+
+        The entries are added as tensors to the sample["input"] or sample["target"] dict in __getitem__.
+
+        Args:
+            field_type (VALID_FIELD_TYPES): _description_
+            t (pd.Timestamp): _description_
+            sample (dict[str, Any]): _description_
         """
         logging.error(
             "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "
@@ -539,9 +624,11 @@ class BaseDataset(AbstractBaseDataset):
 
         # A 3D variable should have dimensions (n_levels, 1, n_lat, n_lon).
         # A 2D variable should have dimensions (1, 1, n_lat, n_lon).
-        n_lat = 10
-        n_lon = 15
-        n_levels = 5
+        # We select prime numbers to ensure that there is no accidental shape
+        # matches when testing the dataset.
+        n_lat = 17
+        n_lon = 23
+        n_levels = 7
 
         if field_type in self.var_dict:
             for var_2d in self.var_dict[field_type].get("vars_2D", []):
