@@ -196,7 +196,9 @@ def _convert(args: argparse.Namespace) -> None:
             level_coord = _prompt("Choose from the above").strip()
 
         conf["data"] = {
-            "source": {"ERA5": {"level_coord": level_coord, "levels": levels, "variables": era5_vars}},
+            "source": {
+                "ERA5": {"dataset_name": "era5", "level_coord": level_coord, "levels": levels, "variables": era5_vars}
+            },
             "timestep": f"{lead_time}h",
             "forecast_len": data.get("forecast_len", 0),
             "start_datetime": f"{train_years[0]}-01-01",
