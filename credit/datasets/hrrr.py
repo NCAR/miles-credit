@@ -91,7 +91,7 @@ Example YAML (wrfnatf, remote mode)::
           dataset_name: "HRRR_NAT"
           mode: "remote"
           forecast_hour: 0
-          levels: [10, 20, 30, 40, 50]   # hybrid level indices 1–65
+          levels: [10, 20, 30, 40, 50]   # hybrid level indices 1-65
           variables:
             prognostic:
               vars_3D: [T, U, V, Q]
@@ -251,9 +251,12 @@ def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: str = "wrfprsf") 
     """Construct the S3 URI for a HRRR grib2 file.
 
     Args:
-        t: Initialisation timestamp (UTC).
-        forecast_hour: Forecast lead hour (FF), e.g. ``0`` for analysis.
-        product: HRRR product name — one of ``VALID_PRODUCTS``.
+        t (pd.Timestamp): Initialisation timestamp (UTC).
+        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
+        product (str): HRRR product name — one of ``VALID_PRODUCTS``.
+
+    Returns:
+        str: S3 URI.
     """
     date_str = t.strftime("%Y%m%d")
     hour_str = t.strftime("%H")
@@ -266,10 +269,13 @@ def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, produc
     """Construct the local filesystem path for a HRRR grib2 file.
 
     Args:
-        base_path: Root directory containing HRRR data.
-        t: Initialisation timestamp (UTC).
-        forecast_hour: Forecast lead hour (FF).
-        product: HRRR product name — one of ``VALID_PRODUCTS``.
+        base_path (str): Root directory containing HRRR data.
+        t (pd.Timestamp): Initialization timestamp (UTC).
+        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
+        product (str, optional): HRRR product name — one of ``VALID_PRODUCTS``. Defaults to "wrfprsf".
+
+    Returns:
+        str: Local filesystem path to the grib2 file.
     """
     date_str = t.strftime("%Y%m%d")
     hour_str = t.strftime("%H")
@@ -280,7 +286,14 @@ def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, produc
 
 
 def _s3_uri_to_https(s3_uri: str) -> str:
-    """Convert an ``s3://noaa-hrrr-bdp-pds/...`` URI to a public HTTPS URL."""
+    """Convert an ``s3://noaa-hrrr-bdp-pds/...`` URI to a public HTTPS URL.
+
+    Args:
+        s3_uri (str): SRI URI
+
+    Returns:
+        str: Public HTTPS URL
+    """
     key = s3_uri[len(f"s3://{_S3_BUCKET}/") :]
     return f"{_HRRR_HTTPS_BASE}/{key}"
 
@@ -295,6 +308,12 @@ def _parse_idx(text: str) -> list[dict[str, str | int | None]]:
 
     Each entry dict has keys: ``var``, ``level``, ``byte_start``, ``byte_end``
     (``None`` for the last entry, meaning read to EOF).
+
+    Args:
+        text (str): The content of the .idx file.
+
+    Returns:
+        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
     """
     entries: list[dict[str, str | int | None]] = []
     for line in text.splitlines():
@@ -323,10 +342,16 @@ def _parse_idx(text: str) -> list[dict[str, str | int | None]]:
 def _fetch_idx(s3_uri: str) -> list[dict[str, str | int | None]]:
     """Fetch and parse the ``.idx`` sidecar for a HRRR grib2 file via HTTPS.
 
+    Args:
+        s3_uri (str): S3 URI
+
     Raises:
         FileNotFoundError: If the ``.idx`` file is not found (older v1/v2 files
             may lack sidecars; pre-download with ``hrrr_download.py`` and use
             local mode instead).
+
+    Returns:
+        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
     """
     import requests  # noqa: PLC0415
 
@@ -351,12 +376,16 @@ def _fetch_message(
     """Fetch a single GRIB message via an HTTP Range request.
 
     Args:
-        https_url: Public HTTPS URL of the grib2 file.
-        byte_start: First byte of the message (inclusive).
-        byte_end: Last byte of the message (inclusive), or ``None`` for EOF.
-        session: Optional ``requests.Session`` for connection reuse.  Falls
-            back to module-level ``requests.get`` if ``None``.
+        https_url (str): Public HTTPS URL of the grib2 file.
+        byte_start (int): First byte of the message (inclusive).
+        byte_end (int | None): Last byte of the message (inclusive), or ``None`` for EOF.
+        session (_type_, optional): Optional ``requests.Session`` for connection reuse.  Falls
+            back to module-level ``requests.get`` if ``None``. Defaults to None
+
+    Returns:
+        bytes: The raw bytes of the GRIB message for that byte range.
     """
+
     import requests  # noqa: PLC0415
 
     range_header = f"bytes={byte_start}-{byte_end}" if byte_end is not None else f"bytes={byte_start}-"
@@ -376,7 +405,15 @@ def _fetch_message(
 def _build_prs_entry_map(
     idx_entries: list[dict[str, str | int | None]], idx_name: str
 ) -> dict[float, dict[str, str | None]]:
-    """Return a ``{pressure_level_hPa: idx_entry}`` dict for a pressure-level variable."""
+    """Return a ``{pressure_level_hPa: idx_entry}`` dict for a pressure-level variable.
+
+    Args:
+        idx_entries (list[dict[str, str  |  int  |  None]]): List of entries parsed from the .idx file.
+        idx_name (str): Name of the variable to filter for.
+
+    Returns:
+        dict[float, dict[str, str | None]]: Mapping from pressure level (hPa) to the corresponding .idx entry for that variable.
+    """
     result: dict[float, dict[str, str | None]] = {}
     for e in idx_entries:
         # If level is in the entry, it should be a string like "500 mb"
@@ -395,7 +432,19 @@ def _resolve_pressure_levels(
     prs_map: dict[float, dict[str, str | None]],
     var_name: str,
 ) -> list[float]:
-    """Return the float pressure levels to fetch, validating against available."""
+    """Return the float pressure levels to fetch, validating against available.
+
+    Args:
+        requested (list[int] | None): List of requested pressure levels.
+        prs_map (dict[float, dict[str, str  |  None]]): Mapping from _build_prs_entry_map()
+        var_name (str): Variable name for error messages (e.g. "T", "U", "Q", etc.)
+
+    Raises:
+        ValueError: If any requested levels are not found in the available levels for that variable.
+
+    Returns:
+        list[float]: The float pressure levels to fetch.
+    """
     if requested is None:
         return sorted(prs_map.keys(), reverse=True)
 
@@ -431,6 +480,13 @@ def _build_nat_entry_map(
 
     i.e. ``level`` ends with ``" hybrid level"`` and the prefix is the integer
     level index (1-65, bottom-up).
+
+    Args:
+        idx_entries (list[dict[str, str  |  int  |  None]]): List of entries parsed from the .idx file.
+        idx_name (str): Name of the variable to filter for.
+
+    Returns:
+        dict[int, dict[str, str | None]]: Mapping from hybrid level index to the corresponding .idx entry for that variable.
     """
     result: dict[int, dict[str, str | None]] = {}
     for e in idx_entries:
@@ -450,7 +506,19 @@ def _resolve_nat_levels(
     nat_map: dict[int, dict[str, str | None]],
     var_name: str,
 ) -> list[int]:
-    """Return native level indices to fetch, validating against available."""
+    """Return native level indices to fetch, validating against available.
+
+    Args:
+        requested (list[int] | None): List of requested hybrid levels.
+        nat_map (dict[int, dict[str, str  |  None]]): Mapping from _build_nat_entry_map()
+        var_name (str): Variable name for error messages (e.g. "T", "U", "Q", etc.)
+
+    Raises:
+        ValueError: If any requested levels are not found in the available levels for that variable.
+
+    Returns:
+        list[int]: The integer native level indices to fetch.
+    """
     if requested is None:
         return sorted(nat_map.keys())
     avail = sorted(nat_map.keys())
@@ -482,13 +550,16 @@ def _find_subhf_entry(
     ``"30 min fcst"``, ``"45 min fcst"``, ``"60 min fcst"``.
 
     Args:
-        idx_entries: Parsed ``.idx`` entries for the wrfsubhf file.
-        idx_name: Variable name as it appears in the ``.idx``.
-        idx_level: Level string (e.g. ``"2 m above ground"``).
-        step_min: Sub-step in minutes (15, 30, 45, 60, …).
+        idx_entries (list[dict[str, str  |  int  |  None]])): Parsed ``.idx`` entries for the wrfsubhf file.
+        idx_name (str): Variable name as it appears in the ``.idx``.
+        idx_level (str): Level string (e.g. ``"2 m above ground"``).
+        step_min (int): Sub-step in minutes (15, 30, 45, 60, …).
 
     Raises:
         KeyError: If no matching entry is found.
+
+    Returns:
+        dict[str, str | int | None]: The matching .idx entry for that variable, level, and step.
     """
     step_str = f"{step_min} min fcst"
     for e in idx_entries:
@@ -509,12 +580,12 @@ def _fetch_bytes_local(path: str, byte_start: int, byte_end: int | None) -> byte
     """Read a byte range directly from a local GRIB2 file.
 
     Args:
-        path: Absolute path to the local grib2 file.
-        byte_start: First byte (inclusive).
-        byte_end: Last byte (inclusive), or ``None`` to read to EOF.
+        path (str): Absolute path to the local grib2 file.
+        byte_start (int): First byte (inclusive).
+        byte_end (int | None): Last byte (inclusive), or ``None`` to read to EOF.
 
     Returns:
-        Raw bytes for that message.
+        bytes: Raw bytes for that message.
     """
     with open(path, "rb") as f:
         f.seek(byte_start)
@@ -529,8 +600,14 @@ def _load_idx_local(grib2_path: str) -> list[dict[str, str | int | None]]:
     Expects the index at ``{grib2_path}.idx``.  Download it alongside the
     grib2 with ``hrrr_download.py``.
 
+    Args:
+        grib2_path (str): Absolute path to the local grib2 file.
+
     Raises:
         FileNotFoundError: If the ``.idx`` file is absent.
+
+    Returns:
+        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
     """
     idx_path = grib2_path + ".idx"
     try:
@@ -548,7 +625,14 @@ def _load_idx_local(grib2_path: str) -> list[dict[str, str | int | None]]:
 
 
 def _to_float32(values: np.ndarray) -> np.ndarray:
-    """Return float32, replacing masked values with NaN."""
+    """Return float32, replacing masked values with NaN.
+
+    Args:
+        values (np.ndarray): Values to convert, potentially a masked array.
+
+    Returns:
+        np.ndarray: Array with masked values filled with NaN and dtype float32.
+    """
     if hasattr(values, "filled"):
         # Pylance cannot currently handle the hasattr check for masked arrays, so we ignore the type issues here.
         values = values.filled(np.nan)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
@@ -561,7 +645,17 @@ def _to_float32(values: np.ndarray) -> np.ndarray:
 
 
 def _validate_product_request(dataset_name: str) -> str:
-    """Validate the dataset request config, raising ValueError for invalid requests."""
+    """Validate the dataset request config, raising ValueError for invalid requests.
+
+    Args:
+        dataset_name (str): The HRRR dataset name from the config (e.g. "HRRR", "HRRR_NAT", "HRRR_SUBH").
+
+    Raises:
+        ValueError: If the dataset_name is not recognized or mapped to a valid HRRR product.
+
+    Returns:
+        str: The validated HRRR product name.
+    """
     # Convert to upper case for case-insensitive matching
     dataset_name = dataset_name.upper()
 
@@ -581,7 +675,7 @@ def _validate_product_request(dataset_name: str) -> str:
 class HRRRDataset(BaseDataset):
     """CREDIT Dataset for HRRR GRIB2 data (wrfprsf / wrfnatf / wrfsubhf).
 
-    Implements the same field-type semantics as MRMSDataset:
+    Implements the same field-type semantics as BaseDataset:
 
     * ``prognostic``      — input at step 0 and target (autoregressive rollout)
     * ``dynamic_forcing`` — input at every step; never a target
@@ -596,10 +690,10 @@ class HRRRDataset(BaseDataset):
     configuration examples.
 
     Attributes:
-        source_name: Tensor key prefix — ``"hrrr"``, ``"hrrr_nat"``, or
-            ``"hrrr_subh"``.
+        dataset_name: Tensor key prefix — ``"HRRR"``, ``"HRRR_NAT"``, or
+            ``"HRRR_SUBH"``.
         product: Active HRRR product (``"wrfprsf"``, ``"wrfnatf"``, or
-            ``"wrfsubhf"``) depending on *source_name*.
+            ``"wrfsubhf"``) depending on *dataset_name*.
         datetimes: DatetimeIndex of valid initialisation timestamps.
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
@@ -608,10 +702,10 @@ class HRRRDataset(BaseDataset):
         """Initialize HRRRDataset.
 
         Args:
-            data_config: Top-level ``data`` config dict.
-            return_target: Whether to include a ``"target"`` key in each sample.
+            data_config (dict[str, Any]): Top-level ``data`` config dict.
+            return_target (bool): Whether to include a ``"target"`` key in each sample.
         """
-        super().__init__(data_config)
+        super().__init__(data_config=data_config, return_target=return_target)
 
         if "dataset_name" not in self.curr_source_cfg:
             raise ValueError(
@@ -623,8 +717,6 @@ class HRRRDataset(BaseDataset):
         product = _validate_product_request(self.dataset_name)
 
         self.product: str = product
-
-        self.return_target: bool = return_target
         self.mode: str = self.curr_source_cfg.get("mode", "local")
         self.base_path: str | None = self.curr_source_cfg.get("base_path", None)
         self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
@@ -632,20 +724,10 @@ class HRRRDataset(BaseDataset):
         self.global_levels: list[int] | None = self.curr_source_cfg.get("levels", None)
         self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
 
-        # self.dt = pd.Timedelta(data_config["timestep"])
-        # self.num_forecast_steps: int = data_config["forecast_len"]
-        # self.start_datetime = pd.Timestamp(data_config["start_datetime"])
-        # self.end_datetime = pd.Timestamp(data_config["end_datetime"])
-        # self.datetimes: pd.DatetimeIndex = self._build_timestamps()
-
         if self.mode == "local" and self.base_path is None:
             raise ValueError(
                 f"Missing 'base_path'. A config['source']['{self.curr_source_name}']['base_path'] is required for local mode"
             )
-
-        # self.var_dict: dict[str, dict[str, list[str] | None]] = {}
-        # for field_type, field_config in self.curr_source_cfg.get("variables", {}).items():
-        #     self._register_field(field_type, field_config)
 
         super().init_register_all_fields()
 
@@ -691,15 +773,15 @@ class HRRRDataset(BaseDataset):
         call so subsequent samples pay no recomputation cost.
 
         Args:
-            lats: 2-D latitude array from a decoded pygrib message.
-            lons: 2-D longitude array from a decoded pygrib message.
+            lats (np.ndarray): 2D latitude array from a decoded pygrib message.
+            lons (np.ndarray): 2D longitude array from a decoded pygrib message.
+
+        Raises:
+            ValueError: If ``self.extent`` does not intersect the HRRR domain.
 
         Returns:
             ``(row_slice, col_slice)`` ready for direct numpy indexing.
             Both slices are ``slice(None)`` when ``self.extent`` is ``None``.
-
-        Raises:
-            ValueError: If ``self.extent`` does not intersect the HRRR domain.
         """
         if self._spatial_slice is not None:
             return self._spatial_slice
@@ -709,7 +791,7 @@ class HRRRDataset(BaseDataset):
             return self._spatial_slice
 
         if len(lats.shape) != 2 or len(lons.shape) != 2:
-            raise ValueError(f"Expected 2-D lat/lon arrays, got shapes {lats.shape} and {lons.shape}")
+            raise ValueError(f"Expected 2D lat/lon arrays, got shapes {lats.shape} and {lons.shape}")
 
         if lats.shape != lons.shape:
             raise ValueError(f"Latitude and longitude arrays have different shapes: {lats.shape} vs {lons.shape}")
@@ -738,6 +820,16 @@ class HRRRDataset(BaseDataset):
     # ------------------------------------------------------------------
 
     def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, list[str] | None] | None) -> None:
+        """Extends the _register_field method of BaseDataset to include levels and checking with HRRR VAR_REGISTRY.
+
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES, namely: ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            field_config (dict[str, list[str]  |  None] | None): Field-type config dict, or ``None`` / null to disable the field.
+
+        Raises:
+            KeyError: If a variable in the field config is not in the HRRR VAR_REGISTRY.
+        """
         super()._register_field(field_type, field_config)
 
         # Add the levels to the var_dict entry
@@ -757,7 +849,10 @@ class HRRRDataset(BaseDataset):
         t: pd.Timestamp,
         sample: dict[str, Any],
     ) -> None:
-        """Load all variables for *field_type* at time *t* into *sample*.
+        """Replace the _extract_field method of BaseDataset to implement the
+        HRRR-specific file resolution and fetching logic.
+
+        Load all variables for *field_type* at time *t* into *sample*.
 
         Resolves the file path / URI, loads the ``.idx`` (cached), then
         delegates to :meth:`_extract_from_idx` with the appropriate byte
@@ -771,6 +866,13 @@ class HRRRDataset(BaseDataset):
         * ``ff        = ceil(step_min / 60)`` (file number within the run)
         * If *t* is exactly on the hour, it is treated as the 60-min step of
           the previous hour's run (``init_hour -= 1h``, ``step_min = 60``).
+
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES, namely: ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            t (pd.Timestamp): Initialization timestamp (UTC).  For ``wrfsubhf``, this is a
+                15-min-resolution timestamp like ``2024-01-01T00:15:00Z``.
+            sample (dict[str, Any]): The sample dict being built in __getitem__
         """
         vd = self.var_dict.get(field_type)
         if not vd:
@@ -836,13 +938,13 @@ class HRRRDataset(BaseDataset):
         is handled here based on ``self.product``.
 
         Args:
-            field_type: e.g. ``"prognostic"``.
-            idx_entries: Parsed ``.idx`` entries for the target file.
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
+            idx_entries (list[dict[str, str  |  int  |  None]]): Parsed ``.idx`` entries for the target file.
             fetcher: Callable ``(entry: dict) -> bytes`` that fetches the raw
                 GRIB message for a given idx entry.
-            vd: Variable dict (``vars_3D``, ``vars_2D``, ``levels``).
-            sample: Output dict to populate in-place.
-            step_min: Sub-hourly step in minutes (15, 30, 45, 60, …).  Only
+            vd (dict[str, list[str | int]]): Variable dict (``vars_3D``, ``vars_2D``, ``levels``).
+            sample (dict[str, Any]): Output dict to populate in-place.
+            step_min (int | None): Sub-hourly step in minutes (15, 30, 45, 60, …).  Only
                 used when ``self.product == "wrfsubhf"``.
         """
         try:

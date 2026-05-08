@@ -20,6 +20,11 @@ import torch
 
 from credit.datasets._utils import _map_files  # pyright: ignore[reportPrivateUsage]
 
+# Expected types of fields
+# * ``prognostic``      — input at step 0 and target (autoregressive rollout)
+# * ``dynamic_forcing`` — input at every step; never a target
+# * ``diagnostic``      — target only
+# * ``static``          — input at step 0; never a target, applies to all steps
 VALID_FIELD_TYPES = Literal["prognostic", "dynamic_forcing", "static", "diagnostic"]
 
 
@@ -612,9 +617,9 @@ class BaseDataset(AbstractBaseDataset):
         The entries are added as tensors to the sample["input"] or sample["target"] dict in __getitem__.
 
         Args:
-            field_type (VALID_FIELD_TYPES): _description_
-            t (pd.Timestamp): _description_
-            sample (dict[str, Any]): _description_
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
+            t (pd.Timestamp): Query timestamp for which to extract the field data.
+            sample (dict[str, Any]): The sample dict being built in __getitem__
         """
         logging.error(
             "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "
