@@ -2,74 +2,145 @@ import os
 import sys
 import copy
 import logging
-
-# Import model classes
-from credit.models.crossformer import CrossFormer
-from credit.models.camulator import Camulator
-from credit.models.unet import SegmentationModel
-from credit.models.fuxi import Fuxi
-from credit.models.swin import SwinTransformerV2Cr
-
-try:
-    from credit.models.graph import GraphResTransfGRU
-except ImportError:
-    GraphResTransfGRU = None
-from credit.models.debugger_model import DebuggerModel
-from credit.models.wxformer.crossformer import CrossFormer as WXFormer
-from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
-from credit.models.wxformer.crossformer_downscaling import DownscalingCrossFormer
-from credit.models.unet_downscaling import DownscalingSegmentationModel
-from credit.models.wxformer.crossformer_diffusion import CrossFormerDiffusion
-from credit.models.unet_diffusion import UnetDiffusion
-from credit.diffusion import ModifiedGaussianDiffusion
-from credit.models.swin_wrf import WRFTransformer
-from credit.models.dscale_wrf import DscaleTransformer
-
+import importlib
 
 logger = logging.getLogger(__name__)
 
-# Define model types and their corresponding classes
-model_types = {
+# Registry entries are either:
+#   (module_path: str, class_name: str, log_message: str)  — internal lazy entries
+#   (cls: type,        log_message: str)                   — externally registered classes
+_MODEL_REGISTRY = {
     "crossformer": (
-        CrossFormer,
+        "credit.models.crossformer",
+        "CrossFormer",
         "Loading the CrossFormer model with a conv decoder head and skip connections ...",
     ),
     "camulator": (
-        Camulator,
+        "credit.models.camulator",
+        "Camulator",
         "Loading the CAMulator model with a conv decoder head and skip connections ...",
     ),
     "crossformer-diffusion": (
-        CrossFormerDiffusion,
+        "credit.models.wxformer.crossformer_diffusion",
+        "CrossFormerDiffusion",
         "Loading A DDPM model with CrossFormer Backbone ...",
     ),
     "unet-diffusion": (
-        UnetDiffusion,
+        "credit.models.unet_diffusion",
+        "UnetDiffusion",
         "Loading A DDPM model with UNET Backbone ...",
     ),
-    "wxformer": (WXFormer, "Loading the WXFormer deterministic model ..."),
+    "wxformer": (
+        "credit.models.wxformer.crossformer",
+        "CrossFormer",
+        "Loading the WXFormer deterministic model ...",
+    ),
     "crossformer-ensemble": (
-        CrossFormerWithNoise,
+        "credit.models.wxformer.crossformer_ensemble",
+        "CrossFormerWithNoise",
         "Loading the ensemble CrossFormer model with a noise injection scheme ...",
     ),
     "crossformer-style": (
-        CrossFormerWithNoise,
+        "credit.models.wxformer.crossformer_ensemble",
+        "CrossFormerWithNoise",
         "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
     ),
-    "unet": (SegmentationModel, "Loading a unet model"),
-    "fuxi": (Fuxi, "Loading Fuxi model"),
-    "swin": (SwinTransformerV2Cr, "Loading the minimal Swin model"),
-    "graph": (GraphResTransfGRU, "Loading Graph Residual Transformer GRU model")
-    if GraphResTransfGRU is not None
-    else None,
-    "debugger": (DebuggerModel, "Loading the debugger model"),
-    "wrf": (WRFTransformer, "Loading WRF Transformer"),
-    "dscale": (DscaleTransformer, "Loading downscaling Transformer"),
+    "unet": ("credit.models.unet", "SegmentationModel", "Loading a unet model"),
+    "fuxi": ("credit.models.fuxi", "Fuxi", "Loading Fuxi model"),
+    "swin": ("credit.models.swin", "SwinTransformerV2Cr", "Loading the minimal Swin model"),
+    "graph": (
+        "credit.models.graph",
+        "GraphResTransfGRU",
+        "Loading Graph Residual Transformer GRU model",
+    ),
+    "debugger": ("credit.models.debugger_model", "DebuggerModel", "Loading the debugger model"),
+    "wrf": ("credit.models.swin_wrf", "WRFTransformer", "Loading WRF Transformer"),
+    "dscale": ("credit.models.dscale_wrf", "DscaleTransformer", "Loading downscaling Transformer"),
     "crossformer_downscaling": (
-        DownscalingCrossFormer,
+        "credit.models.wxformer.crossformer_downscaling",
+        "DownscalingCrossFormer",
         "Loading downscaling crossformer model",
     ),
-    "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
+    "unet_downscaling": (
+        "credit.models.unet_downscaling",
+        "DownscalingSegmentationModel",
+        "Loading downscaling U-net",
+    ),
 }
+
+# Backward-compatible name -> (module_path, class_name) for direct attribute access
+_CLASS_SOURCES = {
+    "CrossFormer": ("credit.models.crossformer", "CrossFormer"),
+    "Camulator": ("credit.models.camulator", "Camulator"),
+    "SegmentationModel": ("credit.models.unet", "SegmentationModel"),
+    "Fuxi": ("credit.models.fuxi", "Fuxi"),
+    "SwinTransformerV2Cr": ("credit.models.swin", "SwinTransformerV2Cr"),
+    "GraphResTransfGRU": ("credit.models.graph", "GraphResTransfGRU"),
+    "DebuggerModel": ("credit.models.debugger_model", "DebuggerModel"),
+    "WXFormer": ("credit.models.wxformer.crossformer", "CrossFormer"),
+    "CrossFormerWithNoise": ("credit.models.wxformer.crossformer_ensemble", "CrossFormerWithNoise"),
+    "DownscalingCrossFormer": ("credit.models.wxformer.crossformer_downscaling", "DownscalingCrossFormer"),
+    "DownscalingSegmentationModel": ("credit.models.unet_downscaling", "DownscalingSegmentationModel"),
+    "CrossFormerDiffusion": ("credit.models.wxformer.crossformer_diffusion", "CrossFormerDiffusion"),
+    "UnetDiffusion": ("credit.models.unet_diffusion", "UnetDiffusion"),
+    "ModifiedGaussianDiffusion": ("credit.diffusion", "ModifiedGaussianDiffusion"),
+    "WRFTransformer": ("credit.models.swin_wrf", "WRFTransformer"),
+    "DscaleTransformer": ("credit.models.dscale_wrf", "DscaleTransformer"),
+}
+
+
+def __getattr__(name):
+    if name in _CLASS_SOURCES:
+        module_path, class_name = _CLASS_SOURCES[name]
+        try:
+            module = importlib.import_module(module_path)
+            return getattr(module, class_name)
+        except ImportError as exc:
+            raise AttributeError(f"Cannot import {name!r}: optional dependencies missing.") from exc
+    raise AttributeError(f"module 'credit.models' has no attribute {name!r}")
+
+
+def register_model(model_type, message=None):
+    """Decorator that adds an external PyTorch model class to the model registry.
+
+    Args:
+        model_type: Key used in the config ``model.type`` field.
+        message: Optional log message shown when the model is loaded.
+
+    Example::
+
+        @register_model("my_model", "Loading my custom model ...")
+        class MyModel(torch.nn.Module):
+            ...
+    """
+
+    def decorator(cls):
+        if model_type in _MODEL_REGISTRY:
+            logger.warning(f"register_model: overwriting existing registry entry for '{model_type}'")
+        _MODEL_REGISTRY[model_type] = (cls, message or f"Loading {model_type} model ...")
+        return cls
+
+    return decorator
+
+
+def _load_model_entry(model_type):
+    """Lazily import and return (model_class, log_message) for a registered model type."""
+    if model_type not in _MODEL_REGISTRY:
+        return None
+    entry = _MODEL_REGISTRY[model_type]
+    # External registration stores the class directly as the first element.
+    if not isinstance(entry[0], str):
+        cls, message = entry
+        return cls, message
+    module_path, class_name, message = entry
+    try:
+        module = importlib.import_module(module_path)
+        cls = getattr(module, class_name)
+        return cls, message
+    except ImportError as exc:
+        raise ImportError(
+            f"Model type '{model_type}' requires optional dependencies that are not installed. Original error: {exc}"
+        ) from exc
 
 
 # Define FSDP sharding and/or checkpointing policy
@@ -149,9 +220,32 @@ def load_fsdp_or_checkpoint_policy(conf):
     return transformer_layers_cls
 
 
+def load_custom_model_modules(conf):
+    """Import every file listed under ``custom_models`` in the config.
+
+    Each file is executed as a standalone module.  The expected use-case is
+    that each file contains one or more classes decorated with
+    ``@register_model``, so the import triggers registration as a side-effect.
+
+    Args:
+        conf (dict): Top-level config dict.  If ``custom_models`` is absent or
+            empty this function is a no-op.
+
+    Raises:
+        FileNotFoundError: If a listed path does not exist on disk.
+    """
+    for raw_path in conf.get("custom_models", []):
+        path = os.path.expandvars(raw_path)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"custom_models: file not found: {path!r}")
+        spec = importlib.util.spec_from_file_location("_credit_custom_model", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+
 def load_model(conf, load_weights=False, model_name=False):
     conf = copy.deepcopy(conf)
-
+    load_custom_model_modules(conf)
     model_conf = conf["model"]
 
     if "type" not in model_conf:
@@ -164,7 +258,7 @@ def load_model(conf, load_weights=False, model_name=False):
     if model_type in ("unet", "unet404"):
         import torch
 
-        model, message = model_types[model_type]
+        model, message = _load_model_entry(model_type)
         logger.info(message)
         if load_weights:
             model = model(**model_conf)
@@ -192,8 +286,10 @@ def load_model(conf, load_weights=False, model_name=False):
 
         return model(**model_conf)
 
-    elif model_type == "crossformer-diffusion":
-        model, message = model_types[model_type]
+    elif model_type in ("crossformer-diffusion", "unet-diffusion"):
+        from credit.diffusion import ModifiedGaussianDiffusion
+
+        model, message = _load_model_entry(model_type)
         logger.info(message)
         diffusion_config = conf.get("model", {}).get("diffusion")
         if diffusion_config is not None:
@@ -215,36 +311,8 @@ def load_model(conf, load_weights=False, model_name=False):
             **diffusion_config,
         )
 
-    elif model_type == "unet-diffusion":
-        model, message = model_types[model_type]
-        logger.info(message)
-        diffusion_config = conf.get("model", {}).get("diffusion")
-        if diffusion_config is not None:
-            diffusion_config = diffusion_config.copy()
-            self_condition = diffusion_config.pop("self_condition", False)
-            condition = diffusion_config.pop("condition", True)
-        else:
-            logger.warning("The diffusion details were not specified as model:diffusion, exiting")
-            sys.exit(0)
-
-        if load_weights:
-            if model_name:
-                return model.load_model_name(conf, model_name=model_name)
-            else:
-                return model.load_model(conf)
-
-        return ModifiedGaussianDiffusion(
-            model(**model_conf, self_condition=self_condition, condition=condition),
-            **diffusion_config,
-        )
-    elif model_type in model_types:
-        entry = model_types[model_type]
-        if entry is None:
-            raise ImportError(
-                f"Model type '{model_type}' requires optional dependencies that are not installed. "
-                f"Install torch_geometric and fsspec to use this model."
-            )
-        model, message = entry
+    elif model_type in _MODEL_REGISTRY:
+        model, message = _load_model_entry(model_type)
         logger.info(message)
         if load_weights:
             if model_name:
@@ -252,6 +320,7 @@ def load_model(conf, load_weights=False, model_name=False):
             else:
                 return model.load_model(conf)
         return model(**model_conf)
+
     else:
         msg = f"Model type {model_type} not supported. Exiting."
         logger.warning(msg)
@@ -272,7 +341,7 @@ def load_model_name(conf, model_name, load_weights=False):
     if model_type in ("unet", "unet404"):
         import torch
 
-        model, message = model_types[model_type]
+        model, message = _load_model_entry(model_type)
         logger.info(message)
         if load_weights:
             model = model(**model_conf)
@@ -290,8 +359,8 @@ def load_model_name(conf, model_name, load_weights=False):
 
         return model(**model_conf)
 
-    if model_type in model_types:
-        model, message = model_types[model_type]
+    if model_type in _MODEL_REGISTRY:
+        model, message = _load_model_entry(model_type)
         logger.info(message)
         if load_weights:
             return model.load_model_name(conf, model_name)

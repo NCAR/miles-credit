@@ -3,13 +3,34 @@ concat.py
 ---------
 ConcatToTensor: end-of-chain preblock that collapses a nested batch dict into a
 flat (x, y, metadata) tuple. Used by build_preblocks/apply_preblocks.
+
+Channel concat order is fully determined by the variable key structure
+``{source}/{field_type}/{dim}/{varname}``:
+
+  1. field_type rank: prognostic < dynamic_forcing < static < diagnostic
+  2. dim rank: 3d < 2d
+  3. within each (field_type, dim) bucket: original insertion order is
+     preserved (Python sort is stable), which matches config list order.
 """
 
 import torch
 from credit.preblock.base import BasePreblock
+from credit.datasets.channel_layout import FIELD_TYPE_RANK as _FIELD_TYPE_RANK
 
 # Field types the model predicts (used to build the "output" channel map).
 _PREDICTABLE_FIELD_TYPES = {"prognostic", "diagnostic"}
+
+
+def _channel_sort_key(item) -> tuple:
+    """Sort key for items from variables.items(): (var_key, tensor).
+
+    var_key has the form ``source/field_type/dim/varname``.
+    """
+    var_key = item[0]
+    parts = var_key.split("/")
+    ft = parts[1] if len(parts) > 1 else ""
+    dim = parts[2] if len(parts) > 2 else ""
+    return (_FIELD_TYPE_RANK.get(ft, len(_FIELD_TYPE_RANK)), 0 if dim == "3d" else 1)
 
 
 class ConcatToTensor(BasePreblock):
@@ -21,9 +42,9 @@ class ConcatToTensor(BasePreblock):
         batch[source][data_type][var_name] -> torch.Tensor
 
     where tensor shapes are (batch, n_levels, time, lat, lon) and concatenation
-    is performed along dim=1 (channel). Traversal order follows key insertion
-    order: for each source, all var_names under a data_type are concatenated,
-    then the next source, and so on.
+    is performed along dim=1 (channel). Input tensors are sorted by
+    ``_channel_sort_key`` before concatenation so the channel order matches
+    the canonical variable schema regardless of insertion order in the batch.
 
     ``metadata`` keys are passed through as-is (not concatenated).
 
@@ -46,10 +67,17 @@ class ConcatToTensor(BasePreblock):
     Example config::
 
         type: "concatenate_to_tensor"
-        args: {}
+        args:
+          to_device: true   # set false to skip .to(device) in apply_preblocks
     """
 
+    def __init__(self, to_device: bool = True):
+        super().__init__()
+        self.to_device = to_device
+
     def forward(self, batch):
+        if isinstance(batch, tuple):
+            return batch
         input_tensors = []
         target_tensors = []
         metadata = {}
@@ -65,7 +93,7 @@ class ConcatToTensor(BasePreblock):
                 if data_type == "metadata":
                     metadata[source] = variables
                 elif data_type == "input":
-                    for var_key, tensor in variables.items():
+                    for var_key, tensor in sorted(variables.items(), key=_channel_sort_key):
                         input_tensors.append(tensor)
                         # tensor shape: (B, n_levels, T, H, W)
                         n_levels, T = tensor.shape[1], tensor.shape[2]
