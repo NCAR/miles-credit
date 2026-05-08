@@ -115,7 +115,7 @@ class ERA5Dataset(BaseDataset):
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
-        """Initialize ERA5Dataset with config parsing, timestamp generation, file mapping from BaseDataset, 
+        """Initialize ERA5Dataset with config parsing, timestamp generation, file mapping from BaseDataset,
         then set ERA5-specific attributes.
 
         Args:
@@ -137,7 +137,7 @@ class ERA5Dataset(BaseDataset):
             "datetime_fmt": "unix_ns",
         }
         self.mode = "local"
-        
+
         # Initialize the field registration based on the provided config and populate
         #   dictionary of variables and file paths for each field type
         self.init_register_all_fields()
@@ -189,7 +189,7 @@ class ERA5Dataset(BaseDataset):
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
                 key = self._get_field_name(field_type, "3d", vname)
                 sample[key] = tensor
- 
+
             # 2D variables: (lat, lon) → (1, 1, lat, lon)
             for vname in vars_2D:
                 arr = ds_t[vname].values
@@ -236,7 +236,7 @@ class ARCOERA5Dataset(BaseDataset):
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
-        """Initialize ARCOERA5Dataset with config parsing, timestamp generation, file mapping from BaseDataset, 
+        """Initialize ARCOERA5Dataset with config parsing, timestamp generation, file mapping from BaseDataset,
         then set ARCOERA5-specific attributes.
 
         Args:
@@ -281,7 +281,7 @@ class ARCOERA5Dataset(BaseDataset):
         else:
             self.levels: list[int] = self.curr_source_cfg["levels"]
         self.mod_level_store = None
-        self.pres_level_store = None       
+        self.pres_level_store = None
         self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
@@ -296,8 +296,7 @@ class ARCOERA5Dataset(BaseDataset):
         self.fs = None
 
     def _init_fs(self):
-        """Initialize the GCSFileSystem and zarr stores for pressure-level and model-level ERA5 data.
-        """
+        """Initialize the GCSFileSystem and zarr stores for pressure-level and model-level ERA5 data."""
         fs_config: dict[str, Any] = {
             "cache_timeout": -1,
             "token": "anon",  # noqa: S106 # nosec B106

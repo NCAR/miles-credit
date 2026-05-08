@@ -807,15 +807,15 @@ def test_hrrr_spatial_slicing_incorrect_lat_lon_arrays():
     cfg = _make_config("HRRR", extent=extent)
     ds = HRRRDataset(cfg)
 
-    with pytest.raises(ValueError, match="Expected 2-D lat/lon arrays"):
+    with pytest.raises(ValueError, match="Expected 2D lat/lon arrays"):
         ds._get_spatial_slice(lat_array_wrong_shape, lon_array_wrong_shape)
 
     lat_array_correct, lon_array_correct = make_example_sparse_lat_lon_array()
 
-    with pytest.raises(ValueError, match="Expected 2-D lat/lon arrays"):
+    with pytest.raises(ValueError, match="Expected 2D lat/lon arrays"):
         ds._get_spatial_slice(lat_array_wrong_shape, lon_array_correct)
 
-    with pytest.raises(ValueError, match="Expected 2-D lat/lon arrays"):
+    with pytest.raises(ValueError, match="Expected 2D lat/lon arrays"):
         ds._get_spatial_slice(lat_array_correct, lon_array_wrong_shape)
 
     lat_array_cropped = lat_array_correct[:3, :3]
