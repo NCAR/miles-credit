@@ -9,8 +9,18 @@ from credit.datasets.era5 import ERA5Dataset, ARCOERA5Dataset
 from credit.datasets.mrms import MRMSDataset
 from credit.datasets.hrrr import HRRRDataset
 
-__all__ = ["BaseDataset", "MultiSourceDataset", "ERA5Dataset", "MRMSDataset", "ARCOERA5Dataset", "HRRRDataset"]
+from credit.datasets.channel_layout import build_channel_layout, update_x
 
+__all__ = [
+    "BaseDataset",
+    "MultiSourceDataset",
+    "ERA5Dataset",
+    "MRMSDataset",
+    "ARCOERA5Dataset",
+    "HRRRDataset",
+    "build_channel_layout",
+    "update_x",
+]
 
 logger = logging.getLogger(__name__)
 

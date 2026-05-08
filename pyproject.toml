@@ -17,7 +17,6 @@ dependencies = [
     "scikit-learn",
     "h5py<=3.14.0",
     "pyarrow",
-    "pysteps",
     "xarray",
     "netcdf4",
     "h5netcdf",
@@ -117,4 +116,7 @@ ignore = ["D417", "F841"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.pytest.ini_options]
+addopts = "--continue-on-collection-errors"
 

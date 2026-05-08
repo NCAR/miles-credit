@@ -316,6 +316,7 @@ def _era5_gen2_conf(**overrides):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
+    base["preblocks"] = {"concat": {"type": "concat"}}
     base.update(overrides)
     return base
 
@@ -413,6 +414,7 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
+    base["preblocks"] = {"concat": {"type": "concat"}}
     return base
 
 
@@ -466,8 +468,8 @@ class TestERA5Gen2MultiStepTraining:
 
         assert t.forecast_len == 2
         assert t.backprop_on_timestep == [1, 2]
-        assert t.static_dim_size == 0
         assert t.varnum_diag == 0
+        assert hasattr(t, "slices")
 
     def test_backprop_on_timestep_default_covers_all_steps(self, tmp_path):
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
@@ -525,7 +527,6 @@ class TestERA5Gen2MultiStepTraining:
         from unittest.mock import patch
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
         from credit.preblock import apply_preblocks
-        from credit.preblock.concat import ConcatToTensor
 
         B, C, H, W = 1, 4, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -553,9 +554,9 @@ class TestERA5Gen2MultiStepTraining:
 
         original_apply = apply_preblocks
 
-        def _patched_apply(preblocks, batch):
-            result = original_apply(preblocks, batch)
-            x_raw, _, __ = ConcatToTensor()(result)
+        def _patched_apply(preblocks, batch, device=None):
+            result = original_apply(preblocks, batch, device=device)
+            x_raw = result["input"]
             step[0] += 1
             if step[0] == 1:
                 x_at_step1_out[0] = x_raw.clone()
@@ -589,19 +590,18 @@ class TestERA5Gen2MultiStepTraining:
     def test_rollout_partial_channels_at_t2(self, tmp_path):
         """At t=2, ERA5Dataset returns only dynfrc channels.
 
-        Verify the trainer correctly:
-          - updates dynfrc slice (channels 0..n_dynfrc-1) from the new batch
-          - preserves static slice (channels n_dynfrc..static_dim_size-1)
-          - replaces prognostic slice (channels static_dim_size..) with y_pred
+        Verify update_x correctly:
+          - replaces prognostic slice (channels 0..N_PROG-1) with y_pred
+          - preserves static slice (channels N_PROG..N_PROG+N_STATIC-1)
+          - updates dynfrc slice (channels N_PROG+N_STATIC..) from the new batch
         """
         import torch
         import torch.nn as nn
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
 
-        # Layout: 2 dynfrc + 1 static + 3 prog  →  static_dim_size = 3, n_prog = 3
-        N_DYNFRC, N_STATIC, N_PROG = 2, 1, 3
-        STATIC_DIM = N_DYNFRC + N_STATIC  # 3
-        TOTAL = N_DYNFRC + N_STATIC + N_PROG  # 6
+        # Canonical order: prog → static → dynfrc
+        N_PROG, N_STATIC, N_DYNFRC = 3, 1, 2
+        TOTAL = N_PROG + N_STATIC + N_DYNFRC  # 6
         B, H, W = 1, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -624,6 +624,7 @@ class TestERA5Gen2MultiStepTraining:
                 }
             },
         }
+        conf["preblocks"] = {"concat": {"type": "concat"}}
 
         # Model: outputs N_PROG channels, all zeros — makes y_pred easy to check.
         # Multiply by self.w so the output has a grad_fn for backprop.
@@ -636,7 +637,7 @@ class TestERA5Gen2MultiStepTraining:
                 return torch.zeros(x.shape[0], N_PROG, x.shape[2], x.shape[3], device=x.device) * self.w
 
         trainer = Trainer(_ZeroProgModel().to(device), rank=0, conf=conf)
-        assert trainer.static_dim_size == STATIC_DIM
+        assert "prognostic" in trainer.slices
 
         # Known fixed tensors for each channel group
         dynfrc_t1 = torch.full((B, N_DYNFRC, H, W), 1.0)
@@ -694,14 +695,13 @@ class TestERA5Gen2MultiStepTraining:
         )
 
         x_t2 = captured_x[1]  # x fed to model at t=2
-        # dynfrc channels updated from t=2 batch
-        torch.testing.assert_close(x_t2[:, :N_DYNFRC], dynfrc_t2.to(device), atol=1e-5, rtol=1e-5)
-        # static channels preserved from t=1
-        torch.testing.assert_close(x_t2[:, N_DYNFRC:STATIC_DIM], static_ch.to(device), atol=1e-5, rtol=1e-5)
+        # canonical order: prog → static → dynfrc
         # prognostic channels replaced by y_pred (zeros from _ZeroProgModel)
-        torch.testing.assert_close(
-            x_t2[:, STATIC_DIM:], torch.zeros(B, N_PROG, H, W, device=device), atol=1e-5, rtol=1e-5
-        )
+        torch.testing.assert_close(x_t2[:, :N_PROG], torch.zeros(B, N_PROG, H, W, device=device), atol=1e-5, rtol=1e-5)
+        # static channels preserved from t=1
+        torch.testing.assert_close(x_t2[:, N_PROG : N_PROG + N_STATIC], static_ch.to(device), atol=1e-5, rtol=1e-5)
+        # dynfrc channels updated from t=2 batch
+        torch.testing.assert_close(x_t2[:, N_PROG + N_STATIC :], dynfrc_t2.to(device), atol=1e-5, rtol=1e-5)
 
 
 # ---------------------------------------------------------------------------

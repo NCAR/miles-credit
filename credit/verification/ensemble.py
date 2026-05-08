@@ -1,7 +1,5 @@
 import logging
-
 import numpy as np
-from pysteps.verification.ensscores import rankhist
 
 logger = logging.getLogger(__name__)
 
@@ -72,27 +70,3 @@ def binned_spread_skill(da_pred, da_true, num_bins, w_lat=None):
         "rmse_means": rmse_means,
         "counts": counts,
     }
-
-
-def rank_histogram_apply(da_pred, da_true, w_lat=None):
-    """
-    computes the rank histogram
-
-    input: da_pred, da_true with matching time, lat, lon dimensions
-    output: result_dict
-    """
-
-    ensemble_size = len(da_pred.ensemble_member_label)
-    rank_hist = np.zeros(ensemble_size + 1)
-
-    da_pred = da_pred.transpose("ensemble_member_label", ...)
-
-    # TODO: vectorize this computation
-    for time in da_pred.time:
-        rank_hist += rankhist(
-            da_pred.sel(time=time).values,  # requires ensemble_member_label to be first dim after removing time
-            da_true.sel(time=time).values,
-            normalize=False,
-        )
-
-    return rank_hist
