@@ -139,11 +139,11 @@ def download_hrrr(
 
     source_cfg = data_config["source"][curr_source_name]
 
-    assert "dataset_name" in source_cfg, (
-        f"Missing required field for dataset_name. Found fields: {list(source_cfg.keys())}"
+    assert "dataset_type" in source_cfg, (
+        f"Missing required field for dataset_type. Found fields: {list(source_cfg.keys())}"
     )
-    dataset_name = source_cfg["dataset_name"]
-    product = _validate_product_request(dataset_name)
+    dataset_type = source_cfg["dataset_type"]
+    product = _validate_product_request(dataset_type)
 
     try:
         import s3fs  # noqa: PLC0415  # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed

@@ -7,13 +7,13 @@ Sample structure returned by __getitem__:
 
     {
         "input": {
-            "{USER_PROVIDED}/goes/prognostic/2d/CMI_C04": tensor,
-            "{USER_PROVIDED}/goes/prognostic/2d/CMI_C07": tensor,
+            "Example_GOES/goes/prognostic/2d/CMI_C04": tensor,
+            "Example_GOES/goes/prognostic/2d/CMI_C07": tensor,
             ...
         },
         "target": {                                  # only when return_target=True
-            "{USER_PROVIDED}/goes/prognostic/2d/CMI_C04": tensor,
-            "{USER_PROVIDED}/goes/prognostic/2d/CMI_C07": tensor,
+            "Example_GOES/goes/prognostic/2d/CMI_C04": tensor,
+            "Example_GOES/goes/prognostic/2d/CMI_C07": tensor,
             ...
         },
         "metadata": {
@@ -151,8 +151,8 @@ class GOESDataset(BaseDataset):
 
         data:
             source:
-                {USER_PROVIDED}:
-                    dataset_name: "goes"
+                Example_GOES:  # User-provided name (arbitrary key)
+                    dataset_type: "goes"
                     goes_id: "goes16"
                     mode: "local"
                     product: "ABI-L2-MCMIPC"
@@ -180,8 +180,8 @@ class GOESDataset(BaseDataset):
 
         data:
             source:
-                {USER_PROVIDED}:
-                    dataset_name: "goes"
+                Example_GOES:  # User-provided name (arbitrary key)
+                    dataset_type: "goes"
                     goes_id: "goes16"
                     mode: "remote"
                     product: "ABI-L2-MCMIPC"
@@ -203,9 +203,9 @@ class GOESDataset(BaseDataset):
         config: Top-level experiment configuration dictionary. The relevant
             sub-keys are:
 
-            - ``config["source"]["{USER_PROVIDED}"]``: user-provided source name.
+            - ``config["source"]["Example_GOES"]``: user-provided source name.
 
-              - ``dataset_name`` (str): has to be "goes" to trigger this dataset class.
+              - ``dataset_type`` (str): has to be "goes" to trigger this dataset class.
               - ``goes_id`` (str): Satellite identifier. One of ``"goes16"``,
                 ``"goes17"``, ``"goes18"``, ``"goes19"``. Defaults to
                 ``"goes16"``.
@@ -268,12 +268,12 @@ class GOESDataset(BaseDataset):
         """
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
-        assert self.curr_source_cfg["dataset_name"] == "goes", (
-            f"Expected dataset_name 'goes' in config for GOESDataset, got '{self.curr_source_cfg['dataset_name']}'"
+        assert self.curr_source_cfg["dataset_type"] == "goes", (
+            f"Expected dataset_type 'goes' in config for GOESDataset, got '{self.curr_source_cfg['dataset_type']}'"
         )
 
         # Set GOES-specific attributes
-        self.dataset_name = "goes"
+        self.dataset_type = "goes"
         self.goes_id: str = self.curr_source_cfg.get("goes_id", "goes16")
         self.product: str = self.curr_source_cfg.get("product", "ABI-L2-MCMIPC")
         self.static_metadata: dict[str, Any] = {"datetime_fmt": "unix_ns"}

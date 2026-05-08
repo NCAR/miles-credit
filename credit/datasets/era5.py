@@ -9,15 +9,15 @@ Sample structure returned by __getitem__:
 
     {
         "input": {
-            "{USER_PROVIDED}/era5/prognostic/3d/T":        tensor,  # (n_levels, 1, lat, lon)
-            "{USER_PROVIDED}/era5/prognostic/2d/SP":       tensor,  # (1,        1, lat, lon)
-            "{USER_PROVIDED}/era5/dynamic_forcing/2d/tsi": tensor,
-            "{USER_PROVIDED}/era5/static/2d/LSM":          tensor,
+            "Example_ERA5/era5/prognostic/3d/T":        tensor,  # (n_levels, 1, lat, lon)
+            "Example_ERA5/era5/prognostic/2d/SP":       tensor,  # (1,        1, lat, lon)
+            "Example_ERA5/era5/dynamic_forcing/2d/tsi": tensor,
+            "Example_ERA5/era5/static/2d/LSM":          tensor,
             ...
         },
         "target": {                                  # only when return_target=True
-            "{USER_PROVIDED}/era5/prognostic/3d/T":        tensor,
-            "{USER_PROVIDED}/era5/prognostic/2d/SP":       tensor,
+            "Example_ERA5/era5/prognostic/3d/T":        tensor,
+            "Example_ERA5/era5/prognostic/2d/SP":       tensor,
             ...
         },
         "metadata": {
@@ -27,9 +27,9 @@ Sample structure returned by __getitem__:
     }
 
 Output key format (flat, slash-delimited):
-    "{USER_PROVIDED}/{dataset_name}/{field_type}/{dim}/{varname}"
+    "Example_ERA5/{dataset_type}/{field_type}/{dim}/{varname}"
 
-    dataset_name: "era5"
+    dataset_type: "era5"
     field_type: "prognostic" | "dynamic_forcing" | "static" | "diagnostic"
     dim       : "2d"  (surface / single-level)
                 "3d"  (multi-level upper-air)
@@ -81,8 +81,8 @@ class ERA5Dataset(BaseDataset):
 
         data:
           source:
-            {USER_PROVIDED}:
-              dataset_name: "era5"
+            Example_ERA5:  # User-provided name (arbitrary key)
+              dataset_type: "era5"
               level_coord: "level"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
               variables:
@@ -124,12 +124,12 @@ class ERA5Dataset(BaseDataset):
         """
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
-        assert self.curr_source_cfg["dataset_name"] == "era5", (
-            f"Expected dataset_name 'era5' in config for ERA5Dataset, got '{self.curr_source_cfg['dataset_name']}'"
+        assert self.curr_source_cfg["dataset_type"] == "era5", (
+            f"Expected dataset_type 'era5' in config for ERA5Dataset, got '{self.curr_source_cfg['dataset_type']}'"
         )
 
         # Set ERA5-specific attributes
-        self.dataset_name = "era5"
+        self.dataset_type = "era5"
         self.level_coord: str = self.curr_source_cfg["level_coord"]
         self.levels: list[int] = self.curr_source_cfg["levels"]
         self.static_metadata: dict[str, Any] = {
@@ -150,8 +150,8 @@ class ERA5Dataset(BaseDataset):
     ) -> None:
         """Open the dataset for *field_type* at time *t* and populate *sample*.
 
-        Keys written are ``"{USER_PROVIDED}/{dataset_name}/{field_type}/3d/{varname}"`` for 3D variables
-        and ``"{USER_PROVIDED}/{dataset_name}/{field_type}/2d/{varname}"`` for 2D variables.
+        Keys written are ``"Example_ERA5/{dataset_type}/{field_type}/3d/{varname}"`` for 3D variables
+        and ``"Example_ERA5/{dataset_type}/{field_type}/2d/{varname}"`` for 2D variables.
 
         Args:
             field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
@@ -207,8 +207,8 @@ class ARCOERA5Dataset(BaseDataset):
 
         data:
           source:
-            {USER_PROVIDED}:
-              dataset_name: "arco_era5"
+            Example_ARCOERA5:  # User-provided name (arbitrary key)
+              dataset_type: "arco_era5"
               level_coord: "hybrid"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
               variables:
@@ -245,12 +245,12 @@ class ARCOERA5Dataset(BaseDataset):
         """
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
-        assert self.curr_source_cfg["dataset_name"] == "arco_era5", (
-            f"Expected dataset_name 'arco_era5' in config for ARCOERA5Dataset, got '{self.curr_source_cfg['dataset_name']}'"
+        assert self.curr_source_cfg["dataset_type"] == "arco_era5", (
+            f"Expected dataset_type 'arco_era5' in config for ARCOERA5Dataset, got '{self.curr_source_cfg['dataset_type']}'"
         )
 
         # Set ARCOERA5-specific attributes
-        self.dataset_name = "arco_era5"
+        self.dataset_type = "arco_era5"
         self.pressure_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
         self.model_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/model-level-1h-0p25deg.zarr-v1"
         self.model_lev_vars = [
@@ -318,8 +318,8 @@ class ARCOERA5Dataset(BaseDataset):
         """
         Open the dataset for *field_type* at time *t* and populate *sample*.
 
-        Keys written are ``"{USER_PROVIDED}/{dataset_name}/{field_type}/3d/{varname}"`` for 3D variables
-        and ``"{USER_PROVIDED}/{dataset_name}/{field_type}/2d/{varname}"`` for 2D variables.
+        Keys written are ``"Example_ARCOERA5/{dataset_type}/{field_type}/3d/{varname}"`` for 3D variables
+        and ``"Example_ARCOERA5/{dataset_type}/{field_type}/2d/{varname}"`` for 2D variables.
 
         Args:
             field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,

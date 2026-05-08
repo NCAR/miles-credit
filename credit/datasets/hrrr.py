@@ -66,8 +66,8 @@ Example YAML (wrfprsf, local mode)::
 
     data:
       source:
-        Example_HRRR:
-          dataset_name: "HRRR"
+        Example_HRRR:  # User-provided name (arbitrary key)
+          dataset_type: "HRRR"
           mode: "local"
           base_path: "/data/hrrr"
           forecast_hour: 0
@@ -87,8 +87,8 @@ Example YAML (wrfnatf, remote mode)::
 
     data:
       source:
-        Example_HRRR_NAT:
-          dataset_name: "HRRR_NAT"
+        Example_HRRR_NAT:  # User-provided name (arbitrary key)
+          dataset_type: "HRRR_NAT"
           mode: "remote"
           forecast_hour: 0
           levels: [10, 20, 30, 40, 50]   # hybrid level indices 1-65
@@ -105,8 +105,8 @@ Example YAML (wrfsubhf, remote mode — 15-min output)::
 
     data:
       source:
-        Example_HRRR_SUBH:
-          dataset_name: "HRRR_SUBH"
+        Example_HRRR_SUBH:  # User-provided name (arbitrary key)
+          dataset_type: "HRRR_SUBH"
           mode: "remote"
           variables:
             prognostic:
@@ -644,27 +644,27 @@ def _to_float32(values: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _validate_product_request(dataset_name: str) -> str:
+def _validate_product_request(dataset_type: str) -> str:
     """Validate the dataset request config, raising ValueError for invalid requests.
 
     Args:
-        dataset_name (str): The HRRR dataset name from the config (e.g. "HRRR", "HRRR_NAT", "HRRR_SUBH").
+        dataset_type (str): The HRRR dataset name from the config (e.g. "HRRR", "HRRR_NAT", "HRRR_SUBH").
 
     Raises:
-        ValueError: If the dataset_name is not recognized or mapped to a valid HRRR product.
+        ValueError: If the dataset_type is not recognized or mapped to a valid HRRR product.
 
     Returns:
         str: The validated HRRR product name.
     """
     # Convert to upper case for case-insensitive matching
-    dataset_name = dataset_name.upper()
+    dataset_type = dataset_type.upper()
 
-    if dataset_name not in VALID_PRODUCTS:
+    if dataset_type not in VALID_PRODUCTS:
         raise ValueError(
-            f"Unknown HRRR product '{dataset_name}' in config['source']."
+            f"Unknown HRRR product '{dataset_type}' in config['source']."
             + f"Valid products mapped as: {VALID_PRODUCTS}"
         )
-    return VALID_PRODUCTS[dataset_name]
+    return VALID_PRODUCTS[dataset_type]
 
 
 # ---------------------------------------------------------------------------
@@ -690,10 +690,10 @@ class HRRRDataset(BaseDataset):
     configuration examples.
 
     Attributes:
-        dataset_name: Tensor key prefix — ``"HRRR"``, ``"HRRR_NAT"``, or
+        dataset_type: Tensor key prefix — ``"HRRR"``, ``"HRRR_NAT"``, or
             ``"HRRR_SUBH"``.
         product: Active HRRR product (``"wrfprsf"``, ``"wrfnatf"``, or
-            ``"wrfsubhf"``) depending on *dataset_name*.
+            ``"wrfsubhf"``) depending on *dataset_type*.
         datetimes: DatetimeIndex of valid initialisation timestamps.
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
@@ -707,14 +707,14 @@ class HRRRDataset(BaseDataset):
         """
         super().__init__(data_config=data_config, return_target=return_target)
 
-        if "dataset_name" not in self.curr_source_cfg:
+        if "dataset_type" not in self.curr_source_cfg:
             raise ValueError(
-                f"Missing 'dataset_name' in config['source']['{self.curr_source_name}']. "
+                f"Missing 'dataset_type' in config['source']['{self.curr_source_name}']. "
                 + f"Expected one of: {list(VALID_PRODUCTS.keys())}"
             )
-        self.dataset_name = self.curr_source_cfg["dataset_name"]
+        self.dataset_type = self.curr_source_cfg["dataset_type"]
 
-        product = _validate_product_request(self.dataset_name)
+        product = _validate_product_request(self.dataset_type)
 
         self.product: str = product
         self.mode: str = self.curr_source_cfg.get("mode", "local")

@@ -8,8 +8,8 @@ Output format
 Samples are nested dicts::
 
     {
-        "input":  {"mrms/{field_type}/2d/{varname}": tensor, ...},
-        "target": {"mrms/{field_type}/2d/{varname}": tensor, ...},  # return_target only
+        "input":  {"Test_MRMS/{field_type}/2d/{varname}": tensor, ...},
+        "target": {"Test_MRMS/{field_type}/2d/{varname}": tensor, ...},  # return_target only
         "metadata": {"input_datetime": int, "target_datetime": int},
     }
 
@@ -85,7 +85,7 @@ def minimal_config():
         "end_datetime": "2024-06-02",
         "source": {
             "TEST_MRMS": {
-                "dataset_name": "mrms",
+                "dataset_type": "mrms",
                 "mode": "local",
                 "variables": {
                     "prognostic": {
@@ -109,7 +109,7 @@ def config_with_forcing():
         "end_datetime": "2024-06-02",
         "source": {
             "TEST_MRMS": {
-                "dataset_name": "mrms",
+                "dataset_type": "mrms",
                 "mode": "local",
                 "variables": {
                     "prognostic": {

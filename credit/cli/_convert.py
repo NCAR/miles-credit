@@ -192,12 +192,12 @@ def _convert(args: argparse.Namespace) -> None:
         level_coord = _prompt("level_coord (vertical coordinate name in your data files)").strip()
         _all_dims = _zarr_dims(prog_path)
         if _all_dims is not None and level_coord not in _all_dims:
-            print(f"  '{level_coord}' not found in file. Available dims: {_all_dims}", file=sys.stderr)
+            print(f"  '{level_coord}' not found in file. Available options: {', '.join(_all_dims)}", file=sys.stderr)
             level_coord = _prompt("Choose from the above").strip()
 
         conf["data"] = {
             "source": {
-                "ERA5": {"dataset_name": "era5", "level_coord": level_coord, "levels": levels, "variables": era5_vars}
+                "ERA5": {"dataset_type": "era5", "level_coord": level_coord, "levels": levels, "variables": era5_vars}
             },
             "timestep": f"{lead_time}h",
             "forecast_len": data.get("forecast_len", 0),

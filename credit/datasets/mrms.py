@@ -7,12 +7,12 @@ Sample structure returned by __getitem__:
 
     {
         "input": {
-            "{USER_PROVIDED}/mrms/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
-            "{USER_PROVIDED}/mrms/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor,
+            "Example_MRMS/mrms/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
+            "Example_MRMS/mrms/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor,
             ...
         },
         "target": {                                  # only when return_target=True
-            "{USER_PROVIDED}/mrms/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
+            "Example_MRMS/mrms/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
             ...
         },
         "metadata": {
@@ -101,8 +101,8 @@ class MRMSDataset(BaseDataset):
 
         data:
           source:
-            {USER_PROVIDED}:
-              dataset_name: "mrms"
+            Example_MRMS:  # User-provided name (arbitrary key)
+              dataset_type: "mrms"
               mode: "local"
               variables:
                 prognostic:                         # input at step 0 + target
@@ -126,8 +126,8 @@ class MRMSDataset(BaseDataset):
 
         data:
           source:
-            {USER_PROVIDED}:
-              dataset_name: "mrms"
+            Example_MRMS:  # User-provided name (arbitrary key)
+              dataset_type: "mrms"
               mode: "remote"
               region: "CONUS"
               variables:
@@ -154,11 +154,11 @@ class MRMSDataset(BaseDataset):
 
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
-        assert self.curr_source_cfg["dataset_name"] == "mrms", (
-            f"Expected dataset_name 'mrms' in config for MRMSDataset, got '{self.curr_source_cfg['dataset_name']}'"
+        assert self.curr_source_cfg["dataset_type"] == "mrms", (
+            f"Expected dataset_type 'mrms' in config for MRMSDataset, got '{self.curr_source_cfg['dataset_type']}'"
         )
         # Set MRMS-specific attributes
-        self.dataset_name: str = "mrms"
+        self.dataset_type: str = "mrms"
         self.region: str = self.curr_source_cfg.get("region", "CONUS")
         self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
         self.static_metadata: dict = {"datetime_fmt": "unix_ns"}

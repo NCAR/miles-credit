@@ -106,7 +106,7 @@ def minimal_config():
         "end_datetime": "2021-06-02",
         "source": {
             "TEST_GOES": {
-                "dataset_name": "goes",
+                "dataset_type": "goes",
                 "goes_id": "goes16",
                 "mode": "local",
                 "product": "ABI-L2-MCMIPC",

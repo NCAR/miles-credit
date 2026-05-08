@@ -45,7 +45,7 @@ class AbstractBaseDataset(Dataset[Any]):
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
         # The name of this source in the config
         self.curr_source_name: str
-        self.dataset_name: str
+        self.dataset_type: str
 
         # Setting the clock for sampling
         self.dt: pd.Timedelta
@@ -101,10 +101,10 @@ class BaseDataset(AbstractBaseDataset):
     ```yaml
         data:
           source:
-            Example_Base: # Notice format is <YourName>_<DatasetType>:
+            Example_Base:  # User-provided name (arbitrary key)
               # PARAMETERS FOR THIS DATASET TYPE
               # Ex: levels: [10, 20, 30]
-              dataset_name: "base"  # Needs to match per type of dataset!
+              dataset_type: "base"  # Needs to match per type of dataset!
               variables:
                 prognostic: null
                 #  vars_3D: ['T', 'U', 'V', 'Q'] # Your 3D variables
@@ -188,7 +188,7 @@ class BaseDataset(AbstractBaseDataset):
         #   source:
         #     <current_source_name>:
         #       # parameters for this source
-        #       dataset_name: ...
+        #       dataset_type: ...
         #       variables: ...
         # Unless we are parsing through a multi-source config (for which you should not inherit from BaseDataset),
         # we expect only one source to be defined in the config. To be pythonic, we can use next & iter to get this
@@ -207,7 +207,7 @@ class BaseDataset(AbstractBaseDataset):
 
         # You should definitely change this in an inherited dataset
         if type(self) is BaseDataset:
-            self.dataset_name = "base"
+            self.dataset_type = "base"
 
         # Now we start loading the parameters for the dataset, starting with the clock parameters.
         self.dt: pd.Timedelta = self._load_dt(data_config, self.curr_source_cfg)
@@ -500,7 +500,7 @@ class BaseDataset(AbstractBaseDataset):
     def _get_field_name(self, field_type: VALID_FIELD_TYPES, dim_str: str, vname: str) -> str:
         """Get the field name and enforce a consistent convention across datasets.
 
-        The convention for the field name is: ``"{user's current source name}/{dataset_name}/{field_type}/{dim_str}/{vname}"``.
+        The convention for the field name is: ``"{user's current source name}/{dataset_type}/{field_type}/{dim_str}/{vname}"``.
 
         Args:
             field_type (VALID_FIELD_TYPES): The field type (e.g., "prognostic")
@@ -513,7 +513,7 @@ class BaseDataset(AbstractBaseDataset):
         # Cast 3D to 3d, etc. (as needed)
         dim_str = dim_str.lower()
         # Do not change the case on everything else!
-        return f"{self.curr_source_name}/{self.dataset_name}/{field_type}/{dim_str}/{vname}"
+        return f"{self.curr_source_name}/{self.dataset_type}/{field_type}/{dim_str}/{vname}"
 
     def init_register_all_fields(self) -> None:
         """Initialize and register all fields for the dataset.
@@ -522,10 +522,10 @@ class BaseDataset(AbstractBaseDataset):
             KeyError: If the config does not include any variables.
         """
 
-        if self.dataset_name == "base":
+        if self.dataset_type == "base":
             logging.error(
-                f"You are currently using a dataset name of {self.dataset_name} for class {self.__class__.__name__}, "
-                "which is the default name for the BaseDataset class. Likely, you did not set the dataset_name attribute "
+                f"You are currently using a dataset name of {self.dataset_type} for class {self.__class__.__name__}, "
+                "which is the default name for the BaseDataset class. Likely, you did not set the dataset_type attribute "
                 "in the __init__ method of your inherited dataset class, which may cause issues downstream! "
             )
 

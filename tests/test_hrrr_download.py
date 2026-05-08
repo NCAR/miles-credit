@@ -27,7 +27,7 @@ def _make_multisource_config() -> dict[str, Any]:
     return {
         "source": {
             "Test_HRRR": {
-                "dataset_name": "hrrr",
+                "dataset_type": "hrrr",
                 "mode": "local",
                 "base_path": "/path/to/hrrr",
                 "forecast_hour": 0,
@@ -37,7 +37,7 @@ def _make_multisource_config() -> dict[str, Any]:
                 },
             },
             "Test_HRRR_NAT": {
-                "dataset_name": "hrrr_nat",
+                "dataset_type": "hrrr_nat",
                 "mode": "local",
                 "base_path": "/path/to/hrrr_nat",
                 "forecast_hour": 0,
@@ -47,7 +47,7 @@ def _make_multisource_config() -> dict[str, Any]:
                 },
             },
             "Test_HRRR_SUBH": {
-                "dataset_name": "hrrr_subhf",
+                "dataset_type": "hrrr_subhf",
                 "mode": "local",
                 "base_path": "/path/to/hrrr_subhf",
                 "forecast_hour": 0,
@@ -67,16 +67,16 @@ def _make_multisource_config() -> dict[str, Any]:
 def test_get_specific_product_config():
     data_config = _make_multisource_config()
 
-    dataset_names_check = ["hrrr", "hrrr_nat", "hrrr_subhf"]
+    dataset_types_check = ["hrrr", "hrrr_nat", "hrrr_subhf"]
 
     # Main HRRR
-    for source, dsn_check in zip(data_config["source"].keys(), dataset_names_check):
+    for source, dsn_check in zip(data_config["source"].keys(), dataset_types_check):
         subconfig = make_single_source_subconfig(data_config, source)
         assert len(subconfig["source"]) == 1
         assert source in subconfig["source"]
         assert subconfig["source"][source] == data_config["source"][source]
 
-        assert subconfig["source"][source]["dataset_name"] == dsn_check
+        assert subconfig["source"][source]["dataset_type"] == dsn_check
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ def _make_config_download_factory(_make_base_path: pathlib.Path) -> Any:
 
     def _make_config_download(source_key: str = "HRRR", **extra_source) -> dict[str, Any]:
         source_defaults: dict[str, Any] = {
-            "dataset_name": source_key.lower(),
+            "dataset_type": source_key.lower(),
             "mode": "local",
             "base_path": _make_base_path,
             "forecast_hour": 0,

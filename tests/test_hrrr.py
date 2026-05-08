@@ -330,7 +330,7 @@ def test_find_subhf_entry_miss():
 
 def _make_config(source_key: str = "HRRR", **extra_source: Any) -> dict[str, Any]:
     source_defaults: dict[str, Any] = {
-        "dataset_name": source_key.lower(),
+        "dataset_type": source_key.lower(),
         "mode": "remote",
         "forecast_hour": 0,
         "levels": [500, 700, 850],
@@ -353,7 +353,7 @@ def test_hrrr_dataset_wrfprsf_defaults():
     cfg = _make_config("HRRR")
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfprsf"
-    assert ds.dataset_name == "hrrr"
+    assert ds.dataset_type == "hrrr"
     assert len(ds) == 25  # 2022-01-01 00:00 … 2022-01-02 00:00 inclusive (25 h)
 
 
@@ -361,7 +361,7 @@ def test_hrrr_dataset_wrfnatf():
     cfg = _make_config("HRRR_NAT", variables={"prognostic": {"vars_3D": ["T", "U"], "vars_2D": []}})
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfnatf"
-    assert ds.dataset_name == "hrrr_nat"
+    assert ds.dataset_type == "hrrr_nat"
 
 
 def test_hrrr_dataset_wrfsubhf():
@@ -372,7 +372,7 @@ def test_hrrr_dataset_wrfsubhf():
     cfg["timestep"] = "15min"
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfsubhf"
-    assert ds.dataset_name == "hrrr_subh"
+    assert ds.dataset_type == "hrrr_subh"
 
 
 def test_hrrr_dataset_invalid_product():
@@ -406,9 +406,9 @@ def test_hrrr_dataset_only_one_of_multiple_sources():
     cfg = _make_config("HRRR")
     rest_cfg = {k: v for k, v in cfg.items() if k != "source"}
 
-    other_dataset_name = ["ERA5", "MRMS", "NOT_VALID_DATASET"]
+    other_dataset_type = ["ERA5", "MRMS", "NOT_VALID_DATASET"]
 
-    for other in other_dataset_name:
+    for other in other_dataset_type:
         multi_source_cfg: dict[str, Any] = {
             "source": {
                 other: cfg["source"]["Test_HRRR"],
