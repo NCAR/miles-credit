@@ -31,17 +31,17 @@ After DataLoader collation the batch dimension is prepended:
 
 from __future__ import annotations
 
-import logging
+from typing import Any
+
 import os
 
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
 import xarray as xr
 
 from credit.datasets._utils import _infer_period_freq, _find_file
-from credit.datasets.base_dataset import BaseDataset
+from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
 
 
 def _build_spatial_slices(
@@ -254,7 +254,7 @@ class GOESDataset(BaseDataset):
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
-        """Initialize GOESDataset with config parsing, timestamp generation, file mapping from BaseDataset, 
+        """Initialize GOESDataset with config parsing, timestamp generation, file mapping from BaseDataset,
         then set GOES-specific attributes and spatial slice computation.
 
         Args:
@@ -439,8 +439,8 @@ class GOESDataset(BaseDataset):
             return time_file_map
 
     def _get_file_source(
-        self, 
-        field_type: VALID_FIELD_TYPES, 
+        self,
+        field_type: VALID_FIELD_TYPES,
         field_config: dict[str, Any],
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         """Return the file source for a field. Override in subclasses for different modes/backends.

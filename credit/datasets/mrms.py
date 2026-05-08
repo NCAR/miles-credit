@@ -49,18 +49,17 @@ File naming (local mode):
 
 from __future__ import annotations
 
+from typing import Any
+
 from glob import glob
 import gzip
-import logging
-import pathlib as Path
 
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
 import xarray as xr
 
 from credit.datasets._utils import _find_file, _map_files
-from credit.datasets.base_dataset import BaseDataset
+from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
 
 
 def _apply_extent(da: xr.DataArray, extent: list[float] | None) -> xr.DataArray:
@@ -152,7 +151,7 @@ class MRMSDataset(BaseDataset):
             data_config (dict[str, Any]): Data configuration dictionary from YAML config.
             return_target (bool, optional): Whether to return target variables. Defaults to False.
         """
-        
+
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
         assert self.curr_source_cfg["dataset_name"] == "mrms", (
@@ -190,10 +189,10 @@ class MRMSDataset(BaseDataset):
             "default_block_size": 8**20,
         }
         self._fs = s3fs.S3FileSystem(**fs_config)
-    
+
     def _get_file_source(
-        self, 
-        field_type: VALID_FIELD_TYPES, 
+        self,
+        field_type: VALID_FIELD_TYPES,
         field_config: dict[str, Any],
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         """Return the file source for a field. Override in subclasses for different modes/backends.
@@ -298,7 +297,7 @@ class MRMSDataset(BaseDataset):
 
         # S3 URI template for MRMS GRIB2 files
         _S3_URI = "s3://noaa-mrms-pds/{region}/{varname}/{date_str}/MRMS_{varname}_{datetime_str}.grib2.gz"
-        
+
         s3_path = _S3_URI.format(
             region=self.region,
             varname=vname,
