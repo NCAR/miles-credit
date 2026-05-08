@@ -3,12 +3,6 @@ mrms.py
 -------------------------------------------------------
 MRMSDataset with nested input/target structure.
 
-Field type semantics (mirrors ERA5 conventions):
-    prognostic      — input at step 0 AND target; model prediction fed back
-                      at step > 0 (autoregressive rollout)
-    diagnostic      — target only; not fed back into the model
-    dynamic_forcing — input at every step; never a target
-
 Sample structure returned by __getitem__:
 
     {
@@ -55,15 +49,15 @@ File naming (local mode):
 
 from __future__ import annotations
 
+from glob import glob
 import gzip
 import logging
-from glob import glob
 import pathlib as Path
 
 import pandas as pd
 import torch
-import xarray as xr
 from torch.utils.data import Dataset
+import xarray as xr
 
 from credit.datasets._utils import _find_file, _map_files
 from credit.datasets.base_dataset import BaseDataset
@@ -92,7 +86,7 @@ def _apply_extent(da: xr.DataArray, extent: list[float] | None) -> xr.DataArray:
 class MRMSDataset(BaseDataset):
     """PyTorch Dataset for MRMS data with nested input/target structure.
 
-    Field types follow ERA5 conventions: ``prognostic`` variables appear in
+    Field types follow CREDIT Gen2 conventions: ``prognostic`` variables appear in
     both input (at step 0) and target; ``dynamic_forcing`` appears in input
     at every step; ``diagnostic`` appears in target only.  At step ``i > 0``
     the model's own prognostic predictions are fed back — no disk read occurs
@@ -150,33 +144,33 @@ class MRMSDataset(BaseDataset):
            in either -180-180 or 0-360 format; it is normalised to 0-360 internally.
     """
 
-    def __init__(self, data_config: dict, return_target: bool = False) -> None:
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        """Initialize MRMSDataset with config parsing, timestamp generation, file mapping from BaseDataset,
+        then set MRMS-specific attributes.
+
+        Args:
+            data_config (dict[str, Any]): Data configuration dictionary from YAML config.
+            return_target (bool, optional): Whether to return target variables. Defaults to False.
+        """
+        
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
-
         assert self.curr_source_cfg["dataset_name"] == "mrms", (
             f"Expected dataset_name 'mrms' in config for MRMSDataset, got '{self.curr_source_cfg['dataset_name']}'"
         )
-
+        # Set MRMS-specific attributes
         self.dataset_name: str = "mrms"
         self.region: str = self.curr_source_cfg.get("region", "CONUS")
         self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
         self.static_metadata: dict = {"datetime_fmt": "unix_ns"}
 
+        # Initialize the field registration based on the provided config and populate
+        #   dictionary of variables and file paths for each field type
         self.init_register_all_fields()
 
         # Initialize the s3fs on the first call to _extract_field within __getitem__
         self._fs = None
 
-    # ------------------------------------------------------------------
-    # Dataset interface
-    # ------------------------------------------------------------------
-    
-    # inheriting from BaseDataset (_len_ and _getitem_ implementations)
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
     def _init_fs(self):
         """Lazily initialize an anonymous ``s3fs.S3FileSystem`` instance.
 
@@ -197,7 +191,26 @@ class MRMSDataset(BaseDataset):
         }
         self._fs = s3fs.S3FileSystem(**fs_config)
     
-    def _get_file_source(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]) -> dict[str, Any]:
+    def _get_file_source(
+        self, 
+        field_type: VALID_FIELD_TYPES, 
+        field_config: dict[str, Any],
+    ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
+        """Return the file source for a field. Override in subclasses for different modes/backends.
+
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
+            field_config (dict[str, Any]): Validated field-type config dict.
+
+        Raises:
+            ValueError: If ``self.mode`` is not a recognised mode.
+
+        Returns:
+            list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None: Depending on the mode and field type,
+                this method may return a list of (start_time, end_time, file_path) tuples produced by _map_files,
+                a boolean indicating the presence of the field (e.g., for remote data), or None if the field is disabled.
+                The expected return type should be consistent within a dataset class.
+        """
         if self.mode == "local":
             files = sorted(glob(field_config.get("path", "")))
             time_fmt: str = field_config.get("filename_time_format", "%Y%m%d-%H%M%S")
@@ -212,7 +225,7 @@ class MRMSDataset(BaseDataset):
         t: pd.Timestamp,
         sample: dict,
     ) -> None:
-        """Load all variables for *field_type* at time *t* into *sample*.
+        """Load all 2-D variables for *field_type* at time *t* into *sample*.
 
         Dispatches to local or remote loading based on ``self.mode``.
 

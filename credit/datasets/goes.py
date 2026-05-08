@@ -135,7 +135,7 @@ def _find_nearest_latlon(lat2d: np.ndarray, lon2d: np.ndarray, lat_target: float
 class GOESDataset(BaseDataset):
     """PyTorch Dataset for GOES-R ABI Level-2 (L2) satellite imagery.
 
-    Field types follow ERA5/MRMS conventions: ``prognostic`` variables appear in
+    Field types follow CREDIT GEN2 conventions: ``prognostic`` variables appear in
     both input (at step 0) and target; ``dynamic_forcing`` appears in input
     at every step; ``diagnostic`` appears in target only.  At step ``i > 0``
     the model's own prognostic predictions are fed back — no disk read occurs
@@ -253,24 +253,35 @@ class GOESDataset(BaseDataset):
         ValueError: If ``goes_id`` or ``region`` are not recognized.
     """
 
-    def __init__(self, data_config: dict, return_target: bool = False) -> None:
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        """Initialize GOESDataset with config parsing, timestamp generation, file mapping from BaseDataset, 
+        then set GOES-specific attributes and spatial slice computation.
+
+        Args:
+            data_config (dict[str, Any]): Data configuration dictionary from YAML config.
+            return_target (bool, optional): Whether to return target variables. Defaults to False.
+
+        Raises:
+            ValueError: If ``goes_id`` or ``region`` are not recognized.
+            FileNotFoundError: If the lat/lon grid NetCDF cannot be found under
+                ``latlon2d_dir``.
+        """
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
-
         assert self.curr_source_cfg["dataset_name"] == "goes", (
             f"Expected dataset_name 'goes' in config for GOESDataset, got '{self.curr_source_cfg['dataset_name']}'"
         )
+
+        # Set GOES-specific attributes
         self.dataset_name = "goes"
         self.goes_id: str = self.curr_source_cfg.get("goes_id", "goes16")
         self.product: str = self.curr_source_cfg.get("product", "ABI-L2-MCMIPC")
         self.static_metadata: dict[str, Any] = {"datetime_fmt": "unix_ns"}
-
         self.qc_path: str = self.curr_source_cfg.get("qc_path", None)
-
-        # Hard-coded configurations
         self.tolerance = pd.Timedelta("3 minutes")  # to allow for searching the nearest GOES observation time
 
-        # Build datetime-to-filepath lookup from source config variables
+        # Initialize the field registration based on the provided config and populate
+        #   dictionary of variables and file paths for each field type
         self.init_register_all_fields()
 
         # Initialize the s3fs on the first call to _extract_field within __getitem__
@@ -304,15 +315,6 @@ class GOESDataset(BaseDataset):
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Latitude/longitude grid file not found at {latlon2d_path}") from e
 
-    # ------------------------------------------------------------------
-    # Dataset interface
-    # ------------------------------------------------------------------
-
-    # inheriting from BaseDataset (_len_ and _getitem_ implementations)
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
     def _init_fs(self):
         """Lazily initialize an anonymous ``s3fs.S3FileSystem`` instance.
 
@@ -436,7 +438,26 @@ class GOESDataset(BaseDataset):
         else:
             return time_file_map
 
-    def _get_file_source(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]) -> dict[str, Any]:
+    def _get_file_source(
+        self, 
+        field_type: VALID_FIELD_TYPES, 
+        field_config: dict[str, Any],
+    ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
+        """Return the file source for a field. Override in subclasses for different modes/backends.
+
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
+            field_config (dict[str, Any]): Validated field-type config dict.
+
+        Raises:
+            ValueError: If ``self.mode`` is not a recognised mode.
+
+        Returns:
+            list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None: Depending on the mode and field type,
+                this method may return a list of (start_time, end_time, file_path) tuples produced by _map_files,
+                a boolean indicating the presence of the field (e.g., for remote data), or None if the field is disabled.
+                The expected return type should be consistent within a dataset class.
+        """
         base_dir = field_config.get("path", "")
         if self.mode == "local":
             return self._collect_GOES_file_path(base_dir=base_dir)

@@ -1,7 +1,7 @@
 """
 era5.py
 -------------------------------------------------------
-Refactored ERA5Dataset with nested input/target structure.
+Refactored ERA5Dataset and ARCOERA5Dataset with nested input/target structure.
 
 Sample structure returned by __getitem__:
 
@@ -59,14 +59,13 @@ File naming:
 
 from __future__ import annotations
 
+import cftime
 from typing import Any
 
-import cftime
-
+from gcsfs import GCSFileSystem
 import pandas as pd
 import torch
 import xarray as xr
-from gcsfs import GCSFileSystem
 import zarr
 
 from credit.datasets._utils import _find_file, _to_cftime  # pyright: ignore[reportPrivateUsage]
@@ -116,12 +115,20 @@ class ERA5Dataset(BaseDataset):
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        """Initialize ERA5Dataset with config parsing, timestamp generation, file mapping from BaseDataset, 
+        then set ERA5-specific attributes.
+
+        Args:
+            data_config (dict[str, Any]): Data configuration dictionary from YAML config.
+            return_target (bool, optional): Whether to return target variables. Defaults to False.
+        """
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
-
         assert self.curr_source_cfg["dataset_name"] == "era5", (
             f"Expected dataset_name 'era5' in config for ERA5Dataset, got '{self.curr_source_cfg['dataset_name']}'"
         )
+
+        # Set ERA5-specific attributes
         self.dataset_name = "era5"
         self.level_coord: str = self.curr_source_cfg["level_coord"]
         self.levels: list[int] = self.curr_source_cfg["levels"]
@@ -129,19 +136,11 @@ class ERA5Dataset(BaseDataset):
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
-
         self.mode = "local"
+        
+        # Initialize the field registration based on the provided config and populate
+        #   dictionary of variables and file paths for each field type
         self.init_register_all_fields()
-
-    # ------------------------------------------------------------------
-    # Dataset interface
-    # ------------------------------------------------------------------
-
-    # inheriting from BaseDataset
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
 
     def _extract_field(
         self,
@@ -237,12 +236,20 @@ class ARCOERA5Dataset(BaseDataset):
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        """Initialize ARCOERA5Dataset with config parsing, timestamp generation, file mapping from BaseDataset, 
+        then set ARCOERA5-specific attributes.
+
+        Args:
+            data_config (dict[str, Any]): Data configuration dictionary from YAML config.
+            return_target (bool, optional): Whether to return target variables. Defaults to False.
+        """
         # Super constructor to inherit common config parsing and timestamp generation logic
         super().__init__(data_config, return_target)
-
         assert self.curr_source_cfg["dataset_name"] == "arco_era5", (
             f"Expected dataset_name 'arco_era5' in config for ARCOERA5Dataset, got '{self.curr_source_cfg['dataset_name']}'"
         )
+
+        # Set ARCOERA5-specific attributes
         self.dataset_name = "arco_era5"
         self.pressure_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
         self.model_lev_era5_path = "gs://gcp-public-data-arco-era5/ar/model-level-1h-0p25deg.zarr-v1"
@@ -273,29 +280,24 @@ class ARCOERA5Dataset(BaseDataset):
                 self.levels: list[int] = [1, 2, 3, 5, 7, 10, 20, 30, 50, 70] + list(range(100, 1025, 25))
         else:
             self.levels: list[int] = self.curr_source_cfg["levels"]
+        self.mod_level_store = None
+        self.pres_level_store = None       
         self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
-
         self.mode = "remote"
+
+        # Initialize the field registration based on the provided config and populate
+        #   dictionary of variables and file paths for each field type
         self.init_register_all_fields()
 
         # Initialize the s3fs on the first call to _extract_field within __getitem__
         self.fs = None
-        self.mod_level_store = None
-        self.pres_level_store = None
 
-    # ------------------------------------------------------------------
-    # Dataset interface
-    # ------------------------------------------------------------------
-
-    # inheriting from BaseDataset
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
     def _init_fs(self):
+        """Initialize the GCSFileSystem and zarr stores for pressure-level and model-level ERA5 data.
+        """
         fs_config: dict[str, Any] = {
             "cache_timeout": -1,
             "token": "anon",  # noqa: S106 # nosec B106
