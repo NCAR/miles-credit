@@ -58,7 +58,7 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _find_file, _map_files
+from credit.datasets._utils import _find_file, _map_files, _start_s3_fs
 from credit.datasets.base_dataset import BaseDataset
 
 
@@ -170,26 +170,6 @@ class MRMSDataset(BaseDataset):
         # Initialize the s3fs on the first call to _extract_field within __getitem__
         self._fs = None
 
-    def _init_fs(self):
-        """Lazily initialize an anonymous ``s3fs.S3FileSystem`` instance.
-
-        Called automatically on the first ``__getitem__`` invocation when
-        ``mode`` is ``"remote"``. The filesystem object is cached in ``_fs``
-        for re-use across later calls.
-
-        Note:
-            Mirrors the initialization pattern used in
-            ``ARCOERA5Dataset._init_fs()``.
-        """
-        import s3fs
-
-        fs_config = {
-            "anon": True,
-            "token": "anon",
-            "default_block_size": 8**20,
-        }
-        self._fs = s3fs.S3FileSystem(**fs_config)
-
     def _get_file_source(
         self,
         field_config: dict[str, Any],
@@ -238,6 +218,8 @@ class MRMSDataset(BaseDataset):
 
         for vname in vd.get("vars_2D", []):
             if self.mode == "remote":
+                if self._fs is None:
+                    self._fs = _start_s3_fs()
                 arr = self._load_remote_var(vname, t)
             else:
                 arr = self._load_local_var(field_type, vname, t)
