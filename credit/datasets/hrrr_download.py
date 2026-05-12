@@ -142,8 +142,13 @@ def download_hrrr(
     assert "dataset_type" in source_cfg, (
         f"Missing required field for dataset_type. Found fields: {list(source_cfg.keys())}"
     )
-    dataset_type = source_cfg["dataset_type"]
-    product = _validate_product_request(dataset_type)
+    assert source_cfg["dataset_type"] == "HRRR", (
+        f"Expected dataset_type to be 'HRRR'. Found: {source_cfg['dataset_type']}"
+    )
+    # The default product is "wrfprsf" if not specified in the config.
+    product_request = source_cfg.get("product", "wrfprsf")
+    # Validate the product request.
+    product = _validate_product_request(product_request)
 
     try:
         import s3fs  # noqa: PLC0415  # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed

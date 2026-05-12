@@ -5,16 +5,16 @@ HRRRDataset: PyTorch Dataset for HRRR GRIB2 data.
 
 Supports three HRRR products (``VALID_PRODUCTS``):
 
-* ``wrfprsf`` — pressure-level output (default, ~200 MB/file)
-* ``wrfnatf`` — native/hybrid-sigma level output (~200 MB/file, ~65 levels)
-* ``wrfsubhf`` — 15-minute sub-hourly surface output (surface vars only)
+* ``"wrfprsf"`` — pressure-level output (default, ~200 MB/file)
+* ``"wrfnatf"`` — native/hybrid-sigma level output (~200 MB/file, ~65 levels)
+* ``"wrfsubhf"`` — 15-minute sub-hourly surface output (surface vars only)
 
-Tensor keys follow the pattern ``{prefix}/{field_type}/{dim}/{varname}``
-where *prefix* is product-specific:
+Tensor keys follow the pattern ``{user_provided_name}/{hrrr_product}/{field_type}/{dim}/{varname}``
+where *hrrr_product* is product-specific:
 
-    wrfprsf  → ``hrrr/…``
-    wrfnatf  → ``hrrr_nat/…``
-    wrfsubhf → ``hrrr_subh/…``
+    "wrfprsf"  → `{user_provided_name}/`wrfprsf/{field_type}/{dim}/{varname}``
+    "wrfnatf"  → `{user_provided_name}/`wrfnatf/{field_type}/{dim}/{varname}``
+    "wrfsubhf" → `{user_provided_name}/`wrfsubhf/{field_type}/2d/{varname}``
 
 *dim* is ``"3d"`` for multi-level variables and ``"2d"`` for surface variables.
 
@@ -24,7 +24,7 @@ Tensor shapes (before DataLoader batching):
 
 The ``y`` / ``x`` spatial dimensions correspond to HRRR's native Lambert
 Conformal Conic grid; if ``extent`` is specified they reflect the cropped
-sub-domain rather than the full CONUS grid (~1059 × 1799).
+sub-domain rather than the full CONUS grid (~1059 x 1799).
 
 Two S3 path layouts are handled automatically:
 
@@ -50,8 +50,8 @@ Both local and remote modes use the same ``.idx`` + byte-range pipeline:
 full-file scan.  The ``.idx`` sidecar must be present alongside the grib2;
 download it with ``hrrr_download.py``.
 
-For a typical training sample (5 vars × 6 levels ≈ 30 messages) remote mode
-transfers ~3 MB instead of ~200 MB (~60-100× reduction).
+For a typical training sample (5 vars x 6 levels ≈ 30 messages) remote mode
+transfers ~3 MB instead of ~200 MB (~60-100x reduction).
 
 Variable lookup is driven by :data:`VAR_REGISTRY`.  Extend it at import
 time to add variables without subclassing::
@@ -68,6 +68,7 @@ Example YAML (wrfprsf, local mode)::
       source:
         Example_HRRR:  # User-provided name (arbitrary key)
           dataset_type: "HRRR"
+          # product: "wrfprsf" # Optional for PRS product. Default is "wrfprsf".
           mode: "local"
           base_path: "/data/hrrr"
           forecast_hour: 0
@@ -88,7 +89,8 @@ Example YAML (wrfnatf, remote mode)::
     data:
       source:
         Example_HRRR_NAT:  # User-provided name (arbitrary key)
-          dataset_type: "HRRR_NAT"
+          dataset_type: "HRRR"
+          product: "wrfnatf" # Options: "wrfprsf" (default), "wrfnatf", "wrfsubhf"
           mode: "remote"
           forecast_hour: 0
           levels: [10, 20, 30, 40, 50]   # hybrid level indices 1-65
@@ -106,7 +108,8 @@ Example YAML (wrfsubhf, remote mode — 15-min output)::
     data:
       source:
         Example_HRRR_SUBH:  # User-provided name (arbitrary key)
-          dataset_type: "HRRR_SUBH"
+          dataset_type: "HRRR"
+          product: "wrfsubhf" # Options: "wrfprsf" (default), "wrfnatf", "wrfsubhf"
           mode: "remote"
           variables:
             prognostic:
@@ -120,7 +123,7 @@ Example YAML (wrfsubhf, remote mode — 15-min output)::
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Literal, get_args
 
 import logging
 import os
@@ -239,7 +242,7 @@ _MAX_REMOTE_WORKERS = 8
 _HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
 
 #: Supported HRRR GRIB2 products.
-VALID_PRODUCTS = {"HRRR": "wrfprsf", "HRRR_NAT": "wrfnatf", "HRRR_SUBH": "wrfsubhf"}
+VALID_PRODUCTS = Literal["wrfprsf", "wrfnatf", "wrfsubhf"]
 
 
 # ---------------------------------------------------------------------------
@@ -247,13 +250,13 @@ VALID_PRODUCTS = {"HRRR": "wrfprsf", "HRRR_NAT": "wrfnatf", "HRRR_SUBH": "wrfsub
 # ---------------------------------------------------------------------------
 
 
-def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: str = "wrfprsf") -> str:
+def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprsf") -> str:
     """Construct the S3 URI for a HRRR grib2 file.
 
     Args:
         t (pd.Timestamp): Initialisation timestamp (UTC).
         forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
-        product (str): HRRR product name — one of ``VALID_PRODUCTS``.
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprsf".
 
     Returns:
         str: S3 URI.
@@ -265,14 +268,14 @@ def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: str = "wrfprsf") 
     return f"s3://{_S3_BUCKET}/hrrr.{date_str}/{subdir}{fname}"
 
 
-def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, product: str = "wrfprsf") -> str:
+def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprsf") -> str:
     """Construct the local filesystem path for a HRRR grib2 file.
 
     Args:
         base_path (str): Root directory containing HRRR data.
         t (pd.Timestamp): Initialization timestamp (UTC).
         forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
-        product (str, optional): HRRR product name — one of ``VALID_PRODUCTS``. Defaults to "wrfprsf".
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprsf".
 
     Returns:
         str: Local filesystem path to the grib2 file.
@@ -644,27 +647,27 @@ def _to_float32(values: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _validate_product_request(dataset_type: str) -> str:
+def _validate_product_request(product_request: str) -> VALID_PRODUCTS:
     """Validate the dataset request config, raising ValueError for invalid requests.
 
     Args:
-        dataset_type (str): The HRRR dataset name from the config (e.g. "HRRR", "HRRR_NAT", "HRRR_SUBH").
+        product_request (str): The HRRR product name from the config (e.g. "wrfprsf", "wrfnatf", "wrfsubhf").
 
     Raises:
-        ValueError: If the dataset_type is not recognized or mapped to a valid HRRR product.
+        ValueError: If the product is not recognized or mapped to a valid HRRR product.
 
     Returns:
-        str: The validated HRRR product name.
+        VALID_PRODUCTS: The validated HRRR product name.
     """
     # Convert to upper case for case-insensitive matching
-    dataset_type = dataset_type.upper()
+    product_request = product_request.lower()
 
-    if dataset_type not in VALID_PRODUCTS:
+    if product_request not in VALID_PRODUCTS:
         raise ValueError(
-            f"Unknown HRRR product '{dataset_type}' in config['source']."
-            + f"Valid products mapped as: {VALID_PRODUCTS}"
+            f"Unknown HRRR product '{product_request}'. Valid products are: {get_args(VALID_PRODUCTS)}"
         )
-    return VALID_PRODUCTS[dataset_type]
+    
+    return product_request
 
 
 # ---------------------------------------------------------------------------
@@ -690,10 +693,9 @@ class HRRRDataset(BaseDataset):
     configuration examples.
 
     Attributes:
-        dataset_type: Tensor key prefix — ``"HRRR"``, ``"HRRR_NAT"``, or
-            ``"HRRR_SUBH"``.
-        product: Active HRRR product (``"wrfprsf"``, ``"wrfnatf"``, or
-            ``"wrfsubhf"``) depending on *dataset_type*.
+        dataset_type: Tensor key - `"HRRR"`
+        product: Active HRRR product (``"HRRR_PRS" / "wrfprsf"``, ``"HRRR_NAT" / "wrfnatf"``, 
+            or ``"HRRR_SUBH" / "wrfsubhf"``) with default value ``"HRRR_PRS"``.
         datetimes: DatetimeIndex of valid initialisation timestamps.
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
@@ -710,13 +712,15 @@ class HRRRDataset(BaseDataset):
         if "dataset_type" not in self.curr_source_cfg:
             raise ValueError(
                 f"Missing 'dataset_type' in config['source']['{self.curr_source_name}']. "
-                + f"Expected one of: {list(VALID_PRODUCTS.keys())}"
+                + f"Expected one of: {get_args(VALID_PRODUCTS)}"
             )
         self.dataset_type = self.curr_source_cfg["dataset_type"]
 
-        product = _validate_product_request(self.dataset_type)
+        # The default product is "wrfprsf" if not specified in the config.
+        product_request = self.curr_source_cfg.get("product", "wrfprsf")
+        # Validate the product request.
+        self.product: VALID_PRODUCTS = _validate_product_request(product_request)
 
-        self.product: str = product
         self.mode: str = self.curr_source_cfg.get("mode", "local")
         self.base_path: str | None = self.curr_source_cfg.get("base_path", None)
         self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
