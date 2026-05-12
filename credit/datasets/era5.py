@@ -488,6 +488,7 @@ class WeatherBench2ERA5Dataset(BaseDataset):
         data:
           source:
             WeatherBench2_ERA5:
+              dataset_type: "weatherbench2_era5"
               resolution: "1440x721"   # optional; overridden by the resolution kwarg
               level_coord: "level"
               levels: [50, 100, 200, 500, 850, 1000]  # optional; defaults to all available
@@ -526,7 +527,7 @@ class WeatherBench2ERA5Dataset(BaseDataset):
     ) -> None:
         super().__init__(data_config, return_target)
         assert self.curr_source_cfg["dataset_type"] == "weatherbench2_era5", (
-            f"Expected dataset_type 'arco_era5' in config for ARCOERA5Dataset, got '{self.curr_source_cfg['dataset_type']}'"
+            f"Expected dataset_type 'weatherbench2_era5' in config for ARCOERA5Dataset, got {self.curr_source_cfg['dataset_type']}"
         )
         self.dataset_type: str = "weatherbench2_era5"
         # Config key takes precedence over the kwarg default.

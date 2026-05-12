@@ -485,6 +485,7 @@ def minimal_wb2_era5_config():
         "end_datetime": "2020-01-02",
         "source": {
             "WeatherBench2_ERA5": {
+                "dataset_type": "weatherbench2_era5",
                 "resolution": "64x32",
                 "level_coord": "level",
                 "levels": [500, 850],
