@@ -107,7 +107,7 @@ def minimal_config():
         "source": {
             "TEST_GOES": {
                 "dataset_type": "goes",
-                "goes_id": "goes16",
+                "goes_position": "east",
                 "mode": "local",
                 "product": "ABI-L2-MCMIPC",
                 "latlon2d_dir": "/fake/latlon/",

@@ -23,7 +23,7 @@ Sample structure returned by __getitem__:
     }
 
 All GOES variables are 2D. Tensor shape (no batch dimension):
-    (1, 1, lat, lon)   — singleton level dim, consistent with CREDIT GEN2 2D convention
+    (1, 1, lat, lon)   — singleton level dim, consistent with CREDIT Gen2 2D convention
 
 After DataLoader collation the batch dimension is prepended:
     (batch, 1, 1, lat, lon)
@@ -40,8 +40,8 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _infer_period_freq, _find_file
-from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets._utils import _infer_period_freq, _find_file, _init_fs
+from credit.datasets.base_dataset import BaseDataset
 
 
 def _build_spatial_slices(
@@ -135,7 +135,7 @@ def _find_nearest_latlon(lat2d: np.ndarray, lon2d: np.ndarray, lat_target: float
 class GOESDataset(BaseDataset):
     """PyTorch Dataset for GOES-R ABI Level-2 (L2) satellite imagery.
 
-    Field types follow CREDIT GEN2 conventions: ``prognostic`` variables appear in
+    Field types follow CREDIT Gen2 conventions: ``prognostic`` variables appear in
     both input (at step 0) and target; ``dynamic_forcing`` appears in input
     at every step; ``diagnostic`` appears in target only.  At step ``i > 0``
     the model's own prognostic predictions are fed back — no disk read occurs
@@ -153,7 +153,7 @@ class GOESDataset(BaseDataset):
             source:
                 Example_GOES:  # User-provided name (arbitrary key)
                     dataset_type: "goes"
-                    goes_id: "goes16"
+                    goes_position: "east"  # or "west"
                     mode: "local"
                     product: "ABI-L2-MCMIPC"
                     variables:
@@ -182,7 +182,7 @@ class GOESDataset(BaseDataset):
             source:
                 Example_GOES:  # User-provided name (arbitrary key)
                     dataset_type: "goes"
-                    goes_id: "goes16"
+                    goes_position: "east" # or "west"
                     mode: "remote"
                     product: "ABI-L2-MCMIPC"
                     variables:
@@ -206,9 +206,8 @@ class GOESDataset(BaseDataset):
             - ``config["source"]["Example_GOES"]``: user-provided source name.
 
               - ``dataset_type`` (str): has to be "goes" to trigger this dataset class.
-              - ``goes_id`` (str): Satellite identifier. One of ``"goes16"``,
-                ``"goes17"``, ``"goes18"``, ``"goes19"``. Defaults to
-                ``"goes16"``.
+              - ``goes_position`` (str): Satellite position. One of ``"east"``, ``"west"``. Defaults to
+                ``"east"``.
               - ``mode`` (str): ``"local"`` or ``"remote"`` (S3). Defaults to
                 ``"local"``.
               - ``product`` (str): ABI product string, e.g.
@@ -250,7 +249,6 @@ class GOESDataset(BaseDataset):
     Raises:
         FileNotFoundError: If the lat/lon grid NetCDF cannot be found under
             ``latlon2d_dir``.
-        ValueError: If ``goes_id`` or ``region`` are not recognized.
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
@@ -262,7 +260,6 @@ class GOESDataset(BaseDataset):
             return_target (bool, optional): Whether to return target variables. Defaults to False.
 
         Raises:
-            ValueError: If ``goes_id`` or ``region`` are not recognized.
             FileNotFoundError: If the lat/lon grid NetCDF cannot be found under
                 ``latlon2d_dir``.
         """
@@ -274,7 +271,7 @@ class GOESDataset(BaseDataset):
 
         # Set GOES-specific attributes
         self.dataset_type = "goes"
-        self.goes_id: str = self.curr_source_cfg.get("goes_id", "goes16")
+        self.goes_position: str = self.curr_source_cfg.get("goes_position", "east")
         self.product: str = self.curr_source_cfg.get("product", "ABI-L2-MCMIPC")
         self.static_metadata: dict[str, Any] = {"datetime_fmt": "unix_ns"}
         self.qc_path: str = self.curr_source_cfg.get("qc_path", None)
@@ -290,12 +287,10 @@ class GOESDataset(BaseDataset):
         # Pre-compute spatial slices from GOES fixed lat/lon grids
         self.latlon2d_dir: str = self.curr_source_cfg.get("latlon2d_dir", "")
 
-        if self.goes_id in ("goes16", "goes19"):  # both GOES-East
+        if self.goes_position == "east":
             prefix = "goes19"
-        elif self.goes_id in ("goes17", "goes18"):  # both GOES-West
+        elif self.goes_position == "west":
             prefix = "goes18"
-        else:
-            raise ValueError(f"Unrecognized GOES ID: {self.goes_id!r}")
 
         if self.product[-1] == "C":
             suffix = "abi_conus_lat_lon.nc"
@@ -314,26 +309,6 @@ class GOESDataset(BaseDataset):
                 )
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Latitude/longitude grid file not found at {latlon2d_path}") from e
-
-    def _init_fs(self):
-        """Lazily initialize an anonymous ``s3fs.S3FileSystem`` instance.
-
-        Called automatically on the first ``__getitem__`` invocation when
-        ``mode`` is ``"remote"``. The filesystem object is cached in ``_fs``
-        for re-use across later calls.
-
-        Note:
-            Mirrors the initialization pattern used in
-            ``ARCOERA5Dataset._init_fs()``.
-        """
-        import s3fs
-
-        fs_config = {
-            "anon": True,
-            "token": "anon",
-            "default_block_size": 8**20,
-        }
-        self._fs = s3fs.S3FileSystem(**fs_config)
 
     def _collect_GOES_file_path(self, base_dir: str = "", verbose: bool = False):
         """Build a time-ordered file map for the dataset's datetime range.
@@ -370,8 +345,33 @@ class GOESDataset(BaseDataset):
 
         file_paths = []
         for dt in self.datetimes.floor("h").unique():
+            if (
+                self.goes_position == "east"
+            ):  # GOES-16 was replaced by GOES-19 at 15:10 UTC on April 7, 2025; https://www.ospo.noaa.gov/data/messages/2025/04/MSG_20250407_1510.html
+                if dt < pd.Timestamp("2025-04-07 15:00:00"):
+                    goes_id = "goes16"
+                elif dt >= pd.Timestamp("2025-04-07 16:00:00"):
+                    goes_id = "goes19"
+                else:  # discard the hour containing the transition since it may contain files from both satellites and cause ambiguity in file mapping
+                    print(
+                        f"[WARN] Discarding observations in {dt} due to GOES-16/19 transition on 2025-04-07 15:10 UTC to avoid file mapping ambiguity during the hour."
+                    )
+                    continue
+            elif (
+                self.goes_position == "west"
+            ):  # GOES-17 was replaced by GOES-18 at 18:00 UTC on January 4, 2023; https://www.ospo.noaa.gov/data/messages/2023/01/MSG_20230104_1805.html
+                if dt < pd.Timestamp("2023-01-04 18:00:00"):
+                    goes_id = "goes17"
+                elif dt >= pd.Timestamp("2023-01-04 19:00:00"):
+                    goes_id = "goes18"
+                else:  # discard the hour containing the transition since it may contain files from both satellites and cause ambiguity in file mapping
+                    print(
+                        f"[WARN] Discarding observations in {dt} due to GOES-17/18 transition on 2023-01-04 18:00 UTC to avoid file mapping ambiguity during the hour."
+                    )
+                    continue
+
             rel_path = os.path.join(
-                f"noaa-{self.goes_id}/{self.product}",
+                f"noaa-{goes_id}/{self.product}",
                 str(dt.year),
                 dt.strftime("%j"),
                 f"{dt.hour:02}",
@@ -440,13 +440,11 @@ class GOESDataset(BaseDataset):
 
     def _get_file_source(
         self,
-        field_type: VALID_FIELD_TYPES,
         field_config: dict[str, Any],
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         """Return the file source for a field. Override in subclasses for different modes/backends.
 
         Args:
-            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
             field_config (dict[str, Any]): Validated field-type config dict.
 
         Raises:
@@ -475,7 +473,7 @@ class GOESDataset(BaseDataset):
         Dispatches to ``_load_local_var`` or ``_load_remote_var`` depending on
         ``mode``, then stores each variable as a ``torch.Tensor`` of shape
         ``(1, 1, ny, nx)`` under the key
-        ``"{goes_id}/{field_type}/2d/{vname}"`` in ``sample``. Does nothing if
+        ``"{goes_position}/{field_type}/2d/{vname}"`` in ``sample``. Does nothing if
         the field type has no registered variables.
 
         Args:
@@ -493,9 +491,8 @@ class GOESDataset(BaseDataset):
             return
 
         if self.mode == "remote":
-            if self.fs is None:
-                self._init_fs()
-
+            if self._fs is None:
+                self._fs = _init_fs()
             arrays = self._load_remote_var(field_type, vnames, t)
         elif self.mode == "local":
             arrays = self._load_local_var(field_type, vnames, t)
