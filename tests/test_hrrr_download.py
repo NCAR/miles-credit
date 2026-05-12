@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from credit.datasets.hrrr_download import download_hrrr
+from credit.datasets.hrrr_download import download_hrrr, VALID_PRODUCTS
 from credit.datasets.multi_source import make_single_source_subconfig
 
 # ---------------------------------------------------------------------------
@@ -28,6 +28,7 @@ def _make_multisource_config() -> dict[str, Any]:
         "source": {
             "Test_HRRR": {
                 "dataset_type": "hrrr",
+                "product": "wrfprsf",
                 "mode": "local",
                 "base_path": "/path/to/hrrr",
                 "forecast_hour": 0,
@@ -37,7 +38,8 @@ def _make_multisource_config() -> dict[str, Any]:
                 },
             },
             "Test_HRRR_NAT": {
-                "dataset_type": "hrrr_nat",
+                "dataset_type": "hrrr",
+                "product": "wrfnatf",
                 "mode": "local",
                 "base_path": "/path/to/hrrr_nat",
                 "forecast_hour": 0,
@@ -47,7 +49,8 @@ def _make_multisource_config() -> dict[str, Any]:
                 },
             },
             "Test_HRRR_SUBH": {
-                "dataset_type": "hrrr_subhf",
+                "dataset_type": "hrrr",
+                "product": "wrfsubhf",
                 "mode": "local",
                 "base_path": "/path/to/hrrr_subhf",
                 "forecast_hour": 0,
@@ -67,16 +70,17 @@ def _make_multisource_config() -> dict[str, Any]:
 def test_get_specific_product_config():
     data_config = _make_multisource_config()
 
-    dataset_types_check = ["hrrr", "hrrr_nat", "hrrr_subhf"]
+    dataset_types_check = "hrrr"
+    product_check = ["wrfprsf", "wrfnatf", "wrfsubhf"]
 
-    # Main HRRR
-    for source, dsn_check in zip(data_config["source"].keys(), dataset_types_check):
+    for source, product in zip(data_config["source"].keys(), product_check):
         subconfig = make_single_source_subconfig(data_config, source)
         assert len(subconfig["source"]) == 1
         assert source in subconfig["source"]
         assert subconfig["source"][source] == data_config["source"][source]
 
-        assert subconfig["source"][source]["dataset_type"] == dsn_check
+        assert subconfig["source"][source]["dataset_type"] == dataset_types_check
+        assert subconfig["source"][source]["product"] == product
 
 
 # ---------------------------------------------------------------------------
@@ -99,9 +103,10 @@ def _make_config_download_factory(_make_base_path: pathlib.Path) -> Any:
     but we want to share the same base path across tests.
     """
 
-    def _make_config_download(source_key: str = "HRRR", **extra_source) -> dict[str, Any]:
+    def _make_config_download(product: VALID_PRODUCTS = "wrfprsf", **extra_source) -> dict[str, Any]:
         source_defaults: dict[str, Any] = {
-            "dataset_type": source_key.lower(),
+            "dataset_type": "hrrr",
+            "product": product,
             "mode": "local",
             "base_path": _make_base_path,
             "forecast_hour": 0,
@@ -112,7 +117,7 @@ def _make_config_download_factory(_make_base_path: pathlib.Path) -> Any:
         }
         source_defaults.update(extra_source)
         resulting_config: dict[str, Any] = {
-            "source": {source_key: source_defaults},
+            "source": {f"Test_HRRR_{product}": source_defaults},
             "start_datetime": "2022-01-01 01:00",
             "end_datetime": "2022-01-01 02:00",
             "timestep": "1h",
@@ -126,7 +131,7 @@ def _make_config_download_factory(_make_base_path: pathlib.Path) -> Any:
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_download_hrrr(_make_config_download_factory):
     time_start_make_config = time.time()
-    data_config = _make_config_download_factory(source_key="HRRR")
+    data_config = _make_config_download_factory(product="wrfprsf")
     time_end_make_config = time.time()
     # Will print if test fails
     print(f"\nMake config took {time_end_make_config - time_start_make_config:.2f} seconds")
@@ -138,7 +143,7 @@ def test_download_hrrr(_make_config_download_factory):
     print(f"Download took {time_end_download - time_start_download:.2f} seconds")
 
     # Check the temporary directory for the expected files.
-    tmp_dir = pathlib.Path(data_config["source"]["HRRR"]["base_path"])
+    tmp_dir = pathlib.Path(data_config["source"]["Test_HRRR_wrfprsf"]["base_path"])
     assert tmp_dir.exists()
     assert tmp_dir.is_dir()
 
@@ -178,7 +183,7 @@ def test_download_hrrr(_make_config_download_factory):
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_download_hrrr_subhf(_make_config_download_factory):
     time_start_make_config = time.time()
-    data_config = _make_config_download_factory(source_key="HRRR_SUBH")
+    data_config = _make_config_download_factory(product="wrfsubhf")
     time_end_make_config = time.time()
     # Will print if test fails
     print(f"\nMake config took {time_end_make_config - time_start_make_config:.2f} seconds")
@@ -190,7 +195,7 @@ def test_download_hrrr_subhf(_make_config_download_factory):
     print(f"Download took {time_end_download - time_start_download:.2f} seconds")
 
     # Check the temporary directory for the expected files.
-    tmp_dir = pathlib.Path(data_config["source"]["HRRR_SUBH"]["base_path"])
+    tmp_dir = pathlib.Path(data_config["source"]["Test_HRRR_wrfsubhf"]["base_path"])
     assert tmp_dir.exists()
     assert tmp_dir.is_dir()
 

@@ -11,7 +11,7 @@ Remote/dataset integration tests are run unless the environment variable
 import os
 import textwrap
 
-from typing import Any
+from typing import Any, get_args
 
 import pandas as pd
 import numpy as np
@@ -39,7 +39,7 @@ from credit.datasets.hrrr import (
 
 
 def test_valid_products():
-    assert VALID_PRODUCTS == {"HRRR": "wrfprsf", "HRRR_NAT": "wrfnatf", "HRRR_SUBH": "wrfsubhf"}
+    assert sorted(get_args(VALID_PRODUCTS)) == sorted(["wrfprsf", "wrfnatf", "wrfsubhf"])
 
 
 # ---------------------------------------------------------------------------
@@ -328,9 +328,10 @@ def test_find_subhf_entry_miss():
 # ---------------------------------------------------------------------------
 
 
-def _make_config(source_key: str = "HRRR", **extra_source: Any) -> dict[str, Any]:
+def _make_config(product_name: VALID_PRODUCTS = "wrfprsf", **extra_source: Any) -> dict[str, Any]:
     source_defaults: dict[str, Any] = {
-        "dataset_type": source_key.lower(),
+        "dataset_type": "hrrr",
+        "product": product_name,
         "mode": "remote",
         "forecast_hour": 0,
         "levels": [500, 700, 850],
@@ -339,7 +340,7 @@ def _make_config(source_key: str = "HRRR", **extra_source: Any) -> dict[str, Any
         },
     }
     source_defaults.update(extra_source)
-    test_source_key = f"Test_{source_key}"
+    test_source_key = f"Test_HRRR_{product_name}"
     return {
         "source": {test_source_key: source_defaults},
         "start_datetime": "2022-01-01 00:00",
@@ -350,7 +351,7 @@ def _make_config(source_key: str = "HRRR", **extra_source: Any) -> dict[str, Any
 
 
 def test_hrrr_dataset_wrfprsf_defaults():
-    cfg = _make_config("HRRR")
+    cfg = _make_config("wrfprsf")
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfprsf"
     assert ds.dataset_type == "hrrr"
@@ -358,21 +359,21 @@ def test_hrrr_dataset_wrfprsf_defaults():
 
 
 def test_hrrr_dataset_wrfnatf():
-    cfg = _make_config("HRRR_NAT", variables={"prognostic": {"vars_3D": ["T", "U"], "vars_2D": []}})
+    cfg = _make_config("wrfnatf", variables={"prognostic": {"vars_3D": ["T", "U"], "vars_2D": []}})
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfnatf"
-    assert ds.dataset_type == "hrrr_nat"
+    assert ds.dataset_type == "hrrr"
 
 
 def test_hrrr_dataset_wrfsubhf():
     cfg = _make_config(
-        "HRRR_SUBH",
+        "wrfsubhf",
         variables={"prognostic": {"vars_3D": [], "vars_2D": ["t2m"]}},
     )
     cfg["timestep"] = "15min"
     ds = HRRRDataset(cfg)
     assert ds.product == "wrfsubhf"
-    assert ds.dataset_type == "hrrr_subh"
+    assert ds.dataset_type == "hrrr"
 
 
 def test_hrrr_dataset_invalid_product():
@@ -389,7 +390,7 @@ def test_hrrr_dataset_missing_source():
 
 
 def test_hrrr_dataset_wrong_config_hierarchy_passed_higher():
-    cfg = _make_config("HRRR")
+    cfg = _make_config("wrfprsf")
     data_cfg = {"data": cfg}
 
     with pytest.raises(KeyError, match="Expected 'source' key in data_config"):
@@ -397,13 +398,13 @@ def test_hrrr_dataset_wrong_config_hierarchy_passed_higher():
 
 
 def test_hrrr_dataset_wrong_config_hierarchy_passed_lower():
-    cfg = _make_config("HRRR")
+    cfg = _make_config("wrfprsf")
     with pytest.raises(KeyError, match="Expected 'source' key in data_config"):
         HRRRDataset(cfg["source"]["Test_HRRR"])
 
 
 def test_hrrr_dataset_only_one_of_multiple_sources():
-    cfg = _make_config("HRRR")
+    cfg = _make_config("wrfprsf")
     rest_cfg = {k: v for k, v in cfg.items() if k != "source"}
 
     other_dataset_type = ["ERA5", "MRMS", "NOT_VALID_DATASET"]
@@ -421,7 +422,7 @@ def test_hrrr_dataset_only_one_of_multiple_sources():
 
 
 def test_hrrr_local_no_base_path():
-    cfg = _make_config("HRRR", mode="local")
+    cfg = _make_config("wrfprsf", mode="local")
     assert "base_path" not in cfg["source"]["Test_HRRR"]
     with pytest.raises(ValueError, match="Missing 'base_path'"):
         HRRRDataset(cfg)
@@ -434,7 +435,7 @@ def test_hrrr_local_no_base_path():
 
 def test_hrrr_dataset_variable_types():
     cfg = _make_config(
-        "HRRR",
+        "wrfprsf",
         variables={
             "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m", "d2m"]},
             "diagnostic": {"vars_3D": ["RH"], "vars_2D": ["sp"]},
@@ -455,7 +456,7 @@ def test_hrrr_dataset_variable_types():
 
 def test_hrrr_dataset_unsupported_static_variables():
     cfg = _make_config(
-        "HRRR",
+        "wrfprsf",
         variables={
             "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
             "not_valid": {
@@ -469,28 +470,15 @@ def test_hrrr_dataset_unsupported_static_variables():
 
 
 def test_hrrr_dataset_unsupported_no_variables():
-    cfg = _make_config("HRRR", variables={})
+    cfg = _make_config("wrfprsf", variables={})
     del cfg["source"]["Test_HRRR"]["variables"]  # Simulate user forgetting to include "variables" key
     with pytest.raises(KeyError, match="Expected 'variables' key in source config"):
         HRRRDataset(cfg)
 
 
-# def test_hrrr_dataset_unsupported_variable_dim_names():
-#     cfg = _make_config(
-#         "HRRR",
-#         variables={
-#             "prognostic": {
-#                 "vars_4D": ["t2m"],  # invalid key "vars_4D"
-#             }
-#         },
-#     )
-#     with pytest.raises(ValueError, match="must define vars_3D and/or vars_2D"):
-#         HRRRDataset(cfg)
-
-
 def test_hrrr_dataset_empty_variable_dim_names():
     cfg = _make_config(
-        "HRRR",
+        "wrfprsf",
         variables={
             "prognostic": {
                 "vars_3D": [],  # empty list of variables
@@ -504,7 +492,7 @@ def test_hrrr_dataset_empty_variable_dim_names():
 
 def test_hrrr_dataset_unsupported_variable_registry_name():
     cfg = _make_config(
-        "HRRR",
+        "wrfprsf",
         variables={
             "prognostic": {
                 "vars_3D": ["T", "horizontal wind"],  # "horizontal wind" is not a valid variable name in the registry
@@ -746,7 +734,7 @@ def test_hrrr_spatial_slicing_with_large_extent():
     se_arrays = make_example_lat_lon_array_from_southeast_corner()
 
     for lat_array, lon_array in [nw_arrays, se_arrays]:
-        cfg = _make_config("HRRR", extent=_make_extent_from_dict(_make_large_extent_dict()))
+        cfg = _make_config("wrfprsf", extent=_make_extent_from_dict(_make_large_extent_dict()))
         ds = HRRRDataset(cfg)
         curr_slice = ds._get_spatial_slice(lat_array, lon_array)
 
@@ -766,7 +754,7 @@ def test_hrrr_spatial_slicing_with_small_inner_extent():
     lat_array, lon_array = make_example_sparse_lat_lon_array()
 
     extent = _make_extent_from_dict(_make_small_inner_extent_dict())
-    cfg = _make_config("HRRR", extent=extent)
+    cfg = _make_config("wrfprsf", extent=extent)
     ds = HRRRDataset(cfg)
     curr_slice = ds._get_spatial_slice(lat_array, lon_array)
     print(curr_slice)
@@ -778,7 +766,7 @@ def test_hrrr_spatial_slicing_with_small_inner_extent():
 
 
 def test_hrrr_spatial_slicing_no_extent():
-    cfg = _make_config("HRRR")
+    cfg = _make_config("wrfprsf")
     assert "extent" not in cfg["source"]["Test_HRRR"]
     ds = HRRRDataset(cfg)
     lat_array, lon_array = _make_example_lat_lon_array_from_northwest_corner()
@@ -793,7 +781,7 @@ def test_hrrr_spatial_slicing_extent_out_of_bounds():
     lat_array, lon_array = make_example_sparse_lat_lon_array()
 
     # Extent that is completely outside the lat/lon arrays (near French Polynesia)
-    cfg = _make_config("HRRR", extent=[-150, -130, -20, -25])
+    cfg = _make_config("wrfprsf", extent=[-150, -130, -20, -25])
     ds = HRRRDataset(cfg)
     with pytest.raises(ValueError, match="does not intersect the HRRR CONUS domain"):
         ds._get_spatial_slice(lat_array, lon_array)
@@ -804,7 +792,7 @@ def test_hrrr_spatial_slicing_incorrect_lat_lon_arrays():
     lon_array_wrong_shape = np.array([-122.0, -121.0, -120.0])
 
     extent = _make_extent_from_dict(_make_small_inner_extent_dict())
-    cfg = _make_config("HRRR", extent=extent)
+    cfg = _make_config("wrfprsf", extent=extent)
     ds = HRRRDataset(cfg)
 
     with pytest.raises(ValueError, match="Expected 2D lat/lon arrays"):
@@ -834,7 +822,7 @@ def test_hrrr_spatial_slicing_incorrect_lat_lon_arrays():
 
 
 def test_register_field_none_dictionary():
-    cfg = _make_config("HRRR")
+    cfg = _make_config("wrfprsf")
     ds = HRRRDataset(cfg)
     assert ds._register_field(field_type="prognostic", field_config=None) is None
 
@@ -850,7 +838,7 @@ REASON_SKIP_REMOTE = "Set SKIP_HRRR_REMOTE=1 to skip remote tests"
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_wrfprsf_getitem():
     cfg = _make_config(
-        "HRRR",
+        "wrfprsf",
         levels=[500, 700],
         variables={"prognostic": {"vars_3D": ["T"], "vars_2D": ["t2m"]}, "static": {"vars_2D": ["orog"]}},
     )
@@ -868,7 +856,7 @@ def test_hrrr_remote_wrfprsf_getitem():
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_wrfnatf_getitem():
     cfg = _make_config(
-        "HRRR_NAT",
+        "wrfnatf",
         levels=[10, 20],
         variables={"prognostic": {"vars_3D": ["T"], "vars_2D": []}, "static": {"vars_2D": ["orog"]}},
     )
@@ -881,7 +869,7 @@ def test_hrrr_remote_wrfnatf_getitem():
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_wrfsubhf_getitem():
     cfg = _make_config(
-        "HRRR_SUBH",
+        "wrfsubhf",
         levels=[10, 20],
         variables={"prognostic": {"vars_2D": ["t2m"]}, "static": {"vars_2D": ["orog"]}},
     )
@@ -894,7 +882,7 @@ def test_hrrr_remote_wrfsubhf_getitem():
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_wrfsubhf_getitem_3D_variable():
     cfg = _make_config(
-        "HRRR_SUBH",
+        "wrfsubhf",
         levels=[10, 20],
         variables={
             "prognostic": {"vars_3D": ["T"]},
@@ -912,7 +900,7 @@ def test_hrrr_remote_wrfsubhf_getitem_3D_variable():
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_return_target_true():
     cfg = _make_config(
-        "HRRR",
+        "wrfprsf",
         variables={
             "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m", "d2m"]},
             "diagnostic": {"vars_3D": ["RH"], "vars_2D": ["sp"]},
@@ -933,7 +921,7 @@ def test_hrrr_remote_return_target_true():
 
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_hrrr_remote_getitem_invalid_datetime():
-    cfg = _make_config("HRRR")
+    cfg = _make_config("wrfprsf")
     ds = HRRRDataset(cfg)
     invalid_time = pd.Timestamp("1999-01-01 00:00")
     with pytest.raises(FileNotFoundError, match="HRRR .idx file not found"):
