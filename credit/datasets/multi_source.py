@@ -10,11 +10,9 @@ instantiated; absent sources are silently skipped.
 Sample structure returned by __getitem__::
 
     {
-        "era5": {
-            "input":    {"era5/prognostic/3d/T": tensor, ...},
-            "target":   {"era5/prognostic/3d/T": tensor, ...},  # return_target only
-            "metadata": {"input_datetime": int, "target_datetime": int},
-        },
+        "input":    {"era5": {"era5/prognostic/3d/T": tensor, ...}, ...},
+        "target":   {"era5": {"era5/prognostic/3d/T": tensor, ...}, ...},  # return_target only
+        "metadata": {"era5": {"input_datetime": int, "target_datetime": int}, ...},
     }
 
 Usage::
@@ -47,7 +45,7 @@ import pandas as pd
 from credit.datasets.base_dataset import AbstractBaseDataset
 
 from credit.datasets.base_dataset import BaseDataset
-from credit.datasets.era5 import ERA5Dataset, ARCOERA5Dataset
+from credit.datasets.era5 import LocalDataset, ARCOERA5Dataset
 from credit.datasets.mrms import MRMSDataset
 from credit.datasets.goes import GOESDataset
 from credit.datasets.hrrr import HRRRDataset
@@ -58,7 +56,7 @@ logger = logging.getLogger(__name__)
 # Add entries here to register new data sources.
 _SOURCE_REGISTRY: dict[str, type] = {
     "BASE": BaseDataset,  # for placeholders, testing, and examples
-    "ERA5": ERA5Dataset,
+    "LOCAL": LocalDataset,
     "ARCO_ERA5": ARCOERA5Dataset,
     "MRMS": MRMSDataset,
     "GOES": GOESDataset,
@@ -170,12 +168,17 @@ class MultiSourceDataset(AbstractBaseDataset):
                 produced by the sampler.
 
         Returns:
-            Dict keyed by lowercase source name, each value being the
-            sub-dataset's own sample dict::
+            Dict keyed by data type, each value being a dict of source name
+            to that source's data::
 
-                {"input": {...}, "target": {...}, "metadata": {...}}
+                {"input": {"era5": {...}, ...}, "target": {...}, "metadata": {...}}
         """
-        return {name: ds[args] for name, ds in self.datasets.items()}
+        raw = {name: ds[args] for name, ds in self.datasets.items()}
+        result: dict[str, dict[str, Any]] = {}
+        for source_name, source_dict in raw.items():
+            for data_type, data in source_dict.items():
+                result.setdefault(data_type, {})[source_name] = data
+        return result
 
     # ------------------------------------------------------------------
     # Private helpers
