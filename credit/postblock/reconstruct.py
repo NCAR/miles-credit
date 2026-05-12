@@ -56,7 +56,9 @@ class Reconstruct(BasePostblock):
 
             # Build nested dict matching input convention: source/dataset_type/field_type/dim/var_name
             source, dataset_type, field_type, dim, var_name = var_key.split("/")
-            prediction.setdefault(source, {}).setdefault(dataset_type, {}).setdefault(field_type, {}).setdefault(dim, {})[var_name] = var_tensor
+            prediction.setdefault(source, {}).setdefault(dataset_type, {}).setdefault(field_type, {}).setdefault(
+                dim, {}
+            )[var_name] = var_tensor
 
         batch_dict["prediction"] = prediction
         return batch_dict
