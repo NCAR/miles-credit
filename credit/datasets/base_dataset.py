@@ -82,7 +82,7 @@ class AbstractBaseDataset(Dataset[Any]):
         raise NotImplementedError
 
     def _get_file_source(
-        self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]
+        self, field_config: dict[str, Any]
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         raise NotImplementedError
 
@@ -580,15 +580,14 @@ class BaseDataset(AbstractBaseDataset):
             "vars_2D": field_config.get("vars_2D") or [],
         }
 
-        self.file_dict[field_type] = self._get_file_source(field_type, field_config)
+        self.file_dict[field_type] = self._get_file_source(field_config)
 
     def _get_file_source(
-        self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any]
+        self, field_config: dict[str, Any]
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         """Return the file source for a field. Override in subclasses for different modes/backends.
 
         Args:
-            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
             field_config (dict[str, Any]): Validated field-type config dict.
 
         Raises:

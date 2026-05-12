@@ -164,3 +164,20 @@ def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:
         ts.second,
         calendar=calendar,
     )
+
+def _init_fs(self):
+    """Lazily initialize an anonymous ``s3fs.S3FileSystem`` instance.
+
+    Called automatically on the first ``__extract_field__`` (called within ``__getitem__``) 
+    invocation whenm``mode`` is ``"remote"``. The filesystem object is cached in ``_fs``
+    for re-use across later calls.
+
+    """
+    import s3fs
+
+    fs_config = {
+        "anon": True,
+        "token": "anon",
+        "default_block_size": 8**20,
+    }
+    return s3fs.S3FileSystem(**fs_config)

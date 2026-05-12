@@ -47,8 +47,7 @@ import pandas as pd
 from credit.datasets.base_dataset import AbstractBaseDataset
 
 from credit.datasets.base_dataset import BaseDataset
-from credit.datasets.era5 import ERA5Dataset
-from credit.datasets.era5 import ARCOERA5Dataset
+from credit.datasets.era5 import ERA5Dataset, ARCOERA5Dataset
 from credit.datasets.mrms import MRMSDataset
 from credit.datasets.goes import GOESDataset
 from credit.datasets.hrrr import HRRRDataset
@@ -92,24 +91,24 @@ def make_single_source_subconfig(config: dict[str, Any], user_dataset_name: str)
 
 def route_to_dataset_class(source_cfg: dict[str, Any]) -> type:
     """
-    Return the appropriate Dataset class based on the "dataset_name" field in the source config.
+    Return the appropriate Dataset class based on the "dataset_type" field in the source config.
 
     Args:
         source_cfg: Config dict for a single source (e.g. config["source"]["Example_ERA5"]).
 
     Returns:
-        Dataset class corresponding to the "dataset_name" field.
+        Dataset class corresponding to the "dataset_type" field.
 
     Raises:
-        ValueError: If the "dataset_name" field is missing or does not correspond to a registered dataset.
+        ValueError: If the "dataset_type" field is missing or does not correspond to a registered dataset.
     """
-    dataset_name = source_cfg.get("dataset_name", "").upper()
-    if not dataset_name:
-        raise ValueError("Source config must contain a 'dataset_name' field.")
-    cls = _SOURCE_REGISTRY.get(dataset_name)
+    dataset_type = source_cfg.get("dataset_type", "").upper()
+    if not dataset_type:
+        raise ValueError("Source config must contain a 'dataset_type' field.")
+    cls = _SOURCE_REGISTRY.get(dataset_type)
     if not cls:
         raise ValueError(
-            f"Unrecognized dataset_name '{dataset_name}' in source config. Must be one of: {list(_SOURCE_REGISTRY.keys())}"
+            f"Unrecognized dataset_type '{dataset_type}' in source config. Must be one of: {list(_SOURCE_REGISTRY.keys())}"
         )
     return cls
 
