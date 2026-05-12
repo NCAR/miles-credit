@@ -620,5 +620,5 @@ class WeatherBench2ERA5Dataset(BaseDataset):
             for vname in vars_2D:
                 arr = ds_t[vname].values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                key = self._get_field_name(field_type, "3d", vname)
+                key = self._get_field_name(field_type, "2d", vname)
                 sample[key] = tensor
