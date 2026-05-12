@@ -175,7 +175,7 @@ def minimal_arco_era5_config() -> dict[str, Any]:
         "start_datetime": "2022-12-25",
         "end_datetime": "2023-01-05",
         "source": {
-            "Test_ARCO_ERA5": {
+            "Test_ARCOERA5": {
                 "dataset_type": "arco_era5",
                 "level_coord": "level",
                 "levels": [1000, 850],
@@ -459,18 +459,18 @@ def test_refactor_dataloader_default_collate(
         assert batch["target"]["Test_ERA5/era5/prognostic/3d/T"].shape == (2, n_levels, 1, lat, lon)
 
 
-def test_arco_era5_single_load(minimal_arco_era5_config: dict[str, Any]):
+def Test_ARCOERA5_single_load(minimal_arco_era5_config: dict[str, Any]):
     arco_ds: ARCOERA5Dataset = ARCOERA5Dataset(minimal_arco_era5_config, return_target=True)
     sample = arco_ds[(pd.Timestamp("2022-12-31 00:00"), 0)]
     assert isinstance(sample, dict)
     assert "input" in sample
     assert "metadata" in sample
     assert "target" in sample
-    assert sample["input"]["Test_ARCO_ERA5/arco_era5/prognostic/3d/temperature"].shape == (
-        len(minimal_arco_era5_config["source"]["Test_ARCO_ERA5"]["levels"]),
+    assert sample["input"]["Test_ARCOERA5/arco_era5/prognostic/3d/temperature"].shape == (
+        len(minimal_arco_era5_config["source"]["Test_ARCOERA5"]["levels"]),
         1,
         721,
         1440,
     )
-    assert sample["target"]["Test_ARCO_ERA5/arco_era5/prognostic/3d/temperature"].min() > 200
-    assert ~torch.any(torch.isnan(sample["target"]["Test_ARCO_ERA5/arco_era5/prognostic/3d/temperature"]))
+    assert sample["target"]["Test_ARCOERA5/arco_era5/prognostic/3d/temperature"].min() > 200
+    assert ~torch.any(torch.isnan(sample["target"]["Test_ARCOERA5/arco_era5/prognostic/3d/temperature"]))

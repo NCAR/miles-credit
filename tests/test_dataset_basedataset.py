@@ -398,6 +398,6 @@ def test_abstract_base_dataset_methods_raise_error() -> None:
     with pytest.raises(NotImplementedError):
         dataset._register_field("prognostic", {})  # pyright: ignore[reportPrivateUsage]
     with pytest.raises(NotImplementedError):
-        dataset._get_file_source("dynamic_forcing", {})  # pyright: ignore[reportPrivateUsage]
+        dataset._get_file_source({})  # pyright: ignore[reportPrivateUsage]
     with pytest.raises(NotImplementedError):
         dataset._extract_field("prognostic", pd.Timestamp("2023-01-01"), {})  # pyright: ignore[reportPrivateUsage]

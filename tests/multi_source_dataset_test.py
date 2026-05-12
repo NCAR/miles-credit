@@ -41,17 +41,17 @@ def multi_config() -> dict[str, Any]:
     return {
         "source": {
             "Base1": {
-                "dataset_name": "base",
+                "dataset_type": "base",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                 },
             },
             "Base2": {
-                "dataset_name": "base",
+                "dataset_type": "base",
                 "variables": {"dynamic_forcing": {"vars_2D": ["d2m"]}, "diagnostic": {"vars_3D": ["V"]}},
             },
             "Base3": {
-                "dataset_name": "base",
+                "dataset_type": "base",
                 "variables": {
                     "diagnostic": {"vars_3D": ["V"]},
                     "static": {"vars_2D": ["orog"]},
@@ -70,7 +70,7 @@ def multi_config_time_subsets() -> dict[str, Any]:
     return {
         "source": {
             "Base1": {
-                "dataset_name": "base",
+                "dataset_type": "base",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                 },
@@ -78,12 +78,12 @@ def multi_config_time_subsets() -> dict[str, Any]:
                 "end_datetime": "2022-12-31",
             },
             "Base2": {
-                "dataset_name": "base",
+                "dataset_type": "base",
                 "variables": {"dynamic_forcing": {"vars_2D": ["d2m"]}, "diagnostic": {"vars_3D": ["V"]}},
                 "timestep": "12h",
             },
             "Base3": {
-                "dataset_name": "base",
+                "dataset_type": "base",
                 "variables": {
                     "static": {"vars_2D": ["orog"]},
                 },
@@ -101,7 +101,7 @@ def one_source_config() -> dict[str, Any]:
     return {
         "source": {
             "Single_Base": {
-                "dataset_name": "base",
+                "dataset_type": "base",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                     "dynamic_forcing": {"vars_2D": ["d2m"]},
