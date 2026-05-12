@@ -42,6 +42,8 @@ preblocks:
     args:
       mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/mean_6h_1979_2018_16lev_0.25deg.nc"
       std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/std_6h_1979_2018_16lev_0.25deg.nc"
+  concat:
+    type: concat
 
 model:
     type: "crossformer"
