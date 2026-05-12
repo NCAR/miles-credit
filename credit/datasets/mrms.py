@@ -59,7 +59,7 @@ import torch
 import xarray as xr
 
 from credit.datasets._utils import _find_file, _map_files
-from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets.base_dataset import BaseDataset
 
 
 def _apply_extent(da: xr.DataArray, extent: list[float] | None) -> xr.DataArray:
@@ -192,13 +192,11 @@ class MRMSDataset(BaseDataset):
 
     def _get_file_source(
         self,
-        field_type: VALID_FIELD_TYPES,
         field_config: dict[str, Any],
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         """Return the file source for a field. Override in subclasses for different modes/backends.
 
         Args:
-            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
             field_config (dict[str, Any]): Validated field-type config dict.
 
         Raises:

@@ -158,13 +158,7 @@ class GOESDataset(BaseDataset):
                     product: "ABI-L2-MCMIPC"
                     variables:
                         prognostic:
-                            vars_2D:
-                                - "CMI_C04"
-                                - "CMI_C07"
-                                - "CMI_C08"
-                                - "CMI_C09"
-                                - "CMI_C10"
-                                - "CMI_C13"
+                            vars_2D: ["CMI_C04", "CMI_C07", "CMI_C08", "CMI_C09", "CMI_C10", "CMI_C13"]
                             path: "/glade/derecho/scratch/kevinyang/datasets/goes/"
                     diagnostic: null
                     dynamic_forcing: null
@@ -187,13 +181,7 @@ class GOESDataset(BaseDataset):
                     product: "ABI-L2-MCMIPC"
                     variables:
                         prognostic:
-                            vars_2D:
-                                - "CMI_C04"
-                                - "CMI_C07"
-                                - "CMI_C08"
-                                - "CMI_C09"
-                                - "CMI_C10"
-                                - "CMI_C13"
+                            vars_2D: ["CMI_C04", "CMI_C07", "CMI_C08", "CMI_C09", "CMI_C10", "CMI_C13"]
                     diagnostic: null
                     dynamic_forcing: null
                 latlon2d_dir: "/glade/derecho/scratch/kevinyang/datasets/goes/"
