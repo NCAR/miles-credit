@@ -17,7 +17,7 @@ bridgescaler
 segmentation-models-pytorch
 haversine
 pvlib
-torch-harmonics
+torch-harmonics<0.9
 torch_geometric
 fsspec
 gcsfs
