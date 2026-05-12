@@ -11,6 +11,7 @@ _CLASS_SOURCES = {
     "MultiSourceDataset": ("credit.datasets.multi_source", "MultiSourceDataset"),
     "ERA5Dataset": ("credit.datasets.era5", "ERA5Dataset"),
     "ARCOERA5Dataset": ("credit.datasets.era5", "ARCOERA5Dataset"),
+    "WeatherBench2ERA5Dataset": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
     "GOESDataset": ("credit.datasets.goes", "GOESDataset"),
     "MRMSDataset": ("credit.datasets.mrms", "MRMSDataset"),
     "HRRRDataset": ("credit.datasets.hrrr", "HRRRDataset"),

@@ -525,25 +525,26 @@ class WeatherBench2ERA5Dataset(BaseDataset):
         return_target: bool = False,
     ) -> None:
         super().__init__(data_config, return_target)
-
-        source_cfg = data_config["source"]["WeatherBench2_ERA5"]
-
+        assert self.curr_source_cfg["dataset_type"] == "weatherbench2_era5", (
+            f"Expected dataset_type 'arco_era5' in config for ARCOERA5Dataset, got '{self.curr_source_cfg['dataset_type']}'"
+        )
+        self.dataset_type: str = "weatherbench2_era5"
         # Config key takes precedence over the kwarg default.
-        self.resolution: str = source_cfg.get("resolution", resolution)
+        self.resolution: str = self.curr_source_cfg.get("resolution", resolution)
         if self.resolution not in _WB2_ERA5_STORE_PATHS:
             raise ValueError(f"Invalid resolution '{self.resolution}'. Valid options: {sorted(_WB2_ERA5_STORE_PATHS)}")
 
         self.store_path: str = _WB2_ERA5_STORE_PATHS[self.resolution]
-        self.level_coord: str = source_cfg.get("level_coord", "level")
-        self.levels: list[int] = source_cfg.get("levels") or _WB2_ERA5_DEFAULT_LEVELS[self.resolution]
-        self.source_name: str = "weatherbench2_era5"
+        self.level_coord: str = self.curr_source_cfg.get("level_coord", "level")
+        self.levels: list[int] = self.curr_source_cfg.get("levels") or _WB2_ERA5_DEFAULT_LEVELS[self.resolution]
         self.static_metadata: dict = {
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
         # Initialised lazily on the first __getitem__ call (worker-safe).
-        self.fs = None
+        self._fs = None
         self.store = None
+        super().init_register_all_fields()
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -558,8 +559,8 @@ class WeatherBench2ERA5Dataset(BaseDataset):
             "asynchronous": True,
             "skip_instance_cache": True,
         }
-        self.fs = GCSFileSystem(**fs_config)
-        self.store = zarr.storage.FsspecStore(fs=self.fs, path=self.store_path)
+        self._fs = GCSFileSystem(**fs_config)
+        self.store = zarr.storage.FsspecStore(fs=self._fs, path=self.store_path)
 
     def _build_timestamps(self) -> pd.DatetimeIndex:
         """Return valid initialisation timestamps for the dataset.

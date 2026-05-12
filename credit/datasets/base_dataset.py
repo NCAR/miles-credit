@@ -158,7 +158,7 @@ class BaseDataset(AbstractBaseDataset):
             return_target: Whether to return the target (t+1) in addition to the input (t). This is used for prognostic and diagnostic fields.
 
         """
-
+        super().__init__(data_config, return_target)
         # Enforce types
         if not isinstance(data_config, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"Expected data_config to be a dict, but got {type(data_config)}")
@@ -228,9 +228,18 @@ class BaseDataset(AbstractBaseDataset):
         # Placeholder for static metadata
         self.static_metadata: dict[str, Any] = {}
 
+        # By default, we suggest that the inherited dataset use both file_dict and var_dict.
+        # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
+        #   tuples produced by _map_files. _extract_field can then use the list to find the
+        #   appropriate file for a given timestamp.
+        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field
+        #   can then use this to know which variables to extract for each field type from the file.
+        self.file_dict: dict[str, Any] = {}
+        self.var_dict: dict[str, Any] = {}
+
         # Only if this is __NOT__ an inherited class, we will immediately run init_register_all_fields.
         # In an inherited class, you should call super().init_register_all_fields() at the end of your
-        # __init__ method after you have set up any additional parameters needed for your
+        # __init__ method after you have set up any additional parameters needed for your dataset.
         if type(self) is BaseDataset:
             self.init_register_all_fields()
 
@@ -535,15 +544,6 @@ class BaseDataset(AbstractBaseDataset):
                 "Expected 'variables' key in source config, but it was not found. "
                 + f"Full source config provided: \n{self.curr_source_cfg}"
             )
-
-        # By default, we suggest that the inherited dataset use both file_dict and var_dict.
-        # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
-        #   tuples produced by _map_files. _extract_field can then use the list to find the
-        #   appropriate file for a given timestamp.
-        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field
-        #   can then use this to know which variables to extract for each field type from the file.
-        self.file_dict: dict[str, Any] = {}
-        self.var_dict: dict[str, Any] = {}
         for field_type, field_config in self.curr_source_cfg["variables"].items():
             # Notice that we are expecting to call the same _register_field method for each field type.
             # Check or override this method as needed based on the expected structure of your config for each field type.
