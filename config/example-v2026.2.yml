@@ -29,6 +29,7 @@ seed: 1000
 data:
   source:
     ERA5:
+      dataset_type: "era5"
       level_coord: "level"
       levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
       variables:

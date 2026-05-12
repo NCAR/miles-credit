@@ -169,10 +169,6 @@ class TrainerERA5Gen2(BaseTrainer):
                 batch = next(dl)
                 _batch = apply_preblocks(self.preblocks, batch, device=self.device)
                 x_raw, y_raw = _batch["input"], _batch["target"]
-                # ERA5Dataset outputs 5D tensors (B, C, frames, H, W); collapse frames dim
-                if x_raw.dim() == 5:
-                    x_raw = x_raw.flatten(1, 2)
-                    y_raw = y_raw.flatten(1, 2)
 
                 if t == 1:
                     x = x_raw.float()
@@ -325,10 +321,6 @@ class TrainerERA5Gen2(BaseTrainer):
                     batch = next(dl)
                     _batch = apply_preblocks(self.preblocks, batch, device=self.device)
                     x_raw, y_raw = _batch["input"], _batch["target"]
-                    # ERA5Dataset outputs 5D tensors (B, C, frames, H, W); collapse frames dim
-                    if x_raw.dim() == 5:
-                        x_raw = x_raw.flatten(1, 2)
-                        y_raw = y_raw.flatten(1, 2)
 
                     if t == 1:
                         x = x_raw.float()

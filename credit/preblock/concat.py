@@ -108,7 +108,7 @@ class ConcatToTensor(BasePreblock):
                         # Also track predictable variables for the output map
                         # Key format: source/field_type/dim/varname
                         parts = var_key.split("/")
-                        if len(parts) >= 2 and parts[1] in _PREDICTABLE_FIELD_TYPES:
+                        if len(parts) >= 2 and parts[2] in _PREDICTABLE_FIELD_TYPES:
                             output_channel_map[var_key] = {
                                 "slice": slice(output_cursor, output_cursor + n_ch),
                                 "orig_shape": (n_levels, T),
