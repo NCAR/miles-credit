@@ -19,11 +19,18 @@ ms_loader = DataLoader(ms_dataset, batch_sampler=ms_sampler, num_workers=0, pin_
 sample = next(iter(ms_loader))
 
 print(sample.keys())
-print(sample["era5"].keys())
-print(sample["mrms"].keys())
-print(sample["era5"]["input"].keys())
-print(sample["mrms"]["input"].keys())
-print(sample["era5"]["target"].keys())
-print(sample["mrms"]["target"].keys())
-print(sample["era5"]["metadata"])
-print(sample["mrms"]["metadata"])
+
+print(sample["ERA5_LowerAir"]["era5"].keys())
+print(sample["ERA5_LowerAir"]["era5"]["input"].keys())
+print(sample["ERA5_LowerAir"]["era5"]["target"].keys())
+print(sample["ERA5_LowerAir"]["era5"]["metadata"])
+
+print(sample["ERA5_UpperAir"]["era5"].keys())
+print(sample["ERA5_UpperAir"]["era5"]["input"].keys())
+print(sample["ERA5_UpperAir"]["era5"]["target"].keys())
+print(sample["ERA5_UpperAir"]["era5"]["metadata"])
+
+print(sample["MRMS"]["mrms"].keys())
+print(sample["MRMS"]["mrms"]["input"].keys())
+print(sample["MRMS"]["mrms"]["target"].keys())
+print(sample["MRMS"]["mrms"]["metadata"])
