@@ -10,6 +10,7 @@ lookup, supporting any temporal file granularity (annual, monthly, daily, etc.).
 from __future__ import annotations
 
 import bisect
+import cftime
 import os
 import re
 from datetime import datetime as dt_cls
@@ -141,3 +142,43 @@ def _find_file(
     if idx >= 0 and t <= intervals[idx][1]:
         return intervals[idx][2]
     raise KeyError(f"No file found covering timestamp {t}. Check that your data files span the requested time range.")
+
+
+def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:
+    """Convert a pandas Timestamp to a cftime.datetime.
+
+    Args:
+        ts: Pandas Timestamp to convert.
+        calendar: cftime calendar string read from the dataset
+            (e.g. ``"noleap"``, ``"gregorian"``, ``"proleptic_gregorian"``).
+
+    Returns:
+        cftime.datetime with the specified calendar.
+    """
+    return cftime.datetime(
+        ts.year,
+        ts.month,
+        ts.day,
+        ts.hour,
+        ts.minute,
+        ts.second,
+        calendar=calendar,
+    )
+
+
+def _init_fs(self):
+    """Lazily initialize an anonymous ``s3fs.S3FileSystem`` instance.
+
+    Called automatically on the first ``__extract_field__`` (called within ``__getitem__``)
+    invocation whenm``mode`` is ``"remote"``. The filesystem object is cached in ``_fs``
+    for re-use across later calls.
+
+    """
+    import s3fs
+
+    fs_config = {
+        "anon": True,
+        "token": "anon",
+        "default_block_size": 8**20,
+    }
+    return s3fs.S3FileSystem(**fs_config)

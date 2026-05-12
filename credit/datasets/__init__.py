@@ -1,26 +1,33 @@
+import glob
+import importlib
+import logging
 import os
 import sys
-import glob
-import logging
-
-from credit.datasets.multi_source import MultiSourceDataset
-from credit.datasets.era5 import ERA5Dataset, ARCOERA5Dataset
-from credit.datasets.MRMS import MRMSDataset
-from credit.datasets.hrrr import HRRRDataset
-from credit.datasets.channel_layout import build_channel_layout, update_x
-
-__all__ = [
-    "MultiSourceDataset",
-    "ERA5Dataset",
-    "MRMSDataset",
-    "ARCOERA5Dataset",
-    "HRRRDataset",
-    "build_channel_layout",
-    "update_x",
-]
-
 
 logger = logging.getLogger(__name__)
+
+_CLASS_SOURCES = {
+    "BaseDataset": ("credit.datasets.base_dataset", "BaseDataset"),
+    "MultiSourceDataset": ("credit.datasets.multi_source", "MultiSourceDataset"),
+    "ERA5Dataset": ("credit.datasets.era5", "ERA5Dataset"),
+    "ARCOERA5Dataset": ("credit.datasets.era5", "ARCOERA5Dataset"),
+    "GOESDataset": ("credit.datasets.goes", "GOESDataset"),
+    "MRMSDataset": ("credit.datasets.mrms", "MRMSDataset"),
+    "HRRRDataset": ("credit.datasets.hrrr", "HRRRDataset"),
+    "build_channel_layout": ("credit.datasets.channel_layout", "build_channel_layout"),
+    "update_x": ("credit.datasets.channel_layout", "update_x"),
+}
+
+
+def __getattr__(name):
+    if name in _CLASS_SOURCES:
+        module_path, class_name = _CLASS_SOURCES[name]
+        try:
+            module = importlib.import_module(module_path)
+            return getattr(module, class_name)
+        except ImportError as exc:
+            raise AttributeError(f"Cannot import {name!r}: optional dependencies missing.") from exc
+    raise AttributeError(f"module 'credit.datasets' has no attribute {name!r}")
 
 
 def set_globals(data_config, namespace=None):

@@ -271,8 +271,8 @@ class TestReconstruct:
         Slash-joined key format: source/data_type/dim/var_name.
         """
         return {
-            "arco_era5/prognostic/3d/temperature": {"slice": slice(0, 4), "orig_shape": (4, 1)},
-            "arco_era5/prognostic/2d/surface_pressure": {"slice": slice(4, 5), "orig_shape": (1, 1)},
+            "Test_ARCOERA5/arco_era5/prognostic/3d/temperature": {"slice": slice(0, 4), "orig_shape": (4, 1)},
+            "Test_ARCOERA5/arco_era5/prognostic/2d/surface_pressure": {"slice": slice(4, 5), "orig_shape": (1, 1)},
         }
 
     def _metadata(self, output_map):
@@ -286,18 +286,19 @@ class TestReconstruct:
         return d
 
     def test_nested_dict_structure(self):
-        """Output mirrors apply_preblocks input convention: source/data_type/dim/var_name."""
+        """Output mirrors apply_preblocks input convention: source/dataset_type/field_type/dim/var_name."""
         from credit.postblock.reconstruct import Reconstruct
 
         result = Reconstruct()(self._batch_dict(torch.randn(2, 5, 8, 8)))
 
         pred = result["prediction"]
-        assert "arco_era5" in pred
-        assert "prognostic" in pred["arco_era5"]
-        assert "3d" in pred["arco_era5"]["prognostic"]
-        assert "2d" in pred["arco_era5"]["prognostic"]
-        assert "temperature" in pred["arco_era5"]["prognostic"]["3d"]
-        assert "surface_pressure" in pred["arco_era5"]["prognostic"]["2d"]
+        assert "Test_ARCOERA5" in pred
+        assert "arco_era5" in pred["Test_ARCOERA5"]
+        assert "prognostic" in pred["Test_ARCOERA5"]["arco_era5"]
+        assert "3d" in pred["Test_ARCOERA5"]["arco_era5"]["prognostic"]
+        assert "2d" in pred["Test_ARCOERA5"]["arco_era5"]["prognostic"]
+        assert "temperature" in pred["Test_ARCOERA5"]["arco_era5"]["prognostic"]["3d"]
+        assert "surface_pressure" in pred["Test_ARCOERA5"]["arco_era5"]["prognostic"]["2d"]
 
     def test_tensor_shapes_4d_input(self):
         """3D var → (B, n_levels, 1, H, W), 2D var → (B, 1, 1, H, W)."""
@@ -307,8 +308,8 @@ class TestReconstruct:
         result = Reconstruct()(self._batch_dict(torch.randn(B, 5, H, W)))
 
         pred = result["prediction"]
-        assert pred["arco_era5"]["prognostic"]["3d"]["temperature"].shape == (B, 4, 1, H, W)
-        assert pred["arco_era5"]["prognostic"]["2d"]["surface_pressure"].shape == (B, 1, 1, H, W)
+        assert pred["Test_ARCOERA5"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape == (B, 4, 1, H, W)
+        assert pred["Test_ARCOERA5"]["arco_era5"]["prognostic"]["2d"]["surface_pressure"].shape == (B, 1, 1, H, W)
 
     def test_5d_input_no_extra_dim(self):
         """5D y_pred (B, C, 1, H, W) produces the same shape as 4D — no spurious singleton."""
@@ -321,8 +322,8 @@ class TestReconstruct:
         result_4d = Reconstruct()(self._batch_dict(y_pred_4d))
         result_5d = Reconstruct()(self._batch_dict(y_pred_5d))
 
-        shape_4d = result_4d["prediction"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape
-        shape_5d = result_5d["prediction"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape
+        shape_4d = result_4d["prediction"]["Test_ARCOERA5"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape
+        shape_5d = result_5d["prediction"]["Test_ARCOERA5"]["arco_era5"]["prognostic"]["3d"]["temperature"].shape
         assert shape_4d == shape_5d == (B, 4, 1, H, W)
 
     def test_values_match_input_channels(self):
@@ -335,11 +336,11 @@ class TestReconstruct:
         pred = result["prediction"]
 
         assert torch.equal(
-            pred["arco_era5"]["prognostic"]["3d"]["temperature"],
+            pred["Test_ARCOERA5"]["arco_era5"]["prognostic"]["3d"]["temperature"],
             y_pred[:, 0:4].unflatten(1, (4, 1)),
         )
         assert torch.equal(
-            pred["arco_era5"]["prognostic"]["2d"]["surface_pressure"],
+            pred["Test_ARCOERA5"]["arco_era5"]["prognostic"]["2d"]["surface_pressure"],
             y_pred[:, 4:5].unflatten(1, (1, 1)),
         )
 
@@ -347,7 +348,7 @@ class TestReconstruct:
         """Keys other than 'prediction' are preserved unchanged."""
         from credit.postblock.reconstruct import Reconstruct
 
-        raw = {"era5": {"input": {}}}
+        raw = {"Test_ERA5": {"input": {}}}
         batch = self._batch_dict(torch.randn(1, 5, 4, 4), extra={"input": torch.zeros(1), "_raw": raw})
         result = Reconstruct()(batch)
         assert result["_raw"] is raw

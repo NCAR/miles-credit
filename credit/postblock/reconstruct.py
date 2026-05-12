@@ -19,7 +19,7 @@ Output
 ------
 The same ``batch_dict`` with ``"prediction"`` replaced by a nested dict:
 
-    batch_dict["prediction"][source][data_type][dim][var_name]
+    batch_dict["prediction"][source][dataset_type][field_type][dim][var_name]
         -> tensor of shape (B, n_levels, n_time, H, W)
 """
 
@@ -54,9 +54,11 @@ class Reconstruct(BasePostblock):
             # Restore level and time dims: (B, n_levels, n_time, H, W)
             var_tensor = var_tensor.unflatten(1, (n_levels, n_time))
 
-            # Build nested dict matching input convention: source/data_type/dim/var_name
-            source, data_type, dim, var_name = var_key.split("/")
-            prediction.setdefault(source, {}).setdefault(data_type, {}).setdefault(dim, {})[var_name] = var_tensor
+            # Build nested dict matching input convention: source/dataset_type/field_type/dim/var_name
+            source, dataset_type, field_type, dim, var_name = var_key.split("/")
+            prediction.setdefault(source, {}).setdefault(dataset_type, {}).setdefault(field_type, {}).setdefault(
+                dim, {}
+            )[var_name] = var_tensor
 
         batch_dict["prediction"] = prediction
         return batch_dict
