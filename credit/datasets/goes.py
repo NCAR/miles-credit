@@ -7,13 +7,13 @@ Sample structure returned by __getitem__:
 
     {
         "input": {
-            "Example_GOES/goes/prognostic/2d/CMI_C04": tensor,
-            "Example_GOES/goes/prognostic/2d/CMI_C07": tensor,
+            "{source_name}/prognostic/2d/CMI_C04": tensor,
+            "{source_name}/prognostic/2d/CMI_C07": tensor,
             ...
         },
         "target": {                                  # only when return_target=True
-            "Example_GOES/goes/prognostic/2d/CMI_C04": tensor,
-            "Example_GOES/goes/prognostic/2d/CMI_C07": tensor,
+            "{source_name}/prognostic/2d/CMI_C04": tensor,
+            "{source_name}/prognostic/2d/CMI_C07": tensor,
             ...
         },
         "metadata": {
@@ -461,7 +461,7 @@ class GOESDataset(BaseDataset):
         Dispatches to ``_load_local_var`` or ``_load_remote_var`` depending on
         ``mode``, then stores each variable as a ``torch.Tensor`` of shape
         ``(1, 1, ny, nx)`` under the key
-        ``"Example_GOES/{dataset_type}/{field_type}/2d/{vname}"`` in ``sample``. Does nothing if
+        ``"{source_name}/{field_type}/2d/{vname}"`` in ``sample``. Does nothing if
         the field type has no registered variables.
 
         Args:
