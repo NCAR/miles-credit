@@ -3,9 +3,9 @@ seed: 1000
 save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke_pretrained/climax'
 
 # Checkpoint (1.40625deg.ckpt) architecture: embed_dim=1024, depth=8,
-# num_heads=16, patch_size=4. Config matches those dims so transformer block
-# weights (norm, attn, MLP) load by shape. Spatial/variable-specific layers
-# (token_embeds, pos_embed, channel_embed, head) differ and are skipped.
+# num_heads=16. Config matches those dims so transformer block weights
+# (norm, attn, MLP) load by shape. patch_size=8 used here (vs ckpt's 4)
+# to keep token count ~1035 on V100; spatial/variable layers are skipped.
 #
 # Gen2 channel math (no diagnostics):
 #   in  = 4*18 + 4 + 2 + 2 = 80
@@ -53,7 +53,7 @@ model:
     out_channels: 76
     img_size: [181, 360]
     levels: 18
-    patch_size: 4
+    patch_size: 8
     embed_dim: 1024
     depth: 8
     num_heads: 16
