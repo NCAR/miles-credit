@@ -67,7 +67,7 @@ trainer:
     valid_batches_per_epoch: 10
     stopping_patience: 999
     epochs: 1
-    amp: True
+    amp: False
     grad_max_norm: 1.0
     thread_workers: 2
     valid_thread_workers: 1

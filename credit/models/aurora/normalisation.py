@@ -59,8 +59,9 @@ def normalise_atmos_var(
     level_locations: list[int | float] = []
     level_scales: list[int | float] = []
     for level in atmos_levels:
-        level_locations.append(locations[f"{name}_{level_to_str(level)}"])
-        level_scales.append(scales[f"{name}_{level_to_str(level)}"])
+        key = f"{name}_{level_to_str(level)}"
+        level_locations.append(locations.get(key, 0.0))
+        level_scales.append(scales.get(key, 1.0))
     location = torch.tensor(level_locations, dtype=x.dtype, device=x.device)
     scale = torch.tensor(level_scales, dtype=x.dtype, device=x.device)
 

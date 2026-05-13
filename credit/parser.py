@@ -1445,13 +1445,13 @@ def training_data_check(conf, print_summary=False):
 
     # model level consistency final checks
     N_level_mean = len(ds_mean[varnames_upper_air[0]].values)
-    N_level_model = conf["model"]["levels"]
-
-    assert N_level_mean == N_level_model, (
-        "number of upper air levels mismatched between model config {} and input data {}".format(
-            N_level_model, N_level_mean
+    N_level_model = conf["model"].get("levels", None)
+    if N_level_model is not None:
+        assert N_level_mean == N_level_model, (
+            "number of upper air levels mismatched between model config {} and input data {}".format(
+                N_level_model, N_level_mean
+            )
         )
-    )
 
     if print_summary:
         print("Coordinate checking passed")

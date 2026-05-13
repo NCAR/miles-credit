@@ -36,6 +36,7 @@ Example config::
 
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 
@@ -49,6 +50,7 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 try:
     from .aurora import Aurora
@@ -92,9 +94,12 @@ class CREDITAurora(nn.Module):
         n_lon: Optional[int] = None,
         history_size: int = 1,
         timestep_hours: int = 6,
+        levels: int = None,
         **aurora_kwargs,
     ) -> None:
         super().__init__()
+        _allowed = set(inspect.signature(Aurora.__init__).parameters) - {"self"}
+        aurora_kwargs = {k: v for k, v in aurora_kwargs.items() if k in _allowed}
 
         self.surf_vars = list(surf_vars)
         self.atmos_vars = list(atmos_vars)
@@ -114,6 +119,9 @@ class CREDITAurora(nn.Module):
             timestep=timedelta(hours=timestep_hours),
             **aurora_kwargs,
         )
+        # CREDIT already z-scores inputs; override Aurora's internal normalisation
+        # with identity transforms (location=0, scale=1) so data isn't double-normalised.
+        self.aurora.surf_stats = {v: (0.0, 1.0) for v in list(surf_vars) + list(static_vars)}
 
         # Lat/lon grids are stored as buffers so they move with .to(device)
         # and are included in state_dict.
@@ -230,16 +238,24 @@ class CREDITAurora(nn.Module):
         """Predict the next atmospheric state.
 
         Args:
-            x: Input tensor of shape ``(B, C, H, W)`` following the channel
-               layout described in the module docstring.
+            x: Input tensor of shape ``(B, C, H, W)`` or ``(B, C, T, H, W)``
+               following the channel layout described in the module docstring.
 
         Returns:
-            Predicted tensor of shape ``(B, C_out, H, W)`` with
+            Predicted tensor of shape ``(B, C_out, 1, H, W)`` with
             ``C_out = n_surf + n_atmos * n_levels``.
         """
+        if x.dim() == 5:
+            B, C, T, H, W = x.shape
+            x = x.permute(0, 2, 1, 3, 4).reshape(B, C * T, H, W)
+        orig_H, orig_W = x.shape[-2], x.shape[-1]
         batch = self._flat_to_batch(x)
         pred = self.aurora(batch)
-        return self._batch_to_flat(pred)
+        out = self._batch_to_flat(pred)
+        # Aurora crops H when H%patch_size==1; pad back to original size
+        if out.shape[-2] != orig_H or out.shape[-1] != orig_W:
+            out = F.pad(out, (0, orig_W - out.shape[-1], 0, orig_H - out.shape[-2]))
+        return out.unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

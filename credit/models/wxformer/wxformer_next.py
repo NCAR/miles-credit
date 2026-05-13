@@ -329,6 +329,8 @@ class NextGenWXFormer(BaseModel):
         total_per_frame = self.channels * self.levels + self.surface_channels + self.input_only_channels
         last_frame_offset = (T - 1) * total_per_frame
         x_res = x[:, last_frame_offset : last_frame_offset + self.output_channels]
+        if x_res.shape[1] < self.output_channels:
+            x_res = F.pad(x_res, (0, 0, 0, 0, 0, self.output_channels - x_res.shape[1]))
 
         # Apply level embedding and column attention to each frame's atmos channels
         atmos_size = self.channels * self.levels
@@ -356,12 +358,15 @@ class NextGenWXFormer(BaseModel):
 
         # Decode
         x = self.up_block1(x)
+        x = F.interpolate(x, size=encodings[2].shape[-2:], mode="bilinear", align_corners=False)
         x = torch.cat([x, encodings[2]], dim=1)
 
         x = self.up_block2(x)
+        x = F.interpolate(x, size=encodings[1].shape[-2:], mode="bilinear", align_corners=False)
         x = torch.cat([x, encodings[1]], dim=1)
 
         x = self.up_block3(x)
+        x = F.interpolate(x, size=encodings[0].shape[-2:], mode="bilinear", align_corners=False)
         x = torch.cat([x, encodings[0]], dim=1)
 
         x = self.up_block4(x)

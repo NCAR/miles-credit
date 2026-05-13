@@ -39,7 +39,8 @@ model:
     patch_size: 4
     embed_dim: 256
     depth: 4
-    n_modes: 90
+    n_modes: 46
+    use_harmonics: False
 
 loss:
     training_loss: "mse"

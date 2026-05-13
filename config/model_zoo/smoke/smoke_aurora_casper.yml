@@ -12,6 +12,7 @@ data:
     variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
     save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
     level_ids: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+    levels: 18
     surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
     save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
     dynamic_forcing_variables: []

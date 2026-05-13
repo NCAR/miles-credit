@@ -11,7 +11,7 @@ class LatWeightedMetrics:
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
 
-        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
+        levels = conf["model"].get("levels") or conf["model"].get("frames") or conf["data"].get("levels")
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
@@ -99,7 +99,7 @@ class LatWeightedMetricsClimatology:
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
 
-        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
+        levels = conf["model"].get("levels") or conf["model"].get("frames") or conf["data"].get("levels")
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
 
@@ -234,7 +234,7 @@ class LatWeightedMetricsEnsemble:
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
 
-        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
+        levels = conf["model"].get("levels") or conf["model"].get("frames") or conf["data"].get("levels")
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars

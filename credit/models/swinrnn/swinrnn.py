@@ -411,8 +411,10 @@ class CREDITSwinRNN(nn.Module):
         super().__init__()
         H, W = img_size
         self.H, self.W = H, W
-        pad_H = (patch_size - H % patch_size) % patch_size
-        pad_W = (patch_size - W % patch_size) % patch_size
+        n_merges = max(0, len(depths) - 1)
+        align = patch_size * window_size * (2**n_merges)
+        pad_H = (align - H % align) % align
+        pad_W = (align - W % align) % align
         self.pad_H, self.pad_W = pad_H, pad_W
         self.model = SwinRNNModel(
             img_size=(H + pad_H, W + pad_W),

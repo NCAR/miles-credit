@@ -15,6 +15,7 @@ import sys
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 
 
@@ -261,10 +262,15 @@ class CREDITClimaX(nn.Module):
         agg_depth=2,
     ):
         super().__init__()
+        H, W = img_size
+        self.H, self.W = H, W
+        pad_H = (patch_size - H % patch_size) % patch_size
+        pad_W = (patch_size - W % patch_size) % patch_size
+        self.pad_H, self.pad_W = pad_H, pad_W
         self.model = ClimaX(
             in_channels=in_channels * frames,
             out_channels=out_channels,
-            img_size=img_size,
+            img_size=(H + pad_H, W + pad_W),
             patch_size=patch_size,
             embed_dim=embed_dim,
             depth=depth,
@@ -278,7 +284,12 @@ class CREDITClimaX(nn.Module):
         if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        return self.model(x).unsqueeze(2)
+        if self.pad_H > 0 or self.pad_W > 0:
+            x = F.pad(x, (0, self.pad_W, 0, self.pad_H))
+        out = self.model(x)
+        if self.pad_H > 0 or self.pad_W > 0:
+            out = out[:, :, : self.H, : self.W]
+        return out.unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

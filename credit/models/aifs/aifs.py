@@ -27,6 +27,7 @@ Input/output: ``(B, C, H, W)`` flat tensors.
 
 from __future__ import annotations
 
+import inspect
 import math
 import os
 from typing import List, Optional
@@ -366,6 +367,7 @@ class CREDITAifs(nn.Module):
         static_vars: List[str] = ("lsm", "z", "slt"),
         atmos_levels: List[int] = (50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000),
         frames: int = 1,
+        levels: int = None,
         **aifs_kwargs,
     ) -> None:
         super().__init__()
@@ -387,6 +389,8 @@ class CREDITAifs(nn.Module):
         n_in = (n_surf + n_atmos * n_levels) * frames + n_static
         n_out = n_surf + n_atmos * n_levels
 
+        _allowed = set(inspect.signature(AIFSProcessor.__init__).parameters) - {"self"}
+        aifs_kwargs = {k: v for k, v in aifs_kwargs.items() if k in _allowed}
         self.model = AIFSProcessor(
             n_input_channels=n_in,
             n_output_channels=n_out,

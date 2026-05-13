@@ -139,7 +139,7 @@ class MessagePassingLayer(nn.Module):
         edge_feat = self.edge_mlp(src_feat, dst_feat, edge_feat)
 
         # aggregate (sum) edges to destination nodes
-        agg = torch.zeros(B, N, edge_feat.shape[-1], device=node_feat.device, dtype=node_feat.dtype)
+        agg = torch.zeros(B, N, edge_feat.shape[-1], device=node_feat.device, dtype=edge_feat.dtype)
         agg.scatter_add_(1, dst[None, :, None].expand(B, -1, edge_feat.shape[-1]), edge_feat)
 
         # node update

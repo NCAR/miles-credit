@@ -25,6 +25,7 @@ import sys
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.fft
 
 try:
@@ -250,8 +251,10 @@ class FCN3Model(nn.Module):
 
         for up, skip_proj, dec, skip in zip(self.up_layers, self.skip_projs, self.dec_stages, reversed(skips)):
             x = up(x)
-            # handle odd sizes from asymmetric pooling
-            x = x[:, :, : skip.shape[2], : skip.shape[3]]
+            h = min(x.shape[2], skip.shape[2])
+            w = min(x.shape[3], skip.shape[3])
+            x = x[:, :, :h, :w]
+            skip = skip[:, :, :h, :w]
             x = skip_proj(torch.cat([x, skip], dim=1))
             x = dec(x)
 
@@ -275,6 +278,7 @@ class CREDITFourCastNetV3(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(128, 256),
+        frames=1,
         base_dim=128,
         depth=2,
         n_stages=3,
@@ -283,9 +287,15 @@ class CREDITFourCastNetV3(nn.Module):
         drop_rate=0.0,
     ):
         super().__init__()
+        H, W = img_size
+        self.H, self.W = H, W
+        align = 2**n_stages
+        pad_H = (align - H % align) % align
+        pad_W = (align - W % align) % align
+        self.pad_H, self.pad_W = pad_H, pad_W
         self.model = FCN3Model(
-            img_size=img_size,
-            in_channels=in_channels,
+            img_size=(H + pad_H, W + pad_W),
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             base_dim=base_dim,
             depth=depth,
@@ -306,7 +316,12 @@ class CREDITFourCastNetV3(nn.Module):
         if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        return self.model(x)
+        if self.pad_H > 0 or self.pad_W > 0:
+            x = F.pad(x, (0, self.pad_W, 0, self.pad_H))
+        out = self.model(x)
+        if self.pad_H > 0 or self.pad_W > 0:
+            out = out[:, :, : self.H, : self.W]
+        return out.unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

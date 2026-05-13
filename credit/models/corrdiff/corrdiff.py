@@ -355,7 +355,14 @@ class CREDITCorrDiff(nn.Module):
         self.out_channels = out_channels
         self.frames = frames
         H, W = img_size
-        self.H, self.W = H, W
+        self.orig_H, self.orig_W = H, W
+        n_downs = len(ch_mult) - 1
+        align = 2**n_downs
+        pad_H = (align - H % align) % align
+        pad_W = (align - W % align) % align
+        self.pad_H, self.pad_W = pad_H, pad_W
+        self.H = H + pad_H
+        self.W = W + pad_W
 
         self.score_net = SongUNet(
             in_ch=out_channels,
@@ -386,11 +393,14 @@ class CREDITCorrDiff(nn.Module):
         else:
             B, _, H, W = x.shape
 
+        if self.pad_H > 0 or self.pad_W > 0:
+            x = F.pad(x, (0, self.pad_W, 0, self.pad_H))
+
         B = x.shape[0]
         if sigma is None:
             sigma = torch.ones(B, device=x.device)
 
-        # Sample Gaussian noise to denoise
+        # Sample Gaussian noise to denoise at padded resolution
         x_noisy = torch.randn(B, self.out_channels, self.H, self.W, device=x.device)
 
         # EDM preconditioning
@@ -400,9 +410,8 @@ class CREDITCorrDiff(nn.Module):
         F_x = self.score_net(x_in, sigma, x)
         D_x = c_skip[:, None, None, None] * x_noisy + c_out[:, None, None, None] * F_x
 
-        # Resize to output if needed
-        if D_x.shape[-2:] != (self.H, self.W):
-            D_x = F.interpolate(D_x, size=(self.H, self.W), mode="bilinear", align_corners=False)
+        if self.pad_H > 0 or self.pad_W > 0:
+            D_x = D_x[:, :, : self.orig_H, : self.orig_W]
         return D_x.unsqueeze(2)
 
     @torch.no_grad()

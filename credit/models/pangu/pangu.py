@@ -26,6 +26,7 @@ channel tensor into these two inputs and reassembles the output.
 
 from __future__ import annotations
 
+import inspect
 from functools import lru_cache
 from typing import List, Optional, Tuple
 
@@ -853,9 +854,12 @@ class CREDITPangu(nn.Module):
         atmos_vars: List[str] = ("z", "u", "v", "t", "q"),
         static_vars: List[str] = ("lsm", "z", "slt"),
         atmos_levels: List[int] = (50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000),
+        levels: int = None,
         **pangu_kwargs,
     ) -> None:
         super().__init__()
+        _allowed = set(inspect.signature(PanguModel.__init__).parameters) - {"self"}
+        pangu_kwargs = {k: v for k, v in pangu_kwargs.items() if k in _allowed}
         self.surf_vars = list(surf_vars)
         self.atmos_vars = list(atmos_vars)
         self.static_vars = list(static_vars)
@@ -888,11 +892,14 @@ class CREDITPangu(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: ``(B, C, H, W)`` following the channel layout above.
+            x: ``(B, C, H, W)`` or ``(B, C, T, H, W)`` following the channel layout above.
 
         Returns:
-            ``(B, C_out, H, W)`` with surf + atmos variables.
+            ``(B, C_out, 1, H, W)`` with surf + atmos variables.
         """
+        if x.dim() == 5:
+            B, C, T, H, W = x.shape
+            x = x.permute(0, 2, 1, 3, 4).reshape(B, C * T, H, W)
         B, C, H, W = x.shape
         offset = 0
         # Surface
@@ -911,7 +918,7 @@ class CREDITPangu(nn.Module):
 
         # Reassemble output: (B, n_atmos*n_levels, H, W)
         atm_out = upper_pred.view(B, self.n_atmos * self.n_levels, H, W)
-        return torch.cat([surf_pred, atm_out], dim=1)
+        return torch.cat([surf_pred, atm_out], dim=1).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):
