@@ -5,16 +5,16 @@ HRRRDataset: PyTorch Dataset for HRRR GRIB2 data.
 
 Supports three HRRR products (``VALID_PRODUCTS``):
 
-* ``wrfprsf`` — pressure-level output (default, ~200 MB/file)
-* ``wrfnatf`` — native/hybrid-sigma level output (~200 MB/file, ~65 levels)
-* ``wrfsubhf`` — 15-minute sub-hourly surface output (surface vars only)
+* ``"wrfprs"`` — pressure-level output (default, ~200 MB/file)
+* ``"wrfnat"`` — native/hybrid-sigma level output (~200 MB/file, ~65 levels)
+* ``"wrfsubh"`` — 15-minute sub-hourly surface output (surface vars only)
 
-Tensor keys follow the pattern ``{prefix}/{field_type}/{dim}/{varname}``
-where *prefix* is product-specific:
+Tensor keys follow the pattern ``{user_provided_name}/{hrrr_product}/{field_type}/{dim}/{varname}``
+where *hrrr_product* is product-specific:
 
-    wrfprsf  → ``hrrr/…``
-    wrfnatf  → ``hrrr_nat/…``
-    wrfsubhf → ``hrrr_subh/…``
+    "wrfprs"  → `{user_provided_name}/`wrfprs/{field_type}/{dim}/{varname}``
+    "wrfnat"  → `{user_provided_name}/`wrfnat/{field_type}/{dim}/{varname}``
+    "wrfsubh" → `{user_provided_name}/`wrfsubh/{field_type}/2d/{varname}``
 
 *dim* is ``"3d"`` for multi-level variables and ``"2d"`` for surface variables.
 
@@ -24,14 +24,14 @@ Tensor shapes (before DataLoader batching):
 
 The ``y`` / ``x`` spatial dimensions correspond to HRRR's native Lambert
 Conformal Conic grid; if ``extent`` is specified they reflect the cropped
-sub-domain rather than the full CONUS grid (~1059 × 1799).
+sub-domain rather than the full CONUS grid (~1059 x 1799).
 
 Two S3 path layouts are handled automatically:
 
     v1/v2  (before 2018-07-12):
-        s3://noaa-hrrr-bdp-pds/hrrr.{YYYYMMDD}/hrrr.t{HH}z.{product}{FF:02d}.grib2
+        s3://noaa-hrrr-bdp-pds/hrrr.{YYYYMMDD}/hrrr.t{HH}z.{product}f{FF:02d}.grib2
     v3/v4  (2018-07-12 onward):
-        s3://noaa-hrrr-bdp-pds/hrrr.{YYYYMMDD}/conus/hrrr.t{HH}z.{product}{FF:02d}.grib2
+        s3://noaa-hrrr-bdp-pds/hrrr.{YYYYMMDD}/conus/hrrr.t{HH}z.{product}f{FF:02d}.grib2
 
 GRIB2 reading
 -------------
@@ -50,8 +50,8 @@ Both local and remote modes use the same ``.idx`` + byte-range pipeline:
 full-file scan.  The ``.idx`` sidecar must be present alongside the grib2;
 download it with ``hrrr_download.py``.
 
-For a typical training sample (5 vars × 6 levels ≈ 30 messages) remote mode
-transfers ~3 MB instead of ~200 MB (~60-100× reduction).
+For a typical training sample (5 vars x 6 levels ≈ 30 messages) remote mode
+transfers ~3 MB instead of ~200 MB (~60-100x reduction).
 
 Variable lookup is driven by :data:`VAR_REGISTRY`.  Extend it at import
 time to add variables without subclassing::
@@ -62,12 +62,13 @@ time to add variables without subclassing::
         "idx_name": "MYVAR", "idx_level": None,
     }
 
-Example YAML (wrfprsf, local mode)::
+Example YAML (wrfprs, local mode)::
 
     data:
       source:
         Example_HRRR:  # User-provided name (arbitrary key)
           dataset_type: "HRRR"
+          # product: "wrfprs" # Optional for PRS product. Default is "wrfprs".
           mode: "local"
           base_path: "/data/hrrr"
           forecast_hour: 0
@@ -83,12 +84,13 @@ Example YAML (wrfprsf, local mode)::
       timestep:       "1h"
       forecast_len:   0
 
-Example YAML (wrfnatf, remote mode)::
+Example YAML (wrfnat, remote mode)::
 
     data:
       source:
         Example_HRRR_NAT:  # User-provided name (arbitrary key)
-          dataset_type: "HRRR_NAT"
+          dataset_type: "HRRR"
+          product: "wrfnat" # Options: "wrfprs" (default), "wrfnat", "wrfsubh"
           mode: "remote"
           forecast_hour: 0
           levels: [10, 20, 30, 40, 50]   # hybrid level indices 1-65
@@ -101,12 +103,13 @@ Example YAML (wrfnatf, remote mode)::
       timestep:       "1h"
       forecast_len:   0
 
-Example YAML (wrfsubhf, remote mode — 15-min output)::
+Example YAML (wrfsubh, remote mode — 15-min output)::
 
     data:
       source:
         Example_HRRR_SUBH:  # User-provided name (arbitrary key)
-          dataset_type: "HRRR_SUBH"
+          dataset_type: "HRRR"
+          product: "wrfsubh" # Options: "wrfprs" (default), "wrfnat", "wrfsubh"
           mode: "remote"
           variables:
             prognostic:
@@ -120,7 +123,7 @@ Example YAML (wrfsubhf, remote mode — 15-min output)::
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Literal, get_args
 
 import logging
 import os
@@ -239,7 +242,7 @@ _MAX_REMOTE_WORKERS = 8
 _HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
 
 #: Supported HRRR GRIB2 products.
-VALID_PRODUCTS = {"HRRR": "wrfprsf", "HRRR_NAT": "wrfnatf", "HRRR_SUBH": "wrfsubhf"}
+VALID_PRODUCTS = Literal["wrfprs", "wrfnat", "wrfsubh"]
 
 
 # ---------------------------------------------------------------------------
@@ -247,39 +250,39 @@ VALID_PRODUCTS = {"HRRR": "wrfprsf", "HRRR_NAT": "wrfnatf", "HRRR_SUBH": "wrfsub
 # ---------------------------------------------------------------------------
 
 
-def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: str = "wrfprsf") -> str:
+def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
     """Construct the S3 URI for a HRRR grib2 file.
 
     Args:
         t (pd.Timestamp): Initialisation timestamp (UTC).
         forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
-        product (str): HRRR product name — one of ``VALID_PRODUCTS``.
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
 
     Returns:
         str: S3 URI.
     """
     date_str = t.strftime("%Y%m%d")
     hour_str = t.strftime("%H")
-    fname = f"hrrr.t{hour_str}z.{product}{forecast_hour:02d}.grib2"
+    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
     subdir = "conus/" if t >= _HRRR_V3_CUTOFF else ""
     return f"s3://{_S3_BUCKET}/hrrr.{date_str}/{subdir}{fname}"
 
 
-def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, product: str = "wrfprsf") -> str:
+def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
     """Construct the local filesystem path for a HRRR grib2 file.
 
     Args:
         base_path (str): Root directory containing HRRR data.
         t (pd.Timestamp): Initialization timestamp (UTC).
         forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
-        product (str, optional): HRRR product name — one of ``VALID_PRODUCTS``. Defaults to "wrfprsf".
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
 
     Returns:
         str: Local filesystem path to the grib2 file.
     """
     date_str = t.strftime("%Y%m%d")
     hour_str = t.strftime("%H")
-    fname = f"hrrr.t{hour_str}z.{product}{forecast_hour:02d}.grib2"
+    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
     if t >= _HRRR_V3_CUTOFF:
         return os.path.join(base_path, f"hrrr.{date_str}", "conus", fname)
     return os.path.join(base_path, f"hrrr.{date_str}", fname)
@@ -465,14 +468,14 @@ def _resolve_pressure_levels(
 
 
 # ---------------------------------------------------------------------------
-# Native (hybrid-sigma) level helpers — wrfnatf
+# Native (hybrid-sigma) level helpers — wrfnat
 # ---------------------------------------------------------------------------
 
 
 def _build_nat_entry_map(
     idx_entries: list[dict[str, str | int | None]], idx_name: str
 ) -> dict[int, dict[str, str | None]]:
-    """Return ``{hybrid_level_index: idx_entry}`` for a wrfnatf variable.
+    """Return ``{hybrid_level_index: idx_entry}`` for a wrfnat variable.
 
     HRRR native-level ``.idx`` entries look like::
 
@@ -534,7 +537,7 @@ def _resolve_nat_levels(
 
 
 # ---------------------------------------------------------------------------
-# Sub-hourly helpers — wrfsubhf
+# Sub-hourly helpers — wrfsubh
 # ---------------------------------------------------------------------------
 
 
@@ -544,13 +547,13 @@ def _find_subhf_entry(
     idx_level: str,
     step_min: int,
 ) -> dict[str, str | int | None]:
-    """Return the idx entry for a wrfsubhf variable at a specific sub-step.
+    """Return the idx entry for a wrfsubh variable at a specific sub-step.
 
     Sub-hourly ``.idx`` entries have a ``step`` field like ``"15 min fcst"``,
     ``"30 min fcst"``, ``"45 min fcst"``, ``"60 min fcst"``.
 
     Args:
-        idx_entries (list[dict[str, str  |  int  |  None]])): Parsed ``.idx`` entries for the wrfsubhf file.
+        idx_entries (list[dict[str, str  |  int  |  None]])): Parsed ``.idx`` entries for the wrfsubh file.
         idx_name (str): Variable name as it appears in the ``.idx``.
         idx_level (str): Level string (e.g. ``"2 m above ground"``).
         step_min (int): Sub-step in minutes (15, 30, 45, 60, …).
@@ -567,7 +570,7 @@ def _find_subhf_entry(
             return e
     raise KeyError(
         f"No .idx entry for '{idx_name}' at level='{idx_level}', step='{step_str}'. "
-        "Verify that the wrfsubhf .idx step strings match the expected format."
+        "Verify that the wrfsubh .idx step strings match the expected format."
     )
 
 
@@ -644,27 +647,25 @@ def _to_float32(values: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _validate_product_request(dataset_type: str) -> str:
+def _validate_product_request(product_request: str) -> VALID_PRODUCTS:
     """Validate the dataset request config, raising ValueError for invalid requests.
 
     Args:
-        dataset_type (str): The HRRR dataset name from the config (e.g. "HRRR", "HRRR_NAT", "HRRR_SUBH").
+        product_request (str): The HRRR product name from the config (e.g. "wrfprs", "wrfnat", "wrfsubh").
 
     Raises:
-        ValueError: If the dataset_type is not recognized or mapped to a valid HRRR product.
+        ValueError: If the product is not recognized or mapped to a valid HRRR product.
 
     Returns:
-        str: The validated HRRR product name.
+        VALID_PRODUCTS: The validated HRRR product name.
     """
     # Convert to upper case for case-insensitive matching
-    dataset_type = dataset_type.upper()
+    product_request = product_request.lower()
 
-    if dataset_type not in VALID_PRODUCTS:
-        raise ValueError(
-            f"Unknown HRRR product '{dataset_type}' in config['source']."
-            + f"Valid products mapped as: {VALID_PRODUCTS}"
-        )
-    return VALID_PRODUCTS[dataset_type]
+    if product_request not in get_args(VALID_PRODUCTS):
+        raise ValueError(f"Unknown HRRR product '{product_request}'. Valid products are: {get_args(VALID_PRODUCTS)}")
+
+    return product_request
 
 
 # ---------------------------------------------------------------------------
@@ -673,7 +674,7 @@ def _validate_product_request(dataset_type: str) -> str:
 
 
 class HRRRDataset(BaseDataset):
-    """CREDIT Dataset for HRRR GRIB2 data (wrfprsf / wrfnatf / wrfsubhf).
+    """CREDIT Dataset for HRRR GRIB2 data (wrfprs / wrfnat / wrfsubh).
 
     Implements the same field-type semantics as BaseDataset:
 
@@ -690,10 +691,9 @@ class HRRRDataset(BaseDataset):
     configuration examples.
 
     Attributes:
-        dataset_type: Tensor key prefix — ``"HRRR"``, ``"HRRR_NAT"``, or
-            ``"HRRR_SUBH"``.
-        product: Active HRRR product (``"wrfprsf"``, ``"wrfnatf"``, or
-            ``"wrfsubhf"``) depending on *dataset_type*.
+        dataset_type: Tensor key - `"HRRR"`
+        product: Active HRRR product (``"HRRR_PRS" / "wrfprs"``, ``"HRRR_NAT" / "wrfnat"``,
+            or ``"HRRR_SUBH" / "wrfsubh"``) with default value ``"HRRR_PRS"``.
         datetimes: DatetimeIndex of valid initialisation timestamps.
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
@@ -710,13 +710,15 @@ class HRRRDataset(BaseDataset):
         if "dataset_type" not in self.curr_source_cfg:
             raise ValueError(
                 f"Missing 'dataset_type' in config['source']['{self.curr_source_name}']. "
-                + f"Expected one of: {list(VALID_PRODUCTS.keys())}"
+                + f"Expected one of: {get_args(VALID_PRODUCTS)}"
             )
         self.dataset_type = self.curr_source_cfg["dataset_type"]
 
-        product = _validate_product_request(self.dataset_type)
+        # The default product is "wrfprs" if not specified in the config.
+        product_request = self.curr_source_cfg.get("product", "wrfprs")
+        # Validate the product request.
+        self.product: VALID_PRODUCTS = _validate_product_request(product_request)
 
-        self.product: str = product
         self.mode: str = self.curr_source_cfg.get("mode", "local")
         self.base_path: str | None = self.curr_source_cfg.get("base_path", None)
         self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
@@ -858,7 +860,7 @@ class HRRRDataset(BaseDataset):
         delegates to :meth:`_extract_from_idx` with the appropriate byte
         fetcher for the current mode.
 
-        For ``wrfsubhf``, *t* is a 15-min-resolution timestamp.  This method
+        For ``wrfsubh``, *t* is a 15-min-resolution timestamp.  This method
         derives the HRRR init time and FF file number automatically:
 
         * ``init_hour = t.floor("1h")``
@@ -870,7 +872,7 @@ class HRRRDataset(BaseDataset):
         Args:
             field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES, namely: ``"prognostic"``, ``"dynamic_forcing"``,
                 ``"static"``, ``"diagnostic"``.
-            t (pd.Timestamp): Initialization timestamp (UTC).  For ``wrfsubhf``, this is a
+            t (pd.Timestamp): Initialization timestamp (UTC).  For ``wrfsubh``, this is a
                 15-min-resolution timestamp like ``2024-01-01T00:15:00Z``.
             sample (dict[str, Any]): The sample dict being built in __getitem__
         """
@@ -881,7 +883,7 @@ class HRRRDataset(BaseDataset):
         # ------------------------------------------------------------------
         # Compute effective init time, FF file number, and sub-step for subhf
         # ------------------------------------------------------------------
-        if self.product == "wrfsubhf":
+        if self.product == "wrfsubh":
             init_hour = t.floor("1h")
             step_min = int((t - init_hour).total_seconds() / 60)
             if step_min == 0:
@@ -945,7 +947,7 @@ class HRRRDataset(BaseDataset):
             vd (dict[str, list[str | int]]): Variable dict (``vars_3D``, ``vars_2D``, ``levels``).
             sample (dict[str, Any]): Output dict to populate in-place.
             step_min (int | None): Sub-hourly step in minutes (15, 30, 45, 60, …).  Only
-                used when ``self.product == "wrfsubhf"``.
+                used when ``self.product == "wrfsubh"``.
         """
         try:
             import pygrib  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs]
@@ -955,13 +957,13 @@ class HRRRDataset(BaseDataset):
         levels = vd["levels"]
 
         # ------------------------------------------------------------------
-        # wrfsubhf — surface-only product, 3D vars not supported
+        # wrfsubh — surface-only product, 3D vars not supported
         # ------------------------------------------------------------------
-        if self.product == "wrfsubhf":
+        if self.product == "wrfsubh":
             if vd["vars_3D"]:
-                raise ValueError(f"wrfsubhf is a surface-only product; vars_3D is not supported. Got: {vd['vars_3D']}")
+                raise ValueError(f"wrfsubh is a surface-only product; vars_3D is not supported. Got: {vd['vars_3D']}")
             if step_min is None:
-                raise ValueError("step_min is required for wrfsubhf extraction")
+                raise ValueError("step_min is required for wrfsubh extraction")
 
         # ------------------------------------------------------------------
         # Build fetch plan: list of (var_name, is_3d, level_value|None, entry)
@@ -970,19 +972,19 @@ class HRRRDataset(BaseDataset):
 
         for vname in vd["vars_3D"]:
             reg = VAR_REGISTRY[vname]
-            if self.product == "wrfnatf":
+            if self.product == "wrfnat":
                 nat_map = _build_nat_entry_map(idx_entries, reg["idx_name"])
                 for lv in _resolve_nat_levels(levels, nat_map, vname):
                     fetch_plan.append((vname, True, lv, nat_map[lv]))
             else:
-                # wrfprsf (default pressure-level path)
+                # wrfprs (default pressure-level path)
                 prs_map = _build_prs_entry_map(idx_entries, reg["idx_name"])
                 for lv in _resolve_pressure_levels(levels, prs_map, vname):
                     fetch_plan.append((vname, True, lv, prs_map[lv]))
 
         for vname in vd["vars_2D"]:
             reg = VAR_REGISTRY[vname]
-            if self.product == "wrfsubhf":
+            if self.product == "wrfsubh":
                 entry = _find_subhf_entry(
                     idx_entries,
                     reg["idx_name"],

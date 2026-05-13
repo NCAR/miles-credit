@@ -16,6 +16,7 @@ import re
 from datetime import datetime as dt_cls
 
 import pandas as pd
+import s3fs
 
 
 # Maps strftime format codes to non-capturing regex fragments
@@ -166,15 +167,14 @@ def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:
     )
 
 
-def _init_fs(self):
+def _start_s3_fs() -> s3fs.S3FileSystem:
     """Lazily initialize an anonymous ``s3fs.S3FileSystem`` instance.
 
     Called automatically on the first ``__extract_field__`` (called within ``__getitem__``)
-    invocation whenm``mode`` is ``"remote"``. The filesystem object is cached in ``_fs``
+    invocation when ``mode`` is ``"remote"``. The filesystem object is cached in ``_fs``
     for re-use across later calls.
 
     """
-    import s3fs
 
     fs_config = {
         "anon": True,
