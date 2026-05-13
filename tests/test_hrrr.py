@@ -855,11 +855,11 @@ def test_hrrr_remote_wrfprs_getitem():
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
     test_source_key = _make_source_key("wrfprs")
-    assert f"{test_source_key}/hrrr/prognostic/3d/T" in sample["input"]
-    assert sample["input"][f"{test_source_key}/hrrr/prognostic/3d/T"].shape == (
+    assert f"{test_source_key}/prognostic/3d/T" in sample["input"]
+    assert sample["input"][f"{test_source_key}/prognostic/3d/T"].shape == (
         2,
         1,
-        *sample["input"][f"{test_source_key}/hrrr/prognostic/3d/T"].shape[2:],
+        *sample["input"][f"{test_source_key}/prognostic/3d/T"].shape[2:],
     )
 
 
@@ -874,7 +874,7 @@ def test_hrrr_remote_wrfnat_getitem():
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
     test_source_key = _make_source_key("wrfnat")
-    assert f"{test_source_key}/hrrr/prognostic/3d/T" in sample["input"]
+    assert f"{test_source_key}/prognostic/3d/T" in sample["input"]
 
 
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
@@ -888,7 +888,7 @@ def test_hrrr_remote_wrfsubh_getitem():
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
     test_source_key = _make_source_key("wrfsubh")
-    assert f"{test_source_key}/hrrr/prognostic/2d/t2m" in sample["input"]
+    assert f"{test_source_key}/prognostic/2d/t2m" in sample["input"]
 
 
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
@@ -928,8 +928,8 @@ def test_hrrr_remote_return_target_true():
     assert "target" in sample
     assert "metadata" in sample
     test_source_key = _make_source_key("wrfprs")
-    assert f"{test_source_key}/hrrr/prognostic/3d/T" in sample["input"]
-    assert f"{test_source_key}/hrrr/prognostic/3d/T" in sample["target"]
+    assert f"{test_source_key}/prognostic/3d/T" in sample["input"]
+    assert f"{test_source_key}/prognostic/3d/T" in sample["target"]
 
 
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)

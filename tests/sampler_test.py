@@ -83,7 +83,7 @@ def minimal_config() -> dict[str, Any]:
         "end_datetime": "2023-01-05",
         "source": {
             "ERA5": {
-                "dataset_type": "era5",
+                "dataset_type": "local",
                 "level_coord": "level",
                 "levels": [1000, 850, 500, 300],
                 "variables": {
