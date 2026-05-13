@@ -25,11 +25,13 @@ Or programmatically::
     from credit.datasets.hrrr_download import download_hrrr
     download_hrrr(config['data'], num_workers=8, overwrite=False)
 
-Config section used (``data.source.HRRR``)::
+Config section used (``data.source``)::
 
     data:
       source:
-        HRRR:
+        Example_HRRR:
+          dataset_type: "hrrr"
+          product: "wrfprsf" # Options: "wrfprsf", "wrfnatf", "wrfsubhf"
           mode: "local"          # mode to use after download
           base_path: "/data/hrrr"
           forecast_hour: 0
@@ -142,8 +144,8 @@ def download_hrrr(
     assert "dataset_type" in source_cfg, (
         f"Missing required field for dataset_type. Found fields: {list(source_cfg.keys())}"
     )
-    assert source_cfg["dataset_type"] == "HRRR", (
-        f"Expected dataset_type to be 'HRRR'. Found: {source_cfg['dataset_type']}"
+    assert source_cfg["dataset_type"] == "hrrr", (
+        f"Expected dataset_type to be 'hrrr'. Found: {source_cfg['dataset_type']}"
     )
     # The default product is "wrfprsf" if not specified in the config.
     product_request = source_cfg.get("product", "wrfprsf")

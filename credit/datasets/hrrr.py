@@ -662,11 +662,9 @@ def _validate_product_request(product_request: str) -> VALID_PRODUCTS:
     # Convert to upper case for case-insensitive matching
     product_request = product_request.lower()
 
-    if product_request not in VALID_PRODUCTS:
-        raise ValueError(
-            f"Unknown HRRR product '{product_request}'. Valid products are: {get_args(VALID_PRODUCTS)}"
-        )
-    
+    if product_request not in get_args(VALID_PRODUCTS):
+        raise ValueError(f"Unknown HRRR product '{product_request}'. Valid products are: {get_args(VALID_PRODUCTS)}")
+
     return product_request
 
 
@@ -694,7 +692,7 @@ class HRRRDataset(BaseDataset):
 
     Attributes:
         dataset_type: Tensor key - `"HRRR"`
-        product: Active HRRR product (``"HRRR_PRS" / "wrfprsf"``, ``"HRRR_NAT" / "wrfnatf"``, 
+        product: Active HRRR product (``"HRRR_PRS" / "wrfprsf"``, ``"HRRR_NAT" / "wrfnatf"``,
             or ``"HRRR_SUBH" / "wrfsubhf"``) with default value ``"HRRR_PRS"``.
         datetimes: DatetimeIndex of valid initialisation timestamps.
         static_metadata: Dataset-level metadata for MultiSourceDataset.

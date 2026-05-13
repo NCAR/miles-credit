@@ -15,7 +15,8 @@ import time
 
 import pytest
 
-from credit.datasets.hrrr_download import download_hrrr, VALID_PRODUCTS
+from credit.datasets.hrrr_download import download_hrrr
+from credit.datasets.hrrr import VALID_PRODUCTS
 from credit.datasets.multi_source import make_single_source_subconfig
 
 # ---------------------------------------------------------------------------
