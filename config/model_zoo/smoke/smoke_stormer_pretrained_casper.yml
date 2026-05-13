@@ -3,9 +3,9 @@ seed: 1000
 save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke_pretrained/stormer'
 
 # Checkpoint (stormer_1.40625_patch_size_4.ckpt) architecture: embed_dim=1024,
-# depth=24, num_heads=16, patch_size=4. Config matches those dims so internal
-# transformer block weights (attn QKV, proj, MLP) load by shape.
-# Spatial layers (pos_embed, patch_embed) differ by resolution and are skipped.
+# depth=24, num_heads=16. Config matches those dims so transformer block weights
+# (attn QKV, proj, MLP) load by shape. patch_size=8 used here (vs ckpt's 4)
+# to keep token count ~1035 and fit on a 32GB V100; spatial layers are skipped.
 #
 # Gen2 channel math (no diagnostics):
 #   in  = 4*18 + 4 + 2 + 2 = 80
@@ -53,7 +53,7 @@ model:
     out_channels: 76
     img_size: [181, 360]
     levels: 18
-    patch_size: 4
+    patch_size: 8
     embed_dim: 1024
     depth: 24
     num_heads: 16
