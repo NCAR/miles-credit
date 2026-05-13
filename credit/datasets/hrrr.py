@@ -691,9 +691,9 @@ class HRRRDataset(BaseDataset):
     configuration examples.
 
     Attributes:
-        dataset_type: Tensor key - `"HRRR"`
-        product: Active HRRR product (``"HRRR_PRS" / "wrfprs"``, ``"HRRR_NAT" / "wrfnat"``,
-            or ``"HRRR_SUBH" / "wrfsubh"``) with default value ``"HRRR_PRS"``.
+        dataset_type: Tensor key - `"hrrr"`
+        product: Active HRRR product (``"wrfprs"``, ``"wrfnat"``,
+            or ``"wrfsubh"``) with default value ``"wrfprs"``.
         datetimes: DatetimeIndex of valid initialisation timestamps.
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
