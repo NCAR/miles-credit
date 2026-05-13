@@ -1,5 +1,9 @@
 # Example of a multi-source data configuration. Does not contain any model config options.
 data:
+    start_datetime: "2021-06-01"
+    end_datetime: "2021-06-04"
+    timestep: "6h"
+    forecast_len: 1
     source:
         ERA5_LowerAir:
             dataset_type: "local"
@@ -41,36 +45,25 @@ data:
 
                 static: null
 
-        MRMS:
-            dataset_type: "mrms"
-            mode: "local" # Supports "local" or "remote" for streaming
-            region: "CONUS"
-            variables:
-                prognostic:                         # input at step 0 + target
-                    vars_2D:
-                        - "MultiSensor_QPE_01H_Pass2_00.00"
-                        - "MultiSensor_QPE_06H_Pass2_00.00"
-                    path: "/glade/derecho/scratch/cbecker/test_CREDIT_data/MRMS_*.nc"
-                    filename_time_format: "%Y%m%d-%H%M%S"
-                diagnostic: null
-                dynamic_forcing: null
-            extent: [ -130, -60, 20, 55 ]
+preblocks:
+    log_transform:
+      type: "log_transform"
+      args:
+          variables:
+                - 'ERA5_LowerAir/prognostic/3d/U'
+                - 'ERA5_LowerAir/prognostic/3d/V'
+                - 'ERA5_LowerAir/prognostic/3d/T'
+                - 'ERA5_LowerAir/prognostic/3d/Q'
+                - 'ERA5_LowerAir/prognostic/2d/SP'
+                - 'ERA5_LowerAir/prognostic/2d/t2m'
+                - 'ERA5_LowerAir/dynamic_forcing/2d/tsi'
+                - 'ERA5_LowerAir/static/2d/LSM'
+          data_types:
+            - 'input'
+            - 'target'
+    concatenate:
+      type: "concat"
 
-        GOES:
-            dataset_type: "goes"
-            goes_position: "east" # or "west"
-            mode: "remote"
-            product: "ABI-L2-MCMIPC"
-            variables:
-                prognostic:
-                    vars_2D: ["CMI_C04", "CMI_C07", "CMI_C08", "CMI_C09", "CMI_C10", "CMI_C13"]
-                    path: "/glade/derecho/scratch/kevinyang/datasets/goes/"
-                diagnostic: null
-                dynamic_forcing: null
-            latlon2d_dir: "/glade/derecho/scratch/kevinyang/datasets/goes/"
-            extent: [-130, -60, 20, 55]
-
-    start_datetime: "2021-06-01"
-    end_datetime: "2021-06-04"
-    timestep: "6h"
-    forecast_len: 1
+postblocks:
+  reconstruct:
+    type: "reconstruct"
