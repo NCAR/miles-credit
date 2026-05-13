@@ -1,4 +1,6 @@
-save_loc: '/glade/casper/scratch/schreck/model_zoo_smoke/nextgen_wxformer'
+seed: 1000
+
+save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke/nextgen_wxformer'
 
 # NextGenWXFormer channel layout (standard 80/84 config):
 #   in  = channels*levels + surface_channels + input_only_channels
@@ -88,6 +90,9 @@ trainer:
     valid_thread_workers: 1
     prefetch_factor: 2
     use_scheduler: False
+    load_scaler: False
+    load_scheduler: False
+    start_epoch: 0
     skip_validation: False
 
 pbs:

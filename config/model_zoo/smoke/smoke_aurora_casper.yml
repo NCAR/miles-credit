@@ -1,4 +1,6 @@
-save_loc: '/glade/casper/scratch/schreck/model_zoo_smoke/aurora'
+seed: 1000
+
+save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke/aurora'
 
 # Aurora derives in/out channels from variable lists, not in_channels/out_channels keys.
 # No dynamic forcing or diagnostic vars to keep channel accounting simple:
@@ -73,6 +75,9 @@ trainer:
     valid_thread_workers: 1
     prefetch_factor: 2
     use_scheduler: False
+    load_scaler: False
+    load_scheduler: False
+    start_epoch: 0
     skip_validation: False
 
 pbs:

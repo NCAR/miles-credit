@@ -1,4 +1,6 @@
-save_loc: '/glade/casper/scratch/schreck/model_zoo_smoke/swinrnn'
+seed: 1000
+
+save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke/swinrnn'
 
 data:
     variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
@@ -72,6 +74,9 @@ trainer:
     valid_thread_workers: 1
     prefetch_factor: 2
     use_scheduler: False
+    load_scaler: False
+    load_scheduler: False
+    start_epoch: 0
     skip_validation: False
 
 pbs:
