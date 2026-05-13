@@ -1,13 +1,17 @@
 from credit.postblock.geopotential import GeopotentialDiagnostic
 from credit.datasets.multi_source import MultiSourceDataset
 from credit.trainers.utils import load_dataloader
+from credit.preblock import ConcatToTensor
+from credit.postblock import Reconstruct
 import yaml
+from copy import deepcopy
 
 
 conf_str = """
 data:
   source:
     ARCO_ERA5:
+      dataset_type: "arco_era5"
       level_coord: "hybrid"
       variables:
         prognostic:
@@ -36,10 +40,26 @@ conf = yaml.safe_load(conf_str)
 def test_geopotential():
     msd = MultiSourceDataset(conf["data"])
     mdl = load_dataloader(conf, msd, 0, 1, True)
-    geopotential_layer = GeopotentialDiagnostic()
-
     batch = next(iter(mdl))
-    batch["prediction"] = batch["arco_era5"]["input"]
-    updated_batch = geopotential_layer(batch)
-    print(updated_batch)
-    assert geopotential_layer.output_name in updated_batch["prediction"]
+    ct = ConcatToTensor()
+    batch_tensor, meta = ct(batch)
+    meta_2 = deepcopy(meta)
+    meta_2["_channel_map"]["output"] = meta_2["_channel_map"]["input"]
+    recon = Reconstruct()
+    output = recon({"prediction": batch_tensor, "meta": meta_2})
+    output_var_name = "ARCO_ERA5/arco_era5/derived_diagnostic/3d/geopotential"
+    geopotential_layer = GeopotentialDiagnostic(
+        output_name=output_var_name,
+        surface_geopotential_var="ARCO_ERA5/arco_era5/static/2d/geopotential_at_surface",
+        surface_pressure_var="ARCO_ERA5/arco_era5/prognostic/2d/surface_pressure",
+        temperature_var="ARCO_ERA5/arco_era5/prognostic/3d/temperature",
+        specific_humidity_var="ARCO_ERA5/arco_era5/prognostic/3d/specific_humidity",
+        level_info_file="ERA5_Lev_Info.nc",
+        model_a_half_var="a_half",
+        model_b_half_var="b_half",
+    )
+    diagnosed = geopotential_layer(output)
+    pred = diagnosed["prediction"]
+    geo = pred["ARCO_ERA5/arco_era5/derived_diagnostic/3d/geopotential"]
+    temp = pred["ARCO_ERA5/arco_era5/prognostic/3d/temperature"]
+    assert geo.shape == temp.shape
