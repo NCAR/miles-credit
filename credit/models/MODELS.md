@@ -434,7 +434,7 @@ EDM-preconditioned (Karras et al. 2022) score-based diffusion model.  A `CondEnc
 1. Create `credit/models/<name>/<name>.py` with a `CREDIT<Name>` wrapper class.
 2. The wrapper must accept `(B, C, H, W)` or `(B, C, T, H, W)` and return `(B, C, 1, H, W)`.
 3. Add `load_model` and `load_model_name` classmethods (see any zoo model for the pattern).
-4. Register in `credit/models/__init__.py` under `model_types`.
+4. Register in `credit/models/__init__.py` under `_MODEL_REGISTRY`.
 5. Add a config example in `config/model_zoo/<name>.yml`.
 6. Optionally add a preset in `credit/models/presets/<preset-name>.yml` — no code changes needed, just drop the file.
 7. Update this file.
