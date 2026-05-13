@@ -342,6 +342,7 @@ class CREDITCorrDiff(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(192, 288),
+        frames=1,
         scale_factor=1,
         base_ch=64,
         ch_mult=(1, 2, 4),
@@ -352,13 +353,14 @@ class CREDITCorrDiff(nn.Module):
         super().__init__()
         self.sigma_data = sigma_data
         self.out_channels = out_channels
+        self.frames = frames
         H, W = img_size
         self.H, self.W = H, W
 
         self.score_net = SongUNet(
             in_ch=out_channels,
             out_ch=out_channels,
-            cond_ch=in_channels,
+            cond_ch=in_channels * frames,
             base_ch=base_ch,
             ch_mult=ch_mult,
             n_res_per_level=n_res_per_level,
@@ -371,16 +373,18 @@ class CREDITCorrDiff(nn.Module):
 
         Parameters
         ----------
-        x : (B, in_channels, H, W)  coarse input (conditioning)
+        x : (B, in_channels, frames, H, W)  coarse input (conditioning)
         sigma : (B,) noise level; defaults to sigma=1.0 if not provided
 
         Returns
         -------
-        (B, out_channels, H, W)  denoised prediction
+        (B, out_channels, 1, H, W)  denoised prediction
         """
         if x.dim() == 5:
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
+        else:
+            B, _, H, W = x.shape
 
         B = x.shape[0]
         if sigma is None:
@@ -399,7 +403,7 @@ class CREDITCorrDiff(nn.Module):
         # Resize to output if needed
         if D_x.shape[-2:] != (self.H, self.W):
             D_x = F.interpolate(D_x, size=(self.H, self.W), mode="bilinear", align_corners=False)
-        return D_x
+        return D_x.unsqueeze(2)
 
     @torch.no_grad()
     def sample(
@@ -452,7 +456,7 @@ class CREDITCorrDiff(nn.Module):
                 d2 = (x2 - D_x2) / sigmas[i + 1]
                 x = x + 0.5 * (d + d2) * (sigmas[i + 1] - sigmas[i])
 
-        return x
+        return x.unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):
@@ -492,9 +496,9 @@ if __name__ == "__main__":
         n_res_per_level=1,
         emb_dim=64,
     ).to(device)
-    x = torch.randn(B, C_in, H, W, device=device)
+    x = torch.randn(B, C_in, 1, H, W, device=device)
     y = model(x)
-    assert y.shape == (B, C_out, H, W), f"shape mismatch: {y.shape}"
+    assert y.shape == (B, C_out, 1, H, W), f"shape mismatch: {y.shape}"
     y.mean().backward()
     n = sum(p.numel() for p in model.parameters()) / 1e6
     print(f"CREDITCorrDiff OK — {tuple(y.shape)}, {n:.1f}M params, {device}")

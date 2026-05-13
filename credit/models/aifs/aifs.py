@@ -365,6 +365,7 @@ class CREDITAifs(nn.Module):
         atmos_vars: List[str] = ("z", "u", "v", "t", "q"),
         static_vars: List[str] = ("lsm", "z", "slt"),
         atmos_levels: List[int] = (50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000),
+        frames: int = 1,
         **aifs_kwargs,
     ) -> None:
         super().__init__()
@@ -372,6 +373,7 @@ class CREDITAifs(nn.Module):
         self.atmos_vars = list(atmos_vars)
         self.static_vars = list(static_vars)
         self.atmos_levels = list(atmos_levels)
+        self.frames = frames
         n_surf = len(surf_vars)
         n_atmos = len(atmos_vars)
         n_static = len(static_vars)
@@ -381,7 +383,8 @@ class CREDITAifs(nn.Module):
         self.n_static = n_static
         self.n_levels = n_levels
 
-        n_in = n_surf + n_atmos * n_levels + n_static
+        # static vars are not repeated across history frames; only surf+atmos are
+        n_in = (n_surf + n_atmos * n_levels) * frames + n_static
         n_out = n_surf + n_atmos * n_levels
 
         self.model = AIFSProcessor(
@@ -392,14 +395,17 @@ class CREDITAifs(nn.Module):
 
     @property
     def n_input_channels(self) -> int:
-        return self.n_surf + self.n_atmos * self.n_levels + self.n_static
+        return (self.n_surf + self.n_atmos * self.n_levels) * self.frames + self.n_static
 
     @property
     def n_output_channels(self) -> int:
         return self.n_surf + self.n_atmos * self.n_levels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+        if x.dim() == 5:
+            B, C, T, H, W = x.shape
+            x = x.reshape(B, C * T, H, W)
+        return self.model(x).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

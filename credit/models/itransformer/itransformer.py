@@ -312,6 +312,7 @@ class CREDITiTransformer(nn.Module):
         in_channels: int = 70,
         out_channels: int = 69,
         img_size: tuple = (192, 288),
+        frames: int = 1,
         d_model: int = 256,
         depth: int = 6,
         num_heads: int = 8,
@@ -320,7 +321,7 @@ class CREDITiTransformer(nn.Module):
     ):
         super().__init__()
         self.model = iTransformerBackbone(
-            in_channels=in_channels,
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             img_size=img_size,
             d_model=d_model,
@@ -332,10 +333,9 @@ class CREDITiTransformer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() == 5:
-            # (B, C, T, H, W) — squeeze T (take first time step or reshape)
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        return self.model(x)
+        return self.model(x).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

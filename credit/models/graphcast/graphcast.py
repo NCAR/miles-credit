@@ -266,6 +266,7 @@ class CREDITGraphCast(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(128, 256),
+        frames=1,
         latent_dim=256,
         edge_dim=128,
         processor_depth=8,
@@ -277,7 +278,7 @@ class CREDITGraphCast(nn.Module):
         super().__init__()
         self.model = GraphCastModel(
             img_size=img_size,
-            in_channels=in_channels,
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             latent_dim=latent_dim,
             edge_dim=edge_dim,
@@ -292,7 +293,7 @@ class CREDITGraphCast(nn.Module):
         if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        return self.model(x)
+        return self.model(x).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

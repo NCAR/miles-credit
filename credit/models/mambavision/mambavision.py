@@ -256,6 +256,7 @@ class CREDITMambaVision(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(192, 288),
+        frames=1,
         stem_dim=64,
         stage_depths=(2, 2, 4, 2),
         num_heads=8,
@@ -264,7 +265,7 @@ class CREDITMambaVision(nn.Module):
     ):
         super().__init__()
         self.model = MambaVisionBackbone(
-            in_channels=in_channels,
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             img_size=img_size,
             stem_dim=stem_dim,
@@ -278,7 +279,7 @@ class CREDITMambaVision(nn.Module):
         if x.dim() == 5:
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        return self.model(x)
+        return self.model(x).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

@@ -308,6 +308,7 @@ class CREDITFengWu(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(128, 256),
+        frames=1,
         patch_size=4,
         group_sizes=None,
         embed_dim=256,
@@ -327,7 +328,7 @@ class CREDITFengWu(nn.Module):
         self.model = FengWuModel(
             img_size=(H + pad_H, W + pad_W),
             patch_size=patch_size,
-            in_channels=in_channels,
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             group_sizes=group_sizes,
             embed_dim=embed_dim,
@@ -348,7 +349,7 @@ class CREDITFengWu(nn.Module):
         out = self.model(x)
         if self.pad_H > 0 or self.pad_W > 0:
             out = out[:, :, : self.H, : self.W]
-        return out
+        return out.unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

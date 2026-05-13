@@ -434,6 +434,7 @@ class CREDITHEALPix(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(128, 256),
+        frames=1,
         nside=32,
         embed_dim=64,
         depth=2,
@@ -457,7 +458,7 @@ class CREDITHEALPix(nn.Module):
         self.register_buffer("ll_to_hp", ll_to_hp)
 
         self.unet = HEALPixUNet(
-            in_channels,
+            in_channels * frames,
             out_channels,
             embed_dim=embed_dim,
             depth=depth,
@@ -494,7 +495,7 @@ class CREDITHEALPix(nn.Module):
             x = x.reshape(B, C * T, H, W)
         faces = self._ll_to_faces(x)
         out = self.unet(faces)
-        return self._faces_to_ll(out)
+        return self._faces_to_ll(out).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

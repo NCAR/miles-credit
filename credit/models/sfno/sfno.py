@@ -241,6 +241,7 @@ class CREDITSfno(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(128, 256),
+        frames=1,
         patch_size=1,
         embed_dim=256,
         depth=12,
@@ -258,7 +259,7 @@ class CREDITSfno(nn.Module):
         self.model = SFNOModel(
             img_size=(H + pad_H, W + pad_W),
             patch_size=patch_size,
-            in_channels=in_channels,
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             embed_dim=embed_dim,
             depth=depth,
@@ -283,7 +284,7 @@ class CREDITSfno(nn.Module):
         out = self.model(x)
         if self.pad_H > 0 or self.pad_W > 0:
             out = out[:, :, : self.H, : self.W]
-        return out
+        return out.unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

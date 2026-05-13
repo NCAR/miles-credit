@@ -297,6 +297,7 @@ class CREDITArchesWeather(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(192, 288),
+        frames=1,
         patch_size=4,
         d_model=256,
         depth=8,
@@ -308,7 +309,7 @@ class CREDITArchesWeather(nn.Module):
     ):
         super().__init__()
         self.model = ArchesWeatherBackbone(
-            in_channels=in_channels,
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             img_size=img_size,
             patch_size=patch_size,
@@ -325,7 +326,7 @@ class CREDITArchesWeather(nn.Module):
         if x.dim() == 5:
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        return self.model(x)
+        return self.model(x).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

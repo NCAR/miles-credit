@@ -398,6 +398,7 @@ class CREDITSwinRNN(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(128, 256),
+        frames=1,
         patch_size=4,
         embed_dim=96,
         depths=(2, 2, 6),
@@ -416,7 +417,7 @@ class CREDITSwinRNN(nn.Module):
         self.model = SwinRNNModel(
             img_size=(H + pad_H, W + pad_W),
             patch_size=patch_size,
-            in_channels=in_channels,
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             embed_dim=embed_dim,
             depths=depths,
@@ -436,7 +437,7 @@ class CREDITSwinRNN(nn.Module):
         out = self.model(x)
         if self.pad_H > 0 or self.pad_W > 0:
             out = out[:, :, : self.H, : self.W]
-        return out
+        return out.unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

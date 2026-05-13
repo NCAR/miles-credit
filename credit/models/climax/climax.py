@@ -251,6 +251,7 @@ class CREDITClimaX(nn.Module):
         in_channels=70,
         out_channels=69,
         img_size=(128, 256),
+        frames=1,
         patch_size=2,
         embed_dim=1024,
         depth=8,
@@ -261,7 +262,7 @@ class CREDITClimaX(nn.Module):
     ):
         super().__init__()
         self.model = ClimaX(
-            in_channels=in_channels,
+            in_channels=in_channels * frames,
             out_channels=out_channels,
             img_size=img_size,
             patch_size=patch_size,
@@ -277,7 +278,7 @@ class CREDITClimaX(nn.Module):
         if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        return self.model(x)
+        return self.model(x).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):
