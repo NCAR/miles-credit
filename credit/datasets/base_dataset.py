@@ -228,6 +228,12 @@ class BaseDataset(AbstractBaseDataset):
         # Placeholder for static metadata
         self.static_metadata: dict[str, Any] = {}
 
+        # If the engine argument for xr.open_dataset needs to be specified, add the engine option to your data source config
+        if "engine" in self.curr_source_cfg:
+            self.engine = self.curr_source_cfg["engine"]
+        else:
+            self.engine = None
+
         # By default, we suggest that the inherited dataset use both file_dict and var_dict.
         # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
         #   tuples produced by _map_files. _extract_field can then use the list to find the

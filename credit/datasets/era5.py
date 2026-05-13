@@ -171,7 +171,7 @@ class ERA5Dataset(BaseDataset):
         vars_3D: list[str] = vd["vars_3D"]
         vars_2D: list[str] = vd["vars_2D"]
 
-        with xr.open_dataset(_find_file(file_intervals, t)) as ds:
+        with xr.open_dataset(_find_file(file_intervals, t), engine=self.engine) as ds:
             # Select the time step; static fields have no time dim
             if "time" in ds.dims:
                 if isinstance(ds.time.values[0], cftime.datetime):
