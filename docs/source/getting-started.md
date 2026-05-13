@@ -1,6 +1,7 @@
 # Getting Started
 
 ## Installation for Single Server/Node Deployment
+
 If you plan to use CREDIT only for running pretrained models or training on a single server/node, then
 the standard Python install process will install both CREDIT and all necessary dependencies, including
 the right versions of PyTorch and CUDA, for you. If you are running CREDIT on the Casper system, then
@@ -25,9 +26,11 @@ git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 pip install --user -e .  # dependencies already satisfied in the shared env
 ```
+
 :::
 
 For non-NCAR systems, create a minimal conda or virtual environment.
+
 ```bash
 conda create -n credit python=3.12
 conda activate credit
@@ -46,11 +49,13 @@ If you want to install the CPU-only version of PyTorch, use `--extra-index-url h
 :::
 
 If you want to install the latest stable release from PyPI:
+
 ```bash
 pip install miles-credit
 ```
 
 If you want to install the main development branch:
+
 ```bash
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
@@ -62,18 +67,22 @@ pip install -e .
 
 If you plan to perform development work on CREDIT, install additional
 dependencies for development.
+
 ```bash
 pip install -e ".[develop]"
 ```
 
 ## Installation on Derecho
+
 If you want to build a conda environment and install a Derecho-compatible version of PyTorch, run
 the `create_derecho_env.sh` script.
+
 ```bash
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 ./create_derecho_env.sh
 ```
+
 This script will create a Derecho-compatible `conda` environment with a user-specified name taken from the `CREDIT_ENV_NAME` environment variable (defaults to `credit-derecho`).
 
 :::{important}
@@ -88,43 +97,51 @@ python installers tend to download their files. You can shift the .cache directo
 more space by adding `export XDG_CACHE_HOME="/glade/work/$USER/.cache"` to your `~/.bashrc` file.
 :::
 
-
 ## Installation from source
+
 See <project:installation.md> for detailed instructions on building CREDIT and its
 dependencies from source or for building CREDIT on the Derecho supercomputer.
 
 ## Making sure training and inference work
+
 To train a basic WXFormer model on Casper or Derecho, run the following command from the miles-credit directory:
+
 ```bash
 # Gen 1
 credit_train -c config/example-v2026.1.0.yml
 ```
+
 This script will train a simple WXFormer model on 1 degree ERA5 data for 10 batches. The model will not be good,
 but if it completes successfully, you can
 have some confidence that CREDIT has been set up correctly in your environment.
 
 Next, make sure inference is working by running:
+
 ```bash
 credit_rollout_to_netcdf -c config/example-v2026.1.0.yml
 ```
+
 This will perform a short forecast based on ERA5 and will save the outputs to a specified directory.
 
 If you want to run a realtime forecast, first download and regrid GFS data to your domain.
+
 ```bash
 credit_gfs_init -c config/example-v2026.1.0.yml -p 1
 ```
+
 The script will create a GFS initialization file in your scratch directory. It
 will also create a realtime config file `config/example-v2026.1.0_realtime.yml`.
 Edit the realtime config file so that `data:save_loc_dynamic_forcing` is
 `/glade/campaign/cisl/aiml/credit/credit_solar_6h_1deg_era5_mlevel/*.nc`.  Then you can
 run a realtime forecast with
+
 ```bash
 credit_rollout_realtime -c config/example-v2026.1.0_realtime.yml -p 1
 ```
+
 This script will output 6-hourly netcdf files to your scratch directory and
 performs interpolation to pressure levels. From there you can view the data with your
 favorite visualization tool.
-
 
 ## Quick start with the Gen 2 `credit` CLI
 
@@ -151,4 +168,5 @@ credit --help
 Use `--dry-run` with `credit submit` to preview the PBS script before submitting.
 
 ## Running a pretrained model
+
 See <project:Inference.md> for more details on how to run one of the pretrained CREDIT models.

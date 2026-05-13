@@ -9,13 +9,15 @@ so follow along here as we take you on the journey to
 CREDIT.
 
 ## Prerequisites
+
 In this section, you will need to create a clean Python
 virtual environment and install other system packages to
 enable the building of PyTorch. You can even do this on your
 Mac or Linux laptop.
 
 ### MacOS (Intel or ARM)
-1. First, install either the [Homebrew](https://brew.sh/) or [MacPorts](https://www.macports.org/) package managers
+
+1. First, install either the [Homebrew/Workbrew](https://brew.sh/) or [MacPorts](https://www.macports.org/) package managers
 so you can easily install all the system-level dependencies and other helpful Linux programs like wget, gcc, etc.
 Further instructions will assume the use of Homebrew, but should also work for MacPorts. Homebrew
 should also install the XCode Command Line tools, which include git and clang.
@@ -25,7 +27,9 @@ command.
     * netcdf (for reading and writing netCDF files)
     * wget (for downloading files from the internet)
     * mpich or openmpi (for MPI distributed training support)
+
 ### Linux
+
 1. Install the following dependencies with your OS package manager or ask your sysadmins to make sure
 they are installed:
    * gcc (gnu compilers for C, C++, and Fortran)
@@ -39,6 +43,7 @@ to interface between libfabric and NCCL. If you do not compile PyTorch with Libf
 we have found that inter-node communication speeds on Derecho and other HPE/Cray HPC systems are much slower.
 
 ## NSF NCAR Derecho
+
 The NSF NCAR Derecho system has some special requirements in place to support Cray MPI and the Slingshot
 interconnect. Ben Kirk has created a special [makefile](https://github.com/benkirk/derecho-pytorch-mpi) to
 build PyTorch and Torchvision from source on Derecho with all appropriate environment variables and dependencies.
@@ -47,6 +52,7 @@ Conda packages for PyTorch 2.5.1 and Torchvision 0.20.1 are available on Derecho
 at `/glade/work/benkirk/consulting/conda-recipes/output/` and are used when running `create_env_derecho.sh`.
 
 ## PyTorch Python Dependencies
+
 1. Install a Python virtual environment manager. My preferred one for now is
 [miniforge](https://github.com/conda-forge/miniforge), which has both conda and mamba included and does not have the
 licensing issues that may come with miniconda. [uv](https://astral.sh/blog/uv) might also work but has not been tested.
@@ -56,19 +62,25 @@ licensing issues that may come with miniconda. [uv](https://astral.sh/blog/uv) m
 4. Clone a release branch of PyTorch and all its third party dependencies. This will take awhile.
 `git clone -b v2.6.0 --recursive git@github.com:pytorch/pytorch.git`
 5. Go into the PyTorch repo and install its dependencies into your `credit` environment.
+
 ```bash
 cd pytorch
 pip install -r requirements.txt
 ```
+
 ## Building PyTorch
+
 1. Build and install PyTorch into your environment with the following command:
+
 ```bash
 USE_DISTRIBUTED=1 python setup.py install
 ```
+
 On Mac systems, the `USE_DISTRIBUTED` option is 0 by default and is 1 on Linux systems.
 
 If you want to build PyTorch in a way that can be distributed to multiple users, build a wheel file.
 Wheel files are binary libraries that can be pip installed into other users' environments on the same operating system.
+
 ```bash
 pip install wheel build
 cd pytorch # if not already in your pytorch directory
@@ -84,23 +96,29 @@ Once a wheel file is created, you can install it into a Python environment with
 `pip install <pytorch wheel file>`
 
 ## Building Torchvision
+
 CREDIT also uses [torchvision](https://github.com/pytorch/vision), which also needs to be built and compiled to match
 with your installed version of PyTorch. Instructions for building torchvision from source
-can be found [here](https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#development-installation).
+can be found on the [pytorch development installation documentation](https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#development-installation).
 
 ## Installing CREDIT
+
 Clone miles-credit from github and install using pip:
+
 ```bash
 git clone https://github.com:NCAR/miles-credit.git
 cd miles-credit
 pip install -e .
 ```
+
 The CREDIT installer should be able to install all dependencies from PyPI using
 pip.
 
 ## Test Your Installation
+
 To verify that you have installed all dependencies correctly, you can conduct the following tests.
 First, install and run pytest to verify all unit tests pass.
+
 ```bash
 pip install pytest
 cd miles-credit

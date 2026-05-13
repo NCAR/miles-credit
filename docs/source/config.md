@@ -1,14 +1,13 @@
-# What's in the Configuration File? 
+# CREDIT Configuration Guide
 
-Your configuration file drives everything from the model training to inference, to creating validation runs. This page documents the possible config options and the what the flags / settings do. 
-
-# CREDIT Configuration Guide  
+Your configuration file drives everything from the model training to inference, to creating validation runs. This page documents the possible config options and the what the flags / settings do.
 
 ## Overview
 
 This document provides detailed instructions on configuring `configuration.yml` for running CREDIT.
 
 **Key Topics Covered:**  
+
 - Understanding and modifying `configuration.yml`  
 - Standard Configuration Values and Recommendations
 - Best Practices and troubleshooting  
@@ -28,19 +27,18 @@ save_loc: '/path/to/workspace/'
 seed: 1000
 ```
 
-- **`save_loc`**: Directory where model weights, logs, and scripts are stored. If it doesn’t exist, CREDIT will create it automatically. The models weights can be large, so make sure ample storage is available. 
-
+- **`save_loc`**: Directory where model weights, logs, and scripts are stored. If it doesn’t exist, CREDIT will create it automatically. The models weights can be large, so make sure ample storage is available.
 - **`seed`**: Random seed for reproducibility. Changing this affects experiment results.  
 
 ---
 
 ## Data Configuration  
 
-CREDIT requires multiple types of atmospheric data, formatted in **YEARLY** `.nc` or `.zarr` files, the following variables can be contained within the same, or different files.   
+CREDIT requires multiple types of atmospheric data, formatted in **YEARLY** `.nc` or `.zarr` files, the following variables can be contained within the same, or different files.
 
 ### Upper-Air Variables  
 
-Upper-Air variables are those which have either pressure or model levels. These variables are considered prognostic (input + output) and have an expected format which covers whole spatial domain and model levels. 
+Upper-Air variables are those which have either pressure or model levels. These variables are considered prognostic (input + output) and have an expected format which covers whole spatial domain and model levels.
 
 ```yaml
 variables: ['U', 'V', 'T', 'Q']
@@ -52,7 +50,7 @@ save_loc: '/path/to/upper_air_data/'
 
 ### Surface Variables  
 
-Despite being named 'surface variables' these are prognostic variables (input &output) that are on single levels, either surface, top-of-model, or somewhere in the middle. 
+Despite being named 'surface variables' these are prognostic variables (input &output) that are on single levels, either surface, top-of-model, or somewhere in the middle.
 
 ```yaml
 surface_variables: ['SP', 't2m', 'Z500', 'T500', 'U500', 'V500', 'Q500']
@@ -72,7 +70,7 @@ diagnostic_variables: ['Z500', 'T500', 'U500', 'V500', 'Q500']
 save_loc_diagnostic: '/path/to/diagnostic_data/'
 ```
 
-- **Dynamic forcing variables** provide additional time-dependent factors (e.g., solar forcing or SST forcing), these are dynamic (changing in time) variables provided during run time. 
+- **Dynamic forcing variables** provide additional time-dependent factors (e.g., solar forcing or SST forcing), these are dynamic (changing in time) variables provided during run time.
 
 - **Diagnostic variables** are used for evaluation but **not directly predicted** by the model.  
 
@@ -131,7 +129,7 @@ std_path: '/path/to/std.nc'
 Both `mean_path` and `std_path` should store **1D variables indexed by level**:  
 
 | Variable Type | Expected Dimensions | Example Variables |
-|--------------|-------------------|------------------|
+| ------------- | ------------------- | ----------------- |
 | **Upper-Air** | `(level,)` | `U`, `V`, `T`, `Q` |
 | **Surface** | `()` | `SP`, `t2m` |
 | **Forcing** | `()` | `TSI` |
@@ -144,7 +142,7 @@ Both `mean_path` and `std_path` should store **1D variables indexed by level**:
 ### Summary of Key Physics & Normalization Recommendations  
 
 | Parameter | Required For | Notes |
-|-----------|-------------|-------|
+| --------- | ------------ | ----- |
 | `save_loc_physics` | Conservation constraints (`post_conf`) | **Required** if conservation physics is enabled. |
 | `mean_path` | `scaler_type: 'std_new'` | **Required** for z-score normalization. |
 | `std_path` | `scaler_type: 'std_new'` | Must include **all model variables**. |
@@ -215,13 +213,11 @@ valid_forecast_len: 0
 
 If `forecast_len > 0`, CREDIT supports **customized backpropagation strategies** to improve training efficiency.
 
-
 ```yaml
 backprop_on_timestep: [1, 2, 3, 5, 6, 7]
 ```
 
-- Specifies which time steps contribute to the loss during 
-backpropagation.  
+- Specifies which time steps contribute to the loss during backpropagation.  
 - If unspecified, the trainer will backpropagate on *all* timesteps
 - Helps **control memory usage** by skipping certain time steps.  
 
@@ -230,6 +226,7 @@ backpropagation.
 ```yaml
 retain_graph: False
 ```
+
 - Specifies whether the trainer keeps the computation graph through the autoregressive prediction during training
 - If so, the backpropagation will go from each `backprop_on_timestep` to the start of the autoregressive rollout
 - Will use **a lot** more memory
@@ -282,6 +279,7 @@ static_first: False
 💡 *If you are using `std_new`, set `static_first: False`.*  
 
 ---
+
 ### Dataset Type  
 
 CREDIT supports multiple data loading strategies:  
@@ -292,19 +290,18 @@ dataset_type: ERA5_MultiStep_Batcher
 
 - **Options**:  
   - `ERA5_MultiStep_Batcher`  
-  - `ERA5_and_Forcing_MultiStep` 
+  - `ERA5_and_Forcing_MultiStep`
   - `ERA5_and_Forcing_SingleStep`
   - `Ocean_Tensor_Batcher`
   - `Ocean_MultiStep_Batcher`
 - The **default (`ERA5_MultiStep_Batcher`) is recommended** for efficient parallel data loading.  
-
 
 ---
 
 ### Summary of Key Data Processing Recommendations  
 
 | Parameter | Recommended Setting | Notes |
-|-----------|---------------------|-------|
+| --------- | ------------------- | ----- |
 | `scaler_type` | `'std_new'` | Ensures data is properly normalized. |
 | `history_len` | `>= 1` | Use longer history for improved forecasts. |
 | `forecast_len` | `0` (single-step) or `>0` (multi-step) | Multi-step training requires additional tuning. |
@@ -314,9 +311,8 @@ dataset_type: ERA5_MultiStep_Batcher
 | `static_first` | `False` | Recommended for `std_new`. |
 | `dataset_type` | `MultiprocessingBatcherPrefetch` | Optimized for performance. |
 
+## Training Configuration
 
-
-## Training Configuration  
 The `trainer` section controls how CREDIT handles **GPU parallelism, gradient updates, checkpointing, and logging**.  
 
 ### Training type and mode  
@@ -332,7 +328,8 @@ trainer:
 
 💡 *For large models, `fsdp` helps distribute computation across multiple GPUs, reducing memory usage.*  
 
-CREDIT supports **single-GPU, multi-GPU, and distributed training**.  
+CREDIT supports **single-GPU, multi-GPU, and distributed training**.
+
 ---
 
 ### FSDP-Specific GPU Optimization  
@@ -439,7 +436,7 @@ update_learning_rate: False
 ### Summary of Key Hardware Utilization Recommendations  
 
 | Parameter | Recommended Setting | Notes |
-|-----------|---------------------|-------|
+| --------- | ------------------- | ----- |
 | `mode` | `"fsdp"` (for multi-GPU) | `"ddp"` for simpler parallel training. |
 | `cpu_offload` | `False` | Saves GPU memory but **can cause CPU OOM errors**. |
 | `activation_checkpoint` | `True` | Saves memory but **slows training**. |
@@ -450,8 +447,6 @@ update_learning_rate: False
 | `save_metric_vars` | `True` (or specify variables) | Controls **what gets logged**. |
 | `update_learning_rate` | `False` | **Disable** if using a scheduler. |
 
-
-
 ### Learning Rate & Optimization  
 
 ```yaml
@@ -459,8 +454,7 @@ learning_rate: 1.0e-03
 use_scheduler: False
 ```
 
-- Set `use_scheduler: True` to enable learning rate decay.  
-
+- Set `use_scheduler: True` to enable learning rate decay.
 
 ### Regularization & Weight Decay  
 
@@ -629,7 +623,7 @@ prefetch_factor: 4
 ### Summary of Key Training Strategy Recommendations  
 
 | Parameter | Recommended Setting | Notes |
-|-----------|---------------------|-------|
+| --------- | ------------------- | ----- |
 | `weight_decay` | `0` (or `1e-4` for deep models) | Helps prevent overfitting. |
 | `train_batch_size` | `1` (increase if possible) | Larger batch size speeds up training. |
 | `batches_per_epoch` | `1000` (or `0` to use all data) | Reduce for faster debugging. |
@@ -640,7 +634,6 @@ prefetch_factor: 4
 | `amp` | `False` (enable for mixed precision) | Saves GPU memory. |
 | `grad_max_norm` | `'dynamic'` | Prevents gradient explosion. |
 | `thread_workers` | `4` | Tune based on available CPUs. |
-
 
 ---
 
@@ -663,7 +656,6 @@ surface_channels: 7
 - **`image_height`, `image_width`**: Spatial resolution (latitude × longitude).  
 - **`levels`**: Number of atmospheric levels.  
 - **`channels`**: Number of upper-air variables.
-
 
 Here's an **expanded and structured section** detailing the **model configuration**, including explanations of **architecture choices, spatial resolution, patch embeddings, attention mechanisms, and normalization techniques**.  
 
@@ -815,7 +807,7 @@ interp: True
 ### Summary of Key Model Recommendations  
 
 | Parameter | Recommended Setting | Notes |
-|-----------|---------------------|-------|
+| --------- | ------------------- | ----- |
 | `type` | `"crossformer"` | Default transformer-based model. |
 | `frames` | `1` (or higher) | More frames improve historical context. |
 | `image_height, image_width` | `640 × 1280` (adjust as needed) | Must match input dataset resolution. |
@@ -849,19 +841,20 @@ padding_conf:
 💡 *Padding ensures continuity at boundaries, preventing artifacts in global simulations.*  
 
 ---
+
 ### Summary of Key Padding Recommendations  
 
 | Parameter | Recommended Setting | Notes |
-|-----------|---------------------|-------|
+| --------- | ------------------- | ----- |
 | `padding_conf.activate` | `True` | Enables domain padding. |
 | `padding_conf.mode` | `'earth'` | Uses **Earth-system-specific padding**. |
 | `padding_conf.pad_lat` | `80` | Adjust based on dataset resolution. |
 | `padding_conf.pad_lon` | `80` | Ensures global continuity. |
 
-
 Here is a **vastly expanded** and **fully structured** explanation of the **post-processing (`post_conf`) section** in **CREDIT**. This covers **conservation schemes, tracer corrections, and energy/mass balance adjustments** in depth.  
 
 ---
+
 ## Post-Block (`post_conf`)  
 
 The **post-processing block (`post_conf`)** enforces **physical conservation constraints** on model outputs, correcting imbalances in **mass, water, energy, and tracers**.  
@@ -884,7 +877,7 @@ post_conf:
 
 SKEBS introduces **stochastic perturbations** to correct **underdispersed forecasts** in weather models.  
 
-Based on [Berner, J., Shutts, G. J., Leutbecher, M., & Palmer, T. N. (2009). A spectral stochastic kinetic energy backscatter scheme and its impact on flow-dependent predictability in the ECMWF ensemble prediction system. Journal of the Atmospheric Sciences, 66(3), 603-626. ](https://journals.ametsoc.org/view/journals/atsc/66/3/2008jas2677.1.xml)
+Based on [Berner, J., Shutts, G. J., Leutbecher, M., & Palmer, T. N. (2009). A spectral stochastic kinetic energy backscatter scheme and its impact on flow-dependent predictability in the ECMWF ensemble prediction system. Journal of the Atmospheric Sciences, 66(3), 603-626.](https://journals.ametsoc.org/view/journals/atsc/66/3/2008jas2677.1.xml)
 
 - **`True`** → Enables **kinetic energy backscatter corrections** (experimental).  
 - **`False`** → Disables SKEBS.  
@@ -953,13 +946,12 @@ skebs:
     write_rollout_debug_files: False # saves only when no_grad 
 ```
 
-
-
 ---
 
 ## Conservation Schemes  
 
-CREDIT enforces **physical conservation laws** for:  
+CREDIT enforces **physical conservation laws** for:
+
 1. **Water Conservation** (tracers, precipitation, evaporation).  
 2. **Mass Conservation** (fixes inconsistencies in pressure/height fields).  
 3. **Energy Conservation** (balances fluxes and temperature).  
@@ -1094,7 +1086,7 @@ global_energy_fixer:
 ### Key Adjustments  
 
 | Variable | Purpose |
-|----------|---------|
+| -------- | ------- |
 | **`air_temperature_name`** | Balances total heat content. |
 | **`specific_total_water_name`** | Adjusts for latent heat effects. |
 | **`u_wind_name`, `v_wind_name`** | Ensures kinetic energy conservation. |
@@ -1107,10 +1099,10 @@ global_energy_fixer:
 
 ---
 
-### Summary of Key Conservation Fixers 
+### Summary of Key Conservation Fixers
 
 | Fixer | Purpose | Key Variables |
-|--------|---------|--------------|
+| ----- | ------- | ------------- |
 | **Tracer Fixer** | Prevents **negative water values** | `"specific_total_water"`, `"total_precipitation"` |
 | **Mass Fixer** | Ensures **total air mass conservation** | `"SP"`, `"specific_total_water"` |
 | **Water Fixer** | Balances **precipitation and evaporation** | `"SP"`, `"total_precipitation"`, `"evaporation"` |
@@ -1118,13 +1110,12 @@ global_energy_fixer:
 
 ---
 
-## Best Practices  
+## Fixers Best Practices  
 
 ✅ **Always enable `post_conf` for physically consistent model outputs.**  
 ✅ **Ensure `save_loc_physics` contains required grid variables** (`lon2d`, `lat2d`, `coef_a`, `coef_b`).  
 ✅ **Adjust `fix_level_num` if conservation should only apply to certain layers.**  
 ✅ **Test with `simple_demo: True` first to visualize corrections before full training.**  
-
 
 ## Loss Configuration  
 
@@ -1226,7 +1217,7 @@ variable_weights:
 ### Summary of Key Loss Recommendations  
 
 | Parameter | Recommended Setting | Notes |
-|-----------|---------------------|-------|
+| --------- | ------------------- | ----- |
 | `training_loss` | `"mse"` (default) | Use `"huber"` or `"logcosh"` if data contains outliers. |
 | `use_power_loss` | `False` | Set `True` to penalize **spectral errors**. |
 | `use_spectral_loss` | `False` | **Do not enable both spectral and power loss**. |
@@ -1234,11 +1225,10 @@ variable_weights:
 | `use_latitude_weights` | `True` | Recommended for **global datasets**. |
 | `use_variable_weights` | `False` | Enable if **some variables are more important**. |
 
-
-
 ## Prediction (Inference) Configuration  
 
-The `predict` section controls **how CREDIT runs forecasts** after training, including:  
+The `predict` section controls **how CREDIT runs forecasts** after training, including:
+
 - **Batching and parallel execution**  
 - **Forecast initialization settings**  
 - **Storage format for predicted fields**  
@@ -1360,7 +1350,7 @@ climatology: '/path/to/climatology.nc'
 ### Summary of Key Prediction Recommendations  
 
 | Parameter | Recommended Setting | Notes |
-|-----------|---------------------|-------|
+| --------- | ------------------- | ----- |
 | `mode` | `"fsdp"` (for multi-GPU) | `"none"` for single-GPU inference. |
 | `batch_size` | `1` (increase for parallelism) | Processes multiple initializations at once. |
 | `ensemble_size` | `1` (or higher for ensembles) | Supports probabilistic forecasting. |
@@ -1392,7 +1382,7 @@ pbs:
 ## Troubleshooting  
 
 | Issue | Possible Cause | Solution |
-|--------|--------------|----------|
+| ----- | -------------- | -------- |
 | Training loss does not decrease | Learning rate too high/low | Adjust `learning_rate` or use a scheduler |
 | Model runs out of memory | Batch size too large | Reduce `train_batch_size` or enable mixed precision |
 | Output fields look unrealistic | Conservation schemes disabled | Ensure `post_conf.activate: True` |
@@ -1401,7 +1391,7 @@ pbs:
 
 ---
 
-## Best Practices  
+## Best Practices
 
 - **Check Data Formats**: Ensure variables follow expected dimensions `(time, level, lat, lon)`.  
 - **Use a Seed for Reproducibility**: Keep `seed` fixed unless testing variations.  

@@ -19,6 +19,7 @@ cd miles-credit
 # Installs credit into the .local directory in your home directory.
 pip install --user -e .
 ```
+
 :::
 
 :::{note}
@@ -31,6 +32,7 @@ git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 pip install --user -e .
 ```
+
 :::
 
 :::{note}
@@ -49,6 +51,7 @@ git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 pip install -e .
 ```
+
 :::
 
 Verify the install worked:
@@ -84,7 +87,7 @@ Open `my_run.yml` and find the `# USER SETTINGS` block. The only things you
 may want to change before your first run:
 
 | Field | Default | Notes |
-|-------|---------|-------|
+| ----- | ------- | ----- |
 | `trainer.num_epoch` | `5` | Epochs per PBS job. Increase if walltime allows. |
 | `trainer.train_batch_size` | `8` | Per-GPU. Reduce if you hit OOM. |
 | `save_loc` | scratch dir | Where checkpoints and logs are written. |
@@ -114,7 +117,7 @@ credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 4
 
 Before submitting, `credit submit` always prints a job plan:
 
-```
+```bash
 ====================================================
   Job plan
 ====================================================
@@ -175,6 +178,7 @@ tail -5 /glade/derecho/scratch/$USER/CREDIT_runs/my_run/training_log.csv
 Columns: `epoch`, `train_loss`, `val_loss`, `lr`, `epoch_time_s`.
 
 **What healthy training looks like:**
+
 - After epoch 1: `train_loss` ≈ 1–3
 - Loss should decrease steadily each epoch
 - `val_loss` should track `train_loss` (not diverge)
@@ -211,7 +215,7 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 **What to look for:**
 
 | What you see | Meaning |
-|---|---|
+| ------------ | ------- |
 | Recognisable weather patterns after ~10 epochs | Training is going well |
 | Uniform grey prediction | Too few epochs, or LR/normalisation problem |
 | Loss > 100 or growing | Check `mean_path` / `std_path` in config |
@@ -241,7 +245,7 @@ credit ask -c my_run.yml "my loss stopped decreasing at epoch 12, what should I 
 ```
 
 | Provider | Env var | Mode | Cost |
-|----------|---------|------|------|
+| -------- | ------- | ---- | ---- |
 | **Anthropic** | `ANTHROPIC_API_KEY` | Agent (multi-turn, reads files) | ~$0.01–0.05/session |
 | OpenAI | `OPENAI_API_KEY` | Simple chat | Pay-per-use |
 | Google | `GOOGLE_API_KEY` | Simple chat | Free |
@@ -263,7 +267,7 @@ See the full [AI Assistant documentation](agent.md) for all examples, options, a
 ## Common problems
 
 | Symptom | Fix |
-|---------|-----|
+| ------- | --- |
 | Training hangs on startup, no error | DataLoader is using too much RAM. Set `thread_workers: 1` and `prefetch_factor: 1` in your config. |
 | `RendezvousConnectionError` on Derecho | Use `--nodes 1` so the job gets `torchrun --standalone` instead of MPI rendezvous. |
 | `ANTHROPIC_API_KEY is not set` | Run `export ANTHROPIC_API_KEY=sk-ant-...` or add it to `~/.bashrc`. |
@@ -276,7 +280,7 @@ See the full [AI Assistant documentation](agent.md) for all examples, options, a
 ## What's next
 
 | Goal | Where to go |
-|------|------------|
+| ---- | ----------- |
 | Understand every config field | [Config reference](config.md) |
 | Multi-node training details | [Training guide](Training.md) |
 | Run a forecast from a trained model | [Inference guide](Inference.md) |
