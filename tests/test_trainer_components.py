@@ -428,8 +428,8 @@ class _FakeLoader:
     """Minimal iterable loader that yields nested-format batches for trainerERA5gen2.
 
     Each batch has the structure expected by apply_preblocks / ConcatToTensor:
-        batch["era5"]["input"][var_key]  -> (B, 1, H, W) tensor
-        batch["era5"]["target"][var_key] -> (B, 1, H, W) tensor
+        batch["input"]["era5"][var_key]  -> (B, 1, H, W) tensor
+        batch["target"]["era5"][var_key] -> (B, 1, H, W) tensor
 
     C variables are emitted so ConcatToTensor assembles (B, C, H, W) tensors,
     matching the original flat (B, C, H, W) shape expected by the test models.
@@ -454,7 +454,7 @@ class _FakeLoader:
         for _ in range(self._n):
             input_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
             target_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
-            yield {"era5": {"input": input_vars, "target": target_vars}}
+            yield {"input": {"era5": input_vars}, "target": {"era5": target_vars}}
 
 
 class TestERA5Gen2MultiStepTraining:
