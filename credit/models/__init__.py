@@ -159,6 +159,11 @@ _MODEL_REGISTRY = {
         "CREDITCorrDiff",
         "Loading CorrDiff (score-based conditional diffusion) ...",
     ),
+    "nextgen_wxformer": (
+        "credit.models.wxformer.wxformer_next",
+        "NextGenWXFormer",
+        "Loading NextGen WXFormer (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
+    ),
 }
 
 # Backward-compatible name -> (module_path, class_name) for direct attribute access
