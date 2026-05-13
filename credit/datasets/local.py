@@ -132,7 +132,7 @@ class LocalDataset(BaseDataset):
             "datetime_fmt": "unix_ns",
         }
         self.mode = "local"
-
+        self.time_coord = self.curr_source_cfg.get("time_coord", "time")
         # Initialize the field registration based on the provided config and populate
         #   dictionary of variables and file paths for each field type
         self.init_register_all_fields()
@@ -168,7 +168,7 @@ class LocalDataset(BaseDataset):
 
         with xr.open_dataset(_find_file(file_intervals, t)) as ds:
             # Select the time step; static fields have no time dim
-            if "time" in ds.dims:
+            if self.time_coord in ds.dims:
                 if isinstance(ds.time.values[0], cftime.datetime):
                     calendar = ds.time.values[0].calendar
                     t_sel = _to_cftime(t, calendar)
