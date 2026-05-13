@@ -29,7 +29,7 @@ def _make_multisource_config() -> dict[str, Any]:
         "source": {
             "Test_HRRR": {
                 "dataset_type": "hrrr",
-                "product": "wrfprsf",
+                "product": "wrfprs",
                 "mode": "local",
                 "base_path": "/path/to/hrrr",
                 "forecast_hour": 0,
@@ -40,7 +40,7 @@ def _make_multisource_config() -> dict[str, Any]:
             },
             "Test_HRRR_NAT": {
                 "dataset_type": "hrrr",
-                "product": "wrfnatf",
+                "product": "wrfnat",
                 "mode": "local",
                 "base_path": "/path/to/hrrr_nat",
                 "forecast_hour": 0,
@@ -51,7 +51,7 @@ def _make_multisource_config() -> dict[str, Any]:
             },
             "Test_HRRR_SUBH": {
                 "dataset_type": "hrrr",
-                "product": "wrfsubhf",
+                "product": "wrfsubh",
                 "mode": "local",
                 "base_path": "/path/to/hrrr_subhf",
                 "forecast_hour": 0,
@@ -72,7 +72,7 @@ def test_get_specific_product_config():
     data_config = _make_multisource_config()
 
     dataset_types_check = "hrrr"
-    product_check = ["wrfprsf", "wrfnatf", "wrfsubhf"]
+    product_check = ["wrfprs", "wrfnat", "wrfsubh"]
 
     for source, product in zip(data_config["source"].keys(), product_check):
         subconfig = make_single_source_subconfig(data_config, source)
@@ -104,7 +104,7 @@ def _make_config_download_factory(_make_base_path: pathlib.Path) -> Any:
     but we want to share the same base path across tests.
     """
 
-    def _make_config_download(product: VALID_PRODUCTS = "wrfprsf", **extra_source) -> dict[str, Any]:
+    def _make_config_download(product: VALID_PRODUCTS = "wrfprs", **extra_source) -> dict[str, Any]:
         source_defaults: dict[str, Any] = {
             "dataset_type": "hrrr",
             "product": product,
@@ -132,7 +132,7 @@ def _make_config_download_factory(_make_base_path: pathlib.Path) -> Any:
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_download_hrrr(_make_config_download_factory):
     time_start_make_config = time.time()
-    data_config = _make_config_download_factory(product="wrfprsf")
+    data_config = _make_config_download_factory(product="wrfprs")
     time_end_make_config = time.time()
     # Will print if test fails
     print(f"\nMake config took {time_end_make_config - time_start_make_config:.2f} seconds")
@@ -144,7 +144,7 @@ def test_download_hrrr(_make_config_download_factory):
     print(f"Download took {time_end_download - time_start_download:.2f} seconds")
 
     # Check the temporary directory for the expected files.
-    tmp_dir = pathlib.Path(data_config["source"]["Test_HRRR_wrfprsf"]["base_path"])
+    tmp_dir = pathlib.Path(data_config["source"]["Test_HRRR_wrfprs"]["base_path"])
     assert tmp_dir.exists()
     assert tmp_dir.is_dir()
 
@@ -184,7 +184,7 @@ def test_download_hrrr(_make_config_download_factory):
 @pytest.mark.skipif(SKIP_REMOTE, reason=REASON_SKIP_REMOTE)
 def test_download_hrrr_subhf(_make_config_download_factory):
     time_start_make_config = time.time()
-    data_config = _make_config_download_factory(product="wrfsubhf")
+    data_config = _make_config_download_factory(product="wrfsubh")
     time_end_make_config = time.time()
     # Will print if test fails
     print(f"\nMake config took {time_end_make_config - time_start_make_config:.2f} seconds")
@@ -196,7 +196,7 @@ def test_download_hrrr_subhf(_make_config_download_factory):
     print(f"Download took {time_end_download - time_start_download:.2f} seconds")
 
     # Check the temporary directory for the expected files.
-    tmp_dir = pathlib.Path(data_config["source"]["Test_HRRR_wrfsubhf"]["base_path"])
+    tmp_dir = pathlib.Path(data_config["source"]["Test_HRRR_wrfsubh"]["base_path"])
     assert tmp_dir.exists()
     assert tmp_dir.is_dir()
 

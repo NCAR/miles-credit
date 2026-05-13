@@ -11,8 +11,8 @@ reads rather than scanning the full file.
 Downloaded files follow the native HRRR directory layout used by ``HRRRDataset``
 in local mode, so they are immediately usable without any renaming::
 
-    v3/v4 (2018-07-12+): {base_path}/hrrr.{YYYYMMDD}/conus/hrrr.t{HH}z.wrfprsf{FF:02d}.grib2
-    v1/v2 (before):      {base_path}/hrrr.{YYYYMMDD}/hrrr.t{HH}z.wrfprsf{FF:02d}.grib2
+    v3/v4 (2018-07-12+): {base_path}/hrrr.{YYYYMMDD}/conus/hrrr.t{HH}z.{product}f{FF:02d}.grib2
+    v1/v2 (before):      {base_path}/hrrr.{YYYYMMDD}/hrrr.t{HH}z.{product}f{FF:02d}.grib2
 
 After downloading, switch ``mode`` to ``"local"`` in the config.
 
@@ -31,7 +31,7 @@ Config section used (``data.source``)::
       source:
         Example_HRRR:
           dataset_type: "hrrr"
-          product: "wrfprsf" # Options: "wrfprsf", "wrfnatf", "wrfsubhf"
+          product: "wrfprs" # Options: "wrfprs", "wrfnat", "wrfsubh"
           mode: "local"          # mode to use after download
           base_path: "/data/hrrr"
           forecast_hour: 0
@@ -147,8 +147,8 @@ def download_hrrr(
     assert source_cfg["dataset_type"] == "hrrr", (
         f"Expected dataset_type to be 'hrrr'. Found: {source_cfg['dataset_type']}"
     )
-    # The default product is "wrfprsf" if not specified in the config.
-    product_request = source_cfg.get("product", "wrfprsf")
+    # The default product is "wrfprs" if not specified in the config.
+    product_request = source_cfg.get("product", "wrfprs")
     # Validate the product request.
     product = _validate_product_request(product_request)
 
@@ -170,7 +170,7 @@ def download_hrrr(
         freq=dt,
     )
 
-    if product == "wrfsubhf":
+    if product == "wrfsubh":
         # For sub-hourly, derive the unique set of (init_hour, ff) file pairs
         # implied by the requested timestamps rather than using forecast_hour directly.
         seen: set[tuple] = set()
