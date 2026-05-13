@@ -595,6 +595,8 @@ class WeatherBench2ERA5Dataset(BaseDataset):
             t: Timestamp to select.
             sample: Dict to write variable tensors into (modified in place).
         """
+        if self._fs is None:
+            self._init_fs()
         if field_type not in self.var_dict:
             return
 
