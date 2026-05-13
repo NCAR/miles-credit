@@ -1,0 +1,85 @@
+save_loc: '/glade/casper/scratch/schreck/model_zoo_smoke/aifs'
+
+# AIFS derives in/out channels from variable lists, not in_channels/out_channels keys.
+# No dynamic forcing or diagnostic vars:
+#   n_in  = n_surf + n_atmos * n_levels + n_static = 4 + 4*18 + 2 = 78
+#   n_out = n_surf + n_atmos * n_levels = 76
+
+data:
+    variables: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
+    save_loc: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    level_ids: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+    surface_variables: ['SP', 'VAR_2T', 'VAR_10U', 'VAR_10V']
+    save_loc_surface: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+    dynamic_forcing_variables: []
+    diagnostic_variables: []
+    save_loc_forcing: null
+    static_variables: ["z_norm", "land_sea_mask"]
+    save_loc_static: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
+    std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+    train_years: [2000, 2014]
+    valid_years: [2014, 2018]
+    scaler_type: 'std_new'
+    history_len: 1
+    valid_history_len: 1
+    forecast_len: 0
+    valid_forecast_len: 0
+    lead_time_periods: 6
+    static_first: False
+    dataset_type: ERA5_MultiStep_Batcher
+
+model:
+    type: "aifs"
+    surf_vars: ["2t", "10u", "10v", "msl"]
+    atmos_vars: ["u", "v", "t", "q"]
+    static_vars: ["lsm", "z"]
+    atmos_levels: [1, 9, 19, 29, 39, 49, 59, 69, 79, 89, 97, 104, 111, 116, 122, 126, 131, 136]
+    hidden_dim: 256
+    num_layers: 4
+    num_heads: 4
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+    use_power_loss: False
+    use_spectral_loss: False
+    use_latitude_weights: True
+    latitude_weights: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
+    use_variable_weights: False
+
+trainer:
+    type: era5
+    mode: none
+    activation_checkpoint: False
+    compile: False
+    load_weights: False
+    load_optimizer: False
+    save_best_weights: False
+    save_backup_weights: False
+    learning_rate: 1.0e-04
+    weight_decay: 0
+    train_batch_size: 1
+    valid_batch_size: 1
+    batches_per_epoch: 50
+    valid_batches_per_epoch: 10
+    stopping_patience: 999
+    epochs: 1
+    amp: True
+    grad_max_norm: 1.0
+    thread_workers: 2
+    valid_thread_workers: 1
+    prefetch_factor: 2
+    use_scheduler: False
+    skip_validation: False
+
+pbs:
+    conda: "credit-casper"
+    project: "NAML0001"
+    job_name: "smoke_aifs"
+    walltime: "02:00:00"
+    ncpus: 8
+    ngpus: 1
+    mem: '128GB'
+    gpu_type: "v100"
+    queue: "casper"
