@@ -666,11 +666,11 @@ class TestERA5Gen2MultiStepTraining:
                 for i in range(N_PROG):
                     full_input[f"era5/prognostic/2d/p{i}"] = prog_t1[:, i : i + 1]
                 target = {f"era5/prognostic/2d/p{i}": prog_t1[:, i : i + 1] for i in range(N_PROG)}
-                yield {"era5": {"input": full_input, "target": target}}
+                yield {"input": {"era5": full_input}, "target": {"era5": target}}
 
                 # t=2 batch: only dynfrc (ERA5Dataset i>0 behavior)
                 partial_input = {f"era5/dynamic_forcing/2d/df{i}": dynfrc_t2[:, i : i + 1] for i in range(N_DYNFRC)}
-                yield {"era5": {"input": partial_input, "target": target}}
+                yield {"input": {"era5": partial_input}, "target": {"era5": target}}
 
         captured_x = {}
 
