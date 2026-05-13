@@ -4,15 +4,13 @@ Adapts Aurora's native :class:`.Batch` interface to CREDIT's flat
 ``(B, C, H, W)`` tensor convention so it can be trained with the standard
 CREDIT data pipeline.
 
-Channel layout (input and output tensors):
-    channels = [surf_var_0, ..., surf_var_N,
-                atmos_var_0_lev_0, atmos_var_0_lev_1, ..., atmos_var_0_lev_P,
-                atmos_var_1_lev_0, ..., atmos_var_M_lev_P,
-                static_var_0, ..., static_var_S]
+Channel layout follows Gen2 FIELD_TYPE_RANK (prognostic < static, 3D before 2D):
+    input  = [atmos_var_0_lev_0, ..., atmos_var_M_lev_P,   ← n_atmos * n_levels
+              surf_var_0, ..., surf_var_N,                  ← n_surf
+              static_var_0, ..., static_var_S]              ← n_static
+    output = [atmos channels, surf channels]  (static dropped)
 
 where levels are ordered from ``atmos_levels[0]`` to ``atmos_levels[-1]``.
-The output tensor contains surf + atmos channels only (static vars are
-unchanged and dropped from the prediction).
 
 Example config::
 
@@ -95,9 +93,11 @@ class CREDITAurora(nn.Module):
         history_size: int = 1,
         timestep_hours: int = 6,
         levels: int = None,
+        channel_layout: Optional[dict] = None,
         **aurora_kwargs,
     ) -> None:
         super().__init__()
+        self._channel_layout = channel_layout
         _allowed = set(inspect.signature(Aurora.__init__).parameters) - {"self"}
         aurora_kwargs = {k: v for k, v in aurora_kwargs.items() if k in _allowed}
 
@@ -151,51 +151,59 @@ class CREDITAurora(nn.Module):
     def _flat_to_batch(self, x: torch.Tensor) -> Batch:
         """Split a CREDIT flat tensor ``(B, C, H, W)`` into an Aurora :class:`.Batch`.
 
-        Channel layout::
+        Gen2 channel layout (FIELD_TYPE_RANK order)::
 
-            [hist_0_surf_vars... | hist_0_atmos_vars... |
-             hist_1_surf_vars... | hist_1_atmos_vars... |   (repeated history_size times)
+            [hist_0_atmos_vars... | hist_0_surf_vars... |
+             hist_1_atmos_vars... | hist_1_surf_vars... |   (repeated history_size times)
              static_vars...]
 
-        The history axis runs from oldest (0) to most recent (T-1).
+        Within each history frame, 3-D (atmos) channels precede 2-D (surf) channels,
+        consistent with ``ConcatToTensor`` / ``FIELD_TYPE_RANK``.  ``channel_layout``
+        (from :func:`build_channel_layout`) is used to locate the prognostic and
+        static slices when available; otherwise Gen2 defaults are applied.
         """
         B, C, H, W = x.shape
         T = self.history_size
+        ch_per_frame = self.n_atmos * self.n_levels + self.n_surf
+
+        if self._channel_layout is not None:
+            prog_sl = self._channel_layout.get("prognostic", slice(0, ch_per_frame * T))
+            stat_sl = self._channel_layout.get("static", slice(ch_per_frame * T, ch_per_frame * T + self.n_static))
+        else:
+            prog_sl = slice(0, ch_per_frame * T)
+            stat_sl = slice(ch_per_frame * T, ch_per_frame * T + self.n_static)
+
+        prog_start = prog_sl.start
+        stat_start = stat_sl.start
 
         surf_dict: dict[str, torch.Tensor] = {}
         atmos_dict: dict[str, torch.Tensor] = {}
 
-        offset = 0
-        # History steps
-        surf_slices = []  # list over T of (B, n_surf, H, W)
-        atmos_slices = []  # list over T of (B, n_atmos, n_levels, H, W)
-        for _ in range(T):
-            s = x[:, offset : offset + self.n_surf, :, :]
-            surf_slices.append(s)
-            offset += self.n_surf
-
-            a = x[:, offset : offset + self.n_atmos * self.n_levels, :, :]
+        # History steps: Gen2 order is atmos (3D) before surf (2D) per frame
+        surf_slices = []
+        atmos_slices = []
+        for t_idx in range(T):
+            frame_start = prog_start + t_idx * ch_per_frame
+            a = x[:, frame_start : frame_start + self.n_atmos * self.n_levels, :, :]
             a = a.view(B, self.n_atmos, self.n_levels, H, W)
             atmos_slices.append(a)
-            offset += self.n_atmos * self.n_levels
 
-        # Stack history: surf → (B, T, H, W) per var; atmos → (B, T, n_levels, H, W) per var
+            s = x[:, frame_start + self.n_atmos * self.n_levels : frame_start + ch_per_frame, :, :]
+            surf_slices.append(s)
+
         surf_stacked = torch.stack(surf_slices, dim=1)  # (B, T, n_surf, H, W)
         atmos_stacked = torch.stack(atmos_slices, dim=1)  # (B, T, n_atmos, n_levels, H, W)
 
         for i, name in enumerate(self.surf_vars):
-            surf_dict[name] = surf_stacked[:, :, i, :, :]  # (B, T, H, W)
+            surf_dict[name] = surf_stacked[:, :, i, :, :]
         for i, name in enumerate(self.atmos_vars):
-            atmos_dict[name] = atmos_stacked[:, :, i, :, :]  # (B, T, n_levels, H, W)
+            atmos_dict[name] = atmos_stacked[:, :, i, :, :]
 
-        # Static vars: (n_static, H, W) → per-var (H, W)
         static_dict: dict[str, torch.Tensor] = {}
         for i, name in enumerate(self.static_vars):
-            static_dict[name] = x[0, offset + i, :, :]  # use first batch element
+            static_dict[name] = x[0, stat_start + i, :, :]
 
-        # Dummy time metadata (Aurora only uses it for dynamic vars, off by default)
         dummy_time = tuple(datetime(2020, 1, 1) for _ in range(B))
-
         metadata = Metadata(
             lat=self.lat,
             lon=self.lon,
@@ -212,21 +220,20 @@ class CREDITAurora(nn.Module):
     def _batch_to_flat(self, pred: Batch) -> torch.Tensor:
         """Reassemble Aurora :class:`.Batch` prediction into a flat ``(B, C, H, W)`` tensor.
 
-        Output channel layout (no static vars, single predicted step)::
+        Output channel layout follows Gen2 FIELD_TYPE_RANK (3D before 2D)::
 
-            [surf_var_0, ..., surf_var_N,
-             atmos_var_0_lev_0, ..., atmos_var_0_lev_P,
-             atmos_var_1_lev_0, ..., atmos_var_M_lev_P]
+            [atmos_var_0_lev_0, ..., atmos_var_0_lev_P,
+             atmos_var_1_lev_0, ..., atmos_var_M_lev_P,
+             surf_var_0, ..., surf_var_N]
         """
         parts = []
-        for name in self.surf_vars:
-            # pred surf_vars: (B, T=1, H, W) → drop T
-            parts.append(pred.surf_vars[name][:, 0, :, :].unsqueeze(1))  # (B,1,H,W)
-
+        # Gen2 order: 3D (atmos) before 2D (surf)
         for name in self.atmos_vars:
-            # pred atmos_vars: (B, T=1, n_levels, H, W) → drop T, flatten levels
             atmos = pred.atmos_vars[name][:, 0, :, :]  # (B, n_levels, H, W)
             parts.append(atmos)
+
+        for name in self.surf_vars:
+            parts.append(pred.surf_vars[name][:, 0, :, :].unsqueeze(1))  # (B,1,H,W)
 
         return torch.cat(parts, dim=1)  # (B, C_out, H, W)
 

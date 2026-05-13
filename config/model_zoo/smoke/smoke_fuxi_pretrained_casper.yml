@@ -1,24 +1,33 @@
 seed: 1000
 
-save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke/fourcastnet'
+save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke_pretrained/fuxi'
 
-# Gen2 channel math (no diagnostics):
-#   in  = 4*18 + 4 + 2 + 2 = 80
-#   out = 4*18 + 4 = 76
+# Smoke test for 16-level 7-surf fuxi variant (Gen2, frames=1).
+# Channel math:
+#   prognostic: 4*16 + 7 = 71  (4 atmos vars * 16 levels + 7 surf vars)
+#   dynamic_forcing: 1
+#   static: 2
+#   in  = 71 + 1 + 2 = 74,  out = 71
+# pretrained_weights path is kept for reference; Gen2 uses frames=1 so
+# shape mismatches are expected — weight loading tests 0 tensors loaded
+# (checkpoint was trained with frames=2, frame_patch_size=2).
+# 7 surface vars: 4 standard + total_precipitation, evaporation, top_net_thermal_radiation
+# input_only_channels: 3 (1 dynamic_forcing + 2 static)
+# output_only_channels: 0 (diagnostic: null)
 
 data:
   source:
     ERA5:
       level_coord: "level"
-      levels: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136.]
+      levels: [1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126.]
       variables:
         prognostic:
           vars_3D: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
-          vars_2D: ["SP", "VAR_2T", "VAR_10U", "VAR_10V"]
+          vars_2D: ["SP", "VAR_2T", "VAR_10U", "VAR_10V", "total_precipitation", "evaporation", "top_net_thermal_radiation"]
           path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
           filename_time_format: "%Y"
         dynamic_forcing:
-          vars_2D: ["toa_incident_solar_radiation", "land_sea_CI_mask"]
+          vars_2D: ["toa_incident_solar_radiation"]
           path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
           filename_time_format: "%Y"
         static:
@@ -41,17 +50,28 @@ preblocks:
     args:
       mean_path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc"
       std_path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc"
+      levels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
 model:
-    type: "fourcastnet"
-    in_channels: 80
-    out_channels: 76
-    img_size: [181, 360]
-    levels: 18
-    patch_size: 4
-    embed_dim: 256
-    depth: 4
-    n_blocks: 4
+    type: "fuxi"
+    frames: 1
+    image_height: 181
+    image_width: 360
+    levels: 16
+    channels: 4
+    surface_channels: 7
+    input_only_channels: 3
+    output_only_channels: 0
+    patch_height: 4
+    patch_width: 4
+    frame_patch_size: 1
+    dim: 1024
+    num_groups: 32
+    num_heads: 8
+    window_size: 7
+    depth: 16
+    use_spectral_norm: True
+    pretrained_weights: '/glade/campaign/cisl/aiml/credit/pretrained_weights/fuxi_6h_hf/model_checkpoint.pt'
 
 loss:
     training_loss: "mse"
@@ -100,7 +120,7 @@ trainer:
 pbs:
     conda: "credit-casper"
     project: "NAML0001"
-    job_name: "smoke_fourcastnet"
+    job_name: "smoke_fuxi_pretrained"
     walltime: "02:00:00"
     ncpus: 8
     ngpus: 1

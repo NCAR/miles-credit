@@ -1,7 +1,12 @@
 seed: 1000
 
-save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke/fourcastnet'
+save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke_pretrained/stormer'
 
+# Checkpoint (stormer_1.40625_patch_size_4.ckpt) architecture: embed_dim=1024,
+# depth=24, num_heads=16, patch_size=4. Config matches those dims so internal
+# transformer block weights (attn QKV, proj, MLP) load by shape.
+# Spatial layers (pos_embed, patch_embed) differ by resolution and are skipped.
+#
 # Gen2 channel math (no diagnostics):
 #   in  = 4*18 + 4 + 2 + 2 = 80
 #   out = 4*18 + 4 = 76
@@ -43,15 +48,16 @@ preblocks:
       std_path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc"
 
 model:
-    type: "fourcastnet"
+    type: "stormer"
     in_channels: 80
     out_channels: 76
     img_size: [181, 360]
     levels: 18
     patch_size: 4
-    embed_dim: 256
-    depth: 4
-    n_blocks: 4
+    embed_dim: 1024
+    depth: 24
+    num_heads: 16
+    pretrained_weights: '/glade/derecho/scratch/schreck/credit_zoo/stormer/stormer_1.40625_patch_size_4.ckpt'
 
 loss:
     training_loss: "mse"
@@ -100,7 +106,7 @@ trainer:
 pbs:
     conda: "credit-casper"
     project: "NAML0001"
-    job_name: "smoke_fourcastnet"
+    job_name: "smoke_stormer_pretrained"
     walltime: "02:00:00"
     ncpus: 8
     ngpus: 1

@@ -1,10 +1,16 @@
 seed: 1000
 
-save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke/fourcastnet'
+save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke_pretrained/aurora'
 
-# Gen2 channel math (no diagnostics):
-#   in  = 4*18 + 4 + 2 + 2 = 80
-#   out = 4*18 + 4 = 76
+# aurora-0.25-small architecture: embed_dim=256, encoder/decoder_depths=(2,6,2),
+# encoder_num_heads=(4,8,16), decoder_num_heads=(16,8,4), latent_levels=4.
+# Config matches those dims so backbone Swin3D weights load by shape.
+# Encoder token_embeds differ (ParameterDict vs single tensor in ckpt) — skipped.
+# history_size=2 matches max_history_size in checkpoint token_embed kernels.
+#
+# Aurora derives channels from variable lists; no dynamic_forcing:
+#   n_in  = 1 * (4*18 + 4) + 2 = 78
+#   n_out = 4*18 + 4 = 76
 
 data:
   source:
@@ -17,10 +23,7 @@ data:
           vars_2D: ["SP", "VAR_2T", "VAR_10U", "VAR_10V"]
           path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
           filename_time_format: "%Y"
-        dynamic_forcing:
-          vars_2D: ["toa_incident_solar_radiation", "land_sea_CI_mask"]
-          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
-          filename_time_format: "%Y"
+        dynamic_forcing: null
         static:
           vars_2D: ["z_norm", "land_sea_mask"]
           path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
@@ -43,15 +46,24 @@ preblocks:
       std_path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc"
 
 model:
-    type: "fourcastnet"
-    in_channels: 80
-    out_channels: 76
-    img_size: [181, 360]
+    type: "aurora"
+    surf_vars: ["2t", "10u", "10v", "msl"]
+    atmos_vars: ["u", "v", "t", "q"]
+    static_vars: ["lsm", "z"]
+    atmos_levels: [1, 9, 19, 29, 39, 49, 59, 69, 79, 89, 97, 104, 111, 116, 122, 126, 131, 136]
     levels: 18
-    patch_size: 4
+    history_size: 1
+    timestep_hours: 6
+    n_lat: 181
+    n_lon: 360
     embed_dim: 256
-    depth: 4
-    n_blocks: 4
+    encoder_depths: [2, 6, 2]
+    encoder_num_heads: [4, 8, 16]
+    decoder_depths: [2, 6, 2]
+    decoder_num_heads: [16, 8, 4]
+    latent_levels: 4
+    use_lora: false
+    pretrained_weights: '/glade/derecho/scratch/schreck/credit_zoo/aurora/aurora-0.25-small-pretrained.ckpt'
 
 loss:
     training_loss: "mse"
@@ -100,7 +112,7 @@ trainer:
 pbs:
     conda: "credit-casper"
     project: "NAML0001"
-    job_name: "smoke_fourcastnet"
+    job_name: "smoke_aurora_pretrained"
     walltime: "02:00:00"
     ncpus: 8
     ngpus: 1

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Submit all model-zoo smoke tests to Casper PBS queue.
-# Usage: bash submit_all_casper.sh [--dry-run]
+# Submit pretrained model smoke tests to Casper PBS queue.
+# Usage: bash submit_pretrained_casper.sh [--dry-run]
 
 set -euo pipefail
 
@@ -13,24 +13,11 @@ if [[ "${1:-}" == "--dry-run" ]]; then
 fi
 
 CONFIGS=(
-    smoke_stormer_casper.yml
-    smoke_arches_casper.yml
-    smoke_sfno_casper.yml
-    smoke_climax_casper.yml
-    smoke_fourcastnet_casper.yml
-    smoke_fourcastnet3_casper.yml
-    smoke_fengwu_casper.yml
-    smoke_swinrnn_casper.yml
-    smoke_itransformer_casper.yml
-    smoke_mambavision_casper.yml
-    smoke_graphcast_casper.yml
-    smoke_healpix_casper.yml
-    smoke_corrdiff_casper.yml
-    smoke_fuxi_ens_casper.yml
-    smoke_aurora_casper.yml
-    smoke_pangu_casper.yml
-    smoke_aifs_casper.yml
-    smoke_nextgen_wxformer_casper.yml
+    smoke_stormer_pretrained_casper.yml
+    smoke_climax_pretrained_casper.yml
+    smoke_fourcastnet_pretrained_casper.yml
+    smoke_aurora_pretrained_casper.yml
+    smoke_fuxi_pretrained_casper.yml
 )
 
 for cfg in "${CONFIGS[@]}"; do
@@ -42,18 +29,17 @@ for cfg in "${CONFIGS[@]}"; do
         continue
     fi
 
-    # Build per-job PBS script and submit
     SAVE_LOC="$(python -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['save_loc'].replace('\$USER', '${USER}'))" 2>/dev/null || \
                python -c "import yaml; import os; c=yaml.safe_load(open('${CFG_PATH}')); print(os.path.expandvars(c['save_loc']))")"
 
-    CONDA="$(python   -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['conda'])")"
-    NCPUS="$(python   -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['ncpus'])")"
-    NGPUS="$(python   -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['ngpus'])")"
-    MEM="$(python     -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['mem'])")"
+    CONDA="$(python    -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['conda'])")"
+    NCPUS="$(python    -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['ncpus'])")"
+    NGPUS="$(python    -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['ngpus'])")"
+    MEM="$(python      -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['mem'])")"
     GPU_TYPE="$(python -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['gpu_type'])")"
     WALLTIME="$(python -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['walltime'])")"
-    QUEUE="$(python   -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['queue'])")"
-    PROJECT="$(python -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['project'])")"
+    QUEUE="$(python    -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['queue'])")"
+    PROJECT="$(python  -c "import yaml; c=yaml.safe_load(open('${CFG_PATH}')); print(c['pbs']['project'])")"
 
     mkdir -p "${SAVE_LOC}"
     cp "${CFG_PATH}" "${SAVE_LOC}/model.yml"

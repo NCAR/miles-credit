@@ -412,6 +412,16 @@ def load_model(conf, load_weights=False, model_name=False):
                 return model.load_model(conf)
         # Pop pretrained_weights before filtering so it isn't passed to __init__
         pretrained_weights = model_conf.pop("pretrained_weights", None)
+        # Inject channel layout from Gen2 data config so models can auto-detect
+        # channel positions without hardcoding them.  No-op for Gen1 configs or
+        # models whose source section is absent.
+        try:
+            from credit.datasets.channel_layout import build_channel_layout
+
+            ch_slices, _n_pred = build_channel_layout(conf)
+            model_conf["channel_layout"] = ch_slices
+        except Exception:
+            pass
         # Filter kwargs to only those accepted by the constructor; zoo models have
         # varied signatures and may not accept every top-level config key.
         sig = inspect.signature(model.__init__)
@@ -423,13 +433,49 @@ def load_model(conf, load_weights=False, model_name=False):
         model_instance = model(**filtered_conf)
         if pretrained_weights:
             import torch
+            from collections import Counter
 
             ckpt_path = os.path.expandvars(pretrained_weights)
-            ckpt = torch.load(ckpt_path, map_location="cpu")
-            state = ckpt.get("model_state_dict", ckpt)
-            missing, unexpected = model_instance.load_state_dict(state, strict=False)
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            # Try common checkpoint key names in priority order
+            state = (
+                ckpt.get("model_state_dict")
+                or ckpt.get("state_dict")
+                or ckpt.get("model_state")
+                or (
+                    ckpt if isinstance(ckpt, dict) and any(isinstance(v, torch.Tensor) for v in ckpt.values()) else None
+                )
+            )
+            if state is None:
+                state = ckpt
+            model_state = model_instance.state_dict()
+            # Remap checkpoint key prefix to the model's prefix when they don't
+            # match (e.g. checkpoint uses "net.*" or "module.*" but our wrapper
+            # stores the inner model under a different attribute name).
+            if not any(k in model_state for k in state):
+                ckpt_prefix_counts = Counter(k.split(".")[0] for k in state if "." in k)
+                model_prefix_counts = Counter(k.split(".")[0] for k in model_state if "." in k)
+                if ckpt_prefix_counts and model_prefix_counts:
+                    ckpt_pfx = ckpt_prefix_counts.most_common(1)[0][0] + "."
+                    model_pfx = model_prefix_counts.most_common(1)[0][0] + "."
+                    if ckpt_pfx != model_pfx:
+                        state = {
+                            (model_pfx + k[len(ckpt_pfx) :] if k.startswith(ckpt_pfx) else k): v
+                            for k, v in state.items()
+                        }
+            # Filter to only keys that exist in the model with matching shapes.
+            # strict=False only skips missing/extra keys, not shape mismatches —
+            # shape mismatches raise RuntimeError even with strict=False.
+            compatible = {k: v for k, v in state.items() if k in model_state and model_state[k].shape == v.shape}
+            n_ckpt = len(state)
+            n_key_match = sum(1 for k in state if k in model_state)
+            n_loaded = len(compatible)
+            model_instance.load_state_dict(compatible, strict=False)
             logger.info(
-                f"Loaded pretrained weights from {ckpt_path}: {len(missing)} missing, {len(unexpected)} unexpected keys"
+                f"Loaded pretrained weights from {ckpt_path}: "
+                f"{n_loaded}/{n_ckpt} tensors loaded "
+                f"({n_key_match - n_loaded} key matches with shape mismatch, "
+                f"{n_ckpt - n_key_match} keys not in model)"
             )
         return model_instance
 

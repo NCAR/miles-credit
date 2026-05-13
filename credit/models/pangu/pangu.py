@@ -827,24 +827,18 @@ class PanguModel(nn.Module):
 class CREDITPangu(nn.Module):
     """Pangu-Weather adapted to CREDIT's flat ``(B, C, H, W)`` tensor convention.
 
-    Channel layout (input tensor)::
-
-        [surf_var_0, ..., surf_var_N,          ← n_surf_vars channels
-         atmos_var_0_lev_0, ..., atmos_var_0_lev_P,
-         ...
-         atmos_var_M_lev_0, ..., atmos_var_M_lev_P,  ← n_atmos_vars * n_levels channels
-         static_var_0, ..., static_var_S]      ← n_static_vars channels
-
-    Output tensor::
-
-        [surf_var_0, ..., surf_var_N,
-         atmos_var_0_lev_0, ..., atmos_var_M_lev_P]
+    Channel layout follows Gen2 FIELD_TYPE_RANK (prognostic < static, 3D before 2D):
+        input  = [atmos_var_0_lev_0, ..., atmos_var_M_lev_P,   ← n_atmos * n_levels
+                  surf_var_0, ..., surf_var_N,                  ← n_surf
+                  static_var_0, ..., static_var_S]              ← n_static
+        output = [atmos channels, surf channels]
 
     Args:
-        surf_vars: List of surface variable names (for documentation).
+        surf_vars: List of surface variable names.
         atmos_vars: List of atmospheric variable names.
         static_vars: List of static variable names.
         atmos_levels: List of pressure levels in hPa.
+        channel_layout: Slice dict from :func:`build_channel_layout` for auto-detection.
         **pangu_kwargs: Forwarded to :class:`.PanguModel`.
     """
 
@@ -855,9 +849,11 @@ class CREDITPangu(nn.Module):
         static_vars: List[str] = ("lsm", "z", "slt"),
         atmos_levels: List[int] = (50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000),
         levels: int = None,
+        channel_layout: dict = None,
         **pangu_kwargs,
     ) -> None:
         super().__init__()
+        self._channel_layout = channel_layout
         _allowed = set(inspect.signature(PanguModel.__init__).parameters) - {"self"}
         pangu_kwargs = {k: v for k, v in pangu_kwargs.items() if k in _allowed}
         self.surf_vars = list(surf_vars)
@@ -892,33 +888,38 @@ class CREDITPangu(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: ``(B, C, H, W)`` or ``(B, C, T, H, W)`` following the channel layout above.
+            x: ``(B, C, H, W)`` or ``(B, C, T, H, W)`` following Gen2 channel layout.
 
         Returns:
-            ``(B, C_out, 1, H, W)`` with surf + atmos variables.
+            ``(B, C_out, 1, H, W)`` with atmos then surf channels (Gen2 order).
         """
         if x.dim() == 5:
             B, C, T, H, W = x.shape
             x = x.permute(0, 2, 1, 3, 4).reshape(B, C * T, H, W)
         B, C, H, W = x.shape
-        offset = 0
-        # Surface
-        surf = x[:, offset : offset + self.n_surf, :, :]
-        offset += self.n_surf
-        # Atmospheric: flatten to (B, n_atmos, n_levels, H, W)
-        atm_flat = x[:, offset : offset + self.n_atmos * self.n_levels, :, :]
+
+        n_atmos_ch = self.n_atmos * self.n_levels
+        n_prog = n_atmos_ch + self.n_surf
+        if self._channel_layout is not None:
+            prog_sl = self._channel_layout.get("prognostic", slice(0, n_prog))
+            stat_sl = self._channel_layout.get("static", slice(n_prog, n_prog + self.n_static))
+        else:
+            prog_sl = slice(0, n_prog)
+            stat_sl = slice(n_prog, n_prog + self.n_static)
+
+        prog_start = prog_sl.start
+        # Gen2: 3D (atmos) before 2D (surf) within prognostic
+        atm_flat = x[:, prog_start : prog_start + n_atmos_ch, :, :]
         atmos = atm_flat.view(B, self.n_atmos, self.n_levels, H, W)
-        offset += self.n_atmos * self.n_levels
-        # Static
-        static = x[:, offset : offset + self.n_static, :, :]
-        # Cat static to surface
+        surf = x[:, prog_start + n_atmos_ch : prog_sl.stop, :, :]
+        static = x[:, stat_sl, :, :]
         surface_in = torch.cat([surf, static], dim=1)  # (B, n_surf+n_static, H, W)
 
         upper_pred, surf_pred = self.model(atmos, surface_in)
 
-        # Reassemble output: (B, n_atmos*n_levels, H, W)
-        atm_out = upper_pred.view(B, self.n_atmos * self.n_levels, H, W)
-        return torch.cat([surf_pred, atm_out], dim=1).unsqueeze(2)
+        atm_out = upper_pred.view(B, n_atmos_ch, H, W)
+        # Gen2 output: 3D (atmos) before 2D (surf)
+        return torch.cat([atm_out, surf_pred], dim=1).unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):

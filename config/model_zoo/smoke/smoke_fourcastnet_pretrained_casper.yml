@@ -1,7 +1,13 @@
 seed: 1000
 
-save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke/fourcastnet'
+save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke_pretrained/fourcastnet'
 
+# Checkpoint (backbone.ckpt) architecture: embed_dim=768, depth=12, n_blocks=8,
+# patch_size=8. Config matches embed_dim/depth/n_blocks so MLP and norm weights
+# load. AFNO filter weights use different naming (stacked w1 vs separate w1r/w1i)
+# and patch_embed uses in_channels=20 — both are skipped by shape filter.
+# patch_size=4 used here because img_size H=181 is not divisible by 8.
+#
 # Gen2 channel math (no diagnostics):
 #   in  = 4*18 + 4 + 2 + 2 = 80
 #   out = 4*18 + 4 = 76
@@ -49,9 +55,10 @@ model:
     img_size: [181, 360]
     levels: 18
     patch_size: 4
-    embed_dim: 256
-    depth: 4
-    n_blocks: 4
+    embed_dim: 768
+    depth: 12
+    n_blocks: 8
+    pretrained_weights: '/glade/campaign/cisl/aiml/credit/pretrained_weights/fourcastnet_v1/backbone.ckpt'
 
 loss:
     training_loss: "mse"
@@ -100,7 +107,7 @@ trainer:
 pbs:
     conda: "credit-casper"
     project: "NAML0001"
-    job_name: "smoke_fourcastnet"
+    job_name: "smoke_fcnet_pretrained"
     walltime: "02:00:00"
     ncpus: 8
     ngpus: 1
