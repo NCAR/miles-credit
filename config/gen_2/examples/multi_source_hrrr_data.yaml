@@ -1,0 +1,61 @@
+# Example of a multi-source data configuration. Does not contain any model config options.
+data:
+    source:
+        HRRR_PressureLevels:
+            dataset_type: "hrrr"
+            product: "wrfprs"
+            mode: "remote"
+            forecast_hour: 0
+            levels: [250, 500, 700, 850, 925, 1000]
+            variables:
+                prognostic:
+                    vars_3D: ['T', 'U', 'V', 'W', 'Q', 'GH', 'DPT']
+                    vars_2D: ['sp', 't2m', 'd2m', 'u10m', 'v10m']
+                static:
+                    vars_2D: ['orog']
+            extent: [-130, -60, 20, 55]
+
+        HRRR_NativeLevels:
+            dataset_type: "hrrr"
+            product: "wrfnat"
+            mode: "remote"
+            forecast_hour: 0
+            levels: [1, 2, 3, 4, 5]
+            variables:
+                prognostic:
+                    vars_3D: ['T', 'U', 'V', 'W', 'Q', 'GH']
+                    vars_2D: ['sp', 't2m', 'd2m', 'u10m', 'v10m']
+                static:
+                    vars_2D: ['orog']
+            extent: [-130, -60, 20, 55]
+
+        HRRR_SubHourly:
+            dataset_type: "hrrr"
+            product: "wrfsubh"
+            mode: "remote"
+            forecast_hour: 0
+            variables:
+                prognostic:
+                    vars_2D: ['t2m', 'sp', 'refc']
+                static:
+                    vars_2D: ['orog']
+            extent: [-130, -60, 20, 55]
+
+        GOES:
+            dataset_type: "goes"
+            goes_position: "east" # or "west"
+            mode: "remote"
+            product: "ABI-L2-MCMIPC"
+            variables:
+                prognostic:
+                    vars_2D: ["CMI_C04", "CMI_C07", "CMI_C08", "CMI_C09", "CMI_C10", "CMI_C13"]
+                    path: "/glade/derecho/scratch/kevinyang/datasets/goes/"
+                diagnostic: null
+                dynamic_forcing: null
+            latlon2d_dir: "/glade/derecho/scratch/kevinyang/datasets/goes/"
+            extent: [-130, -60, 20, 55]
+
+    start_datetime: "2023-06-01"
+    end_datetime: "2023-06-04"
+    timestep: "1h"
+    forecast_len: 1
