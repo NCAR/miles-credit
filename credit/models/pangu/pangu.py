@@ -29,6 +29,8 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import List, Optional, Tuple
 
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -910,6 +912,27 @@ class CREDITPangu(nn.Module):
         # Reassemble output: (B, n_atmos*n_levels, H, W)
         atm_out = upper_pred.view(B, self.n_atmos * self.n_levels, H, W)
         return torch.cat([surf_pred, atm_out], dim=1)
+
+    @classmethod
+    def load_model(cls, conf):
+        model = cls(**{k: v for k, v in conf["model"].items() if k != "type"})
+        save_loc = os.path.expandvars(conf["save_loc"])
+        ckpt = os.path.join(save_loc, "model_checkpoint.pt")
+        if not os.path.isfile(ckpt):
+            ckpt = os.path.join(save_loc, "checkpoint.pt")
+        checkpoint = torch.load(ckpt, map_location="cpu")
+        state = checkpoint.get("model_state_dict", checkpoint)
+        model.load_state_dict(state, strict=False)
+        return model
+
+    @classmethod
+    def load_model_name(cls, conf, model_name):
+        model = cls(**{k: v for k, v in conf["model"].items() if k != "type"})
+        ckpt = os.path.join(os.path.expandvars(conf["save_loc"]), model_name)
+        checkpoint = torch.load(ckpt, map_location="cpu")
+        state = checkpoint.get("model_state_dict", checkpoint)
+        model.load_state_dict(state, strict=False)
+        return model
 
 
 # ---------------------------------------------------------------------------

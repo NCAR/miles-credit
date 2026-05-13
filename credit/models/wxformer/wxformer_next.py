@@ -9,6 +9,7 @@ Design additions over WXFormer:
 """
 
 import logging
+import os
 
 import torch
 import torch.nn as nn
@@ -378,6 +379,27 @@ class NextGenWXFormer(BaseModel):
         x = x + x_res
 
         return x.unsqueeze(2)
+
+    @classmethod
+    def load_model(cls, conf):
+        model = cls(**{k: v for k, v in conf["model"].items() if k != "type"})
+        save_loc = os.path.expandvars(conf["save_loc"])
+        ckpt = os.path.join(save_loc, "model_checkpoint.pt")
+        if not os.path.isfile(ckpt):
+            ckpt = os.path.join(save_loc, "checkpoint.pt")
+        checkpoint = torch.load(ckpt, map_location="cpu")
+        state = checkpoint.get("model_state_dict", checkpoint)
+        model.load_state_dict(state, strict=False)
+        return model
+
+    @classmethod
+    def load_model_name(cls, conf, model_name):
+        model = cls(**{k: v for k, v in conf["model"].items() if k != "type"})
+        ckpt = os.path.join(os.path.expandvars(conf["save_loc"]), model_name)
+        checkpoint = torch.load(ckpt, map_location="cpu")
+        state = checkpoint.get("model_state_dict", checkpoint)
+        model.load_state_dict(state, strict=False)
+        return model
 
 
 if __name__ == "__main__":
