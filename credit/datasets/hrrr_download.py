@@ -53,9 +53,6 @@ import pandas as pd
 from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request  # pyright: ignore[reportPrivateUsage]
 from credit.datasets.multi_source import make_single_source_subconfig
 
-logger = logging.getLogger(__name__)
-
-
 # ---------------------------------------------------------------------------
 # Per-task helper (must be a module-level function for multiprocessing.Pool)
 # ---------------------------------------------------------------------------
@@ -205,13 +202,13 @@ def download_hrrr(
         ]
 
     n_total = len(tasks)
-    logger.info("Starting download: %d files, %d workers.", n_total, num_workers)
+    logging.info("Starting download: %d files, %d workers.", n_total, num_workers)
 
     n_ok = n_skip = n_miss = 0
     with mp.Pool(processes=num_workers) as pool:
         for result in pool.imap_unordered(_download_one, tasks):
             status = result[:4]
-            logger.info(result)
+            logging.info(result)
             if status == "ok  ":
                 n_ok += 1
             elif status == "skip":
@@ -219,7 +216,7 @@ def download_hrrr(
             else:
                 n_miss += 1
 
-    logger.info(
+    logging.info(
         "Done — downloaded: %d, skipped: %d, not found: %d / %d total.",
         n_ok,
         n_skip,
@@ -234,7 +231,6 @@ if __name__ == "__main__":
     """
 
     import argparse
-
     import yaml
 
     parser = argparse.ArgumentParser(description="Download HRRR grib2 data from AWS S3.")

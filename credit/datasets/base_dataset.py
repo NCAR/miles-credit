@@ -2,6 +2,7 @@
 base_dataset.py
 -------------------------------------------------------
 AbstractBaseDataset and BaseDataset: A PyTorch Dataset class for:
+
 1. Type hinting and annotations throughout CREDIT
 2. Scaffolding the development of future datasets
 3. Provide a minimal implementation of a Dataset for testing
@@ -11,7 +12,7 @@ AbstractBaseDataset and BaseDataset: A PyTorch Dataset class for:
 
 from glob import glob
 import logging
-from typing import Any, Literal, get_args
+from typing import Any, Literal, TypeAlias, get_args
 
 import pandas as pd
 
@@ -25,7 +26,15 @@ from credit.datasets._utils import _map_files  # pyright: ignore[reportPrivateUs
 # * ``dynamic_forcing`` — input at every step; never a target
 # * ``diagnostic``      — target only
 # * ``static``          — input at step 0; never a target, applies to all steps
-VALID_FIELD_TYPES = Literal["prognostic", "dynamic_forcing", "static", "diagnostic"]
+VALID_FIELD_TYPES: TypeAlias = Literal["prognostic", "dynamic_forcing", "static", "diagnostic"]
+"""
+Expected types of fields.
+
+* ``prognostic``      — input at step 0 and target (autoregressive rollout)
+* ``dynamic_forcing`` — input at every step; never a target
+* ``diagnostic``      — target only
+* ``static``          — input at step 0; never a target, applies to all steps
+"""
 
 
 class AbstractBaseDataset(Dataset[Any]):
@@ -36,70 +45,102 @@ class AbstractBaseDataset(Dataset[Any]):
     class and provides a minimal implementation. Any future dataset should inherit from
     either AbstractBaseDataset or BaseDataset depending on the level of functionality needed.
 
-    For generality, the inheritance is from torch.utils.data.Dataset[Any], however
+    For generality, the inheritance is from ``torch.utils.data.Dataset[Any]``, however
     there may be benefits to stricter typing than Any for consistency in the
     get item return, especially if torch supports dataset type accelerations in future
     releases.
+
+    .. note::
+        Generally the focus is on ``__getitem__`` and the methods ``_register_field``, ``_extract_field``,
+        ``_get_file_source``, and ``_build_timestamps`` are built to facilitate sampling with ``__getitem__``.
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
-        # The name of this source in the config
+
         self.curr_source_name: str
+        """User-provided name of the current source in the config."""
         self.dataset_type: str
+        """Identity for routing to this class."""
 
         # Setting the clock for sampling
         self.dt: pd.Timedelta
+        """Smallest time interval for the building the timestamps for sampling."""
         self.num_forecast_steps: int
+        """Number of forecast steps to roll out per sample."""
         self.start_datetime: pd.Timestamp
+        """Start datetime for the dataset."""
         self.end_datetime: pd.Timestamp
+        """End datetime for the dataset."""
         self.datetimes: pd.DatetimeIndex
+        """DatetimeIndex for the dataset."""
 
         # Getting the data
         self.return_target: bool
+        """Whether to return the target (t+1) in addition to the input (t). This is used for prognostic and diagnostic fields."""
         self.mode: str
+        """Select if the data is being loaded from local files or remote files. Default is `"local"`."""
         self.file_dict: dict[str, Any]
+        """Dictionary of files for the dataset."""
         self.var_dict: dict[str, Any]
+        """Dictionary of variables for the dataset."""
 
         # Placeholder for static metadata
         self.static_metadata: dict[str, Any]
+        """Dataset-level metadata for MultiSourceDataset."""
 
     def __len__(self) -> int:
+        """Length of the dataset."""
         raise NotImplementedError
 
     def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
+        """Sample from the dataset."""
         raise NotImplementedError
 
     def _build_timestamps(self) -> pd.DatetimeIndex:
+        """Build the timestamps for sampling."""
         raise NotImplementedError
 
     def _get_field_name(self, field_type: VALID_FIELD_TYPES, dim_str: str, vname: str) -> str:
+        """Get the name of fields that can be sampled."""
         raise NotImplementedError
 
     def init_register_all_fields(self) -> None:
+        """Initialize and register all fields for the dataset. (Placed at the end of the ``__init__`` method for ``BaseDataset``.)"""
         raise NotImplementedError
 
     def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
+        """Register a field for sampling in ``__getitem__``."""
         raise NotImplementedError
 
     def _get_file_source(
         self, field_config: dict[str, Any]
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
+        """Route to the appropriate file source for a field."""
         raise NotImplementedError
 
     def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
+        """Extract a field from the file source and register it in the sample."""
         raise NotImplementedError
 
 
 class BaseDataset(AbstractBaseDataset):
     """PyTorch Dataset class for CREDIT that  enables:
+
     1. Type hinting and annotations throughout CREDIT
     2. Scaffolding the development of future datasets
     3. Provide a minimal implementation of a Dataset for testing
 
-    Minimal YAML config for a dataset will have the following stucture:
+    Minimal YAML config for a dataset will have the following stucture::
 
-    ```yaml
+
         data:
+          # These parameters set the overall clock of the sampler
+          start_datetime: "2000-01-01T00:00:00Z" # The earliest datetime across datasets
+          end_datetime: "2020-12-31T23:00:00Z" # The latest datetime across datasets
+          timestep: "12h" # The smallest time interval for the clock
+          forecast_len: 1 # The number of timesteps forward that need to be rolled out per sample
+
+          # The data source are included below under the ``"source"`` key.
           source:
             Example_Base:  # User-provided name (arbitrary key)
               # PARAMETERS FOR THIS DATASET TYPE
@@ -121,14 +162,10 @@ class BaseDataset(AbstractBaseDataset):
               # OPTIONAL: Override the clock bounds for this dataset
               start_datetime: "2012-04-03T00:00Z"
 
-            # <YourName2>_<DatasetType2>: # Multiple datasets (see multi_source)
+            # <YourName2>_<DatasetType2>: # Multiple datasets (see ``credit.datasets.multi_source``)
 
-          # These parameters set the overall clock of the sampler
-          start_datetime: "2000-01-01T00:00:00Z" # The earliest datetime across datasets
-          end_datetime: "2020-12-31T23:00:00Z" # The latest datetime across datasets
-          timestep: "12h" # The smallest time interval for the clock
-          forecast_len: 1 # The number of timesteps forward that need to be rolled out per sample
-    ```
+    .. note::
+        If you are using a multi-source dataset, you should inherit from ``AbstractBaseDataset`` for type hinting and annotations.
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
@@ -142,14 +179,15 @@ class BaseDataset(AbstractBaseDataset):
         AbstractBaseDataset for type hinting and annotations.
 
         Depending on your dataset you will likely want to override or extend the following methods:
-        1. _get_file_source:
+
+        1. ``_get_file_source``:
                 This method tells the dataset how to find the actual data, which is generally different for different datasets
                 and modes (e.g., local vs. remote).
-        2. _extract_field:
+        2. ``_extract_field``:
                 This method tells the dataset how to extract the data from the files and organize them accordingly. To
                 match dictionary key conventions across datasets, we suggest using the _get_field_name helper to create
                 the keys for the extracted data.
-        3. _build_timestamps:
+        3. ``_build_timestamps``:
                 If you would like to apply Quality Control checks that limit the datetimes from which to sample from.
                 You may also want to enforce time bounds automatically for your dataset here.
 
@@ -193,7 +231,7 @@ class BaseDataset(AbstractBaseDataset):
         # Unless we are parsing through a multi-source config (for which you should not inherit from BaseDataset),
         # we expect only one source to be defined in the config. To be pythonic, we can use next & iter to get this
         # source entry.
-        self.curr_source_name = next(iter(data_config["source"]))
+        self.curr_source_name: str = next(iter(data_config["source"]))
         if len(data_config["source"]) > 1:
             raise ValueError(
                 f"Multiple sources found in config for class {self.__class__.__name__}, but BaseDataset is only designed to handle one source. "
@@ -203,11 +241,13 @@ class BaseDataset(AbstractBaseDataset):
                 + f"Full source config: \n{data_config['source']}\n"
                 + f"Curr source config: \n{data_config['source'][self.curr_source_name]}"
             )
-        self.curr_source_cfg = data_config["source"][self.curr_source_name]
+        self.curr_source_cfg: dict[str, Any] = data_config["source"][self.curr_source_name]
+        """Configuration for the current source."""
 
         # You should definitely change this in an inherited dataset
         if type(self) is BaseDataset:
-            self.dataset_type = "base"
+            self.dataset_type: str = "base"
+            """Identity for the BaseDataset class."""
 
         # Now we start loading the parameters for the dataset, starting with the clock parameters.
         self.dt: pd.Timedelta = self._load_dt(data_config, self.curr_source_cfg)
@@ -221,7 +261,7 @@ class BaseDataset(AbstractBaseDataset):
         self.return_target: bool = return_target
 
         # Select if the data is being loaded from local files or remote files.
-        self.mode = "local"
+        self.mode: str = "local"
         if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
 

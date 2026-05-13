@@ -9,14 +9,9 @@ Supports three HRRR products (``VALID_PRODUCTS``):
 * ``"wrfnat"`` — native/hybrid-sigma level output (~200 MB/file, ~65 levels)
 * ``"wrfsubh"`` — 15-minute sub-hourly surface output (surface vars only)
 
-Tensor keys follow the pattern ``{user_provided_name}/{hrrr_product}/{field_type}/{dim}/{varname}``
-where *hrrr_product* is product-specific:
-
-    "wrfprs"  → `{user_provided_name}/`wrfprs/{field_type}/{dim}/{varname}``
-    "wrfnat"  → `{user_provided_name}/`wrfnat/{field_type}/{dim}/{varname}``
-    "wrfsubh" → `{user_provided_name}/`wrfsubh/{field_type}/2d/{varname}``
-
-*dim* is ``"3d"`` for multi-level variables and ``"2d"`` for surface variables.
+Tensor keys follow the pattern ``{user_provided_name}/{field_type}/{dim}/{varname}``.
+We recommend using a descriptive name, such as ``Example_HRRR_PressureLevels``.
+The *dim* key is ``"3d"`` for multi-level variables and ``"2d"`` for surface variables.
 
 Tensor shapes (before DataLoader batching):
     3D variables: ``(n_levels, 1, y, x)``
@@ -66,8 +61,8 @@ Example YAML (wrfprs, local mode)::
 
     data:
       source:
-        Example_HRRR:  # User-provided name (arbitrary key)
-          dataset_type: "HRRR"
+        Example_HRRR_PressureLevels:  # User-provided name (arbitrary key)
+          dataset_type: "hrrr"
           # product: "wrfprs" # Optional for PRS product. Default is "wrfprs".
           mode: "local"
           base_path: "/data/hrrr"
@@ -89,7 +84,7 @@ Example YAML (wrfnat, remote mode)::
     data:
       source:
         Example_HRRR_NAT:  # User-provided name (arbitrary key)
-          dataset_type: "HRRR"
+          dataset_type: "hrrr"
           product: "wrfnat" # Options: "wrfprs" (default), "wrfnat", "wrfsubh"
           mode: "remote"
           forecast_hour: 0
@@ -108,7 +103,7 @@ Example YAML (wrfsubh, remote mode — 15-min output)::
     data:
       source:
         Example_HRRR_SUBH:  # User-provided name (arbitrary key)
-          dataset_type: "HRRR"
+          dataset_type: "hrrr"
           product: "wrfsubh" # Options: "wrfprs" (default), "wrfnat", "wrfsubh"
           mode: "remote"
           variables:
@@ -123,7 +118,7 @@ Example YAML (wrfsubh, remote mode — 15-min output)::
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, get_args
+from typing import Any, Callable, Literal, TypeAlias, get_args
 
 import logging
 import os
@@ -136,15 +131,21 @@ import torch
 
 from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
 
-logger = logging.getLogger(__name__)
-
-# VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing", "static"}
 
 # V3+ S3 path includes a 'conus/' subdirectory; v1/v2 does not
 _HRRR_V3_CUTOFF = pd.Timestamp("2018-07-12")
 _S3_BUCKET = "noaa-hrrr-bdp-pds"
 # Public HTTPS base — used for Range requests (faster than s3fs seek+read)
 _HRRR_HTTPS_BASE = f"https://{_S3_BUCKET}.s3.amazonaws.com"
+
+# Maximum parallel workers for remote fetching
+_MAX_REMOTE_WORKERS = 8
+
+# Timeout (seconds) for HTTPS requests to AWS S3.
+# Passed as (connect_timeout, read_timeout) — requests treats them independently.
+# The read timeout covers waiting for S3 to begin streaming the response body;
+# large GRIB messages (~10 MB) over a slow or loaded connection can exceed 30 s.
+_HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
 
 #: Variable registry mapping user-facing names to HRRR ``.idx`` lookup keys.
 #:
@@ -231,18 +232,11 @@ VAR_REGISTRY: dict[str, dict[str, str | None]] = {
     "goes12bt3": {"idx_name": "SBT123", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES East Chan. 3
     "goes12bt4": {"idx_name": "SBT124", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES East Chan. 4
 }
+"""Variable registry mapping user-facing names to HRRR ``.idx`` lookup keys."""
 
-# Maximum parallel workers for remote fetching
-_MAX_REMOTE_WORKERS = 8
 
-# Timeout (seconds) for HTTPS requests to AWS S3.
-# Passed as (connect_timeout, read_timeout) — requests treats them independently.
-# The read timeout covers waiting for S3 to begin streaming the response body;
-# large GRIB messages (~10 MB) over a slow or loaded connection can exceed 30 s.
-_HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
-
-#: Supported HRRR GRIB2 products.
-VALID_PRODUCTS = Literal["wrfprs", "wrfnat", "wrfsubh"]
+VALID_PRODUCTS: TypeAlias = Literal["wrfprs", "wrfnat", "wrfsubh"]
+"""Supported HRRR GRIB2 products."""
 
 
 # ---------------------------------------------------------------------------
@@ -689,13 +683,6 @@ class HRRRDataset(BaseDataset):
 
     See module docstring for full output format, tensor shapes, and YAML
     configuration examples.
-
-    Attributes:
-        dataset_type: Tensor key - `"hrrr"`
-        product: Active HRRR product (``"wrfprs"``, ``"wrfnat"``,
-            or ``"wrfsubh"``) with default value ``"wrfprs"``.
-        datetimes: DatetimeIndex of valid initialisation timestamps.
-        static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
@@ -712,19 +699,28 @@ class HRRRDataset(BaseDataset):
                 f"Missing 'dataset_type' in config['source']['{self.curr_source_name}']. "
                 + f"Expected one of: {get_args(VALID_PRODUCTS)}"
             )
-        self.dataset_type = self.curr_source_cfg["dataset_type"]
+
+        self.dataset_type: str = self.curr_source_cfg["dataset_type"]
+        """Identity for routing to this class."""
 
         # The default product is "wrfprs" if not specified in the config.
         product_request = self.curr_source_cfg.get("product", "wrfprs")
         # Validate the product request.
         self.product: VALID_PRODUCTS = _validate_product_request(product_request)
+        """Active HRRR product (``"wrfprs"``, ``"wrfnat"``, or ``"wrfsubh"``) with default value ``"wrfprs"``."""
 
         self.mode: str = self.curr_source_cfg.get("mode", "local")
+        """Select if the data is being loaded from `"local"` files or `"remote"` files. Default is `"local"`."""
         self.base_path: str | None = self.curr_source_cfg.get("base_path", None)
+        """Root directory containing HRRR data. Default is `None`."""
         self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
+        """Forecast lead hour (FF), e.g. ``0`` for analysis or ``18`` for 18 hours ahead. Default is ``0``."""
         self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
+        """Bounding box for the data. Default is `None` (no cropping)."""
         self.global_levels: list[int] | None = self.curr_source_cfg.get("levels", None)
+        """Global levels for the data. Default is `None` (no levels)."""
         self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
+        """Number of parallel workers for remote fetching. Default is `_MAX_REMOTE_WORKERS`."""
 
         if self.mode == "local" and self.base_path is None:
             raise ValueError(
@@ -738,12 +734,16 @@ class HRRRDataset(BaseDataset):
             "forecast_hour": self.forecast_hour,
             "datetime_fmt": "unix_ns",
         }
+        """Dataset-level metadata for MultiSourceDataset."""
 
         # Caches — all created lazily so they are fork-safe when DataLoader
         # spins up worker processes after __init__.
         self._idx_cache: dict[str, list[dict[str, str | int | None]]] = {}
+        """Cache for the ``.idx`` sidecar files."""
         self._http_session = None  # requests.Session; built on first remote call
+        """Shared ``requests.Session`` for remote fetching."""
         self._spatial_slice: tuple[slice, slice] | None = None  # extent → (row, col) slices
+        """Cached spatial slice for the data. Default is `None` (no cropping)."""
 
     # ------------------------------------------------------------------
     # Dataset interface
