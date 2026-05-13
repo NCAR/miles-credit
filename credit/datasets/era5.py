@@ -293,7 +293,7 @@ class ARCOERA5Dataset(BaseDataset):
         self.init_register_all_fields()
 
         # Initialize the s3fs on the first call to _extract_field within __getitem__
-        self.fs = None
+        self._fs = None
 
     def _init_fs(self):
         """Initialize the GCSFileSystem and zarr stores for pressure-level and model-level ERA5 data."""
@@ -305,9 +305,9 @@ class ARCOERA5Dataset(BaseDataset):
             "asynchronous": True,
             "skip_instance_cache": True,
         }
-        self.fs = GCSFileSystem(**fs_config)
-        self.pres_level_store = zarr.storage.FsspecStore(fs=self.fs, path=self.pressure_lev_era5_path)
-        self.mod_level_store = zarr.storage.FsspecStore(fs=self.fs, path=self.model_lev_era5_path)
+        self._fs = GCSFileSystem(**fs_config)
+        self.pres_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.pressure_lev_era5_path)
+        self.mod_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.model_lev_era5_path)
 
     def _extract_field(
         self,
@@ -331,7 +331,7 @@ class ARCOERA5Dataset(BaseDataset):
                 - 3D variable: ``(n_levels, 1, lat, lon)``
                 - 2D variable: ``(1, 1, lat, lon)``
         """
-        if self.fs is None:
+        if self._fs is None:
             self._init_fs()
 
         vd = self.var_dict[field_type]

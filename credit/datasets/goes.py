@@ -40,7 +40,7 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _infer_period_freq, _find_file, _init_fs
+from credit.datasets._utils import _infer_period_freq, _find_file, _start_s3_fs
 from credit.datasets.base_dataset import BaseDataset
 
 
@@ -461,7 +461,7 @@ class GOESDataset(BaseDataset):
         Dispatches to ``_load_local_var`` or ``_load_remote_var`` depending on
         ``mode``, then stores each variable as a ``torch.Tensor`` of shape
         ``(1, 1, ny, nx)`` under the key
-        ``"{goes_position}/{field_type}/2d/{vname}"`` in ``sample``. Does nothing if
+        ``"Example_GOES/{dataset_type}/{field_type}/2d/{vname}"`` in ``sample``. Does nothing if
         the field type has no registered variables.
 
         Args:
@@ -480,7 +480,7 @@ class GOESDataset(BaseDataset):
 
         if self.mode == "remote":
             if self._fs is None:
-                self._fs = _init_fs()
+                self._fs = _start_s3_fs()
             arrays = self._load_remote_var(field_type, vnames, t)
         elif self.mode == "local":
             arrays = self._load_local_var(field_type, vnames, t)
