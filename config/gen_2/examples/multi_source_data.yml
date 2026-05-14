@@ -50,14 +50,9 @@ preblocks:
       type: "log_transform"
       args:
           variables:
-                - 'ERA5_LowerAir/prognostic/3d/U'
-                - 'ERA5_LowerAir/prognostic/3d/V'
-                - 'ERA5_LowerAir/prognostic/3d/T'
                 - 'ERA5_LowerAir/prognostic/3d/Q'
                 - 'ERA5_LowerAir/prognostic/2d/SP'
-                - 'ERA5_LowerAir/prognostic/2d/t2m'
                 - 'ERA5_LowerAir/dynamic_forcing/2d/tsi'
-                - 'ERA5_LowerAir/static/2d/LSM'
           data_types:
             - 'input'
             - 'target'
