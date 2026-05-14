@@ -2,11 +2,13 @@ seed: 1000
 
 save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke_pretrained/fourcastnet'
 
-# Checkpoint (backbone.ckpt) architecture: embed_dim=768, depth=12, n_blocks=8,
-# patch_size=8. Config matches embed_dim/depth/n_blocks so MLP and norm weights
-# load. AFNO filter weights use different naming (stacked w1 vs separate w1r/w1i)
-# and patch_embed uses in_channels=20 — both are skipped by shape filter.
-# patch_size=4 used here because img_size H=181 is not divisible by 8.
+# Checkpoint (backbone.ckpt) architecture: embed_dim=768, depth=12, n_blocks=8.
+# Config matches those dims so block weights load by shape: 98/150 keys
+# (all 12 blocks: norm1/2 + MLP).
+# patch_size=4 used because H=181 is not divisible by 8.
+# Not loaded: AFNO filter weights (checkpoint stores real+imag stacked as w1/w2
+# shape [2,8,96,96]; CREDIT uses separate w1r/w1i — key names differ), pos/patch
+# embed (different input channel count).
 #
 # Gen2 channel math (no diagnostics):
 #   in  = 4*18 + 4 + 2 + 2 = 80

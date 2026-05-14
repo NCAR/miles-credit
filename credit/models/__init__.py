@@ -463,6 +463,20 @@ def load_model(conf, load_weights=False, model_name=False):
                             (model_pfx + k[len(ckpt_pfx) :] if k.startswith(ckpt_pfx) else k): v
                             for k, v in state.items()
                         }
+
+            # Secondary remap: checkpoints trained with standard fc1/fc2 MLP naming
+            # won't match CREDIT wrappers that use nn.Sequential (net.0/net.3) or
+            # flat Sequential (0/3).  Try both targets; keep whichever resolves.
+            def _remap_mlp(k):
+                k2 = k.replace(".mlp.fc1.", ".mlp.net.0.").replace(".mlp.fc2.", ".mlp.net.3.")
+                if k2 in model_state:
+                    return k2
+                k2 = k.replace(".mlp.fc1.", ".mlp.0.").replace(".mlp.fc2.", ".mlp.3.")
+                if k2 in model_state:
+                    return k2
+                return k
+
+            state = {_remap_mlp(k): v for k, v in state.items()}
             # Filter to only keys that exist in the model with matching shapes.
             # strict=False only skips missing/extra keys, not shape mismatches —
             # shape mismatches raise RuntimeError even with strict=False.

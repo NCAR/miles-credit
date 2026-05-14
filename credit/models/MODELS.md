@@ -112,27 +112,33 @@ Weights are cached at `/glade/derecho/scratch/schreck/credit_zoo/<model>/` (perm
 Set `pretrained_weights: <path>` in the `model:` config section to load them.
 `strict=False` is always used — missing keys (e.g. input/output projections for different channel counts) stay randomly initialized.
 
-| Key | Weights Available | Load Status | Preset | What it gives you | Notes |
-|-----|:-----------------:|:-----------:|:------:|-------------------|-------|
-| `wxformer` | ✓ NCAR runs | ✓ 100% | `wxformer-v2-025deg-6h` `wxformer-025deg-1h` `wxformer-1deg-6h` | ERA5 backbone trained to convergence; best fine-tuning start | See `credit/models/wxformer/README.md` |
-| `fuxi` | ✓ NCAR runs | ✓ 100% | `fuxi-025deg-6h` | ERA5 FuXi backbone trained to convergence (K. Friedman) | See source in `credit/models/fuxi/fuxi.py` |
-| `stormer` | ✓ cached | ⚠ partial | `stormer-1.40625deg` | 194/295 keys (all 24 attn+mlp blocks); embedding and head initialized fresh | Key remap: `net.blocks.` → `model.blocks.`, `mlp.fc1/fc2` → `mlp.net.0/3`; per-variable `token_embeds` skipped |
-| `climax` | ✓ cached | ⚠ partial | `climax-1.40625deg` | 105 backbone keys (norm1/2, attn, mlp) from 8 ViT blocks; pos_embed, norm, head also transfer | `net.blocks.` → `model.blocks.`; per-var `token_embeds`/`channel_embed` skipped |
-| `fourcastnet` | ✓ cached | ⚠ partial | — | DDP `module.` prefix auto-remapped; AFNO blocks partially load | ~12/150 keys load cleanly; complex-weight layout differs from NERSC checkpoint |
-| `sfno` | — | — | — | — | No public PyTorch weights |
-| `swinrnn` | — | — | — | — | No public weights |
-| `fengwu` | — | — | — | — | ONNX only |
-| `graphcast` | — | — | — | — | JAX only |
-| `healpix` | — | — | — | — | No confirmed public weights |
-| `fourcastnet3` | ✓ cached | ✗ arch mismatch | — | — | HuggingFace checkpoint is 1D-conv SNO; our wrapper is U-Net SNO — zero key overlap |
-| `aurora` | ✓ cached | ✓ ~74% | `aurora-0.1deg` | Full 1B-param Perceiver3D + Swin3D backbone; LoRA adapter layers (224 keys) initialized fresh | `net.` prefix auto-remapped to `aurora.`; missing keys are LoRA (expected) |
-| `pangu` | — | — | — | — | ONNX only |
-| `aifs` | — | — | — | — | Restricted access |
-| `itransformer` | — | — | — | — | No public weather weights |
-| `fuxi_ens` | — | — | — | — | No public weights |
-| `arches` | — | — | — | — | No public weights |
-| `mambavision` | — | — | — | — | No public weather weights |
-| `corrdiff` | — | — | — | — | No public weights |
+| Key | Weights available | Keys loaded | What loads | What does not load |
+|-----|:-----------------:|:-----------:|------------|-------------------|
+| `wxformer` | ✓ NCAR runs | 100% | Full model — trained to convergence on CREDIT-format ERA5 | — |
+| `fuxi` | ✓ NCAR runs | 100% | Full model — trained to convergence on CREDIT-format ERA5 | — |
+| `stormer` | ✓ cached | 192/393 (49%) | All 24 transformer blocks: attn QKV/proj + MLP weights | Per-variable token embeddings (138 keys), adaLN modulation (48 keys), pos/patch embed, head |
+| `climax` | ✓ cached | 98/209 (47%) | All 8 transformer blocks: norm, attn QKV/proj + MLP weights | Per-variable token_embeds, channel_embed, pos_embed, head |
+| `fourcastnet` | ✓ cached | 98/150 (65%) | All 12 blocks: norm + MLP weights | AFNO filter weights (complex-stacked layout differs from checkpoint), pos/patch embed |
+| `aurora` | ✓ cached | 302/308 (98%) | Full Swin3D backbone (encoder + decoder + latent) | 6 LoRA adapter keys (expected — LoRA is fine-tuning-only) |
+| `sfno` | — | — | — | No public PyTorch weights |
+| `swinrnn` | — | — | — | No public weights |
+| `fengwu` | — | — | — | ONNX only |
+| `graphcast` | — | — | — | JAX only |
+| `healpix` | — | — | — | No confirmed public weights |
+| `fourcastnet3` | ✓ cached | 0/N | — | HuggingFace checkpoint is 1D-conv SNO; CREDIT wrapper is U-Net SNO — zero key overlap |
+| `pangu` | — | — | — | ONNX only |
+| `aifs` | — | — | — | Restricted access |
+| `itransformer` | — | — | — | No public weather weights |
+| `fuxi_ens` | — | — | — | No public weights |
+| `arches` | — | — | — | No public weights |
+| `mambavision` | — | — | — | No public weather weights |
+| `corrdiff` | — | — | — | No public weights |
+
+**What partial loading means in practice:** the input embedding and output projection layers are re-initialized from scratch — they must be for any model trained on different variables or grid resolution.  The transformer backbone weights (attention, MLP, normalization) do transfer and give a meaningfully better initialization than random.  Fine-tuning on CREDIT-format ERA5 data starting from these weights converges faster than training from scratch.
+
+**Key remaps applied automatically:**
+- Outer prefix: `net.*` or `module.*` → `model.*` or `aurora.*` (wrapper attribute name)
+- MLP layer names: `mlp.fc1.*` → `mlp.net.0.*` or `mlp.0.*` depending on the CREDIT MLP implementation; `mlp.fc2.*` → `mlp.net.3.*` or `mlp.3.*`
 
 ---
 

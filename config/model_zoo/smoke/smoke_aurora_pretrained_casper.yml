@@ -4,9 +4,11 @@ save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke_pretrained/aurora'
 
 # aurora-0.25-small architecture: embed_dim=256, encoder/decoder_depths=(2,6,2),
 # encoder_num_heads=(4,8,16), decoder_num_heads=(16,8,4), latent_levels=4.
-# Config matches those dims so backbone Swin3D weights load by shape.
-# Encoder token_embeds differ (ParameterDict vs single tensor in ckpt) — skipped.
-# history_size=2 matches max_history_size in checkpoint token_embed kernels.
+# Config matches those dims so backbone Swin3D weights load by shape: 302/308 keys
+# (full encoder + decoder + latent backbone).
+# Not loaded: 6 LoRA adapter keys — LoRA is a fine-tuning overlay, not part of
+# the pretrained backbone, so these are always re-initialized.
+# history_size=1 used; backbone weights are independent of history size.
 #
 # Aurora derives channels from variable lists; no dynamic_forcing:
 #   n_in  = 1 * (4*18 + 4) + 2 = 78
