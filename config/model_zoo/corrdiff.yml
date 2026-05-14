@@ -33,6 +33,7 @@ model:
     type: "corrdiff"
     in_channels: 80
     out_channels: 84
+    levels: 18
     img_size: [181, 360]
     scale_factor: 1
     base_ch: 128

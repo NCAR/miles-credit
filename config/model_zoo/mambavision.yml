@@ -33,6 +33,7 @@ model:
     type: "mambavision"
     in_channels: 80
     out_channels: 84
+    levels: 18
     img_size: [181, 360]
     stem_dim: 96
     stage_depths: [2, 2, 8, 2]

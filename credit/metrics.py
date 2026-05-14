@@ -11,7 +11,7 @@ class LatWeightedMetrics:
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
 
-        levels = conf["model"].get("levels") or conf["model"].get("frames") or conf["data"].get("levels")
+        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
@@ -99,7 +99,7 @@ class LatWeightedMetricsClimatology:
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
 
-        levels = conf["model"].get("levels") or conf["model"].get("frames") or conf["data"].get("levels")
+        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
 
@@ -199,15 +199,11 @@ class LatWeightedMetricsClimatology:
         anomalies_pred = torch.stack(anomalies_pred, dim=1)
         anomalies_y = torch.stack(anomalies_y, dim=1)
 
-        # Iterate over ordered_acc_vars so indices into anomalies_pred/y are correct.
-        # Standard ACC (WB2/WMO): latitude-weighted correlation of (forecast - clim)
-        # vs (obs - clim).  No additional mean removal — the climatology subtraction
-        # already centres the anomalies.
-        for i, var in enumerate(ordered_acc_vars):
-            pred_prime = anomalies_pred[:, i]
-            y_prime = anomalies_y[:, i]
+        for i, var in enumerate(self.acc_vars):
+            pred_prime = anomalies_pred[:, i] - torch.mean(anomalies_pred[:, i])
+            y_prime = anomalies_y[:, i] - torch.mean(anomalies_y[:, i])
 
-            # Offset the denominator in case it's zero.
+            # Offset the denominator incase its zero.
             denominator = torch.sqrt(torch.sum(w_var * w_lat * pred_prime**2) * torch.sum(w_var * w_lat * y_prime**2))
             denominator = torch.maximum(denominator, torch.tensor(1e-8, device=denominator.device))
             loss_dict[f"acc_{var}"] = torch.sum(w_var * w_lat * pred_prime * y_prime) / denominator
@@ -234,7 +230,7 @@ class LatWeightedMetricsEnsemble:
         surface_vars = conf["data"]["surface_variables"]
         diag_vars = conf["data"]["diagnostic_variables"]
 
-        levels = conf["model"].get("levels") or conf["model"].get("frames") or conf["data"].get("levels")
+        levels = conf["model"]["levels"] if "levels" in conf["model"] else conf["model"]["frames"]
 
         self.vars = [f"{v}_{k}" for v in atmos_vars for k in range(levels)]
         self.vars += surface_vars
