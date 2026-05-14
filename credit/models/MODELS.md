@@ -96,6 +96,7 @@ See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full d
 | `mambavision` | MambaVision (Mamba + attention U-Net) | ✓ | ✓ | ✓ | ✓ |
 | `corrdiff` | CorrDiff (score-based conditional diffusion) | ✓ | ✓ | ✓ | ✓ |
 | `nextgen_wxformer` | NextGen WXFormer (CrossFormer U-Net + spectral GNN + column attention) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `dlesym` | DLESyM (HEALPix ConvNeXt U-Net, DLESyM atmospheric backbone) | ✓ | ✓ | ✓ | ✓ |
 
 **Notes on FSDP / activation checkpointing:**
 Legacy WXFormer-family models (`wxformer`, `crossformer`, `unet`, `swin`, `fuxi`) use explicit fine-grained wrap policies (attention + feedforward blocks).  All other models use automatic policy discovery — CREDIT scans the live model for repeating `nn.Module` subtypes and uses those as the wrap/checkpoint units. Pass `activation_checkpoint: true` in the `trainer:` section to enable.
@@ -127,6 +128,7 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `graphcast` | — | — | — | JAX only (CC BY-NC-SA; PyTorch port from NVIDIA PhysicsNeMo, Apache-2.0) |
 | `nextgen_wxformer` | — | — | — | No public weights |
 | `healpix` | — | — | — | No confirmed public weights |
+| `dlesym` | — | — | — | No pretrained weights; train from scratch |
 | `fourcastnet3` | ✓ cached | 0/N | — | HuggingFace checkpoint is 1D-conv SNO; CREDIT wrapper is U-Net SNO — zero key overlap |
 | `pangu` | — | — | — | ONNX only |
 | `aifs` | — | — | — | Restricted access |
@@ -166,6 +168,7 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `graphcast` | [arXiv:2212.12794](https://arxiv.org/abs/2212.12794) | [google-deepmind/graphcast](https://github.com/google-deepmind/graphcast) (paper) · [NVIDIA/PhysicsNeMo](https://github.com/NVIDIA/physicsnemo) (PyTorch impl, Apache-2.0) | CC BY-NC-SA (weights) / Apache-2.0 (code) | JAX (`gs://dm_graphcast`) | Lam et al. 2023, Google DeepMind |
 | `nextgen_wxformer` | — | [CREDIT](https://github.com/NCAR/miles-credit) | Apache-2.0 | — | John Schreck, NCAR MILES |
 | `healpix` | — | [CognitiveModeling/dlwp-hpx](https://github.com/CognitiveModeling/dlwp-hpx) | Apache-2.0 | — | Weyn et al., CognitiveModeling / NVIDIA |
+| `dlesym` | [arXiv:2409.16247](https://arxiv.org/abs/2409.16247) | [NVIDIA/physicsnemo](https://github.com/NVIDIA/physicsnemo) | Apache-2.0 | [HuggingFace nvidia/dlesym-v1-era5](https://huggingface.co/nvidia/dlesym-v1-era5) | Vonich et al. 2024, NVIDIA |
 | `fourcastnet3` | [NVIDIA Research 2025](https://research.nvidia.com/publication/2025-07_fourcastnet-3) | [NVIDIA/makani](https://github.com/NVIDIA/makani) | Apache-2.0 | [HuggingFace](https://huggingface.co/nvidia/fourcastnet3) | Kurth et al. 2025, NVIDIA |
 | `aurora` | [arXiv:2405.13063](https://arxiv.org/abs/2405.13063) | [microsoft/aurora](https://github.com/microsoft/aurora) | MIT | [HuggingFace](https://huggingface.co/microsoft/aurora) | Chen et al. 2024, Microsoft Research |
 | `pangu` | [Nature 2023](https://doi.org/10.1038/s41586-023-06185-3) | [198808eric/Pangu-Weather](https://github.com/198808eric/Pangu-Weather) | Non-commercial | ONNX only | Bi et al. 2023, Huawei |
@@ -175,6 +178,7 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `arches` | [arXiv:2405.14527](https://arxiv.org/abs/2405.14527) | [gcouairon/ArchesWeather](https://github.com/gcouairon/ArchesWeather) | MIT | — | Couairon et al. 2024 |
 | `mambavision` | [arXiv:2407.08083](https://arxiv.org/abs/2407.08083) | [NVlabs/MambaVision](https://github.com/NVlabs/MambaVision) | Apache-2.0 | — | Hatamizadeh & Kautz 2024, NVIDIA |
 | `corrdiff` | [arXiv:2309.15214](https://arxiv.org/abs/2309.15214) | [NVIDIA/modulus](https://github.com/NVIDIA/modulus) | Apache-2.0 | — | Mardani et al. 2023, NVIDIA / Stanford |
+| `dlesym` | [arXiv:2409.16247](https://arxiv.org/abs/2409.16247) | [NVIDIA/physicsnemo dlwp_healpix](https://github.com/NVIDIA/physicsnemo/tree/main/physicsnemo/models/dlwp_healpix) | Apache-2.0 | [HuggingFace nvidia/dlesym-v1-era5](https://huggingface.co/nvidia/dlesym-v1-era5) | Vonich et al. 2024, NVIDIA |
 
 ---
 
@@ -352,7 +356,7 @@ U-Net with Spherical Neural Operator (SNO) blocks.  Uses SHTs when `torch-harmon
 
 #### Aurora
 Key: `aurora`
-Config: see `credit/models/aurora/README.md`
+Config: [`config/model_zoo/aurora.yml`](../../config/model_zoo/aurora.yml)
 
 Chen et al. 2024, Microsoft Research.
 Paper: [arXiv:2405.13063](https://arxiv.org/abs/2405.13063)
@@ -366,6 +370,7 @@ Weight transfer: **302/308 keys load** (full Swin3D backbone: all encoder, decod
 
 #### Pangu-Weather
 Key: `pangu`
+Config: [`config/model_zoo/pangu.yml`](../../config/model_zoo/pangu.yml)
 
 Bi et al. 2023, Huawei.
 Paper: [Nature 2023](https://doi.org/10.1038/s41586-023-06185-3)
@@ -377,6 +382,7 @@ Pretrained weights: ONNX only, non-commercial
 
 #### AIFS
 Key: `aifs`
+Config: [`config/model_zoo/aifs.yml`](../../config/model_zoo/aifs.yml)
 
 Lang et al. 2024, ECMWF.
 Paper: [arXiv:2406.01465](https://arxiv.org/abs/2406.01465)
@@ -444,6 +450,22 @@ Original code: [NVIDIA/modulus](https://github.com/NVIDIA/modulus)
 Pretrained weights: none publicly available
 
 EDM-preconditioned (Karras et al. 2022) score-based diffusion model.  A `CondEncoder` extracts multi-scale features from the coarse conditioning input and injects them into a `SongUNet` denoiser via channel concatenation.  `forward()` performs a single denoising step at σ=1 (suitable for training); `model.sample(x_cond)` runs the full 18-step Heun ODE sampler.
+
+#### DLESyM
+Key: `dlesym`
+Config: [`config/model_zoo/dlesym.yml`](../../config/model_zoo/dlesym.yml)
+
+Vonich et al. 2024, NVIDIA.
+Paper: [arXiv:2409.16247](https://arxiv.org/abs/2409.16247) · [arXiv:2311.06253](https://arxiv.org/abs/2311.06253)
+Source: [`credit/models/dlesym/dlesym.py`](dlesym/dlesym.py)
+Reference architecture: [NVIDIA/physicsnemo HEALPixRecUNet](https://github.com/NVIDIA/physicsnemo/tree/main/physicsnemo/models/dlwp_healpix) (Apache-2.0)
+Pretrained weights: [HuggingFace nvidia/dlesym-v1-era5](https://huggingface.co/nvidia/dlesym-v1-era5) — Apache-2.0, 1° HEALPix nside=64
+
+HEALPix ConvNeXt U-Net trained as the atmospheric backbone for the coupled DLESyM earth system model.  DLESyM-v1 uses a coupled atmosphere (8 vars, 4-step input) + ocean (SST) model on HEALPix nside=64.  The CREDIT port implements the atmospheric backbone architecture: ConvNeXt-style residual blocks with dilated HEALPix-aware convolutions in a 3-stage U-Net.  Lat/lon ↔ HEALPix reprojection is handled internally (requires `healpy` for correct pixel geometry; falls back to approximate grid without it).  The `frames` parameter controls input history (DLESyM uses 4 × 6h steps).
+
+Configuration key differences from PhysicsNeMo `HEALPixRecUNet`: CREDIT uses `n_channels` and `dilations` lists rather than Hydra DictConfigs; ConvGRU recurrent connections are replaced by deeper ConvNeXt residuals for compatibility with CREDIT's single-step training loop.  Pretrained DLESyM weights (PyTorch `HEALPixRecUNet`) cannot be directly transferred — the layer structures differ.
+
+Primary use case: train on CAMulator or ERA5 data at ~1° resolution with HEALPix-native convolutions.
 
 #### NextGen WXFormer
 Key: `nextgen_wxformer`

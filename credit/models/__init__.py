@@ -164,6 +164,11 @@ _MODEL_REGISTRY = {
         "NextGenWXFormer",
         "Loading NextGen WXFormer (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
     ),
+    "dlesym": (
+        "credit.models.dlesym.dlesym",
+        "CREDITDLESyM",
+        "Loading DLESyM (HEALPix ConvNeXt U-Net, DLESyM atmospheric backbone) ...",
+    ),
 }
 
 # Backward-compatible name -> (module_path, class_name) for direct attribute access
