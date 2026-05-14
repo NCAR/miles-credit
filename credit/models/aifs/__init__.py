@@ -1,3 +1,3 @@
-from .aifs import AIFSProcessor, CREDITAifs
+from .aifs import AIFSEncProcDec, CREDITAifs
 
-__all__ = ["AIFSProcessor", "CREDITAifs"]
+__all__ = ["AIFSEncProcDec", "CREDITAifs"]

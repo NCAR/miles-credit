@@ -36,10 +36,12 @@ model:
     out_channels: 84
     img_size: [181, 360]
     levels: 18
-    base_dim: 128
-    depth: 2
-    n_stages: 3
-    n_modes: 90
+    embed_dim: 512
+    num_layers: 8
+    scale_factor: 4
+    sfno_block_frequency: 2
+    kernel_shape: [3, 3]
+    mlp_ratio: 2.0
 
 loss:
     training_loss: "mse"

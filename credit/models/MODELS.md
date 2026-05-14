@@ -95,6 +95,7 @@ See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full d
 | `arches` | ArchesWeather (window + column attention) | ✓ | ✓ | ✓ | ✓ |
 | `mambavision` | MambaVision (Mamba + attention U-Net) | ✓ | ✓ | ✓ | ✓ |
 | `corrdiff` | CorrDiff (score-based conditional diffusion) | ✓ | ✓ | ✓ | ✓ |
+| `nextgen_wxformer` | NextGen WXFormer (CrossFormer U-Net + spectral GNN + column attention) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
 
 **Notes on FSDP / activation checkpointing:**
 Legacy WXFormer-family models (`wxformer`, `crossformer`, `unet`, `swin`, `fuxi`) use explicit fine-grained wrap policies (attention + feedforward blocks).  All other models use automatic policy discovery — CREDIT scans the live model for repeating `nn.Module` subtypes and uses those as the wrap/checkpoint units. Pass `activation_checkpoint: true` in the `trainer:` section to enable.
@@ -123,7 +124,8 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `sfno` | — | — | — | No public PyTorch weights |
 | `swinrnn` | — | — | — | No public weights |
 | `fengwu` | — | — | — | ONNX only |
-| `graphcast` | — | — | — | JAX only |
+| `graphcast` | — | — | — | JAX only (CC BY-NC-SA; PyTorch port from NVIDIA PhysicsNeMo, Apache-2.0) |
+| `nextgen_wxformer` | — | — | — | No public weights |
 | `healpix` | — | — | — | No confirmed public weights |
 | `fourcastnet3` | ✓ cached | 0/N | — | HuggingFace checkpoint is 1D-conv SNO; CREDIT wrapper is U-Net SNO — zero key overlap |
 | `pangu` | — | — | — | ONNX only |
@@ -161,7 +163,8 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `sfno` | [arXiv:2306.03838](https://arxiv.org/abs/2306.03838) | [NVIDIA/makani](https://github.com/NVIDIA/makani) | Apache-2.0 | [NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/modulus/models/sfno_73ch_small) | Bonev et al. 2023, NVIDIA |
 | `swinrnn` | [arXiv:2307.09650](https://arxiv.org/abs/2307.09650) | [microsoft/SwinRNN](https://github.com/microsoft/SwinRNN) | MIT | — | Chen et al. 2023, Microsoft |
 | `fengwu` | [arXiv:2304.02948](https://arxiv.org/abs/2304.02948) | [OpenEarthLab/FengWu](https://github.com/OpenEarthLab/FengWu) | CC BY-NC-SA | ONNX only | Chen et al. 2023, Shanghai AI Lab |
-| `graphcast` | [arXiv:2212.12794](https://arxiv.org/abs/2212.12794) | [google-deepmind/graphcast](https://github.com/google-deepmind/graphcast) | CC BY-NC-SA | JAX (`gs://dm_graphcast`) | Lam et al. 2023, Google DeepMind |
+| `graphcast` | [arXiv:2212.12794](https://arxiv.org/abs/2212.12794) | [google-deepmind/graphcast](https://github.com/google-deepmind/graphcast) (paper) · [NVIDIA/PhysicsNeMo](https://github.com/NVIDIA/physicsnemo) (PyTorch impl, Apache-2.0) | CC BY-NC-SA (weights) / Apache-2.0 (code) | JAX (`gs://dm_graphcast`) | Lam et al. 2023, Google DeepMind |
+| `nextgen_wxformer` | — | [CREDIT](https://github.com/NCAR/miles-credit) | Apache-2.0 | — | John Schreck, NCAR MILES |
 | `healpix` | — | [CognitiveModeling/dlwp-hpx](https://github.com/CognitiveModeling/dlwp-hpx) | Apache-2.0 | — | Weyn et al., CognitiveModeling / NVIDIA |
 | `fourcastnet3` | [NVIDIA Research 2025](https://research.nvidia.com/publication/2025-07_fourcastnet-3) | [NVIDIA/makani](https://github.com/NVIDIA/makani) | Apache-2.0 | [HuggingFace](https://huggingface.co/nvidia/fourcastnet3) | Kurth et al. 2025, NVIDIA |
 | `aurora` | [arXiv:2405.13063](https://arxiv.org/abs/2405.13063) | [microsoft/aurora](https://github.com/microsoft/aurora) | MIT | [HuggingFace](https://huggingface.co/microsoft/aurora) | Chen et al. 2024, Microsoft Research |
@@ -318,10 +321,11 @@ Config: [`config/model_zoo/graphcast.yml`](../../config/model_zoo/graphcast.yml)
 Lam et al. 2023, Google DeepMind.
 Paper: [arXiv:2212.12794](https://arxiv.org/abs/2212.12794)
 Source: [`credit/models/graphcast/graphcast.py`](graphcast/graphcast.py)
-Original code: [google-deepmind/graphcast](https://github.com/google-deepmind/graphcast)
+Original paper code: [google-deepmind/graphcast](https://github.com/google-deepmind/graphcast) (JAX, CC BY-NC-SA)
+PyTorch implementation: [NVIDIA/PhysicsNeMo](https://github.com/NVIDIA/physicsnemo) `GraphCastNet` (Apache-2.0)
 Pretrained weights: `gs://dm_graphcast` — CC BY-NC-SA (non-commercial), JAX/Haiku format
 
-kNN GNN encoder-processor-decoder on an icosahedral mesh.  Official weights are JAX; conversion step required.  CREDIT implementation is a pure-PyTorch re-implementation.
+Faithful port of PhysicsNeMo's `GraphCastNet`: icosahedral multi-mesh GNN with Grid2Mesh bipartite encoder, message-passing processor (alternating `MeshEdgeBlock` + `MeshNodeBlock`), and Mesh2Grid bipartite decoder.  Graph topology is built at model init from an icosahedral refinement hierarchy (mesh_level 0–6; default 6 = 40,962 nodes).  Official weights are JAX; direct weight transfer is not possible without format conversion.
 
 #### DLWP-HEALPix
 Key: `healpix`
@@ -440,6 +444,16 @@ Original code: [NVIDIA/modulus](https://github.com/NVIDIA/modulus)
 Pretrained weights: none publicly available
 
 EDM-preconditioned (Karras et al. 2022) score-based diffusion model.  A `CondEncoder` extracts multi-scale features from the coarse conditioning input and injects them into a `SongUNet` denoiser via channel concatenation.  `forward()` performs a single denoising step at σ=1 (suitable for training); `model.sample(x_cond)` runs the full 18-step Heun ODE sampler.
+
+#### NextGen WXFormer
+Key: `nextgen_wxformer`
+Config: [`config/model_zoo/smoke/smoke_nextgen_wxformer_casper.yml`](../../config/model_zoo/smoke/smoke_nextgen_wxformer_casper.yml)
+
+John Schreck, NCAR MILES.
+Source: [`credit/models/wxformer/wxformer_next.py`](wxformer/wxformer_next.py)
+Pretrained weights: none publicly available
+
+CrossFormer U-Net augmented with three design additions over WXFormer: (1) learned pressure-level embeddings at input (Pangu/Aurora style), (2) column attention for explicit vertical coupling before the encoder (ArchesWeather inspired), (3) a spectral GNN bottleneck for global mixing between encoder and decoder (SFNO inspired).  Spectral normalization is applied throughout.  The `SpectralGNNBottleneck` uses learned aggregation/scatter weight matrices to project the spatial feature map onto K virtual spectral nodes and back, providing a parameter-efficient global receptive field without requiring a fixed graph topology.  Column attention pools to `col_attn_stride` spatial resolution before computing level-wise attention, keeping memory manageable on 640×1280 grids.
 
 ---
 

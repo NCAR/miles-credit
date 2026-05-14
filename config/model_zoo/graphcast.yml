@@ -36,11 +36,13 @@ model:
     out_channels: 84
     img_size: [181, 360]
     levels: 18
-    latent_dim: 512
-    edge_dim: 256
-    processor_depth: 8
-    k_neighbours: 6
-    mlp_hidden: 512
+    mesh_level: 6
+    multimesh: True
+    processor_layers: 16
+    hidden_layers: 1
+    hidden_dim: 512
+    aggregation: "sum"
+    activation_fn: "silu"
 
 loss:
     training_loss: "mse"

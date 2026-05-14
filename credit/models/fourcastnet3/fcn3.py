@@ -1,264 +1,291 @@
 """
-FourCastNet3 (FCN3) — Geometric Spherical Neural Operator weather model.
-Kurth et al., 2025.  https://research.nvidia.com/publication/2025-07_fourcastnet-3
-Original: NVIDIA/PhysicsNeMo (Apache 2.0)
+FourCastNet3 (FCN3) — Atmospheric Spherical Neural Operator.
 
-Architecture: U-Net encoder-decoder with Spherical Neural Operator (SNO) blocks.
-The group-equivariant "geometric" aspect comes from using Spherical Harmonic
-Transforms (SHTs) at every scale, making the spectral filter globally equivariant
-under spherical rotations.
+Ported from NVIDIA/makani (Apache-2.0):
+  makani/models/networks/fourcastnet3.py  →  class AtmoSphericNeuralOperatorNet
 
-When torch-harmonics is installed, SHTs are used at each scale (true FCN3 behaviour).
-Without it, rfft2 is used as a fallback (same as SFNO fallback).
+Paper: Kurth et al. 2025, arXiv:2507.12144
+Original code: https://github.com/NVIDIA/makani
 
-Differences from SFNO:
-  - U-Net multi-scale structure (3 encoder + bottleneck + 3 decoder stages)
-  - Separate SHT at each spatial scale (lmax scales with resolution)
-  - Skip connections + channel projections across scales
-  - Group-normalisation instead of layer-norm (better for equivariance)
+Architecture (from makani):
+    DiscreteContinuousEncoder (DISCO conv, equiangular H×W → legendre-gauss h×w)
+    → N NeuralOperatorBlocks (alternating local DISCO and global diagonal-harmonic)
+    → DiscreteContinuousDecoder (bilinear ResampleS2 + DISCO conv, legendre-gauss h×w → equiangular H×W)
 
-CREDITFourCastNetV3 wraps the model for CREDIT's flat (B, C, H, W) tensors.
+All spherical ops use torch-harmonics (DiscreteContinuousConvS2, RealSHT, ResampleS2).
+No makani or physicsnemo dependencies required.
+
+Key differences from the makani original:
+- No distributed training (single-GPU only; no makani.utils.comm)
+- No channel grouping by variable type (flat B×C×H×W interface)
+- No SST imputation, water clamping, or auxiliary channels
 """
 
+import math
 import os
 import sys
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.fft
 
 try:
-    from torch_harmonics import RealSHT, InverseRealSHT
+    from torch_harmonics import (
+        DiscreteContinuousConvS2,
+        InverseRealSHT,
+        RealSHT,
+        ResampleS2,
+    )
 
-    _HARMONICS_AVAILABLE = True
+    _TH_AVAILABLE = True
 except ImportError:
-    _HARMONICS_AVAILABLE = False
+    _TH_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
-# Spherical Neural Operator block (reusable at any scale)
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-class SpectralConv2d(nn.Module):
-    """
-    Learnable spectral convolution on the sphere.
+def _theta_cutoff(lmax: int, kernel_shape: tuple, margin: float = 1.0) -> float:
+    """Heuristic cutoff radius for morlet DISCO kernels (from makani FCN3)."""
+    return margin * kernel_shape[0] * math.pi / float(lmax)
 
-    Uses SHT when available; falls back to rfft2.
-    At each scale, lmax = min(h, n_modes) to respect the Nyquist limit.
-    """
 
-    def __init__(self, h, w, dim, n_modes=None):
+class LayerScale(nn.Module):
+    """Per-channel learnable scale factor (from makani)."""
+
+    def __init__(self, dim: int, init: float = 1e-4):
         super().__init__()
-        self.h, self.w = h, w
-        self.dim = dim
-        if n_modes is None:
-            n_modes = min(h, w // 2 + 1)
-        self.n_modes = n_modes
-        self.use_harmonics = _HARMONICS_AVAILABLE
+        self.weight = nn.Parameter(torch.full((1, dim, 1, 1), init))
 
-        if self.use_harmonics:
-            self.sht = RealSHT(h, w, lmax=n_modes, mmax=n_modes, grid="equiangular")
-            self.isht = InverseRealSHT(h, w, lmax=n_modes, mmax=n_modes, grid="equiangular")
-            self.weight_r = nn.Parameter(torch.empty(dim, n_modes, n_modes))
-            self.weight_i = nn.Parameter(torch.empty(dim, n_modes, n_modes))
-        else:
-            wf = w // 2 + 1
-            self.weight_r = nn.Parameter(torch.empty(dim, h, wf))
-            self.weight_i = nn.Parameter(torch.empty(dim, h, wf))
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * self.weight
 
+
+class MLP(nn.Module):
+    """Point-wise 1×1 conv MLP (channel-first layout)."""
+
+    def __init__(self, dim: int, hidden_dim: int, drop: float = 0.0):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(dim, hidden_dim, 1),
+            nn.GELU(),
+            nn.Dropout(drop),
+            nn.Conv2d(hidden_dim, dim, 1),
+            nn.Dropout(drop),
+        )
+        with torch.no_grad():
+            self.net[0].weight *= 0.5
+            self.net[3].weight *= 0.5
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+# ---------------------------------------------------------------------------
+# Local and global convolution layers
+# ---------------------------------------------------------------------------
+
+
+class DISCOConv(nn.Module):
+    """
+    Local DISCO (Discrete-Continuous) spherical convolution.
+
+    Operates within the legendre-gauss internal grid — the h×w downsampled space.
+    Corresponds to conv_type='local' blocks in makani's NeuralOperatorBlock.
+    """
+
+    def __init__(self, dim: int, h: int, w: int, kernel_shape: tuple, lmax: int):
+        super().__init__()
+        theta_cutoff = _theta_cutoff(lmax, kernel_shape)
+        self.conv = DiscreteContinuousConvS2(
+            dim,
+            dim,
+            in_shape=(h, w),
+            out_shape=(h, w),
+            kernel_shape=kernel_shape,
+            basis_type="morlet",
+            basis_norm_mode="mean",
+            grid_in="legendre-gauss",
+            grid_out="legendre-gauss",
+            bias=False,
+            theta_cutoff=theta_cutoff,
+        )
+        with torch.no_grad():
+            self.conv.weight *= 0.5
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        with torch.amp.autocast(device_type="cuda", enabled=False):
+            return self.conv(x.float()).to(x.dtype)
+
+
+class DHConv(nn.Module):
+    """
+    Global diagonal-harmonic spectral convolution.
+
+    SHT → learned per-channel complex filter → ISHT.
+    Corresponds to conv_type='global' (operator_type='dhconv') in makani.
+    AMP guard prevents cuFFT fp16 failure on non-power-of-2 grids.
+    """
+
+    def __init__(self, dim: int, h: int, w: int, lmax: int):
+        super().__init__()
+        self.sht = RealSHT(h, w, lmax=lmax, mmax=lmax, grid="legendre-gauss").float()
+        self.isht = InverseRealSHT(h, w, lmax=lmax, mmax=lmax, grid="legendre-gauss").float()
+        self.weight_r = nn.Parameter(torch.empty(dim, lmax, lmax))
+        self.weight_i = nn.Parameter(torch.empty(dim, lmax, lmax))
         nn.init.trunc_normal_(self.weight_r, std=0.02)
         nn.init.trunc_normal_(self.weight_i, std=0.02)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (B, dim, H, W) → (B, dim, H, W)"""
-        B, D, H, W = x.shape
-        w = torch.complex(self.weight_r, self.weight_i)
-        if self.use_harmonics:
-            xc = self.sht(x) * w[None]
-            return self.isht(xc)
-        else:
-            xc = torch.fft.rfft2(x, norm="ortho") * w[None]
-            return torch.fft.irfft2(xc, s=(H, W), norm="ortho")
+        with torch.amp.autocast(device_type="cuda", enabled=False):
+            xf = x.float()
+            w = torch.complex(self.weight_r.float(), self.weight_i.float())
+            xc = self.sht(xf) * w[None]
+            return self.isht(xc).to(x.dtype)
 
 
-class SNOBlock(nn.Module):
+# ---------------------------------------------------------------------------
+# NeuralOperatorBlock
+# ---------------------------------------------------------------------------
+
+
+class NeuralOperatorBlock(nn.Module):
     """
-    Spherical Neural Operator block (channel-first layout).
+    Single processor block: norm(none) → conv → MLP → LayerScale → identity skip.
 
-    Structure: residual spectral branch + point-wise MLP branch.
-    Uses GroupNorm for better equivariance under feature permutations.
-    """
-
-    def __init__(self, h, w, dim, n_modes=None, mlp_ratio=2.0, drop=0.0):
-        super().__init__()
-        n_groups = min(8, dim)
-        self.norm1 = nn.GroupNorm(n_groups, dim)
-        self.spectral = SpectralConv2d(h, w, dim, n_modes=n_modes)
-        self.skip = nn.Conv2d(dim, dim, 1)  # pointwise skip
-        self.norm2 = nn.GroupNorm(n_groups, dim)
-        hidden = int(dim * mlp_ratio)
-        self.mlp = nn.Sequential(
-            nn.Conv2d(dim, hidden, 1),
-            nn.GELU(),
-            nn.Dropout(drop),
-            nn.Conv2d(hidden, dim, 1),
-            nn.Dropout(drop),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (B, dim, H, W)"""
-        x = self.skip(x) + self.spectral(self.norm1(x))
-        x = x + self.mlp(self.norm2(x))
-        return x
-
-
-# ---------------------------------------------------------------------------
-# Down / Up sampling
-# ---------------------------------------------------------------------------
-
-
-class SNODown(nn.Module):
-    """2× spatial downsampling: avg-pool + channel projection."""
-
-    def __init__(self, in_dim, out_dim):
-        super().__init__()
-        self.pool = nn.AvgPool2d(2)
-        self.proj = nn.Conv2d(in_dim, out_dim, 1)
-
-    def forward(self, x):
-        return self.proj(self.pool(x))
-
-
-class SNOUp(nn.Module):
-    """2× spatial upsampling: bilinear + channel projection."""
-
-    def __init__(self, in_dim, out_dim):
-        super().__init__()
-        self.proj = nn.Conv2d(in_dim, out_dim, 1)
-
-    def forward(self, x):
-        x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
-        return self.proj(x)
-
-
-# ---------------------------------------------------------------------------
-# FCN3 model
-# ---------------------------------------------------------------------------
-
-
-class FCN3Model(nn.Module):
-    """
-    FourCastNet3 — multi-scale spherical neural operator U-Net.
-
-    Parameters
-    ----------
-    img_size : tuple[int, int]
-        (H, W).
-    in_channels, out_channels : int
-    base_dim : int
-        Channel dim at the finest scale. Doubles at each stage.
-    depth : int
-        SNO blocks per stage (applied in both encoder and decoder).
-    n_stages : int
-        Number of downsampling stages. Default 3.
-    n_modes : int, optional
-        Spectral truncation at finest scale. Halved at each stage.
-    mlp_ratio : float
-    drop_rate : float
+    Replicates makani's NeuralOperatorBlock with use_mlp=True, skip='identity',
+    normalization_layer='none'.
     """
 
     def __init__(
         self,
-        img_size=(128, 256),
-        in_channels=70,
-        out_channels=69,
-        base_dim=128,
-        depth=2,
-        n_stages=3,
-        n_modes=None,
-        mlp_ratio=2.0,
-        drop_rate=0.0,
+        h: int,
+        w: int,
+        dim: int,
+        lmax: int,
+        conv_type: str = "local",
+        mlp_ratio: float = 2.0,
+        kernel_shape: tuple = (3, 3),
+    ):
+        super().__init__()
+        if conv_type == "local":
+            self.conv = DISCOConv(dim, h, w, kernel_shape, lmax)
+        elif conv_type == "global":
+            self.conv = DHConv(dim, h, w, lmax)
+        else:
+            raise ValueError(f"Unknown conv_type: {conv_type}")
+
+        self.mlp = MLP(dim, int(dim * mlp_ratio))
+        self.layer_scale = LayerScale(dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        dx = self.conv(x)
+        dx = self.mlp(dx)
+        return x + self.layer_scale(dx)
+
+
+# ---------------------------------------------------------------------------
+# FCN3Net backbone
+# ---------------------------------------------------------------------------
+
+
+class FCN3Net(nn.Module):
+    """
+    FourCastNet3 backbone.
+
+    Faithfully ports makani's AtmoSphericNeuralOperatorNet without distributed
+    training, channel grouping, or NVIDIA-specific infrastructure.
+
+    Parameters
+    ----------
+    in_channels, out_channels : int
+    img_size : (H, W)  —  equiangular input/output grid.
+    embed_dim : int    —  internal channel dimension.
+    num_layers : int   —  total processor blocks (default 8, as in paper).
+    scale_factor : int —  spatial downsampling factor for the internal grid.
+    sfno_block_frequency : int — every k-th block is global (DHConv); others local (DISCO).
+    kernel_shape : (int, int) — DISCO Morlet kernel footprint.
+    mlp_ratio : float  —  MLP hidden / embed_dim ratio inside each block.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        img_size: tuple = (181, 360),
+        embed_dim: int = 256,
+        num_layers: int = 8,
+        scale_factor: int = 4,
+        sfno_block_frequency: int = 2,
+        kernel_shape: tuple = (3, 3),
+        mlp_ratio: float = 2.0,
     ):
         super().__init__()
         H, W = img_size
-        self.n_stages = n_stages
+        h, w = H // scale_factor, W // scale_factor
+        self.H, self.W = H, W
+        self.h, self.w = h, w
+        lmax = min(h, w // 2 + 1)
+        self.lmax = lmax
+        tc = _theta_cutoff(lmax, kernel_shape)
 
-        dims = [base_dim * (2**i) for i in range(n_stages + 1)]  # [128, 256, 512, 1024]
-        sizes = [(H // (2**i), W // (2**i)) for i in range(n_stages + 1)]
+        # encoder: equiangular (H, W) → legendre-gauss (h, w)
+        self.encoder = DiscreteContinuousConvS2(
+            in_channels,
+            embed_dim,
+            in_shape=(H, W),
+            out_shape=(h, w),
+            kernel_shape=kernel_shape,
+            basis_type="morlet",
+            basis_norm_mode="mean",
+            grid_in="equiangular",
+            grid_out="legendre-gauss",
+            bias=False,
+            theta_cutoff=tc,
+        )
+        with torch.no_grad():
+            self.encoder.weight *= 0.5
 
-        if n_modes is None:
-            n_modes = min(H, W // 2 + 1)
-        modes_per_stage = [max(4, n_modes // (2**i)) for i in range(n_stages + 1)]
-
-        # stem
-        self.stem = nn.Conv2d(in_channels, dims[0], 3, padding=1)
-
-        # encoder stages
-        self.enc_stages = nn.ModuleList()
-        self.down_layers = nn.ModuleList()
-        for i in range(n_stages):
-            h, w = sizes[i]
-            self.enc_stages.append(
-                nn.Sequential(
-                    *[
-                        SNOBlock(h, w, dims[i], n_modes=modes_per_stage[i], mlp_ratio=mlp_ratio, drop=drop_rate)
-                        for _ in range(depth)
-                    ]
+        # processor
+        self.blocks = nn.ModuleList()
+        for i in range(num_layers):
+            conv_type = "global" if (sfno_block_frequency > 0 and i % sfno_block_frequency == 0) else "local"
+            self.blocks.append(
+                NeuralOperatorBlock(
+                    h, w, embed_dim, lmax, conv_type=conv_type, mlp_ratio=mlp_ratio, kernel_shape=kernel_shape
                 )
             )
-            self.down_layers.append(SNODown(dims[i], dims[i + 1]))
 
-        # bottleneck
-        h, w = sizes[n_stages]
-        self.bottleneck = nn.Sequential(
-            *[
-                SNOBlock(h, w, dims[n_stages], n_modes=modes_per_stage[n_stages], mlp_ratio=mlp_ratio, drop=drop_rate)
-                for _ in range(depth)
-            ]
+        # decoder: legendre-gauss (h, w) → equiangular (H, W) via bilinear resample + DISCO
+        self.resample = ResampleS2(h, w, H, W, grid_in="legendre-gauss", grid_out="equiangular")
+        self.decoder = DiscreteContinuousConvS2(
+            embed_dim,
+            out_channels,
+            in_shape=(H, W),
+            out_shape=(H, W),
+            kernel_shape=kernel_shape,
+            basis_type="morlet",
+            basis_norm_mode="mean",
+            grid_in="equiangular",
+            grid_out="equiangular",
+            bias=False,
+            theta_cutoff=tc,
         )
 
-        # decoder stages
-        self.up_layers = nn.ModuleList()
-        self.skip_projs = nn.ModuleList()
-        self.dec_stages = nn.ModuleList()
-        for i in range(n_stages - 1, -1, -1):
-            h, w = sizes[i]
-            self.up_layers.append(SNOUp(dims[i + 1], dims[i]))
-            self.skip_projs.append(nn.Conv2d(dims[i] * 2, dims[i], 1))
-            self.dec_stages.append(
-                nn.Sequential(
-                    *[
-                        SNOBlock(h, w, dims[i], n_modes=modes_per_stage[i], mlp_ratio=mlp_ratio, drop=drop_rate)
-                        for _ in range(depth)
-                    ]
-                )
-            )
-
-        self.head = nn.Conv2d(dims[0], out_channels, 1)
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.stem(x)
+        # All DISCO and SHT ops require fp32 (sparse bmm / cuFFT limitation with AMP)
+        with torch.amp.autocast(device_type="cuda", enabled=False):
+            x = self.encoder(x.float())
 
-        skips = []
-        for enc, down in zip(self.enc_stages, self.down_layers):
-            x = enc(x)
-            skips.append(x)
-            x = down(x)
+        for blk in self.blocks:
+            x = blk(x)
 
-        x = self.bottleneck(x)
+        with torch.amp.autocast(device_type="cuda", enabled=False):
+            x = self.resample(x.float())
+            x = self.decoder(x)
 
-        for up, skip_proj, dec, skip in zip(self.up_layers, self.skip_projs, self.dec_stages, reversed(skips)):
-            x = up(x)
-            h = min(x.shape[2], skip.shape[2])
-            w = min(x.shape[3], skip.shape[3])
-            x = x[:, :, :h, :w]
-            skip = skip[:, :, :h, :w]
-            x = skip_proj(torch.cat([x, skip], dim=1))
-            x = dec(x)
-
-        return self.head(x)
+        return x
 
 
 # ---------------------------------------------------------------------------
@@ -268,65 +295,52 @@ class FCN3Model(nn.Module):
 
 class CREDITFourCastNetV3(nn.Module):
     """
-    CREDIT wrapper for FourCastNet3 (FCN3).  Flat (B, C, H, W) I/O.
+    CREDIT wrapper for FourCastNet3.  Flat (B, C, H, W) I/O; returns (B, C_out, 1, H, W).
 
-    torch-harmonics used automatically when installed; falls back to rfft2.
+    Requires torch-harmonics (DiscreteContinuousConvS2, ResampleS2, RealSHT).
+    Install with: pip install torch-harmonics
     """
 
     def __init__(
         self,
-        in_channels=70,
-        out_channels=69,
-        img_size=(128, 256),
-        frames=1,
-        base_dim=128,
-        depth=2,
-        n_stages=3,
-        n_modes=None,
-        mlp_ratio=2.0,
-        drop_rate=0.0,
+        in_channels: int = 70,
+        out_channels: int = 69,
+        img_size: tuple = (181, 360),
+        frames: int = 1,
+        embed_dim: int = 256,
+        num_layers: int = 8,
+        scale_factor: int = 4,
+        sfno_block_frequency: int = 2,
+        kernel_shape: tuple = (3, 3),
+        mlp_ratio: float = 2.0,
     ):
         super().__init__()
-        H, W = img_size
-        self.H, self.W = H, W
-        align = 2**n_stages
-        pad_H = (align - H % align) % align
-        pad_W = (align - W % align) % align
-        self.pad_H, self.pad_W = pad_H, pad_W
-        self.model = FCN3Model(
-            img_size=(H + pad_H, W + pad_W),
+        if not _TH_AVAILABLE:
+            raise ImportError(
+                "torch-harmonics is required for FourCastNet3.  Install with: pip install torch-harmonics"
+            )
+        self.H, self.W = img_size
+        self.model = FCN3Net(
             in_channels=in_channels * frames,
             out_channels=out_channels,
-            base_dim=base_dim,
-            depth=depth,
-            n_stages=n_stages,
-            n_modes=n_modes,
+            img_size=img_size,
+            embed_dim=embed_dim,
+            num_layers=num_layers,
+            scale_factor=scale_factor,
+            sfno_block_frequency=sfno_block_frequency,
+            kernel_shape=tuple(kernel_shape),
             mlp_ratio=mlp_ratio,
-            drop_rate=drop_rate,
         )
-        if not _HARMONICS_AVAILABLE:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "torch-harmonics not installed; FCN3 falling back to rfft2 spectral conv. "
-                "Install with: pip install torch-harmonics"
-            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
+        if x.dim() == 5:  # (B, C, T, H, W) → (B, C*T, H, W)
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        if self.pad_H > 0 or self.pad_W > 0:
-            x = F.pad(x, (0, self.pad_W, 0, self.pad_H))
         out = self.model(x)
-        if self.pad_H > 0 or self.pad_W > 0:
-            out = out[:, :, : self.H, : self.W]
-        return out.unsqueeze(2)
+        return out.unsqueeze(2)  # (B, C_out, 1, H, W)
 
     @classmethod
     def load_model(cls, conf):
-        import torch
-
         model = cls(**{k: v for k, v in conf["model"].items() if k != "type"})
         save_loc = os.path.expandvars(conf["save_loc"])
         ckpt = os.path.join(save_loc, "model_checkpoint.pt")
@@ -339,8 +353,6 @@ class CREDITFourCastNetV3(nn.Module):
 
     @classmethod
     def load_model_name(cls, conf, model_name):
-        import torch
-
         model = cls(**{k: v for k, v in conf["model"].items() if k != "type"})
         ckpt = os.path.join(os.path.expandvars(conf["save_loc"]), model_name)
         checkpoint = torch.load(ckpt, map_location="cpu")
@@ -357,24 +369,23 @@ if __name__ == "__main__":
     _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     sys.path.insert(0, _root)
 
-    B, C_in, C_out = 1, 70, 69
-    H, W = 64, 128
+    B, C_in, C_out = 1, 8, 6
+    H, W = 48, 96
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = CREDITFourCastNetV3(
         in_channels=C_in,
         out_channels=C_out,
         img_size=(H, W),
-        base_dim=32,
-        depth=2,
-        n_stages=3,
+        embed_dim=32,
+        num_layers=4,
+        scale_factor=4,
     ).to(device)
 
     x = torch.randn(B, C_in, H, W, device=device)
     y = model(x)
-    assert y.shape == (B, C_out, H, W), f"unexpected shape {y.shape}"
+    assert y.shape == (B, C_out, 1, H, W), f"unexpected shape {y.shape}"
     y.mean().backward()
 
-    harmonics_str = "SHT" if _HARMONICS_AVAILABLE else "rfft2 fallback"
     n_params = sum(p.numel() for p in model.parameters()) / 1e6
-    print(f"CREDITFourCastNetV3 OK ({harmonics_str}) — output {y.shape}, params {n_params:.1f}M, device {device}")
+    print(f"CREDITFourCastNetV3 OK — output {y.shape}, {n_params:.1f}M params, device {device}")

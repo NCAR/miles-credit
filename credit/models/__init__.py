@@ -87,7 +87,7 @@ _MODEL_REGISTRY = {
     "aifs": (
         "credit.models.aifs.aifs",
         "CREDITAifs",
-        "Loading AIFS lat/lon Transformer processor ...",
+        "Loading AIFS (GNN encoder → Transformer processor → GNN decoder) ...",
     ),
     "stormer": (
         "credit.models.stormer.stormer",
@@ -117,12 +117,12 @@ _MODEL_REGISTRY = {
     "fengwu": (
         "credit.models.fengwu.fengwu",
         "CREDITFengWu",
-        "Loading FengWu (multi-group cross-attention ViT) ...",
+        "Loading FengWu (2D Swin Transformer encoder-fuser-decoder) ...",
     ),
     "graphcast": (
         "credit.models.graphcast.graphcast",
         "CREDITGraphCast",
-        "Loading GraphCast (kNN GNN encoder-processor-decoder) ...",
+        "Loading GraphCast (icosahedral GNN: Grid2Mesh → processor → Mesh2Grid) ...",
     ),
     "healpix": (
         "credit.models.healpix.healpix",
@@ -132,7 +132,7 @@ _MODEL_REGISTRY = {
     "fourcastnet3": (
         "credit.models.fourcastnet3.fcn3",
         "CREDITFourCastNetV3",
-        "Loading FourCastNet3 (spherical neural operator U-Net) ...",
+        "Loading FourCastNet3 (DISCO + diagonal-harmonic spherical operator) ...",
     ),
     "itransformer": (
         "credit.models.itransformer.itransformer",

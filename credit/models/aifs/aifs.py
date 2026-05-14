@@ -1,340 +1,667 @@
-"""AIFS-inspired global weather Transformer for CREDIT.
+"""
+AIFS — Artificial Intelligence Forecasting System.
 
-AIFS (Artificial Intelligence Forecasting System) — Lang et al., 2024.
-https://arxiv.org/abs/2406.01465
+Ported from anemoi-models (Apache-2.0):
+  https://github.com/ecmwf/anemoi-models
 
-The original AIFS uses a GNN encoder to map ERA5 data onto a reduced Gaussian
-mesh, a 16-layer Transformer processor, and a GNN decoder back to the output
-grid.  This CREDIT implementation simplifies the architecture by operating
-directly on the regular lat/lon grid — removing the GNN encode/decode steps
-and the reduced Gaussian mesh.  This keeps all the modelling power of the
-Transformer processor while staying fully compatible with CREDIT's data pipeline.
+Paper: Lang et al., 2024.  arXiv:2406.01465
 
-Architecture:
-    Linear token embedding  (C_in × H × W → hidden_dim)
-    + Sinusoidal lat/lon position encoding
-    → N × TransformerProcessorLayer  (MHSA + FF + residual + pre-norm)
-    → Linear output projection  (hidden_dim → C_out × H × W)
+Architecture (from anemoi-models):
+    Grid2Mesh GNN encoder  (GraphTransformerForwardMapper)
+    → N TransformerProcessor layers  (MHSA + FF on hidden mesh nodes)
+    → Mesh2Grid GNN decoder  (GraphTransformerBackwardMapper)
 
-The model operates on flattened spatial tokens ``(B, H*W, hidden_dim)`` —
-equivalent to treating every grid cell as a "node" in the AIFS graph.
+Requires torch-geometric.  The mesh graph must be pre-built with
+credit/models/aifs/build_graph.py and its path supplied in the config.
 
-For very large grids an optional local attention window can be applied
-(``window_size > 0``), which reduces the O(N²) complexity to O(N·W).
-
-Input/output: ``(B, C, H, W)`` flat tensors.
+Key differences from the anemoi-models original:
+- No distributed training  (no shard_tensor / shard_heads / ProcessGroup)
+- No Hydra / OmegaConf config
+- No anemoi-graphs dependency  (graph built by the included build_graph.py)
+- No activation checkpointing wrapper
+- flash_attn optional  (falls back to F.scaled_dot_product_attention)
 """
 
-from __future__ import annotations
-
-import inspect
-import math
 import os
-from typing import List, Optional
 
+import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from timm.layers import DropPath, trunc_normal_
+from torch import Tensor
+from torch_geometric.data import HeteroData
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.utils import softmax
 
-__all__ = ["AIFSProcessor", "CREDITAifs"]
+try:
+    from flash_attn import flash_attn_func as _flash_attn_func
+
+    _FLASH_AVAILABLE = True
+except ImportError:
+    _FLASH_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
-# Positional encoding
+# Primitives (ported from anemoi.models.layers.utils / mlp / conv / block)
 # ---------------------------------------------------------------------------
 
 
-class LatLonPositionalEncoding(nn.Module):
-    """Sinusoidal lat/lon positional encoding stored as a learnable-free buffer.
+class AutocastLayerNorm(nn.LayerNorm):
+    """LayerNorm that casts output back to the input dtype (AMP-safe)."""
 
-    Encodes (lat, lon) as sinusoids with multiple frequencies and projects to
-    ``hidden_dim`` via a small linear layer.
+    def forward(self, x: Tensor) -> Tensor:
+        return super().forward(x).type_as(x)
 
-    Args:
-        hidden_dim: Target embedding dimension.
-        num_freqs: Number of sinusoidal frequencies per coordinate.
+
+class MLP(nn.Module):
+    """
+    Multi-layer perceptron.
+
+    Ported from anemoi.models.layers.mlp.MLP.
+    Default: in → hidden → out + AutocastLayerNorm (matches anemoi default).
     """
 
-    def __init__(self, hidden_dim: int, num_freqs: int = 8) -> None:
+    def __init__(
+        self,
+        in_features: int,
+        hidden_dim: int,
+        out_features: int,
+        n_extra_layers: int = 0,
+        activation: str = "SiLU",
+        final_activation: bool = False,
+        layer_norm: bool = True,
+    ):
         super().__init__()
-        self.num_freqs = num_freqs
-        # 2 coords × 2 trig fns × num_freqs
-        pos_dim = 4 * num_freqs
-        self.proj = nn.Linear(pos_dim, hidden_dim, bias=False)
+        act = getattr(nn, activation)
+        layers = [nn.Linear(in_features, hidden_dim), act()]
+        for _ in range(n_extra_layers + 1):
+            layers += [nn.Linear(hidden_dim, hidden_dim), act()]
+        layers.append(nn.Linear(hidden_dim, out_features))
+        if final_activation:
+            layers.append(act())
+        if layer_norm:
+            layers.append(AutocastLayerNorm(out_features))
+        self.net = nn.Sequential(*layers)
 
-    def _encode(self, coords: torch.Tensor) -> torch.Tensor:
-        """coords: (N,) in radians → (N, 2*num_freqs)"""
-        freqs = torch.arange(1, self.num_freqs + 1, dtype=coords.dtype, device=coords.device)
-        angles = coords.unsqueeze(-1) * freqs.unsqueeze(0) * math.pi
-        return torch.cat([angles.sin(), angles.cos()], dim=-1)
+    def forward(self, x: Tensor) -> Tensor:
+        return self.net(x)
 
-    def forward(self, lat: torch.Tensor, lon: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            lat: ``(H,)`` latitudes in degrees.
-            lon: ``(W,)`` longitudes in degrees.
 
-        Returns:
-            ``(H*W, hidden_dim)`` positional encodings.
-        """
-        lat_rad = lat * (math.pi / 180.0)
-        lon_rad = lon * (math.pi / 180.0)
-        # Build (H*W,) grids
-        lat_grid = lat_rad.unsqueeze(1).expand(-1, lon.shape[0]).reshape(-1)  # H*W
-        lon_grid = lon_rad.unsqueeze(0).expand(lat.shape[0], -1).reshape(-1)  # H*W
-        enc = torch.cat([self._encode(lat_grid), self._encode(lon_grid)], dim=-1)  # H*W × 4*num_freqs
-        return self.proj(enc)  # H*W × hidden_dim
+class TrainableTensor(nn.Module):
+    """
+    Concatenates fixed edge/node attributes with a learned offset.
+
+    Ported from anemoi.models.layers.graph.TrainableTensor.
+    """
+
+    def __init__(self, tensor_size: int, trainable_size: int):
+        super().__init__()
+        if trainable_size > 0:
+            self.trainable = nn.Parameter(torch.zeros(tensor_size, trainable_size))
+        else:
+            self.trainable = None
+
+    def forward(self, x: Tensor, batch_size: int) -> Tensor:
+        parts = [einops.repeat(x, "e f -> (b e) f", b=batch_size)]
+        if self.trainable is not None:
+            parts.append(einops.repeat(self.trainable.to(x.device), "e f -> (b e) f", b=batch_size))
+        return torch.cat(parts, dim=-1)
 
 
 # ---------------------------------------------------------------------------
-# Attention
+# Graph Transformer convolution  (anemoi.models.layers.conv.GraphTransformerConv)
+# ---------------------------------------------------------------------------
+
+
+class GraphTransformerConv(MessagePassing):
+    """
+    Attention-based message passing for bipartite GNN encode/decode.
+
+    Message:  m = (V_j + edge_attr) * softmax(Q_i · (K_j + edge_attr) / sqrt(d))
+    Aggregation: sum over neighbours.
+
+    Ported from anemoi.models.layers.conv.GraphTransformerConv.
+    """
+
+    def __init__(self, out_channels: int, dropout: float = 0.0):
+        super().__init__(aggr="add", node_dim=0)
+        self.out_channels = out_channels
+        self.dropout = dropout
+
+    def forward(
+        self, query: Tensor, key: Tensor, value: Tensor, edge_attr: Tensor, edge_index: Tensor, size=None
+    ) -> Tensor:
+        return self.propagate(
+            edge_index,
+            size=size,
+            dim_size=query.shape[0],
+            query=query,
+            key=key,
+            value=value,
+            edge_attr=edge_attr,
+        )
+
+    def message(
+        self, query_i: Tensor, key_j: Tensor, value_j: Tensor, edge_attr: Tensor, index: Tensor, ptr, size_i
+    ) -> Tensor:
+        # edge_attr shape: (E, heads, d)
+        alpha = (query_i * (key_j + edge_attr)).sum(-1) / self.out_channels**0.5
+        alpha = softmax(alpha, index, ptr, size_i)
+        if self.dropout > 0 and self.training:
+            alpha = F.dropout(alpha, p=self.dropout)
+        return (value_j + edge_attr) * alpha.unsqueeze(-1)
+
+
+# ---------------------------------------------------------------------------
+# Transformer self-attention  (anemoi.models.layers.attention.MultiHeadSelfAttention)
 # ---------------------------------------------------------------------------
 
 
 class MultiHeadSelfAttention(nn.Module):
-    """Standard multi-head self-attention (no flash-attn dependency).
+    """
+    MHSA for the Transformer processor.
 
-    Args:
-        hidden_dim: Embedding dimension.
-        num_heads: Number of attention heads.
-        dropout: Dropout rate.
-        window_size: If > 0, apply local sliding-window attention
-            (reduces O(N²) to O(N·W)).  0 = global attention.
+    Operates on (batch*grid, C) packed tensors; batch_size needed to reshape.
+    Uses flash_attn if available, else F.scaled_dot_product_attention.
+
+    Ported from anemoi.models.layers.attention.MultiHeadSelfAttention.
+    """
+
+    def __init__(self, num_heads: int, embed_dim: int, window_size: int = None, dropout_p: float = 0.0):
+        super().__init__()
+        assert embed_dim % num_heads == 0
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.window_size = (window_size, window_size) if window_size else None
+        self.dropout_p = dropout_p
+
+        self.lin_qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=False)
+        self.projection = nn.Linear(embed_dim, embed_dim, bias=True)
+
+    def forward(self, x: Tensor, batch_size: int) -> Tensor:
+        # x: (batch*grid, C)
+        query, key, value = self.lin_qkv(x).chunk(3, -1)
+
+        # reshape to (batch, heads, grid, head_dim)
+        query, key, value = (
+            einops.rearrange(t, "(b g) (h d) -> b h g d", b=batch_size, h=self.num_heads) for t in (query, key, value)
+        )
+
+        dp = self.dropout_p if self.training else 0.0
+
+        if _FLASH_AVAILABLE:
+            query, key, value = (einops.rearrange(t, "b h g d -> b g h d") for t in (query, key, value))
+            out = _flash_attn_func(
+                query, key, value, causal=False, window_size=self.window_size or (-1, -1), dropout_p=dp
+            )
+            out = einops.rearrange(out, "b g h d -> b h g d")
+        else:
+            out = F.scaled_dot_product_attention(query, key, value, dropout_p=dp)
+
+        out = einops.rearrange(out, "b h g d -> (b g) (h d)")
+        return self.projection(out)
+
+
+# ---------------------------------------------------------------------------
+# Processor block  (anemoi.models.layers.block.TransformerProcessorBlock)
+# ---------------------------------------------------------------------------
+
+
+class TransformerProcessorBlock(nn.Module):
+    """
+    Single Transformer layer: pre-norm MHSA + pre-norm MLP (SiLU, no final LN).
+
+    Ported from anemoi.models.layers.block.TransformerProcessorBlock.
     """
 
     def __init__(
         self,
+        num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        dropout: float = 0.0,
-        window_size: int = 0,
-    ) -> None:
+        window_size: int = None,
+        activation: str = "GELU",
+        dropout_p: float = 0.0,
+    ):
         super().__init__()
-        assert hidden_dim % num_heads == 0
-        self.num_heads = num_heads
-        self.head_dim = hidden_dim // num_heads
-        self.scale = self.head_dim**-0.5
-        self.window_size = window_size
-
-        self.qkv = nn.Linear(hidden_dim, hidden_dim * 3, bias=False)
-        self.proj = nn.Linear(hidden_dim, hidden_dim)
-        self.drop = nn.Dropout(dropout)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (B, N, C)"""
-        B, N, C = x.shape
-        H = self.num_heads
-
-        qkv = self.qkv(x).reshape(B, N, 3, H, self.head_dim).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv.unbind(0)  # each (B, H, N, head_dim)
-
-        if self.window_size > 0:
-            # Sliding window attention: attend only within local windows
-            out = self._windowed_attn(q, k, v)
-        else:
-            out = F.scaled_dot_product_attention(q, k, v, dropout_p=self.drop.p if self.training else 0.0)
-
-        out = out.transpose(1, 2).reshape(B, N, C)
-        out = self.proj(out)
-        return self.drop(out)
-
-    def _windowed_attn(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        """Approximate local attention via chunked processing."""
-        B, H, N, D = q.shape
-        W = self.window_size
-        # Pad N to a multiple of W
-        pad = (W - N % W) % W
-        if pad:
-            q = F.pad(q, (0, 0, 0, pad))
-            k = F.pad(k, (0, 0, 0, pad))
-            v = F.pad(v, (0, 0, 0, pad))
-        N2 = q.shape[2]
-        n_wins = N2 // W
-
-        q = q.reshape(B, H, n_wins, W, D)
-        k = k.reshape(B, H, n_wins, W, D)
-        v = v.reshape(B, H, n_wins, W, D)
-
-        attn = (q * self.scale) @ k.transpose(-2, -1)  # (B, H, n_wins, W, W)
-        attn = attn.softmax(dim=-1)
-        out = attn @ v  # (B, H, n_wins, W, D)
-        out = out.reshape(B, H, N2, D)[:, :, :N, :]
-        return out
-
-
-# ---------------------------------------------------------------------------
-# Feed-forward network
-# ---------------------------------------------------------------------------
-
-
-class FeedForward(nn.Module):
-    def __init__(self, hidden_dim: int, mlp_ratio: float = 4.0, dropout: float = 0.0) -> None:
-        super().__init__()
-        inner = int(hidden_dim * mlp_ratio)
-        self.net = nn.Sequential(
-            nn.Linear(hidden_dim, inner),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(inner, hidden_dim),
-            nn.Dropout(dropout),
+        self.layer_norm1 = nn.LayerNorm(num_channels)
+        self.attention = MultiHeadSelfAttention(num_heads, num_channels, window_size=window_size, dropout_p=dropout_p)
+        act = getattr(nn, activation)
+        self.mlp = nn.Sequential(
+            nn.Linear(num_channels, hidden_dim),
+            act(),
+            nn.Linear(hidden_dim, num_channels),
         )
+        self.layer_norm2 = nn.LayerNorm(num_channels)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
-# ---------------------------------------------------------------------------
-# Transformer processor layer
-# ---------------------------------------------------------------------------
-
-
-class TransformerProcessorLayer(nn.Module):
-    """Single Transformer layer: pre-norm MHSA + pre-norm FFN."""
-
-    def __init__(
-        self,
-        hidden_dim: int,
-        num_heads: int,
-        mlp_ratio: float = 4.0,
-        dropout: float = 0.0,
-        drop_path: float = 0.0,
-        window_size: int = 0,
-    ) -> None:
-        super().__init__()
-        self.norm1 = nn.LayerNorm(hidden_dim)
-        self.norm2 = nn.LayerNorm(hidden_dim)
-        self.attn = MultiHeadSelfAttention(hidden_dim, num_heads, dropout=dropout, window_size=window_size)
-        self.ff = FeedForward(hidden_dim, mlp_ratio=mlp_ratio, dropout=dropout)
-        self.drop_path = DropPath(drop_path) if drop_path > 0 else nn.Identity()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.drop_path(self.attn(self.norm1(x)))
-        x = x + self.drop_path(self.ff(self.norm2(x)))
+    def forward(self, x: Tensor, batch_size: int) -> Tensor:
+        x = x + self.attention(self.layer_norm1(x), batch_size)
+        x = x + self.mlp(self.layer_norm2(x))
         return x
 
 
 # ---------------------------------------------------------------------------
-# Main model
+# Mapper block  (anemoi.models.layers.block.GraphTransformerMapperBlock)
 # ---------------------------------------------------------------------------
 
 
-class AIFSProcessor(nn.Module):
-    """AIFS-inspired lat/lon Transformer processor.
+class GraphTransformerMapperBlock(nn.Module):
+    """
+    Bipartite Graph Transformer block for encode/decode mappers.
 
-    Replaces AIFS's GNN encoder/decoder with simple linear projections on the
-    flattened lat/lon grid.  The Transformer processor — the core of AIFS — is
-    kept intact.
+    src → dst message passing with attention-gated edge features.
 
-    Args:
-        n_input_channels: Number of input channels (all variables flattened).
-        n_output_channels: Number of output channels.
-        hidden_dim: Transformer hidden dimension.
-        num_layers: Number of Transformer processor layers.
-        num_heads: Number of attention heads.
-        mlp_ratio: FFN hidden / embedding ratio.
-        dropout: Dropout rate.
-        drop_path_rate: Max stochastic depth rate (linearly increases with depth).
-        window_size: Local attention window size in tokens (0 = global).
-        num_pos_freqs: Number of sinusoidal frequencies for lat/lon encoding.
+    Ported from anemoi.models.layers.block.GraphTransformerMapperBlock.
     """
 
     def __init__(
         self,
-        n_input_channels: int,
-        n_output_channels: int,
-        hidden_dim: int = 512,
-        num_layers: int = 16,
+        in_channels: int,
+        hidden_dim: int,
+        out_channels: int,
+        edge_dim: int,
         num_heads: int = 16,
-        mlp_ratio: float = 4.0,
-        dropout: float = 0.0,
-        drop_path_rate: float = 0.0,
-        window_size: int = 0,
-        num_pos_freqs: int = 8,
-    ) -> None:
+        activation: str = "GELU",
+    ):
         super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = out_channels // num_heads
+        self.out_channels = out_channels
 
-        self.hidden_dim = hidden_dim
+        self.layer_norm1 = nn.LayerNorm(in_channels)
+        self.layer_norm2 = nn.LayerNorm(in_channels)
 
-        # Encoder: project input features → hidden_dim
-        self.input_proj = nn.Linear(n_input_channels, hidden_dim)
+        self.lin_query = nn.Linear(in_channels, out_channels)
+        self.lin_key = nn.Linear(in_channels, out_channels)
+        self.lin_value = nn.Linear(in_channels, out_channels)
+        self.lin_self = nn.Linear(in_channels, out_channels)
+        self.lin_edge = nn.Linear(edge_dim, out_channels)
 
-        # Positional encoding
-        self.pos_enc = LatLonPositionalEncoding(hidden_dim, num_freqs=num_pos_freqs)
+        self.conv = GraphTransformerConv(out_channels=self.head_dim)
+        self.projection = nn.Linear(out_channels, out_channels)
 
-        # Transformer processor
-        dp_rates = torch.linspace(0, drop_path_rate, num_layers).tolist()
+        act = getattr(nn, activation)
+        self.node_dst_mlp = nn.Sequential(
+            AutocastLayerNorm(out_channels),
+            nn.Linear(out_channels, hidden_dim),
+            act(),
+            nn.Linear(hidden_dim, out_channels),
+        )
+
+    def forward(
+        self, x_src: Tensor, x_dst: Tensor, edge_attr: Tensor, edge_index: Tensor, size=None
+    ) -> tuple[Tensor, Tensor]:
+        x_skip_src, x_skip_dst = x_src, x_dst
+
+        x_src_n = self.layer_norm1(x_src)
+        x_dst_n = self.layer_norm2(x_dst)
+
+        x_r = self.lin_self(x_dst_n)
+
+        # (N, heads, head_dim)
+        query = einops.rearrange(self.lin_query(x_dst_n), "n (h d) -> n h d", h=self.num_heads)
+        key = einops.rearrange(self.lin_key(x_src_n), "n (h d) -> n h d", h=self.num_heads)
+        value = einops.rearrange(self.lin_value(x_src_n), "n (h d) -> n h d", h=self.num_heads)
+        edges = einops.rearrange(self.lin_edge(edge_attr), "e (h d) -> e h d", h=self.num_heads)
+
+        out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=size)
+        out = einops.rearrange(out, "n h d -> n (h d)")
+
+        out = self.projection(out + x_r) + x_skip_dst
+        out = self.node_dst_mlp(out) + out
+
+        # src nodes pass through unchanged (update_src_nodes=False for backward mapper)
+        return x_skip_src, out
+
+
+# ---------------------------------------------------------------------------
+# Graph edge registry mixin
+# ---------------------------------------------------------------------------
+
+
+class _EdgeMixin:
+    """Registers edge_attr, edge_index, and batch-expansion increment."""
+
+    def _register_edges(
+        self, sub_graph: HeteroData, edge_attributes: list, src_size: int, dst_size: int, trainable_size: int
+    ):
+        edge_attr = torch.cat([sub_graph[a] for a in edge_attributes], dim=1)
+        self.edge_dim = edge_attr.shape[1] + trainable_size
+        self.register_buffer("edge_attr_base", edge_attr, persistent=False)
+        self.register_buffer("edge_index_base", sub_graph.edge_index, persistent=False)
+        import numpy as np
+
+        inc = torch.from_numpy(np.asarray([[src_size], [dst_size]], dtype=np.int64))
+        self.register_buffer("edge_inc", inc, persistent=True)
+
+    def _expand_edges(self, edge_index: Tensor, edge_inc: Tensor, batch_size: int) -> Tensor:
+        return torch.cat([edge_index + i * edge_inc for i in range(batch_size)], dim=1)
+
+
+# ---------------------------------------------------------------------------
+# Grid2Mesh encoder  (GraphTransformerForwardMapper)
+# ---------------------------------------------------------------------------
+
+
+class Grid2MeshMapper(nn.Module, _EdgeMixin):
+    """
+    GNN encoder: data-grid nodes → hidden-mesh nodes.
+
+    Ported from anemoi.models.layers.mapper.GraphTransformerForwardMapper
+    (single GPU, no distributed sharding).
+    """
+
+    def __init__(
+        self,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        trainable_size: int = 8,
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        activation: str = "GELU",
+        sub_graph: HeteroData = None,
+        sub_graph_edge_attributes: list = None,
+        src_grid_size: int = 0,
+        dst_grid_size: int = 0,
+    ):
+        super().__init__()
+        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        self.trainable = TrainableTensor(self.edge_attr_base.shape[0], trainable_size)
+
+        self.emb_nodes_src = nn.Linear(in_channels_src, hidden_dim)
+        self.emb_nodes_dst = nn.Linear(in_channels_dst, hidden_dim)
+
+        self.proc = GraphTransformerMapperBlock(
+            in_channels=hidden_dim,
+            hidden_dim=mlp_hidden_ratio * hidden_dim,
+            out_channels=hidden_dim,
+            edge_dim=self.edge_dim,
+            num_heads=num_heads,
+            activation=activation,
+        )
+
+    def forward(self, x_src: Tensor, x_dst: Tensor, batch_size: int) -> tuple[Tensor, Tensor]:
+        x_src_raw = x_src  # keep raw features for decoder's skip input
+        x_src_emb = self.emb_nodes_src(x_src)
+        x_dst_emb = self.emb_nodes_dst(x_dst)
+
+        edge_attr = self.trainable(self.edge_attr_base, batch_size)
+        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
+
+        n_src = x_src_emb.shape[0]
+        n_dst = x_dst_emb.shape[0]
+        _, x_hidden = self.proc(x_src_emb, x_dst_emb, edge_attr, edge_index, size=(n_src, n_dst))
+        # return raw src so decoder can re-embed it (matches anemoi ForwardMapper)
+        return x_src_raw, x_hidden
+
+
+# ---------------------------------------------------------------------------
+# Mesh2Grid decoder  (GraphTransformerBackwardMapper)
+# ---------------------------------------------------------------------------
+
+
+class Mesh2GridMapper(nn.Module, _EdgeMixin):
+    """
+    GNN decoder: hidden-mesh nodes → data-grid nodes.
+
+    Ported from anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+    (single GPU, no distributed sharding).
+    """
+
+    def __init__(
+        self,
+        in_channels_src: int,
+        in_channels_dst: int,
+        hidden_dim: int,
+        out_channels_dst: int,
+        trainable_size: int = 8,
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        activation: str = "GELU",
+        sub_graph: HeteroData = None,
+        sub_graph_edge_attributes: list = None,
+        src_grid_size: int = 0,
+        dst_grid_size: int = 0,
+    ):
+        super().__init__()
+        self._register_edges(sub_graph, sub_graph_edge_attributes, src_grid_size, dst_grid_size, trainable_size)
+        self.trainable = TrainableTensor(self.edge_attr_base.shape[0], trainable_size)
+
+        # dst = data nodes (we embed from the skip-connected input features)
+        self.emb_nodes_dst = nn.Linear(in_channels_dst, hidden_dim)
+
+        self.proc = GraphTransformerMapperBlock(
+            in_channels=hidden_dim,
+            hidden_dim=mlp_hidden_ratio * hidden_dim,
+            out_channels=hidden_dim,
+            edge_dim=self.edge_dim,
+            num_heads=num_heads,
+            activation=activation,
+        )
+
+        self.node_data_extractor = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, out_channels_dst),
+        )
+
+    def forward(self, x_src: Tensor, x_dst: Tensor, batch_size: int) -> Tensor:
+        x_dst = self.emb_nodes_dst(x_dst)
+
+        edge_attr = self.trainable(self.edge_attr_base, batch_size)
+        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
+
+        n_src = x_src.shape[0]
+        n_dst = x_dst.shape[0]
+        _, x_dst = self.proc(x_src, x_dst, edge_attr, edge_index, size=(n_src, n_dst))
+        return self.node_data_extractor(x_dst)
+
+
+# ---------------------------------------------------------------------------
+# Transformer processor  (anemoi.models.layers.processor.TransformerProcessor)
+# ---------------------------------------------------------------------------
+
+
+class TransformerProcessor(nn.Module):
+    """
+    N-layer Transformer processor operating on hidden mesh nodes.
+
+    Ported from anemoi.models.layers.processor.TransformerProcessor.
+    """
+
+    def __init__(
+        self,
+        num_layers: int,
+        num_channels: int,
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        window_size: int = None,
+        activation: str = "GELU",
+        dropout_p: float = 0.0,
+    ):
+        super().__init__()
         self.layers = nn.ModuleList(
             [
-                TransformerProcessorLayer(
-                    hidden_dim=hidden_dim,
+                TransformerProcessorBlock(
+                    num_channels=num_channels,
+                    hidden_dim=mlp_hidden_ratio * num_channels,
                     num_heads=num_heads,
-                    mlp_ratio=mlp_ratio,
-                    dropout=dropout,
-                    drop_path=dp_rates[i],
                     window_size=window_size,
+                    activation=activation,
+                    dropout_p=dropout_p,
                 )
-                for i in range(num_layers)
+                for _ in range(num_layers)
             ]
         )
 
-        self.norm = nn.LayerNorm(hidden_dim)
-
-        # Decoder: project hidden_dim → output features
-        self.output_proj = nn.Linear(hidden_dim, n_output_channels)
-
-        self._init_weights()
-
-    def _init_weights(self) -> None:
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                trunc_normal_(m.weight, std=0.02)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.LayerNorm):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        lat: Optional[torch.Tensor] = None,
-        lon: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """
-        Args:
-            x:   ``(B, C, H, W)`` input tensor.
-            lat: ``(H,)`` latitudes in degrees.  If None, uses linspace(-90, 90).
-            lon: ``(W,)`` longitudes in degrees.  If None, uses linspace(0, 359).
-
-        Returns:
-            ``(B, C_out, H, W)`` predicted tensor.
-        """
-        B, C, H, W = x.shape
-
-        # Flatten spatial: (B, H*W, C)
-        x_tok = x.permute(0, 2, 3, 1).reshape(B, H * W, C)
-
-        # Embed tokens
-        x_tok = self.input_proj(x_tok)  # (B, H*W, hidden_dim)
-
-        # Add positional encoding
-        if lat is None:
-            lat = torch.linspace(90, -90, H, device=x.device, dtype=x.dtype)
-        if lon is None:
-            lon = torch.linspace(0, 359, W, device=x.device, dtype=x.dtype)
-        pos = self.pos_enc(lat, lon)  # (H*W, hidden_dim)
-        x_tok = x_tok + pos.unsqueeze(0)  # broadcast over batch
-
-        # Transformer processor
+    def forward(self, x: Tensor, batch_size: int) -> Tensor:
         for layer in self.layers:
-            x_tok = layer(x_tok)
-        x_tok = self.norm(x_tok)
+            x = layer(x, batch_size)
+        return x
 
-        # Project to output
-        out = self.output_proj(x_tok)  # (B, H*W, C_out)
-        out = out.reshape(B, H, W, -1).permute(0, 3, 1, 2)  # (B, C_out, H, W)
-        return out
+
+# ---------------------------------------------------------------------------
+# Full AIFS model  (AnemoiModelEncProcDec — stripped)
+# ---------------------------------------------------------------------------
+
+
+class AIFSEncProcDec(nn.Module):
+    """
+    AIFS GNN encoder → Transformer processor → GNN decoder.
+
+    The graph must be a torch_geometric.data.HeteroData with node types
+    'data' and 'hidden', and edge types:
+      ('data', 'to', 'hidden')  — Grid2Mesh
+      ('hidden', 'to', 'hidden') — Mesh2Mesh (unused here; processor is Transformer)
+      ('hidden', 'to', 'data')  — Mesh2Grid
+
+    Each sub_graph must have:
+      .edge_index : (2, E) long
+      .edge_attr  : (E, edge_feat_dim) float  (sin/cos of lat/lon diffs + arc length)
+    And each edge type must expose an 'edge_attr' attribute.
+
+    Parameters
+    ----------
+    in_channels : int
+        Input feature dimension per data node (all variables).
+    out_channels : int
+        Output feature dimension per data node (prognostic variables).
+    num_channels : int
+        Hidden embedding dimension (= num_channels in anemoi paper).
+    num_layers : int
+        Number of Transformer processor layers.
+    num_heads : int
+    mlp_hidden_ratio : int
+        MLP hidden dim / num_channels.
+    trainable_size : int
+        Number of learnable edge-feature dimensions appended to fixed features.
+    window_size : int or None
+        Attention window size for Transformer processor (None = global).
+    activation : str
+    dropout_p : float
+    graph_path : str
+        Path to a saved HeteroData .pt file produced by build_graph.py.
+    num_data_nodes : int
+        N_data (= H × W for the lat/lon grid).
+    num_hidden_nodes : int
+        N_hidden (number of mesh nodes).
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        num_channels: int = 512,
+        num_layers: int = 16,
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        trainable_size: int = 8,
+        window_size: int = None,
+        activation: str = "GELU",
+        dropout_p: float = 0.0,
+        graph_path: str = None,
+    ):
+        super().__init__()
+
+        graph = torch.load(graph_path, map_location="cpu", weights_only=False)
+        g2m = graph[("data", "to", "hidden")]
+        m2g = graph[("hidden", "to", "data")]
+        n_data = graph["data"].num_nodes
+        n_hidden = graph["hidden"].num_nodes
+        edge_attrs = ["edge_attr"]
+
+        # node attributes (sin/cos lat/lon → 4 dims)
+        n_data_attr = graph["data"].x.shape[1] if hasattr(graph["data"], "x") else 0
+        n_hidden_attr = graph["hidden"].x.shape[1] if hasattr(graph["hidden"], "x") else 0
+
+        self.encoder = Grid2MeshMapper(
+            in_channels_src=in_channels + n_data_attr,
+            in_channels_dst=n_hidden_attr,
+            hidden_dim=num_channels,
+            trainable_size=trainable_size,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            activation=activation,
+            sub_graph=g2m,
+            sub_graph_edge_attributes=edge_attrs,
+            src_grid_size=n_data,
+            dst_grid_size=n_hidden,
+        )
+
+        self.processor = TransformerProcessor(
+            num_layers=num_layers,
+            num_channels=num_channels,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            window_size=window_size,
+            activation=activation,
+            dropout_p=dropout_p,
+        )
+
+        self.decoder = Mesh2GridMapper(
+            in_channels_src=num_channels,
+            in_channels_dst=in_channels + n_data_attr,
+            hidden_dim=num_channels,
+            out_channels_dst=out_channels,
+            trainable_size=trainable_size,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            activation=activation,
+            sub_graph=m2g,
+            sub_graph_edge_attributes=edge_attrs,
+            src_grid_size=n_hidden,
+            dst_grid_size=n_data,
+        )
+
+        # register node coordinate embeddings (sin/cos lat/lon)
+        if n_data_attr > 0:
+            self.register_buffer("data_node_attr", graph["data"].x, persistent=False)
+        else:
+            self.data_node_attr = None
+        if n_hidden_attr > 0:
+            self.register_buffer("hidden_node_attr", graph["hidden"].x, persistent=False)
+        else:
+            self.hidden_node_attr = None
+
+        self.n_data = n_data
+        self.n_hidden = n_hidden
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Parameters
+        ----------
+        x : (batch*N_data, in_channels)
+            Flattened lat/lon grid, all variables.
+
+        Returns
+        -------
+        (batch*N_data, out_channels)
+        """
+        batch_size = x.shape[0] // self.n_data
+
+        # append fixed node attributes (sin/cos lat/lon)
+        if self.data_node_attr is not None:
+            node_attr = einops.repeat(self.data_node_attr, "n f -> (b n) f", b=batch_size)
+            x_data = torch.cat([x, node_attr], dim=-1)
+        else:
+            x_data = x
+
+        if self.hidden_node_attr is not None:
+            x_hidden = einops.repeat(self.hidden_node_attr, "n f -> (b n) f", b=batch_size)
+        else:
+            x_hidden = torch.zeros(batch_size * self.n_hidden, 1, device=x.device, dtype=x.dtype)
+
+        # Grid2Mesh: encoder updates both data and hidden representations
+        x_data_latent, x_hidden = self.encoder(x_data, x_hidden, batch_size)
+
+        # Transformer processor on hidden mesh + skip (hidden → hidden)
+        x_hidden_proc = self.processor(x_hidden, batch_size)
+        x_hidden_proc = x_hidden_proc + x_hidden
+
+        # Mesh2Grid: src=processed hidden, dst=skip-connected data latent
+        x_out = self.decoder(x_hidden_proc, x_data_latent, batch_size)
+
+        return x_out
 
 
 # ---------------------------------------------------------------------------
@@ -343,73 +670,62 @@ class AIFSProcessor(nn.Module):
 
 
 class CREDITAifs(nn.Module):
-    """AIFS processor wrapped for CREDIT's flat-tensor training pipeline.
+    """
+    CREDIT wrapper for AIFS.  Flat (B, C, H, W) I/O; returns (B, C_out, 1, H, W).
 
-    The model is fully flexible: any combination of surf/atmos/static variables
-    can be used as input.  The output contains surf + atmos channels (static
-    vars are not predicted).
-
-    Channel layout (same convention as CREDITAurora / CREDITPangu):
-        [surf_vars..., atmos_var_0_lev_0, ..., atmos_var_M_lev_P, static_vars...]
-
-    Args:
-        surf_vars: List of surface variable names.
-        atmos_vars: List of atmospheric variable names.
-        static_vars: List of static variable names (included as input only).
-        atmos_levels: List of pressure levels in hPa.
-        **aifs_kwargs: Forwarded to :class:`.AIFSProcessor`.
+    Requires a pre-built mesh graph (build_graph.py) at graph_path.
     """
 
     def __init__(
         self,
-        surf_vars: List[str] = ("2t", "10u", "10v", "msl"),
-        atmos_vars: List[str] = ("z", "u", "v", "t", "q"),
-        static_vars: List[str] = ("lsm", "z", "slt"),
-        atmos_levels: List[int] = (50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000),
+        in_channels: int = 80,
+        out_channels: int = 76,
+        img_size: tuple = (181, 360),
         frames: int = 1,
-        levels: int = None,
-        **aifs_kwargs,
-    ) -> None:
+        num_channels: int = 512,
+        num_layers: int = 16,
+        num_heads: int = 16,
+        mlp_hidden_ratio: int = 4,
+        trainable_size: int = 8,
+        window_size: int = None,
+        activation: str = "GELU",
+        dropout_p: float = 0.0,
+        graph_path: str = None,
+    ):
         super().__init__()
-        self.surf_vars = list(surf_vars)
-        self.atmos_vars = list(atmos_vars)
-        self.static_vars = list(static_vars)
-        self.atmos_levels = list(atmos_levels)
-        self.frames = frames
-        n_surf = len(surf_vars)
-        n_atmos = len(atmos_vars)
-        n_static = len(static_vars)
-        n_levels = len(atmos_levels)
-        self.n_surf = n_surf
-        self.n_atmos = n_atmos
-        self.n_static = n_static
-        self.n_levels = n_levels
+        self.H, self.W = img_size
+        self.N = self.H * self.W
 
-        # static vars are not repeated across history frames; only surf+atmos are
-        n_in = (n_surf + n_atmos * n_levels) * frames + n_static
-        n_out = n_surf + n_atmos * n_levels
+        if graph_path is None:
+            raise ValueError("graph_path must point to a HeteroData .pt file from build_graph.py")
 
-        _allowed = set(inspect.signature(AIFSProcessor.__init__).parameters) - {"self"}
-        aifs_kwargs = {k: v for k, v in aifs_kwargs.items() if k in _allowed}
-        self.model = AIFSProcessor(
-            n_input_channels=n_in,
-            n_output_channels=n_out,
-            **aifs_kwargs,
+        self.model = AIFSEncProcDec(
+            in_channels=in_channels * frames,
+            out_channels=out_channels,
+            num_channels=num_channels,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            mlp_hidden_ratio=mlp_hidden_ratio,
+            trainable_size=trainable_size,
+            window_size=window_size,
+            activation=activation,
+            dropout_p=dropout_p,
+            graph_path=os.path.expandvars(graph_path),
         )
 
-    @property
-    def n_input_channels(self) -> int:
-        return (self.n_surf + self.n_atmos * self.n_levels) * self.frames + self.n_static
-
-    @property
-    def n_output_channels(self) -> int:
-        return self.n_surf + self.n_atmos * self.n_levels
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         if x.dim() == 5:
             B, C, T, H, W = x.shape
             x = x.reshape(B, C * T, H, W)
-        return self.model(x).unsqueeze(2)
+        B, C, H, W = x.shape
+
+        # flatten spatial: (B*N, C)
+        x_flat = x.permute(0, 2, 3, 1).reshape(B * H * W, C)
+
+        out_flat = self.model(x_flat)  # (B*N, out_channels)
+
+        out = out_flat.reshape(B, H, W, -1).permute(0, 3, 1, 2)  # (B, C_out, H, W)
+        return out.unsqueeze(2)
 
     @classmethod
     def load_model(cls, conf):
@@ -434,55 +750,44 @@ class CREDITAifs(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Smoke test
+# Standalone smoke test
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Running AIFS smoke test on {device}")
+    import sys
+    import tempfile
 
-    H, W = 32, 64
-    surf_vars = ["2t", "10u", "10v", "msl"]
-    atmos_vars = ["z", "u", "v", "t", "q"]
-    static_vars = ["lsm", "z", "slt"]
-    levels = [500, 850, 1000]
-    n_surf = len(surf_vars)
-    n_atmos = len(atmos_vars)
-    n_static = len(static_vars)
-    n_levels = len(levels)
-    C_in = n_surf + n_atmos * n_levels + n_static
-    C_out = n_surf + n_atmos * n_levels
+    _root = __import__("os").path.abspath(
+        __import__("os").path.join(__import__("os").path.dirname(__file__), "..", "..", "..")
+    )
+    sys.path.insert(0, _root)
 
-    model = CREDITAifs(
-        surf_vars=surf_vars,
-        atmos_vars=atmos_vars,
-        static_vars=static_vars,
-        atmos_levels=levels,
-        hidden_dim=128,
-        num_layers=4,
-        num_heads=4,
-        mlp_ratio=4.0,
-        dropout=0.0,
-        drop_path_rate=0.1,
-        window_size=16,  # use local windows to keep memory low
-    ).to(device)
+    # build a tiny graph inline for the smoke test
+    from credit.models.aifs.build_graph import build_graph
+
+    H, W = 16, 32
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    with tempfile.NamedTemporaryFile(suffix=".pt") as f:
+        graph_path = f.name
+        build_graph(lat_size=H, lon_size=W, mesh_stride=2, k_g2m=4, k_m2g=4, radius_m2m=None, save_path=graph_path)
+
+        C_in, C_out = 8, 6
+        model = CREDITAifs(
+            in_channels=C_in,
+            out_channels=C_out,
+            img_size=(H, W),
+            num_channels=64,
+            num_layers=2,
+            num_heads=4,
+            trainable_size=4,
+            graph_path=graph_path,
+        ).to(device)
+
+        x = torch.randn(1, C_in, H, W, device=device)
+        y = model(x)
+        assert y.shape == (1, C_out, 1, H, W), f"unexpected shape {y.shape}"
+        y.mean().backward()
 
     n_params = sum(p.numel() for p in model.parameters()) / 1e6
-    print(f"  Parameters: {n_params:.1f} M")
-    print(f"  Input channels : {C_in}")
-    print(f"  Output channels: {C_out}")
-
-    B = 2
-    x = torch.randn(B, C_in, H, W, device=device)
-    print(f"  Input  shape: {x.shape}")
-
-    with torch.no_grad():
-        y = model(x)
-    print(f"  Output shape: {y.shape}")
-    assert y.shape == (B, C_out, H, W), f"Unexpected output shape {y.shape}"
-
-    x.requires_grad_(True)
-    y = model(x)
-    y.mean().backward()
-    print(f"  Input grad shape: {x.grad.shape}")
-    print("AIFS smoke test PASSED")
+    print(f"CREDITAifs OK — output {y.shape}, {n_params:.2f}M params, device {device}")

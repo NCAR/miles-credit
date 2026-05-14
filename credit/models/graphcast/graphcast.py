@@ -1,256 +1,381 @@
-"""
-GraphCast — Graph Neural Network weather model.
-Lam et al., 2023.  https://arxiv.org/abs/2212.12794
-Architecture from PhysicsNemo / DeepMind (Apache 2.0).
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ported from NVIDIA PhysicsNeMo (Apache 2.0) into CREDIT.
+# Stripped: distributed training (partition_size>1), GraphTransformer processor
+# (transformer_engine), nvfuser recompute_activation, profiling decorator.
+# Added: CREDITGraphCast wrapper for CREDIT's (B, C, T, H, W) interface.
 
-Architecture: Grid2Mesh GNN encoder → Mesh GNN processor → Mesh2Grid GNN decoder.
+"""GraphCast — icosahedral GNN encoder-processor-decoder for global weather forecasting.
 
-CREDIT simplification
----------------------
-The original uses an icosahedral multi-scale mesh with ~40k nodes.  For CREDIT's
-flat lat/lon grid we use a *single-resolution* learned graph directly on the
-grid nodes, avoiding the mesh construction entirely:
-
-  - Encoder  : linear projection of grid node features → latent node embeddings
-  - Processor: N message-passing rounds on a k-nearest-neighbour graph over grid nodes
-  - Decoder  : linear projection of node embeddings → output features per grid node
-
-This captures the GNN inductive bias (local message passing + global communication)
-without requiring torch_geometric or an external mesh library.
-
-The kNN graph is precomputed once at construction time from lat/lon coordinates.
-
-CREDITGraphCast wraps the model for CREDIT's flat (B, C, H, W) tensors.
+Architecture (Lam et al. 2023 / PhysicsNeMo):
+  Grid2Mesh bipartite encoder → icosahedral mesh processor (N x MeshEdgeBlock + MeshNodeBlock)
+  -> Mesh2Grid bipartite decoder -> output MLP.
 """
 
-import os
-import sys
+from typing import Any, Tuple
 
 import torch
 import torch.nn as nn
-from einops import rearrange
+from torch import Tensor
+
+from .gnn_layers import (
+    GraphCastDecoderEmbedder,
+    GraphCastEncoderEmbedder,
+    MeshEdgeBlock,
+    MeshGraphDecoder,
+    MeshGraphEncoder,
+    MeshGraphMLP,
+    MeshNodeBlock,
+    set_checkpoint_fn,
+)
+from .icosahedral import Graph
+
+__all__ = ["GraphCastNet", "CREDITGraphCast"]
+
+
+def _get_activation(name: str) -> nn.Module:
+    _map = {
+        "silu": nn.SiLU,
+        "relu": nn.ReLU,
+        "gelu": nn.GELU,
+        "tanh": nn.Tanh,
+        "leakyrelu": nn.LeakyReLU,
+    }
+    key = name.lower().replace("_", "")
+    if key not in _map:
+        raise ValueError(f"Unknown activation '{name}'. Options: {list(_map)}")
+    return _map[key]()
 
 
 # ---------------------------------------------------------------------------
-# Graph helpers
+# Processor  (from PhysicsNeMo graph_cast_processor.py)
 # ---------------------------------------------------------------------------
 
 
-def build_knn_edge_index(lat: torch.Tensor, lon: torch.Tensor, k: int) -> torch.Tensor:
-    """
-    Build k-nearest-neighbour edge index on a lat/lon grid (great-circle distance).
+class GraphCastProcessor(nn.Module):
+    """N x (MeshEdgeBlock + MeshNodeBlock) on the icosahedral mesh."""
 
-    Uses a KDTree on 3-D unit-sphere XYZ coordinates to avoid the O(N²) pairwise
-    distance matrix, which OOMs for large grids (e.g. 181×360 ≈ 65 k nodes).
+    def __init__(
+        self,
+        aggregation: str = "sum",
+        processor_layers: int = 16,
+        input_dim_nodes: int = 512,
+        input_dim_edges: int = 512,
+        hidden_dim: int = 512,
+        hidden_layers: int = 1,
+        activation_fn: nn.Module = nn.SiLU(),
+        norm_type: str = "LayerNorm",
+        do_concat_trick: bool = False,
+    ):
+        super().__init__()
+        edge_kw = dict(
+            input_dim_nodes=input_dim_nodes,
+            input_dim_edges=input_dim_edges,
+            output_dim=input_dim_edges,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            activation_fn=activation_fn,
+            norm_type=norm_type,
+            do_concat_trick=do_concat_trick,
+        )
+        node_kw = dict(
+            aggregation=aggregation,
+            input_dim_nodes=input_dim_nodes,
+            input_dim_edges=input_dim_edges,
+            output_dim=input_dim_nodes,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            activation_fn=activation_fn,
+            norm_type=norm_type,
+        )
+        layers = []
+        for _ in range(processor_layers):
+            layers.append(MeshEdgeBlock(**edge_kw))
+            layers.append(MeshNodeBlock(**node_kw))
+        self.processor_layers = nn.ModuleList(layers)
+        self.num_processor_layers = len(layers)
+        self.checkpoint_segments = [(0, self.num_processor_layers)]
+        self.checkpoint_fn = set_checkpoint_fn(False)
+
+    def set_checkpoint_segments(self, checkpoint_segments: int):
+        if checkpoint_segments > 0:
+            if self.num_processor_layers % checkpoint_segments != 0:
+                raise ValueError("processor_layers must be divisible by checkpoint_segments")
+            seg_size = self.num_processor_layers // checkpoint_segments
+            self.checkpoint_segments = [(i, i + seg_size) for i in range(0, self.num_processor_layers, seg_size)]
+            self.checkpoint_fn = set_checkpoint_fn(True)
+        else:
+            self.checkpoint_fn = set_checkpoint_fn(False)
+            self.checkpoint_segments = [(0, self.num_processor_layers)]
+
+    def _run_segment(self, start: int, end: int):
+        segment = self.processor_layers[start:end]
+
+        def fn(efeat, nfeat, graph):
+            for module in segment:
+                efeat, nfeat = module(efeat, nfeat, graph)
+            return efeat, nfeat
+
+        return fn
+
+    def forward(self, efeat: Tensor, nfeat: Tensor, graph) -> Tuple[Tensor, Tensor]:
+        for start, end in self.checkpoint_segments:
+            efeat, nfeat = self.checkpoint_fn(
+                self._run_segment(start, end),
+                efeat,
+                nfeat,
+                graph,
+                use_reentrant=False,
+                preserve_rng_state=False,
+            )
+        return efeat, nfeat
+
+
+# ---------------------------------------------------------------------------
+# GraphCastNet  (from PhysicsNeMo graph_cast_net.py)
+# ---------------------------------------------------------------------------
+
+
+class GraphCastNet(nn.Module):
+    """GraphCast: Grid2Mesh GNN encoder -> icosahedral processor -> Mesh2Grid GNN decoder.
+
+    Faithful port of PhysicsNeMo's GraphCastNet (Apache 2.0).
+    Single-GPU only (distributed partition_size > 1 removed).
 
     Parameters
     ----------
-    lat, lon : (N,) in degrees
-    k : number of neighbours per node
-
-    Returns
-    -------
-    edge_index : (2, N*k)  — (src, dst) pairs
-    """
-    import numpy as np
-    from scipy.spatial import cKDTree
-
-    lat_np = lat.cpu().numpy().astype(np.float64)
-    lon_np = lon.cpu().numpy().astype(np.float64)
-
-    # Convert to unit-sphere XYZ (Euclidean chord distance ≈ great-circle for kNN)
-    lat_r = np.deg2rad(lat_np)
-    lon_r = np.deg2rad(lon_np)
-    x = np.cos(lat_r) * np.cos(lon_r)
-    y = np.cos(lat_r) * np.sin(lon_r)
-    z = np.sin(lat_r)
-    xyz = np.stack([x, y, z], axis=1)  # (N, 3)
-
-    tree = cKDTree(xyz)
-    # k+1 because the nearest neighbour of each point is itself
-    _, nbrs = tree.query(xyz, k=k + 1, workers=-1)  # (N, k+1)
-    nbrs = nbrs[:, 1:]  # drop self (column 0)
-
-    N = xyz.shape[0]
-    src = np.repeat(np.arange(N, dtype=np.int64), k)
-    dst = nbrs.reshape(-1).astype(np.int64)
-
-    src_t = torch.from_numpy(src)
-    dst_t = torch.from_numpy(dst)
-    return torch.stack([src_t, dst_t], dim=0)  # (2, N*k)
-
-
-# ---------------------------------------------------------------------------
-# GNN layers
-# ---------------------------------------------------------------------------
-
-
-class EdgeMLP(nn.Module):
-    def __init__(self, node_dim, edge_dim, hidden_dim):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(2 * node_dim + edge_dim, hidden_dim),
-            nn.SiLU(),
-            nn.Linear(hidden_dim, edge_dim),
-        )
-        self.norm = nn.LayerNorm(edge_dim)
-
-    def forward(self, src_feat, dst_feat, edge_feat):
-        inp = torch.cat([src_feat, dst_feat, edge_feat], dim=-1)
-        return self.norm(edge_feat + self.net(inp))
-
-
-class NodeMLP(nn.Module):
-    def __init__(self, node_dim, edge_dim, hidden_dim):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(node_dim + edge_dim, hidden_dim),
-            nn.SiLU(),
-            nn.Linear(hidden_dim, node_dim),
-        )
-        self.norm = nn.LayerNorm(node_dim)
-
-    def forward(self, node_feat, agg_edge):
-        inp = torch.cat([node_feat, agg_edge], dim=-1)
-        return self.norm(node_feat + self.net(inp))
-
-
-class MessagePassingLayer(nn.Module):
-    """One round of edge-update + aggregate + node-update."""
-
-    def __init__(self, node_dim, edge_dim, hidden_dim):
-        super().__init__()
-        self.edge_mlp = EdgeMLP(node_dim, edge_dim, hidden_dim)
-        self.node_mlp = NodeMLP(node_dim, edge_dim, hidden_dim)
-
-    def forward(self, node_feat, edge_feat, edge_index):
-        """
-        node_feat : (B, N, node_dim)
-        edge_feat : (B, E, edge_dim)
-        edge_index: (2, E) long
-        """
-        B, N, Dn = node_feat.shape
-        E = edge_feat.shape[1]
-        src, dst = edge_index[0], edge_index[1]
-
-        # edge update
-        src_feat = node_feat[:, src, :]  # (B, E, Dn)
-        dst_feat = node_feat[:, dst, :]
-        edge_feat = self.edge_mlp(src_feat, dst_feat, edge_feat)
-
-        # aggregate (sum) edges to destination nodes
-        agg = torch.zeros(B, N, edge_feat.shape[-1], device=node_feat.device, dtype=edge_feat.dtype)
-        agg.scatter_add_(1, dst[None, :, None].expand(B, -1, edge_feat.shape[-1]), edge_feat)
-
-        # node update
-        node_feat = self.node_mlp(node_feat, agg)
-        return node_feat, edge_feat
-
-
-# ---------------------------------------------------------------------------
-# GraphCast model
-# ---------------------------------------------------------------------------
-
-
-class GraphCastModel(nn.Module):
-    """
-    Simplified GraphCast on a flat lat/lon grid.
-
-    Parameters
-    ----------
-    img_size : tuple[int,int]
-        (H, W) — used to build the lat/lon coordinate grid.
-    in_channels, out_channels : int
-    latent_dim : int
-        Node embedding dimension.
-    edge_dim : int
-        Edge feature dimension.
-    processor_depth : int
-        Number of message-passing rounds.
-    k_neighbours : int
-        kNN graph connectivity.
-    mlp_hidden : int
-        Hidden size inside GNN MLPs.
-    lat_range : tuple[float,float]
-        (lat_min, lat_max) in degrees. Default (-90, 90).
-    lon_range : tuple[float,float]
-        (lon_min, lon_max) in degrees. Default (0, 360).
+    mesh_level : int
+        Icosahedral refinement level (0=12 verts, 1=42, ..., 6=40962). Default 6.
+    multimesh : bool
+        Include edges from all mesh levels 0...mesh_level. Default True.
+    input_res : Tuple[int, int]
+        Grid (H, W). Default (721, 1440).
+    input_dim_grid_nodes : int
+        Input feature dim per grid node. Default 474.
+    input_dim_mesh_nodes : int
+        Mesh node position feature dim (always 3 xyz). Default 3.
+    input_dim_edges : int
+        Edge feature dim (always 4: dx,dy,dz,norm). Default 4.
+    output_dim_grid_nodes : int
+        Output feature dim per grid node. Default 227.
+    processor_layers : int
+        Number of processor layers (must be >= 3). Default 16.
+    hidden_layers : int
+        MLP hidden depth. Default 1.
+    hidden_dim : int
+        Hidden embedding size. Default 512.
+    aggregation : str
+        Message aggregation ("sum" or "mean"). Default "sum".
+    activation_fn : str
+        Activation name ("silu", "relu", "gelu"). Default "silu".
+    norm_type : str
+        "LayerNorm". Default "LayerNorm".
+    do_concat_trick : bool
+        Use the sum-instead-of-concat optimisation. Default False.
     """
 
     def __init__(
         self,
-        img_size=(128, 256),
-        in_channels=70,
-        out_channels=69,
-        latent_dim=256,
-        edge_dim=128,
-        processor_depth=8,
-        k_neighbours=6,
-        mlp_hidden=512,
-        lat_range=(-90.0, 90.0),
-        lon_range=(0.0, 360.0),
+        mesh_level: int = 6,
+        multimesh: bool = True,
+        input_res: tuple = (721, 1440),
+        input_dim_grid_nodes: int = 474,
+        input_dim_mesh_nodes: int = 3,
+        input_dim_edges: int = 4,
+        output_dim_grid_nodes: int = 227,
+        processor_layers: int = 16,
+        hidden_layers: int = 1,
+        hidden_dim: int = 512,
+        aggregation: str = "sum",
+        activation_fn: str = "silu",
+        norm_type: str = "LayerNorm",
+        do_concat_trick: bool = False,
     ):
         super().__init__()
-        H, W = img_size
-        self.H, self.W = H, W
-        N = H * W
 
-        # pre-build lat/lon grid (not learnable; registered as buffer)
-        lat = torch.linspace(lat_range[0], lat_range[1], H)
-        lon = torch.linspace(lon_range[0], lon_range[1], W)
-        lat_grid = lat[:, None].expand(H, W).reshape(N)
-        lon_grid = lon[None, :].expand(H, W).reshape(N)
+        self.input_dim_grid_nodes = input_dim_grid_nodes
+        self.output_dim_grid_nodes = output_dim_grid_nodes
+        self.input_res = input_res
 
-        # build kNN graph (fixed topology, on CPU then moved to device at runtime)
-        edge_index = build_knn_edge_index(lat_grid, lon_grid, k=k_neighbours)
-        self.register_buffer("edge_index", edge_index)  # (2, N*k)
+        act = _get_activation(activation_fn)
 
-        # edge features: Δlat, Δlon, distance (3-dim) → projected to edge_dim
-        E = edge_index.shape[1]
-        src, dst = edge_index[0], edge_index[1]
-        dlat = torch.deg2rad(lat_grid[dst] - lat_grid[src])
-        dlon = torch.deg2rad(lon_grid[dst] - lon_grid[src])
-        dist = torch.sqrt(dlat**2 + dlon**2)
-        raw_edge = torch.stack([dlat.float(), dlon.float(), dist.float()], dim=-1)  # (E, 3)
-        self.register_buffer("raw_edge_feat", raw_edge)
+        # Build lat/lon grid and graphs
+        latitudes = torch.linspace(-90, 90, steps=input_res[0])
+        longitudes = torch.linspace(-180, 180, steps=input_res[1] + 1)[1:]
+        lat_lon_grid = torch.stack(torch.meshgrid(latitudes, longitudes, indexing="ij"), dim=-1)
 
-        # ── Encoder ──────────────────────────────────────────────────────────
-        self.node_encoder = nn.Sequential(
-            nn.Linear(in_channels, latent_dim), nn.SiLU(), nn.Linear(latent_dim, latent_dim)
+        graph_builder = Graph(lat_lon_grid, mesh_level=mesh_level, multimesh=multimesh)
+        self.mesh_graph = graph_builder.create_mesh_graph(verbose=False)
+        self.g2m_graph = graph_builder.create_g2m_graph(verbose=False)
+        self.m2g_graph = graph_builder.create_m2g_graph(verbose=False)
+
+        self.g2m_edata = self.g2m_graph.edge_attr
+        self.m2g_edata = self.m2g_graph.edge_attr
+        self.mesh_ndata = self.mesh_graph.x
+        self.mesh_edata = self.mesh_graph.edge_attr
+
+        self.model_checkpoint_fn = set_checkpoint_fn(False)
+        self.encoder_checkpoint_fn = set_checkpoint_fn(False)
+        self.decoder_checkpoint_fn = set_checkpoint_fn(False)
+
+        kw = dict(
+            output_dim=hidden_dim,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            activation_fn=act,
+            norm_type=norm_type,
         )
-        self.edge_encoder = nn.Sequential(nn.Linear(3, edge_dim), nn.SiLU(), nn.Linear(edge_dim, edge_dim))
+        self.encoder_embedder = GraphCastEncoderEmbedder(
+            input_dim_grid_nodes=input_dim_grid_nodes,
+            input_dim_mesh_nodes=input_dim_mesh_nodes,
+            input_dim_edges=input_dim_edges,
+            **kw,
+        )
+        self.decoder_embedder = GraphCastDecoderEmbedder(input_dim_edges=input_dim_edges, **kw)
 
-        # ── Processor ────────────────────────────────────────────────────────
-        self.processor = nn.ModuleList(
-            [MessagePassingLayer(latent_dim, edge_dim, mlp_hidden) for _ in range(processor_depth)]
+        common_enc = dict(
+            aggregation=aggregation,
+            input_dim_src_nodes=hidden_dim,
+            input_dim_dst_nodes=hidden_dim,
+            input_dim_edges=hidden_dim,
+            output_dim_src_nodes=hidden_dim,
+            output_dim_dst_nodes=hidden_dim,
+            output_dim_edges=hidden_dim,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            activation_fn=act,
+            norm_type=norm_type,
+            do_concat_trick=do_concat_trick,
+        )
+        self.encoder = MeshGraphEncoder(**common_enc)
+
+        if processor_layers <= 2:
+            raise ValueError("processor_layers must be >= 3")
+
+        proc_kw = dict(
+            aggregation=aggregation,
+            input_dim_nodes=hidden_dim,
+            input_dim_edges=hidden_dim,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            activation_fn=act,
+            norm_type=norm_type,
+            do_concat_trick=do_concat_trick,
+        )
+        self.processor_encoder = GraphCastProcessor(processor_layers=1, **proc_kw)
+        self.processor = GraphCastProcessor(processor_layers=processor_layers - 2, **proc_kw)
+        self.processor_decoder = GraphCastProcessor(processor_layers=1, **proc_kw)
+
+        self.decoder = MeshGraphDecoder(
+            aggregation=aggregation,
+            input_dim_src_nodes=hidden_dim,
+            input_dim_dst_nodes=hidden_dim,
+            input_dim_edges=hidden_dim,
+            output_dim_dst_nodes=hidden_dim,
+            output_dim_edges=hidden_dim,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            activation_fn=act,
+            norm_type=norm_type,
+            do_concat_trick=do_concat_trick,
+        )
+        self.finale = MeshGraphMLP(
+            input_dim=hidden_dim,
+            output_dim=output_dim_grid_nodes,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            activation_fn=act,
+            norm_type=None,
         )
 
-        # ── Decoder ──────────────────────────────────────────────────────────
-        self.node_decoder = nn.Sequential(
-            nn.Linear(latent_dim, latent_dim), nn.SiLU(), nn.Linear(latent_dim, out_channels)
+    def set_checkpoint_model(self, flag: bool):
+        self.model_checkpoint_fn = set_checkpoint_fn(flag)
+        if flag:
+            self.processor.set_checkpoint_segments(-1)
+            self.encoder_checkpoint_fn = set_checkpoint_fn(False)
+            self.decoder_checkpoint_fn = set_checkpoint_fn(False)
+
+    def set_checkpoint_processor(self, segments: int):
+        self.processor.set_checkpoint_segments(segments)
+
+    def set_checkpoint_encoder(self, flag: bool):
+        self.encoder_checkpoint_fn = set_checkpoint_fn(flag)
+
+    def set_checkpoint_decoder(self, flag: bool):
+        self.decoder_checkpoint_fn = set_checkpoint_fn(flag)
+
+    def encoder_forward(self, grid_nfeat: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+        (
+            grid_nfeat_embedded,
+            mesh_nfeat_embedded,
+            g2m_efeat_embedded,
+            mesh_efeat_embedded,
+        ) = self.encoder_embedder(grid_nfeat, self.mesh_ndata, self.g2m_edata, self.mesh_edata)
+        grid_nfeat_encoded, mesh_nfeat_encoded = self.encoder(
+            g2m_efeat_embedded, grid_nfeat_embedded, mesh_nfeat_embedded, self.g2m_graph
+        )
+        mesh_efeat_processed, mesh_nfeat_processed = self.processor_encoder(
+            mesh_efeat_embedded, mesh_nfeat_encoded, self.mesh_graph
+        )
+        return mesh_efeat_processed, mesh_nfeat_processed, grid_nfeat_encoded
+
+    def decoder_forward(
+        self,
+        mesh_efeat_processed: Tensor,
+        mesh_nfeat_processed: Tensor,
+        grid_nfeat_encoded: Tensor,
+    ) -> Tensor:
+        _, mesh_nfeat_processed = self.processor_decoder(mesh_efeat_processed, mesh_nfeat_processed, self.mesh_graph)
+        m2g_efeat_embedded = self.decoder_embedder(self.m2g_edata)
+        grid_nfeat_decoded = self.decoder(m2g_efeat_embedded, grid_nfeat_encoded, mesh_nfeat_processed, self.m2g_graph)
+        return self.finale(grid_nfeat_decoded)
+
+    def custom_forward(self, grid_nfeat: Tensor) -> Tensor:
+        mesh_efeat_proc, mesh_nfeat_proc, grid_nfeat_enc = self.encoder_checkpoint_fn(
+            self.encoder_forward,
+            grid_nfeat,
+            use_reentrant=False,
+            preserve_rng_state=False,
+        )
+        mesh_efeat_proc, mesh_nfeat_proc = self.processor(mesh_efeat_proc, mesh_nfeat_proc, self.mesh_graph)
+        return self.decoder_checkpoint_fn(
+            self.decoder_forward,
+            mesh_efeat_proc,
+            mesh_nfeat_proc,
+            grid_nfeat_enc,
+            use_reentrant=False,
+            preserve_rng_state=False,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (B, C_in, H, W) → (B, C_out, H, W)"""
-        B, C, H, W = x.shape
-        N = H * W
+    def forward(self, grid_nfeat: Tensor) -> Tensor:
+        if grid_nfeat.size(0) != 1:
+            raise ValueError(f"GraphCastNet does not support batch size > 1. Got shape {tuple(grid_nfeat.shape)}")
+        # (1, C, H, W) -> (H*W, C)
+        invar = grid_nfeat[0].view(self.input_dim_grid_nodes, -1).permute(1, 0)
+        outvar = self.model_checkpoint_fn(
+            self.custom_forward,
+            invar,
+            use_reentrant=False,
+            preserve_rng_state=False,
+        )
+        # (H*W, C_out) -> (1, C_out, H, W)
+        outvar = outvar.permute(1, 0).view(self.output_dim_grid_nodes, *self.input_res)
+        return outvar.unsqueeze(0)
 
-        # flatten spatial → nodes
-        x_nodes = rearrange(x, "b c h w -> b (h w) c")  # (B, N, C_in)
-
-        # encode
-        node_feat = self.node_encoder(x_nodes)  # (B, N, latent_dim)
-        E = self.raw_edge_feat.shape[0]
-        edge_feat = self.edge_encoder(self.raw_edge_feat)  # (E, edge_dim)
-        edge_feat = edge_feat[None].expand(B, -1, -1)  # (B, E, edge_dim)
-
-        # process
-        for layer in self.processor:
-            node_feat, edge_feat = layer(node_feat, edge_feat, self.edge_index)
-
-        # decode
-        out = self.node_decoder(node_feat)  # (B, N, C_out)
-        return rearrange(out, "b (h w) c -> b c h w", h=H, w=W)
+    def to(self, *args: Any, **kwargs: Any) -> "GraphCastNet":
+        self = super().to(*args, **kwargs)
+        self.g2m_edata = self.g2m_edata.to(*args, **kwargs)
+        self.m2g_edata = self.m2g_edata.to(*args, **kwargs)
+        self.mesh_ndata = self.mesh_ndata.to(*args, **kwargs)
+        self.mesh_edata = self.mesh_edata.to(*args, **kwargs)
+        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
+        if device is not None:
+            self.g2m_graph = self.g2m_graph.to(device)
+            self.mesh_graph = self.mesh_graph.to(device)
+            self.m2g_graph = self.m2g_graph.to(device)
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -259,95 +384,79 @@ class GraphCastModel(nn.Module):
 
 
 class CREDITGraphCast(nn.Module):
-    """CREDIT wrapper for GraphCast (simplified lat/lon GNN).  Flat (B,C,H,W) I/O."""
+    """CREDIT wrapper for GraphCastNet.
+
+    Accepts CREDIT's (B, C, T, H, W) or (B, C, H, W) tensors and returns
+    (B, C_out, 1, H, W). The T dimension must be 1 for GraphCast (single step).
+
+    Config keys (model section)
+    ---------------------------
+    in_channels         : int   -- C_in (grid node input dim)
+    out_channels        : int   -- C_out (grid node output dim)
+    img_size            : [H, W]
+    mesh_level          : int   (default 6)
+    multimesh           : bool  (default True)
+    processor_layers    : int   (default 16)
+    hidden_layers       : int   (default 1)
+    hidden_dim          : int   (default 512)
+    aggregation         : str   (default "sum")
+    activation_fn       : str   (default "silu")
+    do_concat_trick     : bool  (default False)
+    """
 
     def __init__(
         self,
-        in_channels=70,
-        out_channels=69,
-        img_size=(128, 256),
-        frames=1,
-        latent_dim=256,
-        edge_dim=128,
-        processor_depth=8,
-        k_neighbours=6,
-        mlp_hidden=512,
-        lat_range=(-90.0, 90.0),
-        lon_range=(0.0, 360.0),
+        in_channels: int,
+        out_channels: int,
+        img_size: list,
+        mesh_level: int = 6,
+        multimesh: bool = True,
+        processor_layers: int = 16,
+        hidden_layers: int = 1,
+        hidden_dim: int = 512,
+        aggregation: str = "sum",
+        activation_fn: str = "silu",
+        norm_type: str = "LayerNorm",
+        do_concat_trick: bool = False,
+        **kwargs,
     ):
         super().__init__()
-        self.model = GraphCastModel(
-            img_size=img_size,
-            in_channels=in_channels * frames,
-            out_channels=out_channels,
-            latent_dim=latent_dim,
-            edge_dim=edge_dim,
-            processor_depth=processor_depth,
-            k_neighbours=k_neighbours,
-            mlp_hidden=mlp_hidden,
-            lat_range=lat_range,
-            lon_range=lon_range,
+        H, W = img_size
+        self.model = GraphCastNet(
+            mesh_level=mesh_level,
+            multimesh=multimesh,
+            input_res=(H, W),
+            input_dim_grid_nodes=in_channels,
+            input_dim_mesh_nodes=3,
+            input_dim_edges=4,
+            output_dim_grid_nodes=out_channels,
+            processor_layers=processor_layers,
+            hidden_layers=hidden_layers,
+            hidden_dim=hidden_dim,
+            aggregation=aggregation,
+            activation_fn=activation_fn,
+            norm_type=norm_type,
+            do_concat_trick=do_concat_trick,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dim() == 5:  # (B, C, T, H, W) from trainer → (B, C*T, H, W)
-            B, C, T, H, W = x.shape
-            x = x.reshape(B, C * T, H, W)
-        return self.model(x).unsqueeze(2)
+    def forward(self, x: Tensor) -> Tensor:
+        if x.ndim == 5:
+            x = x[:, :, 0]  # (B, C, H, W)
+        out = self.model(x)  # (B, C_out, H, W)
+        return out.unsqueeze(2)  # (B, C_out, 1, H, W)
+
+    def to(self, *args, **kwargs):
+        self.model = self.model.to(*args, **kwargs)
+        return super().to(*args, **kwargs)
 
     @classmethod
     def load_model(cls, conf):
-        import torch
-
-        model = cls(**{k: v for k, v in conf["model"].items() if k != "type"})
-        save_loc = os.path.expandvars(conf["save_loc"])
-        ckpt = os.path.join(save_loc, "model_checkpoint.pt")
-        if not os.path.isfile(ckpt):
-            ckpt = os.path.join(save_loc, "checkpoint.pt")
-        checkpoint = torch.load(ckpt, map_location="cpu")
-        state = checkpoint.get("model_state_dict", checkpoint)
-        model.load_state_dict(state, strict=False)
-        return model
+        return cls(**conf["model"])
 
     @classmethod
-    def load_model_name(cls, conf, model_name):
-        import torch
-
-        model = cls(**{k: v for k, v in conf["model"].items() if k != "type"})
-        ckpt = os.path.join(os.path.expandvars(conf["save_loc"]), model_name)
-        checkpoint = torch.load(ckpt, map_location="cpu")
-        state = checkpoint.get("model_state_dict", checkpoint)
-        model.load_state_dict(state, strict=False)
-        return model
+    def load_model_name(cls):
+        return "CREDITGraphCast"
 
 
-# ---------------------------------------------------------------------------
-# Smoke test
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    sys.path.insert(0, _root)
-
-    B, C_in, C_out = 1, 12, 10
-    H, W = 16, 32  # tiny for smoke test (kNN is O(N^2))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    model = CREDITGraphCast(
-        in_channels=C_in,
-        out_channels=C_out,
-        img_size=(H, W),
-        latent_dim=64,
-        edge_dim=32,
-        processor_depth=2,
-        k_neighbours=4,
-        mlp_hidden=128,
-    ).to(device)
-
-    x = torch.randn(B, C_in, H, W, device=device)
-    y = model(x)
-    assert y.shape == (B, C_out, H, W), f"unexpected shape {y.shape}"
-    y.mean().backward()
-
-    n_params = sum(p.numel() for p in model.parameters()) / 1e6
-    print(f"CREDITGraphCast OK — output {y.shape}, params {n_params:.1f}M, device {device}")
+# backward-compat alias
+GraphCastModel = GraphCastNet

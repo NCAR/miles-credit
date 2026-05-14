@@ -1,3 +1,3 @@
-from .graphcast import GraphCastModel, CREDITGraphCast
+from .graphcast import GraphCastNet, GraphCastModel, CREDITGraphCast
 
-__all__ = ["GraphCastModel", "CREDITGraphCast"]
+__all__ = ["GraphCastNet", "GraphCastModel", "CREDITGraphCast"]

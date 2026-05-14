@@ -40,6 +40,7 @@ Set `model: type:` in your config to select a model.  A complete reference — i
 | `arches` | ArchesWeather — window + column attention | [arXiv:2405.14527](https://arxiv.org/abs/2405.14527) |
 | `mambavision` | MambaVision — hybrid Mamba + attention U-Net | [arXiv:2407.08083](https://arxiv.org/abs/2407.08083) |
 | `corrdiff` | CorrDiff — score-based conditional diffusion | [arXiv:2309.15214](https://arxiv.org/abs/2309.15214) |
+| `nextgen_wxformer` | NextGen WXFormer — CrossFormer U-Net + spectral GNN bottleneck + column attention | — |
 
 ---
 
@@ -109,7 +110,7 @@ Not all models are compatible — the main blocker is `torch.nn.utils.spectral_n
 
 | Model | Compiles? | What to do |
 |-------|:---------:|------------|
-| `wxformer` / `wxformer-sdl` / `crossformer` / `fuxi` / `swin` / `camulator` / `graph` | ✗ default | Set `use_spectral_norm: false` in `model:` config |
+| `wxformer` / `wxformer-sdl` / `crossformer` / `fuxi` / `swin` / `camulator` / `graph` / `nextgen_wxformer` | ✗ default | Set `use_spectral_norm: false` in `model:` config |
 | `sfno` / `fourcastnet3` | ⚠ | Don't install `torch-harmonics`; rfft2 fallback compiles |
 | `graphcast` | ⚠ | Use `torch.compile(model, dynamic=True)` |
 | All others | ✓ | Works out of the box |

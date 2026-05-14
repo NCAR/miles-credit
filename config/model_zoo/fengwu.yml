@@ -35,8 +35,8 @@ model:
     in_channels: 80
     out_channels: 84
     img_size: [181, 360]
-    levels: 18
     patch_size: 4
+    window_size: 8
     embed_dim: 512
     encoder_depth: 6
     fuser_depth: 4
