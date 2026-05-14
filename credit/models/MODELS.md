@@ -44,9 +44,9 @@ data:
 | `wxformer-025deg-1h` | WXFormer v2 CrossFormer | 0.25° 1h | ✓ | 100% |
 | `wxformer-1deg-6h` | WXFormer CrossFormer | 1° 6h | — | 100% |
 | `fuxi-025deg-6h` | FuXi U-Transformer | 0.25° 6h | ✓ | 100% |
-| `stormer-1.40625deg` | Stormer ViT | 1.40625° 6h | — | 194/295 (backbone) |
-| `climax-1.40625deg` | ClimaX ViT | 1.40625° | — | 105/130 (backbone) |
-| `aurora-0.1deg` | Aurora Perceiver3D | 0.1° 6h | — | ~74% |
+| `stormer-1.40625deg` | Stormer ViT | 1.40625° 6h | — | 192/393 (all 24 blocks: attn + MLP) |
+| `climax-1.40625deg` | ClimaX ViT | 1.40625° | — | 98/209 (all 8 blocks: norm + attn + MLP) |
+| `aurora-0.1deg` | Aurora Perceiver3D | 0.1° 6h | — | 302/308 (full Swin3D backbone) |
 
 **Default config ✓** — preset bundles a full working config; only `save_loc` is required from the user.
 
@@ -245,6 +245,8 @@ Pretrained weights: [HuggingFace tungnd/stormer](https://huggingface.co/tungnd/s
 
 Plain ViT with patch embedding and a residual prediction head.  Trained on ERA5 WeatherBench2 at 1.40625° resolution.
 
+Weight transfer: **192/393 keys load** (all 24 blocks: attn QKV/proj + MLP).  Not loaded: per-variable token embeddings (138 keys), adaLN modulation (48 keys), pos/patch embed, head — re-initialized for CREDIT ERA5 channel layout.
+
 #### ClimaX
 Key: `climax`
 Config: [`config/model_zoo/climax.yml`](../../config/model_zoo/climax.yml) *(see stormer.yml as template)*
@@ -255,7 +257,9 @@ Source: [`credit/models/climax/climax.py`](climax/climax.py)
 Original code: [microsoft/ClimaX](https://github.com/microsoft/ClimaX)
 Pretrained weights: [HuggingFace tungnd/climax](https://huggingface.co/tungnd/climax) — MIT, flexible channels, 5.625° / 1.40625°
 
-Per-variable tokenization ViT pre-trained on CMIP6.  Most transfer-friendly architecture — per-variable embeddings allow selective reuse for any ERA5 variable subset.
+Per-variable tokenization ViT pre-trained on CMIP6.
+
+Weight transfer: **98/209 keys load** (all 8 blocks: norm1/2, attn QKV/proj + MLP).  Not loaded: per-variable token_embeds (one per input channel), channel_embed, pos_embed, head — re-initialized for CREDIT ERA5 channel layout.
 
 #### FourCastNet v1
 Key: `fourcastnet`
@@ -268,6 +272,8 @@ Original code: [NVlabs/FourCastNet](https://github.com/NVlabs/FourCastNet)
 Pretrained weights: [NERSC portal](https://portal.nersc.gov/project/m4134/FCN_weights_v0/) / [HuggingFace nvidia/fourcastnet1](https://huggingface.co/nvidia/fourcastnet1) — BSD-3, 20-ch, 0.25°
 
 AFNO (Adaptive Fourier Neural Operator) ViT.  Uses rfft2 for spectral mixing.
+
+Weight transfer: **98/150 keys load** (all 12 blocks: norm1/2 + MLP).  Not loaded: AFNO filter weights — the public checkpoint stores real and imaginary parts stacked as `w1/w2` shape `[2,8,96,96]`; CREDIT uses separate `w1r`/`w1i` tensors, so the key names differ.  Pos/patch embed also skipped (different input channel count).  The norm + MLP initialization is still a meaningful starting point for fine-tuning.
 
 #### SFNO (FourCastNet v2)
 Key: `sfno`
@@ -351,6 +357,8 @@ Original code: [microsoft/aurora](https://github.com/microsoft/aurora)
 Pretrained weights: [HuggingFace microsoft/aurora](https://huggingface.co/microsoft/aurora) — MIT
 
 Perceiver3D encoder + Swin3D processor.  3D pressure-level representation.
+
+Weight transfer: **302/308 keys load** (full Swin3D backbone: all encoder, decoder, and latent layers).  The 6 unloaded keys are LoRA adapter weights — LoRA is a fine-tuning overlay not present in the pretrained backbone, so those slots are always re-initialized.
 
 #### Pangu-Weather
 Key: `pangu`
