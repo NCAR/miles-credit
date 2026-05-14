@@ -90,7 +90,7 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
     ds_mean.close()
     ds_std.close()
 
-    pre_scaler_dict = {"era5": {"input": pre_input, "target": pre_target}}
+    pre_scaler_dict = {"input": {"era5": pre_input}, "target": {"era5": pre_target}}
     save_scaler_dict(pre_scaler_dict, pre_out)
     save_scaler_dict(post_dict, post_out)
 
