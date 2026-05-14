@@ -500,7 +500,7 @@ class BaseDataset(AbstractBaseDataset):
     def _get_field_name(self, field_type: VALID_FIELD_TYPES, dim_str: str, vname: str) -> str:
         """Get the field name and enforce a consistent convention across datasets.
 
-        The convention for the field name is: ``"{user's current source name}/{dataset_type}/{field_type}/{dim_str}/{vname}"``.
+        The convention for the field name is: ``"{user's current source name}/{field_type}/{dim_str}/{vname}"``.
 
         Args:
             field_type (VALID_FIELD_TYPES): The field type (e.g., "prognostic")
@@ -513,7 +513,7 @@ class BaseDataset(AbstractBaseDataset):
         # Cast 3D to 3d, etc. (as needed)
         dim_str = dim_str.lower()
         # Do not change the case on everything else!
-        return f"{self.curr_source_name}/{self.dataset_type}/{field_type}/{dim_str}/{vname}"
+        return f"{self.curr_source_name}/{field_type}/{dim_str}/{vname}"
 
     def init_register_all_fields(self) -> None:
         """Initialize and register all fields for the dataset.

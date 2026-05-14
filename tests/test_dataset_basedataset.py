@@ -312,11 +312,11 @@ def test_getitem_step0(
 
     assert "input" in sample
     inp = sample["input"]
-    assert "TestSource_Base/base/prognostic/2d/t2m" in inp
-    assert "TestSource_Base/base/prognostic/3d/T" in inp
-    assert "TestSource_Base/base/prognostic/3d/U" in inp
-    assert "TestSource_Base/base/static/2d/lsm" in inp
-    assert "TestSource_Base/base/dynamic_forcing/2d/msl" in inp
+    assert "TestSource_Base/prognostic/2d/t2m" in inp
+    assert "TestSource_Base/prognostic/3d/T" in inp
+    assert "TestSource_Base/prognostic/3d/U" in inp
+    assert "TestSource_Base/static/2d/lsm" in inp
+    assert "TestSource_Base/dynamic_forcing/2d/msl" in inp
     assert "metadata" in sample
     assert "input_datetime" in sample["metadata"]
 
@@ -333,10 +333,10 @@ def test_getitem_step1(
 
     assert "input" in sample
     inp = sample["input"]
-    assert "TestSource_Base/base/prognostic/2d/t2m" not in inp
-    assert "TestSource_Base/base/prognostic/3d/T" not in inp
-    assert "TestSource_Base/base/static/2d/lsm" not in inp
-    assert "TestSource_Base/base/dynamic_forcing/2d/msl" in inp
+    assert "TestSource_Base/prognostic/2d/t2m" not in inp
+    assert "TestSource_Base/prognostic/3d/T" not in inp
+    assert "TestSource_Base/static/2d/lsm" not in inp
+    assert "TestSource_Base/dynamic_forcing/2d/msl" in inp
 
 
 def test_getitem_return_target_true(
@@ -355,13 +355,13 @@ def test_getitem_return_target_true(
 
         assert "target" in sample
         tgt = sample["target"]
-        assert "TestSource_Base/base/prognostic/2d/t2m" in tgt
-        assert "TestSource_Base/base/prognostic/3d/T" in tgt
-        assert "TestSource_Base/base/prognostic/3d/U" in tgt
-        assert "TestSource_Base/base/diagnostic/2d/tp" in tgt
+        assert "TestSource_Base/prognostic/2d/t2m" in tgt
+        assert "TestSource_Base/prognostic/3d/T" in tgt
+        assert "TestSource_Base/prognostic/3d/U" in tgt
+        assert "TestSource_Base/diagnostic/2d/tp" in tgt
         # Static and dynamic forcing should not be in target
-        assert "TestSource_Base/base/static/2d/lsm" not in tgt
-        assert "TestSource_Base/base/dynamic_forcing/2d/msl" not in tgt
+        assert "TestSource_Base/static/2d/lsm" not in tgt
+        assert "TestSource_Base/dynamic_forcing/2d/msl" not in tgt
         assert "target_datetime" in sample["metadata"]
 
 

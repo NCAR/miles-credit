@@ -5,11 +5,12 @@ Tests for MultiSourceDataset (credit.datasets.multi_source).
 
 Output format
 -------------
-Samples are nested dicts keyed by lowercase source name::
+Samples are nested dicts keyed first by data type, then by source name::
 
     {
-        "era5": {"input": {...}, "target": {...}, "metadata": {...}},
-        "mrms": {"input": {...}, "target": {...}, "metadata": {...}},
+        "input":    {"era5": {...}, "mrms": {...}},
+        "target":   {"era5": {...}, "mrms": {...}},   # return_target only
+        "metadata": {"era5": {...}, "mrms": {...}},
     }
 
 Sub-dataset IO is replaced with lightweight fakes via monkeypatching so these
@@ -31,9 +32,9 @@ from credit.samplers import DistributedMultiStepBatchSampler
 # Shared constants
 DATETIMES = pd.date_range("2024-06-01", "2026-06-02", freq="6h")
 DATETIMES_SUBSET = pd.date_range("2020-06-01", "2022-12-31", freq="12h")
-BASE1_KEYS = ["Base1/base/prognostic/3d/T", "Base1/base/prognostic/3d/U", "Base1/base/prognostic/2d/t2m"]
-BASE2_KEYS = ["Base2/base/dynamic_forcing/2d/d2m", "Base2/base/diagnostic/3d/V"]
-BASE3_KEYS = ["Base3/base/diagnostic/3d/V", "Base3/base/static/2d/orog"]
+BASE1_KEYS = ["Base1/prognostic/3d/T", "Base1/prognostic/3d/U", "Base1/prognostic/2d/t2m"]
+BASE2_KEYS = ["Base2/dynamic_forcing/2d/d2m", "Base2/diagnostic/3d/V"]
+BASE3_KEYS = ["Base3/diagnostic/3d/V", "Base3/static/2d/orog"]
 
 
 @pytest.fixture
@@ -140,22 +141,24 @@ def test_multi_source_output_source_keys(multi_config):
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    assert set(sample.keys()) == {"Base1", "Base2", "Base3"}
+    assert "input" in sample
+    assert "metadata" in sample
 
     for source in ("Base1", "Base2", "Base3"):
-        assert "input" in sample[source]
-        assert "metadata" in sample[source]
+        assert source in sample["input"]
+        assert source in sample["metadata"]
 
 
 def test_multi_source_target_present(multi_config):
-    """With return_target=True, each source should have a 'target' key."""
+    """With return_target=True, each source should appear in sample['target']."""
     ds = MultiSourceDataset(multi_config, return_target=True)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
+    assert "target" in sample
     for source in ("Base1", "Base2", "Base3"):
-        assert "target" in sample[source]
-        assert isinstance(sample[source]["target"], dict)
+        assert source in sample["target"]
+        assert isinstance(sample["target"][source], dict)
 
 
 def test_multi_source_variable_keys_no_return_type(multi_config):
@@ -164,23 +167,21 @@ def test_multi_source_variable_keys_no_return_type(multi_config):
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    assert "target" not in sample["Base1"]
-    assert "target" not in sample["Base2"]
-    assert "target" not in sample["Base3"]
+    assert "target" not in sample
 
     for base, b_keys in zip(("Base1", "Base2", "Base3"), (BASE1_KEYS, BASE2_KEYS, BASE3_KEYS)):
         for b_key in b_keys:
             if "diagnostic" in b_key:
-                assert b_key not in sample[base]["input"]
+                assert b_key not in sample["input"][base]
             else:
-                assert b_key in sample[base]["input"]
-            assert "metadata" in sample[base]
+                assert b_key in sample["input"][base]
+            assert base in sample["metadata"]
 
             # Ensure no cross-talk between sources
             for other_base in ("Base1", "Base2", "Base3"):
                 if other_base == base:
                     continue
-                assert b_key not in sample[other_base]["input"]
+                assert b_key not in sample["input"][other_base]
 
 
 def test_multi_source_variable_keys_no_return_type_step_index(multi_config):
@@ -189,17 +190,15 @@ def test_multi_source_variable_keys_no_return_type_step_index(multi_config):
     t = ds.datetimes[0]
     sample_1 = ds[(t, 1)]
 
-    assert "target" not in sample_1["Base1"]
-    assert "target" not in sample_1["Base2"]
-    assert "target" not in sample_1["Base3"]
+    assert "target" not in sample_1
 
     for base, b_keys in zip(("Base1", "Base2", "Base3"), (BASE1_KEYS, BASE2_KEYS, BASE3_KEYS)):
         for b_key in b_keys:
             if "dynamic_forcing" in b_key:
-                assert b_key in sample_1[base]["input"]
+                assert b_key in sample_1["input"][base]
             else:
-                assert b_key not in sample_1[base]["input"]
-            assert "metadata" in sample_1[base]
+                assert b_key not in sample_1["input"][base]
+            assert base in sample_1["metadata"]
 
 
 def test_multi_source_variable_keys_with_return_type(multi_config):
@@ -211,21 +210,21 @@ def test_multi_source_variable_keys_with_return_type(multi_config):
     for base, b_keys in zip(("Base1", "Base2", "Base3"), (BASE1_KEYS, BASE2_KEYS, BASE3_KEYS)):
         for b_key in b_keys:
             if "static" in b_key:
-                assert b_key not in sample[base]["input"]
-                assert b_key not in sample[base]["target"]
+                assert b_key not in sample["input"][base]
+                assert b_key not in sample["target"][base]
             elif "dynamic_forcing" in b_key:
-                assert b_key in sample[base]["input"]
-                assert b_key not in sample[base]["target"]
+                assert b_key in sample["input"][base]
+                assert b_key not in sample["target"][base]
             else:
-                assert b_key not in sample[base]["input"]
-                assert b_key in sample[base]["target"]
+                assert b_key not in sample["input"][base]
+                assert b_key in sample["target"][base]
 
             # Ensure no cross-talk between sources
             for other_base in ("Base1", "Base2", "Base3"):
                 if other_base == base:
                     continue
-                assert b_key not in sample[other_base]["input"]
-                assert b_key not in sample[other_base]["target"]
+                assert b_key not in sample["input"][other_base]
+                assert b_key not in sample["target"][other_base]
 
 
 def test_multi_source_dataset_type(multi_config):
@@ -236,12 +235,13 @@ def test_multi_source_dataset_type(multi_config):
 
 
 def test_multi_source_single_dataset(one_source_config):
-    """With only source in config, output should have only 'Single_Base' key."""
+    """With only one source in config, output should have 'Single_Base' under 'input'."""
     ds = MultiSourceDataset(one_source_config)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    assert set(sample.keys()) == {"Single_Base"}
+    assert "input" in sample
+    assert set(sample["input"].keys()) == {"Single_Base"}
 
 
 def test_multi_source_static_metadata(multi_config):
@@ -289,15 +289,17 @@ def test_multi_source_dataloader_default_collate(multi_config):
     batch = next(iter(loader))
 
     assert isinstance(batch, dict)
-    assert set(batch.keys()) == {"Base1", "Base2", "Base3"}
+    assert "input" in batch
+    assert "target" in batch
+    assert "metadata" in batch
 
     for source in ("Base1", "Base2", "Base3"):
-        assert "input" in batch[source]
-        assert "target" in batch[source]
-        assert "metadata" in batch[source]
+        assert source in batch["input"]
+        assert source in batch["target"]
+        assert source in batch["metadata"]
 
     for base, b_keys in zip(("Base1", "Base2", "Base3"), (BASE1_KEYS, BASE2_KEYS, BASE3_KEYS)):
-        for entry_key, entry_val in batch[base]["input"].items():
+        for entry_key, entry_val in batch["input"][base].items():
             assert entry_key in b_keys
             assert isinstance(entry_val, torch.Tensor)
             # should be (batch, n_levels, 1, lat, lon)

@@ -32,7 +32,7 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.local import LocalDataset
 from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
@@ -103,7 +103,7 @@ def _inject_tracer_inds(conf):
 def _build_output_denorm(conf, device, dtype=torch.float32):
     """Build (mean, std) tensors of shape (1, C_out, 1, 1, 1) for inverse-normalizing y_pred.
 
-    Channel order follows ERA5Dataset target insertion order:
+    Channel order follows LocalDataset target insertion order:
         prognostic/3d (each var × n_levels), prognostic/2d, diagnostic/2d
     """
     data_conf = conf["data"]
@@ -158,7 +158,7 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
 
 
 def _sample_to_batch(sample):
-    """Wrap a single ERA5Dataset sample (no batch dim) into preblock-compatible dict."""
+    """Wrap a single LocalDataset sample (no batch dim) into preblock-compatible dict."""
     return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()}, "metadata": sample["metadata"]}}
 
 
@@ -258,7 +258,7 @@ def predict(rank, world_size, conf, p):
     # ---- Dataset (predict uses full data range; we select specific inits below) ----
     dataset_conf = dict(conf["data"])
     dataset_conf["forecast_len"] = 1
-    dataset = ERA5Dataset(dataset_conf, return_target=False)
+    dataset = LocalDataset(dataset_conf, return_target=False)
     dt = pd.Timedelta(conf["data"]["timestep"]) if "timestep" in conf["data"] else pd.Timedelta(hours=lead_time_periods)
 
     # ---- Forecast init times: distribute across ranks ----

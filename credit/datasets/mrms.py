@@ -7,12 +7,12 @@ Sample structure returned by __getitem__:
 
     {
         "input": {
-            "Example_MRMS/mrms/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
-            "Example_MRMS/mrms/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor,
+            "{source_name}/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
+            "{source_name}/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor,
             ...
         },
         "target": {                                  # only when return_target=True
-            "Example_MRMS/mrms/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
+            "{source_name}/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
             ...
         },
         "metadata": {

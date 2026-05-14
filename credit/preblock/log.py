@@ -51,22 +51,15 @@ class LogTransform(BasePreblock):
         for var_key in self.variables:
             source = var_key.split("/")[0]
 
-            if source not in batch:
-                raise KeyError(f"LogTransform: source '{source}' not found in batch.")
-
             for data_type in self.data_types:
-                # Silent skip: data_type absent (e.g. 'target' during inference)
-                if data_type not in batch[source]:
+                if data_type not in batch:
+                    continue
+                if source not in batch[data_type]:
+                    raise KeyError(f"LogTransform: source '{source}' not found in batch['{data_type}'].")
+                if var_key not in batch[data_type][source]:
                     continue
 
-                # Silent skip: variable not present in this data_type
-                if var_key not in batch[source][data_type]:
-                    print(batch[source][data_type].keys())
-                    print(f"LogTransform: data_type '{data_type}' not found in batch.")
-                    continue
-
-                x = batch[source][data_type][var_key]
-                # Out-of-place: safe for autograd
-                batch[source][data_type][var_key] = self._log_fn(x + self.eps) - self._log_fn(self.eps)
+                x = batch[data_type][source][var_key]
+                batch[data_type][source][var_key] = self._log_fn(x + self.eps) - self._log_fn(self.eps)
 
         return batch
