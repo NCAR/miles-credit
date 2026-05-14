@@ -1,4 +1,4 @@
-save_loc: '/glade/derecho/scratch/schreck/tmp/model_zoo_train/fuxi_ens'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/fuxi_ens'
 seed: 1000
 
 data:

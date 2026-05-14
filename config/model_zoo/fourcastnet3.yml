@@ -1,4 +1,4 @@
-save_loc: '/glade/derecho/scratch/schreck/tmp/model_zoo_train/fourcastnet3'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/fourcastnet3'
 seed: 1000
 
 data:

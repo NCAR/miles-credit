@@ -1,4 +1,4 @@
-save_loc: '/glade/derecho/scratch/schreck/tmp/model_zoo_train/healpix'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/healpix'
 seed: 1000
 
 data:

@@ -1,4 +1,4 @@
-save_loc: '/glade/derecho/scratch/schreck/tmp/model_zoo_train/mambavision'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/mambavision'
 seed: 1000
 
 data:

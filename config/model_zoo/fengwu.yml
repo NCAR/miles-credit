@@ -1,4 +1,4 @@
-save_loc: '/glade/derecho/scratch/schreck/tmp/model_zoo_train/fengwu'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/fengwu'
 seed: 1000
 
 data:
