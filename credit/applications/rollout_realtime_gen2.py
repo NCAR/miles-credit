@@ -15,7 +15,7 @@ All forecast-specific parameters (init time, steps, save dir) come from
 CLI args and override whatever is in the config.  The config only needs to
 describe the model, the data source paths, and the normalization files.
 
-The script uses ERA5Dataset directly — the same dataset class used for
+The script uses LocalDataset directly — the same dataset class used for
 training — so there is no separate "predict dataset" to maintain.
 
 Output: one NetCDF file per forecast step saved to
@@ -37,7 +37,7 @@ import torch
 import xarray as xr
 from tqdm import tqdm
 
-from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.local import LocalDataset
 from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
@@ -147,7 +147,7 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
 
 
 def _sample_to_batch(sample):
-    """Add batch dim and wrap ERA5Dataset sample for preblock input."""
+    """Add batch dim and wrap LocalDataset sample for preblock input."""
     return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()}, "metadata": sample["metadata"]}}
 
 
@@ -187,7 +187,7 @@ def run_gfs_init(conf, init_time: pd.Timestamp, n_procs: int = 1) -> str:
     """Download GFS analysis for init_time, regrid to CREDIT grid, save as zarr.
 
     Patches conf['data']['source']['ERA5']['variables']['prognostic']['path']
-    to the generated zarr so ERA5Dataset loads the GFS IC at step 0.
+    to the generated zarr so LocalDataset loads the GFS IC at step 0.
     Returns the zarr path.
     """
     rt_conf = conf["predict"]["realtime"]
@@ -314,12 +314,12 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     model.eval()
 
     # ---- Dataset: build a config that covers the requested init time ----
-    # ERA5Dataset uses start/end datetimes only for __len__; we access by timestamp directly.
+    # LocalDataset uses start/end datetimes only for __len__; we access by timestamp directly.
     dataset_conf = dict(conf["data"])
     dataset_conf["start_datetime"] = str(init_time.date())
     dataset_conf["end_datetime"] = str((init_time + n_steps * dt).date())
     dataset_conf["forecast_len"] = 1
-    dataset = ERA5Dataset(dataset_conf, return_target=False)
+    dataset = LocalDataset(dataset_conf, return_target=False)
 
     init_str = init_time.strftime("%Y-%m-%dT%HZ")
     conf["predict"]["save_forecast"] = save_dir

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import pytest
-from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.local import LocalDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
 
@@ -83,7 +83,7 @@ def minimal_config() -> dict[str, Any]:
         "end_datetime": "2023-01-05",
         "source": {
             "ERA5": {
-                "dataset_type": "era5",
+                "dataset_type": "local",
                 "level_coord": "level",
                 "levels": [1000, 850, 500, 300],
                 "variables": {
@@ -112,7 +112,7 @@ def minimal_config() -> dict[str, Any]:
 
 def test_sampler_multistep(minimal_config: dict[str, Any], patch_era5_io_multiyear):
 
-    dataset = ERA5Dataset(minimal_config, return_target=True)
+    dataset = LocalDataset(minimal_config, return_target=True)
     batch_size = 4
     sampler = DistributedMultiStepBatchSampler(
         dataset=dataset,

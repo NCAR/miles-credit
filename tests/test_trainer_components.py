@@ -428,8 +428,8 @@ class _FakeLoader:
     """Minimal iterable loader that yields nested-format batches for trainerERA5gen2.
 
     Each batch has the structure expected by apply_preblocks / ConcatToTensor:
-        batch["era5"]["input"][var_key]  -> (B, 1, H, W) tensor
-        batch["era5"]["target"][var_key] -> (B, 1, H, W) tensor
+        batch["input"]["era5"][var_key]  -> (B, 1, H, W) tensor
+        batch["target"]["era5"][var_key] -> (B, 1, H, W) tensor
 
     C variables are emitted so ConcatToTensor assembles (B, C, H, W) tensors,
     matching the original flat (B, C, H, W) shape expected by the test models.
@@ -454,7 +454,7 @@ class _FakeLoader:
         for _ in range(self._n):
             input_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
             target_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
-            yield {"era5": {"input": input_vars, "target": target_vars}}
+            yield {"input": {"era5": input_vars}, "target": {"era5": target_vars}}
 
 
 class TestERA5Gen2MultiStepTraining:
@@ -666,11 +666,11 @@ class TestERA5Gen2MultiStepTraining:
                 for i in range(N_PROG):
                     full_input[f"era5/prognostic/2d/p{i}"] = prog_t1[:, i : i + 1]
                 target = {f"era5/prognostic/2d/p{i}": prog_t1[:, i : i + 1] for i in range(N_PROG)}
-                yield {"era5": {"input": full_input, "target": target}}
+                yield {"input": {"era5": full_input}, "target": {"era5": target}}
 
                 # t=2 batch: only dynfrc (ERA5Dataset i>0 behavior)
                 partial_input = {f"era5/dynamic_forcing/2d/df{i}": dynfrc_t2[:, i : i + 1] for i in range(N_DYNFRC)}
-                yield {"era5": {"input": partial_input, "target": target}}
+                yield {"input": {"era5": partial_input}, "target": {"era5": target}}
 
         captured_x = {}
 

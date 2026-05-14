@@ -67,6 +67,7 @@ def apply_preblocks(preblocks: nn.ModuleDict, batch: dict, device=None):
     meta = None
     target = None
     to_device = True
+    concat_ran = False
     for preblock in preblocks.values():
         result = preblock(batch)
         if isinstance(result, tuple):
@@ -78,10 +79,14 @@ def apply_preblocks(preblocks: nn.ModuleDict, batch: dict, device=None):
             batch = result
         if isinstance(preblock, ConcatToTensor):
             to_device = preblock.to_device
+            concat_ran = True
+
+    if not concat_ran:
+        return batch
 
     out = {"input": batch}
     if meta is not None:
-        out["meta"] = meta
+        out["metadata"] = meta
     if target is not None:
         out["target"] = target
 

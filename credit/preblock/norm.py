@@ -98,13 +98,10 @@ class ERA5Normalizer(nn.Module):
 
     def forward(self, batch: dict) -> dict:
         """Normalize all input/target tensors in-place (returns same dict)."""
-        for source_data in batch.values():
-            if not isinstance(source_data, dict):
+        for data_type in ("input", "target"):
+            if data_type not in batch:
                 continue
-            for data_type in ("input", "target"):
-                if data_type not in source_data:
-                    continue
-                field_dict = source_data[data_type]
+            for field_dict in batch[data_type].values():
                 for key in list(field_dict.keys()):
                     field_dict[key] = self._normalize_tensor(key, field_dict[key])
         return batch
