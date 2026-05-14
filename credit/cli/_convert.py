@@ -8,6 +8,102 @@ import yaml
 from ._common import _prompt, _prompt_bool, _repo_root
 
 
+def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out):
+    """Convert old mean/std NetCDF files into two BridgeScaler JSON files.
+
+    Creates one JSON for the preblock (batch-dict key structure) and one for
+    the postblock (reconstructed prediction-dict structure).
+
+    Parameters
+    ----------
+    mean_path, std_path : str
+        Paths to NetCDF files with per-variable means and standard deviations.
+        3-D variables have a 'level' dimension; 2-D variables are scalars.
+    var_groups : dict
+        ``{(field_type, dim): [varname, ...]}`` — maps ("prognostic", "3d") etc.
+        to the list of variable names that belong to that group.
+    pre_out : str
+        Output path for the preblock scaler JSON.
+    post_out : str
+        Output path for the postblock scaler JSON.
+
+    Returns
+    -------
+    pre_keys : list[str]
+        Full key paths included in the preblock scaler
+        (e.g. ``"era5/prognostic/3d/temperature"``).
+    post_prog_vars : list[str]
+        Short variable names of prognostic vars in the postblock scaler.
+    """
+    import numpy as np
+    import xarray as xr
+
+    try:
+        import torch
+        from bridgescaler.distributed_tensor import DStandardScalerTensor
+        from bridgescaler import save_scaler_dict
+    except ImportError as e:
+        print(f"  WARNING: cannot build BridgeScaler JSON — {e}", file=sys.stderr)
+        print("  Falling back to era5_normalizer preblock.", file=sys.stderr)
+        return None, None
+
+    ds_mean = xr.open_dataset(mean_path)
+    ds_std = xr.open_dataset(std_path)
+    nc_vars = set(ds_mean.data_vars) & set(ds_std.data_vars)
+
+    def _make_scaler(varname, n_levels):
+        mean_vals = np.array(ds_mean[varname].values, dtype=np.float32)
+        std_vals = np.array(ds_std[varname].values, dtype=np.float32)
+        if mean_vals.ndim == 0:
+            mean_vals = mean_vals.reshape(1)
+            std_vals = std_vals.reshape(1)
+        sc = DStandardScalerTensor(channels_last=False)
+        sc.mean_x_ = torch.tensor(mean_vals, dtype=torch.float32)
+        sc.var_x_ = torch.tensor(std_vals**2, dtype=torch.float32)
+        sc.x_columns_ = list(range(len(mean_vals)))
+        sc._fit = True
+        sc.n_ = 1
+        return sc
+
+    # --- preblock dict: {"era5": {"input": {full_key: scaler}, "target": {full_key: scaler}}}
+    pre_input = {}
+    pre_target = {}
+    pre_keys = []
+
+    # --- postblock dict: {"era5": {field_type: {dim: {varname: scaler}}}}
+    post_dict = {}
+
+    for (field_type, dim), varnames in var_groups.items():
+        for varname in varnames:
+            if varname not in nc_vars:
+                continue
+            n_levels = int(ds_mean[varname].size)
+            sc = _make_scaler(varname, n_levels)
+            full_key = f"era5/{field_type}/{dim}/{varname}"
+            pre_input[full_key] = sc
+            pre_target[full_key] = sc
+            pre_keys.append(full_key)
+            # postblock only covers prognostic vars (model outputs)
+            if field_type == "prognostic":
+                post_dict.setdefault("era5", {}).setdefault(field_type, {}).setdefault(dim, {})[varname] = sc
+
+    ds_mean.close()
+    ds_std.close()
+
+    pre_scaler_dict = {"era5": {"input": pre_input, "target": pre_target}}
+    save_scaler_dict(pre_scaler_dict, pre_out)
+    save_scaler_dict(post_dict, post_out)
+
+    post_prog_vars = [
+        varname
+        for (ft, dim), varnames in var_groups.items()
+        if ft == "prognostic"
+        for varname in varnames
+        if varname in nc_vars
+    ]
+    return pre_keys, post_prog_vars
+
+
 class _FlowSeqDumper(yaml.Dumper):
     """YAML dumper that writes lists of scalars as flow sequences [a, b, c]."""
 
@@ -212,17 +308,67 @@ def _convert(args: argparse.Namespace) -> None:
             }
         )
         if mean_path or std_path:
-            conf.setdefault("preblocks", {})["norm"] = {
-                "type": "era5_normalizer",
-                "args": {"mean_path": mean_path, "std_path": std_path},
-            }
+            # Build BridgeScaler JSON files from old z-score NetCDF files.
+            # Group variables by (field_type, dim) so the converter knows the
+            # v2 key structure.
+            var_groups = {}
+            if vars_3d:
+                var_groups[("prognostic", "3d")] = vars_3d
+            if vars_2d:
+                var_groups[("prognostic", "2d")] = vars_2d
+            if dyn_vars:
+                var_groups[("dynamic_forcing", "2d")] = dyn_vars
+            if static_vars:
+                var_groups[("static", "2d")] = static_vars
+
+            base_out, _ = os.path.splitext(
+                getattr(args, "output", None)
+                or (
+                    f"{os.path.splitext(args.config)[0]}_gen2{os.path.splitext(args.config)[1]}"
+                    if os.path.splitext(args.config)[1]
+                    else f"{args.config}_gen2.yml"
+                )
+            )
+            pre_json = f"{base_out}_pre_scaler.json"
+            post_json = f"{base_out}_post_scaler.json"
+
+            pre_keys, post_prog_vars = _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_json, post_json)
+
+            if pre_keys is not None:
+                conf.setdefault("preblocks", {})["scaler"] = {
+                    "type": "bridgescaler_transform",
+                    "args": {
+                        "scaler_path": pre_json,
+                        "variables": pre_keys,
+                        "method": "transform",
+                    },
+                }
+                conf.setdefault("postblocks", {})["scaler"] = {
+                    "type": "bridgescaler_transform",
+                    "args": {
+                        "scaler_path": post_json,
+                        "variables": post_prog_vars,
+                        "method": "inverse_transform",
+                        "key": "prediction",
+                    },
+                }
+                changes.append(f"preblocks.scaler: bridgescaler_transform → {pre_json}")
+                changes.append(f"postblocks.scaler: bridgescaler_transform (inverse) → {post_json}")
+            else:
+                # Fallback if bridgescaler/torch not available
+                conf.setdefault("preblocks", {})["norm"] = {
+                    "type": "era5_normalizer",
+                    "args": {"mean_path": mean_path, "std_path": std_path},
+                }
+                changes.append(
+                    "preblocks.norm: era5_normalizer (bridgescaler unavailable — install torch+bridgescaler to convert)"
+                )
+
         changes.append(
             f"data: flat V1 schema → nested V2 source schema  (ERA5, {n_levels} levels, timestep={lead_time}h)"
         )
         changes.append(f"data.start_datetime: {train_years[0]}-01-01 .. {train_years[1]}-12-31")
         changes.append(f"validation_data: {valid_years[0]}-01-01 .. {valid_years[1]}-12-31")
-        if mean_path:
-            changes.append("preblocks.norm: moved from data.mean_path / data.std_path")
         changes.append("  NOTE: review data paths — glob patterns may need updating for v2 file layout")
 
     # forecast_len: v1 uses 0 = single step, v2 uses 1 = single step
