@@ -86,7 +86,7 @@ See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full d
 | `fengwu` | FengWu (cross-attention ViT) | ✓ | ✓ | ✓ | ✓ |
 | `graphcast` | GraphCast (icosahedral GNN) | ✓ | ✓ | ✓ | ⚠ use `dynamic=True` |
 | `healpix` | DLWP-HEALPix (HEALPix U-Net) | ✓ | ✓ | ✓ | ✓ |
-| `fourcastnet3` | FourCastNet v3 (spherical SNO U-Net) | ✓ | ✓ | ✓ | ⚠ rfft2 fallback only |
+| `fourcastnet3` | FourCastNet v3 (spherical SNO, DISCO encoder-processor-decoder) | ✓ | ✓ | ✓ | ⚠ rfft2 fallback only |
 | `aurora` | Aurora (Perceiver3D + Swin3D) | ✓ | ✓ | ✓ | ✓ |
 | `pangu` | Pangu-Weather (3D Earth Transformer) | ✓ | ✓ | ✓ | ✓ |
 | `aifs` | AIFS (lat/lon Transformer) | ✓ | ✓ | ✓ | ✓ |
@@ -129,7 +129,7 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `nextgen_wxformer` | — | — | — | No public weights |
 | `healpix` | — | — | — | No confirmed public weights |
 | `dlesym` | — | — | — | No pretrained weights; train from scratch |
-| `fourcastnet3` | ✓ cached | 0/N | — | HuggingFace checkpoint is 1D-conv SNO; CREDIT wrapper is U-Net SNO — zero key overlap |
+| `fourcastnet3` | ✓ cached | 0/N | — | CREDIT wrapper implements makani's `AtmoSphericNeuralOperatorNet` (DISCO conv encoder-processor-decoder); HuggingFace checkpoint is from a different architecture variant — zero key overlap |
 | `pangu` | — | — | — | ONNX only |
 | `aifs` | — | — | — | Restricted access |
 | `itransformer` | — | — | — | No public weather weights |
@@ -352,7 +352,7 @@ Source: [`credit/models/fourcastnet3/fcn3.py`](fourcastnet3/fcn3.py)
 Original code: [NVIDIA/makani](https://github.com/NVIDIA/makani)
 Pretrained weights: [HuggingFace nvidia/fourcastnet3](https://huggingface.co/nvidia/fourcastnet3) — Apache-2, 72-ch, 0.25°, ~711M params
 
-U-Net with Spherical Neural Operator (SNO) blocks.  Uses SHTs when `torch-harmonics` is installed.  CREDIT wrapper pads input to the nearest multiple of `2^n_stages` and crops output.
+Single-scale DISCO encoder-processor-decoder (`AtmoSphericNeuralOperatorNet` from makani).  Encoder: `DiscreteContinuousConvS2` equiangular→legendre-gauss; Processor: N alternating local-DISCO and global diagonal-harmonic `NeuralOperatorBlock`s; Decoder: bilinear `ResampleS2` + `DiscreteContinuousConvS2` legendre-gauss→equiangular.  Uses `torch-harmonics` SHTs when installed; falls back to rfft2 otherwise.  HuggingFace weights are from a different FCN3 training variant and do not transfer.
 
 #### Aurora
 Key: `aurora`
