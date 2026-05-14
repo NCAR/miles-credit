@@ -169,6 +169,11 @@ _MODEL_REGISTRY = {
         "CREDITDLESyM",
         "Loading DLESyM (HEALPix ConvNeXt U-Net, DLESyM atmospheric backbone) ...",
     ),
+    "ace": (
+        "credit.models.ace.ace",
+        "CREDITACE",
+        "Loading ACE2 (SFNO with 2-step input, AI2 Climate Emulator v2) ...",
+    ),
 }
 
 # Backward-compatible name -> (module_path, class_name) for direct attribute access

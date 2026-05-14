@@ -97,6 +97,7 @@ See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full d
 | `corrdiff` | CorrDiff (score-based conditional diffusion) | ✓ | ✓ | ✓ | ✓ |
 | `nextgen_wxformer` | NextGen WXFormer (CrossFormer U-Net + spectral GNN + column attention) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
 | `dlesym` | DLESyM (HEALPix ConvNeXt U-Net, DLESyM atmospheric backbone) | ✓ | ✓ | ✓ | ✓ |
+| `ace` | ACE2 (SFNO with 2-step input, AI2 Climate Emulator v2) | ✓ | ✓ | ✓ | ⚠ rfft2 fallback only |
 
 **Notes on FSDP / activation checkpointing:**
 Legacy WXFormer-family models (`wxformer`, `crossformer`, `unet`, `swin`, `fuxi`) use explicit fine-grained wrap policies (attention + feedforward blocks).  All other models use automatic policy discovery — CREDIT scans the live model for repeating `nn.Module` subtypes and uses those as the wrap/checkpoint units. Pass `activation_checkpoint: true` in the `trainer:` section to enable.
@@ -129,6 +130,7 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `nextgen_wxformer` | — | — | — | No public weights |
 | `healpix` | — | — | — | No confirmed public weights |
 | `dlesym` | — | — | — | No pretrained weights; train from scratch |
+| `ace` | — | — | — | ACE2-ERA5 weights require fme package from AI2; not directly loadable |
 | `fourcastnet3` | ✓ cached | 0/N | — | CREDIT wrapper implements makani's `AtmoSphericNeuralOperatorNet` (DISCO conv encoder-processor-decoder); HuggingFace checkpoint is from a different architecture variant — zero key overlap |
 | `pangu` | — | — | — | ONNX only |
 | `aifs` | — | — | — | Restricted access |
@@ -178,7 +180,7 @@ Set `pretrained_weights: <path>` in the `model:` config section to load them.
 | `arches` | [arXiv:2405.14527](https://arxiv.org/abs/2405.14527) | [gcouairon/ArchesWeather](https://github.com/gcouairon/ArchesWeather) | MIT | — | Couairon et al. 2024 |
 | `mambavision` | [arXiv:2407.08083](https://arxiv.org/abs/2407.08083) | [NVlabs/MambaVision](https://github.com/NVlabs/MambaVision) | Apache-2.0 | — | Hatamizadeh & Kautz 2024, NVIDIA |
 | `corrdiff` | [arXiv:2309.15214](https://arxiv.org/abs/2309.15214) | [NVIDIA/modulus](https://github.com/NVIDIA/modulus) | Apache-2.0 | — | Mardani et al. 2023, NVIDIA / Stanford |
-| `dlesym` | [arXiv:2409.16247](https://arxiv.org/abs/2409.16247) | [NVIDIA/physicsnemo dlwp_healpix](https://github.com/NVIDIA/physicsnemo/tree/main/physicsnemo/models/dlwp_healpix) | Apache-2.0 | [HuggingFace nvidia/dlesym-v1-era5](https://huggingface.co/nvidia/dlesym-v1-era5) | Vonich et al. 2024, NVIDIA |
+| `ace` | [arXiv:2411.11268](https://arxiv.org/abs/2411.11268) | [ai2cm/ace](https://github.com/ai2cm/ace) | Apache-2.0 | fme package (AI2) | Watt-Meyer et al. 2024, Allen Institute for AI |
 
 ---
 
@@ -466,6 +468,18 @@ HEALPix ConvNeXt U-Net trained as the atmospheric backbone for the coupled DLESy
 Configuration key differences from PhysicsNeMo `HEALPixRecUNet`: CREDIT uses `n_channels` and `dilations` lists rather than Hydra DictConfigs; ConvGRU recurrent connections are replaced by deeper ConvNeXt residuals for compatibility with CREDIT's single-step training loop.  Pretrained DLESyM weights (PyTorch `HEALPixRecUNet`) cannot be directly transferred — the layer structures differ.
 
 Primary use case: train on CAMulator or ERA5 data at ~1° resolution with HEALPix-native convolutions.
+
+#### ACE2 (AI2 Climate Emulator v2)
+Key: `ace`
+Config: [`config/model_zoo/ace.yml`](../../config/model_zoo/ace.yml)
+
+Watt-Meyer et al. 2024, Allen Institute for AI.
+Paper: [arXiv:2411.11268](https://arxiv.org/abs/2411.11268)
+Source: [`credit/models/ace/ace.py`](ace/ace.py)
+Reference code: [ai2cm/ace](https://github.com/ai2cm/ace) (Apache-2.0)
+Pretrained weights: available via `fme` package — not directly loadable without weight remapping
+
+SFNO backbone (Bonev et al. 2023) with two consecutive time steps concatenated along the channel dimension.  Set `history_len: 2` in the data config; CREDIT automatically provides `(B, C, T=2, H, W)` which is reshaped to `(B, 2C, H, W)` before the SFNO.  Output is a single next time step `(B, C_out, 1, H, W)`.  The two-step input gives the model explicit access to the finite-difference tendency, which ACE2 found critical for stable long-rollout behavior.  The full ACE2-ERA5 model is 450M parameters at 1° with conservation constraints (dry air mass, moisture); this CREDIT port matches the architecture but omits the post-processing conservation layer.
 
 #### NextGen WXFormer
 Key: `nextgen_wxformer`
