@@ -29,7 +29,7 @@ Usage::
 Extending with a new source::
 
     # In _SOURCE_REGISTRY, add:
-    "NewSource": NewSourceDataset,
+    "NEW_SOURCE": ("credit.datasets.new_source", "NewSourceDataset"),
 
     # The dataset class must accept (config, return_target) and expose
     # a ``datetimes`` attribute (pd.DatetimeIndex).
@@ -37,6 +37,7 @@ Extending with a new source::
 
 from __future__ import annotations
 
+import importlib
 import logging
 from typing import Any
 
@@ -44,26 +45,21 @@ import pandas as pd
 
 from credit.datasets.base_dataset import AbstractBaseDataset
 
-from credit.datasets.base_dataset import BaseDataset
-from credit.datasets.local import LocalDataset
-from credit.datasets.era5 import ARCOERA5Dataset
-from credit.datasets.mrms import MRMSDataset
-from credit.datasets.goes import GOESDataset
-from credit.datasets.hrrr import HRRRDataset
-
 logger = logging.getLogger(__name__)
 
-# Maps config["source"] keys to Dataset classes.
-# Add entries here to register new data sources.
-_SOURCE_REGISTRY: dict[str, type] = {
-    "BASE": BaseDataset,  # for placeholders, testing, and examples
-    "LOCAL": LocalDataset,
-    "ARCO_ERA5": ARCOERA5Dataset,
-    "MRMS": MRMSDataset,
-    "GOES": GOESDataset,
-    "HRRR": HRRRDataset,
-    "HRRR_NAT": HRRRDataset,
-    "HRRR_SUBH": HRRRDataset,
+# Maps config["source"] dataset_type keys to (module_path, class_name) pairs.
+# Modules are imported on first use so optional heavy dependencies (gcsfs,
+# herbie, s3fs, …) are never loaded unless that source type is actually
+# requested.  Add entries here to register new data sources.
+_SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
+    "BASE": ("credit.datasets.base_dataset", "BaseDataset"),  # placeholders / testing
+    "LOCAL": ("credit.datasets.local", "LocalDataset"),
+    "ARCO_ERA5": ("credit.datasets.era5", "ARCOERA5Dataset"),
+    "MRMS": ("credit.datasets.mrms", "MRMSDataset"),
+    "GOES": ("credit.datasets.goes", "GOESDataset"),
+    "HRRR": ("credit.datasets.hrrr", "HRRRDataset"),
+    "HRRR_NAT": ("credit.datasets.hrrr", "HRRRDataset"),
+    "HRRR_SUBH": ("credit.datasets.hrrr", "HRRRDataset"),
 }
 
 
@@ -92,6 +88,9 @@ def route_to_dataset_class(source_cfg: dict[str, Any]) -> type:
     """
     Return the appropriate Dataset class based on the "dataset_type" field in the source config.
 
+    The module containing the class is imported lazily on first call so that
+    optional heavy dependencies are not loaded unless this source type is used.
+
     Args:
         source_cfg: Config dict for a single source (e.g. config["source"]["Example_ERA5"]).
 
@@ -104,12 +103,13 @@ def route_to_dataset_class(source_cfg: dict[str, Any]) -> type:
     dataset_type = source_cfg.get("dataset_type", "").upper()
     if not dataset_type:
         raise ValueError("Source config must contain a 'dataset_type' field.")
-    cls = _SOURCE_REGISTRY.get(dataset_type)
-    if not cls:
+    entry = _SOURCE_REGISTRY.get(dataset_type)
+    if not entry:
         raise ValueError(
             f"Unrecognized dataset_type '{dataset_type}' in source config. Must be one of: {list(_SOURCE_REGISTRY.keys())}"
         )
-    return cls
+    module_path, class_name = entry
+    return getattr(importlib.import_module(module_path), class_name)
 
 
 class MultiSourceDataset(AbstractBaseDataset):
