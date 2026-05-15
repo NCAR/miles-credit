@@ -161,7 +161,11 @@ _skip_bridgescaler = pytest.mark.skipif(
 
 @pytest.fixture
 def scaler_file(tmp_path):
-    """Fit a DStandardScalerTensor on random data, save to JSON, return path."""
+    """Fit a DStandardScalerTensor on random data, save to JSON, return path.
+
+    Uses 16 channels to match typical CREDIT usage.  Spatial size is kept small
+    (8×8) so the fixture stays fast.
+    """
     x_dict = create_synthetic_data()
     variables = x_dict["input"]["Test_ERA5"].keys()
     scaler = DStandardScalerTensor(channels_last=False)
@@ -174,6 +178,8 @@ def scaler_file(tmp_path):
 # ---------------------------------------------------------------------------
 # Scaler tests
 # ---------------------------------------------------------------------------
+
+# VAR_NAMES = ["era5/pronostic/3d/T", "era5/pronostic/3d/U", "era5/pronostic/3d/V"]
 
 
 @_skip_bridgescaler
