@@ -5,7 +5,7 @@ Gen2 training entry point for the nested ERA5 data schema.
 
 This script bypasses ``credit_main_parser`` entirely. It reads the config
 directly and assumes the new ``conf["data"]["source"]`` structure produced by
-``MultiSourceDataset`` / ``ERA5Dataset``.
+``MultiSourceDataset`` / ``BaseDataset``.
 
 For the legacy flat schema (v1), use ``applications/train.py``.
 """

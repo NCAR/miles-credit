@@ -225,6 +225,11 @@ class BaseDataset(AbstractBaseDataset):
         if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
 
+        # temporal_mode: "exact" (default, exact timestamp match required) or
+        # "persist" (snap to last native timestamp via asof(); used for coarser sources)
+        self.temporal_mode: str = self.curr_source_cfg.get("temporal_mode", "exact")
+        self._persist_cache: dict = {}
+
         # Placeholder for static metadata
         self.static_metadata: dict[str, Any] = {}
 
@@ -245,6 +250,12 @@ class BaseDataset(AbstractBaseDataset):
     def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
         """Return a nested input/target sample dict.
 
+        When ``temporal_mode == "persist"``, the requested timestamp *t* is
+        snapped to the last native timestamp at-or-before *t* via
+        ``pd.DatetimeIndex.asof()``.  The result is cached so that multiple
+        fine-resolution master-clock ticks within the same native interval
+        only trigger a single file read.
+
         Args:
             args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
                 or pd.Timestamp) and *i* is the within-sequence step index
@@ -259,8 +270,57 @@ class BaseDataset(AbstractBaseDataset):
         """
         t, i = args
         t = pd.Timestamp(t)
-        t_target = t + self.dt
 
+        if self.temporal_mode == "persist":
+            t_resolved = self._resolve_persist_timestamp(t)
+            cache_key = (t_resolved, i == 0)
+            if cache_key not in self._persist_cache:
+                # Evict entries from previous native intervals to keep cache small
+                stale = [k for k in self._persist_cache if k[0] != t_resolved]
+                for k in stale:
+                    del self._persist_cache[k]
+                self._persist_cache[cache_key] = self._load_sample(t_resolved, i)
+            return self._persist_cache[cache_key]
+
+        return self._load_sample(t, i)
+
+    def _resolve_persist_timestamp(self, t: pd.Timestamp) -> pd.Timestamp:
+        """Snap *t* to the last native timestamp at or before *t*.
+
+        Uses ``pd.DatetimeIndex.asof()`` so non-uniform or non-zero-aligned
+        cadences are handled correctly.
+
+        Args:
+            t: Master-clock timestamp to resolve.
+
+        Returns:
+            The last native timestamp ``<= t``.
+
+        Raises:
+            ValueError: If *t* is before the first native timestamp.
+        """
+        resolved = self.datetimes.asof(t)
+        if pd.isna(resolved):
+            raise ValueError(
+                f"Persist source '{self.curr_source_name}': timestamp {t} is before "
+                f"the first available native timestamp {self.datetimes[0]}."
+            )
+        return resolved
+
+    def _load_sample(self, t: pd.Timestamp, i: int) -> dict[str, Any]:
+        """Build and return the sample dict for timestamp *t* and step index *i*.
+
+        This is the inner implementation called by ``__getitem__``, separated
+        so the persist cache can call it without re-entering the dispatch logic.
+
+        Args:
+            t: Timestamp to load (already resolved for persist sources).
+            i: Within-sequence step index (0 = initial step).
+
+        Returns:
+            Sample dict with ``"input"``, ``"metadata"``, and optionally ``"target"``.
+        """
+        t_target = t + self.dt
         input_data: dict[str, Any] = {}
 
         # Dynamic forcing is loaded at every step
@@ -283,7 +343,6 @@ class BaseDataset(AbstractBaseDataset):
         if self.return_target:
             target_data: dict[str, Any] = {}
             for field_type in ("prognostic", "diagnostic"):
-                # if self.file_dict.get(field_type) and
                 if field_type in self.var_dict:
                     self._extract_field(field_type, t_target, target_data)
 

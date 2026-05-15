@@ -147,7 +147,7 @@ class MultiSourceDataset(AbstractBaseDataset):
             self.datasets[user_dataset_name] = cls(sub_config, return_target)
             logger.info(f"MultiSourceDataset: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
 
-        self.datetimes: pd.DatetimeIndex = self._intersect_timestamps()
+        self.datetimes: pd.DatetimeIndex = self._build_master_clock(config)
 
         self.static_metadata: dict[str, dict[str, Any]] = {
             name: ds.static_metadata for name, ds in self.datasets.items()
@@ -185,16 +185,56 @@ class MultiSourceDataset(AbstractBaseDataset):
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _intersect_timestamps(self) -> pd.DatetimeIndex:
-        """Return timestamps common to all active source datasets."""
+    def _build_master_clock(self, config: dict[str, Any]) -> pd.DatetimeIndex:
+        """Build the master sampling clock from the global config.
+
+        The clock is anchored to the global ``start_datetime``, ``end_datetime``,
+        and ``timestep``.  For each source:
+
+        - **Normal sources** (no ``temporal_mode``): the clock is filtered to
+          timestamps that exist exactly in that source's native datetimes.  A
+          warning is emitted when the source's native timestep differs from the
+          master clock timestep and ``temporal_mode`` is not set.
+        - **Persist sources** (``temporal_mode: persist``): the clock is only
+          clipped to the source's coverage range.  Fine-resolution master-clock
+          ticks are snapped to the last native timestamp inside
+          ``BaseDataset.__getitem__``.
+        """
         if not self.datasets:
             return pd.DatetimeIndex([])
 
-        sets: list[set[pd.Timestamp]] = [set(ds.datetimes) for ds in self.datasets.values()]
-        common = sets[0].intersection(*sets[1:])
-        if not common:
+        master_dt = pd.Timedelta(config["timestep"])
+        num_steps = config.get("forecast_len", 1)
+        master_start = pd.Timestamp(config["start_datetime"])
+        master_end = pd.Timestamp(config["end_datetime"])
+
+        master = pd.date_range(master_start, master_end - num_steps * master_dt, freq=master_dt)
+
+        source_cfg = config.get("source", {})
+        for name, ds in self.datasets.items():
+            if not len(ds.datetimes):
+                continue
+            temporal_mode = source_cfg.get(name, {}).get("temporal_mode")
+
+            if temporal_mode == "persist":
+                # Clip master clock to the source's coverage window only
+                ds_start = ds.datetimes[0]
+                ds_end = ds.datetimes[-1]
+                master = master[(master >= ds_start) & (master <= ds_end + ds.dt)]
+            else:
+                # Exact match required — warn if resolutions differ
+                if hasattr(ds, "dt") and ds.dt != master_dt:
+                    logger.warning(
+                        f"MultiSourceDataset: source '{name}' has timestep {ds.dt} which differs "
+                        f"from the master clock timestep {master_dt}, but 'temporal_mode' is not set. "
+                        "Consider setting temporal_mode: persist in the source config if this source "
+                        "should persist its last sample between master-clock ticks."
+                    )
+                master = master[master.isin(ds.datetimes)]
+
+        if not len(master):
             logger.warning(
-                "MultiSourceDataset: timestamp intersection across sources is empty. "
-                "Check that start_datetime/end_datetime overlap for all configured sources."
+                "MultiSourceDataset: master clock is empty after applying source constraints. "
+                "Check that start_datetime/end_datetime and timestep are consistent across sources."
             )
-        return pd.DatetimeIndex(sorted(common))
+        return master
