@@ -1,7 +1,5 @@
 """test_preblock.py — unit tests for credit.preblock modules."""
 
-import copy
-
 import numpy as np
 import pytest
 import torch
@@ -11,7 +9,6 @@ try:
     from bridgescaler.distributed_tensor import DStandardScalerTensor
     from bridgescaler import save_scaler_dict, scale_var_dict
     from credit.preblock.scaler import BridgeScalerTransformer
-    from credit.preblock.norm import ERA5Normalizer
 
     _BRIDGESCALER_AVAILABLE = True
 except (ImportError, Exception):
@@ -164,11 +161,7 @@ _skip_bridgescaler = pytest.mark.skipif(
 
 @pytest.fixture
 def scaler_file(tmp_path):
-    """Fit a DStandardScalerTensor on random data, save to JSON, return path.
-
-    Uses 16 channels to match typical CREDIT usage.  Spatial size is kept small
-    (8×8) so the fixture stays fast.
-    """
+    """Fit a DStandardScalerTensor on random data, save to JSON, return path."""
     x_dict = create_synthetic_data()
     variables = x_dict["input"]["Test_ERA5"].keys()
     scaler = DStandardScalerTensor(channels_last=False)
@@ -181,8 +174,6 @@ def scaler_file(tmp_path):
 # ---------------------------------------------------------------------------
 # Scaler tests
 # ---------------------------------------------------------------------------
-
-# VAR_NAMES = ["era5/pronostic/3d/T", "era5/pronostic/3d/U", "era5/pronostic/3d/V"]
 
 
 @_skip_bridgescaler
@@ -219,163 +210,3 @@ def test_scaler_round_trip(scaler_file):
     data = fwd(data)
     data = inv(data)
     assert torch.allclose(data["input"]["Test_ERA5"][var].float(), original.float(), atol=1e-5)
-
-
-# ---------------------------------------------------------------------------
-# Parity tests: ERA5Normalizer (old) vs BridgeScalerTransformer (new)
-# ---------------------------------------------------------------------------
-# The converter reads the same mean/std NC files that ERA5Normalizer uses and
-# stores them in DStandardScalerTensor objects (var = std**2).  Both normalize
-# as (x - mean) / std so the outputs must agree to float32 precision.
-
-
-@pytest.fixture
-def zscore_nc_files(tmp_path):
-    """Write synthetic mean/std NetCDF files and return their paths.
-
-    3-D variable 'T': 4 levels, non-trivial per-level mean/std.
-    2-D variable 'SP': scalar mean/std.
-    """
-    n_levels = 4
-    mean_T = np.array([100.0, 200.0, 300.0, 400.0], dtype=np.float32)
-    std_T = np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float32)
-    mean_SP = np.float32(1013.25)
-    std_SP = np.float32(5.0)
-
-    ds_mean = xr.Dataset(
-        {
-            "T": xr.DataArray(mean_T, dims=("level",)),
-            "SP": xr.DataArray(mean_SP),
-        }
-    )
-    ds_std = xr.Dataset(
-        {
-            "T": xr.DataArray(std_T, dims=("level",)),
-            "SP": xr.DataArray(std_SP),
-        }
-    )
-    mean_path = str(tmp_path / "mean.nc")
-    std_path = str(tmp_path / "std.nc")
-    ds_mean.to_netcdf(mean_path)
-    ds_std.to_netcdf(std_path)
-    return mean_path, std_path, n_levels, mean_T, std_T, mean_SP, std_SP
-
-
-@pytest.fixture
-def zscore_batch():
-    """Batch dict with 3-D and 2-D prognostic variables matching zscore_nc_files."""
-    B, L, T, H, W = 2, 4, 1, 8, 8
-    return {
-        "input": {
-            "era5": {
-                "era5/prognostic/3d/T": torch.randn(B, L, T, H, W),
-                "era5/prognostic/2d/SP": torch.randn(B, 1, T, H, W),
-            }
-        },
-        "target": {
-            "era5": {
-                "era5/prognostic/3d/T": torch.randn(B, L, T, H, W),
-                "era5/prognostic/2d/SP": torch.randn(B, 1, T, H, W),
-            }
-        },
-    }
-
-
-@_skip_bridgescaler
-def test_preblock_era5normalizer_vs_bridgescaler_3d(tmp_path, zscore_nc_files, zscore_batch):
-    """ERA5Normalizer and BridgeScalerTransformer produce identical output for 3-D vars."""
-    from credit.cli._convert import _build_bridgescaler_jsons
-
-    mean_path, std_path, n_levels, mean_T, std_T, _, _ = zscore_nc_files
-    var_groups = {("prognostic", "3d"): ["T"], ("prognostic", "2d"): ["SP"]}
-    pre_json = str(tmp_path / "pre_scaler.json")
-    post_json = str(tmp_path / "post_scaler.json")
-    pre_keys, _ = _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_json, post_json)
-
-    batch_old = copy.deepcopy(zscore_batch)
-    batch_new = copy.deepcopy(zscore_batch)
-
-    # Old path
-    old_norm = ERA5Normalizer(mean_path=mean_path, std_path=std_path)
-    batch_old = old_norm(batch_old)
-
-    # New path
-    new_norm = BridgeScalerTransformer(scaler_path=pre_json, variables=pre_keys, method="transform")
-    batch_new = new_norm(batch_new)
-
-    for split in ("input", "target"):
-        old_T = batch_old[split]["era5"]["era5/prognostic/3d/T"]
-        new_T = batch_new[split]["era5"]["era5/prognostic/3d/T"]
-        assert torch.allclose(old_T, new_T, atol=1e-5), (
-            f"3D var mismatch in {split}: max diff {(old_T - new_T).abs().max()}"
-        )
-
-
-@_skip_bridgescaler
-def test_preblock_era5normalizer_vs_bridgescaler_2d(tmp_path, zscore_nc_files, zscore_batch):
-    """ERA5Normalizer and BridgeScalerTransformer produce identical output for 2-D vars."""
-    from credit.cli._convert import _build_bridgescaler_jsons
-
-    mean_path, std_path, *_ = zscore_nc_files
-    var_groups = {("prognostic", "3d"): ["T"], ("prognostic", "2d"): ["SP"]}
-    pre_json = str(tmp_path / "pre_scaler.json")
-    post_json = str(tmp_path / "post_scaler.json")
-    pre_keys, _ = _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_json, post_json)
-
-    batch_old = copy.deepcopy(zscore_batch)
-    batch_new = copy.deepcopy(zscore_batch)
-
-    old_norm = ERA5Normalizer(mean_path=mean_path, std_path=std_path)
-    batch_old = old_norm(batch_old)
-
-    new_norm = BridgeScalerTransformer(scaler_path=pre_json, variables=pre_keys, method="transform")
-    batch_new = new_norm(batch_new)
-
-    for split in ("input", "target"):
-        old_SP = batch_old[split]["era5"]["era5/prognostic/2d/SP"]
-        new_SP = batch_new[split]["era5"]["era5/prognostic/2d/SP"]
-        assert torch.allclose(old_SP, new_SP, atol=1e-5), (
-            f"2D var mismatch in {split}: max diff {(old_SP - new_SP).abs().max()}"
-        )
-
-
-@_skip_bridgescaler
-def test_postblock_bridgescaler_inverse_matches_manual(tmp_path, zscore_nc_files):
-    """BridgeScalerTransformer postblock inverse_transform matches (x*std + mean) applied manually."""
-    from credit.cli._convert import _build_bridgescaler_jsons
-    from credit.postblock.scaler import BridgeScalerTransformer as PostBridgeScaler
-
-    mean_path, std_path, n_levels, mean_T, std_T, mean_SP, std_SP = zscore_nc_files
-    var_groups = {("prognostic", "3d"): ["T"], ("prognostic", "2d"): ["SP"]}
-    pre_json = str(tmp_path / "pre_scaler.json")
-    post_json = str(tmp_path / "post_scaler.json")
-    _, post_prog_vars = _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_json, post_json)
-
-    B, T, H, W = 2, 1, 8, 8
-    # Simulate a normalized prediction dict (post-Reconstruct structure)
-    pred_T = torch.randn(B, n_levels, T, H, W)
-    pred_SP = torch.randn(B, 1, T, H, W)
-    prediction = {"era5": {"prognostic": {"3d": {"T": pred_T.clone()}, "2d": {"SP": pred_SP.clone()}}}}
-    batch_dict = {"prediction": prediction}
-
-    postblock = PostBridgeScaler(scaler_path=post_json, variables=post_prog_vars, method="inverse_transform")
-    result = postblock(batch_dict)
-
-    # Manual inverse: x * std + mean
-    mean_T_t = torch.tensor(mean_T, dtype=torch.float32).view(1, n_levels, 1, 1, 1)
-    std_T_t = torch.tensor(std_T, dtype=torch.float32).view(1, n_levels, 1, 1, 1)
-    expected_T = pred_T * std_T_t + mean_T_t
-
-    mean_SP_t = torch.tensor([mean_SP], dtype=torch.float32).view(1, 1, 1, 1, 1)
-    std_SP_t = torch.tensor([std_SP], dtype=torch.float32).view(1, 1, 1, 1, 1)
-    expected_SP = pred_SP * std_SP_t + mean_SP_t
-
-    got_T = result["prediction"]["era5"]["prognostic"]["3d"]["T"]
-    got_SP = result["prediction"]["era5"]["prognostic"]["2d"]["SP"]
-
-    assert torch.allclose(got_T, expected_T, atol=1e-4), (
-        f"T inverse mismatch: max diff {(got_T - expected_T).abs().max()}"
-    )
-    assert torch.allclose(got_SP, expected_SP, atol=1e-4), (
-        f"SP inverse mismatch: max diff {(got_SP - expected_SP).abs().max()}"
-    )

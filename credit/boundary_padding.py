@@ -14,8 +14,8 @@ class TensorPadding:
         """
 
         self.mode = mode
-        self.pad_NS = (pad_lat, pad_lat) if isinstance(pad_lat, int) else pad_lat
-        self.pad_WE = (pad_lon, pad_lon) if isinstance(pad_lon, int) else pad_lon
+        self.pad_NS = pad_lat
+        self.pad_WE = pad_lon
 
     def pad(self, x):
         """
