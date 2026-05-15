@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------------------------------------------------- #
-# CREDIT starter config — gen2 data schema, 1-degree ERA5, 6-hourly CrossFormer
+# CREDIT starter config — gen2 data schema, small HRRR subset, WxFormer
 #
 # Quick-start: edit the USER SETTINGS sections below, then:
 #
@@ -20,93 +20,50 @@ seed: 1000
 # Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
 data:
   source:
-    ERA5:
-      dataset_type: "era5"
+    HRRR:
+      dataset_type: "hrrr"
+      product: "wrfprs"
+      mode: "remote"
       level_coord: "level"
-      levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
+      levels: [250, 500, 925, 1000]
       variables:
         # Prognostic: model both predicts and receives as input next step
         prognostic:
-          vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
-          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          vars_3D: ['T', 'U', 'V', 'Q', 'GH']
+          vars_2D: ['sp', 't2m']
 
         # Diagnostic: model predicts these but does not feed them back as input
         diagnostic:
-          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
-                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
-                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          vars_2D: [ 'DPT' ]
 
         # Dynamic forcing: time-varying inputs (not predicted)
         dynamic_forcing:
-          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          vars_2D: [ 'W' ]
 
         # Static: time-invariant inputs (not predicted)
         static:
-          vars_2D: [ 'z_norm', 'land_sea_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+          vars_2D: [ 'orog' ]
+      extent: [-100, -80, 30, 45]  # [lon_min, lon_max, lat_min, lat_max]
 
-  start_datetime: "1979-01-01"
-  end_datetime: "2018-12-31"
-  timestep: "6h"
+  start_datetime: "2025-01-01"
+  end_datetime: "2025-01-02"
+  timestep: "1h"
 
   history_len: 1            # number of past states fed as input
   forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
 
   one_shot: True
-  lead_time_periods: 6
+  lead_time_periods: 1
   skip_periods: null
   static_first: True
   scaler_type: 'std_new'
-
-  mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
 
 
 # ---- USER SETTINGS: validation data ---- #
 data_valid:
-  source:
-    ERA5:
-      level_coord: "level"
-      levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
-      variables:
-        prognostic:
-          vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
-          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
-
-        diagnostic:
-          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
-                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
-                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
-
-        dynamic_forcing:
-          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
-
-        static:
-          vars_2D: [ 'z_norm', 'land_sea_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
-
-  start_datetime: "2018-01-01"
-  end_datetime: "2019-12-31"
-  timestep: "6h"
-
-  history_len: 1
-  forecast_len: 1
-
-  one_shot: True
-  lead_time_periods: 6
-  skip_periods: null
-  static_first: True
-  scaler_type: 'std_new'
-
-  mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
-
+  start_datetime: "2025-01-03"
+  end_datetime: "2025-01-04"
+  timestep: "1h"
 
 # ---- USER SETTINGS: training hyperparameters ---- #
 trainer:
@@ -169,8 +126,8 @@ trainer:
 model:
   type: "wxformer"
   frames: 1
-  image_height: 181       # 1-degree ERA5 latitude grid
-  image_width: 360        # 1-degree ERA5 longitude grid
+  image_height: 9       # 1-degree ERA5 latitude grid
+  image_width: 6        # 1-degree ERA5 longitude grid
   levels: 18              # number of ERA5 model levels (matches data.levels above)
   channels: 4             # 3D prognostic variables (u, v, T, q)
   surface_channels: 4     # 2D prognostic variables (SP, 2T, 10U, 10V)
@@ -206,8 +163,8 @@ model:
   padding_conf:
     activate: True
     mode: earth          # spherical (latitude-wrapping) padding
-    pad_lat: [ 37, 38 ]
-    pad_lon: [ 12, 12 ]
+    pad_lat: [ 3, 3 ]
+    pad_lon: [ 2, 2 ]
 
   
 # ---- Loss ---- #
@@ -216,10 +173,7 @@ loss:
 
   use_power_loss: False
   use_spectral_loss: False
-
-  use_latitude_weights: True
-  latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
-
+  use_latitude_weights: False
   use_variable_weights: False
 
 
@@ -230,7 +184,7 @@ predict:
   ensemble_size: 1
   forecasts:
     type: "custom"
-    start_year: 2020
+    start_year: 2025
     start_month: 1
     start_day: 1
     start_hours: [ 0, 12 ]
@@ -242,8 +196,8 @@ predict:
 pbs: #derecho
   conda: "credit-derecho"
   project: "NAML0001"
-  job_name: "wxformer_1deg_6hr_gen2"
-  walltime: "12:00:00"
+  job_name: "credit_integration_test_hrrr_gen2"
+  walltime: "01:00:00"
   nodes: 8
   ncpus: 64
   ngpus: 4
