@@ -129,7 +129,8 @@ def main_cli():
     inject_flat_var_keys(conf)
     if "post_conf" in conf["model"]:
         warnings.warn(
-            "Gen 2 training does not support Gen 1 postblocks. Any postblocks included in the conf will be ignored."
+            "Gen 2 training does not support Gen 1 postblocks (conf['model']['post_conf']). "
+            "These will be ignored. Gen 2 postblocks (conf['postblocks']) are still applied normally."
         )
         conf["model"].pop("post_conf", None)
     m = load_model(conf)
