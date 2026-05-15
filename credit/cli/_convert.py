@@ -343,7 +343,6 @@ def _convert(args: argparse.Namespace) -> None:
                         "scaler_path": pre_json,
                         "variables": pre_keys,
                         "method": "transform",
-                        "key": None,  # apply to full batch dict (input + target)
                     },
                 }
                 conf["preblocks"]["concat"] = {"type": "concat", "args": {}}
