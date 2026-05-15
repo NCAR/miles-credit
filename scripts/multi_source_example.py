@@ -9,8 +9,8 @@ import torch
 import numpy as np
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
-config_path = BASE_DIR.parent / "config" / "gen_2" / "examples" / "multi_source_data.yaml"
-# config_path = BASE_DIR.parent / "config" / "multi_source_data_local.yaml"
+config_path = BASE_DIR.parent / "config" / "gen_2" / "examples" / "multi_source_data.yml"
+# config_path = BASE_DIR.parent / "config" / "multi_source_data_local.yml"
 
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)
@@ -28,8 +28,10 @@ print(sample["input"]["ERA5_UpperAir"].keys())
 preblocks = build_preblocks(config["preblocks"])
 batch = apply_preblocks(preblocks, sample)
 print("BATCH KEYS:", batch.keys())
-print(batch["input"].shape)
-print(batch["target"].shape)
+print("Input shape:", batch["input"].shape)
+print("Target shape:", batch["target"].shape)
+target_shape = batch["target"].shape
+
 print("METADATA KEYS:", batch["metadata"].keys())
 print("METADATA KEYS:", batch["metadata"]["input"].keys())
 print("METADATA KEYS:", batch["metadata"]["input"]["ERA5_LowerAir"].keys())
@@ -37,7 +39,7 @@ print("METADATA KEYS:", batch["metadata"]["input"]["ERA5_LowerAir"]["datetime"])
 # print("METADATA CHANNEL_MAP KEYS:", batch['metadata']['target']['_channel_map']['ERA5_LowerAir/prognostic/3d/V'].keys())
 # print("METADATA CHANNEL_MAP KEYS:", batch['metadata']['input']['_channel_map']['ERA5_LowerAir/prognostic/3d/V']['slice'])
 
-fake_prediction = torch.tensor(np.random.normal(0, 1, (4, 68, 1, 192, 288)))
+fake_prediction = torch.tensor(np.random.normal(0, 1, target_shape))
 batch["prediction"] = fake_prediction
 sample["prediction"] = fake_prediction
 
