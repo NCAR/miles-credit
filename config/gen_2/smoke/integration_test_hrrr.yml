@@ -49,18 +49,18 @@ data:
   end_datetime: "2025-01-02"
   timestep: "1h"
 
-  history_len: 1            # number of past states fed as input
+  # history_len: 1            # number of past states fed as input
   forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
 
-  one_shot: True
-  lead_time_periods: 1
-  skip_periods: null
-  static_first: True
-  scaler_type: 'std_new'
+  # one_shot: True
+  # lead_time_periods: 1
+  # skip_periods: null
+  # static_first: True
+  # scaler_type: 'std_new'
 
 
 # ---- USER SETTINGS: validation data ---- #
-data_valid:
+validation_data:
   start_datetime: "2025-01-03"
   end_datetime: "2025-01-04"
   timestep: "1h"
