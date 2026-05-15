@@ -8,7 +8,7 @@ import yaml
 from ._common import _prompt, _prompt_bool, _repo_root
 
 
-def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out):
+def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out, source_name="ERA5"):
     """Convert old mean/std NetCDF files into two BridgeScaler JSON files.
 
     Creates one JSON for the preblock (batch-dict key structure) and one for
@@ -65,13 +65,14 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
         sc.n_ = 1
         return sc
 
-    # --- preblock dict: {"era5": {"input": {full_key: scaler}, "target": {full_key: scaler}}}
+    # --- preblock dict: {source_name: {"input": {full_key: scaler}, "target": {full_key: scaler}}}
     pre_input = {}
     pre_target = {}
     pre_keys = []
 
-    # --- postblock dict: {"era5": {field_type: {dim: {varname: scaler}}}}
+    # --- postblock dict: {source_name: {field_type: {dim: {varname: scaler}}}}
     post_dict = {}
+    src_lower = source_name.lower()
 
     for (field_type, dim), varnames in var_groups.items():
         for varname in varnames:
@@ -79,18 +80,18 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
                 continue
             n_levels = int(ds_mean[varname].size)
             sc = _make_scaler(varname, n_levels)
-            full_key = f"era5/{field_type}/{dim}/{varname}"
+            full_key = f"{src_lower}/{field_type}/{dim}/{varname}"
             pre_input[full_key] = sc
             pre_target[full_key] = sc
             pre_keys.append(full_key)
             # postblock only covers prognostic vars (model outputs)
             if field_type == "prognostic":
-                post_dict.setdefault("era5", {}).setdefault(field_type, {}).setdefault(dim, {})[varname] = sc
+                post_dict.setdefault(src_lower, {}).setdefault(field_type, {}).setdefault(dim, {})[varname] = sc
 
     ds_mean.close()
     ds_std.close()
 
-    pre_scaler_dict = {"input": {"era5": pre_input}, "target": {"era5": pre_target}}
+    pre_scaler_dict = {"input": {source_name: pre_input}, "target": {source_name: pre_target}}
     save_scaler_dict(pre_scaler_dict, pre_out)
     save_scaler_dict(post_dict, post_out)
 
@@ -295,7 +296,7 @@ def _convert(args: argparse.Namespace) -> None:
 
         conf["data"] = {
             "source": {
-                "ERA5": {"dataset_type": "era5", "level_coord": level_coord, "levels": levels, "variables": era5_vars}
+                "ERA5": {"dataset_type": "local", "level_coord": level_coord, "levels": levels, "variables": era5_vars}
             },
             "timestep": f"{lead_time}h",
             "forecast_len": data.get("forecast_len", 0),
