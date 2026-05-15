@@ -84,9 +84,10 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
             pre_input[full_key] = sc
             pre_target[full_key] = sc
             pre_keys.append(full_key)
-            # postblock only covers prognostic vars (model outputs)
+            # postblock only covers prognostic vars (model outputs).
+            # Keys must match Reconstruct output: {source: {full_key: tensor}}
             if field_type == "prognostic":
-                post_dict.setdefault(source_name, {}).setdefault(field_type, {}).setdefault(dim, {})[varname] = sc
+                post_dict.setdefault(source_name, {})[full_key] = sc
 
     ds_mean.close()
     ds_std.close()
@@ -96,7 +97,7 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
     save_scaler_dict(post_dict, post_out)
 
     post_prog_vars = [
-        varname
+        f"{source_name}/{ft}/{dim}/{varname}"
         for (ft, dim), varnames in var_groups.items()
         if ft == "prognostic"
         for varname in varnames
