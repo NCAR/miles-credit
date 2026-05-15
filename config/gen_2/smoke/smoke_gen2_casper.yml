@@ -123,7 +123,7 @@ trainer:
     start_epoch: 0
     # num_epoch: 1
     reload_epoch: False
-    epochs: 20
+    epochs: 2
 
     use_scheduler: True
     scheduler:
