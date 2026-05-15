@@ -29,11 +29,12 @@ from credit.trainers import load_trainer
 from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
 from credit.metrics import LatWeightedMetrics
+from credit.preblock import build_preblocks, apply_preblocks
 from credit.trainers.utils import (
-    inject_flat_var_keys,
     load_dataset,
     load_dataloader,
     load_model_states_and_optimizer,
+    extract_flat_keys_from_channel_map,
 )
 
 warnings.filterwarnings("ignore")
@@ -126,7 +127,6 @@ def main_cli():
 
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
-    inject_flat_var_keys(conf)
     if "post_conf" in conf["model"]:
         warnings.warn(
             "Gen 2 training does not support Gen 1 postblocks. Any postblocks included in the conf will be ignored."
@@ -144,6 +144,22 @@ def main_cli():
         model = m
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
+
+    logging.info("Probing preblocks to populate loss/metrics conf keys from channel metadata")
+    _preblocks = build_preblocks(conf.get("preblocks", {}))
+    _probe = apply_preblocks(_preblocks, next(iter(train_loader)))
+    _channel_map = _probe["metadata"]["target"]["_channel_map"]
+    variables, surface_variables, diagnostic_variables = extract_flat_keys_from_channel_map(_channel_map)
+    conf["data"]["variables"] = variables
+    conf["data"]["surface_variables"] = surface_variables
+    conf["data"]["diagnostic_variables"] = diagnostic_variables
+    logging.info(
+        "Configured from preblock metadata: %d 3D vars, %d surface vars, %d diagnostic vars",
+        len(variables),
+        len(surface_variables),
+        len(diagnostic_variables),
+    )
+    del _preblocks, _probe, _channel_map
 
     train_criterion = load_loss(conf)
     valid_criterion = load_loss(conf, validation=True)

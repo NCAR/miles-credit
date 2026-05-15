@@ -33,28 +33,56 @@ def accum_log(log, new_logs):
     return log
 
 
-def inject_flat_var_keys(conf: dict) -> None:
-    """Inject Gen1-compatible variable keys into conf["data"] for metrics/loss.
+def vars_from_channel_map(channel_map: dict) -> list:
+    """Build the flat var list that loss/metrics iterate over from a preblock channel_map.
 
-    ``LatWeightedMetrics`` and ``VariableTotalLoss2D`` expect flat lists at:
-    - ``conf["data"]["variables"]``
-    - ``conf["data"]["surface_variables"]``
-    - ``conf["data"]["diagnostic_variables"]``
-
-    These are derived from the nested Gen2 source config.
+    Matches the format used by VariableTotalLoss2D and LatWeightedMetrics:
+    3D vars expanded as ``"{varname}_{level_idx}"``, 2D vars as ``"{varname}"``.
+    Sorted by channel slice start so the list is in tensor channel order.
     """
-    if "variables" in conf["data"]:
-        return
+    result = []
+    for key in sorted(channel_map, key=lambda k: channel_map[k]["slice"].start):
+        parts = key.split("/")
+        if len(parts) < 4:
+            continue
+        dim, varname = parts[2], parts[3]
+        n_levels = channel_map[key]["orig_shape"][0]
+        if dim == "3d":
+            result.extend(f"{varname}_{k}" for k in range(n_levels))
+        else:
+            result.append(varname)
+    return result
 
-    source_conf = next(iter(conf["data"]["source"].values()))
-    vars_conf = source_conf.get("variables", {})
 
-    prog = vars_conf.get("prognostic") or {}
-    diag = vars_conf.get("diagnostic") or {}
+def extract_flat_keys_from_channel_map(channel_map: dict) -> tuple:
+    """Extract the three conf flat key lists that loss/metrics read at init time.
 
-    conf["data"]["variables"] = prog.get("vars_3D", [])
-    conf["data"]["surface_variables"] = prog.get("vars_2D", [])
-    conf["data"]["diagnostic_variables"] = (diag.get("vars_3D", []) + diag.get("vars_2D", [])) if diag else []
+    Parses the preblock target channel_map (keys of the form
+    ``"source/field_type/dim/varname"``) and returns the unexpanded name lists
+    that populate ``conf["data"]["variables"]``, ``conf["data"]["surface_variables"]``,
+    and ``conf["data"]["diagnostic_variables"]``.
+
+    Returns:
+        (variables, surface_variables, diagnostic_variables)
+    """
+    variables = []
+    surface_variables = []
+    diagnostic_variables = []
+
+    for key in sorted(channel_map, key=lambda k: channel_map[k]["slice"].start):
+        parts = key.split("/")
+        if len(parts) < 4:
+            continue
+        field_type, dim, varname = parts[1], parts[2], parts[3]
+        if field_type == "prognostic":
+            if dim == "3d":
+                variables.append(varname)
+            else:
+                surface_variables.append(varname)
+        elif field_type == "diagnostic":
+            diagnostic_variables.append(varname)
+
+    return variables, surface_variables, diagnostic_variables
 
 
 def inject_postblock_info(conf: dict) -> None:
