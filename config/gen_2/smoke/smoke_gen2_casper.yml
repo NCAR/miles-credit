@@ -121,9 +121,9 @@ trainer:
     skip_validation: False
 
     start_epoch: 0
-    num_epoch: 1
+    # num_epoch: 1
     reload_epoch: False
-    epochs: 1
+    epochs: 20
 
     use_scheduler: True
     scheduler:
