@@ -40,6 +40,7 @@ from tqdm import tqdm
 from credit.datasets.local import LocalDataset
 from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
+from credit.postblock import build_postblocks, apply_postblocks
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info, setup, distributed_model_wrapper
@@ -97,53 +98,6 @@ def _inject_tracer_inds(conf):
     conf["model"]["post_conf"]["tracer_fixer"]["tracer_inds"] = inds
     conf["model"]["post_conf"]["tracer_fixer"]["tracer_thres"] = thres
     conf["model"]["post_conf"]["tracer_fixer"]["denorm"] = False
-
-
-def _build_output_denorm(conf, device, dtype=torch.float32):
-    """Return (mean, std) of shape (1, C_out, 1, 1, 1) for inverse-normalizing y_pred."""
-    data_conf = conf["data"]
-    src = data_conf["source"]["ERA5"]
-    levels = src["levels"]
-    level_coord = src["level_coord"]
-    n_levels = len(levels)
-    v = src["variables"]
-    prog = v.get("prognostic") or {}
-    diag = v.get("diagnostic") or {}
-
-    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", data_conf)
-    mean_ds = xr.open_dataset(norm_args.get("mean_path", data_conf.get("mean_path"))).load()
-    std_ds = xr.open_dataset(norm_args.get("std_path", data_conf.get("std_path"))).load()
-
-    def _stats(varname, is_3d):
-        if varname not in mean_ds:
-            n = n_levels if is_3d else 1
-            return torch.zeros(n, dtype=dtype), torch.ones(n, dtype=dtype)
-        if is_3d:
-            m = torch.tensor(mean_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
-            s = torch.tensor(std_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
-        else:
-            m = torch.tensor([float(mean_ds[varname].values)], dtype=dtype)
-            s = torch.tensor([float(std_ds[varname].values)], dtype=dtype)
-        return m, s
-
-    means, stds = [], []
-    for groups in [("vars_3D", True), ("vars_2D", False)]:
-        for vname in prog.get(groups[0], []):
-            m, s = _stats(vname, groups[1])
-            means.append(m)
-            stds.append(s)
-    for groups in [("vars_3D", True), ("vars_2D", False)]:
-        for vname in diag.get(groups[0], []):
-            m, s = _stats(vname, groups[1])
-            means.append(m)
-            stds.append(s)
-
-    mean_ds.close()
-    std_ds.close()
-    return (
-        torch.cat(means).view(1, -1, 1, 1, 1).to(device),
-        torch.cat(stds).view(1, -1, 1, 1, 1).to(device),
-    )
 
 
 def _sample_to_batch(sample):
@@ -266,11 +220,9 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     slices, _ = build_channel_layout(conf)
     n_prog = slices["prognostic"].stop - slices["prognostic"].start
 
-    # ---- Preblocks ----
+    # ---- Preblocks / Postblocks ----
     preblocks = build_preblocks(conf.get("preblocks", {}))
-
-    # ---- Inverse normalizer ----
-    denorm_mean, denorm_std = _build_output_denorm(conf, device)
+    postblocks = build_postblocks(conf.get("postblocks", {}))
 
     # ---- Lat/lon for output ----
     latlons = xr.open_dataset(conf["loss"]["latitude_weights"]).load()
@@ -330,7 +282,9 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     # ---- Load full initial state ----
     sample_full = dataset[(init_time, 0)]
     batch_full = _sample_to_batch(sample_full)
-    x = apply_preblocks(preblocks, batch_full, device=device)["input"].float()  # (1, C_in, 1, H, W)
+    out = apply_preblocks(preblocks, batch_full, device=device)
+    x = out["input"].float()  # (1, C_in, 1, H, W)
+    meta = out["metadata"]
 
     results = []
     x_init = None
@@ -348,8 +302,15 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
             if flag_energy:
                 y_pred = opt_energy({"y_pred": y_pred, "x": x})["y_pred"]
 
-            # Inverse-normalize → physical space; squeeze T dim for output.py
-            y_phys = (y_pred * denorm_std + denorm_mean).squeeze(2).cpu().numpy()  # (1, C, H, W)
+            # Inverse-normalize → physical space via postblocks
+            batch_dict = apply_postblocks(postblocks, {"prediction": y_pred, "metadata": meta})
+            pred = batch_dict["prediction"]
+            if isinstance(pred, torch.Tensor):
+                y_pred_phys = pred.squeeze(2)
+            else:
+                channel_map = meta["target"]["_channel_map"]
+                y_pred_phys = torch.cat([pred[k.split("/")[0]][k].flatten(1, 2) for k in channel_map], dim=1)
+            y_phys = y_pred_phys.cpu().numpy()  # (1, C, H, W)
 
             # Async save via SharedMemory
             shm = SharedMemory(create=True, size=y_phys.nbytes)
