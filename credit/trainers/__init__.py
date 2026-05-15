@@ -4,7 +4,15 @@ import logging
 # Import trainer classes
 from credit.trainers.trainerERA5gen1 import TrainerERA5Gen1
 from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2
-from credit.trainers.trainerERA5_Diffusion import TrainerERA5Diffusion
+from credit.trainers.trainerERA5gen2_legacy import TrainerERA5Gen2 as TrainerERA5Gen2Legacy
+
+try:
+    from credit.trainers.trainerERA5_Diffusion import TrainerERA5Diffusion
+
+    _DIFFUSION_AVAILABLE = True
+except (ImportError, Exception):
+    TrainerERA5Diffusion = None
+    _DIFFUSION_AVAILABLE = False
 from credit.trainers.trainerERA5_ensemble import TrainerERA5Ensemble
 from credit.trainers.trainer_downscaling import TrainerDownscaling
 
@@ -37,6 +45,10 @@ trainer_types = {
     "era5-gen2": (
         TrainerERA5Gen2,
         "ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.",
+    ),
+    "era5-gen2-legacy": (
+        TrainerERA5Gen2Legacy,
+        "ERA5 Gen 2 legacy trainer (update_x/build_channel_layout rollout, no postblocks). For comparison against era5-gen2.",
     ),
     "era5-diffusion": (
         TrainerERA5Diffusion,

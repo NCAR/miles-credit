@@ -3,12 +3,20 @@ import torch.nn as nn
 from credit.postblock.reconstruct import Reconstruct
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransformer
+from credit.postblock.tracer_fixer import TracerFixer
+from credit.postblock.mass_fixer import GlobalMassFixer
+from credit.postblock.water_fixer import GlobalWaterFixer
+from credit.postblock.energy_fixer import GlobalEnergyFixer
 
 
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
     "bridgescaler_transform": BridgeScalerTransformer,
     "wet_mask_samudra": WetMaskBlock,
+    "tracer_fixer": TracerFixer,
+    "global_mass_fixer": GlobalMassFixer,
+    "global_water_fixer": GlobalWaterFixer,
+    "global_energy_fixer": GlobalEnergyFixer,
 }
 
 

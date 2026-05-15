@@ -9,9 +9,9 @@ import tqdm
 
 import optuna
 
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock import build_postblocks, apply_postblocks
 from credit.preblock import build_preblocks, apply_preblocks
-from credit.datasets.channel_layout import build_channel_layout, update_x
+from credit.trainers.rollout_utils import build_rollout_input
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
@@ -27,10 +27,11 @@ class TrainerERA5Gen2(BaseTrainer):
         Key differences from TrainerERA5Gen1:
           - Uses new nested data schema: conf["data"]["source"]["ERA5"]["variables"]
           - Applies preblocks to assemble batch tensors before the model forward pass
-            (no concat_and_reshape / reshape_only calls in the training loop)
           - forecast_len semantics: 1 = 1 step (Gen 1 used 0 = 1 step)
           - backprop_on_timestep: range(1, forecast_len+1) instead of range(0, forecast_len+2)
           - Validation config read from conf["validation_data"] if present, else conf["data"]
+          - Postblocks applied after model forward pass via apply_postblocks()
+          - Multi-step rollout uses build_rollout_input() driven by the t=1 channel map
 
         Args:
             model: The (possibly DDP/FSDP-wrapped) model.
@@ -40,42 +41,14 @@ class TrainerERA5Gen2(BaseTrainer):
         super().__init__(model, rank, conf)
         logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
 
-        # ---- Preblock: config-driven transforms then auto-concat to tensors ----
         self.preblocks = build_preblocks(conf.get("preblocks", {}))
+        self.postblocks = build_postblocks(conf.get("postblocks", {}))
 
-        # ---- Postblock conservation fixers ----
-        post_conf = conf.get("model", {}).get("post_conf", {})
-        self.flag_mass_conserve = False
-        self.flag_water_conserve = False
-        self.flag_energy_conserve = False
-        self.opt_mass = None
-        self.opt_water = None
-        self.opt_energy = None
-
-        if post_conf.get("activate", False):
-            if post_conf.get("global_mass_fixer", {}).get("activate", False) and post_conf["global_mass_fixer"].get(
-                "activate_outside_model", False
-            ):
-                logger.info("Activate GlobalMassFixer outside of model")
-                self.flag_mass_conserve = True
-                self.opt_mass = GlobalMassFixer(post_conf)
-
-            if post_conf.get("global_water_fixer", {}).get("activate", False) and post_conf["global_water_fixer"].get(
-                "activate_outside_model", False
-            ):
-                logger.info("Activate GlobalWaterFixer outside of model")
-                self.flag_water_conserve = True
-                self.opt_water = GlobalWaterFixer(post_conf)
-
-            if post_conf.get("global_energy_fixer", {}).get("activate", False) and post_conf["global_energy_fixer"].get(
-                "activate_outside_model", False
-            ):
-                logger.info("Activate GlobalEnergyFixer outside of model")
-                self.flag_energy_conserve = True
-                self.opt_energy = GlobalEnergyFixer(post_conf)
+        # Cached from the first t=1 batch; covers ALL input variable groups.
+        # Used by build_rollout_input to assemble x at t > 1.
+        self.ic_channel_map = None
 
         # ---- Data schema extraction (new nested schema) ----
-        self.slices, _ = build_channel_layout(conf)
         data_conf = conf["data"]
         source = next(iter(data_conf["source"].values()))
         vars_conf = source["variables"]
@@ -107,8 +80,32 @@ class TrainerERA5Gen2(BaseTrainer):
         self.valid_forecast_len = data_valid.get("forecast_len", self.forecast_len)
 
         # If True, log a warning on NaN loss instead of raising TrialPruned.
-        # Useful for smoke tests with unnormalized data where NaN is expected.
         self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _init_full_data_dict(self, batch: dict, _batch: dict, x: torch.Tensor) -> dict:
+        """Build the full_data_dict at t=1 from the raw batch and preblock output."""
+        return {
+            "raw": batch,
+            "preprocessed": {
+                "input": x,
+                "target": _batch.get("target"),
+                "metadata": _batch["metadata"],
+            },
+            "predicted": None,
+        }
+
+    def _update_full_data_dict(self, full_data_dict: dict, _batch: dict, x: torch.Tensor) -> None:
+        """Update preprocessed input/target in full_data_dict at t > 1 (in-place)."""
+        full_data_dict["preprocessed"]["input"] = x
+        full_data_dict["preprocessed"]["target"] = _batch.get("target")
+
+    # ------------------------------------------------------------------
+    # Training loop
+    # ------------------------------------------------------------------
 
     def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
         """
@@ -116,13 +113,14 @@ class TrainerERA5Gen2(BaseTrainer):
 
         The inner loop iterates over forecast_len autoregressive steps. For each step:
           1. Pull the next batch from the dataloader (contains per-field tensors).
-          2. Apply preblocks to assemble batch["x"] and batch["y"].
-          3. For t > 1, replace the prognostic channels of x with the previous y_pred.
-          4. Forward pass, optional postblock, loss and backprop on backprop_on_timestep.
+          2. Apply preblocks to assemble batch["preprocessed"]["input"] and ["target"].
+          3. At t=1: cache self.ic_channel_map and initialize full_data_dict.
+             At t>1: assemble x via build_rollout_input from the previous prediction.
+          4. Forward pass; compute loss on the flat (scaled) y_pred.
+          5. Apply postblocks (Reconstruct converts y_pred to nested variable dict).
 
         Args:
             epoch: Current epoch number.
-            conf: Full configuration dict.
             trainloader: DataLoader for training.
             optimizer, criterion, scaler, scheduler, metrics: Standard training objects.
 
@@ -133,11 +131,9 @@ class TrainerERA5Gen2(BaseTrainer):
             logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
         logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
 
-        # lambda scheduler steps once per epoch before batches
         if self.use_scheduler and self.scheduler_type == "lambda":
             scheduler.step()
 
-        # resolve effective batches_per_epoch
         from torch.utils.data import IterableDataset
 
         batches_per_epoch = self.batches_per_epoch
@@ -161,62 +157,50 @@ class TrainerERA5Gen2(BaseTrainer):
         for steps in range(batches_per_epoch):
             logs = {}
             loss = 0
-            x_init = None  # snapshot of x at step 1 for GlobalMassFixer
-            y_pred = None
+            y_pred_flat = None  # flat model output; used for loss, metrics, and rollout
             y = None
+            full_data_dict = None
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
                 _batch = apply_preblocks(self.preblocks, batch, device=self.device)
-                x_raw, y_raw = _batch["input"], _batch["target"]
 
                 if t == 1:
-                    x = x_raw.float()
+                    self.ic_channel_map = _batch["metadata"]["input"]["_channel_map"]
+                    x = _batch["input"].float()
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                    full_data_dict = self._init_full_data_dict(batch, _batch, x)
                 else:
-                    # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
-                    # update_x replaces dynfrc and prognostic slices; static stays.
-                    x_dynfrc = x_raw.float()
+                    curr_dyn_input = _batch["input"].float()
                     if self.ensemble_size > 1:
-                        x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
-                    y_pred_in = y_pred if self.retain_graph else y_pred.detach()
-                    x = update_x(x, x_dynfrc, y_pred_in, self.slices)
+                        curr_dyn_input = torch.repeat_interleave(curr_dyn_input, self.ensemble_size, 0)
+                    x = build_rollout_input(full_data_dict, curr_dyn_input, self.ic_channel_map)
+                    self._update_full_data_dict(full_data_dict, _batch, x)
 
                 if self.flag_clamp:
                     x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
+                    full_data_dict["preprocessed"]["input"] = x
 
                 with torch.autocast(device_type="cuda", enabled=self.amp):
-                    y_pred = self.model(x)
+                    y_pred_flat = self.model(x)
 
-                # postblock opts outside of model
-                if self.flag_mass_conserve:
-                    if t == 1:
-                        x_init = x.clone()
-                    input_dict = {"y_pred": y_pred, "x": x_init}
-                    input_dict = self.opt_mass(input_dict)
-                    y_pred = input_dict["y_pred"]
-
-                if self.flag_water_conserve:
-                    input_dict = {"y_pred": y_pred, "x": x}
-                    input_dict = self.opt_water(input_dict)
-                    y_pred = input_dict["y_pred"]
-
-                if self.flag_energy_conserve:
-                    input_dict = {"y_pred": y_pred, "x": x}
-                    input_dict = self.opt_energy(input_dict)
-                    y_pred = input_dict["y_pred"]
-
-                # backprop on specified timesteps
+                # Loss on flat scaled prediction — computed before postblocks so
+                # the target and prediction are in the same (scaled) space.
                 if t in self.backprop_on_timestep:
-                    y = y_raw.float()
+                    y = _batch["target"].float()
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
-
                     with torch.autocast(device_type="cuda", enabled=self.amp):
-                        loss = criterion(y.to(y_pred.dtype), y_pred).mean()
+                        loss = criterion(y.to(y_pred_flat.dtype), y_pred_flat).mean()
                     accum_log(logs, {"loss": loss.item()})
                     scaler.scale(loss).backward(retain_graph=self.retain_graph)
+
+                # Postblocks — Reconstruct (if configured) splits y_pred_flat into
+                # a nested variable dict for the next rollout step.
+                full_data_dict["predicted"] = y_pred_flat if self.retain_graph else y_pred_flat.detach()
+                if self.postblocks:
+                    full_data_dict = apply_postblocks(self.postblocks, full_data_dict)
 
                 if self.distributed:
                     torch.distributed.barrier()
@@ -241,9 +225,8 @@ class TrainerERA5Gen2(BaseTrainer):
             if self.ema is not None:
                 self.ema.update(self.model)
 
-            # collect metrics
-            if y_pred is not None and y is not None:
-                metrics_dict = metrics(y_pred, y)
+            if y_pred_flat is not None and y is not None:
+                metrics_dict = metrics(y_pred_flat, y)
                 for name, value in metrics_dict.items():
                     value = torch.Tensor([value]).to(self.device, non_blocking=True)
                     if self.distributed:
@@ -274,16 +257,19 @@ class TrainerERA5Gen2(BaseTrainer):
 
         return results_dict
 
+    # ------------------------------------------------------------------
+    # Validation loop
+    # ------------------------------------------------------------------
+
     def validate(self, epoch, valid_loader, criterion, metrics):
         """
         Validate for one epoch.
 
         Runs self.valid_forecast_len autoregressive steps per sample.
-        Loss and metrics are computed only at the final step (t == self.valid_forecast_len).
+        Loss and metrics are computed only at the final step.
 
         Args:
             epoch: Current epoch number.
-            conf: Full configuration dict.
             valid_loader: DataLoader for validation.
             criterion, metrics: Loss and metric callables.
 
@@ -312,59 +298,44 @@ class TrainerERA5Gen2(BaseTrainer):
         dl = cycle(valid_loader)
         with torch.no_grad():
             for steps in range(valid_batches_per_epoch):
-                y_pred = None
+                y_pred_flat = None
                 y = None
                 loss = 0
-                x_init = None
+                full_data_dict = None
 
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
                     _batch = apply_preblocks(self.preblocks, batch, device=self.device)
-                    x_raw, y_raw = _batch["input"], _batch["target"]
 
                     if t == 1:
-                        x = x_raw.float()
+                        self.ic_channel_map = _batch["metadata"]["input"]["_channel_map"]
+                        x = _batch["input"].float()
                         if self.ensemble_size > 1:
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                        full_data_dict = self._init_full_data_dict(batch, _batch, x)
                     else:
-                        # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
-                        # update_x replaces dynfrc and prognostic slices; static stays.
-                        x_dynfrc = x_raw.float()
+                        curr_dyn_input = _batch["input"].float()
                         if self.ensemble_size > 1:
-                            x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
-                        x = update_x(x, x_dynfrc, y_pred.detach(), self.slices)
+                            curr_dyn_input = torch.repeat_interleave(curr_dyn_input, self.ensemble_size, 0)
+                        x = build_rollout_input(full_data_dict, curr_dyn_input, self.ic_channel_map)
+                        self._update_full_data_dict(full_data_dict, _batch, x)
 
                     if self.flag_clamp:
                         x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
+                        full_data_dict["preprocessed"]["input"] = x
 
-                    y_pred = self.model(x.float())
+                    y_pred_flat = self.model(x.float())
 
-                    # postblock opts outside of model
-                    if self.flag_mass_conserve:
-                        if t == 1:
-                            x_init = x.clone()
-                        input_dict = {"y_pred": y_pred, "x": x_init}
-                        input_dict = self.opt_mass(input_dict)
-                        y_pred = input_dict["y_pred"]
+                    full_data_dict["predicted"] = y_pred_flat
+                    if self.postblocks:
+                        full_data_dict = apply_postblocks(self.postblocks, full_data_dict)
 
-                    if self.flag_water_conserve:
-                        input_dict = {"y_pred": y_pred, "x": x}
-                        input_dict = self.opt_water(input_dict)
-                        y_pred = input_dict["y_pred"]
-
-                    if self.flag_energy_conserve:
-                        input_dict = {"y_pred": y_pred, "x": x}
-                        input_dict = self.opt_energy(input_dict)
-                        y_pred = input_dict["y_pred"]
-
-                    # compute loss and metrics only at the final rollout step
                     if t == self.valid_forecast_len:
-                        y = y_raw.float()
+                        y = _batch["target"].float()
                         if self.flag_clamp:
                             y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
-
-                        loss = criterion(y.to(y_pred.dtype), y_pred).mean()
-                        metrics_dict = metrics(y_pred.float(), y.float())
+                        loss = criterion(y.to(y_pred_flat.dtype), y_pred_flat).mean()
+                        metrics_dict = metrics(y_pred_flat.float(), y.float())
                         for name, value in metrics_dict.items():
                             value = torch.Tensor([value]).to(self.device, non_blocking=True)
                             if self.distributed:
