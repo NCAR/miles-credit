@@ -100,9 +100,19 @@ def _inject_tracer_inds(conf):
     conf["model"]["post_conf"]["tracer_fixer"]["denorm"] = False
 
 
-def _sample_to_batch(sample):
-    """Add batch dim and wrap LocalDataset sample for preblock input."""
-    return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()}, "metadata": sample["metadata"]}}
+def _sample_to_batch(sample, source_name):
+    """Add batch dim and wrap LocalDataset sample for preblock input.
+
+    Produces the MultiSourceDataset format expected by ERA5Normalizer and ConcatToTensor:
+        {"input": {source_name: {var_key: tensor}}, "metadata": {source_name: {...}}}
+    """
+    meta = {
+        k: torch.tensor(v).unsqueeze(0) if isinstance(v, (int, float)) else v for k, v in sample["metadata"].items()
+    }
+    return {
+        "input": {source_name: {k: v.unsqueeze(0) for k, v in sample["input"].items()}},
+        "metadata": {source_name: meta},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +291,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
 
     # ---- Load full initial state ----
     sample_full = dataset[(init_time, 0)]
-    batch_full = _sample_to_batch(sample_full)
+    batch_full = _sample_to_batch(sample_full, dataset.curr_source_name)
     out = apply_preblocks(preblocks, batch_full, device=device)
     x = out["input"].float()  # (1, C_in, 1, H, W)
     meta = out["metadata"]
@@ -326,7 +336,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
             if step < n_steps:
                 t_next = init_time + step * dt
                 sample_frc = dataset[(t_next, 1)]  # only dynamic_forcing
-                batch_frc = _sample_to_batch(sample_frc)
+                batch_frc = _sample_to_batch(sample_frc, dataset.curr_source_name)
                 x_frc = apply_preblocks(preblocks, batch_frc, device=device)["input"].float()
                 y_prog = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
                 x = update_x(x, x_frc, y_prog, slices)

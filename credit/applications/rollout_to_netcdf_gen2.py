@@ -101,9 +101,19 @@ def _inject_tracer_inds(conf):
     conf["model"]["post_conf"]["tracer_fixer"]["denorm"] = False
 
 
-def _sample_to_batch(sample):
-    """Wrap a single LocalDataset sample (no batch dim) into preblock-compatible dict."""
-    return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()}, "metadata": sample["metadata"]}}
+def _sample_to_batch(sample, source_name):
+    """Wrap a single LocalDataset sample (no batch dim) into preblock-compatible dict.
+
+    Produces the MultiSourceDataset format expected by ERA5Normalizer and ConcatToTensor:
+        {"input": {source_name: {var_key: tensor}}, "metadata": {source_name: {...}}}
+    """
+    meta = {
+        k: torch.tensor(v).unsqueeze(0) if isinstance(v, (int, float)) else v for k, v in sample["metadata"].items()
+    }
+    return {
+        "input": {source_name: {k: v.unsqueeze(0) for k, v in sample["input"].items()}},
+        "metadata": {source_name: meta},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +224,7 @@ def predict(rank, world_size, conf, p):
 
             # Step 0: load full initial state
             sample_full = dataset[(t0, 0)]
-            batch_full = _sample_to_batch(sample_full)
+            batch_full = _sample_to_batch(sample_full, dataset.curr_source_name)
             out = apply_preblocks(preblocks, batch_full)
             x = out["input"].to(device).float()  # (1, C_in, 1, H, W)
             meta = out["metadata"]
@@ -262,7 +272,7 @@ def predict(rank, world_size, conf, p):
                 if step < forecast_steps:
                     t_next = t0 + step * dt
                     sample_frc = dataset[(t_next, 1)]  # loads only dynamic_forcing
-                    batch_frc = _sample_to_batch(sample_frc)
+                    batch_frc = _sample_to_batch(sample_frc, dataset.curr_source_name)
                     x_frc = apply_preblocks(preblocks, batch_frc)["input"].to(device).float()
                     x = update_x(x, x_frc, y_pred.detach(), slices)
 
