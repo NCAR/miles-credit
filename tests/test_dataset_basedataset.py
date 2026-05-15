@@ -383,7 +383,7 @@ def test_getitem_return_target_false(minimal_config: Dict[str, Any], patch_base_
 def test_temporal_mode_default_is_none(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """temporal_mode is None by default (no key in source config)."""
     ds = BaseDataset(minimal_config)
-    assert ds.temporal_mode is None
+    assert ds.temporal_mode == "exact"
 
 
 def test_temporal_mode_set_from_config(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:

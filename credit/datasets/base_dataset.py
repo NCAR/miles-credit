@@ -225,9 +225,9 @@ class BaseDataset(AbstractBaseDataset):
         if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
 
-        # temporal_mode: None (default, exact timestamp match required) or
+        # temporal_mode: "exact" (default, exact timestamp match required) or
         # "persist" (snap to last native timestamp via asof(); used for coarser sources)
-        self.temporal_mode: str | None = self.curr_source_cfg.get("temporal_mode")
+        self.temporal_mode: str = self.curr_source_cfg.get("temporal_mode", "exact")
         self._persist_cache: dict = {}
 
         # Placeholder for static metadata
