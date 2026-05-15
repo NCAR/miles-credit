@@ -285,7 +285,9 @@ def _convert(args: argparse.Namespace) -> None:
 
         # Keep non-flat keys (forecast_len, valid_forecast_len, backprop_on_timestep, …)
         keep_keys = {k: v for k, v in data.items() if k not in _V1_DATA_FLAT_KEYS}
-        level_coord = _prompt("level_coord (vertical coordinate name in your data files)").strip()
+        level_coord = getattr(args, "level_coord", None) or ""
+        if not level_coord:
+            level_coord = prompt("level_coord (vertical coordinate name in your data files)", default="level").strip()
         _all_dims = _zarr_dims(prog_path)
         if _all_dims is not None and level_coord not in _all_dims:
             print(f"  '{level_coord}' not found in file. Available options: {', '.join(_all_dims)}", file=sys.stderr)
