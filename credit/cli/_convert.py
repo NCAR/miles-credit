@@ -72,7 +72,6 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
 
     # --- postblock dict: {source_name: {field_type: {dim: {varname: scaler}}}}
     post_dict = {}
-    src_lower = source_name.lower()
 
     for (field_type, dim), varnames in var_groups.items():
         for varname in varnames:
@@ -80,13 +79,14 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
                 continue
             n_levels = int(ds_mean[varname].size)
             sc = _make_scaler(varname, n_levels)
-            full_key = f"{src_lower}/{field_type}/{dim}/{varname}"
+            # Use source_name exactly as the dataset uses it as key prefix in variable keys.
+            full_key = f"{source_name}/{field_type}/{dim}/{varname}"
             pre_input[full_key] = sc
             pre_target[full_key] = sc
             pre_keys.append(full_key)
             # postblock only covers prognostic vars (model outputs)
             if field_type == "prognostic":
-                post_dict.setdefault(src_lower, {}).setdefault(field_type, {}).setdefault(dim, {})[varname] = sc
+                post_dict.setdefault(source_name, {}).setdefault(field_type, {}).setdefault(dim, {})[varname] = sc
 
     ds_mean.close()
     ds_std.close()
