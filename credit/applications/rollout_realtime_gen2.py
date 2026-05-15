@@ -47,6 +47,7 @@ from credit.models.checkpoint import load_model_state, load_state_dict_error_han
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.nwp import build_GFS_init
+from credit.trainers.utils import extract_flat_keys_from_channel_map
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -60,20 +61,18 @@ os.environ["MKL_NUM_THREADS"] = "1"
 # ---------------------------------------------------------------------------
 
 
-def _inject_flat_schema(conf):
-    """Inject v1-style flat keys into conf['data'] so output.py utilities work."""
-    if "variables" in conf["data"]:
-        return
+def _set_output_conf(conf, preblocks, dataset, init_time):
+    """Populate output conf keys from a preblock channel_map probe."""
     src = conf["data"]["source"]["ERA5"]
-    v = src["variables"]
-    prog = v.get("prognostic") or {}
-    diag = v.get("diagnostic") or {}
-    conf["data"]["variables"] = prog.get("vars_3D", [])
-    conf["data"]["surface_variables"] = prog.get("vars_2D", [])
-    conf["data"]["diagnostic_variables"] = diag.get("vars_2D", []) if diag else []
-    conf["data"]["level_ids"] = src.get("levels", list(range(conf["model"]["levels"])))
-    if "scaler_type" not in conf["data"]:
-        conf["data"]["scaler_type"] = "std_new"
+    _probe = apply_preblocks(preblocks, _sample_to_batch(dataset[(init_time, 0)]))
+    variables, surface_variables, diagnostic_variables = extract_flat_keys_from_channel_map(
+        _probe["metadata"]["target"]["_channel_map"]
+    )
+    conf["data"]["variables"] = variables
+    conf["data"]["surface_variables"] = surface_variables
+    conf["data"]["diagnostic_variables"] = diagnostic_variables
+    conf["data"].setdefault("level_ids", src.get("levels", list(range(conf["model"]["levels"]))))
+    conf["data"].setdefault("scaler_type", "std_new")
 
 
 def _inject_tracer_inds(conf):
@@ -321,6 +320,9 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     dataset_conf["forecast_len"] = 1
     dataset = LocalDataset(dataset_conf, return_target=False)
 
+    # ---- Populate output conf keys from preblock channel_map ----
+    _set_output_conf(conf, preblocks, dataset, init_time)
+
     init_str = init_time.strftime("%Y-%m-%dT%HZ")
     conf["predict"]["save_forecast"] = save_dir
 
@@ -443,7 +445,6 @@ Examples:
     )
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
-    _inject_flat_schema(conf)
 
     # ---- CLI overrides ----
     if args.mode in ["none", "ddp", "fsdp"]:

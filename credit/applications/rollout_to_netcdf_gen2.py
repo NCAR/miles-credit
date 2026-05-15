@@ -43,6 +43,7 @@ from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.forecast import load_forecasts
 from credit.pbs import launch_script, launch_script_mpi
+from credit.trainers.utils import extract_flat_keys_from_channel_map
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -56,23 +57,19 @@ os.environ["MKL_NUM_THREADS"] = "1"
 # ---------------------------------------------------------------------------
 
 
-def _inject_flat_schema(conf):
-    """Inject v1-style flat keys into conf['data'] so output.py utilities work."""
-    if "variables" in conf["data"]:
-        return
+def _set_output_conf(conf, preblocks, dataset):
+    """Populate output conf keys from a preblock channel_map probe."""
     src = conf["data"]["source"]["ERA5"]
-    v = src["variables"]
-    prog = v.get("prognostic") or {}
-    diag = v.get("diagnostic") or {}
-    conf["data"]["variables"] = prog.get("vars_3D", [])
-    conf["data"]["surface_variables"] = prog.get("vars_2D", [])
-    # diagnostic_variables is the list of names shown in xarray output
-    conf["data"]["diagnostic_variables"] = diag.get("vars_2D", []) if diag else []
-    # level_ids: actual pressure/model-level values for xarray coordinate
-    conf["data"]["level_ids"] = src.get("levels", list(range(conf["model"]["levels"])))
-    # scaler_type needed by save_netcdf_increment
-    if "scaler_type" not in conf["data"]:
-        conf["data"]["scaler_type"] = "std_new"
+    _t0 = pd.Timestamp(conf["predict"]["forecasts"][0]).tz_localize(None)
+    _probe = apply_preblocks(preblocks, _sample_to_batch(dataset[(_t0, 0)]))
+    variables, surface_variables, diagnostic_variables = extract_flat_keys_from_channel_map(
+        _probe["metadata"]["target"]["_channel_map"]
+    )
+    conf["data"]["variables"] = variables
+    conf["data"]["surface_variables"] = surface_variables
+    conf["data"]["diagnostic_variables"] = diagnostic_variables
+    conf["data"].setdefault("level_ids", src.get("levels", list(range(conf["model"]["levels"]))))
+    conf["data"].setdefault("scaler_type", "std_new")
 
 
 def _inject_tracer_inds(conf):
@@ -261,6 +258,9 @@ def predict(rank, world_size, conf, p):
     dataset = LocalDataset(dataset_conf, return_target=False)
     dt = pd.Timedelta(conf["data"]["timestep"]) if "timestep" in conf["data"] else pd.Timedelta(hours=lead_time_periods)
 
+    # ---- Populate output conf keys from preblock channel_map ----
+    _set_output_conf(conf, preblocks, dataset)
+
     # ---- Forecast init times: distribute across ranks ----
     all_forecasts = conf["predict"]["forecasts"]
     forecasts = [f for i, f in enumerate(all_forecasts) if i % world_size == rank]
@@ -400,7 +400,6 @@ def main():
     )
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
-    _inject_flat_schema(conf)
 
     if "predict" not in conf:
         logger.error(
