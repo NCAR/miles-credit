@@ -347,7 +347,9 @@ def _convert(args: argparse.Namespace) -> None:
                     },
                 }
                 conf["preblocks"]["concat"] = {"type": "concat", "args": {}}
-                conf.setdefault("postblocks", {})["scaler"] = {
+                pb = conf.setdefault("postblocks", {})
+                pb["reconstruct"] = {"type": "reconstruct"}
+                pb["scaler"] = {
                     "type": "bridgescaler_transform",
                     "args": {
                         "scaler_path": post_json,
