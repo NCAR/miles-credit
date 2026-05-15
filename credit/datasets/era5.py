@@ -414,19 +414,6 @@ class WeatherBench2ERA5Dataset(BaseDataset):
         self._fs = GCSFileSystem(**fs_config)
         self.store = zarr.storage.FsspecStore(fs=self._fs, path=self.store_path)
 
-    def _build_timestamps(self) -> pd.DatetimeIndex:
-        """Return valid initialisation timestamps for the dataset.
-
-        Returns:
-            DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
-            the forecast horizon, at the configured timestep frequency.
-        """
-        return pd.date_range(
-            self.start_datetime,
-            self.end_datetime - self.num_forecast_steps * self.dt,
-            freq=self.dt,
-        )
-
     def _extract_field(
         self,
         field_type: VALID_FIELD_TYPES,

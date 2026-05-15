@@ -5,6 +5,7 @@ from credit.preblock import ConcatToTensor
 from credit.postblock import Reconstruct
 import yaml
 from copy import deepcopy
+from torch import isnan, all
 
 
 conf_str = """
@@ -44,22 +45,24 @@ def test_geopotential():
     ct = ConcatToTensor()
     batch_tensor, meta = ct(batch)
     meta_2 = deepcopy(meta)
-    meta_2["_channel_map"]["output"] = meta_2["_channel_map"]["input"]
+    meta_2["target"]["_channel_map"] = meta_2["input"]["_channel_map"]
     recon = Reconstruct()
-    output = recon({"prediction": batch_tensor, "meta": meta_2})
-    output_var_name = "ARCO_ERA5/arco_era5/derived_diagnostic/3d/geopotential"
+    output = recon({"prediction": batch_tensor, "metadata": meta_2})
+    output_var_name = "ARCO_ERA5/derived_diagnostic/3d/geopotential"
     geopotential_layer = GeopotentialDiagnostic(
         output_name=output_var_name,
-        surface_geopotential_var="ARCO_ERA5/arco_era5/static/2d/geopotential_at_surface",
-        surface_pressure_var="ARCO_ERA5/arco_era5/prognostic/2d/surface_pressure",
-        temperature_var="ARCO_ERA5/arco_era5/prognostic/3d/temperature",
-        specific_humidity_var="ARCO_ERA5/arco_era5/prognostic/3d/specific_humidity",
+        data_keys=["prediction"],
+        surface_geopotential_var="ARCO_ERA5/static/2d/geopotential_at_surface",
+        surface_pressure_var="ARCO_ERA5/prognostic/2d/surface_pressure",
+        temperature_var="ARCO_ERA5/prognostic/3d/temperature",
+        specific_humidity_var="ARCO_ERA5/prognostic/3d/specific_humidity",
         level_info_file="ERA5_Lev_Info.nc",
         model_a_half_var="a_half",
         model_b_half_var="b_half",
     )
     diagnosed = geopotential_layer(output)
     pred = diagnosed["prediction"]
-    geo = pred["ARCO_ERA5/arco_era5/derived_diagnostic/3d/geopotential"]
-    temp = pred["ARCO_ERA5/arco_era5/prognostic/3d/temperature"]
+    geo = pred["ARCO_ERA5"]["ARCO_ERA5/derived_diagnostic/3d/geopotential"]
+    temp = pred["ARCO_ERA5"]["ARCO_ERA5/prognostic/3d/temperature"]
     assert geo.shape == temp.shape
+    assert all(~isnan(geo))

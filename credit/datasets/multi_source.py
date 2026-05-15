@@ -43,7 +43,7 @@ from typing import Any
 
 import pandas as pd
 
-from credit.datasets.base_dataset import AbstractBaseDataset
+from credit.datasets.base_dataset import AbstractBaseDataset, BaseDataset
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class MultiSourceDataset(AbstractBaseDataset):
 
     def __init__(self, config: dict[str, Any], return_target: bool = False) -> None:
         super().__init__(config, return_target)
-        self.datasets: dict[str, AbstractBaseDataset] = {}
+        self.datasets: dict[str, BaseDataset] = {}
         source_cfg = config.get("source", {})
 
         # Loop through all the options in the source config. These will have user

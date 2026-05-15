@@ -527,32 +527,32 @@ def test_wb2_era5_64x32_single_load(minimal_wb2_era5_config):
     lat, lon = 64, 32
 
     # 3D variable: (n_levels, 1, lat, lon)
-    temp_in = sample["input"]["WeatherBench2_ERA5/weatherbench2_era5/prognostic/3d/temperature"]
+    temp_in = sample["input"]["WeatherBench2_ERA5/prognostic/3d/temperature"]
     assert temp_in.shape == (n_levels, 1, lat, lon), f"Unexpected shape: {temp_in.shape}"
     assert temp_in.dtype == torch.float32
     assert temp_in.min() > 180, "Temperature below 180 K is implausible"
     assert ~torch.any(torch.isnan(temp_in))
 
-    u_in = sample["input"]["WeatherBench2_ERA5/weatherbench2_era5/prognostic/3d/u_component_of_wind"]
+    u_in = sample["input"]["WeatherBench2_ERA5/prognostic/3d/u_component_of_wind"]
     assert u_in.shape == (n_levels, 1, lat, lon)
 
     # 2D variable: (1, 1, lat, lon)
-    sp_in = sample["input"]["WeatherBench2_ERA5/weatherbench2_era5/prognostic/2d/surface_pressure"]
+    sp_in = sample["input"]["WeatherBench2_ERA5/prognostic/2d/surface_pressure"]
     assert sp_in.shape == (1, 1, lat, lon), f"Unexpected shape: {sp_in.shape}"
     assert sp_in.dtype == torch.float32
     assert ~torch.any(torch.isnan(sp_in))
 
-    t2m_in = sample["input"]["WeatherBench2_ERA5/weatherbench2_era5/prognostic/2d/2m_temperature"]
+    t2m_in = sample["input"]["WeatherBench2_ERA5/prognostic/2d/2m_temperature"]
     assert t2m_in.shape == (1, 1, lat, lon)
 
-    sfc_geo = sample["input"]["WeatherBench2_ERA5/weatherbench2_era5/static/2d/geopotential_at_surface"]
+    sfc_geo = sample["input"]["WeatherBench2_ERA5/static/2d/geopotential_at_surface"]
     assert sfc_geo.shape == (1, 1, lat, lon)
 
     # Target contains prognostic + diagnostic; static and dynamic_forcing should be absent
-    assert "WeatherBench2_ERA5/weatherbench2_era5/prognostic/3d/temperature" in sample["target"]
-    assert "WeatherBench2_ERA5/weatherbench2_era5/diagnostic/2d/total_precipitation_6hr" in sample["target"]
-    assert "WeatherBench2_ERA5/weatherbench2_era5/static/2d/geopotential_at_surface" not in sample["target"]
+    assert "WeatherBench2_ERA5/prognostic/3d/temperature" in sample["target"]
+    assert "WeatherBench2_ERA5/diagnostic/2d/total_precipitation_6hr" in sample["target"]
+    assert "WeatherBench2_ERA5/static/2d/geopotential_at_surface" not in sample["target"]
 
-    temp_tgt = sample["target"]["WeatherBench2_ERA5/weatherbench2_era5/prognostic/3d/temperature"]
+    temp_tgt = sample["target"]["WeatherBench2_ERA5/prognostic/3d/temperature"]
     assert temp_tgt.shape == (n_levels, 1, lat, lon)
     assert ~torch.any(torch.isnan(temp_tgt))
