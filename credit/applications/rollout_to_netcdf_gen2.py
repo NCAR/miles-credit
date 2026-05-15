@@ -73,20 +73,19 @@ def _set_output_conf(conf, preblocks, dataset):
 
 
 def _inject_tracer_inds(conf):
-    """Compute tracer_inds for TracerFixer from v2 variable layout (same as train_gen2.py)."""
+    """Compute tracer_inds for TracerFixer from the flat keys already set by _set_output_conf.
+
+    # TODO: remove when postblock config work is done — tracer_inds will be derived
+    # from the new postblock schema instead of being injected here.
+    """
     tracer_conf = conf.get("model", {}).get("post_conf", {}).get("tracer_fixer", {})
     if not tracer_conf.get("activate", False) or "tracer_inds" in tracer_conf:
         return
-    src = conf["data"]["source"]["ERA5"]
-    n_levels = len(src.get("levels", []))
-    v = src["variables"]
-    vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
-    vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
-    diag_2d = (v.get("diagnostic") or {}).get("vars_2D", [])
-    output_vars = [vn for vn in vars_3d for _ in range(n_levels)] + vars_2d + diag_2d
-    tracer_names = tracer_conf.get("tracer_name", [])
-    tracer_thres_cfg = tracer_conf.get("tracer_thres", [])
-    thres_map = dict(zip(tracer_names, tracer_thres_cfg))
+    levels = conf["model"].get("levels") or conf["model"].get("frames")
+    output_vars = [vn for vn in conf["data"]["variables"] for _ in range(levels)]
+    output_vars += conf["data"]["surface_variables"]
+    output_vars += conf["data"]["diagnostic_variables"]
+    thres_map = dict(zip(tracer_conf.get("tracer_name", []), tracer_conf.get("tracer_thres", [])))
     tracer_inds, tracer_thres = [], []
     for i, vn in enumerate(output_vars):
         if vn in thres_map:
@@ -247,11 +246,6 @@ def predict(rank, world_size, conf, p):
             flag_energy_conserve = True
             opt_energy = GlobalEnergyFixer(post_conf)
 
-    # ---- Model ----
-    _inject_tracer_inds(conf)
-    model = _load_model(conf, device)
-    model.eval()
-
     # ---- Dataset (predict uses full data range; we select specific inits below) ----
     dataset_conf = dict(conf["data"])
     dataset_conf["forecast_len"] = 1
@@ -260,6 +254,11 @@ def predict(rank, world_size, conf, p):
 
     # ---- Populate output conf keys from preblock channel_map ----
     _set_output_conf(conf, preblocks, dataset)
+
+    # ---- Model ----
+    _inject_tracer_inds(conf)
+    model = _load_model(conf, device)
+    model.eval()
 
     # ---- Forecast init times: distribute across ranks ----
     all_forecasts = conf["predict"]["forecasts"]

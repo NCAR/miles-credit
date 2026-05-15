@@ -76,17 +76,18 @@ def _set_output_conf(conf, preblocks, dataset, init_time):
 
 
 def _inject_tracer_inds(conf):
-    """Compute tracer_inds for TracerFixer from v2 variable layout."""
+    """Compute tracer_inds for TracerFixer from the flat keys already set by _set_output_conf.
+
+    # TODO: remove when postblock config work is done — tracer_inds will be derived
+    # from the new postblock schema instead of being injected here.
+    """
     tracer_conf = conf.get("model", {}).get("post_conf", {}).get("tracer_fixer", {})
     if not tracer_conf.get("activate", False) or "tracer_inds" in tracer_conf:
         return
-    src = conf["data"]["source"]["ERA5"]
-    n_levels = len(src.get("levels", []))
-    v = src["variables"]
-    vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
-    vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
-    diag_2d = (v.get("diagnostic") or {}).get("vars_2D", [])
-    output_vars = [vn for vn in vars_3d for _ in range(n_levels)] + vars_2d + diag_2d
+    levels = conf["model"].get("levels") or conf["model"].get("frames")
+    output_vars = [vn for vn in conf["data"]["variables"] for _ in range(levels)]
+    output_vars += conf["data"]["surface_variables"]
+    output_vars += conf["data"]["diagnostic_variables"]
     thres_map = dict(zip(tracer_conf.get("tracer_name", []), tracer_conf.get("tracer_thres", [])))
     inds, thres = [], []
     for i, vn in enumerate(output_vars):
@@ -291,6 +292,17 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
             flag_energy = True
             opt_energy = GlobalEnergyFixer(post_conf)
 
+    # ---- Dataset: build a config that covers the requested init time ----
+    # LocalDataset uses start/end datetimes only for __len__; we access by timestamp directly.
+    dataset_conf = dict(conf["data"])
+    dataset_conf["start_datetime"] = str(init_time.date())
+    dataset_conf["end_datetime"] = str((init_time + n_steps * dt).date())
+    dataset_conf["forecast_len"] = 1
+    dataset = LocalDataset(dataset_conf, return_target=False)
+
+    # ---- Populate output conf keys from preblock channel_map ----
+    _set_output_conf(conf, preblocks, dataset, init_time)
+
     # ---- Model ----
     _inject_tracer_inds(conf)
     mode = conf["predict"]["mode"]
@@ -311,17 +323,6 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     else:
         raise ValueError(f"Unsupported predict mode: {mode}")
     model.eval()
-
-    # ---- Dataset: build a config that covers the requested init time ----
-    # LocalDataset uses start/end datetimes only for __len__; we access by timestamp directly.
-    dataset_conf = dict(conf["data"])
-    dataset_conf["start_datetime"] = str(init_time.date())
-    dataset_conf["end_datetime"] = str((init_time + n_steps * dt).date())
-    dataset_conf["forecast_len"] = 1
-    dataset = LocalDataset(dataset_conf, return_target=False)
-
-    # ---- Populate output conf keys from preblock channel_map ----
-    _set_output_conf(conf, preblocks, dataset, init_time)
 
     init_str = init_time.strftime("%Y-%m-%dT%HZ")
     conf["predict"]["save_forecast"] = save_dir
