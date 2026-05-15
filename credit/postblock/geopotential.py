@@ -22,7 +22,7 @@ def pressure_on_interfaces(
         surface_pressure (torch.Tensor): (time, latitude, longitude) or (latitude, longitude) grid in units of Pa.
         model_a_half (torch.Tensor): coefficient a at each model level interface in units of Pa.
         model_b_half (torch.Tensor): coefficient b at each model level interface, which is unitless.
-        model_top_pressure (float): pressure at model top (default 1 Pa).
+        model_top_pressure (float): pressure at model top (default 0.57 Pa).
 
     Returns:
         Pressure on each model level interface.
