@@ -109,7 +109,14 @@ trainer:
   start_epoch: 0
   epochs: 1
 
-  use_scheduler: False
+  use_scheduler: True
+  scheduler:
+    scheduler_type: "linear-warmup-cosine"
+    warmup_steps: 3
+    total_steps: 10
+    min_lr: 1.0e-06
+
+  save_metric_vars: True
 
   amp: True
   grad_max_norm: 1.0

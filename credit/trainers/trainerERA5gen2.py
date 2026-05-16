@@ -243,7 +243,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
             # collect metrics
             if y_pred is not None and y is not None:
-                metrics_dict = metrics(y_pred, y)
+                metrics_dict = metrics(y_pred.float(), y)
                 for name, value in metrics_dict.items():
                     value = torch.Tensor([value]).to(self.device, non_blocking=True)
                     if self.distributed:
