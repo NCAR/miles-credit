@@ -7,6 +7,7 @@ All tests run on CPU with no data files required.
 import pytest
 import torch
 import torch.nn as nn
+import warnings
 
 try:
     from credit.trainers.base_trainer import EMATracker, BaseTrainer
@@ -15,6 +16,7 @@ try:
     _TRAINER_GEN2_AVAILABLE = True
 except ImportError:
     _TRAINER_GEN2_AVAILABLE = False
+warnings.filterwarnings("ignore", category=UserWarning)
 
 pytestmark = pytest.mark.skipif(
     not _TRAINER_GEN2_AVAILABLE,
@@ -316,6 +318,7 @@ def _era5_gen2_conf(**overrides):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
+    base["preblocks"] = {"concat": {"type": "concat"}}
     base.update(overrides)
     return base
 
@@ -413,6 +416,7 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
+    base["preblocks"] = {"concat": {"type": "concat"}}
     return base
 
 
@@ -426,8 +430,8 @@ class _FakeLoader:
     """Minimal iterable loader that yields nested-format batches for trainerERA5gen2.
 
     Each batch has the structure expected by apply_preblocks / ConcatToTensor:
-        batch["era5"]["input"][var_key]  -> (B, 1, H, W) tensor
-        batch["era5"]["target"][var_key] -> (B, 1, H, W) tensor
+        batch["input"]["era5"][var_key]  -> (B, 1, H, W) tensor
+        batch["target"]["era5"][var_key] -> (B, 1, H, W) tensor
 
     C variables are emitted so ConcatToTensor assembles (B, C, H, W) tensors,
     matching the original flat (B, C, H, W) shape expected by the test models.
@@ -452,7 +456,7 @@ class _FakeLoader:
         for _ in range(self._n):
             input_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
             target_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
-            yield {"era5": {"input": input_vars, "target": target_vars}}
+            yield {"input": {"era5": input_vars}, "target": {"era5": target_vars}}
 
 
 class TestERA5Gen2MultiStepTraining:
@@ -525,7 +529,6 @@ class TestERA5Gen2MultiStepTraining:
         from unittest.mock import patch
         from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
         from credit.preblock import apply_preblocks
-        from credit.preblock.concat import ConcatToTensor
 
         B, C, H, W = 1, 4, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -553,9 +556,9 @@ class TestERA5Gen2MultiStepTraining:
 
         original_apply = apply_preblocks
 
-        def _patched_apply(preblocks, batch):
-            result = original_apply(preblocks, batch)
-            x_raw, _, __ = ConcatToTensor()(result)
+        def _patched_apply(preblocks, batch, device=None):
+            result = original_apply(preblocks, batch, device=device)
+            x_raw = result["input"]
             step[0] += 1
             if step[0] == 1:
                 x_at_step1_out[0] = x_raw.clone()
@@ -623,6 +626,7 @@ class TestERA5Gen2MultiStepTraining:
                 }
             },
         }
+        conf["preblocks"] = {"concat": {"type": "concat"}}
 
         # Model: outputs N_PROG channels, all zeros — makes y_pred easy to check.
         # Multiply by self.w so the output has a grad_fn for backprop.
@@ -664,11 +668,11 @@ class TestERA5Gen2MultiStepTraining:
                 for i in range(N_PROG):
                     full_input[f"era5/prognostic/2d/p{i}"] = prog_t1[:, i : i + 1]
                 target = {f"era5/prognostic/2d/p{i}": prog_t1[:, i : i + 1] for i in range(N_PROG)}
-                yield {"era5": {"input": full_input, "target": target}}
+                yield {"input": {"era5": full_input}, "target": {"era5": target}}
 
                 # t=2 batch: only dynfrc (ERA5Dataset i>0 behavior)
                 partial_input = {f"era5/dynamic_forcing/2d/df{i}": dynfrc_t2[:, i : i + 1] for i in range(N_DYNFRC)}
-                yield {"era5": {"input": partial_input, "target": target}}
+                yield {"input": {"era5": partial_input}, "target": {"era5": target}}
 
         captured_x = {}
 

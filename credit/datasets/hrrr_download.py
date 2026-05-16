@@ -11,8 +11,8 @@ reads rather than scanning the full file.
 Downloaded files follow the native HRRR directory layout used by ``HRRRDataset``
 in local mode, so they are immediately usable without any renaming::
 
-    v3/v4 (2018-07-12+): {base_path}/hrrr.{YYYYMMDD}/conus/hrrr.t{HH}z.wrfprsf{FF:02d}.grib2
-    v1/v2 (before):      {base_path}/hrrr.{YYYYMMDD}/hrrr.t{HH}z.wrfprsf{FF:02d}.grib2
+    v3/v4 (2018-07-12+): {base_path}/hrrr.{YYYYMMDD}/conus/hrrr.t{HH}z.{product}f{FF:02d}.grib2
+    v1/v2 (before):      {base_path}/hrrr.{YYYYMMDD}/hrrr.t{HH}z.{product}f{FF:02d}.grib2
 
 After downloading, switch ``mode`` to ``"local"`` in the config.
 
@@ -25,11 +25,13 @@ Or programmatically::
     from credit.datasets.hrrr_download import download_hrrr
     download_hrrr(config['data'], num_workers=8, overwrite=False)
 
-Config section used (``data.source.HRRR``)::
+Config section used (``data.source``)::
 
     data:
       source:
-        HRRR:
+        Example_HRRR:
+          dataset_type: "hrrr"
+          product: "wrfprs" # Options: "wrfprs", "wrfnat", "wrfsubh"
           mode: "local"          # mode to use after download
           base_path: "/data/hrrr"
           forecast_hour: 0
@@ -44,11 +46,11 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import os
-from typing import NamedTuple
+from typing import NamedTuple, Any
 
 import pandas as pd
 
-from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request
+from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request  # pyright: ignore[reportPrivateUsage]
 from credit.datasets.multi_source import make_single_source_subconfig
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,12 @@ logger = logging.getLogger(__name__)
 
 
 class _DownloadTask(NamedTuple):
+    """Simple struct for downloading HRRR data
+
+    Args:
+        NamedTuple: Lightweight immutable struct for named parameters.
+    """
+
     s3_uri: str
     local_path: str
     overwrite: bool
@@ -70,8 +78,17 @@ def _download_one(task: _DownloadTask) -> str:
 
     Runs in a worker process — imports s3fs locally so the pool workers don't
     need to inherit an open filesystem object from the parent.
+
+    Args:
+        task (_DownloadTask): Specifications for HRRR download (see _DownloadTask).
+
+    Returns:
+        str: Status string indicating the result of the download attempt, formatted as:
+            - "ok    {local_path}" if the file was successfully downloaded.
+            - "skip  {local_path}" if the file already exists and overwrite is False.
+            - "miss  {s3_uri}" if the file was not found on S3
     """
-    import s3fs  # noqa: PLC0415
+    import s3fs  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
 
     if os.path.exists(task.local_path) and not task.overwrite:
         return f"skip  {task.local_path}"
@@ -92,34 +109,8 @@ def _download_one(task: _DownloadTask) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_specific_product_config(config: dict, product: str) -> dict:
-    """
-    Separate the config to only the requested product, so that we can pass it to the download function.
-
-    Args:
-        config: Top-level ``data`` config dict.
-        product: Product to extract config for.  One of "wrfprsf", "wrfnatf", or "wrfsubhf".
-
-    Returns:
-        A new config dict with only the requested product's source config, and the same top-level fields.
-    """
-    from credit.datasets.hrrr import VALID_PRODUCTS  # noqa: PLC0415
-
-    valid_keys_or_vals = set(VALID_PRODUCTS.keys()) | set(VALID_PRODUCTS.values())
-
-    if product not in valid_keys_or_vals:
-        raise ValueError(f"Invalid product: {product}. Must be one of {valid_keys_or_vals}")
-
-    if product in VALID_PRODUCTS:
-        config_key = product
-    else:  # Look up the config key corresponding to the requested product value (invert dictionary)
-        config_key = next(key for key, val in VALID_PRODUCTS.items() if val == product)
-
-    return make_single_source_subconfig(config, config_key)
-
-
 def download_hrrr(
-    config: dict,
+    data_config: dict[str, Any],
     num_workers: int = 4,
     overwrite: bool = False,
 ) -> None:
@@ -130,11 +121,11 @@ def download_hrrr(
     ``HRRRDataset`` in ``mode: "local"`` can use fast byte-range reads.
 
     Args:
-        config: Top-level ``data`` config dict (same object passed to
+        data_config (dict[str, Any]): Top-level ``data`` config dict (same object passed to
             ``HRRRDataset``).
-        num_workers: Number of parallel download workers.  Each worker opens
+        num_workers (int, optional): Number of parallel download workers.  Each worker opens
             its own ``s3fs`` connection.  Default ``4``.
-        overwrite: Re-download files that already exist on disk. Default
+        overwrite (bool, optional): Re-download files that already exist on disk. Default
             ``False`` (skip existing files).
 
     Raises:
@@ -142,11 +133,27 @@ def download_hrrr(
         KeyError: If the config is missing required fields.
         ValueError: If *product* is not a recognised HRRR product.
     """
-    config_key, product = _validate_product_request(config)
-    source_cfg = config["source"][config_key]
+    curr_source_name = next(iter(data_config["source"]))
+    if len(data_config["source"]) > 1:
+        raise ValueError(
+            f"Multiple sources found in config. Please provide a config with a single source. Found sources: {list(data_config['source'].keys())}"
+        )
+
+    source_cfg = data_config["source"][curr_source_name]
+
+    assert "dataset_type" in source_cfg, (
+        f"Missing required field for dataset_type. Found fields: {list(source_cfg.keys())}"
+    )
+    assert source_cfg["dataset_type"] == "hrrr", (
+        f"Expected dataset_type to be 'hrrr'. Found: {source_cfg['dataset_type']}"
+    )
+    # The default product is "wrfprs" if not specified in the config.
+    product_request = source_cfg.get("product", "wrfprs")
+    # Validate the product request.
+    product = _validate_product_request(product_request)
 
     try:
-        import s3fs  # noqa: PLC0415
+        import s3fs  # noqa: PLC0415  # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
 
         del s3fs
     except ImportError as exc:
@@ -155,15 +162,15 @@ def download_hrrr(
     base_path: str = source_cfg["base_path"]
     forecast_hour: int = int(source_cfg.get("forecast_hour", 0))
 
-    dt = pd.Timedelta(config["timestep"])
-    num_steps: int = config.get("forecast_len", 0)
+    dt = pd.Timedelta(data_config["timestep"])
+    num_steps: int = data_config.get("forecast_len", 0)
     timestamps = pd.date_range(
-        pd.Timestamp(config["start_datetime"]),
-        pd.Timestamp(config["end_datetime"]) - num_steps * dt,
+        pd.Timestamp(data_config["start_datetime"]),
+        pd.Timestamp(data_config["end_datetime"]) - num_steps * dt,
         freq=dt,
     )
 
-    if product == "wrfsubhf":
+    if product == "wrfsubh":
         # For sub-hourly, derive the unique set of (init_hour, ff) file pairs
         # implied by the requested timestamps rather than using forecast_hour directly.
         seen: set[tuple] = set()
@@ -222,18 +229,17 @@ def download_hrrr(
 
 
 if __name__ == "__main__":
+    """
+    The code below defines the CLI for the HRRR download
+    """
+
     import argparse
 
     import yaml
 
     parser = argparse.ArgumentParser(description="Download HRRR grib2 data from AWS S3.")
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config file.")
-    parser.add_argument(
-        "--product",
-        default=None,
-        choices=["HRRR", "wrfprsf", "HRRR_NAT", "wrfnatf", "HRRR_SUBH", "wrfsubhf"],
-        help="HRRR product to download (default: use config, assuming single source). Note, HRRR=wrfprsf, HRRR_NAT=wrfnatf, and HRRR_SUBH=wrfsubhf.",
-    )
+    parser.add_argument("--source_name", default=None, help="Name of the source in the data config to download.")
     parser.add_argument(
         "--num_workers",
         type=int,
@@ -253,7 +259,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    if args.product is not None:
-        cfg["data"] = get_specific_product_config(cfg["data"], args.product)
+    if args.source_name is not None:
+        cfg["data"] = make_single_source_subconfig(cfg["data"], args.source_name)
 
     download_hrrr(cfg["data"], num_workers=args.num_workers, overwrite=args.overwrite)

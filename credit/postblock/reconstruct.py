@@ -1,57 +1,61 @@
 """
 reconstruct.py
 --------------
-Reconstruct: first hardcoded postblock that splits a flat model-output tensor
-back into a nested dict keyed by variable path.
+Reconstruct: first postblock that splits the flat ``batch_dict["prediction"]``
+tensor back into a nested variable dict in-place.
 
-Reads ``metadata["_channel_map"]["output"]`` built by ``ConcatToTensor`` to
-know which channels in ``y_pred`` correspond to which variables and what their
-original shape was before flattening.
+Reads ``batch_dict["meta"]["_channel_map"]["output"]`` built by
+``ConcatToTensor`` to know which channels correspond to which variables.
 
 Input
 -----
-y_pred   : torch.Tensor, shape (B, C, H, W)
-             Flat model output after ``flatten(1, 2)`` collapsed the time dim.
-metadata : dict
-             Must contain ``metadata["_channel_map"]["output"]``.
+batch_dict : dict
+    Must contain:
+      "prediction" — flat model output tensor, shape (B, C, H, W) or (B, C, T, H, W)
+      "meta"       — metadata dict with ``_channel_map["output"]``
+    May also contain "input", "target", "_raw", etc. — all passed through unchanged.
 
 Output
 ------
-dict with keys:
+The same ``batch_dict`` with ``"prediction"`` replaced by a nested dict:
 
-    "prediction" : {var_key: tensor}
-                   Each tensor has shape (B, n_levels, T, H, W), restoring the
-                   original level and time dimensions.
-    "metadata"   : the input metadata dict, passed through unchanged.
+    batch_dict["prediction"][source][var_string]
+        -> tensor of shape (B, n_levels, n_time, H, W)
 """
 
-import torch
 from credit.postblock.base import BasePostblock
 
 
 class Reconstruct(BasePostblock):
-    """Splits a flat ``y_pred`` tensor into a per-variable dict.
+    """Splits ``batch_dict["prediction"]`` from a flat tensor into a nested variable dict.
 
-    Slices are read from ``metadata["_channel_map"]["output"]``, which is built
-    by ``ConcatToTensor`` and covers only prognostic + diagnostic variables.
-    Each slice is unflattened from ``(B, n_levels * T, H, W)`` back to
-    ``(B, n_levels, T, H, W)``.
+    Slices are read from ``batch_dict["metadata"]["target"]["_channel_map"]``, built
+    by ``ConcatToTensor`` and covering only prognostic + diagnostic variables.
+    Each slice is unflattened from ``(B, n_levels * n_time, H, W)`` back to
+    ``(B, n_levels, n_time, H, W)``. All other keys in ``batch_dict`` pass through.
     """
 
-    def forward(self, y_pred: torch.Tensor, metadata: dict) -> dict:
-        output_map = metadata["_channel_map"]["output"]
+    def forward(self, batch_dict: dict) -> dict:
+        y_pred = batch_dict["prediction"]
+        output_map = batch_dict["metadata"]["target"]["_channel_map"]
+
+        # Flatten time dim if y_pred arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
+        if y_pred.dim() == 5:
+            y_pred = y_pred.flatten(1, 2)
 
         prediction = {}
         for var_key, info in output_map.items():
             ch_slice = info["slice"]
-            n_levels, T = info["orig_shape"]
+            n_levels, n_time = info["orig_shape"]
 
-            # Slice the flat channel dim: (B, n_levels*T, H, W)
+            # Slice the flat channel dim: (B, n_levels*n_time, H, W)
             var_tensor = y_pred[:, ch_slice, ...]
 
-            # Restore level and time dims: (B, n_levels, T, H, W)
-            var_tensor = var_tensor.unflatten(1, (n_levels, T))
+            # Restore level and time dims: (B, n_levels, n_time, H, W)
+            var_tensor = var_tensor.unflatten(1, (n_levels, n_time))
 
-            prediction[var_key] = var_tensor
+            source = var_key.split("/")[0]
+            prediction.setdefault(source, {})[var_key] = var_tensor
 
-        return {"prediction": prediction, "metadata": metadata}
+        batch_dict["prediction"] = prediction
+        return batch_dict

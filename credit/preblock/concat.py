@@ -13,6 +13,7 @@ Channel concat order is fully determined by the variable key structure
      preserved (Python sort is stable), which matches config list order.
 """
 
+import pandas as pd
 import torch
 from credit.preblock.base import BasePreblock
 from credit.datasets.channel_layout import FIELD_TYPE_RANK as _FIELD_TYPE_RANK
@@ -39,7 +40,7 @@ class ConcatToTensor(BasePreblock):
 
     Expects a batch dict of the form::
 
-        batch[source][data_type][var_name] -> torch.Tensor
+        batch[data_type][source][var_name] -> torch.Tensor
 
     where tensor shapes are (batch, n_levels, time, lat, lon) and concatenation
     is performed along dim=1 (channel). Input tensors are sorted by
@@ -67,15 +68,20 @@ class ConcatToTensor(BasePreblock):
     Example config::
 
         type: "concatenate_to_tensor"
-        args: {}
+        args:
+          to_device: true   # set false to skip .to(device) in apply_preblocks
     """
+
+    def __init__(self, to_device: bool = True):
+        super().__init__()
+        self.to_device = to_device
 
     def forward(self, batch):
         if isinstance(batch, tuple):
             return batch
         input_tensors = []
         target_tensors = []
-        metadata = {}
+        metadata: dict = {"input": {}, "target": {}}
 
         # Channel-map accumulators
         input_channel_map = {}
@@ -83,11 +89,17 @@ class ConcatToTensor(BasePreblock):
         input_cursor = 0
         output_cursor = 0
 
-        for source, data_types in batch.items():
-            for data_type, variables in data_types.items():
-                if data_type == "metadata":
-                    metadata[source] = variables
-                elif data_type == "input":
+        for data_type, sources in batch.items():
+            if data_type == "metadata":
+                for source, meta_dict in sources.items():
+                    if "input_datetime" in meta_dict:
+                        metadata["input"][source] = {"datetime": pd.DatetimeIndex(meta_dict["input_datetime"].numpy())}
+                    if "target_datetime" in meta_dict:
+                        metadata["target"][source] = {
+                            "datetime": pd.DatetimeIndex(meta_dict["target_datetime"].numpy())
+                        }
+            elif data_type == "input":
+                for source, variables in sources.items():
                     for var_key, tensor in sorted(variables.items(), key=_channel_sort_key):
                         input_tensors.append(tensor)
                         # tensor shape: (B, n_levels, T, H, W)
@@ -110,17 +122,16 @@ class ConcatToTensor(BasePreblock):
                             }
                             output_cursor += n_ch
 
-                elif data_type == "target":
+            elif data_type == "target":
+                for source, variables in sources.items():
                     for tensor in variables.values():
                         target_tensors.append(tensor)
 
         if not input_tensors:
             raise ValueError("No 'input' tensors found in batch.")
 
-        metadata["_channel_map"] = {
-            "input": input_channel_map,
-            "output": output_channel_map,
-        }
+        metadata["input"]["_channel_map"] = input_channel_map
+        metadata["target"]["_channel_map"] = output_channel_map
 
         input_tensor = torch.cat(input_tensors, dim=1)
 

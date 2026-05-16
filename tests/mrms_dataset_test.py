@@ -1,15 +1,15 @@
 """
 mrms_dataset_test.py
 --------------------
-Tests for MRMSDataset (credit.datasets.MRMS).
+Tests for MRMSDataset (credit.datasets.mrms).
 
 Output format
 -------------
 Samples are nested dicts::
 
     {
-        "input":  {"mrms/{field_type}/2d/{varname}": tensor, ...},
-        "target": {"mrms/{field_type}/2d/{varname}": tensor, ...},  # return_target only
+        "input":  {"Test_MRMS/{field_type}/2d/{varname}": tensor, ...},
+        "target": {"Test_MRMS/{field_type}/2d/{varname}": tensor, ...},  # return_target only
         "metadata": {"input_datetime": int, "target_datetime": int},
     }
 
@@ -29,7 +29,7 @@ import torch
 import xarray as xr
 from torch.utils.data import DataLoader
 
-from credit.datasets.MRMS import MRMSDataset
+from credit.datasets.mrms import MRMSDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 QPE_1H = "MultiSensor_QPE_01H_Pass2_00.00"
@@ -66,7 +66,7 @@ def mrms_xr_dataset():
 @pytest.fixture
 def patch_mrms_io(monkeypatch, mrms_xr_dataset):
     """Patch glob + xr.open_dataset so MRMSDataset loads from the fake dataset."""
-    MRMS_MODULE = "credit.datasets.MRMS"
+    MRMS_MODULE = "credit.datasets.mrms"
     monkeypatch.setattr(
         f"{MRMS_MODULE}.glob",
         lambda pattern: ["/fake/MRMS_20240601-000000.nc"],
@@ -84,7 +84,8 @@ def minimal_config():
         "start_datetime": "2024-06-01",
         "end_datetime": "2024-06-02",
         "source": {
-            "MRMS": {
+            "TEST_MRMS": {
+                "dataset_type": "mrms",
                 "mode": "local",
                 "variables": {
                     "prognostic": {
@@ -107,7 +108,8 @@ def config_with_forcing():
         "start_datetime": "2024-06-01",
         "end_datetime": "2024-06-02",
         "source": {
-            "MRMS": {
+            "TEST_MRMS": {
+                "dataset_type": "mrms",
                 "mode": "local",
                 "variables": {
                     "prognostic": {
@@ -143,8 +145,8 @@ def test_mrms_key_format(minimal_config, patch_mrms_io):
     sample = ds[(t, 0)]
 
     inp = sample["input"]
-    assert f"mrms/prognostic/2d/{QPE_1H}" in inp
-    assert f"mrms/prognostic/2d/{QPE_6H}" in inp
+    assert f"TEST_MRMS/prognostic/2d/{QPE_1H}" in inp
+    assert f"TEST_MRMS/prognostic/2d/{QPE_6H}" in inp
     assert "metadata" in sample
 
 
@@ -154,8 +156,8 @@ def test_mrms_prognostic_loaded_at_step0(minimal_config, patch_mrms_io):
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    assert f"mrms/prognostic/2d/{QPE_1H}" in sample["input"]
-    assert f"mrms/prognostic/2d/{QPE_6H}" in sample["input"]
+    assert f"TEST_MRMS/prognostic/2d/{QPE_1H}" in sample["input"]
+    assert f"TEST_MRMS/prognostic/2d/{QPE_6H}" in sample["input"]
 
 
 def test_mrms_prognostic_absent_at_step1(minimal_config, patch_mrms_io):
@@ -177,8 +179,8 @@ def test_mrms_dynamic_forcing_every_step(config_with_forcing, patch_mrms_io):
     sample0 = ds[(t, 0)]
     sample1 = ds[(t, 1)]
 
-    forcing_key = f"mrms/dynamic_forcing/2d/{QPE_6H}"
-    prog_key = f"mrms/prognostic/2d/{QPE_1H}"
+    forcing_key = f"TEST_MRMS/dynamic_forcing/2d/{QPE_6H}"
+    prog_key = f"TEST_MRMS/prognostic/2d/{QPE_1H}"
 
     # Dynamic forcing present at every step
     assert forcing_key in sample0["input"]
@@ -228,8 +230,8 @@ def test_mrms_target_keys(minimal_config, patch_mrms_io):
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    assert f"mrms/prognostic/2d/{QPE_1H}" in sample["target"]
-    assert f"mrms/prognostic/2d/{QPE_6H}" in sample["target"]
+    assert f"TEST_MRMS/prognostic/2d/{QPE_1H}" in sample["target"]
+    assert f"TEST_MRMS/prognostic/2d/{QPE_6H}" in sample["target"]
 
 
 def test_mrms_target_tensor_shapes(minimal_config, patch_mrms_io):
@@ -259,15 +261,15 @@ def test_mrms_extent_applied(minimal_config, patch_mrms_io):
     """With extent set, lat/lon dims should be smaller than the full grid."""
     cfg = dict(minimal_config)
     cfg["source"] = dict(minimal_config["source"])
-    cfg["source"]["MRMS"] = dict(minimal_config["source"]["MRMS"])
+    cfg["source"]["TEST_MRMS"] = dict(minimal_config["source"]["TEST_MRMS"])
     # Subset to roughly half the lon range (230-265 out of 230-300)
-    cfg["source"]["MRMS"]["extent"] = [230, 265, 20, 55]
+    cfg["source"]["TEST_MRMS"]["extent"] = [230, 265, 20, 55]
 
     ds = MRMSDataset(cfg)
     t = ds.datetimes[0]
     sample = ds[(t, 0)]
 
-    key = f"mrms/prognostic/2d/{QPE_1H}"
+    key = f"TEST_MRMS/prognostic/2d/{QPE_1H}"
     tensor = sample["input"][key]
 
     # Full lon span is 100 points (230-300); subset (230-265) should be fewer
@@ -295,6 +297,6 @@ def test_mrms_dataloader_default_collate(minimal_config, patch_mrms_io):
 
     batch = next(iter(loader))
 
-    key = f"mrms/prognostic/2d/{QPE_1H}"
+    key = f"TEST_MRMS/prognostic/2d/{QPE_1H}"
     assert batch["input"][key].shape == (2, 1, 1, 50, 100)
     assert batch["target"][key].shape == (2, 1, 1, 50, 100)

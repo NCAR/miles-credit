@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 from credit.postblock.reconstruct import Reconstruct
@@ -16,13 +15,15 @@ POSTBLOCK_REGISTRY = {
 def build_postblocks(postblock_cfg: dict | None = None) -> nn.ModuleDict:
     """Instantiates all postblocks from the config's ``postblocks`` section.
 
-    ``per_step`` defaults to ``True`` for every block and can be set per-block
+    ``per_step`` defaults to ``False`` for every block and can be set per-block
     in the config as a signal to the trainer about call timing.
 
     Args:
         postblock_cfg: the full postblocks dict from the config, e.g.::
 
             postblocks:
+              reconstruct:
+                type: reconstruct
               inverse_scale:
                 type: bridgescaler_transform
                 args:
@@ -35,8 +36,6 @@ def build_postblocks(postblock_cfg: dict | None = None) -> nn.ModuleDict:
 
     Returns:
         ``nn.ModuleDict`` of instantiated postblocks, ordered as in config.
-        ``Reconstruct`` is NOT included here — it is hardcoded in
-        ``apply_postblocks``.
     """
     modules = {}
     for name, block_cfg in (postblock_cfg or {}).items():
@@ -48,27 +47,33 @@ def build_postblocks(postblock_cfg: dict | None = None) -> nn.ModuleDict:
     return nn.ModuleDict(modules)
 
 
-def apply_postblocks(postblocks: nn.ModuleDict, y_pred: torch.Tensor, metadata: dict) -> dict:
-    """Applies all postblocks. Downstream postblocks require the "Reconstruct" postblock to be run in the config first.
+def apply_postblocks(postblocks: nn.ModuleDict, batch_dict: dict) -> dict:
+    """Applies all postblocks sequentially on a shared batch dict.
 
-    All registered postblocks are run sequentially on the resulting dict after reconstuct is called. If no postblocks
-    are present, the raw tensor is returned.
+    The caller is responsible for adding ``"prediction"`` (flat model output
+    tensor) and ``"meta"`` (metadata from ``apply_preblocks``) to ``batch_dict``
+    before calling. Any additional data needed by postblocks (e.g. ``"input"``,
+    ``"target"``, ``"_raw"``) should also be added by the caller beforehand.
+
+    ``Reconstruct`` must be the first registered postblock — it converts
+    ``batch_dict["prediction"]`` from a flat tensor into a nested variable dict.
+    Subsequent postblocks operate on that nested dict via their ``key=`` arg.
 
     Args:
-        postblocks: ``nn.ModuleDict`` built by ``build_postblocks``.
-        y_pred:     Flat model output tensor, shape ``(B, C, H, W)``.
-        metadata:   Metadata dict from ``apply_preblocks``, must contain
-                    ``metadata["_channel_map"]["output"]``.
+        postblocks:  ``nn.ModuleDict`` built by ``build_postblocks``.
+        batch_dict:  Dict containing at minimum ``"prediction"`` (flat tensor)
+                     and ``"meta"`` (with ``_channel_map["output"]``).
 
     Returns:
-        Dict with keys ``"prediction"`` and ``"metadata"``, possibly further
-        transformed by registered postblocks.
+        The same ``batch_dict`` after all postblocks have run. ``"prediction"``
+        will be a nested variable dict after ``Reconstruct`` runs.
+
+    Raises:
+        RuntimeError: if ``postblocks`` is empty or ``Reconstruct`` is not first.
     """
+    blocks = list(postblocks.values())
 
-    for postblock in postblocks.values():
-        if isinstance(postblock, Reconstruct):
-            y_pred = postblock(y_pred, metadata)
-        else:
-            y_pred = postblock(y_pred)
+    for block in blocks:
+        batch_dict = block(batch_dict)
 
-    return y_pred
+    return batch_dict

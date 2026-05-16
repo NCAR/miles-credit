@@ -3,12 +3,13 @@
 # tsi from solar NC, static from static_norm_old.nc
 # Reduced model size and 2-year training window for quick Casper single-GPU validation.
 
-save_loc: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2'
+save_loc: '/glade/derecho/scratch/$USER/credit_tests/smoke_gen2'
 seed: 1000
 
 data:
   source:
     ERA5:
+      dataset_type: "local"
       level_coord: "level"
       levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
       variables:
@@ -41,6 +42,8 @@ preblocks:
     args:
       mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/mean_6h_1979_2018_16lev_0.25deg.nc"
       std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/std_6h_1979_2018_16lev_0.25deg.nc"
+  concat:
+    type: concat
 
 model:
     type: "crossformer"
@@ -142,7 +145,7 @@ trainer:
 
 predict:
     mode: none
-    save_forecast: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2/rollout'
+    save_forecast: '/glade/derecho/scratch/$USER/credit_tests/smoke_gen2/rollout'
     forecasts:
         type: "custom"
         start_year: 2017

@@ -21,20 +21,20 @@ def create_synthetic_data() -> dict:
     """
     Creates synthetic data as a nested dictionary of torch tensors.
 
-    Structure: data[source][split][var_name]
-    - source: "ERA5"
-    - split: "input" | "target"
-    - var_name: "era5/pronostic/3d/T" | "era5/pronostic/3d/U" | "era5/pronostic/3d/V"
+    Structure: data[data_type][source][var_name]
+    - data_type: "input" | "target"
+    - source: "Test_ERA5"
+    - var_name: "Test_ERA5/pronostic/3d/T" | ...
     - tensor shape: (100, 16, 1, 8, 8)
     """
     shape = (100, 16, 1, 8, 8)
     var_names = [
-        "era5/pronostic/3d/T",
-        "era5/pronostic/3d/U",
-        "era5/pronostic/3d/V",
+        "Test_ERA5/pronostic/3d/T",
+        "Test_ERA5/pronostic/3d/U",
+        "Test_ERA5/pronostic/3d/V",
     ]
 
-    return {"era5": {split: {var: torch.randn(*shape) for var in var_names} for split in ("input", "target")}}
+    return {split: {"Test_ERA5": {var: torch.randn(*shape) for var in var_names}} for split in ("input", "target")}
 
 
 # ---------------------------------------------------------------------------
@@ -99,23 +99,23 @@ def weight_file(tmp_path):
 def test_regrid_output_shape(weight_file):
     """Downsampling regrid produces the destination grid shape for all splits."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    variables = ["era5/pronostic/3d/T"]
+    variables = ["Test_ERA5/pronostic/3d/T"]
     regrid = Regridder(path, variables=variables)
     batch = create_synthetic_data()
     result = regrid(batch)
     for split in ("input", "target"):
-        assert result["era5"][split]["era5/pronostic/3d/T"].shape == (100, 16, 1, n_dst_lat, n_dst_lon)
+        assert result[split]["Test_ERA5"]["Test_ERA5/pronostic/3d/T"].shape == (100, 16, 1, n_dst_lat, n_dst_lon)
 
 
 def test_regrid_uniform_input(weight_file):
     """Block-average regrid: uniform input maps to uniform output of the same value."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    variables = ["era5/pronostic/3d/T"]
+    variables = ["Test_ERA5/pronostic/3d/T"]
     regrid = Regridder(path, variables=variables)
-    batch = {"era5": {"input": {"era5/pronostic/3d/T": torch.ones(1, 1, 1, n_src_lat, n_src_lon)}}}
+    batch = {"input": {"Test_ERA5": {"Test_ERA5/pronostic/3d/T": torch.ones(1, 1, 1, n_src_lat, n_src_lon)}}}
     result = regrid(batch)
     assert torch.allclose(
-        result["era5"]["input"]["era5/pronostic/3d/T"],
+        result["input"]["Test_ERA5"]["Test_ERA5/pronostic/3d/T"],
         torch.ones(1, 1, 1, n_dst_lat, n_dst_lon),
         atol=1e-5,
     )
@@ -124,11 +124,11 @@ def test_regrid_uniform_input(weight_file):
 def test_regrid_reshape_false(weight_file):
     """reshape_to_xy=False returns a flat (prod(lead_dims), n_b) tensor."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    variables = ["era5/pronostic/3d/T"]
+    variables = ["Test_ERA5/pronostic/3d/T"]
     regrid = Regridder(path, variables=variables, reshape_to_xy=False)
     batch = create_synthetic_data()
     result = regrid(batch)
-    assert result["era5"]["input"]["era5/pronostic/3d/T"].shape == (100 * 16 * 1, n_dst_lat * n_dst_lon)
+    assert result["input"]["Test_ERA5"]["Test_ERA5/pronostic/3d/T"].shape == (100 * 16 * 1, n_dst_lat * n_dst_lon)
 
 
 def test_regrid_flip_axis(weight_file):
@@ -136,15 +136,15 @@ def test_regrid_flip_axis(weight_file):
     import copy
 
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    variables = ["era5/pronostic/3d/T"]
+    variables = ["Test_ERA5/pronostic/3d/T"]
     regrid = Regridder(path, variables=variables)
     regrid_flip = Regridder(path, variables=variables, flip_axis=[-1])
     batch = create_synthetic_data()
     result = regrid(copy.deepcopy(batch))
     result_flip = regrid_flip(copy.deepcopy(batch))
     assert not torch.allclose(
-        result["era5"]["input"]["era5/pronostic/3d/T"],
-        result_flip["era5"]["input"]["era5/pronostic/3d/T"],
+        result["input"]["Test_ERA5"]["Test_ERA5/pronostic/3d/T"],
+        result_flip["input"]["Test_ERA5"]["Test_ERA5/pronostic/3d/T"],
     )
 
 
@@ -167,7 +167,7 @@ def scaler_file(tmp_path):
     (8×8) so the fixture stays fast.
     """
     x_dict = create_synthetic_data()
-    variables = x_dict["era5"]["input"].keys()
+    variables = x_dict["input"]["Test_ERA5"].keys()
     scaler = DStandardScalerTensor(channels_last=False)
     scaler_dict = scale_var_dict(x_dict, scaler, method="fit")
     path = str(tmp_path / "scaler.json")
@@ -187,10 +187,10 @@ def test_scaler_output_shape(scaler_file):
     """Transform preserves the input tensor shape for every variable."""
     path, variables, data = scaler_file
     scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
-    original_shapes = {v: data["era5"]["input"][v].shape for v in variables}
+    original_shapes = {v: data["input"]["Test_ERA5"][v].shape for v in variables}
     result = scaler(data)
     for v in variables:
-        assert result["era5"]["input"][v].shape == original_shapes[v]
+        assert result["input"]["Test_ERA5"][v].shape == original_shapes[v]
 
 
 @_skip_bridgescaler
@@ -199,9 +199,9 @@ def test_scaler_transform_changes_values(scaler_file):
     path, variables, data = scaler_file
     scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
     var = list(variables)[0]
-    original = data["era5"]["input"][var].clone()
+    original = data["input"]["Test_ERA5"][var].clone()
     result = scaler(data)
-    assert not torch.allclose(result["era5"]["input"][var].float(), original.float())
+    assert not torch.allclose(result["input"]["Test_ERA5"][var].float(), original.float())
 
 
 @_skip_bridgescaler
@@ -212,7 +212,7 @@ def test_scaler_round_trip(scaler_file):
     fwd = BridgeScalerTransformer(scaler_path=path, variables=var_list, method="transform")
     inv = BridgeScalerTransformer(scaler_path=path, variables=var_list, method="inverse_transform")
     var = var_list[0]
-    original = data["era5"]["input"][var].clone()
+    original = data["input"]["Test_ERA5"][var].clone()
     data = fwd(data)
     data = inv(data)
-    assert torch.allclose(data["era5"]["input"][var].float(), original.float(), atol=1e-5)
+    assert torch.allclose(data["input"]["Test_ERA5"][var].float(), original.float(), atol=1e-5)

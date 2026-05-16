@@ -32,7 +32,7 @@ dependencies = [
     "segmentation-models-pytorch",
     "haversine",
     "pvlib",
-    "torch-harmonics",
+    "torch-harmonics<0.9",
     "torch_geometric",
     "torchmetrics",
     "fsspec",
@@ -116,4 +116,7 @@ ignore = ["D417", "F841"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.pytest.ini_options]
+addopts = "--continue-on-collection-errors"
 

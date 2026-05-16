@@ -11,7 +11,6 @@ import optuna
 
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.preblock import build_preblocks, apply_preblocks
-from credit.preblock.concat import ConcatToTensor
 from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
@@ -168,16 +167,17 @@ class TrainerERA5Gen2(BaseTrainer):
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
-                x_raw, y_raw, _ = ConcatToTensor()(apply_preblocks(self.preblocks, batch))
+                _batch = apply_preblocks(self.preblocks, batch, device=self.device)
+                x_raw, y_raw = _batch["input"], _batch["target"]
 
                 if t == 1:
-                    x = x_raw.to(self.device).float()
+                    x = x_raw.float()
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
                 else:
                     # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
                     # update_x replaces dynfrc and prognostic slices; static stays.
-                    x_dynfrc = x_raw.to(self.device).float()
+                    x_dynfrc = x_raw.float()
                     if self.ensemble_size > 1:
                         x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                     y_pred_in = y_pred if self.retain_graph else y_pred.detach()
@@ -209,7 +209,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 # backprop on specified timesteps
                 if t in self.backprop_on_timestep:
-                    y = y_raw.to(self.device).float()
+                    y = y_raw.float()
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
@@ -319,16 +319,17 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
-                    x_raw, y_raw, _ = ConcatToTensor()(apply_preblocks(self.preblocks, batch))
+                    _batch = apply_preblocks(self.preblocks, batch, device=self.device)
+                    x_raw, y_raw = _batch["input"], _batch["target"]
 
                     if t == 1:
-                        x = x_raw.to(self.device).float()
+                        x = x_raw.float()
                         if self.ensemble_size > 1:
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
                     else:
                         # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
                         # update_x replaces dynfrc and prognostic slices; static stays.
-                        x_dynfrc = x_raw.to(self.device).float()
+                        x_dynfrc = x_raw.float()
                         if self.ensemble_size > 1:
                             x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                         x = update_x(x, x_dynfrc, y_pred.detach(), self.slices)
@@ -358,7 +359,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                     # compute loss and metrics only at the final rollout step
                     if t == self.valid_forecast_len:
-                        y = y_raw.to(self.device).float()
+                        y = y_raw.float()
                         if self.flag_clamp:
                             y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 

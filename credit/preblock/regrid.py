@@ -89,14 +89,13 @@ class Regridder(BasePreblock):
         for var_key in self.variables:
             source = var_key.split("/")[0]
 
-            if source not in batch:
-                raise KeyError(f"Regridder: source '{source}' not found in batch.")
-
             for data_type in self.data_types:
-                if data_type not in batch[source]:
+                if data_type not in batch:
                     continue
-                if var_key not in batch[source][data_type]:
+                if source not in batch[data_type]:
+                    raise KeyError(f"Regridder: source '{source}' not found in batch['{data_type}'].")
+                if var_key not in batch[data_type][source]:
                     continue
-                batch[source][data_type][var_key] = self._regrid(batch[source][data_type][var_key])
+                batch[data_type][source][var_key] = self._regrid(batch[data_type][source][var_key])
 
         return batch
