@@ -40,20 +40,45 @@ class ERA5Normalizer(nn.Module):
     Args:
         mean_path: Path to NetCDF file containing per-variable means.
         std_path:  Path to NetCDF file containing per-variable standard deviations.
-        levels:    Optional list of 1-indexed model levels to select from the
-                   full 137-level stats (e.g. [60, 90, 120, 137] for a 4-level
-                   smoke test).  When omitted, all levels in the stats file are
-                   used.
+        levels:          Optional list of 1-indexed model levels to select from
+                         the stats (e.g. [60, 90, 120, 137]).  Mutually exclusive
+                         with ``pressure_levels``.
+        pressure_levels: Optional list of pressure values in hPa to select from
+                         the stats file's ``level`` coordinate (e.g. [500, 850,
+                         1000]).  Takes priority over ``levels``.
     """
 
-    def __init__(self, mean_path: str, std_path: str, levels: list[int] | None = None) -> None:
+    def __init__(
+        self,
+        mean_path: str,
+        std_path: str,
+        levels: list[int] | None = None,
+        pressure_levels: list[int] | None = None,
+    ) -> None:
         super().__init__()
 
         ds_mean = xr.open_dataset(mean_path)
         ds_std = xr.open_dataset(std_path)
 
-        # Convert 1-indexed level list to 0-indexed array indices.
-        level_idx = [lv - 1 for lv in levels] if levels is not None else None
+        # Determine which rows of the level dimension to keep.
+        if pressure_levels is not None:
+            # Select by matching hPa values against the file's level coordinate.
+            if "level" not in ds_mean.coords:
+                raise ValueError("pressure_levels requires a 'level' coordinate in the stats file")
+            file_levels = np.array(ds_mean["level"].values)
+            level_idx = []
+            for p in pressure_levels:
+                matches = np.where(file_levels == p)[0]
+                if len(matches) == 0:
+                    raise ValueError(
+                        f"pressure level {p} hPa not found in stats file; available: {file_levels.tolist()}"
+                    )
+                level_idx.append(int(matches[0]))
+        elif levels is not None:
+            # Legacy: 1-indexed model-level positions → 0-indexed array indices.
+            level_idx = [lv - 1 for lv in levels]
+        else:
+            level_idx = None
 
         # Build {varname: tensor} lookup. Tensors are scalar or 1-D (levels).
         # Use only variables present in both files; extras in either are skipped.

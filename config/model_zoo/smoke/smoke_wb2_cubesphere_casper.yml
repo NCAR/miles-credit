@@ -1,0 +1,128 @@
+seed: 1000
+
+save_loc: '/glade/derecho/scratch/schreck/model_zoo_smoke/wb2_cubesphere'
+
+# Smoke — CubeSphereWxFormer + WB2 ERA5 (tiny variable set)
+# lat-lon 721×1440 → SE ne120 (ncol=777602) via latlon_to_se preblock
+# channels=3 levels=3 surface=2 in_only=2 out_only=0
+# C_in  = 3*3 + 2 + 2 = 13
+# C_out = 3*3 + 2 + 0 = 11
+
+data:
+  source:
+    WeatherBench2_ERA5:
+      dataset_type: "weatherbench2_era5"
+      resolution: "1440x721"
+      level_coord: "level"
+      levels: [500, 850, 1000]
+      variables:
+        prognostic:
+          vars_3D:
+            - "temperature"
+            - "u_component_of_wind"
+            - "v_component_of_wind"
+          vars_2D:
+            - "surface_pressure"
+            - "2m_temperature"
+        dynamic_forcing:
+          vars_2D:
+            - "mean_top_downward_short_wave_radiation_flux"
+        static:
+          vars_2D:
+            - "land_sea_mask"
+        diagnostic: null
+
+  timestep: "6h"
+  forecast_len: 1
+  start_datetime: "2000-01-01"
+  end_datetime: "2014-12-31"
+
+validation_data:
+  start_datetime: "2018-01-01"
+  end_datetime:   "2018-03-31"
+
+preblocks:
+  norm:
+    type: era5_normalizer
+    args:
+      mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_plevel_1979_2018_mean.nc"
+      std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_plevel_1979_2018_std.nc"
+      pressure_levels: [500, 850, 1000]
+  latlon_to_se:
+    type: tripole_to_se
+    args:
+      weight_file: "/glade/work/schreck/repos/credit-mesaclip/mesaclip/static/latlon721x1440_to_se_ne120.nc"
+      fill_value: 0.0
+  concat:
+    type: concat
+
+model:
+  type: "cube_sphere_wxformer"
+  se_index_path: "/glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_index_ne120.npy"
+  adjacency_path: "/glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_face_adjacency_ne120.npz"
+  frames: 1
+  channels: 3
+  surface_channels: 2
+  input_only_channels: 2
+  output_only_channels: 0
+  levels: 3
+  dim:   [32, 64, 128, 256]
+  depth: [2,  2,  4,   2  ]
+  dim_head: 32
+  global_window_size: [6, 3, 2, 1]
+  local_window_size:  12
+  use_spectral_norm: True
+
+loss:
+  training_loss: "mse"
+  validation_loss: "mse"
+  use_power_loss: False
+  use_spectral_loss: False
+  use_latitude_weights: False
+  use_variable_weights: False
+
+trainer:
+  type: era5-gen2
+  mode: none
+
+  load_weights: False
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+
+  save_backup_weights: False
+  save_best_weights: False
+
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  train_batch_size: 1
+  valid_batch_size: 1
+
+  batches_per_epoch: 10
+  valid_batches_per_epoch: 5
+  stopping_patience: 999
+  skip_validation: False
+
+  start_epoch: 0
+  epochs: 1
+
+  use_scheduler: False
+
+  amp: True
+  grad_max_norm: 1.0
+
+  thread_workers: 2
+  valid_thread_workers: 1
+  prefetch_factor: 2
+
+pbs:
+  conda: "credit-casper"
+  project: "NAML0001"
+  job_name: "smoke_wb2_cubesphere"
+  walltime: "01:00:00"
+  ncpus: 8
+  ngpus: 1
+  mem: "128GB"
+  gpu_type: "v100"
+  queue: "casper"

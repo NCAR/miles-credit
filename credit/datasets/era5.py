@@ -157,8 +157,10 @@ class ARCOERA5Dataset(BaseDataset):
             "skip_instance_cache": True,
         }
         self._fs = GCSFileSystem(**fs_config)
-        self.pres_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.pressure_lev_era5_path)
-        self.mod_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.model_lev_era5_path)
+        self.pres_level_store = zarr.storage.FsspecStore(
+            fs=self._fs, path=self.pressure_lev_era5_path.split("://", 1)[-1]
+        )
+        self.mod_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.model_lev_era5_path.split("://", 1)[-1])
 
     def _extract_field(
         self,
@@ -412,7 +414,7 @@ class WeatherBench2ERA5Dataset(BaseDataset):
             "skip_instance_cache": True,
         }
         self._fs = GCSFileSystem(**fs_config)
-        self.store = zarr.storage.FsspecStore(fs=self._fs, path=self.store_path)
+        self.store = zarr.storage.FsspecStore(fs=self._fs, path=self.store_path.split("://", 1)[-1])
 
     def _extract_field(
         self,
