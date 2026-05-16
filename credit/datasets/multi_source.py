@@ -43,7 +43,7 @@ from typing import Any
 
 import pandas as pd
 
-from credit.datasets.base_dataset import AbstractBaseDataset
+from credit.datasets.base_dataset import AbstractBaseDataset, BaseDataset
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ _SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
     "BASE": ("credit.datasets.base_dataset", "BaseDataset"),  # placeholders / testing
     "LOCAL": ("credit.datasets.local", "LocalDataset"),
     "ARCO_ERA5": ("credit.datasets.era5", "ARCOERA5Dataset"),
+    "WeatherBench2_ERA5": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
     "MRMS": ("credit.datasets.mrms", "MRMSDataset"),
     "GOES": ("credit.datasets.goes", "GOESDataset"),
     "HRRR": ("credit.datasets.hrrr", "HRRRDataset"),
@@ -133,7 +134,8 @@ class MultiSourceDataset(AbstractBaseDataset):
     """
 
     def __init__(self, config: dict[str, Any], return_target: bool = False) -> None:
-        self.datasets: dict[str, AbstractBaseDataset] = {}
+        super().__init__(config, return_target)
+        self.datasets: dict[str, BaseDataset] = {}
         source_cfg = config.get("source", {})
 
         # Loop through all the options in the source config. These will have user

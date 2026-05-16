@@ -7,6 +7,7 @@ All tests run on CPU with no data files required.
 import pytest
 import torch
 import torch.nn as nn
+import warnings
 
 try:
     from credit.trainers.base_trainer import EMATracker, BaseTrainer
@@ -15,6 +16,7 @@ try:
     _TRAINER_GEN2_AVAILABLE = True
 except ImportError:
     _TRAINER_GEN2_AVAILABLE = False
+warnings.filterwarnings("ignore", category=UserWarning)
 
 pytestmark = pytest.mark.skipif(
     not _TRAINER_GEN2_AVAILABLE,
