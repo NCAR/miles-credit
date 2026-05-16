@@ -70,7 +70,19 @@ class EMATracker:
         self.shadow: OrderedDict = OrderedDict()
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
         for k, v in state.items():
+            if self._is_spectral_norm_buffer(k, state):
+                continue  # power-iteration vectors must not be EMA-averaged
             self.shadow[k] = v.detach().float().cpu().clone()
+
+    @staticmethod
+    def _is_spectral_norm_buffer(key: str, state: dict) -> bool:
+        # nn.utils.spectral_norm stores weight_u / weight_v alongside weight_orig.
+        # Averaging these vectors destroys the power-iteration convergence and causes
+        # sigma = u^T W v → 0 in eval mode → weight explodes.
+        if key.endswith("_u") or key.endswith("_v"):
+            orig_key = key[:-2] + "_orig"
+            return orig_key in state
+        return False
 
     @torch.no_grad()
     def update(self, model: torch.nn.Module):
@@ -78,6 +90,8 @@ class EMATracker:
         effective_decay = min(self.decay, (1 + self.step) / (10 + self.step))
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
         for k, v in state.items():
+            if k not in self.shadow:
+                continue  # spectral norm buffers are excluded
             self.shadow[k].mul_(effective_decay).add_(v.detach().float().cpu(), alpha=1.0 - effective_decay)
 
     @torch.no_grad()
