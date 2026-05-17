@@ -9,19 +9,18 @@
 #   Levels : 13 standard WB2 pressure levels (hPa)
 #
 # Scalers : /glade/campaign/cisl/aiml/credit/static_scalers/
-#           wb2_era5_plevel_1979_2018_{mean,std}.nc
-#   Source : spatially averaged from ERA5 d633000 SE ne120np4 scalers
-#            (/glade/work/schreck/mesaclip_zarr/mean_std/)
-#   Period : 1979-2018
+#           wb2_era5_1440x721_2000_2018_v2_{mean,std,xi}.nc
+#   Source : computed via scripts/compute_wb2_stats.py from WB2 GCS zarr
+#   Period : 2000-2018
 #
 # Channel counts (matched vars only — 7 WB2-derived fields excluded)
-#   channels             = 10  (3D prognostic vars × 13 levels = 130)
-#   surface_channels     = 19  (2D prognostic)
-#   input_only_channels  = 14  (1 dynamic_forcing + 13 static)
-#   output_only_channels = 7   (diagnostic)
+#   channels             = 9   (3D prognostic vars × 13 levels = 117; pot_vort all-NaN)
+#   surface_channels     = 16  (2D prognostic; 2m_dewpoint + 2 leaf areas all-NaN excluded)
+#   input_only_channels  = 13  (13 static; dyn_forcing insolation all-NaN excluded)
+#   output_only_channels = 2   (diagnostic: mslhf + msshf; 5 net-radiation vars all-NaN)
 #
-#   C_in  = 10×13 + 19 + 14 = 163
-#   C_out = 10×13 + 19 + 7  = 156
+#   C_in  = 9×13 + 16 + 13 = 146
+#   C_out = 9×13 + 16 + 2  = 135
 #
 # Padding: 721 → 800 (pad [40,39]), 1440 → 1440 (no pad)
 #   800 and 1440 divisible by LCM(local_window=10, stride^4=16) = 80
@@ -51,11 +50,11 @@ data:
             - "relative_humidity"
             - "vorticity"
             - "divergence"
-            - "potential_vorticity"
+            # potential_vorticity: all-NaN in WB2 zarr
           vars_2D:
             - "surface_pressure"
             - "2m_temperature"
-            - "2m_dewpoint_temperature"
+            # 2m_dewpoint_temperature: all-NaN in WB2 zarr
             - "10m_u_component_of_wind"
             - "10m_v_component_of_wind"
             - "mean_sea_level_pressure"
@@ -70,12 +69,9 @@ data:
             - "volumetric_soil_water_layer_2"
             - "volumetric_soil_water_layer_3"
             - "volumetric_soil_water_layer_4"
-            - "leaf_area_index_high_vegetation"
-            - "leaf_area_index_low_vegetation"
+            # leaf_area_index_{high,low}_vegetation: all-NaN in WB2 zarr
 
-        dynamic_forcing:
-          vars_2D:
-            - "mean_top_downward_short_wave_radiation_flux"
+        dynamic_forcing: null   # mean_top_downward_short_wave_radiation_flux: all-NaN in WB2 zarr
 
         static:
           vars_2D:
@@ -97,11 +93,8 @@ data:
           vars_2D:
             - "mean_surface_latent_heat_flux"
             - "mean_surface_sensible_heat_flux"
-            - "mean_surface_net_long_wave_radiation_flux"
-            - "mean_surface_net_short_wave_radiation_flux"
-            - "mean_top_net_long_wave_radiation_flux"
-            - "mean_top_net_short_wave_radiation_flux"
-            - "mean_vertically_integrated_moisture_divergence"
+            # mean_surface/top_net_*_radiation_flux and mean_vertically_integrated_moisture_divergence
+            # are all-NaN in the WB2 zarr — excluded.
 
   timestep: "6h"
   forecast_len: 1
@@ -119,10 +112,10 @@ model:
   image_height: 721
   image_width:  1440
   frames: 1
-  channels: 10
-  surface_channels: 19
-  input_only_channels: 14
-  output_only_channels: 7
+  channels: 9
+  surface_channels: 16
+  input_only_channels: 13
+  output_only_channels: 2
   levels: 13
 
   dim:              [64, 128, 256, 512]
@@ -130,7 +123,7 @@ model:
   dim_head:         64
   global_window_size: [10, 5, 5, 1]
   local_window_size:  [10, 5, 5, 1]
-  col_attn_heads:   5
+  col_attn_heads:   3
   col_attn_stride:  1
   num_spectral_nodes: 64
   use_spectral_norm: True
@@ -146,8 +139,10 @@ preblocks:
   norm:
     type: era5_normalizer
     args:
-      mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_plevel_1979_2018_mean.nc"
-      std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_plevel_1979_2018_std.nc"
+      mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_mean.nc"
+      std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_std.nc"
+      xi_path:   "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_xi.nc"
+      pressure_levels: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
 
 # ---- Postblocks ---- #
 postblocks: {}

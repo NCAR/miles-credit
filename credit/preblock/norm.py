@@ -105,6 +105,7 @@ class ERA5Normalizer(nn.Module):
         self._std: dict[str, torch.Tensor] = {}
         self._xi: dict[str, torch.Tensor] = {}
         skipped_nan: list[str] = []
+        skipped_zero_std: list[str] = []
 
         common_vars = set(ds_mean.data_vars) & set(ds_std.data_vars)
         for var in common_vars:
@@ -115,6 +116,9 @@ class ERA5Normalizer(nn.Module):
                 s = s[level_idx]
             if torch.isnan(m).any() or torch.isnan(s).any():
                 skipped_nan.append(var)
+                continue
+            if (s == 0).all():
+                skipped_zero_std.append(var)
                 continue
             self._mean[var] = m
             self._std[var] = s
@@ -134,6 +138,12 @@ class ERA5Normalizer(nn.Module):
                 "ERA5Normalizer: skipping %d variables with NaN stats (pass-through): %s",
                 len(skipped_nan),
                 skipped_nan,
+            )
+        if skipped_zero_std:
+            logger.warning(
+                "ERA5Normalizer: skipping %d variables with zero std (pass-through): %s",
+                len(skipped_zero_std),
+                skipped_zero_std,
             )
         xi_loaded = len(self._xi)
         logger.info(

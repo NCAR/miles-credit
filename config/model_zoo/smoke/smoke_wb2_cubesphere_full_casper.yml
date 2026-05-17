@@ -1,0 +1,178 @@
+seed: 1000
+
+save_loc: '/glade/derecho/scratch/$USER/model_zoo_smoke/wb2_cubesphere_full'
+
+# Smoke — CubeSphereWxFormer + WB2 ERA5, full VALID variable set (13 pressure levels)
+# lat-lon 721×1440 → SE ne120 (ncol=777602) via latlon_to_se preblock
+# Excluded (all-NaN in zarr): potential_vorticity, 2m_dewpoint_temperature,
+#   leaf_area_index_{high,low}_vegetation, mean_top_downward_short_wave_radiation_flux,
+#   mean_{surface,top}_{net_lw,net_sw}_radiation_flux, mean_vertically_integrated_moisture_divergence
+#
+# C_in  = 9*13 + 16 + 13 = 146
+# C_out = 9*13 + 16 + 2  = 135
+
+data:
+  source:
+    WeatherBench2_ERA5:
+      dataset_type: "weatherbench2_era5"
+      resolution: "1440x721"
+      level_coord: "level"
+      levels: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+
+      variables:
+        prognostic:
+          vars_3D:
+            - "temperature"
+            - "u_component_of_wind"
+            - "v_component_of_wind"
+            - "specific_humidity"
+            - "geopotential"
+            - "vertical_velocity"
+            - "relative_humidity"
+            - "vorticity"
+            - "divergence"
+            # potential_vorticity: all-NaN in WB2 zarr
+          vars_2D:
+            - "surface_pressure"
+            - "2m_temperature"
+            # 2m_dewpoint_temperature: all-NaN in WB2 zarr
+            - "10m_u_component_of_wind"
+            - "10m_v_component_of_wind"
+            - "mean_sea_level_pressure"
+            - "sea_surface_temperature"
+            - "sea_ice_cover"
+            - "snow_depth"
+            - "total_cloud_cover"
+            - "boundary_layer_height"
+            - "total_column_water_vapour"
+            - "total_column_water"
+            - "volumetric_soil_water_layer_1"
+            - "volumetric_soil_water_layer_2"
+            - "volumetric_soil_water_layer_3"
+            - "volumetric_soil_water_layer_4"
+            # leaf_area_index_{high,low}_vegetation: all-NaN in WB2 zarr
+        dynamic_forcing: null   # mean_top_downward_short_wave_radiation_flux: all-NaN in WB2 zarr
+        static:
+          vars_2D:
+            - "geopotential_at_surface"
+            - "land_sea_mask"
+            - "lake_cover"
+            - "high_vegetation_cover"
+            - "low_vegetation_cover"
+            - "standard_deviation_of_filtered_subgrid_orography"
+            - "standard_deviation_of_orography"
+            - "angle_of_sub_gridscale_orography"
+            - "anisotropy_of_sub_gridscale_orography"
+            - "slope_of_sub_gridscale_orography"
+            - "soil_type"
+            - "type_of_high_vegetation"
+            - "type_of_low_vegetation"
+        diagnostic:
+          vars_2D:
+            - "mean_surface_latent_heat_flux"
+            - "mean_surface_sensible_heat_flux"
+            # mean_surface/top_net_*_radiation_flux and mean_vertically_integrated_moisture_divergence
+            # are all-NaN in the WB2 zarr — excluded.
+
+  timestep: "6h"
+  forecast_len: 1
+  start_datetime: "2000-01-01"
+  end_datetime:   "2014-12-31"
+
+validation_data:
+  start_datetime: "2018-01-01"
+  end_datetime:   "2018-03-31"
+
+preblocks:
+  norm:
+    type: era5_normalizer
+    args:
+      mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_mean.nc"
+      std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_std.nc"
+      xi_path:   "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_xi.nc"
+      pressure_levels: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+  latlon_to_se:
+    type: tripole_to_se
+    args:
+      weight_file: "/glade/work/schreck/repos/credit-mesaclip/mesaclip/static/latlon721x1440_to_se_ne120.nc"
+      fill_value: 0.0
+  concat:
+    type: concat
+
+model:
+  type: "cube_sphere_wxformer"
+  se_index_path: "/glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_index_ne120.npy"
+  adjacency_path: "/glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_face_adjacency_ne120.npz"
+  frames: 1
+  channels: 9
+  surface_channels: 16
+  input_only_channels: 13
+  output_only_channels: 2
+  levels: 13
+  dim:   [32, 64, 128, 256]
+  depth: [2,  2,  4,   2  ]
+  dim_head: 32
+  global_window_size: [6, 3, 2, 1]
+  local_window_size:  12
+  use_spectral_norm: True
+
+loss:
+  training_loss: "mse"
+  validation_loss: "mse"
+  use_power_loss: False
+  use_spectral_loss: False
+  use_latitude_weights: False
+  use_variable_weights: False
+
+trainer:
+  type: era5-gen2
+  mode: none
+
+  load_weights: False
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+
+  save_backup_weights: False
+  save_best_weights: False
+
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  train_batch_size: 1
+  valid_batch_size: 1
+
+  batches_per_epoch: 10
+  valid_batches_per_epoch: 5
+  stopping_patience: 999
+  skip_validation: False
+
+  start_epoch: 0
+  epochs: 1
+
+  use_scheduler: True
+  scheduler:
+    scheduler_type: "linear-warmup-cosine"
+    warmup_steps: 3
+    total_steps: 10
+    min_lr: 1.0e-06
+
+  save_metric_vars: True
+
+  amp: True
+  grad_max_norm: 1.0
+
+  thread_workers: 2
+  valid_thread_workers: 1
+  prefetch_factor: 2
+
+pbs:
+  conda: "credit-casper"
+  project: "NAML0001"
+  job_name: "smoke_wb2_cubesphere_full"
+  walltime: "01:00:00"
+  ncpus: 8
+  ngpus: 1
+  mem: "128GB"
+  gpu_type: "v100"
+  queue: "casper"
