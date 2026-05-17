@@ -44,8 +44,9 @@ preblocks:
   norm:
     type: era5_normalizer
     args:
-      mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_plevel_1979_2018_mean.nc"
-      std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_plevel_1979_2018_std.nc"
+      mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_mean.nc"
+      std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_std.nc"
+      xi_path:   "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_xi.nc"
       pressure_levels: [500, 850, 1000]
   concat:
     type: concat
@@ -118,7 +119,7 @@ trainer:
 
   save_metric_vars: True
 
-  amp: True
+  amp: False
   grad_max_norm: 1.0
   skip_nan_prune: True
 

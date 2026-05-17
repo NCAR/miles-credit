@@ -171,13 +171,13 @@ class TrainerERA5Gen2(BaseTrainer):
                 x_raw, y_raw = _batch["input"], _batch["target"]
 
                 if t == 1:
-                    x = x_raw.float()
+                    x = torch.nan_to_num(x_raw.float(), nan=0.0, posinf=0.0, neginf=0.0)
                     if self.ensemble_size > 1:
                         x = torch.repeat_interleave(x, self.ensemble_size, 0)
                 else:
                     # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
                     # update_x replaces dynfrc and prognostic slices; static stays.
-                    x_dynfrc = x_raw.float()
+                    x_dynfrc = torch.nan_to_num(x_raw.float(), nan=0.0, posinf=0.0, neginf=0.0)
                     if self.ensemble_size > 1:
                         x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                     y_pred_in = y_pred if self.retain_graph else y_pred.detach()
@@ -209,7 +209,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 # backprop on specified timesteps
                 if t in self.backprop_on_timestep:
-                    y = y_raw.float()
+                    y = torch.nan_to_num(y_raw.float(), nan=0.0, posinf=0.0, neginf=0.0)
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
@@ -323,13 +323,13 @@ class TrainerERA5Gen2(BaseTrainer):
                     x_raw, y_raw = _batch["input"], _batch["target"]
 
                     if t == 1:
-                        x = x_raw.float()
+                        x = torch.nan_to_num(x_raw.float(), nan=0.0, posinf=0.0, neginf=0.0)
                         if self.ensemble_size > 1:
                             x = torch.repeat_interleave(x, self.ensemble_size, 0)
                     else:
                         # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
                         # update_x replaces dynfrc and prognostic slices; static stays.
-                        x_dynfrc = x_raw.float()
+                        x_dynfrc = torch.nan_to_num(x_raw.float(), nan=0.0, posinf=0.0, neginf=0.0)
                         if self.ensemble_size > 1:
                             x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                         x = update_x(x, x_dynfrc, y_pred.detach(), self.slices)
@@ -359,7 +359,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                     # compute loss and metrics only at the final rollout step
                     if t == self.valid_forecast_len:
-                        y = y_raw.float()
+                        y = torch.nan_to_num(y_raw.float(), nan=0.0, posinf=0.0, neginf=0.0)
                         if self.flag_clamp:
                             y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
