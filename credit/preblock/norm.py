@@ -68,7 +68,14 @@ class ERA5Normalizer(nn.Module):
 
         ds_mean = xr.open_dataset(mean_path)
         ds_std = xr.open_dataset(std_path)
-        ds_xi = xr.open_dataset(xi_path) if xi_path is not None else None
+        if xi_path is not None:
+            try:
+                ds_xi = xr.open_dataset(xi_path)
+            except FileNotFoundError:
+                logger.warning("ERA5Normalizer: xi_path not found, proceeding with xi=1: %s", xi_path)
+                ds_xi = None
+        else:
+            ds_xi = None
 
         # Determine which rows of the level dimension to keep.
         if pressure_levels is not None:
