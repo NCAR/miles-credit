@@ -538,6 +538,160 @@ class CubeSphereWxFormer(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# CubeSphereWxFormerNext: CubeSphereWxFormer + NextGen additions
+# ---------------------------------------------------------------------------
+
+
+class CubeSphereWxFormerNext(CubeSphereWxFormer):
+    """CubeSphereWxFormer with NextGen feature additions.
+
+    Adds three capabilities from NextGenWXFormer on top of the cubed-sphere backbone:
+
+    1. **LevelEmbedding** — learned per-level bias broadcast onto atmospheric channels.
+    2. **ColumnAttention** — multi-head attention across pressure levels at each face
+       pixel before the encoder, for explicit vertical coupling.
+    3. **SpectralGNNBottleneck** — grid-agnostic global spectral mixing at the encoder
+       bottleneck (per-face at 12×12 spatial resolution) via learned virtual spectral
+       nodes.
+    4. **Decoder ColumnAttention** (optional) — re-applies vertical coupling to the
+       atmospheric output channels before the residual add.
+
+    All other parameters are identical to :class:`CubeSphereWxFormer`
+    (SE index, face attention, halo exchange, edge attention, etc.).
+
+    Additional parameters
+    ---------------------
+    col_attn_heads : int
+        Heads in ColumnAttention.  Must divide ``channels`` (embed_dim = channels).
+        With channels=9: valid values are 1, 3, 9.  Default 3.
+    col_attn_stride : int
+        Spatial pooling stride before ColumnAttention.  For 361×361 faces use ≥4 in
+        production to keep attention memory reasonable.  Default 1.
+    decoder_col_attn : bool
+        Apply ColumnAttention to atmospheric output channels before the residual add.
+        Default False.
+    num_spectral_nodes : int
+        Virtual spectral nodes K in the GNN bottleneck (per face, 12×12 spatial).
+        Default 64.
+    use_spectral_norm : bool
+        Apply spectral norm to new Conv/Linear layers in the added modules.
+        Default True.
+
+    Notes
+    -----
+    ColumnAttention processes the first ``channels * levels`` input channels, which
+    correctly maps to the atmospheric variables when ``frames=1`` (the standard use
+    case).  For ``frames>1``, channel-major reshape ordering means only the last
+    frame's atmospheric variables are processed; multi-frame column attention is left
+    for a future revision.
+    """
+
+    def __init__(
+        self,
+        col_attn_heads: int = 3,
+        col_attn_stride: int = 1,
+        decoder_col_attn: bool = False,
+        num_spectral_nodes: int = 64,
+        use_spectral_norm: bool = True,
+        **base_kwargs,
+    ) -> None:
+        # Drop loader-injected keys that CubeSphereWxFormer.__init__ doesn't accept
+        base_kwargs.pop("channel_layout", None)
+        super().__init__(**base_kwargs)
+
+        channels = base_kwargs.get("channels", 2)
+        levels = base_kwargs.get("levels", 6)
+        self._atmos_channels = channels * levels
+
+        from credit.models.wxformer.wxformer_next import (
+            ColumnAttention,
+            LevelEmbedding,
+            SpectralGNNBottleneck,
+        )
+        from credit.models.wxformer.crossformer import apply_spectral_norm as _apply_sn
+
+        self.level_embedding = LevelEmbedding(channels, levels)
+        self.col_attn = ColumnAttention(channels, levels, num_heads=col_attn_heads, spatial_stride=col_attn_stride)
+
+        dim = base_kwargs.get("dim", (64, 128, 256, 512))
+        self.sfno_bottleneck = SpectralGNNBottleneck(
+            dim=dim[-1],
+            nlat=12,
+            nlon=12,
+            num_spectral_nodes=num_spectral_nodes,
+        )
+
+        self.dec_col_attn: Optional[nn.Module] = None
+        if decoder_col_attn:
+            self.dec_col_attn = ColumnAttention(
+                channels, levels, num_heads=col_attn_heads, spatial_stride=col_attn_stride
+            )
+
+        if use_spectral_norm:
+            _apply_sn(self.sfno_bottleneck)
+            if self.dec_col_attn is not None:
+                _apply_sn(self.dec_col_attn)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """(B, C_in, T, ncol) → (B, C_out, 1, ncol)"""
+        B, C, T, ncol = x.shape
+
+        x_res = x[:, : self.output_channels, T - 1, :]  # (B, C_out, ncol)
+
+        x_flat = x.reshape(B, C * T, ncol)
+        cube = self.se_to_cube(x_flat)  # (B, C*T, 6, 361, 361)
+        x6 = cube.permute(0, 2, 1, 3, 4).reshape(B * NFACE, C * T, NFACE_EDGE, NFACE_EDGE)
+
+        # Level embedding + column attention on atmospheric input channels (frames=1)
+        atmos = self.level_embedding(x6[:, : self._atmos_channels])
+        atmos = self.col_attn(atmos)
+        x6 = torch.cat([atmos, x6[:, self._atmos_channels :]], dim=1)
+
+        # Halo exchange / padding
+        if self.halo_exchange is not None:
+            x6 = self.halo_exchange(x6)
+            halo_pad = _PADDED - (NFACE_EDGE + 2 * self.halo_size)
+            x6 = F.pad(x6, (0, halo_pad, 0, halo_pad))
+        else:
+            x6 = F.pad(x6, (0, _PAD, 0, _PAD))
+
+        # Encoder
+        encodings = []
+        z = x6
+        for i, stage in enumerate(self.encoder_stages):
+            z = stage(z)
+            if self.face_edge_attn is not None:
+                z = self.face_edge_attn(z, stage=i)
+            if self.cross_face_tile_attn is not None:
+                z = self.cross_face_tile_attn(z, stage=i)
+            encodings.append(z)
+
+        # Spectral GNN bottleneck at deepest encoder stage (per-face, 12×12)
+        encodings[-1] = self.sfno_bottleneck(encodings[-1])
+        z = encodings[-1]
+
+        # Decoder with skip connections
+        z = self.up1(z)
+        z = self.up2(torch.cat([z, encodings[-2]], dim=1))
+        z = self.up3(torch.cat([z, encodings[-3]], dim=1))
+        z = self.up4(torch.cat([z, encodings[-4]], dim=1))
+
+        z = F.interpolate(z, size=(NFACE_EDGE, NFACE_EDGE), mode="bilinear", align_corners=False)
+
+        # Decoder column attention: atmospheric output channels only
+        if self.dec_col_attn is not None:
+            atmos_out = self.dec_col_attn(z[:, : self._atmos_channels])
+            z = torch.cat([atmos_out, z[:, self._atmos_channels :]], dim=1)
+
+        out_cube = z.reshape(B, NFACE, self.output_channels, NFACE_EDGE, NFACE_EDGE)
+        out_cube = out_cube.permute(0, 2, 1, 3, 4)
+        out = self.cube_to_se(out_cube)
+        out = out + x_res
+
+        return out.unsqueeze(2)  # (B, C_out, 1, ncol)
+
+
+# ---------------------------------------------------------------------------
 # __main__: forward-pass smoke test
 #
 # Requires static files (se_index_ne120.npy, se_face_adjacency_ne120.npz).
