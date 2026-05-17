@@ -48,6 +48,7 @@ preblocks:
       mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_mean.nc"
       std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_std.nc"
       xi_path:   "/glade/campaign/cisl/aiml/credit/static_scalers/wb2_era5_1440x721_2000_2018_v2_xi.nc"
+      xi_min: 0.3
       pressure_levels: [500, 850, 1000]
   latlon_to_se:
     type: tripole_to_se

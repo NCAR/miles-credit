@@ -48,6 +48,12 @@ class ERA5Normalizer(nn.Module):
         xi_path:         Optional path to NetCDF file containing per-variable xi values
                          (residual normalization factors).  When provided, the effective
                          std used for normalization is ``xi * std``.
+        xi_min:          Minimum xi value.  Any loaded xi below this floor is clamped to
+                         1.0 (i.e., that variable falls back to plain std normalization).
+                         Useful for slow-varying surface fields (snow, SST, soil moisture)
+                         whose 6h tendency is near-zero; without a floor their xi ≈ 0
+                         amplifies their MSE weight by 1/xi² → training instability.
+                         Default 0.0 (no clamping, backward-compatible).
         levels:          Optional list of 1-indexed model levels to select from
                          the stats (e.g. [60, 90, 120, 137]).  Mutually exclusive
                          with ``pressure_levels``.
@@ -61,6 +67,7 @@ class ERA5Normalizer(nn.Module):
         mean_path: str,
         std_path: str,
         xi_path: str | None = None,
+        xi_min: float = 0.0,
         levels: list[int] | None = None,
         pressure_levels: list[int] | None = None,
     ) -> None:
@@ -124,13 +131,16 @@ class ERA5Normalizer(nn.Module):
             self._std[var] = s
 
             # Load xi if provided and variable is present in xi file.
-            # Skip xi=0 values (zero-tendency / static fields) so those variables
-            # fall back to base-std normalization rather than dividing by 0.
+            # Skip xi=0 (zero-tendency / static fields) → fall back to base-std.
+            # Apply xi_min floor: any xi below xi_min is clamped to 1.0 so slow-
+            # varying surface vars (snow, SST, soil) don't get amplified by 1/xi².
             if ds_xi is not None and var in ds_xi.data_vars:
                 x = torch.tensor(np.array(ds_xi[var].values), dtype=torch.float32)
                 if level_idx is not None and x.dim() == 1 and x.shape[0] > 1:
                     x = x[level_idx]
                 if not torch.isnan(x).any() and (x > 0).all():
+                    if xi_min > 0.0:
+                        x = torch.where(x < xi_min, torch.ones_like(x), x)
                     self._xi[var] = x
 
         if skipped_nan:
