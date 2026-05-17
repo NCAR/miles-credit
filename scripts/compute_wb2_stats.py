@@ -469,12 +469,17 @@ def main():
             gmean = 1.0
             logger.warning("No valid tendency stds — xi=1 everywhere")
 
+        # xi = tend_std / gmean.  Variables with zero tendency (static or all-NaN
+        # fields) get xi=1.0 so normalization falls back to base std — a xi of 0
+        # would collapse effective_std to zero and explode normalized values.
         xi: dict[str, np.ndarray | np.floating] = {}
         for v in vars_3d:
             arr = np.array(tend_stds[v], dtype=np.float64)
-            xi[v] = (arr / gmean).astype(np.float32)
+            xi_arr = np.where(arr > 1e-10, arr / gmean, 1.0).astype(np.float32)
+            xi[v] = xi_arr
         for v in vars_2d:
-            xi[v] = np.float32(float(tend_stds[v]) / gmean)
+            ts_val = float(tend_stds[v])
+            xi[v] = np.float32(ts_val / gmean if ts_val > 1e-10 else 1.0)
 
         # Summary table
         print(f"\n  {'variable':<55}  {'tend_std':>10}  {'xi':>8}")

@@ -120,11 +120,13 @@ class ERA5Normalizer(nn.Module):
             self._std[var] = s
 
             # Load xi if provided and variable is present in xi file.
+            # Skip xi=0 values (zero-tendency / static fields) so those variables
+            # fall back to base-std normalization rather than dividing by 0.
             if ds_xi is not None and var in ds_xi.data_vars:
                 x = torch.tensor(np.array(ds_xi[var].values), dtype=torch.float32)
                 if level_idx is not None and x.dim() == 1 and x.shape[0] > 1:
                     x = x[level_idx]
-                if not torch.isnan(x).any():
+                if not torch.isnan(x).any() and (x > 0).all():
                     self._xi[var] = x
 
         if skipped_nan:
