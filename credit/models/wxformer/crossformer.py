@@ -7,7 +7,6 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
-from credit.postblock.gen1 import PostBlock
 from credit.boundary_padding import TensorPadding
 from credit.models.unet_attention_modules import load_unet_attention
 
@@ -624,6 +623,8 @@ class CrossFormer(BaseModel):
                         param.requires_grad = False
 
             logger.info("using postblock")
+            from credit.postblock.gen1 import PostBlock
+
             self.postblock = PostBlock(post_conf)
 
     def forward(self, x):
