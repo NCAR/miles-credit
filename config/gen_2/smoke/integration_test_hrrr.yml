@@ -137,9 +137,9 @@ trainer:
 model:
   type: "wxformer"
   frames: 1
-  image_height: 59       # 1-degree ERA5 latitude grid
-  image_width: 47        # 1-degree ERA5 longitude grid
-  levels: 4               # number of ERA5 model levels (matches data.levels above)
+  image_height: 59       # Custom HRRR extent has 59 latitudes (39.5 to 41.0 at 3km resolution)
+  image_width: 47        # Custom HRRR extent has 47 longitudes (-106.0 to -104.5 at 3km resolution)
+  levels: 4               # number of HRRR model levels (matches data.levels above)
   channels: 3             # 3D prognostic variables (T, U, V)
   surface_channels: 2     # 2D prognostic variables (sp, t2m)
   input_only_channels: 5  # dynamic_forcing (GH x4) + static (orog)
@@ -173,9 +173,9 @@ model:
 
   padding_conf:
     activate: True
-    mode: mirror          # spherical (latitude-wrapping) padding
-    pad_lat: [ 3, 2 ]
-    pad_lon: [ 9, 8 ]
+    mode: mirror          # switch to mirror since it is a local extent
+    pad_lat: [ 3, 2 ]     # Produce dimensions of 59+3+2=64 ...
+    pad_lon: [ 9, 8 ]     # and 47+9+8=64, divisible by 8 and 4 (window sizes)
 
   
 # ---- Loss ---- #
