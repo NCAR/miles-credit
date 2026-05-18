@@ -71,6 +71,15 @@ print("Input shape:", batch["input"].shape)
 print("Target shape:", batch["target"].shape)
 target_shape = batch["target"].shape
 
+print("# Input is Nan:", torch.isnan(batch["input"]).sum().item())
+print("# Total in input:", batch["input"].numel())
+print("Input min value:", batch["input"].min().item())
+print("Input max value:", batch["input"].max().item())
+print("# Target is Nan:", torch.isnan(batch["target"]).sum().item())
+print("# Total in target:", batch["target"].numel())
+print("Target min value:", batch["target"].min().item())
+print("Target max value:", batch["target"].max().item())
+
 print("METADATA KEYS:", batch["metadata"].keys())
 print("METADATA KEYS:", batch["metadata"]["input"].keys())
 

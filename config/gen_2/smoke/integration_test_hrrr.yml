@@ -20,7 +20,7 @@ seed: 1000
 # Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
 data:
   source:
-    HRRR:
+    Example_HRRR:
       dataset_type: "hrrr"
       product: "wrfprs"
       mode: "remote"
@@ -29,7 +29,7 @@ data:
       variables:
         # Prognostic: model both predicts and receives as input next step
         prognostic:
-          vars_3D: ['T', 'U', 'V']
+          vars_3D: ['T', 'U', 'V'] #, 'Q']
           vars_2D: ['sp', 't2m']
 
         # Diagnostic: model predicts these but does not feed them back as input
@@ -69,7 +69,26 @@ validation_data:
 # ---- USER SETTINGS: preblocks/postblocks before/after passed to model ---- #
 
 preblocks:
-  concat:
+
+  pressure_log_transform:
+    type: "log_transform"
+    args:
+      variables:
+        - 'Example_HRRR/prognostic/2d/sp'
+      data_types:
+        - 'input'
+        - 'target'
+
+  # q_sqrt_transform:
+  #     type: "sqrt_transform"
+  #     args:
+  #         variables:
+  #               - 'Example_HRRR/prognostic/3d/Q'
+  #         data_types:
+  #           - 'input'
+  #           - 'target'
+
+  vars_concat:
     type: "concat"
 
 postblocks:
