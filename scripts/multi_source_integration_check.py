@@ -1,6 +1,6 @@
 import time
 
-import_timer_start = time.perf_counter()
+# import_timer_start = time.perf_counter()
 
 import yaml
 import pathlib
@@ -12,8 +12,8 @@ from credit.postblock import build_postblocks, apply_postblocks
 import torch
 import numpy as np
 
-import_timer_end = time.perf_counter()
-print(f"Imports completed in {import_timer_end - import_timer_start:.2f} seconds")
+# import_timer_end = time.perf_counter()
+# print(f"Imports completed in {import_timer_end - import_timer_start:.2f} seconds")
 
 setup_timer_start = time.perf_counter()
 
