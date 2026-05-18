@@ -3,7 +3,8 @@ import torch.nn as nn
 from credit.postblock.reconstruct import Reconstruct
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransformer
-from credit.postblock.mslp import MSLPDiagnostic, mslp_from_surface_pressure
+from credit.postblock.mslp import MSLPDiagnostic
+from credit.postblock.mslp import mslp_from_surface_pressure as mslp_from_surface_pressure
 
 
 POSTBLOCK_REGISTRY = {
