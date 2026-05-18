@@ -16,7 +16,6 @@ where sgp is geopotential (m² s⁻²); it must be `LAPSE_RATE * sgp / GRAVITY`
 to convert geopotential to height in metres.
 """
 
-import logging
 from typing import Iterable
 
 import torch
@@ -24,11 +23,13 @@ import torch.nn as nn
 
 from credit.physics_constants import GRAVITY, RDGAS
 
-logger = logging.getLogger(__name__)
-
 # Trenberth 1993 standard atmosphere lapse rate
 _LAPSE_RATE = 0.0065  # K m⁻¹
 _ALPHA_STD = _LAPSE_RATE * RDGAS / GRAVITY  # dimensionless
+
+# Trenberth 1993 temperature thresholds for lapse-rate regime selection
+_T_WARM = 290.5  # K — warm-surface branch (alpha → 0, T_eff blended)
+_T_COLD = 255.0  # K — very-cold-surface branch (T_eff blended toward 255 K)
 
 
 def mslp_from_surface_pressure(
@@ -58,25 +59,22 @@ def mslp_from_surface_pressure(
     tto = temperature + _LAPSE_RATE * height
 
     # --- effective lapse-rate alpha and temperature ---
-    # case 1: cold surface but warm sea level  (T_surf <= 290.5, T_sl > 290.5)
-    mask1 = (temperature <= 290.5) & (tto > 290.5)
-    alpha_case1 = RDGAS * (290.5 - temperature) / sgp.clamp(min=1e-6)
+    # case 1: cold surface but warm sea level  (T_surf <= _T_WARM, T_sl > _T_WARM)
+    mask1 = (temperature <= _T_WARM) & (tto > _T_WARM)
+    alpha_case1 = RDGAS * (_T_WARM - temperature) / sgp.clamp(min=1e-6)
 
-    # case 2: warm surface  (T_surf > 290.5)
-    mask2 = temperature > 290.5
+    # case 2: warm surface  (T_surf > _T_WARM)
+    mask2 = temperature > _T_WARM
 
-    # case 3: very cold surface  (T_surf < 255), only outside cases 1 & 2
-    mask3 = (temperature < 255) & ~mask1 & ~mask2
+    # case 3: very cold surface  (T_surf < _T_COLD), only outside cases 1 & 2
+    mask3 = (temperature < _T_COLD) & ~mask1 & ~mask2
 
-    # defaults
     alpha = torch.full_like(temperature, _ALPHA_STD)
-    temp_eff = temperature.clone()
-
-    # apply cases
     alpha = torch.where(mask1, alpha_case1, alpha)
     alpha = torch.where(mask2, torch.zeros_like(alpha), alpha)
-    temp_eff = torch.where(mask2, 0.5 * (290.5 + temperature), temp_eff)
-    temp_eff = torch.where(mask3, 0.5 * (255.0 + temperature), temp_eff)
+
+    temp_eff = torch.where(mask2, 0.5 * (_T_WARM + temperature), temperature)
+    temp_eff = torch.where(mask3, 0.5 * (_T_COLD + temperature), temp_eff)
 
     x = sgp / (RDGAS * temp_eff.clamp(min=1.0))
     mslp_computed = surface_pressure * torch.exp(x * (1.0 - 0.5 * alpha * x + (alpha * x) ** 2 / 3.0))
