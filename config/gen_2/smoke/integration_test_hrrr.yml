@@ -173,9 +173,9 @@ model:
 
   padding_conf:
     activate: True
-    mode: earth          # spherical (latitude-wrapping) padding
-    pad_lat: [ 0, 0 ]
-    pad_lon: [ 0, 0 ]
+    mode: mirror          # spherical (latitude-wrapping) padding
+    pad_lat: [ 3, 2 ]
+    pad_lon: [ 9, 8 ]
 
   
 # ---- Loss ---- #
