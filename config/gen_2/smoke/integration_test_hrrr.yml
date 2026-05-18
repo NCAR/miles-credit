@@ -30,11 +30,11 @@ data:
         # Prognostic: model both predicts and receives as input next step
         prognostic:
           vars_3D: ['T', 'U', 'V', 'Q']
-          vars_2D: ['sp', 't2m']
+          vars_2D: ['sp'] #, 't2m']
 
         # Diagnostic: model predicts these but does not feed them back as input
-        diagnostic:
-          vars_2D: [ 'd2m' ]
+        diagnostic: null
+          # vars_2D: [ 'd2m' ]
 
         # Dynamic forcing: time-varying inputs (not predicted)
         dynamic_forcing:
@@ -45,6 +45,20 @@ data:
           vars_2D: [ 'orog' ]
       # [lon_min, lon_max, lat_min, lat_max]
       extent: [-106.0, -104.5, 39.5, 41.0]  # Prime numbers of data points: 59 lat × 47 lon
+
+    Example_HRRR_SUBH:
+      dataset_type: "hrrr"
+      product: "wrfsubh" # 2D only
+      mode: "remote"
+      variables:
+        prognostic:
+          vars_2D: ['t2m']
+        
+        diagnostic:
+          vars_2D: ['d2m']
+
+      # Extent to match the one above
+      extent: [-106.0, -104.5, 39.5, 41.0]
 
   start_datetime: "2025-01-01"
   end_datetime: "2025-01-02"
