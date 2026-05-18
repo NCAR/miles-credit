@@ -29,7 +29,7 @@ data:
       variables:
         # Prognostic: model both predicts and receives as input next step
         prognostic:
-          vars_3D: ['T', 'U', 'V'] #, 'Q']
+          vars_3D: ['T', 'U', 'V', 'Q']
           vars_2D: ['sp', 't2m']
 
         # Diagnostic: model predicts these but does not feed them back as input
@@ -79,14 +79,14 @@ preblocks:
         - 'input'
         - 'target'
 
-  # q_sqrt_transform:
-  #     type: "sqrt_transform"
-  #     args:
-  #         variables:
-  #               - 'Example_HRRR/prognostic/3d/Q'
-  #         data_types:
-  #           - 'input'
-  #           - 'target'
+  q_sqrt_transform:
+      type: "sqrt_transform"
+      args:
+          variables:
+                - 'Example_HRRR/prognostic/3d/Q'
+          data_types:
+            - 'input'
+            - 'target'
 
   vars_concat:
     type: "concat"
@@ -126,7 +126,7 @@ trainer:
   stopping_patience: 999
 
   start_epoch: 0
-  num_epoch: 5            # epochs per qsub job (checkpoint after each)
+  num_epoch: 2            # epochs per qsub job (checkpoint after each)
   epochs: &epochs 70      # total training target
 
   use_tensorboard: True
@@ -159,7 +159,7 @@ model:
   image_height: 59       # Custom HRRR extent has 59 latitudes (39.5 to 41.0 at 3km resolution)
   image_width: 47        # Custom HRRR extent has 47 longitudes (-106.0 to -104.5 at 3km resolution)
   levels: 4               # number of HRRR model levels (matches data.levels above)
-  channels: 3             # 3D prognostic variables (T, U, V)
+  channels: 4             # 3D prognostic variables (T, U, V, Q)
   surface_channels: 2     # 2D prognostic variables (sp, t2m)
   input_only_channels: 5  # dynamic_forcing (GH x4) + static (orog)
   output_only_channels: 1 # diagnostic variables (d2m)

@@ -170,6 +170,7 @@ class BaseTrainer(ABC):
             ema_decay = trainer_conf.get("ema_decay", 0.9999)
             self.ema: Optional[EMATracker] = EMATracker(self.model, decay=ema_decay)
             ema_path = os.path.join(self.save_loc, "checkpoint_ema.pt")
+            # if self.load_weights and os.path.exists(ema_path):
             if os.path.exists(ema_path):
                 ema_ckpt = torch.load(ema_path, map_location="cpu", weights_only=False)
                 self.ema.load_state_dict(ema_ckpt["model_state_dict"])
