@@ -1,0 +1,143 @@
+"""
+MSLPDiagnostic postblock
+------------------------
+Computes mean sea level pressure (MSLP) from surface pressure, near-surface
+temperature, and static surface geopotential using the Trenberth et al. (1993)
+formula.  Fully vectorized in PyTorch — no numpy, no per-pixel loops.
+
+Reference:
+    Trenberth, K., J. Berry, and L. Buja, 1993: Vertical Interpolation and
+    Truncation of Model-Coordinate Data. NCAR Tech. Note NCAR/TN-396+STR.
+    https://doi.org/10.5065/D6HX19NH
+
+Bug fixed vs. the original numpy implementation in credit/interp.py (merged
+in PR #341): the sea-level temperature branch test used `LAPSE_RATE * sgp`
+where sgp is geopotential (m² s⁻²); it must be `LAPSE_RATE * sgp / GRAVITY`
+to convert geopotential to height in metres.
+"""
+
+import logging
+from typing import Iterable
+
+import torch
+import torch.nn as nn
+
+from credit.physics_constants import GRAVITY, RDGAS
+
+logger = logging.getLogger(__name__)
+
+# Trenberth 1993 standard atmosphere lapse rate
+_LAPSE_RATE = 0.0065  # K m⁻¹
+_ALPHA_STD = _LAPSE_RATE * RDGAS / GRAVITY  # dimensionless
+
+
+def mslp_from_surface_pressure(
+    surface_pressure: torch.Tensor,
+    temperature: torch.Tensor,
+    surface_geopotential: torch.Tensor,
+) -> torch.Tensor:
+    """Vectorized MSLP from surface pressure, near-surface T, and PHIS.
+
+    Implements the simplified Trenberth et al. (1993) formula.  All inputs
+    must be broadcastable to the same shape.
+
+    Args:
+        surface_pressure: surface pressure in Pa, shape (..., H, W).
+        temperature: near-surface temperature in K, shape (..., H, W).
+        surface_geopotential: PHIS in m² s⁻², shape (..., H, W).
+
+    Returns:
+        MSLP in Pa, same shape as inputs.
+    """
+    sgp = surface_geopotential
+    height = sgp / GRAVITY  # surface height in metres
+
+    near_flat = height.abs() < 1e-4  # essentially at sea level
+
+    # sea-level temperature (uncorrected)
+    tto = temperature + _LAPSE_RATE * height
+
+    # --- effective lapse-rate alpha and temperature ---
+    # case 1: cold surface but warm sea level  (T_surf <= 290.5, T_sl > 290.5)
+    mask1 = (temperature <= 290.5) & (tto > 290.5)
+    alpha_case1 = RDGAS * (290.5 - temperature) / sgp.clamp(min=1e-6)
+
+    # case 2: warm surface  (T_surf > 290.5)
+    mask2 = temperature > 290.5
+
+    # case 3: very cold surface  (T_surf < 255), only outside cases 1 & 2
+    mask3 = (temperature < 255) & ~mask1 & ~mask2
+
+    # defaults
+    alpha = torch.full_like(temperature, _ALPHA_STD)
+    temp_eff = temperature.clone()
+
+    # apply cases
+    alpha = torch.where(mask1, alpha_case1, alpha)
+    alpha = torch.where(mask2, torch.zeros_like(alpha), alpha)
+    temp_eff = torch.where(mask2, 0.5 * (290.5 + temperature), temp_eff)
+    temp_eff = torch.where(mask3, 0.5 * (255.0 + temperature), temp_eff)
+
+    x = sgp / (RDGAS * temp_eff.clamp(min=1.0))
+    mslp_computed = surface_pressure * torch.exp(x * (1.0 - 0.5 * alpha * x + (alpha * x) ** 2 / 3.0))
+
+    return torch.where(near_flat, surface_pressure, mslp_computed)
+
+
+class MSLPDiagnostic(nn.Module):
+    """Postblock that computes MSLP from surface pressure, 2m temperature, and PHIS.
+
+    Follows the same data-dict protocol as ``GeopotentialDiagnostic``: all
+    inputs are accessed by variable name from the nested batch dict, and the
+    result is written back under ``output_name``.
+
+    Args:
+        output_name: key written into ``data[dataset_name]`` for the result.
+        dataset_name: top-level key inside each ``data_type`` sub-dict.
+        data_keys: which top-level batch-dict keys to process (e.g.
+            ``("prediction", "target")``).
+        surface_pressure_var: variable name for surface pressure (Pa).
+        temperature_var: variable name for near-surface temperature (K).
+        surface_geopotential_var: variable name for PHIS (m² s⁻²).
+    """
+
+    def __init__(
+        self,
+        output_name: str = "ARCO_ERA5/derived_diagnostic/2d/mean_sea_level_pressure",
+        dataset_name: str = "ARCO_ERA5",
+        data_keys: Iterable[str] = ("prediction", "target"),
+        surface_pressure_var: str = "ARCO_ERA5/prognostic/2d/surface_pressure",
+        temperature_var: str = "ARCO_ERA5/prognostic/2d/2m_temperature",
+        surface_geopotential_var: str = "ARCO_ERA5/static/2d/geopotential_at_surface",
+    ):
+        super().__init__()
+        self.output_name = output_name
+        self.dataset_name = dataset_name
+        self.data_keys = data_keys
+        self.surface_pressure_var = surface_pressure_var
+        self.temperature_var = temperature_var
+        self.surface_geopotential_var = surface_geopotential_var
+
+    def forward(self, data_dict: dict) -> dict:
+        """Compute MSLP for each requested data key and write into the batch dict.
+
+        Args:
+            data_dict: nested batch dict.  Each ``data_dict[data_type][dataset_name]``
+                must contain ``surface_pressure_var``, ``temperature_var``, and
+                ``surface_geopotential_var`` as tensors with shapes broadcastable
+                to ``(B, 1, n_time, H, W)``.
+
+        Returns:
+            The same ``data_dict`` with ``output_name`` added under each
+            processed ``data_type[dataset_name]``.
+        """
+        for data_type in self.data_keys:
+            if data_type not in data_dict:
+                raise ValueError(f"Data key {data_type!r} not found in data_dict.")
+            data = data_dict[data_type]
+            dsn = self.dataset_name
+            sp = data[dsn][self.surface_pressure_var]  # (B, 1, n_time, H, W)
+            t2m = data[dsn][self.temperature_var]  # (B, 1, n_time, H, W)
+            phis = data[dsn][self.surface_geopotential_var]  # (B, 1, 1_or_n_time, H, W)
+            data[dsn][self.output_name] = mslp_from_surface_pressure(sp, t2m, phis)
+        return data_dict
