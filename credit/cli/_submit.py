@@ -200,6 +200,8 @@ def _build_pbs_script(
 
         if nodes == 1:
             launch = textwrap.dedent(f"""\
+                export NCCL_SOCKET_IFNAME=lo
+                export CUDA_VISIBLE_DEVICES={cuda_devices}
                 {torchrun} \\
                     --standalone \\
                     --nnodes=1 \\
