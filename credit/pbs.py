@@ -265,6 +265,7 @@ module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
 {torchrun_line}export PYTHONPATH="{os.path.dirname(str(script_path))}:${{PYTHONPATH:-}}"
 export LOGLEVEL=INFO
 export NCCL_DEBUG=WARN
+export NCCL_SOCKET_IFNAME=^lo,docker,virbr
 export CUDA_VISIBLE_DEVICES={cuda_devices}
 
 echo "Host   : $(hostname)"
