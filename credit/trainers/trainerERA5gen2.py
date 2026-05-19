@@ -100,7 +100,7 @@ class TrainerERA5Gen2(BaseTrainer):
              rollout preblocks normalize and concat.
           3. Forward pass → y_pred_flat (flat, normalized).
           4. Apply postblocks: Reconstruct → inverse scaler → physics fixers.
-             After this, full_data_dict["predicted"] is a nested physical-space dict.
+             After this, full_data_dict["y_processed"] is a nested dict split by Reconstruct.
           5. Compute loss on y_pred_flat vs the normalized target from preblocks.
 
         Args:
@@ -141,53 +141,44 @@ class TrainerERA5Gen2(BaseTrainer):
         for steps in range(batches_per_epoch):
             logs = {}
             loss = 0
-            y_pred_flat = None  # flat model output; used for loss, metrics, and rollout
-            y = None
+            full_data_dict = {}
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
 
                 if t == 1:
-                    ic_preprocessed = apply_preblocks(self.ic_preblocks, batch, device=self.device)
-                    preprocessed_batch = apply_preblocks(self.step_preblocks, ic_preprocessed, device=self.device)
-                    x = preprocessed_batch["input"].float()
-                    if self.ensemble_size > 1:
-                        x = torch.repeat_interleave(x, self.ensemble_size, 0)
-                    full_data_dict = {
-                        "ic_preprocessed": ic_preprocessed,
-                        "metadata": preprocessed_batch["metadata"],
-                        "predicted": None,
-                    }
-                else:
-                    rollout_batch = assemble_rollout_batch(
-                        corrected_pred=full_data_dict["predicted"],
-                        ic_preprocessed=full_data_dict["ic_preprocessed"],
-                        curr_batch=batch,
+                    full_data_dict["ic_preprocessed"] = apply_preblocks(self.ic_preblocks, batch, device=self.device)
+                    full_data_dict.update(
+                        apply_preblocks(self.step_preblocks, full_data_dict["ic_preprocessed"], device=self.device)
                     )
-                    preprocessed_batch = apply_preblocks(self.step_preblocks, rollout_batch, device=self.device)
-                    x = preprocessed_batch["input"].float()
-                    if self.ensemble_size > 1:
-                        x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                else:
+                    full_data_dict.update(
+                        apply_preblocks(
+                            self.step_preblocks, assemble_rollout_batch(full_data_dict, batch), device=self.device
+                        )
+                    )
+
+                if self.ensemble_size > 1:
+                    full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
 
                 if self.flag_clamp:
-                    x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
+                    full_data_dict["x"] = torch.clamp(full_data_dict["x"], min=self.clamp_min, max=self.clamp_max)
 
                 with torch.autocast(device_type="cuda", enabled=self.amp):
-                    y_pred_flat = self.model(x)
+                    full_data_dict["y_pred"] = self.model(full_data_dict["x"])
 
-                # Postblocks first: Reconstruct splits y_pred_flat into a nested
-                # physical-space dict; subsequent blocks apply corrections in-place.
-                full_data_dict["predicted"] = y_pred_flat if self.retain_graph else y_pred_flat.detach()
                 full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
 
-                # Loss on flat normalized prediction — y_pred_flat ref is still valid
-                # after postblocks replaced full_data_dict["predicted"].
                 if t in self.backprop_on_timestep:
-                    y = preprocessed_batch["target"].float()
                     if self.flag_clamp:
-                        y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
+                        full_data_dict["y"] = torch.clamp(
+                            full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                        )
                     with torch.autocast(device_type="cuda", enabled=self.amp):
-                        loss = criterion(y.to(y_pred_flat.dtype), y_pred_flat).mean()
+                        loss = criterion(
+                            full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
+                            full_data_dict["y_pred"],
+                        ).mean()
                     accum_log(logs, {"loss": loss.item()})
                     scaler.scale(loss).backward(retain_graph=self.retain_graph)
 
@@ -216,8 +207,8 @@ class TrainerERA5Gen2(BaseTrainer):
             if self.ema is not None:
                 self.ema.update(self.model)
 
-            if y_pred_flat is not None and y is not None:
-                metrics_dict = metrics(y_pred_flat, y)
+            if full_data_dict.get("y_pred") is not None and full_data_dict.get("y") is not None:
+                metrics_dict = metrics(full_data_dict["y_pred"], full_data_dict["y"])
                 for name, value in metrics_dict.items():
                     value = torch.Tensor([value]).to(self.device, non_blocking=True)
                     if self.distributed:
@@ -293,45 +284,44 @@ class TrainerERA5Gen2(BaseTrainer):
                 y = None
                 loss = 0
 
+                full_data_dict = {}
+
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
 
                     if t == 1:
-                        ic_preprocessed = apply_preblocks(self.ic_preblocks, batch, device=self.device)
-                        preprocessed_batch = apply_preblocks(self.step_preblocks, ic_preprocessed, device=self.device)
-                        x = preprocessed_batch["input"].float()
-                        if self.ensemble_size > 1:
-                            x = torch.repeat_interleave(x, self.ensemble_size, 0)
-                        full_data_dict = {
-                            "ic_preprocessed": ic_preprocessed,
-                            "metadata": preprocessed_batch["metadata"],
-                            "predicted": None,
-                        }
-                    else:
-                        rollout_batch = assemble_rollout_batch(
-                            corrected_pred=full_data_dict["predicted"],
-                            ic_preprocessed=full_data_dict["ic_preprocessed"],
-                            curr_batch=batch,
+                        full_data_dict["ic_preprocessed"] = apply_preblocks(
+                            self.ic_preblocks, batch, device=self.device
                         )
-                        preprocessed_batch = apply_preblocks(self.step_preblocks, rollout_batch, device=self.device)
-                        x = preprocessed_batch["input"].float()
-                        if self.ensemble_size > 1:
-                            x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                        full_data_dict.update(
+                            apply_preblocks(self.step_preblocks, full_data_dict["ic_preprocessed"], device=self.device)
+                        )
+                    else:
+                        full_data_dict.update(
+                            apply_preblocks(
+                                self.step_preblocks, assemble_rollout_batch(full_data_dict, batch), device=self.device
+                            )
+                        )
+
+                    if self.ensemble_size > 1:
+                        full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
 
                     if self.flag_clamp:
-                        x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
+                        full_data_dict["x"] = torch.clamp(full_data_dict["x"], min=self.clamp_min, max=self.clamp_max)
 
-                    y_pred_flat = self.model(x.float())
-
-                    full_data_dict["predicted"] = y_pred_flat
+                    full_data_dict["y_pred"] = self.model(full_data_dict["x"])
                     full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
 
                     if t == self.valid_forecast_len:
-                        y = preprocessed_batch["target"].float()
                         if self.flag_clamp:
-                            y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
-                        loss = criterion(y.to(y_pred_flat.dtype), y_pred_flat).mean()
-                        metrics_dict = metrics(y_pred_flat.float(), y.float())
+                            full_data_dict["y"] = torch.clamp(
+                                full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                            )
+                        loss = criterion(
+                            full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
+                            full_data_dict["y_pred"],
+                        ).mean()
+                        metrics_dict = metrics(full_data_dict["y_pred"].float(), full_data_dict["y"].float())
                         for name, value in metrics_dict.items():
                             value = torch.Tensor([value]).to(self.device, non_blocking=True)
                             if self.distributed:

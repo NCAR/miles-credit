@@ -88,7 +88,7 @@ def apply_postblocks(postblocks: nn.ModuleDict, batch_dict: dict) -> dict:
 
     Args:
         postblocks: ``nn.ModuleDict`` built by ``build_postblocks`` for a single phase.
-        batch_dict: dict containing at minimum ``"predicted"`` and ``"metadata"``.
+        batch_dict: dict containing at minimum ``"y_pred"`` and ``"metadata"``.
 
     Returns:
         The same ``batch_dict`` after all blocks in the group have run.

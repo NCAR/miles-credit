@@ -115,11 +115,11 @@ def _run_preblock_group(group: nn.ModuleDict, batch: dict, device=None):
     if not concat_ran:
         return batch
 
-    out = {"input": batch}
+    out = {"x": batch}
     if meta is not None:
         out["metadata"] = meta
     if target is not None:
-        out["target"] = target
+        out["y"] = target
 
     if device is not None and to_device:
         out = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in out.items()}
@@ -140,7 +140,7 @@ def apply_preblocks(
         device: move output tensors here after concat.
 
     Returns:
-        When concat has run: ``{"input": tensor, "metadata": ..., "target": tensor}``.
-        Otherwise: the transformed nested batch dict.
+        When concat has run: ``{"x": tensor, "y": tensor, "metadata": ...}``.
+        Otherwise: the transformed nested batch dict (pre-concat).
     """
     return _run_preblock_group(preblocks, batch, device)

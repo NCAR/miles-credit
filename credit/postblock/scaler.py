@@ -7,7 +7,12 @@ class BridgeScalerTransformer(BasePostblock):
 
     Applies per-variable scaling (or its inverse) to the nested prediction dict
     at ``batch_dict[key]``, which has the form
-    ``batch_dict[key][source][data_type][dim][var_name]``.
+    ``batch_dict[key][source][var_key]`` where ``var_key`` is
+    ``"source/field_type/dim/varname"`` (e.g. ``"era5/prognostic/3d/T"``).
+
+    Defaults to operating on ``"y_processed"`` — the nested dict written by
+    ``Reconstruct``. Use ``method="inverse_transform"`` to convert normalized
+    predictions back to physical units before physics fixers.
 
     The scaler dict must have been fit with ``bridgescaler.scale_var_dict``
     using the same nested structure and saved with ``bridgescaler.save_scaler_dict``.
@@ -23,7 +28,7 @@ class BridgeScalerTransformer(BasePostblock):
             method: "inverse_transform"
     """
 
-    def __init__(self, scaler_path: str, variables: list[str], method: str, key: str = "prediction"):
+    def __init__(self, scaler_path: str, variables: list[str], method: str, key: str = "y_processed"):
         super().__init__()
         self.variables = variables
         self.method = method
