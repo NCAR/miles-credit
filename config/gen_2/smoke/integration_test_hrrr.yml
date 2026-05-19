@@ -12,7 +12,7 @@
 # --------------------------------------------------------------------------------------------------------------------- #
 
 # ---- USER SETTINGS: output directory ---- #
-save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr'
 seed: 1000
 
 
