@@ -10,9 +10,9 @@ instantiated; absent sources are silently skipped.
 Sample structure returned by __getitem__::
 
     {
-        "input":    {"era5": {"era5/prognostic/3d/T": tensor, ...}, ...},
-        "target":   {"era5": {"era5/prognostic/3d/T": tensor, ...}, ...},  # return_target only
-        "metadata": {"era5": {"input_datetime": int, "target_datetime": int}, ...},
+        "input":    {<user_provided_name>: {"<user_provided_name>/prognostic/3d/T": tensor, ...}, ...},
+        "target":   {<user_provided_name>: {"<user_provided_name>/prognostic/3d/T": tensor, ...}, ...},  # return_target only
+        "metadata": {<user_provided_name>: {"input_datetime": int, "target_datetime": int}, ...},
     }
 
 Usage::
@@ -61,6 +61,7 @@ _SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
     "HRRR": ("credit.datasets.hrrr", "HRRRDataset"),
     "HRRR_NAT": ("credit.datasets.hrrr", "HRRRDataset"),
     "HRRR_SUBH": ("credit.datasets.hrrr", "HRRRDataset"),
+    "TISR": ("credit.datasets.tisr", "TISRDataset"),
 }
 
 
