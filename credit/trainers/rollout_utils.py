@@ -1,91 +1,98 @@
 """rollout_utils.py — utilities for autoregressive multi-step rollout."""
 
-import torch
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-def build_rollout_input(
-    prev_full_dict: dict,
-    curr_dyn_input: torch.Tensor,
-    ic_channel_map: dict,
-) -> torch.Tensor:
-    """Build the next-step model input tensor using the IC channel map.
+def assemble_rollout_batch(
+    corrected_pred: dict,
+    ic_preprocessed: dict,
+    curr_batch: dict,
+) -> dict:
+    """Assemble a batch dict for the rollout preblock pass at autoregressive step t > 0.
 
-    Combines three sources:
-    - **Prognostic** channels: from ``prev_full_dict["predicted"]``.
-      Supports both a nested variable dict (after ``Reconstruct`` postblock)
-      and a raw flat tensor (when no postblocks are configured).
-    - **Dynamic forcing** channels: from ``curr_dyn_input`` (current dataloader
-      batch), written in the same relative order as the dynamic_forcing entries
-      in ``ic_channel_map``.
-    - **Static** (and any other) channels: copied as-is from the previous
-      input tensor.
+    Constructs a dataset-schema batch by routing each variable from the
+    appropriate source:
 
-    No full clone of the previous input is needed; only static channels are
-    copied, so peak extra memory is proportional to the static channel count
-    rather than the full tensor size.
+    - **prognostic / diagnostic** channels: from ``corrected_pred`` — the
+      postblock-corrected prediction in physical units from the previous step.
+    - **dynamic_forcing** channels: from ``curr_batch["input"]`` — the
+      current step's time-varying forcing loaded by the dataset.
+    - **static** (and any other non-predicted) channels: from
+      ``ic_preprocessed["input"]`` — the t=0 batch after IC-only preblocks
+      (e.g. regrid), so statics are already on the model grid.
+
+    The assembled dict is passed to ``apply_step_preblocks()``
+    which handles per-step operations (dynamic-forcing regrid, log_transform,
+    concat).  ``curr_batch["target"]`` is forwarded so preblocks normalize the
+    training target in the same pass.
 
     Args:
-        prev_full_dict: ``full_data_dict`` from the previous rollout step.
-            Must contain:
-              ``["preprocessed"]["input"]`` — previous full ``x`` tensor
-              ``["preprocessed"]["metadata"]["target"]["_channel_map"]`` — output
-              channel map used for the flat-tensor fallback path
-              ``["predicted"]`` — either a nested dict
-              ``{source: {var_key: tensor(B, n_lev, T, H, W)}}`` (after
-              ``Reconstruct``) or a raw flat tensor ``(B, C_pred, H, W)``.
-        curr_dyn_input: flat tensor ``(B, C_dyn, H, W)`` of dynamic_forcing
-            channels from the current dataloader batch.  Must be in the same
-            relative order as the dynamic_forcing entries in ``ic_channel_map``.
-        ic_channel_map: per-variable channel map cached from ``t=1``, covering
-            ALL input variable groups.  Keys are ``source/field_type/dim/varname``
-            strings; values are ``{"slice": slice, "orig_shape": (n_lev, T)}``.
+        corrected_pred: Nested ``{source: {var_key: tensor(B, n_lev, n_time, H, W)}}``
+            in physical units — output of the postblock chain at the previous
+            step.  Must be a dict; if postblocks are not configured, include at
+            least ``Reconstruct`` so this function receives the expected type.
+        ic_preprocessed: t=0 batch after IC-only preblocks.
+            Provides time-invariant static variables already mapped to the model
+            grid, and the authoritative list of all input variable keys.
+        curr_batch: Current step's raw batch from the dataset.  Provides the
+            dynamic forcing fields for this step and the training target.
 
     Returns:
-        Tensor ``(B, C_in, H, W)``: assembled input for the next forward pass.
+        dict with keys ``"input"`` (nested source→var dict) and ``"target"``
+        (from ``curr_batch``), ready for ``apply_step_preblocks()``.
+
+    Raises:
+        TypeError: if ``corrected_pred`` is not a dict, which usually means
+            ``Reconstruct`` was not included in the postblock chain.
     """
-    x_prev = prev_full_dict["preprocessed"]["input"]
-    prediction = prev_full_dict["predicted"]
+    if not isinstance(corrected_pred, dict):
+        raise TypeError(
+            "assemble_rollout_batch: corrected_pred must be a nested dict "
+            "{source: {var_key: tensor}}. "
+            "For multi-step rollout, 'Reconstruct' must be the first postblock. "
+            f"Got {type(corrected_pred).__name__}."
+        )
 
-    x_new = torch.empty_like(x_prev)
-    dyn_cursor = 0
+    assembled_input: dict = {}
 
-    for var_key, info in ic_channel_map.items():
-        sl = info["slice"]
-        n = sl.stop - sl.start
-        parts = var_key.split("/")
-        field_type = parts[1] if len(parts) > 1 else ""
+    for source, source_vars in ic_preprocessed["input"].items():
+        assembled_input[source] = {}
+        curr_source = curr_batch.get("input", {}).get(source, {})
+        pred_source = corrected_pred.get(source, {})
 
-        if field_type == "dynamic_forcing":
-            x_new[:, sl, ...] = curr_dyn_input[:, dyn_cursor : dyn_cursor + n, ...]
-            dyn_cursor += n
+        for var_key, ic_tensor in source_vars.items():
+            parts = var_key.split("/")
+            field_type = parts[1] if len(parts) > 1 else ""
 
-        elif field_type == "prognostic":
-            if isinstance(prediction, dict):
-                # After Reconstruct: nested dict {source: {var_key: (B, n_lev, T, H, W)}}
-                # Reconstruct always produces 5D var tensors.  If x_prev is 4D we need to
-                # flatten (n_lev, T) → n_lev*T; if x_prev is 5D assign directly.
-                source = parts[0]
-                if source in prediction and var_key in prediction[source]:
-                    var_tensor = prediction[source][var_key]  # (B, n_lev, T, H, W)
-                    if x_prev.dim() == 5:
-                        x_new[:, sl, ...] = var_tensor
-                    else:
-                        x_new[:, sl, ...] = var_tensor.flatten(1, 2)
+            if field_type in ("prognostic", "diagnostic"):
+                if var_key in pred_source:
+                    assembled_input[source][var_key] = pred_source[var_key]
                 else:
-                    x_new[:, sl, ...] = x_prev[:, sl, ...]
+                    logger.warning(
+                        "assemble_rollout_batch: '%s' not in corrected_pred; carrying forward from ic_preprocessed.",
+                        var_key,
+                    )
+                    assembled_input[source][var_key] = ic_tensor
+
+            elif field_type == "dynamic_forcing":
+                if var_key in curr_source:
+                    assembled_input[source][var_key] = curr_source[var_key]
+                else:
+                    logger.warning(
+                        "assemble_rollout_batch: dynamic_forcing '%s' not in curr_batch; "
+                        "carrying forward from ic_preprocessed.",
+                        var_key,
+                    )
+                    assembled_input[source][var_key] = ic_tensor
+
             else:
-                # Flat tensor fallback (no Reconstruct in postblocks).
-                # prediction has the same dimensionality as x_prev, so the slice
-                # naturally yields a compatible shape — no flatten needed.
-                output_map = prev_full_dict["preprocessed"]["metadata"]["target"]["_channel_map"]
-                if var_key in output_map:
-                    out_sl = output_map[var_key]["slice"]
-                    x_new[:, sl, ...] = prediction[:, out_sl, ...]
-                else:
-                    x_new[:, sl, ...] = x_prev[:, sl, ...]
+                # static and any other non-predicted field: carry forward from ic_preprocessed
+                # (already on the model grid after IC-only preblocks)
+                assembled_input[source][var_key] = ic_tensor
 
-        else:
-            # Static and any other non-updated channels: preserve from previous x.
-            x_new[:, sl, ...] = x_prev[:, sl, ...]
-
-    return x_new
+    return {
+        "input": assembled_input,
+        "target": curr_batch.get("target"),
+    }
