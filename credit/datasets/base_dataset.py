@@ -650,6 +650,7 @@ class BaseDataset(AbstractBaseDataset):
             field_config (dict[str, Any]): Validated field-type config dict.
 
         Raises:
+            FileNotFoundError: If ``self.mode == "local"`` and the glob pattern matches no files.
             ValueError: If ``self.mode`` is not a recognised mode.
 
         Returns:
@@ -659,9 +660,14 @@ class BaseDataset(AbstractBaseDataset):
                 The expected return type should be consistent within a dataset class.
         """
         if self.mode == "local":
-            files = sorted(glob(field_config.get("path", "")))
+            path = field_config.get("path", "")
+            files = sorted(glob(path))
+            if not files:
+                raise FileNotFoundError(
+                    f"No files found matching '{path}'. Check that the path exists and is accessible from this machine."
+                )
             time_fmt: str = field_config.get("filename_time_format", "%Y")
-            return _map_files(files, time_fmt) if files else None
+            return _map_files(files, time_fmt)
         elif self.mode == "remote":
             return True
         else:
