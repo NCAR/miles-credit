@@ -1,25 +1,25 @@
 """
 reconstruct.py
 --------------
-Reconstruct: first postblock that splits the flat ``batch_dict["prediction"]``
+Reconstruct: first postblock that splits the flat ``batch_dict["predicted"]``
 tensor back into a nested variable dict in-place.
 
-Reads ``batch_dict["meta"]["_channel_map"]["output"]`` built by
+Reads ``batch_dict["metadata"]["target"]["_channel_map"]`` built by
 ``ConcatToTensor`` to know which channels correspond to which variables.
 
 Input
 -----
 batch_dict : dict
     Must contain:
-      "prediction" — flat model output tensor, shape (B, C, H, W) or (B, C, T, H, W)
-      "meta"       — metadata dict with ``_channel_map["output"]``
-    May also contain "input", "target", "_raw", etc. — all passed through unchanged.
+      "predicted" — flat model output tensor, shape (B, C, H, W) or (B, C, T, H, W)
+      "metadata"  — metadata dict with ``["target"]["_channel_map"]``
+    All other keys pass through unchanged.
 
 Output
 ------
-The same ``batch_dict`` with ``"prediction"`` replaced by a nested dict:
+The same ``batch_dict`` with ``"predicted"`` replaced by a nested dict:
 
-    batch_dict["prediction"][source][var_string]
+    batch_dict["predicted"][source][var_key]
         -> tensor of shape (B, n_levels, n_time, H, W)
 """
 
@@ -27,7 +27,7 @@ from credit.postblock.base import BasePostblock
 
 
 class Reconstruct(BasePostblock):
-    """Splits ``batch_dict["prediction"]`` from a flat tensor into a nested variable dict.
+    """Splits ``batch_dict["predicted"]`` from a flat tensor into a nested variable dict.
 
     Slices are read from ``batch_dict["metadata"]["target"]["_channel_map"]``, built
     by ``ConcatToTensor`` and covering only prognostic + diagnostic variables.
@@ -37,7 +37,7 @@ class Reconstruct(BasePostblock):
 
     def forward(self, batch_dict: dict) -> dict:
         y_pred = batch_dict["predicted"]
-        output_map = batch_dict["preprocessed"]["metadata"]["target"]["_channel_map"]
+        output_map = batch_dict["metadata"]["target"]["_channel_map"]
 
         # Flatten time dim if y_pred arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
         if y_pred.dim() == 5:
