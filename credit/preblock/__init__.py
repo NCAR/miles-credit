@@ -1,5 +1,3 @@
-import logging
-
 import torch
 import torch.nn as nn
 
@@ -8,16 +6,8 @@ from credit.preblock.sqrt import SqrtTransform
 from credit.preblock.regrid import Regridder
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.norm import ERA5Normalizer
+from credit.preblock.scaler import BridgeScalerTransformer
 
-# bridgescaler is an optional dependency; guard against environments without it
-try:
-    from credit.preblock.scaler import BridgeScalerTransformer
-
-    _BRIDGESCALER_AVAILABLE = True
-except (ImportError, Exception) as _e:
-    logging.warning(f"BridgeScalerTransformer unavailable (numba/NumPy conflict): {_e}")
-    BridgeScalerTransformer = None
-    _BRIDGESCALER_AVAILABLE = False
 
 PREBLOCK_REGISTRY = {
     "log_transform": LogTransform,
@@ -25,10 +15,8 @@ PREBLOCK_REGISTRY = {
     "regrid": Regridder,
     "concat": ConcatToTensor,
     "era5_normalizer": ERA5Normalizer,
+    "bridgescaler_transform": BridgeScalerTransformer,
 }
-
-if _BRIDGESCALER_AVAILABLE:
-    PREBLOCK_REGISTRY["bridgescaler_transform"] = BridgeScalerTransformer
 
 
 def build_preblocks(preblock_cfg: dict | None = None) -> nn.ModuleDict:
@@ -94,3 +82,18 @@ def apply_preblocks(preblocks: nn.ModuleDict, batch: dict, device=None):
         out = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in out.items()}
 
     return out
+
+
+def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=None):
+    for preblock in preblocks.values():
+        if isinstance(preblock, BridgeScalerTransformer):
+            break
+        result = preblock(batch)
+        if isinstance(result, tuple):
+            if len(result) == 3:
+                batch, target, meta = result
+            else:
+                batch, meta = result
+        else:
+            batch = result
+    return batch

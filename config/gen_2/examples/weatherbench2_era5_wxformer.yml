@@ -1,0 +1,54 @@
+save_loc: '/glade/derecho/scratch/$USER/CREDIT/weatherbench2'
+seed: 31415
+
+data:
+  source:
+    WBERA5:
+      dataset_type: "weatherbench2_era5"
+      resolution: "240x121"   # optional; overridden by the resolution kwarg
+      level_coord: "level"
+      levels: [ 50, 100, 150, 200, 250,  300, 400, 500, 600, 700, 850, 925, 1000 ]
+      variables:
+        prognostic:
+          vars_3D: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_humidity", "geopotential"]
+          vars_2D: ["surface_pressure", "2m_temperature", '2m_dewpoint_temperature',
+                    '10m_u_component_of_wind', '10m_v_component_of_wind']
+        diagnostic:
+          vars_2D: ['total_precipitation_6hr', 'total_cloud_cover', 'sea_ice_cover',
+                    'mean_surface_sensible_heat_flux', 'mean_surface_latent_heat_flux',
+                    'mean_surface_net_short_wave_radiation_flux', 'mean_surface_net_long_wave_radiation_flux',
+                     'mean_top_net_long_wave_radiation_flux', 'mean_top_net_short_wave_radiation_flux']
+        dynamic_forcing:
+          vars_2D: ["sea_surface_temperature", 'mean_top_downward_short_wave_radiation_flux',
+                    'low_vegetation_cover', 'high_vegetation_cover',
+                    'leaf_area_index_high_vegetation', 'leaf_area_index_low_vegetation']
+        static:
+          vars_2D: ["land_sea_mask", "geopotential_at_surface", 'lake_cover']
+  start_datetime: "1979-01-01"
+  end_datetime: "2017-12-31 18:00:00"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+preblocks:
+  log_transform:
+    type: "log_transform"
+    args:
+      variables:
+        - 'WBERA5/prognostic/3d/specific_humidity'
+        - "WBERA5/prognostic/3d/surface_pressure"
+        - "WBERA5/diagnostic/2d/total_precipitation_6hr"
+      data_types:
+        - 'input'
+        - 'target'
+  vars_concat:
+    type: "concat"
+
+postblocks:
+  reconstruct:
+    type: "reconstruct"
+
+
+
+
