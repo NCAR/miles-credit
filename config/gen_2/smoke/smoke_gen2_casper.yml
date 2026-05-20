@@ -149,7 +149,7 @@ trainer:
 
 predict:
     mode: none
-    save_forecast: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2/rollout'
+    save_forecast: '/glade/derecho/scratch/$USER/credit_tests/smoke_gen2/rollout'
     forecasts:
         type: "custom"
         start_year: 2017
