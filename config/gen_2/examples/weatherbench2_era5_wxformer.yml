@@ -1,4 +1,5 @@
-save_loc: '/glade/derecho/scratch/$USER/CREDIT/weatherbench2'
+save_loc: '/Users/dgagne/data/weatherbench2'
+#save_loc: '/glade/derecho/scratch/$USER/CREDIT/weatherbench2'
 seed: 31415
 
 data:
@@ -42,12 +43,29 @@ preblocks:
       data_types:
         - 'input'
         - 'target'
+  scaler:
+    type: "bridgescaler_transformer"
+    args:
+      scaler_path: "/Users/dgagne/data/weatherbench2/scaler.json"
+      scaler_type: "standard"
+
   vars_concat:
     type: "concat"
 
 postblocks:
   reconstruct:
     type: "reconstruct"
+
+trainer:
+  type: era5-gen2           # use the v2 trainer (new nested data schema)
+
+  mode: ddp
+  epochs: 100
+  train_batch_size: 32
+  batches_per_epoch: 100
+  thread_workers: 2
+  valid_thread_workers: 2
+  prefetch_factor: 2
 
 
 

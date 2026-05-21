@@ -4,6 +4,7 @@ from credit.preblock.base import BasePreblock
 from os.path import exists, expandvars
 from os import makedirs
 
+
 _SCALER_REGISTRY = {
     "standard": DStandardScalerTensor,
     "quantile": DQuantileScalerTensor,
@@ -32,12 +33,17 @@ class BridgeScalerTransformer(BasePreblock):
     """
 
     def __init__(
-        self, scaler_path: str, variables: list[str], method: str, scaler_type: str = "standard", scaler_params=None
+        self,
+        scaler_path: str,
+        variables: list[str],
+        method: str = "transform",
+        scaler_type: str = "standard",
+        scaler_params=None,
     ):
         super().__init__()
         self.variables = variables
         self.method = method
-        self.scaler_path = scaler_path
+        self.scaler_path = expandvars(scaler_path)
         if scaler_params is None:
             scaler_params = {}
         self.scaler_params = scaler_params

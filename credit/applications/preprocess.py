@@ -1,5 +1,8 @@
 import argparse
 import logging
+
+from bridgescaler import save_scaler_dict
+
 from credit.distributed import get_rank_info, setup
 from credit.seed import seed_everything
 from os.path import expandvars
@@ -9,10 +12,10 @@ import yaml
 import sys
 from pathlib import Path
 from credit.pbs import launch_script, launch_script_mpi
-from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
 import shutil
-from credit.preblock import build_preblocks, apply_preblocks_before_scaler
-from credit.trainers.utils import cycle
+from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransformer
+from credit.trainers.utils import cycle, load_dataset, load_dataloader
+from torch.distributed import gather_object, barrier
 
 
 def main():
@@ -34,8 +37,8 @@ def main():
     ch.setLevel(logging.DEBUG if gettrace and gettrace() else logging.INFO)
     ch.setFormatter(formatter)
     root.addHandler(ch)
-
-    with open(args.config) as config_file:
+    root.info("Loading Config file")
+    with open(args.model_config) as config_file:
         conf = yaml.safe_load(config_file)
     local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
     rank = world_rank
@@ -72,7 +75,7 @@ def main():
     preblocks = build_preblocks(conf["preblocks"])
     scaler_block_key = None
     for k, v in preblocks.items():
-        if v["type"] == "bridgescaler_transform":
+        if isinstance(v, BridgeScalerTransformer):
             scaler_block_key = k
             break
     if scaler_block_key is None:
@@ -80,10 +83,20 @@ def main():
     batches_per_epoch = trainer_conf.get("batches_per_epoch", 1)
     dl = cycle(train_loader)
     for i in range(batches_per_epoch):
+        root.info(f"Worker {rank}: Processing batch {i} of {batches_per_epoch}.")
         batch = next(dl)
         processed_batch = apply_preblocks_before_scaler(preblocks, batch, device)
         preblocks[scaler_block_key].fit_scaler_batch(processed_batch)
-
+    barrier()
+    if rank == 0:
+        all_scalers = []
+    else:
+        all_scalers = []
+    gather_object(preblocks[scaler_block_key].scaler, all_scalers, dst=0)
+    if rank == 0:
+        root.info("Combining scalers.")
+        combined_scaler = sum(all_scalers)
+        save_scaler_dict(combined_scaler, preblocks.scaler_path)
     return
 
 

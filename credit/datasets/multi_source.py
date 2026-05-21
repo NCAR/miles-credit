@@ -55,7 +55,7 @@ _SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
     "BASE": ("credit.datasets.base_dataset", "BaseDataset"),  # placeholders / testing
     "LOCAL": ("credit.datasets.local", "LocalDataset"),
     "ARCO_ERA5": ("credit.datasets.era5", "ARCOERA5Dataset"),
-    "WeatherBench2_ERA5": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
+    "WEATHERBENCH2_ERA5": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
     "MRMS": ("credit.datasets.mrms", "MRMSDataset"),
     "GOES": ("credit.datasets.goes", "GOESDataset"),
     "HRRR": ("credit.datasets.hrrr", "HRRRDataset"),
