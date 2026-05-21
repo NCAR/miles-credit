@@ -155,7 +155,7 @@ def _era5_tsi_data() -> tuple[torch.Tensor, torch.Tensor]:
             1365.7240,
             1365.6918,
         ],
-        dtype=torch.float64,
+        dtype=_TORCH_DTYPE,
     )
     return times, tsi_values
 
@@ -222,7 +222,7 @@ def _get_tsi(
     )  # searchsorted requires tensors are contiguous in memory
 
      # Clamp indices so that boundary timestamps don't go out of bounds
-    idx = idx.clamp(1, len(tsi_times) - 1) 
+    idx = idx.clamp(1, len(tsi_times) - 1)
 
     # Indices of the surrounding annual samples
     lo, hi = idx - 1, idx
@@ -379,8 +379,8 @@ def _get_orbital_parameters(
         [4.8952, 6.283320, -0.0075, -0.0326, -0.0003, 0.0002], dtype=j2000_days.dtype, device=j2000_days.device
     )
 
-    repsm = 0.409093
-    sin_declination = torch.sin(torch.tensor(repsm)) * torch.sin(rllls)
+    repsm = torch.tensor(0.409093, dtype=j2000_days.dtype, device=j2000_days.device)
+    sin_declination = torch.sin(repsm) * torch.sin(rllls)
     cos_declination = torch.sqrt(1.0 - sin_declination**2)
 
     eq_of_time_seconds = torch.stack(
@@ -421,7 +421,6 @@ def _get_solar_time(
 
 def _get_hour_angle(
     solar_time: torch.Tensor,
-    latitude: torch.Tensor,
     longitude: torch.Tensor,
 ) -> torch.Tensor:
     """_summary_
@@ -440,7 +439,6 @@ def _get_cosine_zenith_angle(
     cos_declination: torch.Tensor,
     sin_declination: torch.Tensor,
     latitude: torch.Tensor,
-    longitude: torch.Tensor,
     hour_angle: torch.Tensor,
 ) -> torch.Tensor:
     """Compute the cosine of the solar zenith angle at each grid point and time.
@@ -462,7 +460,6 @@ def _get_cosine_zenith_angle(
             ``(T,)``.
         latitude (torch.Tensor): Geographic latitude in degrees, shape
             ``(1, ny, nx)`` or broadcastable equivalent.
-        longitude (torch.Tensor): Geographic longitude in degrees
         hour_angle (torch.Tensor): Solar hour angle in degrees, shape
             broadcastable to ``(T, ny, nx)``.
  
@@ -636,13 +633,11 @@ def _compute_tisr(
         cos_declination=orbital["cos_declination"],
         sin_declination=orbital["sin_declination"],
         latitude=latitude,
-        longitude=longitude,
         hour_angle=_get_hour_angle(
             solar_time=_get_solar_time(
                 orbital["rotational_phase"],
                 orbital["eq_of_time_seconds"],
             ),
-            latitude=latitude,
             longitude=longitude,
         ),
     )
