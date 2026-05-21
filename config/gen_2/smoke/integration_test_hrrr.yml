@@ -30,11 +30,10 @@ data:
         # Prognostic: model both predicts and receives as input next step
         prognostic:
           vars_3D: ['T', 'U', 'V', 'Q']
-          vars_2D: ['sp'] #, 't2m']
+          vars_2D: ['sp']
 
         # Diagnostic: model predicts these but does not feed them back as input
         diagnostic: null
-          # vars_2D: [ 'd2m' ]
 
         # Dynamic forcing: time-varying inputs (not predicted)
         dynamic_forcing:
@@ -160,7 +159,7 @@ trainer:
 
   thread_workers: 4
   valid_thread_workers: 4
-  prefetch_factor: 4
+  prefetch_factor: 2
 
 
 # ---- Architecture (based on HRRR Extent, A×B) ---- #
