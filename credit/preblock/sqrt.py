@@ -34,6 +34,7 @@ class SqrtTransform(BasePreblock):
             )
 
     def forward(self, batch: dict) -> dict:
+        batch = self._copy_batch(batch)
         for var_key in self.variables:
             source = var_key.split("/")[0]
 

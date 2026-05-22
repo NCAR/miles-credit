@@ -30,4 +30,5 @@ class BridgeScalerTransformer(BasePreblock):
         self.scaler = load_scaler_dict(scaler_path)
 
     def forward(self, batch: dict) -> dict:
+        batch = self._copy_batch(batch)
         return scale_var_dict(batch, self.scaler, self.method, self.variables)
