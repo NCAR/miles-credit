@@ -3,10 +3,7 @@ import torch.nn as nn
 from credit.postblock.reconstruct import Reconstruct
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransformer
-from credit.postblock.tracer_fixer import TracerFixer
-from credit.postblock.mass_fixer import GlobalMassFixer
-from credit.postblock.water_fixer import GlobalWaterFixer
-from credit.postblock.energy_fixer import GlobalEnergyFixer
+from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.postblock.geopotential import GeopotentialDiagnostic
 
 POSTBLOCK_REGISTRY = {
