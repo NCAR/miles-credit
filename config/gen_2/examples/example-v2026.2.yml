@@ -135,12 +135,12 @@ trainer:
   train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
   valid_batch_size: 8
 
-  batches_per_epoch: 0    # 0 = use full dataset each epoch
+  batches_per_epoch: 5    # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
   stopping_patience: 999
 
   start_epoch: 0
-  num_epoch: 5            # epochs per qsub job (checkpoint after each)
+  num_epoch: 1            # epochs per qsub job (checkpoint after each)
   epochs: &epochs 70      # total training target
 
   use_tensorboard: True
@@ -161,6 +161,22 @@ trainer:
   thread_workers: 4
   valid_thread_workers: 4
   prefetch_factor: 4
+
+
+# ---- Preblocks / Postblocks ---- #
+# Preblocks run before the model; postblocks run after each forward pass.
+# ConcatToTensor (concat) is required — it assembles the nested variable dict
+# into the flat (B, C, H, W) tensor the model expects and builds the channel map
+# used by Reconstruct. Reconstruct is required for forecast_len > 1 rollout.
+preblocks:
+  per_step:
+    concat:
+      type: concat
+
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
 
 
 # ---- Architecture (pre-filled for 1-degree ERA5, 181×360) ---- #

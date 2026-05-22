@@ -28,7 +28,7 @@ data:
         diagnostic: null
 
   timestep: "6h"
-  forecast_len: 1
+  forecast_len: 3
   start_datetime: "2015-01-01"
   end_datetime: "2016-12-31"
 
@@ -37,13 +37,19 @@ validation_data:
   end_datetime: "2018-12-31"
 
 preblocks:
-  norm:
-    type: era5_normalizer
-    args:
-      mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/mean_6h_1979_2018_16lev_0.25deg.nc"
-      std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/std_6h_1979_2018_16lev_0.25deg.nc"
-  concat:
-    type: concat
+  per_step:
+#    norm:
+#      type: era5_normalizer
+#      args:
+#        mean_path: "/glade/campaign/cisl/aiml/credit/static_scalers/mean_6h_1979_2018_16lev_0.25deg.nc"
+#        std_path:  "/glade/campaign/cisl/aiml/credit/static_scalers/std_6h_1979_2018_16lev_0.25deg.nc"
+    concat:
+      type: concat
+
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
 
 model:
     type: "crossformer"
