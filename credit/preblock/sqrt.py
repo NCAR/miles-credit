@@ -4,7 +4,7 @@ import torch
 
 class SqrtTransform(BasePreblock):
     """
-    Applies a log transformation to specified variables in a batch dict.
+    Applies a sqrt transformation to specified variables in a batch dict.
 
     Expected dict structure:
         batch[source][data_type]['source/var_type/var_shape/var_name']

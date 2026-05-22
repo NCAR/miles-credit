@@ -872,6 +872,7 @@ class TestBaseTrainerAdditionalInit:
         # Now build the trainer; it should load that EMA state
         conf = _minimal_conf(use_ema=True, ema_decay=0.999)
         conf["save_loc"] = str(tmp_path)
+        conf["trainer"]["load_weights"] = True
         trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
         assert trainer.ema is not None
         assert trainer.ema.step == 77
