@@ -284,18 +284,18 @@ class TestReconstruct:
 
     def _batch_dict(self, y_pred, extra=None):
         """Minimal batch_dict as the caller would build before apply_postblocks."""
-        d = {"prediction": y_pred, "metadata": self._metadata(self._output_map())}
+        d = {"y_pred": y_pred, "metadata": self._metadata(self._output_map())}
         if extra:
             d.update(extra)
         return d
 
     def test_nested_dict_structure(self):
-        """Output is prediction[source][var_key] — source then flat 4-part slash key."""
+        """Output is y_processed[source][var_key] — source then flat 4-part slash key."""
         from credit.postblock.reconstruct import Reconstruct
 
         result = Reconstruct()(self._batch_dict(torch.randn(2, 5, 8, 8)))
 
-        pred = result["prediction"]
+        pred = result["y_processed"]
         assert "Test_ARCOERA5" in pred
         assert self.KEY_3D in pred["Test_ARCOERA5"]
         assert self.KEY_2D in pred["Test_ARCOERA5"]
@@ -307,7 +307,7 @@ class TestReconstruct:
         B, H, W = 2, 8, 8
         result = Reconstruct()(self._batch_dict(torch.randn(B, 5, H, W)))
 
-        pred = result["prediction"]
+        pred = result["y_processed"]
         assert pred["Test_ARCOERA5"][self.KEY_3D].shape == (B, 4, 1, H, W)
         assert pred["Test_ARCOERA5"][self.KEY_2D].shape == (B, 1, 1, H, W)
 
@@ -322,8 +322,8 @@ class TestReconstruct:
         result_4d = Reconstruct()(self._batch_dict(y_pred_4d))
         result_5d = Reconstruct()(self._batch_dict(y_pred_5d))
 
-        shape_4d = result_4d["prediction"]["Test_ARCOERA5"][self.KEY_3D].shape
-        shape_5d = result_5d["prediction"]["Test_ARCOERA5"][self.KEY_3D].shape
+        shape_4d = result_4d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
+        shape_5d = result_5d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
         assert shape_4d == shape_5d == (B, 4, 1, H, W)
 
     def test_values_match_input_channels(self):
@@ -333,7 +333,7 @@ class TestReconstruct:
         B, H, W = 1, 4, 4
         y_pred = torch.randn(B, 5, H, W)
         result = Reconstruct()(self._batch_dict(y_pred))
-        pred = result["prediction"]
+        pred = result["y_processed"]
 
         assert torch.equal(
             pred["Test_ARCOERA5"][self.KEY_3D],
@@ -345,7 +345,7 @@ class TestReconstruct:
         )
 
     def test_other_keys_pass_through(self):
-        """Keys other than 'prediction' are preserved unchanged."""
+        """Keys other than 'y_pred' are preserved unchanged."""
         from credit.postblock.reconstruct import Reconstruct
 
         raw = {"Test_ERA5": {"input": {}}}

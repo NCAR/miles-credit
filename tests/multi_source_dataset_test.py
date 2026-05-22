@@ -43,16 +43,19 @@ def multi_config() -> dict[str, Any]:
         "source": {
             "Base1": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                 },
             },
             "Base2": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {"dynamic_forcing": {"vars_2D": ["d2m"]}, "diagnostic": {"vars_3D": ["V"]}},
             },
             "Base3": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "diagnostic": {"vars_3D": ["V"]},
                     "static": {"vars_2D": ["orog"]},
@@ -72,6 +75,7 @@ def multi_config_time_subsets() -> dict[str, Any]:
         "source": {
             "Base1": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                 },
@@ -80,11 +84,13 @@ def multi_config_time_subsets() -> dict[str, Any]:
             },
             "Base2": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {"dynamic_forcing": {"vars_2D": ["d2m"]}, "diagnostic": {"vars_3D": ["V"]}},
                 "timestep": "12h",
             },
             "Base3": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "static": {"vars_2D": ["orog"]},
                 },
@@ -103,6 +109,7 @@ def one_source_config() -> dict[str, Any]:
         "source": {
             "Single_Base": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                     "dynamic_forcing": {"vars_2D": ["d2m"]},
@@ -272,12 +279,14 @@ def persist_config() -> dict[str, Any]:
         "source": {
             "Base1": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "prognostic": {"vars_3D": ["T"], "vars_2D": ["t2m"]},
                 },
             },
             "Base2": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {"dynamic_forcing": {"vars_2D": ["precip"]}},
                 "timestep": "12h",
                 "temporal_mode": "persist",
