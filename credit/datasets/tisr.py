@@ -38,7 +38,7 @@ from credit.datasets.base_dataset import BaseDataset
 
 logger = logging.getLogger(__name__)
 
-_TORCH_DTYPE = torch.float32
+_TORCH_DTYPE = torch.float64
 
 # ------------------------------------------------------------------
 # Total Solar Irradiance (TSI) Data and Interpolation
@@ -506,7 +506,8 @@ def _get_instantaneous_toa_tisr(
         torch.Tensor: Instantaneous total incident solar radiation at the top of
             the atmosphere, in W/m².
     """
-    return tsi * solar_factor * cos_zenith
+    #return tsi * solar_factor * cos_zenith
+    return tsi * solar_factor * torch.maximum(cos_zenith, torch.zeros_like(cos_zenith))
 
 def _get_integrated_toa_tisr(
     instantaneous_toa_tisr: torch.Tensor,
