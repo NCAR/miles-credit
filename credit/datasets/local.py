@@ -173,7 +173,7 @@ class LocalDataset(BaseDataset):
                     t_sel = _to_cftime(t, calendar)
                 else:
                     t_sel = t
-                ds_t = ds.sel(time=t_sel)
+                ds_t = ds.sel({self.time_coord: t_sel})
             else:
                 ds_t = ds
 
