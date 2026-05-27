@@ -24,7 +24,6 @@ ms_loader = DataLoader(ms_dataset, batch_sampler=ms_sampler, num_workers=0, pin_
 sample = next(iter(ms_loader))
 print(sample.keys())
 print(sample["input"].keys())
-print(sample)
 print(sample["input"]["ERA5_UpperAir"].keys())
 preblocks = build_preblocks(config["preblocks"])
 batch = apply_preblocks(preblocks, sample)
