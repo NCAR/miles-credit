@@ -132,6 +132,8 @@ class GeopotentialDiagnostic(torch.nn.Module):
         level_info_file: str = "ERA5_Lev_Info.nc",
         model_a_half_var: str = "a_half",
         model_b_half_var: str = "b_half",
+        static_source_key: str = "ic_raw",
+        levels: list[int] | None = None,
     ):
         super().__init__()
         self.output_name = output_name
@@ -146,9 +148,18 @@ class GeopotentialDiagnostic(torch.nn.Module):
         self.level_info_file = get_meta_file_path(level_info_file)
         self.model_a_half_var = model_a_half_var
         self.model_b_half_var = model_b_half_var
+        self.static_source_key = static_source_key
+        self.levels = levels
         with xr.open_dataset(self.level_info_file) as level_info:
-            self.model_a_half = torch.Tensor(level_info[self.model_a_half_var].values)
-            self.model_b_half = torch.Tensor(level_info[self.model_b_half_var].values)
+            a_all = torch.Tensor(level_info[self.model_a_half_var].values)
+            b_all = torch.Tensor(level_info[self.model_b_half_var].values)
+        if levels is not None:
+            half_idx = [lv - 1 for lv in levels] + [levels[-1]]
+            self.model_a_half = a_all[half_idx]
+            self.model_b_half = b_all[half_idx]
+        else:
+            self.model_a_half = a_all
+            self.model_b_half = b_all
         return
 
     def forward(self, data_dict: dict):
@@ -175,16 +186,20 @@ class GeopotentialDiagnostic(torch.nn.Module):
             pred_shape = list(data[self.dataset_name][self.temperature_var].shape)  # (B, n_levels, n_time, H, W)
             pred_flat = {}
             dsn = self.dataset_name
+            static_data = data_dict[self.static_source_key]
             for input_var in [
                 self.surface_geopotential_var,
                 self.surface_pressure_var,
                 self.temperature_var,
                 self.specific_humidity_var,
             ]:
-                new_dim_order = tuple([0] + list(range(2, len(data[dsn][input_var].shape))) + [1])
-                pred_per = torch.permute(data[dsn][input_var], new_dim_order)  # (B, n_time, H, W, n_levels)
+                src = static_data[dsn] if input_var == self.surface_geopotential_var else data[dsn]
+                new_dim_order = tuple([0] + list(range(2, len(src[input_var].shape))) + [1])
+                pred_per = torch.permute(src[input_var], new_dim_order)  # (B, n_time, H, W, n_levels)
                 total_shape = int(np.prod(pred_per.shape[:-1]))
                 pred_flat[input_var] = pred_per.reshape(total_shape, pred_per.shape[-1])
+            device = pred_flat[self.surface_pressure_var].device
+            pred_flat = {k: v.to(device) for k, v in pred_flat.items()}
             vgeo = torch.vmap(
                 partial(geopotential, flip_vertical=self.flip_vertical),
                 (0, 0, 0, 0, None, None),
@@ -195,8 +210,8 @@ class GeopotentialDiagnostic(torch.nn.Module):
                 pred_flat[self.surface_pressure_var],
                 pred_flat[self.temperature_var],
                 pred_flat[self.specific_humidity_var],
-                self.model_a_half,
-                self.model_b_half,
+                self.model_a_half.to(device),
+                self.model_b_half.to(device),
             ).reshape(*[pred_shape[0]] + pred_shape[2:] + [pred_shape[1]])  # (B, n_time, H, W, n_levels)
             final_dim_order = tuple([0] + [len(pred_shape) - 1] + list(range(1, len(pred_shape) - 1)))
             data[dsn][self.output_name] = torch.permute(geo_out, final_dim_order)
