@@ -16,12 +16,10 @@ data:
         prognostic:
           vars_3D: ["U", "V", "T", "Q"]
           vars_2D: ["SP", "t2m", "V500", "U500", "T500", "Z500", "Q500"]
-          path: "/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL*"
-          filename_time_format: "%Y"
+          path: "/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL_%Y-*"
         dynamic_forcing:
           vars_2D: ["tsi"]
-          path: "/glade/campaign/cisl/aiml/credit/credit_solar_nc_6h_0.25deg/*.nc"
-          filename_time_format: "%Y"
+          path: "/glade/campaign/cisl/aiml/credit/credit_solar_nc_6h_0.25deg/solar_irradiance_%Y*.nc"
         static:
           vars_2D: ["Z_GDS4_SFC", "LSM"]
           path: "/glade/campaign/cisl/aiml/credit/static_scalers/static_norm_old.nc"

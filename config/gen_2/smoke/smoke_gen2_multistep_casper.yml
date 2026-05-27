@@ -17,12 +17,10 @@ data:
         prognostic:
           vars_3D: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_total_water"]
           vars_2D: ["SP", "VAR_2T", "VAR_10U", "VAR_10V"]
-          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
-          filename_time_format: "%Y"
+          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y_*.zarr"
         dynamic_forcing:
           vars_2D: ["toa_incident_solar_radiation", "land_sea_CI_mask"]
-          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_*.zarr"
-          filename_time_format: "%Y"
+          path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y_*.zarr"
         static:
           vars_2D: ["z_norm", "land_sea_mask"]
           path: "/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr"
