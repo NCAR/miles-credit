@@ -6,13 +6,13 @@ GOESDataset: PyTorch Dataset for GOES data with nested input/target structure.
 Sample structure returned by __getitem__:
 
     {
-        "input":    {<user_provided_name>: {"<user_provided_name>/prognostic/2d/CMI_C04": tensor, 
+        "input":    {<user_provided_name>: {"<user_provided_name>/prognostic/2d/CMI_C04": tensor,
                                             "<user_provided_name>/prognostic/2d/CMI_C07": tensor}},
         "target":   {<user_provided_name>: {"<user_provided_name>/prognostic/2d/CMI_C04": tensor,
                                             "<user_provided_name>/prognostic/2d/CMI_C07": tensor}},  # only populated when return_target=True
         "metadata": {<user_provided_name>: {"input_datetime": int, "target_datetime": int}},
     }
-    
+
 All GOES variables are 2D. Tensor shape (no batch dimension):
     (1, 1, lat, lon)   — singleton level dim, consistent with CREDIT Gen2 2D convention
 

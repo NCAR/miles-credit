@@ -6,7 +6,7 @@ MRMSDataset: PyTorch Dataset for MRMS data with nested input/target structure.
 Sample structure returned by __getitem__:
 
     {
-        "input":    {<user_provided_name>: {"<user_provided_name>/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor, 
+        "input":    {<user_provided_name>: {"<user_provided_name>/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
                                             "<user_provided_name>/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor}},
         "target":   {<user_provided_name>: {"<user_provided_name>/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
                                             "<user_provided_name>/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor}},  # only populated when return_target=True
