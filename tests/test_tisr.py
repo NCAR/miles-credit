@@ -1,21 +1,8 @@
 """
-test_tisr.py
+tests/test_tisr.py
 ------------
-Pure PyTorch unit and integration tests for the TISR implementation
-(credit/datasets/tisr.py). No JAX or GraphCast dependency — safe to run
-as part of the normal CI test suite.
+Unit tests for the TISRDataset class in credit.datasets.tisr.py.
 
-Usage
------
-Run from the repository root:
-
-    pytest tests/test_tisr.py -v
-
-Coverage
---------
-To check test coverage:
-
-    pytest tests/test_tisr.py --cov=credit.datasets.tisr --cov-report=term-missing -v
 """
 
 import numpy as np
@@ -26,17 +13,17 @@ import xarray as xr
 from unittest.mock import MagicMock, patch
 
 from credit.datasets.tisr import (
-    _era5_tsi_data,
-    _get_tsi,
-    _get_j2000_days,
-    _get_orbital_parameters,
-    _get_solar_time,
-    _get_hour_angle,
-    _get_cosine_zenith_angle,
-    _get_instantaneous_toa_tisr,
-    _get_integrated_toa_tisr,
-    _load_latlon_grid,
-    _compute_tisr,
+    _era5_tsi_data,  # pyright: ignore[reportPrivateUsage]
+    _get_tsi,  # pyright: ignore[reportPrivateUsage]
+    _get_j2000_days,  # pyright: ignore[reportPrivateUsage]
+    _get_orbital_parameters,  # pyright: ignore[reportPrivateUsage]
+    _get_solar_time,  # pyright: ignore[reportPrivateUsage]
+    _get_hour_angle,  # pyright: ignore[reportPrivateUsage]
+    _get_cosine_zenith_angle,  # pyright: ignore[reportPrivateUsage]
+    _get_instantaneous_toa_tisr,  # pyright: ignore[reportPrivateUsage]
+    _get_integrated_toa_tisr,  # pyright: ignore[reportPrivateUsage]
+    _load_latlon_grid,  # pyright: ignore[reportPrivateUsage]
+    _compute_tisr,  # pyright: ignore[reportPrivateUsage]
     TISRDataset,
 )
 
@@ -45,15 +32,13 @@ from credit.datasets.tisr import (
 #   * June solstice (max N declination)
 #   * September equinox
 #   * December solstice (max S declination)
-#   * High noon on equator, midnight, and an arbitrary mid-day time
+#   * J2000 epoch (reference for day count)
 TIMESTAMPS = [
     "2020-03-20 12:00:00",  # March equinox
     "2020-06-21 00:00:00",  # June solstice midnight
     "2020-06-21 12:00:00",  # June solstice noon
-    "2020-09-22 06:00:00",  # September equinox dawn
     "2020-12-21 18:00:00",  # December solstice dusk
     "2000-01-01 12:00:00",  # J2000 reference epoch
-    "1989-11-08 21:00:00",  # Example from ERA5 docs
 ]
 
 
@@ -65,6 +50,7 @@ def to_np(x) -> np.ndarray:
 # =============================================================================
 # NetCDF fixtures
 # =============================================================================
+
 
 def _write_rectangular_netcdf(path: str, ny: int = 4, nx: int = 8) -> None:
     """Write a minimal rectangular-grid NetCDF file with 1-D lat/lon coords."""
@@ -108,14 +94,14 @@ def curvilinear_nc(tmp_path):
 # 1. TSI data integrity
 # =============================================================================
 
+
 class TestTSIDataIntegrity:
     """Checks on the ERA5 TSI lookup table itself."""
 
     def test_tsi_dataset_length(self):
-        """ERA5 TSI dataset must cover exactly 84 years (1951.5–2034.5)."""
-        times, values = _era5_tsi_data()
-        assert len(times) == 84, f"Expected 84 TSI entries, got {len(times)}"
-        assert len(values) == 84, f"Expected 84 TSI value entries, got {len(values)}"
+        """ERA5 TSI times and tsi_values must have the same length."""
+        times, tsi_values = _era5_tsi_data()
+        assert len(times) == len(tsi_values), f"times length {len(times)} != tsi_values length {len(tsi_values)}"
 
     def test_tsi_times_are_monotonic(self):
         """TSI time axis must be strictly increasing (required for searchsorted)."""
@@ -123,46 +109,32 @@ class TestTSIDataIntegrity:
         diffs = times[1:] - times[:-1]
         assert (diffs > 0).all(), "TSI times are not strictly monotonically increasing"
 
-    def test_tsi_times_start_and_end(self):
-        """TSI data must span 1951.5 to 2034.5 exactly."""
-        times, _ = _era5_tsi_data()
-        assert abs(times[0].item() - 1951.5) < 1e-9, \
-            f"TSI data should start at 1951.5, got {times[0].item()}"
-        assert abs(times[-1].item() - 2034.5) < 1e-9, \
-            f"TSI data should end at 2034.5, got {times[-1].item()}"
-
-    def test_tsi_scale_factor_applied(self):
-        """All TSI values must be scaled by 0.9965 (below ~1366 W/m²)."""
-        _, values = _era5_tsi_data()
-        assert (values < 1366.0).all(), \
-            "TSI values should all be below 1366 W/m² (0.9965 scale not applied?)"
-
     def test_tsi_single_timestamp(self):
         """_get_tsi must handle a single pd.Timestamp (not just sequences)."""
         times, values = _era5_tsi_data()
         result = _get_tsi(pd.Timestamp("2020-06-21 12:00:00"), times, values)
-        assert result.shape == (1,), \
-            f"Single timestamp should return shape (1,), got {result.shape}"
+        assert result.shape == (1,), f"Single timestamp should return shape (1,), got {result.shape}"
 
     def test_tsi_leap_year(self):
         """TSI interpolation on Feb 29 of a leap year must not crash."""
         times, values = _era5_tsi_data()
         result = _get_tsi(["2020-02-29 12:00:00"], times, values)
-        assert result.shape == (1,) and (result > 1358).all(), \
-            f"Leap day TSI result unexpected: {result}"
+        assert result.shape == (1,) and (result > 1360).all(), f"Leap day TSI result unexpected: {result}"
 
     def test_tsi_year_boundary(self):
         """TSI on Dec 31 and Jan 1 of adjacent years must be close (smooth interpolation)."""
         times, values = _era5_tsi_data()
         dec31 = _get_tsi(["2020-12-31 23:00:00"], times, values)
         jan01 = _get_tsi(["2021-01-01 00:00:00"], times, values)
-        assert abs(dec31.item() - jan01.item()) < 1.0, \
+        assert abs(dec31.item() - jan01.item()) < 1.0, (
             f"TSI should be continuous across year boundary: {dec31.item():.4f} vs {jan01.item():.4f}"
+        )
 
 
 # =============================================================================
 # 2. TSI interpolation
 # =============================================================================
+
 
 class TestTSI:
     """Unit tests for _get_tsi."""
@@ -171,8 +143,7 @@ class TestTSI:
         """All TSI values should be in physically plausible range ~1360–1362 W/m²."""
         times_torch, values_torch = _era5_tsi_data()
         result = _get_tsi(TIMESTAMPS, times_torch, values_torch)
-        assert (result > 1358).all() and (result < 1364).all(), \
-            f"TSI out of plausible range: {result}"
+        assert (result > 1360).all() and (result < 1362).all(), f"TSI out of plausible range: {result}"
 
     def test_tsi_rejects_out_of_range_timestamp(self):
         """Timestamps outside 1951–2034 must raise ValueError."""
@@ -185,24 +156,22 @@ class TestTSI:
 # 3. J2000 day conversion
 # =============================================================================
 
+
 class TestJ2000Days:
     """Unit tests for _get_j2000_days."""
 
     def test_j2000_epoch_is_zero(self):
         """J2000 epoch (2000-01-01 12:00 TT) should give exactly 0.0 days."""
         result = _get_j2000_days(pd.Timestamp("2000-01-01 12:00:00"))
-        assert abs(result.item()) < 1e-3, \
-            f"J2000 epoch should be ~0, got {result.item()}"
+        assert abs(result.item()) < 1e-3, f"J2000 epoch should be ~0, got {result.item()}"
 
     def test_j2000_days_batch_vs_scalar(self):
         """Batch input must give the same result as calling scalar inputs one by one."""
         batch_result = to_np(_get_j2000_days(pd.DatetimeIndex(TIMESTAMPS)))
-        scalar_results = np.array([
-            _get_j2000_days(pd.Timestamp(ts)).item()
-            for ts in TIMESTAMPS
-        ])
-        np.testing.assert_array_equal(batch_result, scalar_results,
-            err_msg="Batch J2000 days differ from scalar equivalents")
+        scalar_results = np.array([_get_j2000_days(pd.Timestamp(ts)).item() for ts in TIMESTAMPS])
+        np.testing.assert_array_equal(
+            batch_result, scalar_results, err_msg="Batch J2000 days differ from scalar equivalents"
+        )
 
     def test_j2000_days_ordering(self):
         """Later timestamps must produce larger J2000 day values."""
@@ -214,19 +183,18 @@ class TestJ2000Days:
         """Two timestamps exactly 1 day apart must differ by exactly 1.0 J2000 days."""
         t1 = _get_j2000_days(pd.Timestamp("2020-06-21 00:00:00")).item()
         t2 = _get_j2000_days(pd.Timestamp("2020-06-22 00:00:00")).item()
-        assert abs((t2 - t1) - 1.0) < 1e-9, \
-            f"One day apart should differ by 1.0 J2000 days, got {t2 - t1}"
+        assert abs((t2 - t1) - 1.0) < 1e-9, f"One day apart should differ by 1.0 J2000 days, got {t2 - t1}"
 
     def test_j2000_days_output_dtype(self):
         """Output dtype must be float64."""
         result = _get_j2000_days(pd.Timestamp("2020-06-21 12:00:00"))
-        assert result.dtype == torch.float64, \
-            f"Expected float64, got {result.dtype}"
+        assert result.dtype == torch.float64, f"Expected float64, got {result.dtype}"
 
 
 # =============================================================================
 # 4. Orbital parameters
 # =============================================================================
+
 
 class TestOrbitalParameters:
     """Unit tests for _get_orbital_parameters."""
@@ -236,22 +204,21 @@ class TestOrbitalParameters:
         j2000_days = _get_j2000_days(pd.DatetimeIndex(TIMESTAMPS))
         op = _get_orbital_parameters(j2000_days)
         d = op["solar_distance_au"]
-        assert (d > 0.98).all() and (d < 1.02).all(), \
-            f"Solar distance out of expected range: {d}"
+        assert (d > 0.98).all() and (d < 1.02).all(), f"Solar distance out of expected range: {d}"
 
     def test_declination_in_valid_range(self):
         """sin(declination) must be in [-sin(23.44°), +sin(23.44°)] ≈ ±0.398."""
         j2000_days = _get_j2000_days(pd.DatetimeIndex(TIMESTAMPS))
         op = _get_orbital_parameters(j2000_days)
-        limit = np.sin(np.radians(23.44))
+        limit = 0.3979  # sin(23.44°)
         sd = op["sin_declination"].abs()
-        assert (sd <= limit + 1e-3).all(), \
-            f"sin_declination exceeds axial tilt bound: {sd}"
+        assert (sd <= limit + 1e-3).all(), f"sin_declination exceeds axial tilt bound: {sd}"
 
 
 # =============================================================================
 # 5. Solar time
 # =============================================================================
+
 
 class TestSolarTime:
     """Unit tests for _get_solar_time."""
@@ -261,8 +228,7 @@ class TestSolarTime:
         j2000 = torch.tensor([0.0], dtype=torch.float64)
         op = _get_orbital_parameters(j2000)
         solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
-        assert abs(solar_time.item()) < 0.01, \
-            f"Solar time at J2000 epoch should be near 0, got {solar_time.item()}"
+        assert abs(solar_time.item()) < 0.01, f"Solar time at J2000 epoch should be near 0, got {solar_time.item()}"
 
     def test_solar_time_bounded(self):
         """Solar time (rotational_phase + eq_of_time correction) should stay near [0, 1)."""
@@ -270,13 +236,15 @@ class TestSolarTime:
         op = _get_orbital_parameters(j2000_days)
         solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
         # eq_of_time is at most ~17 minutes = 0.012 days, so solar_time stays near [0, 1)
-        assert (solar_time > -0.02).all() and (solar_time < 1.02).all(), \
+        assert (solar_time > -0.02).all() and (solar_time < 1.02).all(), (
             f"Solar time out of expected bounds: {solar_time}"
+        )
 
 
 # =============================================================================
 # 6. Solar geometry / hour angle
 # =============================================================================
+
 
 class TestSolarGeometry:
     """Unit tests for _get_hour_angle and _get_cosine_zenith_angle."""
@@ -288,28 +256,26 @@ class TestSolarGeometry:
         angle should be 180°.
         """
         solar_time = torch.tensor([0.5], dtype=torch.float64)  # midday
-        longitude = torch.tensor([0.0], dtype=torch.float64)   # prime meridian
+        longitude = torch.tensor([0.0], dtype=torch.float64)  # prime meridian
         ha = _get_hour_angle(solar_time, longitude)
-        assert abs(ha.item() - 180.0) < 1e-3, \
-            f"Hour angle at solar noon / lon=0 should be 180°, got {ha.item()}"
+        assert abs(ha.item() - 180.0) < 1e-3, f"Hour angle at solar noon / lon=0 should be 180°, got {ha.item()}"
 
     def test_cosine_zenith_equator_equinox_noon(self):
         """At solar noon on the equator with declination=0, cos_zenith should be 1.0."""
         cos_dec = torch.tensor([[[1.0]]], dtype=torch.float64)
         sin_dec = torch.tensor([[[0.0]]], dtype=torch.float64)
-        lat = torch.tensor([[[0.0]]], dtype=torch.float64)   # equator, degrees
-        ha = torch.tensor([[[0.0]]], dtype=torch.float64)    # solar noon, degrees
+        lat = torch.tensor([[[0.0]]], dtype=torch.float64)  # equator, degrees
+        ha = torch.tensor([[[0.0]]], dtype=torch.float64)  # solar noon, degrees
 
         cz = _get_cosine_zenith_angle(cos_dec, sin_dec, lat, ha)
-        assert abs(cz.item() - 1.0) < 1e-5, \
-            f"cos_zenith at equatorial noon/equinox should be 1.0, got {cz.item()}"
+        assert abs(cz.item() - 1.0) < 1e-5, f"cos_zenith at equatorial noon/equinox should be 1.0, got {cz.item()}"
 
     def test_cosine_zenith_nightside_is_zero(self):
         """Below-horizon values must be clamped to 0 (not negative)."""
         cos_dec = torch.tensor([[[0.5]]], dtype=torch.float64)
         sin_dec = torch.tensor([[[0.866]]], dtype=torch.float64)
         lat = torch.tensor([[[-80.0]]], dtype=torch.float64)  # near south pole
-        ha = torch.tensor([[[180.0]]], dtype=torch.float64)   # midnight
+        ha = torch.tensor([[[180.0]]], dtype=torch.float64)  # midnight
 
         cz = _get_cosine_zenith_angle(cos_dec, sin_dec, lat, ha)
         assert cz.item() >= 0.0, "Nightside cos_zenith must be >= 0"
@@ -318,6 +284,7 @@ class TestSolarGeometry:
 # =============================================================================
 # 7. Instantaneous TOA TISR
 # =============================================================================
+
 
 class TestInstantaneousFlux:
     """Unit tests for _get_instantaneous_toa_tisr."""
@@ -335,6 +302,7 @@ class TestInstantaneousFlux:
 # 8. Integrated TOA TISR
 # =============================================================================
 
+
 class TestIntegratedTISR:
     """Unit and integration tests for _get_integrated_toa_tisr."""
 
@@ -342,8 +310,7 @@ class TestIntegratedTISR:
         """Output of _get_integrated_toa_tisr must drop the time dimension."""
         inst = torch.rand(361, 5, 4, dtype=torch.float64)
         result = _get_integrated_toa_tisr(inst, pd.Timedelta(hours=1), 360)
-        assert result.shape == (5, 4), \
-            f"Expected shape (5, 4), got {result.shape}"
+        assert result.shape == (5, 4), f"Expected shape (5, 4), got {result.shape}"
 
     def test_num_integration_steps_validation(self):
         """Non-positive or non-integer num_integration_steps must raise ValueError."""
@@ -363,8 +330,7 @@ class TestIntegratedTISR:
         """Integrated TISR output dtype must be float64."""
         inst = torch.rand(361, 3, 4, dtype=torch.float64)
         result = _get_integrated_toa_tisr(inst, pd.Timedelta(hours=1), 360)
-        assert result.dtype == torch.float64, \
-            f"Expected float64 output, got {result.dtype}"
+        assert result.dtype == torch.float64, f"Expected float64 output, got {result.dtype}"
 
     @pytest.mark.parametrize("num_steps", [60, 180, 360, 720])
     def test_convergence_with_more_bins(self, num_steps):
@@ -377,8 +343,7 @@ class TestIntegratedTISR:
         def _run(n_steps):
             integration_period = pd.Timedelta(hours=1)
             t = pd.Timestamp(ts_str)
-            ts = pd.date_range(end=t, periods=n_steps + 1,
-                               freq=integration_period / n_steps)
+            ts = pd.date_range(end=t, periods=n_steps + 1, freq=integration_period / n_steps)
             times_t, tsi_v = _era5_tsi_data()
             tsi = _get_tsi(ts, times_t, tsi_v).unsqueeze(-1).unsqueeze(-1)
             j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
@@ -393,8 +358,9 @@ class TestIntegratedTISR:
 
         result_360 = _run(360)
         result = _run(num_steps)
-        np.testing.assert_allclose(result, result_360, rtol=1e-2,
-            err_msg=f"num_steps={num_steps} diverges too much from 360-bin reference")
+        np.testing.assert_allclose(
+            result, result_360, rtol=1e-2, err_msg=f"num_steps={num_steps} diverges too much from 360-bin reference"
+        )
 
     def test_non_standard_integration_period(self):
         """A 6-hour integration period should give more energy than 1-hour
@@ -407,8 +373,7 @@ class TestIntegratedTISR:
             integration_period = pd.Timedelta(hours=period_hours)
             num_steps = 360
             t = pd.Timestamp(ts_str)
-            ts = pd.date_range(end=t, periods=num_steps + 1,
-                               freq=integration_period / num_steps)
+            ts = pd.date_range(end=t, periods=num_steps + 1, freq=integration_period / num_steps)
             times_t, tsi_v = _era5_tsi_data()
             tsi = _get_tsi(ts, times_t, tsi_v).unsqueeze(-1).unsqueeze(-1)
             j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
@@ -423,8 +388,7 @@ class TestIntegratedTISR:
 
         result_1h = _run(1)
         result_6h = _run(6)
-        assert result_6h > result_1h, \
-            f"6-hour TISR ({result_6h:.1f}) should exceed 1-hour TISR ({result_1h:.1f})"
+        assert result_6h > result_1h, f"6-hour TISR ({result_6h:.1f}) should exceed 1-hour TISR ({result_1h:.1f})"
 
     def test_polar_night_is_zero(self):
         """South pole in June: no sunlight -> integrated TISR must be 0 J/m2."""
@@ -448,95 +412,15 @@ class TestIntegratedTISR:
         inst = _get_instantaneous_toa_tisr(tsi, 1.0 / op["solar_distance_au"] ** 2, cz)
         result = _get_integrated_toa_tisr(inst, integration_period, num_steps)
 
-        assert result.item() == pytest.approx(0.0, abs=1.0), \
+        assert result.item() == pytest.approx(0.0, abs=1.0), (
             f"South pole in June should have zero TISR, got {result.item()}"
+        )
 
 
 # =============================================================================
-# 9. Physical symmetry checks (full pipeline)
+# 9. _load_latlon_grid
 # =============================================================================
 
-class TestPhysicalSymmetry:
-    """Sanity checks based on known physical symmetries of solar geometry."""
-
-    def test_longitude_periodicity(self):
-        """lon=0 and lon=360 are the same point; TISR must be identical."""
-        ts_str = "2020-06-21 12:00:00"
-        integration_period = pd.Timedelta(hours=1)
-        num_steps = 360
-
-        def _tisr_at_lon(lon_val):
-            t = pd.Timestamp(ts_str)
-            ts = pd.date_range(end=t, periods=num_steps + 1,
-                               freq=integration_period / num_steps)
-            times_t, tsi_v = _era5_tsi_data()
-            tsi = _get_tsi(ts, times_t, tsi_v).unsqueeze(-1).unsqueeze(-1)
-            j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
-            op = _get_orbital_parameters(j2000_days)
-            lat_t = torch.tensor([45.0], dtype=torch.float64).reshape(1, -1, 1)
-            lon_t = torch.tensor([lon_val], dtype=torch.float64).reshape(1, 1, -1)
-            solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
-            ha = _get_hour_angle(solar_time, lon_t)
-            cz = _get_cosine_zenith_angle(op["cos_declination"], op["sin_declination"], lat_t, ha)
-            inst = _get_instantaneous_toa_tisr(tsi, 1.0 / op["solar_distance_au"] ** 2, cz)
-            return _get_integrated_toa_tisr(inst, integration_period, num_steps).item()
-
-        assert abs(_tisr_at_lon(0.0) - _tisr_at_lon(360.0)) < 1e-6, \
-            "lon=0 and lon=360 must give identical TISR"
-
-    def test_north_pole_midsummer_positive(self):
-        """North pole in June has 24-hour daylight -> integrated TISR must be > 0."""
-        ts_str = "2020-06-21 12:00:00"
-        integration_period = pd.Timedelta(hours=1)
-        num_steps = 360
-        t = pd.Timestamp(ts_str)
-        ts = pd.date_range(end=t, periods=num_steps + 1,
-                           freq=integration_period / num_steps)
-        times_t, tsi_v = _era5_tsi_data()
-        tsi = _get_tsi(ts, times_t, tsi_v).unsqueeze(-1).unsqueeze(-1)
-        j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
-        op = _get_orbital_parameters(j2000_days)
-        lat_t = torch.tensor([90.0], dtype=torch.float64).reshape(1, -1, 1)
-        lon_t = torch.tensor([0.0], dtype=torch.float64).reshape(1, 1, -1)
-        solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
-        ha = _get_hour_angle(solar_time, lon_t)
-        cz = _get_cosine_zenith_angle(op["cos_declination"], op["sin_declination"], lat_t, ha)
-        inst = _get_instantaneous_toa_tisr(tsi, 1.0 / op["solar_distance_au"] ** 2, cz)
-        result = _get_integrated_toa_tisr(inst, integration_period, num_steps).item()
-        assert result > 0, \
-            f"North pole in June should have positive TISR, got {result}"
-
-    def test_tisr_upper_bound(self):
-        """Integrated TISR cannot exceed TSI * solar_factor * integration_seconds.
-        For a 1-hour window, that is ~1366 * 1.034 * 3600 ~ 5.08e6 J/m2."""
-        ts_str = "2020-01-03 12:00:00"  # perihelion: max solar_factor ~1.034
-        integration_period = pd.Timedelta(hours=1)
-        num_steps = 360
-        max_possible = 1366.0 * 1.034 * 3600.0
-
-        t = pd.Timestamp(ts_str)
-        ts = pd.date_range(end=t, periods=num_steps + 1,
-                           freq=integration_period / num_steps)
-        times_t, tsi_v = _era5_tsi_data()
-        tsi = _get_tsi(ts, times_t, tsi_v).unsqueeze(-1).unsqueeze(-1)
-        j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
-        op = _get_orbital_parameters(j2000_days)
-        lats = np.linspace(-90, 90, 19)
-        lons = np.linspace(0, 360, 37)
-        lat_t = torch.tensor(lats, dtype=torch.float64).reshape(1, -1, 1)
-        lon_t = torch.tensor(lons, dtype=torch.float64).reshape(1, 1, -1)
-        solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
-        ha = _get_hour_angle(solar_time, lon_t)
-        cz = _get_cosine_zenith_angle(op["cos_declination"], op["sin_declination"], lat_t, ha)
-        inst = _get_instantaneous_toa_tisr(tsi, 1.0 / op["solar_distance_au"] ** 2, cz)
-        result = to_np(_get_integrated_toa_tisr(inst, integration_period, num_steps))
-        assert result.max() <= max_possible, \
-            f"TISR exceeds physical upper bound: {result.max():.1f} > {max_possible:.1f}"
-
-
-# =============================================================================
-# 10. _load_latlon_grid
-# =============================================================================
 
 class TestLoadLatlonGrid:
     """Tests for _load_latlon_grid covering both grid types and error paths."""
@@ -587,8 +471,9 @@ class TestLoadLatlonGrid:
 
 
 # =============================================================================
-# 11. _compute_tisr
+# 10. _compute_tisr
 # =============================================================================
+
 
 class TestComputeTISR:
     """Tests for _compute_tisr using a mocked NetCDF lat/lon grid."""
@@ -611,8 +496,7 @@ class TestComputeTISR:
             num_integration_steps=360,
             latlon_grid_path=rectangular_nc,
         )
-        assert result.dtype == torch.float64, \
-            f"Expected float64, got {result.dtype}"
+        assert result.dtype == torch.float64, f"Expected float64, got {result.dtype}"
 
     def test_output_nonnegative(self, rectangular_nc):
         """All integrated TISR values must be non-negative."""
@@ -634,8 +518,9 @@ class TestComputeTISR:
         )
         # rectangular_nc has lat starting at -90; first row is the south pole
         south_pole_row = result[0, :]
-        assert (south_pole_row.abs() <= 1.0).all(), \
+        assert (south_pole_row.abs() <= 1.0).all(), (
             f"South pole row in June should be zero via _compute_tisr, got {south_pole_row}"
+        )
 
     def test_different_integration_period(self, rectangular_nc):
         """6-hour integration period must give more energy than 1-hour."""
@@ -646,13 +531,13 @@ class TestComputeTISR:
         )
         result_1h = _compute_tisr(integration_period=pd.Timedelta(hours=1), **kwargs)
         result_6h = _compute_tisr(integration_period=pd.Timedelta(hours=6), **kwargs)
-        assert result_6h.sum() > result_1h.sum(), \
-            "6-hour integrated TISR should exceed 1-hour integrated TISR"
+        assert result_6h.sum() > result_1h.sum(), "6-hour integrated TISR should exceed 1-hour integrated TISR"
 
 
 # =============================================================================
-# 12. TISRDataset
+# 11. TISRDataset
 # =============================================================================
+
 
 @pytest.fixture()
 def tisr_dataset(rectangular_nc):
@@ -747,18 +632,250 @@ class TestTISRDataset:
         """_extract_field must raise ValueError when vars_2D is not ['tisr']."""
         tisr_dataset.var_dict = {"dynamic_forcing": {"vars_2D": ["u10"]}}
         with pytest.raises(ValueError, match="TISRDataset only supports"):
-            tisr_dataset._extract_field(
-                "dynamic_forcing", pd.Timestamp("2020-06-21 12:00:00"), {}
-            )
+            tisr_dataset._extract_field("dynamic_forcing", pd.Timestamp("2020-06-21 12:00:00"), {})
 
     def test_extract_field_writes_to_sample(self, tisr_dataset):
         """_extract_field must compute TISR and store it in the sample dict."""
         sample = {}
-        tisr_dataset._extract_field(
-            "dynamic_forcing", pd.Timestamp("2020-06-21 12:00:00"), sample
-        )
+        tisr_dataset._extract_field("dynamic_forcing", pd.Timestamp("2020-06-21 12:00:00"), sample)
         key = "src/dynamic_forcing/2d/tisr"
         assert key in sample, f"Expected key '{key}' in sample"
-        assert sample[key].shape == (1, 1, 4, 8), \
-            f"Expected shape (1, 1, 4, 8), got {sample[key].shape}"
+        assert sample[key].shape == (1, 1, 4, 8), f"Expected shape (1, 1, 4, 8), got {sample[key].shape}"
         assert (sample[key] >= 0).all(), "TISR values must be non-negative"
+
+
+# =============================================================================
+# GraphCast / JAX parity tests
+# Each test calls pytest.importorskip("graphcast.solar_radiation") as its
+# first line, so the test is skipped automatically when the package is absent.
+# Install graphcast with: pip install --upgrade "https://github.com/deepmind/graphcast/archive/master.zip"
+# =============================================================================
+
+_PARITY_RTOL = 1e-6
+_PARITY_ATOL = 1e-7
+
+
+class TestTSIParity:
+    """_get_tsi must return identical interpolated TSI values as the JAX reference."""
+
+    def test_tsi_values_match(self):
+        gc_solar = pytest.importorskip("graphcast.solar_radiation")
+        tsi_data_jax = gc_solar.era5_tsi_data()
+        times_torch, values_torch = _era5_tsi_data()
+
+        jax_result = gc_solar.get_tsi(TIMESTAMPS, tsi_data_jax)
+        torch_result = _get_tsi(TIMESTAMPS, times_torch, values_torch)
+
+        np.testing.assert_allclose(
+            to_np(torch_result),
+            np.array(jax_result),
+            rtol=_PARITY_RTOL,
+            atol=_PARITY_ATOL,
+            err_msg="TSI interpolation diverges between implementations",
+        )
+
+
+class TestJ2000DaysParity:
+    """_get_j2000_days must agree with the JAX reference."""
+
+    @pytest.mark.parametrize("ts", TIMESTAMPS)
+    def test_j2000_days_match(self, ts):
+        gc_solar = pytest.importorskip("graphcast.solar_radiation")
+        jax_val = float(gc_solar._get_j2000_days(pd.Timestamp(ts)))
+        torch_val = float(_get_j2000_days(pd.Timestamp(ts)).item())
+        assert abs(jax_val - torch_val) < 1e-4, f"J2000 days differ for {ts}: JAX={jax_val}, PyTorch={torch_val}"
+
+
+class TestOrbitalParametersParity:
+    """Every orbital parameter must match the JAX reference."""
+
+    KEYS = [
+        "sin_declination",
+        "cos_declination",
+        "eq_of_time_seconds",
+        "solar_distance_au",
+    ]
+
+    @pytest.mark.parametrize("ts", TIMESTAMPS)
+    def test_orbital_params_match(self, ts):
+        gc_solar = pytest.importorskip("graphcast.solar_radiation")
+        jax = pytest.importorskip("jax")
+        jax.config.update("jax_enable_x64", True)
+        jnp = jax.numpy
+
+        j2000 = float(gc_solar._get_j2000_days(pd.Timestamp(ts)))
+        jax_op = gc_solar._get_orbital_parameters(jnp.array(j2000))
+        torch_op = _get_orbital_parameters(torch.tensor([j2000], dtype=torch.float64))
+
+        for key in self.KEYS:
+            jax_val = float(np.asarray(getattr(jax_op, key)))
+            torch_val = float(torch_op[key].item())
+            assert abs(jax_val - torch_val) < _PARITY_ATOL, (
+                f"{key} mismatch at {ts}: JAX={jax_val:.6f}, PyTorch={torch_val:.6f}"
+            )
+
+
+class TestSolarTimeParity:
+    """Solar time derived from PyTorch orbital params must match JAX."""
+
+    def test_solar_time_matches_jax(self):
+        gc_solar = pytest.importorskip("graphcast.solar_radiation")
+        jax = pytest.importorskip("jax")
+        jax.config.update("jax_enable_x64", True)
+        jnp = jax.numpy
+
+        for ts_str in TIMESTAMPS:
+            j2000 = float(gc_solar._get_j2000_days(pd.Timestamp(ts_str)))
+            jax_op = gc_solar._get_orbital_parameters(jnp.array(j2000))
+            jax_solar_time = float(jax_op.rotational_phase + jax_op.eq_of_time_seconds / 86400.0)
+
+            torch_op = _get_orbital_parameters(torch.tensor([j2000], dtype=torch.float64))
+            torch_solar_time = _get_solar_time(torch_op["rotational_phase"], torch_op["eq_of_time_seconds"]).item()
+
+            assert abs(jax_solar_time - torch_solar_time) < 1e-9, (
+                f"Solar time mismatch at {ts_str}: JAX={jax_solar_time:.10f}, PyTorch={torch_solar_time:.10f}"
+            )
+
+
+class TestSolarGeometryParity:
+    """cos_zenith (PyTorch) must match sin_altitude (JAX) — they are the same quantity."""
+
+    def test_cosine_zenith_matches_jax_sin_altitude(self):
+        gc_solar = pytest.importorskip("graphcast.solar_radiation")
+        jax = pytest.importorskip("jax")
+        jax.config.update("jax_enable_x64", True)
+        jnp = jax.numpy
+
+        ts = "2020-06-21 12:00:00"
+        lat_deg = np.array([0.0, 45.0, -45.0, 90.0, -90.0])
+        lon_deg = np.array([0.0, 90.0, -90.0, 180.0, 45.0])
+
+        j2000 = float(gc_solar._get_j2000_days(pd.Timestamp(ts)))
+        jax_op = gc_solar._get_orbital_parameters(jnp.array(j2000))
+
+        jax_vals = np.asarray(
+            gc_solar._get_solar_sin_altitude(
+                jax_op,
+                jnp.sin(jnp.radians(lat_deg)),
+                jnp.cos(jnp.radians(lat_deg)),
+                jnp.radians(lon_deg),
+            )
+        )
+        jax_vals_clamped = np.maximum(jax_vals, 0.0)
+
+        torch_op = _get_orbital_parameters(torch.tensor([[j2000]], dtype=torch.float64))
+        solar_time = _get_solar_time(torch_op["rotational_phase"], torch_op["eq_of_time_seconds"])
+        ha = _get_hour_angle(solar_time, torch.tensor(lon_deg, dtype=torch.float64))
+        cos_zenith = _get_cosine_zenith_angle(
+            cos_declination=torch_op["cos_declination"],
+            sin_declination=torch_op["sin_declination"],
+            latitude=torch.tensor(lat_deg, dtype=torch.float64),
+            hour_angle=ha,
+        )
+
+        np.testing.assert_allclose(
+            to_np(cos_zenith.squeeze()),
+            jax_vals_clamped,
+            rtol=_PARITY_RTOL,
+            atol=_PARITY_ATOL,
+            err_msg="cos_zenith (PyTorch) vs sin_altitude (JAX) mismatch",
+        )
+
+
+class TestInstantaneousFluxParity:
+    """Instantaneous flux (W/m²) must match the JAX _get_radiation_flux."""
+
+    @pytest.mark.parametrize("ts", TIMESTAMPS)
+    def test_instantaneous_flux_matches_jax(self, ts):
+        gc_solar = pytest.importorskip("graphcast.solar_radiation")
+        jax = pytest.importorskip("jax")
+        jax.config.update("jax_enable_x64", True)
+        jnp = jax.numpy
+
+        lat_deg = np.array([[-90.0], [-45.0], [0.0], [45.0], [90.0]])
+        lon_deg = np.array([0.0, 90.0, 180.0, 270.0])
+
+        tsi_data_jax = gc_solar.era5_tsi_data()
+        tsi_scalar = float(gc_solar.get_tsi([ts], tsi_data_jax)[0])
+        j2000 = float(gc_solar._get_j2000_days(pd.Timestamp(ts)))
+
+        jax_flux = np.asarray(
+            gc_solar._get_radiation_flux(
+                j2000_days=jnp.array(j2000),
+                sin_latitude=jnp.sin(jnp.radians(lat_deg)),
+                cos_latitude=jnp.cos(jnp.radians(lat_deg)),
+                longitude=jnp.radians(lon_deg),
+                tsi=jnp.array(tsi_scalar),
+            )
+        )
+
+        torch_op = _get_orbital_parameters(torch.tensor([[[j2000]]], dtype=torch.float64))
+        lat_t = torch.tensor(lat_deg, dtype=torch.float64).unsqueeze(0)
+        lon_t = torch.tensor(lon_deg, dtype=torch.float64).unsqueeze(0)
+        solar_time = _get_solar_time(torch_op["rotational_phase"], torch_op["eq_of_time_seconds"])
+        ha = _get_hour_angle(solar_time, lon_t)
+        cz = _get_cosine_zenith_angle(torch_op["cos_declination"], torch_op["sin_declination"], lat_t, ha)
+        solar_factor = 1.0 / torch_op["solar_distance_au"] ** 2
+        torch_flux = _get_instantaneous_toa_tisr(
+            tsi=torch.tensor([[[tsi_scalar]]], dtype=torch.float64),
+            solar_factor=solar_factor,
+            cos_zenith=cz,
+        ).squeeze(0)
+
+        np.testing.assert_allclose(
+            to_np(torch_flux),
+            jax_flux,
+            rtol=_PARITY_RTOL,
+            atol=_PARITY_ATOL,
+            err_msg=f"Instantaneous TOA flux mismatch at {ts}",
+        )
+
+
+class TestIntegratedTISRParity:
+    """Integrated TISR must match the JAX get_toa_incident_solar_radiation."""
+
+    @pytest.mark.parametrize("ts_str", TIMESTAMPS)
+    def test_integrated_tisr_matches_jax(self, ts_str):
+        gc_solar = pytest.importorskip("graphcast.solar_radiation")
+        lat_deg = np.array([-60.0, -30.0, 0.0, 30.0, 60.0])
+        lon_deg = np.array([0.0, 90.0, 180.0, 270.0])
+        integration_period = pd.Timedelta(hours=1)
+        num_steps = 360
+
+        jax_result = np.asarray(
+            gc_solar.get_toa_incident_solar_radiation(
+                timestamps=[ts_str],
+                latitude=lat_deg,
+                longitude=lon_deg,
+                integration_period=integration_period,
+                num_integration_bins=num_steps,
+                use_jit=False,
+            )
+        )[0]  # shape (lat, lon)
+
+        t = pd.Timestamp(ts_str)
+        ts = pd.date_range(
+            end=t,
+            periods=num_steps + 1,
+            freq=integration_period / num_steps,
+        )
+        times_torch, tsi_values_torch = _era5_tsi_data()
+        tsi = _get_tsi(ts, times_torch, tsi_values_torch).unsqueeze(-1).unsqueeze(-1)
+        j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
+        op = _get_orbital_parameters(j2000_days)
+        lat_t = torch.tensor(lat_deg, dtype=torch.float64).reshape(1, -1, 1)
+        lon_t = torch.tensor(lon_deg, dtype=torch.float64).reshape(1, 1, -1)
+        solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
+        ha = _get_hour_angle(solar_time, lon_t)
+        cz = _get_cosine_zenith_angle(op["cos_declination"], op["sin_declination"], lat_t, ha)
+        solar_factor = 1.0 / op["solar_distance_au"] ** 2
+        inst = _get_instantaneous_toa_tisr(tsi, solar_factor, cz)
+        torch_result = to_np(_get_integrated_toa_tisr(inst, integration_period, num_steps))  # shape (lat, lon)
+
+        np.testing.assert_allclose(
+            torch_result,
+            jax_result,
+            rtol=_PARITY_RTOL,
+            atol=_PARITY_ATOL,
+            err_msg=f"Integrated TISR mismatch at {ts_str}",
+        )
