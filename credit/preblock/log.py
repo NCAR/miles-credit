@@ -48,6 +48,7 @@ class LogTransform(BasePreblock):
             raise ValueError(f"Unsupported log base '{base}'. Choose from: 'e', '2', '10'.")
 
     def forward(self, batch: dict) -> dict:
+        batch = self._copy_batch(batch)
         for var_key in self.variables:
             source = var_key.split("/")[0]
 

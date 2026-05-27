@@ -299,7 +299,7 @@ def _era5_v1_conf(**overrides):
 
 
 def _era5_gen2_conf(**overrides):
-    """Minimal conf for trainerERA5gen2.Trainer (v2 nested data schema)."""
+    """Minimal conf for trainer_gen2.Trainer (v2 nested data schema)."""
     base = _minimal_conf()
     base["data"] = {
         "forecast_len": 1,
@@ -318,7 +318,7 @@ def _era5_gen2_conf(**overrides):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
-    base["preblocks"] = {"concat": {"type": "concat"}}
+    base["preblocks"] = {"per_step": {"concat": {"type": "concat"}}}
     base.update(overrides)
     return base
 
@@ -346,7 +346,7 @@ class TestTrainerSubclassInstantiation:
         assert not t.flag_mass_conserve
 
     def test_era5gen2_trainer_init(self):
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         t = Trainer(_tiny_model(), rank=0, conf=_era5_gen2_conf())
         assert t.forecast_len == 1
@@ -393,7 +393,7 @@ class TestTrainerSubclassInstantiation:
 
 
 def _era5_gen2_multistep_conf(forecast_len, tmp_path):
-    """Minimal conf for trainerERA5gen2.Trainer with forecast_len > 1."""
+    """Minimal conf for trainer_gen2.Trainer with forecast_len > 1."""
     base = _minimal_conf()
     base["save_loc"] = str(tmp_path)
     base["trainer"]["batches_per_epoch"] = 1
@@ -416,7 +416,7 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
         "mean_path": "/dev/null",
         "std_path": "/dev/null",
     }
-    base["preblocks"] = {"concat": {"type": "concat"}}
+    base["preblocks"] = {"per_step": {"concat": {"type": "concat"}}}
     return base
 
 
@@ -427,7 +427,7 @@ class _FakeDataset:
 
 
 class _FakeLoader:
-    """Minimal iterable loader that yields nested-format batches for trainerERA5gen2.
+    """Minimal iterable loader that yields nested-format batches for trainer_gen2.
 
     Each batch has the structure expected by apply_preblocks / ConcatToTensor:
         batch["input"]["era5"][var_key]  -> (B, 1, H, W) tensor
@@ -454,8 +454,8 @@ class _FakeLoader:
 
         B, C, H, W = self._B, self._C, self._H, self._W
         for _ in range(self._n):
-            input_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
-            target_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, H, W) for i in range(C)}
+            input_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, 1, H, W) for i in range(C)}
+            target_vars = {f"era5/prognostic/2d/v{i}": torch.randn(B, 1, 1, H, W) for i in range(C)}
             yield {"input": {"era5": input_vars}, "target": {"era5": target_vars}}
 
 
@@ -463,7 +463,7 @@ class TestERA5Gen2MultiStepTraining:
     """Verify forecast_len > 1 in the v2 trainer autoregressive loop."""
 
     def test_forecast_len_2_init(self, tmp_path):
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         t = Trainer(_tiny_model(), rank=0, conf=conf)
@@ -471,10 +471,9 @@ class TestERA5Gen2MultiStepTraining:
         assert t.forecast_len == 2
         assert t.backprop_on_timestep == [1, 2]
         assert t.varnum_diag == 0
-        assert hasattr(t, "slices")
 
     def test_backprop_on_timestep_default_covers_all_steps(self, tmp_path):
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         for fl in [1, 2, 3]:
             conf = _era5_gen2_multistep_conf(forecast_len=fl, tmp_path=tmp_path)
@@ -485,7 +484,7 @@ class TestERA5Gen2MultiStepTraining:
         """2-step autoregressive loop completes with toy data."""
         import torch
         import torch.nn as nn
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
         forecast_len = 2
@@ -495,6 +494,7 @@ class TestERA5Gen2MultiStepTraining:
         model = _ScaleModel().to(device)
 
         conf = _era5_gen2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
+        conf["postblocks"] = {"per_step": {"reconstruct": {"type": "reconstruct"}}}
         trainer = Trainer(model, rank=0, conf=conf)
 
         # _FakeLoader yields forecast_len * batches_per_epoch batches total
@@ -523,87 +523,68 @@ class TestERA5Gen2MultiStepTraining:
         assert torch.isfinite(torch.tensor(results["train_loss"][0]))
 
     def test_2step_x_replaced_with_y_pred(self, tmp_path):
-        """At t=2, prognostic channels of x must equal y_pred from t=1."""
+        """At t=2, x must equal y_pred from t=1 (all vars are prognostic)."""
         import torch
         import torch.nn as nn
-        from unittest.mock import patch
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
-        from credit.preblock import apply_preblocks
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         captured = {}
+        step = [0]
 
-        class _ConstModel(nn.Module):
-            """Returns a fixed tensor so we can track what y_pred was at t=1."""
-
+        class _CapturingModel(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.ones(1))  # needs a param for optimizer
+                self.w = nn.Parameter(torch.ones(1))
 
             def forward(self, x):
-                out = x * self.w  # shape preserved, differentiable
-                captured["last_x"] = x.detach().clone()
-                captured["last_out"] = out.detach().clone()
+                out = x * self.w
+                captured[step[0]] = {"x": x.detach().clone(), "out": out.detach().clone()}
+                step[0] += 1
                 return out
 
-        model = _ConstModel().to(device)
+        model = _CapturingModel().to(device)
         conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        conf["postblocks"] = {"per_step": {"reconstruct": {"type": "reconstruct"}}}
         trainer = Trainer(model, rank=0, conf=conf)
-
-        step = [0]
-        x_at_step1_out = [None]
-
-        original_apply = apply_preblocks
-
-        def _patched_apply(preblocks, batch, device=None):
-            result = original_apply(preblocks, batch, device=device)
-            x_raw = result["input"]
-            step[0] += 1
-            if step[0] == 1:
-                x_at_step1_out[0] = x_raw.clone()
-            return result
-
-        def _metrics(pred, y):
-            return {"acc": 0.0, "mae": 0.0}
 
         loader = _FakeLoader(B, C, H, W, n_batches=2)
         optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
         criterion = nn.MSELoss()
         scaler = torch.amp.GradScaler(device.type, enabled=False)
 
-        with patch("credit.trainers.trainerERA5gen2.apply_preblocks", side_effect=_patched_apply):
-            trainer.train_one_epoch(
-                epoch=0,
-                trainloader=loader,
-                optimizer=optimizer,
-                criterion=criterion,
-                scaler=scaler,
-                scheduler=None,
-                metrics=_metrics,
-            )
+        trainer.train_one_epoch(
+            epoch=0,
+            trainloader=loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            scaler=scaler,
+            scheduler=None,
+            metrics=lambda p, y: {"acc": 0.0, "mae": 0.0},
+        )
 
-        # At t=2 the model sees x = y_pred from t=1 = x_at_step1_out (since model is identity-like)
-        # captured["last_x"] is the x fed to the model at t=2
-        assert captured["last_x"] is not None
-        expected = x_at_step1_out[0].to(device)  # y_pred at t=1 = model(x_t1) = x_t1 * 1.0 ≈ x_t1
-        torch.testing.assert_close(captured["last_x"], expected, atol=1e-5, rtol=1e-5)
+        # All vars are prognostic, model is identity (w=1), so y_pred at t=1 = x_t1.
+        # Reconstruct + assemble_rollout_batch routes all channels through y_processed,
+        # so x at t=2 must equal y_pred from t=1.
+        y_pred_t1 = captured[0]["out"]
+        x_t2 = captured[1]["x"]
+        torch.testing.assert_close(x_t2, y_pred_t1, atol=1e-5, rtol=1e-5)
 
     def test_rollout_partial_channels_at_t2(self, tmp_path):
         """At t=2, ERA5Dataset returns only dynfrc channels.
 
-        Verify update_x correctly:
-          - replaces prognostic slice (channels 0..N_PROG-1) with y_pred
-          - preserves static slice (channels N_PROG..N_PROG+N_STATIC-1)
-          - updates dynfrc slice (channels N_PROG+N_STATIC..) from the new batch
+        Verify assemble_rollout_batch correctly:
+          - replaces prognostic channels with y_pred (via Reconstruct → y_processed)
+          - preserves static channels from ic_preprocessed
+          - updates dynfrc channels from the new batch
+        Channel order follows FIELD_TYPE_RANK: prognostic < static < dynamic_forcing.
         """
         import torch
         import torch.nn as nn
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
-        # Canonical order: prog → static → dynfrc
         N_PROG, N_STATIC, N_DYNFRC = 3, 1, 2
-        TOTAL = N_PROG + N_STATIC + N_DYNFRC  # 6
         B, H, W = 1, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -626,28 +607,32 @@ class TestERA5Gen2MultiStepTraining:
                 }
             },
         }
-        conf["preblocks"] = {"concat": {"type": "concat"}}
+        conf["preblocks"] = {"per_step": {"concat": {"type": "concat"}}}
+        conf["postblocks"] = {"per_step": {"reconstruct": {"type": "reconstruct"}}}
 
-        # Model: outputs N_PROG channels, all zeros — makes y_pred easy to check.
-        # Multiply by self.w so the output has a grad_fn for backprop.
+        # Known fixed tensors — 5D (B, 1, 1, H, W) to match ConcatToTensor expectations.
+        dynfrc_t1 = torch.full((B, N_DYNFRC, 1, H, W), 1.0)
+        static_ch = torch.full((B, N_STATIC, 1, H, W), 2.0)
+        prog_t1 = torch.full((B, N_PROG, 1, H, W), 3.0)
+        dynfrc_t2 = torch.full((B, N_DYNFRC, 1, H, W), 9.0)
+
+        # Model: outputs N_PROG channels, all zeros — makes y_pred easy to verify.
         class _ZeroProgModel(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.w = nn.Parameter(torch.zeros(1))
 
             def forward(self, x):
-                return torch.zeros(x.shape[0], N_PROG, x.shape[2], x.shape[3], device=x.device) * self.w
-
-        trainer = Trainer(_ZeroProgModel().to(device), rank=0, conf=conf)
-        assert "prognostic" in trainer.slices
-
-        # Known fixed tensors for each channel group
-        dynfrc_t1 = torch.full((B, N_DYNFRC, H, W), 1.0)
-        static_ch = torch.full((B, N_STATIC, H, W), 2.0)
-        prog_t1 = torch.full((B, N_PROG, H, W), 3.0)
-        dynfrc_t2 = torch.full((B, N_DYNFRC, H, W), 9.0)  # new forcing at t=2
+                return torch.zeros(x.shape[0], N_PROG, *x.shape[2:], device=x.device) * self.w
 
         step = [0]
+        captured_x = {}
+
+        class _CapturingModel(_ZeroProgModel):
+            def forward(self, x):
+                captured_x[step[0]] = x.detach().clone()
+                step[0] += 1
+                return super().forward(x)
 
         class _PartialLoader:
             """Step 1: full batch. Step 2: dynfrc only (simulates ERA5Dataset i>0)."""
@@ -659,30 +644,20 @@ class TestERA5Gen2MultiStepTraining:
                 return 2
 
             def __iter__(self):
-                # t=1 batch: all channel types present
                 full_input = {}
-                for i in range(N_DYNFRC):
-                    full_input[f"era5/dynamic_forcing/2d/df{i}"] = dynfrc_t1[:, i : i + 1]
-                for i in range(N_STATIC):
-                    full_input[f"era5/static/2d/st{i}"] = static_ch[:, i : i + 1]
                 for i in range(N_PROG):
                     full_input[f"era5/prognostic/2d/p{i}"] = prog_t1[:, i : i + 1]
+                for i in range(N_STATIC):
+                    full_input[f"era5/static/2d/st{i}"] = static_ch[:, i : i + 1]
+                for i in range(N_DYNFRC):
+                    full_input[f"era5/dynamic_forcing/2d/df{i}"] = dynfrc_t1[:, i : i + 1]
                 target = {f"era5/prognostic/2d/p{i}": prog_t1[:, i : i + 1] for i in range(N_PROG)}
                 yield {"input": {"era5": full_input}, "target": {"era5": target}}
 
-                # t=2 batch: only dynfrc (ERA5Dataset i>0 behavior)
                 partial_input = {f"era5/dynamic_forcing/2d/df{i}": dynfrc_t2[:, i : i + 1] for i in range(N_DYNFRC)}
                 yield {"input": {"era5": partial_input}, "target": {"era5": target}}
 
-        captured_x = {}
-
-        class _CapturingModel(_ZeroProgModel):
-            def forward(self, x):
-                captured_x[step[0]] = x.detach().clone()
-                step[0] += 1
-                return super().forward(x)
-
-        trainer.model = _CapturingModel().to(device)
+        trainer = Trainer(_CapturingModel().to(device), rank=0, conf=conf)
         optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
         criterion = nn.MSELoss()
         scaler = torch.amp.GradScaler(device.type, enabled=False)
@@ -696,14 +671,159 @@ class TestERA5Gen2MultiStepTraining:
             metrics=lambda p, y: {"acc": 0.0, "mae": 0.0},
         )
 
-        x_t2 = captured_x[1]  # x fed to model at t=2
-        # canonical order: prog → static → dynfrc
-        # prognostic channels replaced by y_pred (zeros from _ZeroProgModel)
-        torch.testing.assert_close(x_t2[:, :N_PROG], torch.zeros(B, N_PROG, H, W, device=device), atol=1e-5, rtol=1e-5)
-        # static channels preserved from t=1
+        x_t2 = captured_x[1]  # x fed to model at t=2, shape (B, TOTAL, 1, H, W)
+        # Channel order: prognostic(0) < static(1) < dynamic_forcing(2) per FIELD_TYPE_RANK
+        torch.testing.assert_close(
+            x_t2[:, :N_PROG], torch.zeros(B, N_PROG, 1, H, W, device=device), atol=1e-5, rtol=1e-5
+        )
         torch.testing.assert_close(x_t2[:, N_PROG : N_PROG + N_STATIC], static_ch.to(device), atol=1e-5, rtol=1e-5)
-        # dynfrc channels updated from t=2 batch
         torch.testing.assert_close(x_t2[:, N_PROG + N_STATIC :], dynfrc_t2.to(device), atol=1e-5, rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# assemble_rollout_batch — direct unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestAssembleRolloutBatch:
+    """Direct unit tests for rollout_utils.assemble_rollout_batch.
+
+    These verify the routing contract independently of the trainer loop:
+      - prognostic / diagnostic → from y_processed (previous step's prediction)
+      - dynamic_forcing          → from curr_batch["input"]
+      - static (and unknown)     → always from ic_preprocessed["input"]
+    """
+
+    def test_static_always_comes_from_ic_preprocessed(self):
+        """Static channels use ic_preprocessed values even when absent from curr_batch."""
+        from credit.trainers.rollout_utils import assemble_rollout_batch
+
+        STATIC_VAL = 42.0
+        B, H, W = 1, 4, 4
+        ic_preprocessed = {
+            "input": {
+                "era5": {
+                    "era5/prognostic/2d/p": torch.full((B, 1, 1, H, W), 1.0),
+                    "era5/static/2d/st": torch.full((B, 1, 1, H, W), STATIC_VAL),
+                }
+            }
+        }
+        y_processed = {"era5": {"era5/prognostic/2d/p": torch.full((B, 1, 1, H, W), 99.0)}}
+        curr_batch = {"input": {"era5": {}}, "target": None}  # no static in curr_batch
+        full_data_dict = {"ic_preprocessed": ic_preprocessed, "y_processed": y_processed}
+
+        result = assemble_rollout_batch(full_data_dict, curr_batch)
+
+        torch.testing.assert_close(
+            result["input"]["era5"]["era5/static/2d/st"],
+            torch.full((B, 1, 1, H, W), STATIC_VAL),
+        )
+
+    def test_prognostic_comes_from_y_processed(self):
+        """Prognostic channels are routed from y_processed (previous step prediction)."""
+        from credit.trainers.rollout_utils import assemble_rollout_batch
+
+        PRED_VAL = 99.0
+        B, H, W = 1, 4, 4
+        ic_preprocessed = {"input": {"era5": {"era5/prognostic/2d/p": torch.full((B, 1, 1, H, W), 1.0)}}}
+        y_processed = {"era5": {"era5/prognostic/2d/p": torch.full((B, 1, 1, H, W), PRED_VAL)}}
+        curr_batch = {"input": {"era5": {}}, "target": None}
+        full_data_dict = {"ic_preprocessed": ic_preprocessed, "y_processed": y_processed}
+
+        result = assemble_rollout_batch(full_data_dict, curr_batch)
+
+        torch.testing.assert_close(
+            result["input"]["era5"]["era5/prognostic/2d/p"],
+            torch.full((B, 1, 1, H, W), PRED_VAL),
+        )
+
+    def test_dynamic_forcing_comes_from_curr_batch(self):
+        """Dynamic forcing channels are routed from curr_batch, not ic_preprocessed."""
+        from credit.trainers.rollout_utils import assemble_rollout_batch
+
+        DYNFRC_VAL = 7.0
+        IC_VAL = 0.0
+        B, H, W = 1, 4, 4
+        ic_preprocessed = {"input": {"era5": {"era5/dynamic_forcing/2d/df": torch.full((B, 1, 1, H, W), IC_VAL)}}}
+        y_processed = {"era5": {}}
+        curr_batch = {
+            "input": {"era5": {"era5/dynamic_forcing/2d/df": torch.full((B, 1, 1, H, W), DYNFRC_VAL)}},
+            "target": None,
+        }
+        full_data_dict = {"ic_preprocessed": ic_preprocessed, "y_processed": y_processed}
+
+        result = assemble_rollout_batch(full_data_dict, curr_batch)
+
+        torch.testing.assert_close(
+            result["input"]["era5"]["era5/dynamic_forcing/2d/df"],
+            torch.full((B, 1, 1, H, W), DYNFRC_VAL),
+        )
+
+    def test_all_three_sources_assembled_together(self):
+        """All three field types are assembled correctly in a single call."""
+        from credit.trainers.rollout_utils import assemble_rollout_batch
+
+        B, H, W = 1, 4, 4
+        ic_preprocessed = {
+            "input": {
+                "era5": {
+                    "era5/prognostic/2d/p": torch.full((B, 1, 1, H, W), 1.0),
+                    "era5/static/2d/st": torch.full((B, 1, 1, H, W), 42.0),
+                    "era5/dynamic_forcing/2d/df": torch.full((B, 1, 1, H, W), 0.0),
+                }
+            }
+        }
+        y_processed = {"era5": {"era5/prognostic/2d/p": torch.full((B, 1, 1, H, W), 99.0)}}
+        curr_batch = {
+            "input": {"era5": {"era5/dynamic_forcing/2d/df": torch.full((B, 1, 1, H, W), 7.0)}},
+            "target": None,
+        }
+        full_data_dict = {"ic_preprocessed": ic_preprocessed, "y_processed": y_processed}
+
+        result = assemble_rollout_batch(full_data_dict, curr_batch)
+
+        torch.testing.assert_close(
+            result["input"]["era5"]["era5/prognostic/2d/p"],
+            torch.full((B, 1, 1, H, W), 99.0),
+            msg="prognostic must come from y_processed",
+        )
+        torch.testing.assert_close(
+            result["input"]["era5"]["era5/static/2d/st"],
+            torch.full((B, 1, 1, H, W), 42.0),
+            msg="static must come from ic_preprocessed",
+        )
+        torch.testing.assert_close(
+            result["input"]["era5"]["era5/dynamic_forcing/2d/df"],
+            torch.full((B, 1, 1, H, W), 7.0),
+            msg="dynamic_forcing must come from curr_batch",
+        )
+
+    def test_y_processed_not_dict_raises_type_error(self):
+        """TypeError raised when y_processed is not a dict (Reconstruct absent from chain)."""
+        from credit.trainers.rollout_utils import assemble_rollout_batch
+
+        full_data_dict = {
+            "ic_preprocessed": {"input": {"era5": {}}},
+            "y_processed": torch.randn(1, 4, 4, 4),  # wrong type — flat tensor
+        }
+        with pytest.raises(TypeError, match="y_processed"):
+            assemble_rollout_batch(full_data_dict, {"input": {}})
+
+    def test_target_forwarded_from_curr_batch(self):
+        """The assembled batch's target is the same object as curr_batch['target']."""
+        from credit.trainers.rollout_utils import assemble_rollout_batch
+
+        B, H, W = 1, 4, 4
+        target = {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}}
+        curr_batch = {"input": {"era5": {}}, "target": target}
+        full_data_dict = {
+            "ic_preprocessed": {"input": {"era5": {}}},
+            "y_processed": {"era5": {}},
+        }
+
+        result = assemble_rollout_batch(full_data_dict, curr_batch)
+
+        assert result["target"] is target
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +843,7 @@ class TestLoadTrainer:
 
     def test_valid_era5v2_type_returns_class(self):
         from credit.trainers import load_trainer
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         result = load_trainer({"trainer": {"type": "era5-gen2"}})
         assert result is Trainer
@@ -1054,11 +1174,11 @@ class TestSaveCheckpoint:
 
 
 class TestTrainerERA5Gen2AdditionalCoverage:
-    """Cover trainerERA5gen2 init branches and validate loop."""
+    """Cover trainer_gen2 init branches and validate loop."""
 
     def test_backprop_on_timestep_explicit(self, tmp_path):
         """Explicit backprop_on_timestep in data conf is used directly (lines 102-103)."""
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_gen2_multistep_conf(forecast_len=3, tmp_path=tmp_path)
         conf["data"]["backprop_on_timestep"] = [2, 3]
@@ -1069,7 +1189,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
 
     def test_data_clamp_sets_flags(self, tmp_path):
         """data_clamp in conf sets flag_clamp, clamp_min, clamp_max (lines 107-115)."""
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["data"]["data_clamp"] = [-5.0, 5.0]
@@ -1082,7 +1202,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
 
     def test_data_valid_overrides_valid_forecast_len(self, tmp_path):
         """validation_data block used when present (lines 118-120)."""
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
         conf["validation_data"] = {"forecast_len": 4, "history_len": 2}
@@ -1094,7 +1214,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
 
     def test_retain_graph_flag(self, tmp_path):
         """retain_graph flag extracted from conf (line 98)."""
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["data"]["retain_graph"] = True
@@ -1111,7 +1231,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         model = _ScaleModel().to(device)
         conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
 
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         trainer = Trainer(model, rank=0, conf=conf)
 
@@ -1143,7 +1263,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         conf["trainer"]["use_ema"] = True
         conf["trainer"]["ema_decay"] = 0.999
 
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         trainer = Trainer(model, rank=0, conf=conf)
 
@@ -1180,7 +1300,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         conf = _era5_gen2_multistep_conf(forecast_len=1, tmp_path=tmp_path)
         conf["trainer"]["grad_max_norm"] = 0.01  # very small to actually clip
 
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         trainer = Trainer(model, rank=0, conf=conf)
 
@@ -1208,7 +1328,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
     def test_scheduler_lambda_step_called(self, tmp_path):
         """lambda scheduler steps once per epoch at epoch start (lines 146-147)."""
         from unittest.mock import MagicMock
-        from credit.trainers.trainerERA5gen2 import TrainerERA5Gen2 as Trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -1242,3 +1362,85 @@ class TestTrainerERA5Gen2AdditionalCoverage:
 
         # Lambda scheduler should have been called at epoch start
         mock_scheduler.step.assert_called()
+
+    def test_rollout_postblocks_called_once_after_loop(self, tmp_path):
+        """apply_postblocks is invoked with rollout_postblocks exactly once after the rollout loop.
+
+        This guards against accidentally removing the post-rollout apply_postblocks call
+        at the end of train_one_epoch (not inside the per-step loop).
+        """
+        from unittest.mock import patch
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+        import credit.trainers.trainer_gen2 as trainer_module
+
+        B, C, H, W = 1, 4, 4, 4
+        forecast_len = 2
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+        model = _ScaleModel().to(device)
+        conf = _era5_gen2_multistep_conf(forecast_len=forecast_len, tmp_path=tmp_path)
+        conf["postblocks"] = {"per_step": {"reconstruct": {"type": "reconstruct"}}}
+
+        trainer = Trainer(model, rank=0, conf=conf)
+        loader = _FakeLoader(B, C, H, W, n_batches=forecast_len)
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-4)
+        criterion = nn.MSELoss()
+        scaler = torch.amp.GradScaler(device.type, enabled=False)
+
+        real_apply = trainer_module.apply_postblocks
+        rollout_postblock_calls = []
+
+        def _tracking_apply(postblocks, fdd):
+            result = real_apply(postblocks, fdd)
+            if postblocks is trainer.rollout_postblocks:
+                rollout_postblock_calls.append(True)
+            return result
+
+        with patch.object(trainer_module, "apply_postblocks", side_effect=_tracking_apply):
+            trainer.train_one_epoch(
+                epoch=0,
+                trainloader=loader,
+                optimizer=optimizer,
+                criterion=criterion,
+                scaler=scaler,
+                scheduler=None,
+                metrics=lambda p, y: {"acc": 0.0},
+            )
+
+        assert len(rollout_postblock_calls) == 1, (
+            "rollout_postblocks must be applied exactly once after the autoregressive loop"
+        )
+
+    def test_validate_multistep_completes_with_reconstruct(self, tmp_path):
+        """validate() with valid_forecast_len=2 completes and returns valid_loss.
+
+        At t=2 the validate loop calls assemble_rollout_batch, which requires
+        full_data_dict['y_processed'] to exist (populated by Reconstruct at t=1).
+        This test confirms the two-step validate path is end-to-end functional.
+        """
+        B, C, H, W = 1, 4, 4, 4
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+        model = _ScaleModel().to(device)
+        conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        conf["postblocks"] = {"per_step": {"reconstruct": {"type": "reconstruct"}}}
+
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+
+        trainer = Trainer(model, rank=0, conf=conf)
+        # Two batches per validation step (one per rollout step)
+        loader = _FakeLoader(B, C, H, W, n_batches=2)
+
+        criterion = nn.MSELoss()
+
+        results = trainer.validate(
+            epoch=0,
+            valid_loader=loader,
+            criterion=criterion,
+            metrics=lambda pred, y: {"acc": 0.5, "mae": 0.1},
+        )
+
+        assert "valid_loss" in results
+        assert len(results["valid_loss"]) == 1
+        assert torch.isfinite(torch.tensor(results["valid_loss"][0]))
+        assert results["valid_forecast_len"][-1] == 2
