@@ -40,21 +40,22 @@ logger = logging.getLogger(__name__)
 
 _TORCH_DTYPE = torch.float64
 
+
 # ------------------------------------------------------------------
 # Total Solar Irradiance (TSI) Data and Interpolation
 # ------------------------------------------------------------------
 def _era5_tsi_data() -> tuple[torch.Tensor, torch.Tensor]:
     """ERA5-compatible Total Solar Irradiance (TSI) time series.
- 
+
     Sourced from
     `Graphcast <https://github.com/google-deepmind/graphcast/blob/main/graphcast/solar_radiation.py>`_.
- 
+
     ECMWF provided the data used for ERA5, which was hardcoded in the IFS
     (cycle 41r2, 2016). Values from 2009 onwards repeat the 1996–2008 period
     (the last completed 13-year solar cycle available when the code was
     written). All values are scaled by 0.9965 to agree better with more
     recent solar observations.
- 
+
     Returns:
         tuple[torch.Tensor, torch.Tensor]:
             - **times** – 1-D tensor of fractional years, one entry per year
@@ -159,16 +160,17 @@ def _era5_tsi_data() -> tuple[torch.Tensor, torch.Tensor]:
     )
     return times, tsi_values
 
+
 def _get_tsi(
     timestamps: Sequence[str | pd.Timestamp],
     tsi_times: torch.Tensor,
     tsi_values: torch.Tensor,
 ) -> torch.Tensor:
     """Interpolate Total Solar Irradiance (TSI) at the given timestamps.
- 
+
     Converts each timestamp to a fractional year and performs piecewise
     linear interpolation against the provided annual TSI time series.
- 
+
     Args:
         timestamps:  Sequence of timestamps (strings or ``pd.Timestamp``
             objects) at which to evaluate TSI.
@@ -176,11 +178,11 @@ def _get_tsi(
             sorted in ascending order.
         tsi_values:  1-D tensor of TSI values (W m⁻²) corresponding
             element-wise to *tsi_times*.
- 
+
     Returns:
         torch.Tensor: 1-D tensor of interpolated TSI values (W m⁻²),
         one per input timestamp.
- 
+
     Raises:
         ValueError: If any timestamp's **year** falls outside the integer
             range spanned by *tsi_times*.  Note that timestamps in the
@@ -189,13 +191,13 @@ def _get_tsi(
     """
     # Normalise input to a DatetimeIndex for vectorised calendar operations
     ts = pd.DatetimeIndex([timestamps] if isinstance(timestamps, pd.Timestamp) else timestamps)
-    
+
     # Extract the date component (time-of-day stripped) for intra-day fraction calculation
     ts_date = pd.DatetimeIndex(ts.date)
 
     # Guard: reject timestamps whose *year* is entirely outside the TSI dataset.
     # Timestamps in the first/last partial year are still passed through and
-    # handled gracefully by the linear interpolation below.    
+    # handled gracefully by the linear interpolation below.
     t_min, t_max = tsi_times[0].item(), tsi_times[-1].item()
     out_mask = (ts.year < int(t_min)) | (ts.year > int(t_max))
 
@@ -221,7 +223,7 @@ def _get_tsi(
         tsi_times.contiguous(), frac_year.contiguous()
     )  # searchsorted requires tensors are contiguous in memory
 
-     # Clamp indices so that boundary timestamps don't go out of bounds
+    # Clamp indices so that boundary timestamps don't go out of bounds
     idx = idx.clamp(1, len(tsi_times) - 1)
 
     # Indices of the surrounding annual samples
@@ -237,29 +239,29 @@ def _get_tsi(
 # ------------------------------------------------------------------
 def _load_latlon_grid(path: str) -> torch.Tensor:
     """Read a lat/lon grid from a NetCDF file and return it as a (1, ny, nx) tensor pair.
- 
+
     Handles two common grid representations:
- 
+
     * **Curvilinear grids** – latitude and longitude are stored as 2-D
       variables of shape ``(ny, nx)`` and are read directly.
     * **Rectangular grids** – latitude and longitude are stored as 1-D
       coordinate arrays of lengths ``ny`` and ``nx`` respectively; a 2-D
       meshgrid is constructed from them.
- 
+
     Common field name aliases (``latitude``/``lat``/``XLAT``/``nav_lat``
     and ``longitude``/``lon``/``XLONG``/``nav_lon``) are tried in order of
     preference so that files from different models/tools are accepted
     without preprocessing.
- 
+
     Args:
         path (str): Path to a NetCDF file containing latitude/longitude
             information.
- 
+
     Returns:
         tuple[torch.Tensor, torch.Tensor]:
             - **lat_tensor** – Latitude grid in degrees, shape ``(1, ny, nx)``.
             - **lon_tensor** – Longitude grid in degrees, shape ``(1, ny, nx)``.
- 
+
     Raises:
         ValueError: If the file cannot be opened by xarray.
         ValueError: If no recognised latitude or longitude field is found.
@@ -324,13 +326,17 @@ def _load_latlon_grid(path: str) -> torch.Tensor:
 def _get_j2000_days(
     timestamp: pd.Timestamp | pd.DatetimeIndex,
 ) -> torch.Tensor:
-    """
+    """Convert UTC timestamp(s) to fractional days since the J2000.0 epoch.
 
     Args:
-        timestamp (pd.Timestamp | pd.DatetimeIndex): _description_
+        timestamp (pd.Timestamp | pd.DatetimeIndex): UTC timestamp or collection
+            of timestamps to convert.
 
     Returns:
-        torch.Tensor: _description_
+        torch.Tensor: Fractional days elapsed since J2000.0 (2000-01-01 12:00:00 UTC).
+            Shape matches the input dimensions, matching `_TORCH_DTYPE`.
+    References:
+        - https://en.wikipedia.org/wiki/Epoch_(astronomy)#Julian_years_and_J2000
     """
     _J2000_EPOCH = 2451545.0
     # Convert the input timestamp(s) to a DatetimeIndex if it's a single Timestamp.
@@ -343,27 +349,51 @@ def _get_j2000_days(
 def _get_orbital_parameters(
     j2000_days: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
-    """_summary_
+    """Compute solar orbital parameters from J2000 day count.
+
+    Derives the key quantities needed for TISR calculation — solar declination,
+    equation of time, and Earth-Sun distance — using low-order trigonometric
+    approximations sourced from the ERA5 / IFS parameterization.
+
+    This function is a PyTorch port of ``_get_orbital_parameters`` from Graphcast's
+    ``graphcast/solar_radiation.py`` (Google DeepMind).  The logic, variable names,
+    and numerical constants are kept identical to the original; the only changes are
+    replacing JAX/NumPy array operations (``jnp.stack``, ``jnp.dot``, ``jnp.sin``,
+    etc.) with their PyTorch equivalents (``torch.stack``, ``@``, ``torch.sin``,
+    etc.), and passing explicit ``dtype`` and ``device`` arguments to tensor
+    constructors to ensure compatibility with the calling context.
 
     Args:
-        j2000_days (torch.Tensor): _description_
-
-    Raises:
-        ValueError: _description_
-        ValueError: _description_
+        j2000_days (torch.Tensor): Days elapsed since the J2000 epoch
+            (2000-01-01 12:00 TT), shape ``(T,)``.
 
     Returns:
-        dict[str, torch.Tensor]: _description_
+        dict[str, torch.Tensor]: Dictionary with the following keys, all
+        shape ``(T,)`` unless noted:
+
+        - ``theta``: fractional Julian years since J2000.
+        - ``rotational_phase``: UTC time-of-day as a day-fraction
+          (0.0 = UTC noon, 0.5 = UTC midnight).
+        - ``sin_declination``, ``cos_declination``: sine and cosine of the
+          solar declination angle (dimensionless).
+        - ``eq_of_time_seconds``: equation of time in seconds.
+        - ``solar_distance_au``: Earth-Sun distance in Astronomical Units.
+
+    References:
+        - https://github.com/google-deepmind/graphcast/blob/08cf73625c9d12bd9aaa038868bcb2fe488f2a22/graphcast/solar_radiation.py#L293
+
     """
     _JULIAN_YEAR_LENGTH_IN_DAYS = 365.25
 
     theta = j2000_days / _JULIAN_YEAR_LENGTH_IN_DAYS
     rotational_phase = j2000_days % 1.0
 
-    rel = 1.7535 + 6.283076 * theta
-    rem = 6.240041 + 6.283020 * theta
-    rlls = 4.8951 + 6.283076 * theta
+    # intermediate angles in radians (ERA5/IFS variable names preserved from Graphcast)
+    rel = 1.7535 + 6.283076 * theta  # mean ecliptic longitude of the Sun
+    rem = 6.240041 + 6.283020 * theta  # mean anomaly of Earth's orbit
+    rlls = 4.8951 + 6.283076 * theta  # mean ecliptic longitude (used for EoT / declination)
 
+    # precompute trig terms reused across multiple outputs
     one = torch.ones_like(theta)
     sin_rel = torch.sin(rel)
     cos_rel = torch.cos(rel)
@@ -375,19 +405,23 @@ def _get_orbital_parameters(
     sin_rem = torch.sin(rem)
     sin_two_rem = torch.sin(2.0 * rem)
 
+    # true ecliptic longitude of the Sun
     rllls = torch.stack([one, theta, sin_rel, cos_rel, sin_two_rel, cos_two_rel], dim=-1) @ torch.tensor(
         [4.8952, 6.283320, -0.0075, -0.0326, -0.0003, 0.0002], dtype=j2000_days.dtype, device=j2000_days.device
     )
 
-    repsm = torch.tensor(0.409093, dtype=j2000_days.dtype, device=j2000_days.device)
+    # solar declination
+    repsm = torch.tensor(0.409093, dtype=j2000_days.dtype, device=j2000_days.device)  # obliquity ≈ 23.44°
     sin_declination = torch.sin(repsm) * torch.sin(rllls)
     cos_declination = torch.sqrt(1.0 - sin_declination**2)
 
+    # equation of time (seconds)
     eq_of_time_seconds = torch.stack(
         [sin_two_rlls, sin_rem, sin_rem * cos_two_rlls, sin_four_rlls, sin_two_rem],
         dim=-1,
     ) @ torch.tensor([591.8, -459.4, 39.5, -12.7, -4.8], dtype=j2000_days.dtype, device=j2000_days.device)
 
+    # Earth-Sun distance in AU (low-order approximation; 1 AU at mean distance)
     solar_distance_au = torch.stack([one, sin_rel, cos_rel], dim=-1) @ torch.tensor(
         [1.0001, -0.0163, 0.0037], dtype=j2000_days.dtype, device=j2000_days.device
     )
@@ -409,13 +443,31 @@ def _get_solar_time(
     rotational_phase: torch.Tensor,
     eq_of_time_seconds: torch.Tensor,
 ) -> torch.Tensor:
-    """_summary_
+    """Compute local apparent solar time as a fraction of a day.
+
+    Adjusts the fractional UTC day (rotational phase) by the Equation of Time
+    to account for solar variance due to Earth's orbital eccentricity and axial tilt.
+
+    Args:
+        rotational_phase (torch.Tensor): Fractional part of the J2000 day count,
+            representing UTC time-of-day, shape ``(T,)``. Because the J2000 epoch
+            starts at noon, ``0.0`` represents UTC Noon (12:00) and ``0.5``
+            represents UTC Midnight (00:00).
+        eq_of_time_seconds (torch.Tensor): Equation of time in seconds,
+            shape ``(T,)``. Positive values indicate apparent solar noon occurs
+            before mean solar noon.
 
     Returns:
-        _type_: _description_
+        torch.Tensor: Apparent solar time at the prime meridian as a fraction
+            of a day in ``[0, 1)``, shape ``(T,)``.
+
+    References:
+        - https://en.wikipedia.org/wiki/Equation_of_time
     """
     _SECONDS_PER_DAY = 60 * 60 * 24
-    solar_time = rotational_phase + eq_of_time_seconds / _SECONDS_PER_DAY
+    # apparent = mean + EOT  (Wikipedia: EOT = apparent − mean)
+    # result is referenced to the prime meridian; pass to _get_hour_angle to localize
+    solar_time = rotational_phase + eq_of_time_seconds / _SECONDS_PER_DAY  # day-fraction
     return solar_time
 
 
@@ -423,14 +475,35 @@ def _get_hour_angle(
     solar_time: torch.Tensor,
     longitude: torch.Tensor,
 ) -> torch.Tensor:
-    """_summary_
+    """Compute the solar hour angle from apparent solar time and longitude.
+
+    The hour angle measures how far the Sun has moved across the sky relative
+    to the local meridian: 0° at solar noon, increasing 15° per hour (360° per day).
+    Longitude shifts the prime-meridian-referenced solar time to each grid point's
+    local meridian.
+
+    Args:
+        solar_time (torch.Tensor): Apparent solar time as a fraction of a day,
+            with 0.0 corresponding to UTC noon at the prime meridian (J2000 origin).
+            Shape broadcastable to ``(T,)``.
+        longitude (torch.Tensor): Geographic longitude in degrees (positive east),
+            shape broadcastable to ``(ny, nx)``.
 
     Returns:
-        torch.Tensor: _description_
+        torch.Tensor: Solar hour angle in degrees, shape ``(T, ny, nx)`` after
+            broadcasting.  0° at solar noon; ±180° at solar midnight.  Not
+            wrapped to ``[−180°, 180°]`` — pass directly to ``torch.deg2rad``
+            before taking the cosine.
 
     References:
         - https://en.wikipedia.org/wiki/Hour_angle#Solar_hour_angle
+          (conceptual reference; the page gives no explicit formula, only the
+          prose rule "15° per hour before/after solar noon". The formula here
+          uses a J2000 rotational phase origin at UTC noon, so the −180° offset
+          present in midnight-origin derivations is absent.)
     """
+    # 360° per day; solar_time=0 → UTC noon at prime meridian (HA=0° there)
+    # adding longitude shifts from prime-meridian reference to local meridian
     hour_angle = 360.0 * solar_time + longitude
     return hour_angle
 
@@ -442,17 +515,17 @@ def _get_cosine_zenith_angle(
     hour_angle: torch.Tensor,
 ) -> torch.Tensor:
     """Compute the cosine of the solar zenith angle at each grid point and time.
- 
+
     Uses the standard spherical-trigonometry identity::
- 
+
         cos(θ_z) = cos(φ)·cos(δ)·cos(H) + sin(φ)·sin(δ)
- 
+
     where ``φ`` is geographic latitude, ``δ`` is solar declination, and
     ``H`` is the hour angle.  Negative values (Sun below the horizon) are
     floored to zero; no upper clamp is applied since values above 1.0 are
     physically impossible and should surface as bugs rather than be silently
     masked.
- 
+
     Args:
         cos_declination (torch.Tensor): Cosine of solar declination, shape
             ``(T,)`` – one value per timestamp.
@@ -462,12 +535,12 @@ def _get_cosine_zenith_angle(
             ``(1, ny, nx)`` or broadcastable equivalent.
         hour_angle (torch.Tensor): Solar hour angle in degrees, shape
             broadcastable to ``(T, ny, nx)``.
- 
+
     Returns:
         torch.Tensor: Cosine of the solar zenith angle floored at 0,
         shape ``(T, ny, nx)``.  A value of 1.0 means the Sun is directly
         overhead; 0.0 means the Sun is on or below the horizon.
- 
+
     References:
         https://en.wikipedia.org/wiki/Solar_zenith_angle#Formula
     """
@@ -477,7 +550,7 @@ def _get_cosine_zenith_angle(
         + torch.sin(torch.deg2rad(latitude)) * sin_declination
     )
 
-    return torch.maximum(cos_zenith, torch.tensor([0.0], dtype=cos_zenith.dtype))
+    return cos_zenith.clamp(min=0)
 
 
 # ------------------------------------------------------------------
@@ -506,8 +579,8 @@ def _get_instantaneous_toa_tisr(
         torch.Tensor: Instantaneous total incident solar radiation at the top of
             the atmosphere, in W/m².
     """
-    #return tsi * solar_factor * cos_zenith
-    return tsi * solar_factor * torch.maximum(cos_zenith, torch.zeros_like(cos_zenith))
+    return tsi * solar_factor * cos_zenith.clamp(min=0)
+
 
 def _get_integrated_toa_tisr(
     instantaneous_toa_tisr: torch.Tensor,
@@ -542,9 +615,7 @@ def _get_integrated_toa_tisr(
     """
     # Check that num_integration_steps is a positive integer
     if not isinstance(num_integration_steps, int) or num_integration_steps <= 0:
-        raise ValueError(
-            f"num_integration_steps must be a positive integer, but got {num_integration_steps}"
-        )
+        raise ValueError(f"num_integration_steps must be a positive integer, but got {num_integration_steps}")
 
     # Check that instantaneous_toa_tisr.shape[0] equals num_integration_steps + 1
     expected_steps = num_integration_steps + 1
@@ -561,6 +632,7 @@ def _get_integrated_toa_tisr(
     integrated_toa_tisr = torch.trapz(instantaneous_toa_tisr, dx=dt, dim=0)
 
     return integrated_toa_tisr
+
 
 def _compute_tisr(
     t: pd.Timestamp,
@@ -628,7 +700,7 @@ def _compute_tisr(
     # etc.) for each timestep. J2000 days are unsqueezed to (time, 1, 1) so the
     # result broadcasts cleanly against the spatial grid.
     orbital = _get_orbital_parameters(_get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1))
-    
+
     # Derive the cosine of the solar zenith angle at every grid point and timestep.
     cos_zenith = _get_cosine_zenith_angle(
         cos_declination=orbital["cos_declination"],
@@ -659,6 +731,7 @@ def _compute_tisr(
         integration_period=integration_period,
         num_integration_steps=num_integration_steps,
     )
+
 
 # ------------------------------------------------------------------
 # TISR PyTorch Dataset Class
@@ -725,12 +798,11 @@ class TISRDataset(BaseDataset):
         # Initialize the field registration based on the provided config
         self.init_register_all_fields()
 
-        # Load the latitude-longitude grid file path from the config; this is needed to compute 
+        # Load the latitude-longitude grid file path from the config; this is needed to compute
         # the cosine of the solar zenith angle for each grid point
         self.latlon_grid_path: str = self.curr_source_cfg.get("latlon_grid_path")
 
-    def _get_file_source(self, 
-                         field_config: dict[str, Any]) -> None:
+    def _get_file_source(self, field_config: dict[str, Any]) -> None:
         """Returns None since TISR dataset is not loading any data from local or remote files."""
         return None
 
@@ -762,11 +834,9 @@ class TISRDataset(BaseDataset):
         if not vars_2D:
             return
         if vars_2D != ["tisr"]:
-            raise ValueError(
-                f"TISRDataset only supports vars_2D=['tisr'], got {vars_2D}"
-            )
+            raise ValueError(f"TISRDataset only supports vars_2D=['tisr'], got {vars_2D}")
 
-        # Compute the top-of-atmosphere solar radiation, expand to be (1, 1, lat, lon), 
+        # Compute the top-of-atmosphere solar radiation, expand to be (1, 1, lat, lon),
         # and store it in the sample dictionary
         tisr = _compute_tisr(t, self.dt, self.num_integration_steps, self.latlon_grid_path)
         key = self._get_field_name(field_type, "2d", "tisr")
