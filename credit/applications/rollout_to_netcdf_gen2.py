@@ -35,7 +35,6 @@ import xarray as xr
 from credit.datasets.local import LocalDataset
 from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
-from credit.postblock import build_postblocks, apply_postblocks
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info, setup, distributed_model_wrapper
@@ -44,13 +43,123 @@ from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.forecast import load_forecasts
 from credit.pbs import launch_script, launch_script_mpi
-from credit.applications.rollout_utils_gen2 import _inject_flat_schema, _inject_tracer_inds, _sample_to_batch
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+
+
+# ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+
+
+def _inject_flat_schema(conf):
+    """Inject v1-style flat keys into conf['data'] so output.py utilities work."""
+    if "variables" in conf["data"]:
+        return
+    src = conf["data"]["source"]["ERA5"]
+    v = src["variables"]
+    prog = v.get("prognostic") or {}
+    diag = v.get("diagnostic") or {}
+    conf["data"]["variables"] = prog.get("vars_3D", [])
+    conf["data"]["surface_variables"] = prog.get("vars_2D", [])
+    # diagnostic_variables is the list of names shown in xarray output
+    conf["data"]["diagnostic_variables"] = diag.get("vars_2D", []) if diag else []
+    # level_ids: actual pressure/model-level values for xarray coordinate
+    conf["data"]["level_ids"] = src.get("levels", list(range(conf["model"]["levels"])))
+    # scaler_type needed by save_netcdf_increment
+    if "scaler_type" not in conf["data"]:
+        conf["data"]["scaler_type"] = "std_new"
+
+
+def _inject_tracer_inds(conf):
+    """Compute tracer_inds for TracerFixer from v2 variable layout (same as train_gen2.py)."""
+    tracer_conf = conf.get("model", {}).get("post_conf", {}).get("tracer_fixer", {})
+    if not tracer_conf.get("activate", False) or "tracer_inds" in tracer_conf:
+        return
+    src = conf["data"]["source"]["ERA5"]
+    n_levels = len(src.get("levels", []))
+    v = src["variables"]
+    vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
+    vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
+    diag_2d = (v.get("diagnostic") or {}).get("vars_2D", [])
+    output_vars = [vn for vn in vars_3d for _ in range(n_levels)] + vars_2d + diag_2d
+    tracer_names = tracer_conf.get("tracer_name", [])
+    tracer_thres_cfg = tracer_conf.get("tracer_thres", [])
+    thres_map = dict(zip(tracer_names, tracer_thres_cfg))
+    tracer_inds, tracer_thres = [], []
+    for i, vn in enumerate(output_vars):
+        if vn in thres_map:
+            tracer_inds.append(i)
+            tracer_thres.append(thres_map[vn])
+    conf["model"]["post_conf"]["tracer_fixer"]["tracer_inds"] = tracer_inds
+    conf["model"]["post_conf"]["tracer_fixer"]["tracer_thres"] = tracer_thres
+    conf["model"]["post_conf"]["tracer_fixer"]["denorm"] = False
+
+
+def _build_output_denorm(conf, device, dtype=torch.float32):
+    """Build (mean, std) tensors of shape (1, C_out, 1, 1, 1) for inverse-normalizing y_pred.
+
+    Channel order follows LocalDataset target insertion order:
+        prognostic/3d (each var × n_levels), prognostic/2d, diagnostic/2d
+    """
+    data_conf = conf["data"]
+    src = data_conf["source"]["ERA5"]
+    levels = src["levels"]
+    level_coord = src["level_coord"]
+    n_levels = len(levels)
+    v = src["variables"]
+    prog = v.get("prognostic") or {}
+    diag = v.get("diagnostic") or {}
+
+    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", {})
+    mean_ds = xr.open_dataset(norm_args["mean_path"]).load()
+    std_ds = xr.open_dataset(norm_args["std_path"]).load()
+
+    def _stats(varname, is_3d):
+        if varname not in mean_ds:
+            n = n_levels if is_3d else 1
+            return torch.zeros(n, dtype=dtype), torch.ones(n, dtype=dtype)
+        if is_3d:
+            m = torch.tensor(mean_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
+            s = torch.tensor(std_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
+        else:
+            m = torch.tensor([float(mean_ds[varname].values)], dtype=dtype)
+            s = torch.tensor([float(std_ds[varname].values)], dtype=dtype)
+        return m, s
+
+    means, stds = [], []
+    for vname in prog.get("vars_3D", []):
+        m, s = _stats(vname, True)
+        means.append(m)
+        stds.append(s)
+    for vname in prog.get("vars_2D", []):
+        m, s = _stats(vname, False)
+        means.append(m)
+        stds.append(s)
+    for vname in diag.get("vars_3D", []):
+        m, s = _stats(vname, True)
+        means.append(m)
+        stds.append(s)
+    for vname in diag.get("vars_2D", []):
+        m, s = _stats(vname, False)
+        means.append(m)
+        stds.append(s)
+
+    mean_ds.close()
+    std_ds.close()
+
+    mean_all = torch.cat(means).view(1, -1, 1, 1, 1).to(device)
+    std_all = torch.cat(stds).view(1, -1, 1, 1, 1).to(device)
+    return mean_all, std_all
+
+
+def _sample_to_batch(sample):
+    """Wrap a single LocalDataset sample (no batch dim) into preblock-compatible dict."""
+    return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()}, "metadata": sample["metadata"]}}
 
 
 # ---------------------------------------------------------------------------
@@ -114,9 +223,11 @@ def predict(rank, world_size, conf, p):
     )
     forecast_steps = conf["predict"].get("forecast_steps", conf["predict"].get("days", 1) * (24 // lead_time_periods))
 
-    # ---- Preblocks / Postblocks ----
+    # ---- Preblocks ----
     preblocks = build_preblocks(conf.get("preblocks", {}))
-    postblocks = build_postblocks(conf.get("postblocks", {}))
+
+    # ---- Inverse normalization ----
+    denorm_mean, denorm_std = _build_output_denorm(conf, device)
 
     # ---- Lat/lon for output ----
     latlons = xr.open_dataset(conf["loss"]["latitude_weights"]).load()
@@ -161,10 +272,9 @@ def predict(rank, world_size, conf, p):
 
             # Step 0: load full initial state
             sample_full = dataset[(t0, 0)]
-            batch_full = _sample_to_batch(sample_full, dataset.curr_source_name)
-            out = apply_preblocks(preblocks, batch_full)
-            x = out["input"].to(device).float()  # (1, C_in, 1, H, W)
-            meta = out["metadata"]
+            batch_full = _sample_to_batch(sample_full)
+            x, _ = apply_preblocks(preblocks, batch_full)
+            x = x.to(device).float()  # (1, C_in, 1, H, W)
 
             x_init = None
             results = []
@@ -181,14 +291,8 @@ def predict(rank, world_size, conf, p):
                 if flag_energy_conserve:
                     y_pred = opt_energy({"y_pred": y_pred, "x": x})["y_pred"]
 
-                # Inverse-normalize → physical space via postblocks
-                batch_dict = apply_postblocks(postblocks, {"prediction": y_pred, "metadata": meta})
-                pred = batch_dict["prediction"]
-                if isinstance(pred, torch.Tensor):
-                    y_pred_phys = pred.squeeze(2)
-                else:
-                    channel_map = meta["target"]["_channel_map"]
-                    y_pred_phys = torch.cat([pred[k.split("/")[0]][k].flatten(1, 2) for k in channel_map], dim=1)
+                # Inverse-normalize → physical space; squeeze T dim for output.py
+                y_pred_phys = (y_pred * denorm_std + denorm_mean).squeeze(2)  # (1, C_out, H, W)
 
                 result = p.apply_async(
                     _save_worker,
@@ -205,12 +309,13 @@ def predict(rank, world_size, conf, p):
                 )
                 results.append(result)
 
-                # Update x for next step (y_pred is still in normalized space)
+                # Update x for next step
                 if step < forecast_steps:
                     t_next = t0 + step * dt
                     sample_frc = dataset[(t_next, 1)]  # loads only dynamic_forcing
-                    batch_frc = _sample_to_batch(sample_frc, dataset.curr_source_name)
-                    x_frc = apply_preblocks(preblocks, batch_frc)["input"].to(device).float()
+                    batch_frc = _sample_to_batch(sample_frc)
+                    x_frc, _ = apply_preblocks(preblocks, batch_frc)
+                    x_frc = x_frc.to(device).float()  # (1, n_dyn, 1, H, W)
                     x = update_x(x, x_frc, y_pred.detach(), slices)
 
             for result in results:

@@ -40,7 +40,6 @@ from tqdm import tqdm
 from credit.datasets.local import LocalDataset
 from credit.datasets.channel_layout import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
-from credit.postblock import build_postblocks, apply_postblocks
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info, setup, distributed_model_wrapper
@@ -48,13 +47,108 @@ from credit.models.checkpoint import load_model_state, load_state_dict_error_han
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.nwp import build_GFS_init
-from credit.applications.rollout_utils_gen2 import _inject_flat_schema, _inject_tracer_inds, _sample_to_batch
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+
+
+# ---------------------------------------------------------------------------
+# Config helpers (shared with rollout_to_netcdf_gen2)
+# ---------------------------------------------------------------------------
+
+
+def _inject_flat_schema(conf):
+    """Inject v1-style flat keys into conf['data'] so output.py utilities work."""
+    if "variables" in conf["data"]:
+        return
+    src = conf["data"]["source"]["ERA5"]
+    v = src["variables"]
+    prog = v.get("prognostic") or {}
+    diag = v.get("diagnostic") or {}
+    conf["data"]["variables"] = prog.get("vars_3D", [])
+    conf["data"]["surface_variables"] = prog.get("vars_2D", [])
+    conf["data"]["diagnostic_variables"] = diag.get("vars_2D", []) if diag else []
+    conf["data"]["level_ids"] = src.get("levels", list(range(conf["model"]["levels"])))
+    if "scaler_type" not in conf["data"]:
+        conf["data"]["scaler_type"] = "std_new"
+
+
+def _inject_tracer_inds(conf):
+    """Compute tracer_inds for TracerFixer from v2 variable layout."""
+    tracer_conf = conf.get("model", {}).get("post_conf", {}).get("tracer_fixer", {})
+    if not tracer_conf.get("activate", False) or "tracer_inds" in tracer_conf:
+        return
+    src = conf["data"]["source"]["ERA5"]
+    n_levels = len(src.get("levels", []))
+    v = src["variables"]
+    vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
+    vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
+    diag_2d = (v.get("diagnostic") or {}).get("vars_2D", [])
+    output_vars = [vn for vn in vars_3d for _ in range(n_levels)] + vars_2d + diag_2d
+    thres_map = dict(zip(tracer_conf.get("tracer_name", []), tracer_conf.get("tracer_thres", [])))
+    inds, thres = [], []
+    for i, vn in enumerate(output_vars):
+        if vn in thres_map:
+            inds.append(i)
+            thres.append(thres_map[vn])
+    conf["model"]["post_conf"]["tracer_fixer"]["tracer_inds"] = inds
+    conf["model"]["post_conf"]["tracer_fixer"]["tracer_thres"] = thres
+    conf["model"]["post_conf"]["tracer_fixer"]["denorm"] = False
+
+
+def _build_output_denorm(conf, device, dtype=torch.float32):
+    """Return (mean, std) of shape (1, C_out, 1, 1, 1) for inverse-normalizing y_pred."""
+    data_conf = conf["data"]
+    src = data_conf["source"]["ERA5"]
+    levels = src["levels"]
+    level_coord = src["level_coord"]
+    n_levels = len(levels)
+    v = src["variables"]
+    prog = v.get("prognostic") or {}
+    diag = v.get("diagnostic") or {}
+
+    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", data_conf)
+    mean_ds = xr.open_dataset(norm_args.get("mean_path", data_conf.get("mean_path"))).load()
+    std_ds = xr.open_dataset(norm_args.get("std_path", data_conf.get("std_path"))).load()
+
+    def _stats(varname, is_3d):
+        if varname not in mean_ds:
+            n = n_levels if is_3d else 1
+            return torch.zeros(n, dtype=dtype), torch.ones(n, dtype=dtype)
+        if is_3d:
+            m = torch.tensor(mean_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
+            s = torch.tensor(std_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
+        else:
+            m = torch.tensor([float(mean_ds[varname].values)], dtype=dtype)
+            s = torch.tensor([float(std_ds[varname].values)], dtype=dtype)
+        return m, s
+
+    means, stds = [], []
+    for groups in [("vars_3D", True), ("vars_2D", False)]:
+        for vname in prog.get(groups[0], []):
+            m, s = _stats(vname, groups[1])
+            means.append(m)
+            stds.append(s)
+    for groups in [("vars_3D", True), ("vars_2D", False)]:
+        for vname in diag.get(groups[0], []):
+            m, s = _stats(vname, groups[1])
+            means.append(m)
+            stds.append(s)
+
+    mean_ds.close()
+    std_ds.close()
+    return (
+        torch.cat(means).view(1, -1, 1, 1, 1).to(device),
+        torch.cat(stds).view(1, -1, 1, 1, 1).to(device),
+    )
+
+
+def _sample_to_batch(sample):
+    """Add batch dim and wrap LocalDataset sample for preblock input."""
+    return {"era5": {"input": {k: v.unsqueeze(0) for k, v in sample["input"].items()}, "metadata": sample["metadata"]}}
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +266,11 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     slices, _ = build_channel_layout(conf)
     n_prog = slices["prognostic"].stop - slices["prognostic"].start
 
-    # ---- Preblocks / Postblocks ----
+    # ---- Preblocks ----
     preblocks = build_preblocks(conf.get("preblocks", {}))
-    postblocks = build_postblocks(conf.get("postblocks", {}))
+
+    # ---- Inverse normalizer ----
+    denorm_mean, denorm_std = _build_output_denorm(conf, device)
 
     # ---- Lat/lon for output ----
     latlons = xr.open_dataset(conf["loss"]["latitude_weights"]).load()
@@ -233,10 +329,8 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
 
     # ---- Load full initial state ----
     sample_full = dataset[(init_time, 0)]
-    batch_full = _sample_to_batch(sample_full, dataset.curr_source_name)
-    out = apply_preblocks(preblocks, batch_full, device=device)
-    x = out["input"].float()  # (1, C_in, 1, H, W)
-    meta = out["metadata"]
+    batch_full = _sample_to_batch(sample_full)
+    x = apply_preblocks(preblocks, batch_full, device=device)["input"].float()  # (1, C_in, 1, H, W)
 
     results = []
     x_init = None
@@ -254,15 +348,8 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
             if flag_energy:
                 y_pred = opt_energy({"y_pred": y_pred, "x": x})["y_pred"]
 
-            # Inverse-normalize → physical space via postblocks
-            batch_dict = apply_postblocks(postblocks, {"prediction": y_pred, "metadata": meta})
-            pred = batch_dict["prediction"]
-            if isinstance(pred, torch.Tensor):
-                y_pred_phys = pred.squeeze(2)
-            else:
-                channel_map = meta["target"]["_channel_map"]
-                y_pred_phys = torch.cat([pred[k.split("/")[0]][k].flatten(1, 2) for k in channel_map], dim=1)
-            y_phys = y_pred_phys.cpu().numpy()  # (1, C, H, W)
+            # Inverse-normalize → physical space; squeeze T dim for output.py
+            y_phys = (y_pred * denorm_std + denorm_mean).squeeze(2).cpu().numpy()  # (1, C, H, W)
 
             # Async save via SharedMemory
             shm = SharedMemory(create=True, size=y_phys.nbytes)
@@ -278,7 +365,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
             if step < n_steps:
                 t_next = init_time + step * dt
                 sample_frc = dataset[(t_next, 1)]  # only dynamic_forcing
-                batch_frc = _sample_to_batch(sample_frc, dataset.curr_source_name)
+                batch_frc = _sample_to_batch(sample_frc)
                 x_frc = apply_preblocks(preblocks, batch_frc, device=device)["input"].float()
                 y_prog = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
                 x = update_x(x, x_frc, y_prog, slices)
