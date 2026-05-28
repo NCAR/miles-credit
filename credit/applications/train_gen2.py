@@ -22,7 +22,7 @@ from argparse import ArgumentParser
 
 import torch
 
-from credit.distributed import distributed_model_wrapper, setup, get_rank_info
+from credit.distributed import distributed_model_wrapper, distributed_model_wrapper_v2, setup, get_rank_info
 from credit.seed import seed_everything
 from credit.losses import load_loss
 from credit.trainers import load_trainer
@@ -80,7 +80,7 @@ def main_cli():
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     assert "source" in conf["data"], (
-        "train_gen2.py requires the Gen2 nested data schema (conf['data']['source']). "
+        "train.py requires the Gen2 nested data schema (conf['data']['source']). "
         "For the legacy flat schema, use applications/train.py."
     )
 
@@ -99,13 +99,22 @@ def main_cli():
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    _trainer_conf = conf["trainer"]
+    _has_v2_parallelism = "parallelism" in _trainer_conf
+
+    # V2 parallelism configs use the parallelism: block; rank info is always set by torchrun env vars.
+    # V1 legacy configs use trainer.mode to determine rank detection.
+    _rank_mode = "ddp" if _has_v2_parallelism else _trainer_conf.get("mode", "none")
+    local_rank, world_rank, world_size = get_rank_info(_rank_mode)
     rank = world_rank
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
-    if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
-        setup(rank, world_size, conf["trainer"]["mode"], backend)
+    if _has_v2_parallelism:
+        if world_size > 1:
+            setup(rank, world_size, "ddp", backend)
+    elif _trainer_conf.get("mode", "none") in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
+        setup(rank, world_size, _trainer_conf["mode"], backend)
 
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
@@ -139,7 +148,9 @@ def main_cli():
     if conf["trainer"].get("compile", False):
         m = torch.compile(m)
 
-    if conf["trainer"]["mode"] in ["ddp", "fsdp", "domain_parallel", "fsdp+domain_parallel"]:
+    if _has_v2_parallelism:
+        model = distributed_model_wrapper_v2(conf, m, device)
+    elif _trainer_conf.get("mode", "none") in ["ddp", "fsdp", "domain_parallel", "fsdp+domain_parallel"]:
         model = distributed_model_wrapper(conf, m, device)
     else:
         model = m

@@ -224,6 +224,13 @@ class TrainerERA5Gen2(BaseTrainer):
                 if full_data_dict["y_pred"].dim() == 5:
                     full_data_dict["y_pred"] = full_data_dict["y_pred"].flatten(1, 2)
 
+                # domain parallel: shard y to match y_pred's spatial shard
+                if "y" in full_data_dict and full_data_dict["y"] is not None:
+                    _y = full_data_dict["y"]
+                    if _y.dim() == 5:
+                        _y = _y.flatten(1, 2)
+                    full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
+
                 full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
 
                 if t in self.backprop_on_timestep:
@@ -395,6 +402,13 @@ class TrainerERA5Gen2(BaseTrainer):
                         )
                     if full_data_dict["y_pred"].dim() == 5:
                         full_data_dict["y_pred"] = full_data_dict["y_pred"].flatten(1, 2)
+
+                    # domain parallel: shard y to match y_pred's spatial shard
+                    if "y" in full_data_dict and full_data_dict["y"] is not None:
+                        _y = full_data_dict["y"]
+                        if _y.dim() == 5:
+                            _y = _y.flatten(1, 2)
+                        full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
 
                     full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
 
