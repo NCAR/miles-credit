@@ -61,9 +61,6 @@ data:
   static_first: True
   scaler_type: 'std_new'
 
-  mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc'
-
 
 # ---- USER SETTINGS: validation data ---- #
 validation_data:
@@ -104,9 +101,6 @@ validation_data:
   skip_periods: null
   static_first: True
   scaler_type: 'std_new'
-
-  mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc'
 
 
 # ---- USER SETTINGS: training hyperparameters ---- #
