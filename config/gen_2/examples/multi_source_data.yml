@@ -46,21 +46,19 @@ data:
                 static: null
 
 preblocks:
-    per_step:
-        log_transform:
-            type: "log_transform"
-            args:
-                variables:
-                    - 'ERA5_LowerAir/prognostic/3d/Q'
-                    - 'ERA5_LowerAir/prognostic/2d/SP'
-                    - 'ERA5_LowerAir/dynamic_forcing/2d/tsi'
-                data_types:
-                    - 'input'
-                    - 'target'
-        concatenate:
-            type: "concat"
+    log_transform:
+      type: "log_transform"
+      args:
+          variables:
+                - 'ERA5_LowerAir/prognostic/3d/Q'
+                - 'ERA5_LowerAir/prognostic/2d/SP'
+                - 'ERA5_LowerAir/dynamic_forcing/2d/tsi'
+          data_types:
+            - 'input'
+            - 'target'
+    concatenate:
+      type: "concat"
 
 postblocks:
-    per_step:
-        reconstruct:
-            type: "reconstruct"
+  reconstruct:
+    type: "reconstruct"
