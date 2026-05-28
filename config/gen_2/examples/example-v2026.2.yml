@@ -62,7 +62,7 @@ data:
   scaler_type: 'std_new'
 
   mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc'
 
 
 # ---- USER SETTINGS: validation data ---- #
@@ -106,7 +106,7 @@ validation_data:
   scaler_type: 'std_new'
 
   mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
-  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_6h_1979_2019_conserve_1deg.nc'
 
 
 # ---- USER SETTINGS: training hyperparameters ---- #
@@ -165,11 +165,25 @@ trainer:
 
 # ---- Preblocks / Postblocks ---- #
 # Preblocks run before the model; postblocks run after each forward pass.
-# ConcatToTensor (concat) is required — it assembles the nested variable dict
-# into the flat (B, C, H, W) tensor the model expects and builds the channel map
-# used by Reconstruct. Reconstruct is required for forecast_len > 1 rollout.
+# scaler (BridgeScaler) normalizes inputs/targets before the model and
+# denormalizes outputs after. concat assembles the nested variable dict into
+# the flat (B, C, H, W) tensor the model expects. reconstruct is required
+# for forecast_len > 1 rollout.
 preblocks:
   per_step:
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
+                    'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
+                    'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
+                    'ERA5/prognostic/2d/VAR_10V', 'ERA5/dynamic_forcing/2d/toa_incident_solar_radiation',
+                    'ERA5/diagnostic/2d/total_precipitation', 'ERA5/diagnostic/2d/evaporation',
+                    'ERA5/diagnostic/2d/top_net_thermal_radiation', 'ERA5/diagnostic/2d/top_net_solar_radiation',
+                    'ERA5/diagnostic/2d/surface_latent_heat_flux', 'ERA5/diagnostic/2d/surface_net_solar_radiation',
+                    'ERA5/diagnostic/2d/surface_net_thermal_radiation', 'ERA5/diagnostic/2d/surface_sensible_heat_flux']
+        method: transform
     concat:
       type: concat
 
@@ -177,6 +191,15 @@ postblocks:
   per_step:
     reconstruct:
       type: reconstruct
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_post.json'
+        variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
+                    'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
+                    'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
+                    'ERA5/prognostic/2d/VAR_10V']
+        method: inverse_transform
 
 
 # ---- Architecture (pre-filled for 1-degree ERA5, 181×360) ---- #
