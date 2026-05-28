@@ -86,14 +86,15 @@ def test_convert_writes_postblocks(tmp_path, mean_std_nc):
         result = yaml.safe_load(f)
 
     pb = result.get("postblocks", {})
-    keys = list(pb.keys())
+    per_step = pb.get("per_step", {})
+    keys = list(per_step.keys())
     assert "reconstruct" in keys
     assert "scaler" in keys
     assert keys.index("reconstruct") < keys.index("scaler"), "reconstruct must come before scaler"
-    assert pb["reconstruct"]["type"] == "reconstruct"
-    assert pb["scaler"]["type"] == "bridgescaler_transform"
-    assert pb["scaler"]["args"]["method"] == "inverse_transform"
-    assert pb["scaler"]["args"]["key"] == "prediction"
+    assert per_step["reconstruct"]["type"] == "reconstruct"
+    assert per_step["scaler"]["type"] == "bridgescaler_transform"
+    assert per_step["scaler"]["args"]["method"] == "inverse_transform"
+    assert "key" not in per_step["scaler"]["args"], "key should not be set; default y_processed is correct"
 
     # The generated JSON must load into working postblocks
     postblocks = build_postblocks(pb)
@@ -116,16 +117,17 @@ def test_convert_postblocks_inverse_transform(tmp_path, mean_std_nc):
     _, post_vars = _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_json, post_json)
 
     postblocks_cfg = {
-        "reconstruct": {"type": "reconstruct"},
-        "scaler": {
-            "type": "bridgescaler_transform",
-            "args": {
-                "scaler_path": post_json,
-                "variables": post_vars,
-                "method": "inverse_transform",
-                "key": "prediction",
+        "per_step": {
+            "reconstruct": {"type": "reconstruct"},
+            "scaler": {
+                "type": "bridgescaler_transform",
+                "args": {
+                    "scaler_path": post_json,
+                    "variables": post_vars,
+                    "method": "inverse_transform",
+                },
             },
-        },
+        }
     }
     postblocks = build_postblocks(postblocks_cfg)
 
@@ -142,10 +144,10 @@ def test_convert_postblocks_inverse_transform(tmp_path, mean_std_nc):
     }
     meta = {"target": {"_channel_map": channel_map}}
 
-    batch_dict = apply_postblocks(postblocks, {"prediction": y_pred_norm, "metadata": meta})
-    pred = batch_dict["prediction"]
+    batch_dict = apply_postblocks(postblocks, {"y_pred": y_pred_norm, "metadata": meta})
+    pred = batch_dict["y_processed"]
 
-    assert isinstance(pred, dict), "Reconstruct should convert prediction to nested dict"
+    assert isinstance(pred, dict), "Reconstruct should split y_pred into nested y_processed dict"
     assert "ERA5" in pred
     T_out = pred["ERA5"]["ERA5/prognostic/3d/T"]
     SP_out = pred["ERA5"]["ERA5/prognostic/2d/SP"]

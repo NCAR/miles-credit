@@ -339,7 +339,8 @@ def _convert(args: argparse.Namespace) -> None:
             pre_keys, post_prog_vars = _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_json, post_json)
 
             if pre_keys is not None:
-                conf.setdefault("preblocks", {})["scaler"] = {
+                per_step_pre = conf.setdefault("preblocks", {}).setdefault("per_step", {})
+                per_step_pre["scaler"] = {
                     "type": "bridgescaler_transform",
                     "args": {
                         "scaler_path": pre_json,
@@ -347,28 +348,29 @@ def _convert(args: argparse.Namespace) -> None:
                         "method": "transform",
                     },
                 }
-                conf["preblocks"]["concat"] = {"type": "concat", "args": {}}
-                pb = conf.setdefault("postblocks", {})
-                pb["reconstruct"] = {"type": "reconstruct"}
-                pb["scaler"] = {
+                per_step_pre["concat"] = {"type": "concat"}
+                per_step_post = conf.setdefault("postblocks", {}).setdefault("per_step", {})
+                per_step_post["reconstruct"] = {"type": "reconstruct"}
+                per_step_post["scaler"] = {
                     "type": "bridgescaler_transform",
                     "args": {
                         "scaler_path": post_json,
                         "variables": post_prog_vars,
                         "method": "inverse_transform",
-                        "key": "prediction",
                     },
                 }
-                changes.append(f"preblocks.scaler: bridgescaler_transform → {pre_json}")
-                changes.append(f"postblocks.scaler: bridgescaler_transform (inverse) → {post_json}")
+                changes.append(f"preblocks.per_step.scaler: bridgescaler_transform → {pre_json}")
+                changes.append(f"postblocks.per_step.scaler: bridgescaler_transform (inverse) → {post_json}")
             else:
                 # Fallback if bridgescaler/torch not available
-                conf.setdefault("preblocks", {})["norm"] = {
+                per_step_pre = conf.setdefault("preblocks", {}).setdefault("per_step", {})
+                per_step_pre["norm"] = {
                     "type": "era5_normalizer",
                     "args": {"mean_path": mean_path, "std_path": std_path},
                 }
+                per_step_pre["concat"] = {"type": "concat"}
                 changes.append(
-                    "preblocks.norm: era5_normalizer (bridgescaler unavailable — install torch+bridgescaler to convert)"
+                    "preblocks.per_step.norm: era5_normalizer (bridgescaler unavailable — install torch+bridgescaler to convert)"
                 )
 
         changes.append(
