@@ -90,19 +90,19 @@ def minimal_config() -> dict[str, Any]:
                     "prognostic": {
                         "vars_3D": ["T", "U"],
                         "vars_2D": ["SP"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "dynamic_forcing": {
                         "vars_2D": ["tsi"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "static": {
                         "vars_2D": ["LSM"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "diagnostic": {
                         "vars_2D": ["TP"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                 },
             }
