@@ -242,7 +242,7 @@ def test_register_field_success(minimal_config: Dict[str, Any], patch_base_datas
     assert ds.file_dict["prognostic"] is not None, "Expected file_dict['prognostic'] to be set, got None"
 
 
-def test_register_field_invalid_type(minimal_config: Dict[str, Any]) -> None:
+def test_register_field_invalid_type(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """Test that an invalid field type raises KeyError."""
     config = minimal_config.copy()
     config["source"]["TestSource_Base"]["variables"]["invalid_field"] = {"vars_2D": ["x"]}
@@ -250,7 +250,7 @@ def test_register_field_invalid_type(minimal_config: Dict[str, Any]) -> None:
         BaseDataset(config)
 
 
-def test_register_field_null_config(minimal_config: Dict[str, Any]) -> None:
+def test_register_field_null_config(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """Test that a null field config is handled correctly."""
     config = minimal_config.copy()
     config["source"]["TestSource_Base"]["variables"]["prognostic"] = None

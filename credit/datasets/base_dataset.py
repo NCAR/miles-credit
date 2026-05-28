@@ -656,6 +656,7 @@ class BaseDataset(AbstractBaseDataset):
             field_config (dict[str, Any]): Validated field-type config dict.
 
         Raises:
+            FileNotFoundError: If ``self.mode == "local"`` and the glob pattern matches no files.
             ValueError: If ``self.mode`` is not a recognised mode.
 
         Returns:

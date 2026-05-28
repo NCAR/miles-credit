@@ -28,8 +28,8 @@ seed: 1000
 # Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
 data:
   source:
-    ERA5:
-      dataset_type: "era5"
+    ERA5_train:
+      dataset_type: "local"
       level_coord: "level"
       levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
       variables:
@@ -76,7 +76,8 @@ data:
 # ---- USER SETTINGS: validation data ---- #
 data_valid:
   source:
-    ERA5:
+    ERA5_valid:
+      dataset_type: "local"
       level_coord: "level"
       levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
       variables:
@@ -114,6 +115,18 @@ data_valid:
 
   mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/mean_6h_1979_2019_conserve_1deg.nc'
   std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/mean_std/std_residual_6h_1979_2019_conserve_1deg.nc'
+
+
+# ---- USER SETTINGS: preblocks/postblocks before/after passed to model ---- #
+
+preblocks:
+  vars_concat:
+    type: "concat"
+
+postblocks:
+  reconstruct:
+    type: "reconstruct"
+
 
 
 # ---- USER SETTINGS: training hyperparameters ---- #
@@ -165,9 +178,9 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 4
-  valid_thread_workers: 4
-  prefetch_factor: 4
+  thread_workers: 8
+  valid_thread_workers: 8
+  prefetch_factor: 2
 
 
 # ---- Architecture (pre-filled for 1-degree ERA5, 181×360) ---- #

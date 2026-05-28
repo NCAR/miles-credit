@@ -4,10 +4,6 @@ import torch.nn as nn
 class BasePostblock(nn.Module):
     """Base class for all postblocks.
 
-    Subclasses that need to run at every rollout step (e.g. conservation fixers)
-    should set ``per_step = True``.  All others leave it at the default ``False``
-    and will be called once after the full rollout, on the reconstructed dict.
-
     Forward signature for all postblocks::
 
         forward(batch: dict) -> dict
@@ -19,8 +15,6 @@ class BasePostblock(nn.Module):
             "metadata":   {...},
         }
     """
-
-    per_step: bool = True
 
     def forward(self, batch: dict) -> dict:
         pass
