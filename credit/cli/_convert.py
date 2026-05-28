@@ -209,7 +209,7 @@ def _convert(args: argparse.Namespace) -> None:
     changes = []
 
     # trainer.type
-    V1_TYPES = {"era5", "standard", "universal"}
+    V1_TYPES = {"era5", "era5-gen1", "standard", "universal"}
     if trainer_type in V1_TYPES:
         conf["trainer"]["type"] = "era5-gen2"
         changes.append(f"trainer.type: '{trainer_type}' → 'era5-gen2'")
