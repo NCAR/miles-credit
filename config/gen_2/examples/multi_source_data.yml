@@ -21,7 +21,6 @@ data:
                 dynamic_forcing: null
 
                 static:
-#                    vars_2D: ['Z_GDS4_SFC','LSM']
                     vars_2D: ['LSM']
                     path: '/glade/derecho/scratch/cbecker/test_CREDIT_data/LSM_static_variables_ERA5_zhght_ONEDEG.nc'
                     # single file — filename_time_format not needed
@@ -52,7 +51,7 @@ data:
                 diagnostic: null
                 dynamic_forcing:
                     vars_2D: ['tisr']
-            num_integration_steps: 2160 # deafult is 360 for a single hour
+            num_integration_steps: 2160 # default is 360 for a single hour
             #latlon_grid_path: "/glade/derecho/scratch/kevinyang/datasets/goes/goes19_abi_conus_lat_lon.nc"
             latlon_grid_path: "/glade/derecho/scratch/cbecker/test_CREDIT_data/era5_local_testing_data_onedeg_2021.nc"
 
