@@ -65,12 +65,16 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
         sc.n_ = 1
         return sc
 
-    # --- preblock dict: {source_name: {"input": {full_key: scaler}, "target": {full_key: scaler}}}
-    pre_input = {}
-    pre_target = {}
+    # --- preblock dict: {"input": {source: {full_key: scaler}},
+    #                     "target": {source: {full_key: scaler}}}
+    # Must match the raw batch dict produced by the dataset. The dataset uses
+    # full-path strings as leaf keys: e.g. "ERA5/prognostic/3d/u_component_of_wind".
+    pre_input = {}  # all field types (prognostic, dynamic_forcing, static)
+    pre_target = {}  # prognostic only (model prediction targets)
     pre_keys = []
 
-    # --- postblock dict: {source_name: {field_type: {dim: {varname: scaler}}}}
+    # --- postblock dict: {source: {full_key: scaler}}
+    # Must match y_processed structure written by Reconstruct.
     post_dict = {}
 
     for (field_type, dim), varnames in var_groups.items():
@@ -79,21 +83,18 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
                 continue
             n_levels = int(ds_mean[varname].size)
             sc = _make_scaler(varname, n_levels)
-            # Use source_name exactly as the dataset uses it as key prefix in variable keys.
             full_key = f"{source_name}/{field_type}/{dim}/{varname}"
             pre_input[full_key] = sc
-            pre_target[full_key] = sc
             pre_keys.append(full_key)
-            # postblock only covers prognostic vars (model outputs).
-            # Keys must match Reconstruct output: {source: {full_key: tensor}}
-            if field_type == "prognostic":
+            if field_type in ("prognostic", "diagnostic"):
+                pre_target[full_key] = sc
                 post_dict.setdefault(source_name, {})[full_key] = sc
 
     ds_mean.close()
     ds_std.close()
 
-    pre_scaler_dict = {"input": {source_name: pre_input}, "target": {source_name: pre_target}}
-    save_scaler_dict(pre_scaler_dict, pre_out)
+    pre_dict = {"input": {source_name: pre_input}, "target": {source_name: pre_target}}
+    save_scaler_dict(pre_dict, pre_out)
     save_scaler_dict(post_dict, post_out)
 
     post_prog_vars = [
@@ -324,6 +325,8 @@ def _convert(args: argparse.Namespace) -> None:
                 var_groups[("dynamic_forcing", "2d")] = dyn_vars
             if static_vars:
                 var_groups[("static", "2d")] = static_vars
+            if diag_vars:
+                var_groups[("diagnostic", "2d")] = diag_vars
 
             base_out, _ = os.path.splitext(
                 getattr(args, "output", None)
