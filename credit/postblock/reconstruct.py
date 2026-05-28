@@ -39,7 +39,7 @@ class Reconstruct(BasePostblock):
     """
 
     def forward(self, batch_dict: dict) -> dict:
-        y_pred = batch_dict["y_pred"]
+        y_pred = batch_dict["prediction"]
         output_map = batch_dict["metadata"]["target"]["_channel_map"]
 
         # Flatten time dim if y_pred arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
