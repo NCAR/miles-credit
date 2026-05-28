@@ -1,169 +1,404 @@
-"""
-train_gen2.py
--------------
-Gen2 training entry point for the nested ERA5 data schema.
-
-This script bypasses ``credit_main_parser`` entirely. It reads the config
-directly and assumes the new ``conf["data"]["source"]`` structure produced by
-``MultiSourceDataset`` / ``BaseDataset``.
-
-For the legacy flat schema (v1), use ``applications/train.py``.
-"""
-
-import os
-import sys
-import yaml
-import shutil
+import gc
 import logging
-import warnings
+from collections import defaultdict
 
-from pathlib import Path
-from argparse import ArgumentParser
-
+import numpy as np
 import torch
+import torch.distributed as dist
+import tqdm
 
-from credit.distributed import distributed_model_wrapper, setup, get_rank_info
-from credit.seed import seed_everything
-from credit.losses import load_loss
-from credit.trainers import load_trainer
-from credit.pbs import launch_script, launch_script_mpi
-from credit.models import load_model
-from credit.metrics import LatWeightedMetrics
-from credit.trainers.utils import (
-    inject_flat_var_keys,
-    load_dataset,
-    load_dataloader,
-    load_model_states_and_optimizer,
-)
+import optuna
 
-warnings.filterwarnings("ignore")
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.preblock import build_preblocks, apply_preblocks
+from credit.datasets.channel_layout import build_channel_layout, update_x
+from credit.scheduler import update_on_batch
+from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.utils import accum_log, cycle
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+logger = logging.getLogger(__name__)
 
 
-def main_cli():
-    description = (
-        "Train a Gen2 AI weather model using the nested ERA5 data schema "
-        "(conf['data']['source']). For the legacy flat schema, use train.py."
-    )
-    parser = ArgumentParser(description=description)
-    parser.add_argument(
-        "-c",
-        "--config",
-        dest="model_config",
-        type=str,
-        required=True,
-        help="Path to the model config YAML (Gen2 nested schema).",
-    )
-    parser.add_argument("-l", dest="launch", type=int, default=0, help="Submit workers to PBS.")
-    parser.add_argument(
-        "--backend", type=str, default="nccl", choices=["nccl", "gloo", "mpi"], help="Backend for distributed training."
-    )
-    args = parser.parse_args()
-    config = args.model_config
-    launch = int(args.launch)
-    backend = args.backend
+class TrainerERA5Gen2(BaseTrainer):
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
+        """
+        Gen 2 trainer for the ERA5 nested data schema.
 
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
-    ch = logging.StreamHandler()
-    gettrace = getattr(sys, "gettrace", None)
-    ch.setLevel(logging.DEBUG if gettrace and gettrace() else logging.INFO)
-    ch.setFormatter(formatter)
-    root.addHandler(ch)
+        Key differences from TrainerERA5Gen1:
+          - Uses new nested data schema: conf["data"]["source"]["ERA5"]["variables"]
+          - Applies preblocks to assemble batch tensors before the model forward pass
+            (no concat_and_reshape / reshape_only calls in the training loop)
+          - forecast_len semantics: 1 = 1 step (Gen 1 used 0 = 1 step)
+          - backprop_on_timestep: range(1, forecast_len+1) instead of range(0, forecast_len+2)
+          - Validation config read from conf["validation_data"] if present, else conf["data"]
 
-    with open(config) as cf:
-        conf = yaml.load(cf, Loader=yaml.FullLoader)
+        Args:
+            model: The (possibly DDP/FSDP-wrapped) model.
+            rank: Global rank of this process.
+            conf: Full configuration dict.
+        """
+        super().__init__(model, rank, conf)
+        logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
 
-    assert "source" in conf["data"], (
-        "train_gen2.py requires the Gen2 nested data schema (conf['data']['source']). "
-        "For the legacy flat schema, use applications/train.py."
-    )
+        # ---- Preblock: config-driven transforms then auto-concat to tensors ----
+        self.preblocks = build_preblocks(conf.get("preblocks", {}))
 
-    save_loc = os.path.expandvars(conf["save_loc"])
-    os.makedirs(save_loc, exist_ok=True)
-    if not os.path.exists(os.path.join(save_loc, "model.yml")):
-        shutil.copy(config, os.path.join(save_loc, "model.yml"))
+        # ---- Postblock conservation fixers ----
+        post_conf = conf.get("model", {}).get("post_conf", {})
+        self.flag_mass_conserve = False
+        self.flag_water_conserve = False
+        self.flag_energy_conserve = False
+        self.opt_mass = None
+        self.opt_water = None
+        self.opt_energy = None
 
-    if launch:
-        script_path = Path(__file__).absolute()
-        if conf["pbs"]["queue"] == "casper":
-            logging.info("Launching to PBS on Casper")
-            launch_script(config, script_path)
+        if post_conf.get("activate", False):
+            if post_conf.get("global_mass_fixer", {}).get("activate", False) and post_conf["global_mass_fixer"].get(
+                "activate_outside_model", False
+            ):
+                logger.info("Activate GlobalMassFixer outside of model")
+                self.flag_mass_conserve = True
+                self.opt_mass = GlobalMassFixer(post_conf)
+
+            if post_conf.get("global_water_fixer", {}).get("activate", False) and post_conf["global_water_fixer"].get(
+                "activate_outside_model", False
+            ):
+                logger.info("Activate GlobalWaterFixer outside of model")
+                self.flag_water_conserve = True
+                self.opt_water = GlobalWaterFixer(post_conf)
+
+            if post_conf.get("global_energy_fixer", {}).get("activate", False) and post_conf["global_energy_fixer"].get(
+                "activate_outside_model", False
+            ):
+                logger.info("Activate GlobalEnergyFixer outside of model")
+                self.flag_energy_conserve = True
+                self.opt_energy = GlobalEnergyFixer(post_conf)
+
+        # ---- Data schema extraction (new nested schema) ----
+        self.slices, _ = build_channel_layout(conf)
+        data_conf = conf["data"]
+        source = next(iter(data_conf["source"].values()))
+        vars_conf = source["variables"]
+        diag = vars_conf.get("diagnostic") or {}
+        num_levels = len(source.get("levels", []))
+        self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
+
+        self.retain_graph = data_conf.get("retain_graph", False)
+
+        # forecast_len: 1 = 1 step (new semantics, unlike v1 where 0 = 1 step)
+        self.forecast_len = data_conf["forecast_len"]
+        # history_len: 1 = single-step input (gen2 default). > 1 enables a
+        # sliding-window history fed to the model; update_x handles the slide
+        # at t > 1 rollout steps.
+        self.history_len = data_conf.get("history_len", 1)
+        trainer_conf = conf.get("trainer", {})
+        bpt = trainer_conf.get("backprop_on_timestep") or data_conf.get("backprop_on_timestep")
+        self.backprop_on_timestep = bpt if bpt is not None else list(range(1, self.forecast_len + 1))
+
+        data_clamp = data_conf.get("data_clamp")
+        if data_clamp is None:
+            self.flag_clamp = False
+            self.clamp_min = None
+            self.clamp_max = None
         else:
-            logging.info("Launching to PBS on Derecho")
-            launch_script_mpi(config, script_path)
-        sys.exit()
+            self.flag_clamp = True
+            self.clamp_min = float(data_clamp[0])
+            self.clamp_max = float(data_clamp[1])
 
-    local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
-    rank = world_rank
+        # Validation config: use validation_data block if present, else fall back to data
+        data_valid = conf.get("validation_data", data_conf)
+        self.valid_history_len = data_valid.get("history_len", data_conf.get("history_len", 1))
+        self.valid_forecast_len = data_valid.get("forecast_len", self.forecast_len)
 
-    conf["save_loc"] = os.path.expandvars(conf["save_loc"])
+        # If True, log a warning on NaN loss instead of raising TrialPruned.
+        # Useful for smoke tests with unnormalized data where NaN is expected.
+        self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
 
-    if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
-        setup(rank, world_size, conf["trainer"]["mode"], backend)
+    def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
+        """
+        Train for one epoch.
 
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(local_rank % torch.cuda.device_count())
-        torch.backends.cudnn.benchmark = True
-    else:
-        device = torch.device("cpu")
+        The inner loop iterates over forecast_len autoregressive steps. For each step:
+          1. Pull the next batch from the dataloader (contains per-field tensors).
+          2. Apply preblocks to assemble batch["x"] and batch["y"].
+          3. For t > 1, replace the prognostic channels of x with the previous y_pred.
+          4. Forward pass, optional postblock, loss and backprop on backprop_on_timestep.
 
-    train_dataset = load_dataset(conf, is_train=True)
-    train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
+        Args:
+            epoch: Current epoch number.
+            conf: Full configuration dict.
+            trainloader: DataLoader for training.
+            optimizer, criterion, scaler, scheduler, metrics: Standard training objects.
 
-    skip_validation = conf["trainer"].get("skip_validation", False)
-    if skip_validation:
-        valid_loader = None
-    else:
-        valid_dataset = load_dataset(conf, is_train=False)
-        valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
+        Returns:
+            dict: Training metrics for the epoch.
+        """
+        if self.ensemble_size > 1:
+            logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
+        logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
 
-    seed = conf.get("seed", 42) + rank
-    seed_everything(seed)
-    inject_flat_var_keys(conf)
-    if "post_conf" in conf["model"]:
-        warnings.warn(
-            "Gen 2 training does not support Gen 1 postblocks. Any postblocks included in the conf will be ignored."
-        )
-        conf["model"].pop("post_conf", None)
-    m = load_model(conf)
-    m.to(device)
+        # lambda scheduler steps once per epoch before batches
+        if self.use_scheduler and self.scheduler_type == "lambda":
+            scheduler.step()
 
-    if conf["trainer"].get("compile", False):
-        m = torch.compile(m)
+        # resolve effective batches_per_epoch
+        from torch.utils.data import IterableDataset
 
-    if conf["trainer"]["mode"] in ["ddp", "fsdp", "domain_parallel", "fsdp+domain_parallel"]:
-        model = distributed_model_wrapper(conf, m, device)
-    else:
-        model = m
+        batches_per_epoch = self.batches_per_epoch
+        if not isinstance(trainloader.dataset, IterableDataset):
+            if hasattr(trainloader.dataset, "batches_per_epoch"):
+                dataset_batches = trainloader.dataset.batches_per_epoch()
+            elif hasattr(trainloader.sampler, "batches_per_epoch"):
+                dataset_batches = trainloader.sampler.batches_per_epoch()
+            else:
+                dataset_batches = len(trainloader)
+            batches_per_epoch = (
+                self.batches_per_epoch if 0 < self.batches_per_epoch < dataset_batches else dataset_batches
+            )
 
-    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
+        batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
+        self.model.train()
 
-    train_criterion = load_loss(conf)
-    valid_criterion = load_loss(conf, validation=True)
-    metrics = LatWeightedMetrics(conf)
+        dl = cycle(trainloader)
+        results_dict = defaultdict(list)
 
-    trainer_cls = load_trainer(conf)
-    trainer = trainer_cls(model, rank, conf)
+        for steps in range(batches_per_epoch):
+            logs = {}
+            loss = 0
+            x_init = None  # snapshot of x at step 1 for GlobalMassFixer
+            y_pred = None
+            y = None
 
-    trainer.fit(
-        conf,
-        train_loader=train_loader,
-        valid_loader=valid_loader,
-        optimizer=optimizer,
-        train_criterion=train_criterion,
-        valid_criterion=valid_criterion,
-        scaler=scaler,
-        scheduler=scheduler,
-        metrics=metrics,
-    )
+            for t in range(1, self.forecast_len + 1):
+                batch = next(dl)
+                _batch = apply_preblocks(self.preblocks, batch, device=self.device)
+                x_raw, y_raw = _batch["input"], _batch["target"]
+
+                if t == 1:
+                    x = x_raw.float()
+                    if self.ensemble_size > 1:
+                        x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                else:
+                    # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
+                    # update_x replaces dynfrc and prognostic slices; static stays.
+                    x_dynfrc = x_raw.float()
+                    if self.ensemble_size > 1:
+                        x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
+                    y_pred_in = y_pred if self.retain_graph else y_pred.detach()
+                    x = update_x(
+                        x, x_dynfrc, y_pred_in, self.slices,
+                        history_len=self.history_len,
+                    )
+
+                if self.flag_clamp:
+                    x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
+
+                with torch.autocast(device_type="cuda", enabled=self.amp):
+                    y_pred = self.model(x)
+
+                # postblock opts outside of model
+                if self.flag_mass_conserve:
+                    if t == 1:
+                        x_init = x.clone()
+                    input_dict = {"y_pred": y_pred, "x": x_init}
+                    input_dict = self.opt_mass(input_dict)
+                    y_pred = input_dict["y_pred"]
+
+                if self.flag_water_conserve:
+                    input_dict = {"y_pred": y_pred, "x": x}
+                    input_dict = self.opt_water(input_dict)
+                    y_pred = input_dict["y_pred"]
+
+                if self.flag_energy_conserve:
+                    input_dict = {"y_pred": y_pred, "x": x}
+                    input_dict = self.opt_energy(input_dict)
+                    y_pred = input_dict["y_pred"]
+
+                # backprop on specified timesteps
+                if t in self.backprop_on_timestep:
+                    y = y_raw.float()
+                    if self.flag_clamp:
+                        y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
+
+                    with torch.autocast(device_type="cuda", enabled=self.amp):
+                        loss = criterion(y.to(y_pred.dtype), y_pred).mean()
+                    accum_log(logs, {"loss": loss.item()})
+                    scaler.scale(loss).backward(retain_graph=self.retain_graph)
+
+                if self.distributed:
+                    torch.distributed.barrier()
+
+            # optimizer step
+            scaler.unscale_(optimizer)
+            if self.grad_max_norm == "dynamic":
+                local_norm = torch.norm(
+                    torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
+                )
+                if self.distributed:
+                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
+                global_norm = local_norm.sqrt()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
+            elif self.grad_max_norm > 0.0:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
+
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+
+            if self.ema is not None:
+                self.ema.update(self.model)
+
+            # collect metrics
+            if y_pred is not None and y is not None:
+                metrics_dict = metrics(y_pred, y)
+                for name, value in metrics_dict.items():
+                    value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                    if self.distributed:
+                        dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                    results_dict[f"train_{name}"].append(value[0].item())
+
+            batch_loss = torch.Tensor([logs.get("loss", 0.0)]).to(self.device)
+            if self.distributed:
+                dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+            results_dict["train_loss"].append(batch_loss[0].item())
+            results_dict["train_forecast_len"].append(self.forecast_len)
+
+            if not np.isfinite(np.mean(results_dict["train_loss"])):
+                print(results_dict["train_loss"])
+                if self.skip_nan_prune:
+                    logger.warning("NaN/Inf loss detected but skip_nan_prune=True; continuing.")
+                else:
+                    raise optuna.TrialPruned()
+
+            self._log_batch_progress(epoch, results_dict, optimizer, batch_group_generator, phase="train")
+
+            if self.use_scheduler and self.scheduler_type in update_on_batch:
+                scheduler.step()
+
+        batch_group_generator.close()
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        return results_dict
+
+    def validate(self, epoch, valid_loader, criterion, metrics):
+        """
+        Validate for one epoch.
+
+        Runs self.valid_forecast_len autoregressive steps per sample.
+        Loss and metrics are computed only at the final step (t == self.valid_forecast_len).
+
+        Args:
+            epoch: Current epoch number.
+            conf: Full configuration dict.
+            valid_loader: DataLoader for validation.
+            criterion, metrics: Loss and metric callables.
+
+        Returns:
+            dict: Validation metrics for the epoch.
+        """
+        self.model.eval()
+
+        from torch.utils.data import IterableDataset
+
+        valid_batches_per_epoch = self.valid_batches_per_epoch
+        if not isinstance(valid_loader.dataset, IterableDataset):
+            if hasattr(valid_loader.dataset, "batches_per_epoch"):
+                dataset_batches = valid_loader.dataset.batches_per_epoch()
+            elif hasattr(valid_loader.sampler, "batches_per_epoch"):
+                dataset_batches = valid_loader.sampler.batches_per_epoch()
+            else:
+                dataset_batches = len(valid_loader)
+            valid_batches_per_epoch = (
+                self.valid_batches_per_epoch if 0 < self.valid_batches_per_epoch < dataset_batches else dataset_batches
+            )
+
+        results_dict = defaultdict(list)
+        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
+
+        dl = cycle(valid_loader)
+        with torch.no_grad():
+            for steps in range(valid_batches_per_epoch):
+                y_pred = None
+                y = None
+                loss = 0
+                x_init = None
+
+                for t in range(1, self.valid_forecast_len + 1):
+                    batch = next(dl)
+                    _batch = apply_preblocks(self.preblocks, batch, device=self.device)
+                    x_raw, y_raw = _batch["input"], _batch["target"]
+
+                    if t == 1:
+                        x = x_raw.float()
+                        if self.ensemble_size > 1:
+                            x = torch.repeat_interleave(x, self.ensemble_size, 0)
+                    else:
+                        # At t > 1 ERA5Dataset returns only dynamic_forcing channels.
+                        # update_x replaces dynfrc and prognostic slices; static stays.
+                        x_dynfrc = x_raw.float()
+                        if self.ensemble_size > 1:
+                            x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
+                        x = update_x(
+                            x, x_dynfrc, y_pred.detach(), self.slices,
+                            history_len=self.valid_history_len,
+                        )
+
+                    if self.flag_clamp:
+                        x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
+
+                    y_pred = self.model(x.float())
+
+                    # postblock opts outside of model
+                    if self.flag_mass_conserve:
+                        if t == 1:
+                            x_init = x.clone()
+                        input_dict = {"y_pred": y_pred, "x": x_init}
+                        input_dict = self.opt_mass(input_dict)
+                        y_pred = input_dict["y_pred"]
+
+                    if self.flag_water_conserve:
+                        input_dict = {"y_pred": y_pred, "x": x}
+                        input_dict = self.opt_water(input_dict)
+                        y_pred = input_dict["y_pred"]
+
+                    if self.flag_energy_conserve:
+                        input_dict = {"y_pred": y_pred, "x": x}
+                        input_dict = self.opt_energy(input_dict)
+                        y_pred = input_dict["y_pred"]
+
+                    # compute loss and metrics only at the final rollout step
+                    if t == self.valid_forecast_len:
+                        y = y_raw.float()
+                        if self.flag_clamp:
+                            y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
+
+                        loss = criterion(y.to(y_pred.dtype), y_pred).mean()
+                        metrics_dict = metrics(y_pred.float(), y.float())
+                        for name, value in metrics_dict.items():
+                            value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                            if self.distributed:
+                                dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                            results_dict[f"valid_{name}"].append(value[0].item())
+
+                batch_loss = torch.Tensor([loss.item() if torch.is_tensor(loss) else loss]).to(self.device)
+                if self.distributed:
+                    torch.distributed.barrier()
+
+                results_dict["valid_loss"].append(batch_loss[0].item())
+                results_dict["valid_forecast_len"].append(self.valid_forecast_len)
+
+                self._log_batch_progress(epoch, results_dict, optimizer=None, pbar=batch_group_generator, phase="valid")
+
+        batch_group_generator.close()
+
+        if self.distributed:
+            torch.distributed.barrier()
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        return results_dict
 
 
-if __name__ == "__main__":
-    main_cli()
+Trainer = TrainerERA5Gen2  # canonical alias, matches other trainer modules

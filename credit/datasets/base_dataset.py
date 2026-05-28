@@ -50,6 +50,8 @@ class AbstractBaseDataset(Dataset[Any]):
         # Setting the clock for sampling
         self.dt: pd.Timedelta
         self.num_forecast_steps: int
+        self.history_len: int
+        self.output_frames: int
         self.start_datetime: pd.Timestamp
         self.end_datetime: pd.Timestamp
         self.datetimes: pd.DatetimeIndex
@@ -86,7 +88,14 @@ class AbstractBaseDataset(Dataset[Any]):
     ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
         raise NotImplementedError
 
-    def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
+    def _extract_field(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t: pd.Timestamp,
+        sample: dict[str, Any],
+        *,
+        t_history: pd.DatetimeIndex | None = None,
+    ) -> None:
         raise NotImplementedError
 
 
@@ -212,6 +221,8 @@ class BaseDataset(AbstractBaseDataset):
         # Now we start loading the parameters for the dataset, starting with the clock parameters.
         self.dt: pd.Timedelta = self._load_dt(data_config, self.curr_source_cfg)
         self.num_forecast_steps: int = self._load_num_forecast_steps(data_config, self.curr_source_cfg)
+        self.history_len: int = self._load_history_len(data_config, self.curr_source_cfg)
+        self.output_frames: int = self._load_output_frames(data_config, self.curr_source_cfg)
 
         self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
         self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
@@ -328,6 +339,13 @@ class BaseDataset(AbstractBaseDataset):
         This is the inner implementation called by ``__getitem__``, separated
         so the persist cache can call it without re-entering the dispatch logic.
 
+        When ``self.history_len > 1`` and ``i == 0``, prognostic, dynamic_forcing,
+        and static fields are loaded as a ``history_len``-step window ending at
+        ``t`` (inclusive), i.e. ``[t - (H-1)*dt, ..., t]``. At rollout steps
+        (``i > 0``) only the newest dynamic_forcing step (at ``t``) is loaded;
+        prior history is carried forward by the trainer's ``update_x`` sliding
+        window. With ``history_len == 1`` behaviour is identical to the original.
+
         Args:
             t: Timestamp to load (already resolved for persist sources).
             i: Within-sequence step index (0 = initial step).
@@ -338,28 +356,67 @@ class BaseDataset(AbstractBaseDataset):
         t_target = t + self.dt
         input_data: dict[str, Any] = {}
 
-        # Dynamic forcing is loaded at every step
-        if "dynamic_forcing" in self.var_dict:
-            self._extract_field("dynamic_forcing", t, input_data)
+        # History window ending at t (inclusive). Used only at i == 0 for
+        # fields that need a multi-step history. Always length history_len.
+        if self.history_len > 1:
+            t_history = pd.date_range(
+                t - (self.history_len - 1) * self.dt, t, freq=self.dt
+            )
+        else:
+            t_history = None  # signal single-step path to _extract_field
 
-        # Prognostic + static are only needed at the initial step
+        # Dynamic forcing is loaded at every step.
+        # At i == 0 we need the full history window so the trainer's x has H
+        # time steps; at i > 0 we only need the newest step (update_x slides
+        # the previous history forward).
+        if "dynamic_forcing" in self.var_dict:
+            if i == 0:
+                self._extract_field(
+                    "dynamic_forcing", t, input_data, t_history=t_history
+                )
+            else:
+                self._extract_field("dynamic_forcing", t, input_data)
+
+        # Prognostic + static are only needed at the initial step.
+        # Both are loaded over the full history window so x starts with H steps.
         if i == 0:
             if "static" in self.var_dict:
-                self._extract_field("static", t, input_data)
+                self._extract_field("static", t, input_data, t_history=t_history)
             if "prognostic" in self.var_dict:
-                self._extract_field("prognostic", t, input_data)
+                self._extract_field(
+                    "prognostic", t, input_data, t_history=t_history
+                )
 
         sample: dict[str, Any] = {
             "input": input_data,
             "metadata": {"input_datetime": int(t.value)},
         }
 
-        # Optionally load t+1 as the supervised target
+        # Optionally load supervised target(s). With output_frames == 1 (default),
+        # the target is a single time step at t+dt — the original gen2 behaviour.
+        # With output_frames > 1, the target is a window of output_frames steps
+        # [t+dt, ..., t + output_frames*dt] stacked along the time dimension so
+        # the model can be trained to predict multiple future steps per forward.
+        # Target window always uses ground truth; it never depends on history_len.
         if self.return_target:
             target_data: dict[str, Any] = {}
+            if self.output_frames > 1:
+                t_target_history = pd.date_range(
+                    t_target,
+                    t_target + (self.output_frames - 1) * self.dt,
+                    freq=self.dt,
+                )
+            else:
+                t_target_history = None  # single-step legacy path
+
             for field_type in ("prognostic", "diagnostic"):
                 if field_type in self.var_dict:
-                    self._extract_field(field_type, t_target, target_data)
+                    self._extract_field(
+                        field_type,
+                        t_target,
+                        target_data,
+                        t_history=t_target_history,
+                    )
 
             sample["target"] = target_data
             sample["metadata"]["target_datetime"] = int(t_target.value)
@@ -476,6 +533,88 @@ class BaseDataset(AbstractBaseDataset):
 
         return num_forecast_steps_in_data
 
+    def _load_history_len(
+        self,
+        data_config: dict[str, Any],
+        curr_source_config: dict[str, Any],
+        history_len_key: str = "history_len",
+    ) -> int:
+        """Load the number of history time steps fed into the model at each init step.
+
+        ``history_len == 1`` (the default) reproduces the original gen2 behaviour:
+        the dataset returns a single time step and the trainer feeds frames=1 to
+        the model. ``history_len > 1`` makes the dataset return a ``history_len``
+        time-step window at i == 0 and the trainer slides the window in update_x
+        at subsequent rollout steps.
+
+        history_len is optional in the config; it is read from the source-level
+        config first and from the data-level config as a fallback. If neither
+        is present it defaults to 1 so that existing configs keep working.
+
+        Args:
+            data_config: Portion of the config under "data"
+            curr_source_config: Portion of the config under a specific source
+            history_len_key: The key name. Defaults to "history_len".
+
+        Returns:
+            int: history length, >= 1.
+        """
+        if self._in_source_config(data_config, curr_source_config, history_len_key):
+            history_len = curr_source_config[history_len_key]
+        elif history_len_key in data_config:
+            history_len = data_config[history_len_key]
+        else:
+            history_len = 1
+
+        if not isinstance(history_len, int) or history_len < 1:
+            raise ValueError(
+                f"{history_len_key} must be a positive int, got {history_len!r}"
+            )
+        return history_len
+
+    def _load_output_frames(
+        self,
+        data_config: dict[str, Any],
+        curr_source_config: dict[str, Any],
+        output_frames_key: str = "output_frames",
+    ) -> int:
+        """Load the number of target time steps produced per forward pass.
+
+        ``output_frames == 1`` (the default) reproduces the original gen2 behaviour:
+        the dataset returns a single supervised target ``t + dt`` and the model
+        predicts one step ahead. ``output_frames > 1`` makes the dataset return a
+        target window ``[t + dt, ..., t + output_frames * dt]`` so the model can
+        be trained to predict multiple future steps in a single forward pass.
+
+        This is independent of ``num_forecast_steps`` (rollout): rollout calls
+        forward multiple times with sliding inputs, while output_frames widens
+        each forward's target. The two can be combined.
+
+        output_frames is optional in the config; it is read from the source-level
+        config first and from the data-level config as a fallback. If neither
+        is present it defaults to 1 so that existing configs keep working.
+
+        Args:
+            data_config: Portion of the config under "data"
+            curr_source_config: Portion of the config under a specific source
+            output_frames_key: The key name. Defaults to "output_frames".
+
+        Returns:
+            int: output frames, >= 1.
+        """
+        if self._in_source_config(data_config, curr_source_config, output_frames_key):
+            output_frames = curr_source_config[output_frames_key]
+        elif output_frames_key in data_config:
+            output_frames = data_config[output_frames_key]
+        else:
+            output_frames = 1
+
+        if not isinstance(output_frames, int) or output_frames < 1:
+            raise ValueError(
+                f"{output_frames_key} must be a positive int, got {output_frames!r}"
+            )
+        return output_frames
+
     def _load_start_datetime(
         self,
         data_config: dict[str, Any],
@@ -550,8 +689,10 @@ class BaseDataset(AbstractBaseDataset):
     def _build_timestamps(self) -> pd.DatetimeIndex:
         """Return timestamps for the dataset using the class parameters.
         The timestamps should ensure that there are enough future timesteps to
-        rollout based on num_forecast_steps and the dt timestep length, and
-        should be at the configured timestep frequency.
+        rollout based on num_forecast_steps and the dt timestep length, enough
+        past timesteps to assemble a ``history_len``-step input window, and
+        enough future timesteps for the ``output_frames``-step target window at
+        the last rollout step; timestamps are at the configured timestep frequency.
 
         Note: Please override this method if you would like to apply Quality Control
         checks that limit the datetimes from which to sample from, or if you would
@@ -559,12 +700,14 @@ class BaseDataset(AbstractBaseDataset):
         super() to have base functionality in these cases.
 
         Returns:
-            pd.DatetimeIndex: DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
-                the forecast horizon, at the configured timestep frequency.
+            pd.DatetimeIndex: DatetimeIndex from ``start_datetime + (history_len-1)*dt``
+                to ``end_datetime - (num_forecast_steps + output_frames - 1) * dt``,
+                at the configured timestep frequency.
         """
         return pd.date_range(
-            self.start_datetime,
-            self.end_datetime - self.num_forecast_steps * self.dt,
+            self.start_datetime + (self.history_len - 1) * self.dt,
+            self.end_datetime
+            - (self.num_forecast_steps + self.output_frames - 1) * self.dt,
             freq=self.dt,
         )
 
@@ -673,7 +816,14 @@ class BaseDataset(AbstractBaseDataset):
         else:
             raise ValueError(f"Unknown mode '{self.mode}'. Expected 'local' or 'remote'.")
 
-    def _extract_field(self, field_type: VALID_FIELD_TYPES, t: pd.Timestamp, sample: dict[str, Any]) -> None:
+    def _extract_field(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t: pd.Timestamp,
+        sample: dict[str, Any],
+        *,
+        t_history: pd.DatetimeIndex | None = None,
+    ) -> None:
         """Base extract field method, which should be overridden in the inherited dataset class to extract the data for
         each field type. The method should populate data_dict with the extracted data for the given field type and
         timestamp. The keys in data_dict should follow the format in _get_field_name.
@@ -684,6 +834,12 @@ class BaseDataset(AbstractBaseDataset):
             field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
             t (pd.Timestamp): Query timestamp for which to extract the field data.
             sample (dict[str, Any]): The sample dict being built in __getitem__
+            t_history (pd.DatetimeIndex | None, optional): When not None, the
+                field should be extracted as a stack along the time dimension
+                over this index of timestamps (ending at ``t``). Used by
+                multi-step history (history_len > 1) at the initial step.
+                When None, a single time step at ``t`` is extracted (legacy
+                history_len == 1 behaviour).
         """
         logging.error(
             "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "

@@ -27,6 +27,59 @@ def apply_spectral_norm(model):
                 nn.utils.spectral_norm(module)
 
 
+def ICNR(tensor, scale=2, initializer=nn.init.kaiming_normal_):
+    """
+    ICNR (Initialized to Convolution NN Resize) initialization for the conv
+    that precedes a PixelShuffle layer.
+
+    Aitken et al., 2017, "Checkerboard artifact free sub-pixel convolution:
+    A note on sub-pixel convolution, resize convolution and convolution resize."
+
+    A standard sub-pixel conv uses a conv with ``out_ch * scale**2`` output
+    channels followed by ``nn.PixelShuffle(scale)``. With random init, the
+    ``scale x scale`` block produced by PixelShuffle starts with uncorrelated
+    values, which is what creates the well-known checkerboard pattern at the
+    beginning of training.
+
+    ICNR fixes this by initializing only a small ``(out_ch, in_ch, kH, kW)``
+    sub-kernel and then *replicating it* ``scale**2`` times along the output-
+    channel dimension. After PixelShuffle, every ``scale x scale`` block then
+    contains identical values, i.e. the layer is initialized to be equivalent
+    to a nearest-neighbour upsample followed by a normal conv. Training can
+    then move away from this artifact-free starting point.
+
+    Args:
+        tensor: weight of the pre-PixelShuffle conv, shape
+            ``(out_ch * scale**2, in_ch, kH, kW)``. Modified in-place.
+        scale: PixelShuffle upscale factor.
+        initializer: function used to initialize the small sub-kernel
+            (default: Kaiming normal).
+
+    Returns:
+        The same tensor, initialized in-place.
+    """
+    out_ch_full, in_ch, kH, kW = tensor.shape
+    if out_ch_full % (scale ** 2) != 0:
+        raise ValueError(
+            f"ICNR: out_channels ({out_ch_full}) must be divisible by "
+            f"scale**2 ({scale ** 2})."
+        )
+    out_ch = out_ch_full // (scale ** 2)
+
+    # Initialize the small sub-kernel, then replicate scale**2 times along
+    # the output-channel dim. ``repeat_interleave`` along dim=0 gives the
+    # ordering [c0, c0, ..., c1, c1, ...], which matches PixelShuffle's
+    # interpretation of consecutive output channels as the sub-pixels of a
+    # single output channel.
+    sub_kernel = torch.zeros(out_ch, in_ch, kH, kW)
+    initializer(sub_kernel)
+    kernel = sub_kernel.repeat_interleave(scale ** 2, dim=0)
+
+    with torch.no_grad():
+        tensor.copy_(kernel)
+    return tensor
+
+
 # cube embedding
 class CubeEmbedding(nn.Module):
     """
@@ -108,10 +161,15 @@ class UpBlock(nn.Module):
 
 
 class UpBlockPS(nn.Module):
-    def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2):
+    def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2, icnr_init=True):
         super().__init__()
         # sub-pixel conv at low res
         self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
+        # Apply ICNR (Aitken et al., 2017) to make sub-pixel conv equivalent
+        # to NN-resize + conv at initialization, removing checkerboard artifacts.
+        if icnr_init:
+            ICNR(self.conv.weight, scale=scale, initializer=nn.init.kaiming_normal_)
+            nn.init.zeros_(self.conv.bias)
         self.ps = nn.PixelShuffle(scale)
         # sharpening branch (identity init)
         self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
@@ -432,6 +490,7 @@ class CrossFormer(BaseModel):
         attention_type: str = None,
         interp: bool = True,
         upsample_with_ps: bool = False,
+        icnr_init: bool = True,
         padding_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
@@ -463,6 +522,13 @@ class CrossFormer(BaseModel):
             ff_dropout (float): dropout rate for feedforward layers.
             use_spectral_norm (bool): whether to use spectral normalization
             interp (bool): whether to use interpolation
+            upsample_with_ps (bool): whether to use sub-pixel (PixelShuffle) upsampling
+                in the decoder instead of transposed convolutions.
+            icnr_init (bool): when ``upsample_with_ps`` is True, whether to initialize
+                each pre-PixelShuffle conv with ICNR (Aitken et al., 2017) so that
+                sub-pixel conv is equivalent to NN-resize + conv at init,
+                eliminating checkerboard artifacts. No effect when
+                ``upsample_with_ps`` is False.
             padding_conf (dict): padding configuration
             post_conf (dict): configuration for postblock processing
             **kwargs:
@@ -480,6 +546,7 @@ class CrossFormer(BaseModel):
         self.patch_height = patch_height
         self.patch_width = patch_width
         self.upsample_with_ps = upsample_with_ps
+        self.icnr_init = icnr_init
         self.frames = frames
         self.output_frames = output_frames
         self.channels = channels
@@ -576,18 +643,24 @@ class CrossFormer(BaseModel):
 
         # =================================================================================== #
         if self.upsample_with_ps:
-            self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
-            self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
-            self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
+            self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0], icnr_init=icnr_init)
+            self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0], icnr_init=icnr_init)
+            self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0], icnr_init=icnr_init)
             scale = 2
+            # Pre-PixelShuffle conv: apply ICNR so that the final upsample is
+            # equivalent to NN-resize + conv at initialization (checkerboard-free).
+            up4_ps_conv = nn.Conv2d(
+                2 * (last_dim // 8),  # in_channels
+                self.output_channels * (scale**2),  # conv_out = target_channels * 4
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            )
+            if icnr_init:
+                ICNR(up4_ps_conv.weight, scale=scale, initializer=nn.init.kaiming_normal_)
+                nn.init.zeros_(up4_ps_conv.bias)
             self.up_block4 = nn.Sequential(
-                nn.Conv2d(
-                    2 * (last_dim // 8),  # in_channels
-                    self.output_channels * (scale**2),  # conv_out = target_channels * 4
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                ),
+                up4_ps_conv,
                 nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
                 nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
             )

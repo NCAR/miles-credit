@@ -87,6 +87,22 @@ class TrainerERA5Gen2(BaseTrainer):
 
         # forecast_len: 1 = 1 step (new semantics, unlike v1 where 0 = 1 step)
         self.forecast_len = data_conf["forecast_len"]
+        # history_len: 1 = single-step input (gen2 default). > 1 enables a
+        # sliding-window history fed to the model; update_x handles the slide
+        # at t > 1 rollout steps.
+        self.history_len = data_conf.get("history_len", 1)
+        # output_frames: 1 = single-step target (gen2 default). > 1 makes the
+        # dataset return a multi-step target window and the model predicts
+        # output_frames steps per forward. Must match model.output_frames so
+        # y_pred and y target line up along the time dim.
+        self.output_frames = data_conf.get("output_frames", 1)
+        model_output_frames = conf.get("model", {}).get("output_frames", 1)
+        if model_output_frames != self.output_frames:
+            logger.warning(
+                f"data.output_frames ({self.output_frames}) != "
+                f"model.output_frames ({model_output_frames}). "
+                "These must be equal for the loss to align along the time dim."
+            )
         trainer_conf = conf.get("trainer", {})
         bpt = trainer_conf.get("backprop_on_timestep") or data_conf.get("backprop_on_timestep")
         self.backprop_on_timestep = bpt if bpt is not None else list(range(1, self.forecast_len + 1))
@@ -181,7 +197,10 @@ class TrainerERA5Gen2(BaseTrainer):
                     if self.ensemble_size > 1:
                         x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
                     y_pred_in = y_pred if self.retain_graph else y_pred.detach()
-                    x = update_x(x, x_dynfrc, y_pred_in, self.slices)
+                    x = update_x(
+                        x, x_dynfrc, y_pred_in, self.slices,
+                        history_len=self.history_len,
+                    )
 
                 if self.flag_clamp:
                     x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)
@@ -332,7 +351,10 @@ class TrainerERA5Gen2(BaseTrainer):
                         x_dynfrc = x_raw.float()
                         if self.ensemble_size > 1:
                             x_dynfrc = torch.repeat_interleave(x_dynfrc, self.ensemble_size, 0)
-                        x = update_x(x, x_dynfrc, y_pred.detach(), self.slices)
+                        x = update_x(
+                            x, x_dynfrc, y_pred.detach(), self.slices,
+                            history_len=self.valid_history_len,
+                        )
 
                     if self.flag_clamp:
                         x = torch.clamp(x, min=self.clamp_min, max=self.clamp_max)

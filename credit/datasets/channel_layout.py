@@ -79,29 +79,48 @@ def build_channel_layout(conf):
     return slices, n_pred
 
 
-def update_x(x_prev, x_dynfrc, y_pred, slices):
+def update_x(x_prev, x_dynfrc, y_pred, slices, history_len: int = 1):
     """Build the next-step input tensor for autoregressive rollout.
 
     Replaces dataset-driven channels (dynamic_forcing) and model-predicted
     channels (prognostic) in x_prev.  Fixed channels (static, etc.) are
     carried forward unchanged via clone.
 
+    When ``history_len > 1``, both dataset-driven and model-predicted channels
+    are advanced as a sliding window along the time dimension (dim=2):
+    the oldest step is dropped, the existing steps shift one position toward
+    index 0, and the new step (from ``x_dynfrc`` or ``y_pred``) is written at
+    the last time index.  Fixed channels (e.g. static) are time-invariant and
+    require no shifting; they are carried forward by ``clone()``.
+
+    With ``history_len == 1`` the behaviour is identical to the original
+    single-step update (full overwrite), so callers that have not opted in
+    to multi-step history are unaffected.
+
     Parameters
     ----------
-    x_prev : Tensor  [B, C, ...]
-        Full input tensor from the previous step.
-    x_dynfrc : Tensor  [B, C_dyn, ...]
+    x_prev : Tensor  [B, C, T, ...]
+        Full input tensor from the previous step. ``T == history_len``.
+    x_dynfrc : Tensor  [B, C_dyn, T_new, ...]
         New dynamic-forcing channels from the dataset, in the same relative
-        order as the dataset-driven groups appear in slices.
-    y_pred : Tensor  [B, C_pred, ...]
+        order as the dataset-driven groups appear in slices.  At rollout
+        steps (t > 1) the dataset returns only the newest step
+        (``T_new == 1``); the prior ``history_len - 1`` steps are obtained
+        by sliding ``x_prev``.
+    y_pred : Tensor  [B, C_pred, T_pred, ...]
         Model output, in the same relative order as the predicted groups
-        appear in slices.
+        appear in slices.  ``T_pred`` is the model's ``output_frames``
+        (typically 1) and only the last predicted step is written into the
+        sliding window.
     slices : dict[str, slice]
         From build_channel_layout().
+    history_len : int, default 1
+        Length of the time history axis. ``history_len=1`` reproduces the
+        original single-step update behaviour.
 
     Returns
     -------
-    Tensor  [B, C, ...]
+    Tensor  [B, C, T, ...]
         Updated input tensor ready for the next forward pass.
     """
     x_new = x_prev.clone()
@@ -111,11 +130,33 @@ def update_x(x_prev, x_dynfrc, y_pred, slices):
     for name, sl in slices.items():
         n = sl.stop - sl.start
         if name in _DATASET_DRIVEN:
-            x_new[:, sl, ...] = x_dynfrc[:, dyn_offset : dyn_offset + n, ...]
+            if history_len > 1:
+                # Slide old steps toward index 0, then write newest step at -1.
+                # x_prev[:, sl, 1:H] -> x_new[:, sl, 0:H-1]
+                x_new[:, sl, : history_len - 1, ...] = x_prev[
+                    :, sl, 1:history_len, ...
+                ]
+                # x_dynfrc carries only the newest step (T_new == 1).
+                x_new[:, sl, history_len - 1 : history_len, ...] = x_dynfrc[
+                    :, dyn_offset : dyn_offset + n, -1:, ...
+                ]
+            else:
+                # Original single-step behaviour: full overwrite.
+                x_new[:, sl, ...] = x_dynfrc[:, dyn_offset : dyn_offset + n, ...]
             dyn_offset += n
         elif name in _MODEL_PREDICTED:
-            x_new[:, sl, ...] = y_pred[:, pred_offset : pred_offset + n, ...]
+            if history_len > 1:
+                # Slide previous prognostic history one step forward.
+                x_new[:, sl, : history_len - 1, ...] = x_prev[
+                    :, sl, 1:history_len, ...
+                ]
+                # Append the latest prediction (use the last output frame).
+                x_new[:, sl, history_len - 1 : history_len, ...] = y_pred[
+                    :, pred_offset : pred_offset + n, -1:, ...
+                ]
+            else:
+                x_new[:, sl, ...] = y_pred[:, pred_offset : pred_offset + n, ...]
             pred_offset += n
-        # fixed groups: already present via clone()
+        # fixed groups (static, etc.): time-invariant, already present via clone()
 
     return x_new

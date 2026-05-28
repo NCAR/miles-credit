@@ -6,43 +6,45 @@
 # Grid: 721 x 1440 (0.25-degree global), 13 pressure levels
 # NOTE: forecast_len semantics changed — 1 means 1 step (not 0 = 1 step as in v1)
 # --------------------------------------------------------------------------------------------------------------------- #
-save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_025deg_6hr_v2'
+save_loc: '/nwpr/ait/com181/work/credit_log/529_era5_10y_wxformer_4input4output'
 seed: 1000
 
-# Training data block
+
+# ---- USER SETTINGS: training data ---- #
+# Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
 data:
   source:
     ERA5:
       dataset_type: "local"
       level_coord: "level"
-      levels: [ 25.5, 75.0, 125.0, 175.0, 225.0, 275.0, 350.0, 450.0, 550.0, 650.0, 775.0, 887.5, 962.5 ]
+      levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
       variables:
+      variables:
+        # Prognostic: 模型預測這些變數，下一步又當輸入（自回歸）
         prognostic:
-          vars_3D: [ 'U', 'V', 'T', 'specific_total_water' ]
-          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          vars_3D: ['U', 'V', 'T', 'Q']
+          vars_2D: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
+          path: '/weka/p088/CREDIT_data/SixHourly_y_TOTAL*12-31_staged.zarr'
 
-        diagnostic:
-          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
-                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
-                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+        # 你沒有 diagnostic 變數 → 整段省略
 
+        # Dynamic forcing: 時變的外部驅動（不預測）
         dynamic_forcing:
-          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          vars_2D: ['tsi']
+          path: '/weka/p088/CREDIT_sta_for/solar_irradiance_*.nc'
 
+        # Static: 時不變的輸入（不預測）
         static:
-          vars_2D: [ 'z_norm', 'land_sea_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/static/ERA5_plevel_6h_static.zarr'
+          vars_2D: ['Z_GDS4_SFC', 'LSM']
+          path: '/weka/p088/CREDIT_sta_for/static_norm_old.nc'
 
-  start_datetime: "1979-01-01"
-  end_datetime: "2018-12-31"
+  start_datetime: "1999-01-01"
+  end_datetime: "2008-12-31"
   timestep: "6h"
 
-  # forecast_len: 1 = 1 autoregressive step (new semantics; v1 used 0 to mean 1 step)
-  history_len: 1
-  forecast_len: 1
+  history_len: 4            # 1 個歷史 input
+  forecast_len: 1           # v2 語意：1 = 單步
+  output_frames: 4
 
   one_shot: True
   lead_time_periods: 6
@@ -50,42 +52,39 @@ data:
   static_first: True
   scaler_type: 'std_new'
 
-  mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/mean_6h_1979_2019_13lev_0.25deg.nc'
-  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/std_6h_1979_2019_13lev_0.25deg.nc'
+  mean_path: '/weka/p088/CREDIT_sta_for/mean_6h_1979_2018_16lev_0.25deg.nc'
+  std_path: '/weka/p088/CREDIT_sta_for/std_residual_6h_1979_2018_16lev_0.25deg.nc'
 
-# Validation data block (same schema, different date range)
+
+
+# ---- USER SETTINGS: validation data ---- #
 validation_data:
   source:
     ERA5_Validation:
       dataset_type: "local"
       level_coord: "level"
-      levels: [ 25.5, 75.0, 125.0, 175.0, 225.0, 275.0, 350.0, 450.0, 550.0, 650.0, 775.0, 887.5, 962.5 ]
+      levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
       variables:
         prognostic:
-          vars_3D: [ 'U', 'V', 'T', 'specific_total_water' ]
-          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
-
-        diagnostic:
-          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
-                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
-                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          vars_3D: ['U', 'V', 'T', 'Q']
+          vars_2D: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
+          path: '/weka/p088/CREDIT_data/SixHourly_y_TOTAL*12-31_staged.zarr'
 
         dynamic_forcing:
-          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          vars_2D: ['tsi']
+          path: '/weka/p088/CREDIT_sta_for/solar_irradiance_*.nc'
 
         static:
-          vars_2D: [ 'z_norm', 'land_sea_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/static/ERA5_plevel_6h_static.zarr'
+          vars_2D: ['Z_GDS4_SFC', 'LSM']
+          path: '/weka/p088/CREDIT_sta_for/static_norm_old.nc'
 
-  start_datetime: "2018-01-01"
-  end_datetime: "2019-12-31"
+  start_datetime: "2009-01-01"
+  end_datetime: "2009-12-31"
   timestep: "6h"
 
-  history_len: 1
+  history_len: 4
   forecast_len: 1
+  output_frames: 4
 
   one_shot: True
   lead_time_periods: 6
@@ -93,8 +92,21 @@ validation_data:
   static_first: True
   scaler_type: 'std_new'
 
-  mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/mean_6h_1979_2019_13lev_0.25deg.nc'
-  std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/std_6h_1979_2019_13lev_0.25deg.nc'
+  mean_path: '/weka/p088/CREDIT_sta_for/mean_6h_1979_2018_16lev_0.25deg.nc'
+  std_path: '/weka/p088/CREDIT_sta_for/std_residual_6h_1979_2018_16lev_0.25deg.nc'
+
+# ============================== PREBLOCKS ============================== #
+preblocks:
+  norm:
+    type: era5_normalizer
+    args:
+      mean_path: '/weka/p088/CREDIT_sta_for/mean_6h_1979_2018_16lev_0.25deg.nc'
+      std_path:  '/weka/p088/CREDIT_sta_for/std_residual_6h_1979_2018_16lev_0.25deg.nc'
+  to_tensor:
+    type: concat
+    args:
+      to_device: true
+
 
 trainer:
   type: era5-gen2
@@ -146,22 +158,23 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 4
-  valid_thread_workers: 4
+  thread_workers: 2
+  valid_thread_workers: 2
 
-  prefetch_factor: 4
+  prefetch_factor: 2
 
 
 model:
-  type: "crossformer"
-  frames: 1                         # number of input states
-  image_height: 721                 # latitude grids (0.25-degree ERA5: 721)
-  image_width: 1440                 # longitude grids (0.25-degree ERA5: 1440)
-  levels: 13                        # number of pressure levels (matches data.levels above)
-  channels: 4                       # 3D prognostic variable channels (U,V,T,q)
-  surface_channels: 4               # 2D prognostic variable channels (SP,VAR_2T,VAR_10U,VAR_10V)
-  input_only_channels: 4            # dynamic forcing (2) + static (2)
-  output_only_channels: 8           # diagnostic variable channels
+  type: "wxformer"
+  frames: 4
+  output_frames: 4
+  image_height: 640       # 1-degree ERA5 latitude grid
+  image_width: 1280        # 1-degree ERA5 longitude grid
+  levels: 16              # number of ERA5 model levels (matches data.levels above)
+  channels: 4             # 3D prognostic variables (u, v, T, q)
+  surface_channels: 7     # 2D prognostic variables (SP, 2T, 10U, 10V)
+  input_only_channels: 3  # dynamic_forcing (2) + static (2)
+  output_only_channels: 0 # diagnostic variables
 
   patch_width: 1
   patch_height: 1
@@ -186,11 +199,14 @@ model:
 
   interp: True
   use_spectral_norm: True
+  # upsample_v_conv: True
+  upsample_with_ps: True            # Upsample with pixel shuffle
+
 
   padding_conf:
     activate: True
     mode: earth
-    pad_lat: [ 40, 40 ]
+    pad_lat: [ 80, 80 ]
     pad_lon: [ 80, 80 ]
 
   post_conf:
@@ -208,7 +224,7 @@ loss:
   use_spectral_loss: False
 
   use_latitude_weights: True
-  latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/static/ERA5_plevel_6h_static.zarr'
+  latitude_weights: '/weka/p088/CREDIT_sta_for/LSM_static_variables_ERA5_zhght.nc'
 
   use_variable_weights: False
 
