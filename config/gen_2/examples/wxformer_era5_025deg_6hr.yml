@@ -13,6 +13,7 @@ seed: 1000
 data:
   source:
     ERA5:
+      dataset_type: "local"
       level_coord: "level"
       levels: [ 25.5, 75.0, 125.0, 175.0, 225.0, 275.0, 350.0, 450.0, 550.0, 650.0, 775.0, 887.5, 962.5 ]
       variables:
@@ -53,9 +54,10 @@ data:
   std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/std_6h_1979_2019_13lev_0.25deg.nc'
 
 # Validation data block (same schema, different date range)
-data_valid:
+validation_data:
   source:
-    ERA5:
+    ERA5_Validation:
+      dataset_type: "local"
       level_coord: "level"
       levels: [ 25.5, 75.0, 125.0, 175.0, 225.0, 275.0, 350.0, 450.0, 550.0, 650.0, 775.0, 887.5, 962.5 ]
       variables:

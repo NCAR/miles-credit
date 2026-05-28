@@ -25,13 +25,14 @@ import logging
 
 import numpy as np
 import torch
-import torch.nn as nn
 import xarray as xr
+
+from credit.preblock.base import BasePreblock
 
 logger = logging.getLogger(__name__)
 
 
-class ERA5Normalizer(nn.Module):
+class ERA5Normalizer(BasePreblock):
     """Normalizes per-variable ERA5 tensors using pre-computed mean/std files.
 
     Normalization: ``(x - mean) / std`` applied per variable. Variables not
@@ -97,14 +98,12 @@ class ERA5Normalizer(nn.Module):
         return (tensor - mean) / std.clamp(min=1e-12)
 
     def forward(self, batch: dict) -> dict:
-        """Normalize all input/target tensors in-place (returns same dict)."""
-        for source_data in batch.values():
-            if not isinstance(source_data, dict):
+        """Normalize all input/target tensors, returning a new batch dict."""
+        batch = self._copy_batch(batch)
+        for data_type in ("input", "target"):
+            if data_type not in batch:
                 continue
-            for data_type in ("input", "target"):
-                if data_type not in source_data:
-                    continue
-                field_dict = source_data[data_type]
+            for field_dict in batch[data_type].values():
                 for key in list(field_dict.keys()):
                     field_dict[key] = self._normalize_tensor(key, field_dict[key])
         return batch

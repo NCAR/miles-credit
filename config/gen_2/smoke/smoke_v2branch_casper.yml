@@ -3,7 +3,7 @@
 #   upper-air+surface from SixHourly_y_TOTAL zarr, tsi from solar NC, static from static_norm_old.nc
 # Reduced model size and 2-year training window for quick Casper single-GPU validation.
 
-save_loc: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen1'
+save_loc: '/glade/derecho/scratch/$USER/credit_tests/smoke_gen1'
 seed: 1000
 
 data:

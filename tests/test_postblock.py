@@ -9,9 +9,9 @@ import os
 import logging
 
 import torch
-from credit.postblock import GlobalWaterFixer, PostBlock
+from credit.postblock.gen1 import GlobalWaterFixer, PostBlock
 from credit.skebs import BackscatterFCNN
-from credit.postblock import TracerFixer, GlobalMassFixer, GlobalEnergyFixer, GlobalEnergyFixerUpDown
+from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalEnergyFixer, GlobalEnergyFixerUpDown
 from credit.parser import credit_main_parser
 
 
@@ -259,6 +259,109 @@ def test_GlobalEnergyFixerUpDown_rand():
     y_pred_fix = postblock({"y_pred": y_pred, "x": x})
 
     assert y_pred_fix.shape == y_pred.shape
+
+
+class TestReconstruct:
+    """Tests for credit.postblock.reconstruct.Reconstruct."""
+
+    # 4-part key format: source/field_type/dim/varname
+    KEY_3D = "Test_ARCOERA5/prognostic/3d/temperature"
+    KEY_2D = "Test_ARCOERA5/prognostic/2d/surface_pressure"
+
+    def _output_map(self):
+        """Minimal channel map matching ConcatToTensor output format.
+
+        Simulates: one 3D variable (4 levels) and one 2D surface variable.
+        Slash-joined key format: source/field_type/dim/var_name (4 parts).
+        """
+        return {
+            self.KEY_3D: {"slice": slice(0, 4), "orig_shape": (4, 1)},
+            self.KEY_2D: {"slice": slice(4, 5), "orig_shape": (1, 1)},
+        }
+
+    def _metadata(self, output_map):
+        return {"target": {"_channel_map": output_map}}
+
+    def _batch_dict(self, y_pred, extra=None):
+        """Minimal batch_dict as the caller would build before apply_postblocks."""
+        d = {"y_pred": y_pred, "metadata": self._metadata(self._output_map())}
+        if extra:
+            d.update(extra)
+        return d
+
+    def test_nested_dict_structure(self):
+        """Output is y_processed[source][var_key] — source then flat 4-part slash key."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        result = Reconstruct()(self._batch_dict(torch.randn(2, 5, 8, 8)))
+
+        pred = result["y_processed"]
+        assert "Test_ARCOERA5" in pred
+        assert self.KEY_3D in pred["Test_ARCOERA5"]
+        assert self.KEY_2D in pred["Test_ARCOERA5"]
+
+    def test_tensor_shapes_4d_input(self):
+        """3D var → (B, n_levels, 1, H, W), 2D var → (B, 1, 1, H, W)."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        B, H, W = 2, 8, 8
+        result = Reconstruct()(self._batch_dict(torch.randn(B, 5, H, W)))
+
+        pred = result["y_processed"]
+        assert pred["Test_ARCOERA5"][self.KEY_3D].shape == (B, 4, 1, H, W)
+        assert pred["Test_ARCOERA5"][self.KEY_2D].shape == (B, 1, 1, H, W)
+
+    def test_5d_input_no_extra_dim(self):
+        """5D y_pred (B, C, 1, H, W) produces the same shape as 4D — no spurious singleton."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        B, H, W = 2, 8, 8
+        y_pred_4d = torch.randn(B, 5, H, W)
+        y_pred_5d = y_pred_4d.unsqueeze(2)  # (B, 5, 1, H, W)
+
+        result_4d = Reconstruct()(self._batch_dict(y_pred_4d))
+        result_5d = Reconstruct()(self._batch_dict(y_pred_5d))
+
+        shape_4d = result_4d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
+        shape_5d = result_5d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
+        assert shape_4d == shape_5d == (B, 4, 1, H, W)
+
+    def test_values_match_input_channels(self):
+        """Reconstructed tensors contain exactly the channels sliced from y_pred."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        B, H, W = 1, 4, 4
+        y_pred = torch.randn(B, 5, H, W)
+        result = Reconstruct()(self._batch_dict(y_pred))
+        pred = result["y_processed"]
+
+        assert torch.equal(
+            pred["Test_ARCOERA5"][self.KEY_3D],
+            y_pred[:, 0:4].unflatten(1, (4, 1)),
+        )
+        assert torch.equal(
+            pred["Test_ARCOERA5"][self.KEY_2D],
+            y_pred[:, 4:5].unflatten(1, (1, 1)),
+        )
+
+    def test_other_keys_pass_through(self):
+        """Keys other than 'y_pred' are preserved unchanged."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        raw = {"Test_ERA5": {"input": {}}}
+        batch = self._batch_dict(torch.randn(1, 5, 4, 4), extra={"input": torch.zeros(1), "_raw": raw})
+        result = Reconstruct()(batch)
+        assert result["_raw"] is raw
+        assert "input" in result
+
+    def test_metadata_passthrough(self):
+        """metadata dict is returned at the same key, unchanged."""
+        from credit.postblock.reconstruct import Reconstruct
+
+        batch = self._batch_dict(torch.randn(1, 5, 4, 4))
+        original_meta = batch["metadata"]
+        result = Reconstruct()(batch)
+        assert result["metadata"] is original_meta
 
 
 if __name__ == "__main__":

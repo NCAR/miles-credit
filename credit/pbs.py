@@ -135,24 +135,6 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     export CUDA_VISIBLE_DEVICES={cuda_devices}
 
-    export NCCL_SOCKET_IFNAME=hsn
-    export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
-    export MPICH_OFI_NIC_POLICY=GPU
-    export MPICH_GPU_SUPPORT_ENABLED=1
-
-    export NCCL_IB_DISABLE=1
-    export NCCL_CROSS_NIC=1
-    export NCCL_NCHANNELS_PER_NET_PEER=4
-
-    export MPICH_RDMA_ENABLED_CUDA=1
-    export NCCL_NET="AWS Libfabric"
-    export NCCL_NET_GDR_LEVEL=PBH
-
-    export FI_CXI_DISABLE_HOST_REGISTER=1
-    export FI_CXI_OPTIMIZED_MRS=false
-    export FI_MR_CACHE_MONITOR=userfaultfd
-    export FI_CXI_DEFAULT_CQ_SIZE=131072
-
     # logger.info the results
     echo "Number of nodes: {num_nodes}"
     echo "Number of GPUs per node: {num_gpus}"
@@ -243,21 +225,30 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
     else:
         torchrun = f"$(conda info --base)/envs/{conda}/bin/torchrun"
 
-    rdzv_block = (
-        '--rdzv-backend=c10d \\\n    --rdzv-endpoint="localhost:29500"'
+    total_ranks = num_nodes * num_gpus
+    cuda_devices = ",".join(str(i) for i in range(num_gpus))
+
+    launch_cmd = (
+        f"${{TORCHRUN}} \\\n"
+        f"    --nnodes=1 \\\n"
+        f"    --nproc-per-node={num_gpus} \\\n"
+        f"    --rdzv-backend=c10d \\\n"
+        f'    --rdzv-endpoint="localhost:29500" \\\n'
+        f"    {script_path} \\\n"
+        f"        -c {config_save_path}"
         if num_nodes == 1
-        else ('--rdzv-backend=c10d \\\n    --rdzv-id=credit_job \\\n    --rdzv-endpoint="${head_node_ip}:29500"')
+        else (
+            f"nodes=( $( cat $PBS_NODEFILE ) )\n"
+            f"head_node=${{nodes[0]}}\n"
+            f"head_node_ip=$(ssh $head_node hostname -i | awk '{{print $1}}')\n\n"
+            f"MASTER_ADDR=$head_node_ip MASTER_PORT=29500 \\\n"
+            f"mpiexec -n {total_ranks} --ppn {num_gpus} --cpu-bind none \\\n"
+            f"    {torchrun.replace('/bin/torchrun', '/bin/python')} {script_path} \\\n"
+            f"        -c {config_save_path}"
+        )
     )
 
-    head_node_section = (
-        ""
-        if num_nodes == 1
-        else """
-nodes=( $( cat $PBS_NODEFILE ) )
-head_node=${nodes[0]}
-head_node_ip=$(ssh $head_node hostname -i | awk '{print $1}')
-"""
-    )
+    torchrun_line = f"TORCHRUN={torchrun}\n" if num_nodes == 1 else ""
 
     script = f"""#!/bin/bash -l
 #PBS -A {pbs_options.get("project", "NAML0001")}
@@ -271,24 +262,18 @@ head_node_ip=$(ssh $head_node hostname -i | awk '{print $1}')
 module --force purge
 module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
 
-TORCHRUN={torchrun}
-{head_node_section}
-export PYTHONPATH="{os.path.dirname(str(script_path))}:${{PYTHONPATH:-}}"
+{torchrun_line}export PYTHONPATH="{os.path.dirname(str(script_path))}:${{PYTHONPATH:-}}"
 export LOGLEVEL=INFO
 export NCCL_DEBUG=WARN
+export CUDA_VISIBLE_DEVICES={cuda_devices}
 export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
 
-echo "=== CREDIT v2 parallelism (torchrun) ==="
+
 echo "Host   : $(hostname)"
 echo "Date   : $(date)"
 echo "Nodes  : {num_nodes}  GPUs/node: {num_gpus}"
 
-${{TORCHRUN}} \\
-    --nnodes={num_nodes} \\
-    --nproc-per-node={num_gpus} \\
-    {rdzv_block} \\
-    {script_path} \\
-        -c {config_save_path}
+{launch_cmd}
 
 echo "Done at $(date)"
 """

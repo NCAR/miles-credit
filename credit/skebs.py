@@ -4,7 +4,8 @@ from os.path import join
 
 import torch
 from torch import nn
-import torch_harmonics as harmonics
+from torch_harmonics import RealSHT, InverseRealSHT, InverseRealVectorSHT
+from torch_harmonics.quadrature import clenshaw_curtiss_weights
 import segmentation_models_pytorch as smp
 
 from torch.amp import custom_fwd
@@ -449,12 +450,10 @@ class SKEBS(nn.Module):
         for both scalar and vector fields.
         """
         # Initialize spherical harmonics transformation objects
-        self.sht = harmonics.RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
-        self.isht = harmonics.InverseRealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
-        # self.vsht = harmonics.RealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
-        self.ivsht = harmonics.InverseRealVectorSHT(
-            self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False
-        )
+        self.sht = RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        self.isht = InverseRealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        # self.vsht = RealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
+        self.ivsht = InverseRealVectorSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
         self.lmax = self.isht.lmax
         self.mmax = self.isht.mmax
 
@@ -464,7 +463,7 @@ class SKEBS(nn.Module):
         # )
 
         ## equiangular grid
-        cost, w = harmonics.quadrature.clenshaw_curtiss_weights(self.nlat, -1, 1)
+        cost, w = clenshaw_curtiss_weights(self.nlat, -1, 1)
         self.lats = -torch.as_tensor(np.arcsin(cost))
         self.lons = torch.linspace(0, 2 * np.pi, self.nlon + 1, dtype=torch.float64)[: self.nlon]
 

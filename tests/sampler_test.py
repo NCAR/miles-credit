@@ -1,8 +1,10 @@
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import xarray as xr
 import pytest
-from credit.datasets.era5 import ERA5Dataset
+from credit.datasets.local import LocalDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
 
@@ -14,7 +16,7 @@ def annual_xr_dataset():
     each with time coords restricted to that year.
     """
 
-    def make_ds(start, end):
+    def make_ds(start: str, end: str) -> xr.Dataset:
         time = pd.date_range(start, end, freq="6h")
         level = [1000, 850, 500, 300]
         lat = np.linspace(-90, 90, 21)
@@ -50,18 +52,18 @@ def annual_xr_dataset():
 
 
 @pytest.fixture
-def patch_era5_io_multiyear(monkeypatch, annual_xr_dataset):
+def patch_era5_io_multiyear(monkeypatch: pytest.MonkeyPatch, annual_xr_dataset: dict[int, xr.Dataset]):
     """
     Patch glob + xarray open so ERA5Dataset sees
     multiple yearly files and routes correctly.
     """
-    ERA5_MODULE = "credit.datasets.era5"
+    BASE_DATASET_MODULE = "credit.datasets.base_dataset"
 
     # 1) glob returns two "files", one per year
-    monkeypatch.setattr(f"{ERA5_MODULE}.glob", lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"])
+    monkeypatch.setattr(f"{BASE_DATASET_MODULE}.glob", lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"])
 
     # 2) open_dataset returns dataset based on year in filename
-    def fake_open_dataset(path):
+    def fake_open_dataset(path: str) -> xr.Dataset:
         for year in (2022, 2023):
             if str(year) in path:
                 return annual_xr_dataset[year]
@@ -73,7 +75,7 @@ def patch_era5_io_multiyear(monkeypatch, annual_xr_dataset):
 
 
 @pytest.fixture
-def minimal_config():
+def minimal_config() -> dict[str, Any]:
     return {
         "timestep": "6h",
         "forecast_len": 6,
@@ -81,6 +83,7 @@ def minimal_config():
         "end_datetime": "2023-01-05",
         "source": {
             "ERA5": {
+                "dataset_type": "local",
                 "level_coord": "level",
                 "levels": [1000, 850, 500, 300],
                 "variables": {
@@ -107,9 +110,9 @@ def minimal_config():
     }
 
 
-def test_sampler_multistep(minimal_config, patch_era5_io_multiyear):
+def test_sampler_multistep(minimal_config: dict[str, Any], patch_era5_io_multiyear):
 
-    dataset = ERA5Dataset(minimal_config, return_target=True)
+    dataset = LocalDataset(minimal_config, return_target=True)
     batch_size = 4
     sampler = DistributedMultiStepBatchSampler(
         dataset=dataset,

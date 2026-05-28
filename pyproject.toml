@@ -17,7 +17,6 @@ dependencies = [
     "scikit-learn",
     "h5py<=3.14.0",
     "pyarrow",
-    "pysteps",
     "xarray",
     "netcdf4",
     "h5netcdf",
@@ -33,7 +32,7 @@ dependencies = [
     "segmentation-models-pytorch",
     "haversine",
     "pvlib",
-    "torch-harmonics",
+    "torch-harmonics<0.9",
     "torch_geometric",
     "torchmetrics",
     "fsspec",
@@ -42,7 +41,9 @@ dependencies = [
     "setuptools_scm",
     "setuptools",
     "numba",
-    "tensorboard"
+    "tensorboard",
+    "fastapi",
+    "overrides"
 ]
 
 [project.optional-dependencies]
@@ -115,4 +116,7 @@ ignore = ["D417", "F841"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.pytest.ini_options]
+addopts = "--continue-on-collection-errors"
 

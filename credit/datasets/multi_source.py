@@ -10,11 +10,9 @@ instantiated; absent sources are silently skipped.
 Sample structure returned by __getitem__::
 
     {
-        "era5": {
-            "input":    {"era5/prognostic/3d/T": tensor, ...},
-            "target":   {"era5/prognostic/3d/T": tensor, ...},  # return_target only
-            "metadata": {"input_datetime": int, "target_datetime": int},
-        },
+        "input":    {"era5": {"era5/prognostic/3d/T": tensor, ...}, ...},
+        "target":   {"era5": {"era5/prognostic/3d/T": tensor, ...}, ...},  # return_target only
+        "metadata": {"era5": {"input_datetime": int, "target_datetime": int}, ...},
     }
 
 Usage::
@@ -31,7 +29,7 @@ Usage::
 Extending with a new source::
 
     # In _SOURCE_REGISTRY, add:
-    "NewSource": NewSourceDataset,
+    "NEW_SOURCE": ("credit.datasets.new_source", "NewSourceDataset"),
 
     # The dataset class must accept (config, return_target) and expose
     # a ``datetimes`` attribute (pd.DatetimeIndex).
@@ -39,31 +37,34 @@ Extending with a new source::
 
 from __future__ import annotations
 
+import importlib
 import logging
+from typing import Any
 
 import pandas as pd
-from torch.utils.data import Dataset
 
-from credit.datasets.era5 import ERA5Dataset
-from credit.datasets.MRMS import MRMSDataset
-from credit.datasets.goes import GOESDataset
-from credit.datasets.hrrr import HRRRDataset
+from credit.datasets.base_dataset import AbstractBaseDataset, BaseDataset
 
 logger = logging.getLogger(__name__)
 
-# Maps config["source"] keys to Dataset classes.
-# Add entries here to register new data sources.
-_SOURCE_REGISTRY: dict[str, type] = {
-    "ERA5": ERA5Dataset,
-    "MRMS": MRMSDataset,
-    "GOES": GOESDataset,
-    "HRRR": HRRRDataset,
-    "HRRR_NAT": HRRRDataset,
-    "HRRR_SUBH": HRRRDataset,
+# Maps config["source"] dataset_type keys to (module_path, class_name) pairs.
+# Modules are imported on first use so optional heavy dependencies (gcsfs,
+# herbie, s3fs, …) are never loaded unless that source type is actually
+# requested.  Add entries here to register new data sources.
+_SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
+    "BASE": ("credit.datasets.base_dataset", "BaseDataset"),  # placeholders / testing
+    "LOCAL": ("credit.datasets.local", "LocalDataset"),
+    "ARCO_ERA5": ("credit.datasets.era5", "ARCOERA5Dataset"),
+    "WeatherBench2_ERA5": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
+    "MRMS": ("credit.datasets.mrms", "MRMSDataset"),
+    "GOES": ("credit.datasets.goes", "GOESDataset"),
+    "HRRR": ("credit.datasets.hrrr", "HRRRDataset"),
+    "HRRR_NAT": ("credit.datasets.hrrr", "HRRRDataset"),
+    "HRRR_SUBH": ("credit.datasets.hrrr", "HRRRDataset"),
 }
 
 
-def make_single_source_subconfig(config: dict, source_key: str) -> dict:
+def make_single_source_subconfig(config: dict[str, Any], user_dataset_name: str) -> dict[str, Any]:
     """
     Return a modified config dict containing only the specified source.
 
@@ -73,22 +74,55 @@ def make_single_source_subconfig(config: dict, source_key: str) -> dict:
 
     Args:
         config: Original multisource config dict.
-        source_key: Key of the source to isolate (e.g., "HRRR").
+        user_dataset_name: Unique dataset name specified by the user in config["source"] (e.g. "Example_ERA5").
 
     Returns:
         New config dict containing only the specified source's config block.
     """
-    return {"source": {source_key: config["source"][source_key]}, **{k: v for k, v in config.items() if k != "source"}}
+    return {
+        "source": {user_dataset_name: config["source"][user_dataset_name]},
+        **{k: v for k, v in config.items() if k != "source"},
+    }
 
 
-class MultiSourceDataset(Dataset):
-    """PyTorch Dataset that combines multiple source datasets.
+def route_to_dataset_class(source_cfg: dict[str, Any]) -> type:
+    """
+    Return the appropriate Dataset class based on the "dataset_type" field in the source config.
+
+    The module containing the class is imported lazily on first call so that
+    optional heavy dependencies are not loaded unless this source type is used.
+
+    Args:
+        source_cfg: Config dict for a single source (e.g. config["source"]["Example_ERA5"]).
+
+    Returns:
+        Dataset class corresponding to the "dataset_type" field.
+
+    Raises:
+        ValueError: If the "dataset_type" field is missing or does not correspond to a registered dataset.
+    """
+    dataset_type = source_cfg.get("dataset_type", "").upper()
+    if not dataset_type:
+        raise ValueError("Source config must contain a 'dataset_type' field.")
+    entry = _SOURCE_REGISTRY.get(dataset_type)
+    if not entry:
+        raise ValueError(
+            f"Unrecognized dataset_type '{dataset_type}' in source config. Must be one of: {list(_SOURCE_REGISTRY.keys())}"
+        )
+    module_path, class_name = entry
+    return getattr(importlib.import_module(module_path), class_name)
+
+
+class MultiSourceDataset(AbstractBaseDataset):
+    """CREDIT Dataset that combines multiple source datasets.
 
     Instantiates one sub-dataset per source key found in ``config["source"]``,
     computes the intersection of their valid timestamps, and delegates each
     ``__getitem__`` call to all active sub-datasets.
 
     See module docstring for full output structure and usage examples.
+
+    Note that we inherit from AbstractBaseDataset _rather_ than BaseDataset.
 
     Attributes:
         datasets: Ordered mapping of lowercase source name to its Dataset
@@ -99,23 +133,27 @@ class MultiSourceDataset(Dataset):
             sub-dataset's ``static_metadata`` attribute.
     """
 
-    def __init__(self, config: dict, return_target: bool = False) -> None:
-        self.datasets: dict[str, Dataset] = {}
+    def __init__(self, config: dict[str, Any], return_target: bool = False) -> None:
+        super().__init__(config, return_target)
+        self.datasets: dict[str, BaseDataset] = {}
         source_cfg = config.get("source", {})
-        rest_cfg = {k: v for k, v in config.items() if k != "source"}
 
-        for key, cls in _SOURCE_REGISTRY.items():
-            if key in source_cfg:
-                # Pass in just the sub-config for this source to avoid confusion
-                # with multisource datasets (e.g., HRRR and HRRR_NAT)
-                sub_config = make_single_source_subconfig(config, key)
-                self.datasets[key.lower()] = cls(sub_config, return_target)
-                logger.info("MultiSourceDataset: registered source '%s'", key.lower())
-            else:
-                logger.debug("MultiSourceDataset: source '%s' not in config, skipping", key)
+        # Loop through all the options in the source config. These will have user
+        # provided (unique) names.
+        for user_dataset_name in source_cfg.keys():
+            # Pass in just the sub-config for this source to avoid confusion
+            # with multisource datasets (e.g., HRRR and HRRR_NAT)
+            sub_config = make_single_source_subconfig(config, user_dataset_name)
+            # Route to the appropriate dataset class based on the "dataset_name" field in the sub-config
+            cls = route_to_dataset_class(sub_config["source"][user_dataset_name])
+            self.datasets[user_dataset_name] = cls(sub_config, return_target)
+            logger.info(f"MultiSourceDataset: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
 
-        self.datetimes: pd.DatetimeIndex = self._intersect_timestamps()
-        self.static_metadata: dict[str, dict] = {name: ds.static_metadata for name, ds in self.datasets.items()}
+        self.datetimes: pd.DatetimeIndex = self._build_master_clock(config)
+
+        self.static_metadata: dict[str, dict[str, Any]] = {
+            name: ds.static_metadata for name, ds in self.datasets.items()
+        }
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -124,7 +162,7 @@ class MultiSourceDataset(Dataset):
     def __len__(self) -> int:
         return len(self.datetimes)
 
-    def __getitem__(self, args: tuple) -> dict:
+    def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, dict[str, Any]]:
         """Return a dict of per-source sample dicts.
 
         Args:
@@ -133,27 +171,72 @@ class MultiSourceDataset(Dataset):
                 produced by the sampler.
 
         Returns:
-            Dict keyed by lowercase source name, each value being the
-            sub-dataset's own sample dict::
+            Dict keyed by data type, each value being a dict of source name
+            to that source's data::
 
-                {"input": {...}, "target": {...}, "metadata": {...}}
+                {"input": {"era5": {...}, ...}, "target": {...}, "metadata": {...}}
         """
-        return {name: ds[args] for name, ds in self.datasets.items()}
+        raw = {name: ds[args] for name, ds in self.datasets.items()}
+        result: dict[str, dict[str, Any]] = {}
+        for source_name, source_dict in raw.items():
+            for data_type, data in source_dict.items():
+                result.setdefault(data_type, {})[source_name] = data
+        return result
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _intersect_timestamps(self) -> pd.DatetimeIndex:
-        """Return timestamps common to all active source datasets."""
+    def _build_master_clock(self, config: dict[str, Any]) -> pd.DatetimeIndex:
+        """Build the master sampling clock from the global config.
+
+        The clock is anchored to the global ``start_datetime``, ``end_datetime``,
+        and ``timestep``.  For each source:
+
+        - **Normal sources** (no ``temporal_mode``): the clock is filtered to
+          timestamps that exist exactly in that source's native datetimes.  A
+          warning is emitted when the source's native timestep differs from the
+          master clock timestep and ``temporal_mode`` is not set.
+        - **Persist sources** (``temporal_mode: persist``): the clock is only
+          clipped to the source's coverage range.  Fine-resolution master-clock
+          ticks are snapped to the last native timestamp inside
+          ``BaseDataset.__getitem__``.
+        """
         if not self.datasets:
             return pd.DatetimeIndex([])
 
-        sets = [set(ds.datetimes) for ds in self.datasets.values()]
-        common = set.intersection(*sets)
-        if not common:
+        master_dt = pd.Timedelta(config["timestep"])
+        num_steps = config.get("forecast_len", 1)
+        master_start = pd.Timestamp(config["start_datetime"])
+        master_end = pd.Timestamp(config["end_datetime"])
+
+        master = pd.date_range(master_start, master_end - num_steps * master_dt, freq=master_dt)
+
+        source_cfg = config.get("source", {})
+        for name, ds in self.datasets.items():
+            if not len(ds.datetimes):
+                continue
+            temporal_mode = source_cfg.get(name, {}).get("temporal_mode")
+
+            if temporal_mode == "persist":
+                # Clip master clock to the source's coverage window only
+                ds_start = ds.datetimes[0]
+                ds_end = ds.datetimes[-1]
+                master = master[(master >= ds_start) & (master <= ds_end + ds.dt)]
+            else:
+                # Exact match required — warn if resolutions differ
+                if hasattr(ds, "dt") and ds.dt != master_dt:
+                    logger.warning(
+                        f"MultiSourceDataset: source '{name}' has timestep {ds.dt} which differs "
+                        f"from the master clock timestep {master_dt}, but 'temporal_mode' is not set. "
+                        "Consider setting temporal_mode: persist in the source config if this source "
+                        "should persist its last sample between master-clock ticks."
+                    )
+                master = master[master.isin(ds.datetimes)]
+
+        if not len(master):
             logger.warning(
-                "MultiSourceDataset: timestamp intersection across sources is empty. "
-                "Check that start_datetime/end_datetime overlap for all configured sources."
+                "MultiSourceDataset: master clock is empty after applying source constraints. "
+                "Check that start_datetime/end_datetime and timestep are consistent across sources."
             )
-        return pd.DatetimeIndex(sorted(common))
+        return master

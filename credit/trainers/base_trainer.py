@@ -16,7 +16,7 @@ import os
 import shutil
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 
 import numpy as np
 import pandas as pd
@@ -70,7 +70,19 @@ class EMATracker:
         self.shadow: OrderedDict = OrderedDict()
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
         for k, v in state.items():
+            if self._is_spectral_norm_buffer(k, state):
+                continue  # power-iteration vectors must not be EMA-averaged
             self.shadow[k] = v.detach().float().cpu().clone()
+
+    @staticmethod
+    def _is_spectral_norm_buffer(key: str, state: dict) -> bool:
+        # nn.utils.spectral_norm stores weight_u / weight_v alongside weight_orig.
+        # Averaging these vectors destroys the power-iteration convergence and causes
+        # sigma = u^T W v → 0 in eval mode → weight explodes.
+        if key.endswith("_u") or key.endswith("_v"):
+            orig_key = key[:-2] + "_orig"
+            return orig_key in state
+        return False
 
     @torch.no_grad()
     def update(self, model: torch.nn.Module):
@@ -78,6 +90,8 @@ class EMATracker:
         effective_decay = min(self.decay, (1 + self.step) / (10 + self.step))
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
         for k, v in state.items():
+            if k not in self.shadow:
+                continue  # spectral norm buffers are excluded
             self.shadow[k].mul_(effective_decay).add_(v.detach().float().cpu(), alpha=1.0 - effective_decay)
 
     @torch.no_grad()
@@ -179,7 +193,7 @@ class BaseTrainer(ABC):
             ema_decay = trainer_conf.get("ema_decay", 0.9999)
             self.ema: Optional[EMATracker] = EMATracker(self.model, decay=ema_decay)
             ema_path = os.path.join(self.save_loc, "checkpoint_ema.pt")
-            if os.path.exists(ema_path):
+            if self.load_weights and os.path.exists(ema_path):
                 ema_ckpt = torch.load(ema_path, map_location="cpu", weights_only=False)
                 self.ema.load_state_dict(ema_ckpt["model_state_dict"])
                 logger.info(f"Resumed EMA from {ema_path} (step {self.ema.step})")
@@ -365,7 +379,7 @@ class BaseTrainer(ABC):
         scaler: GradScaler,
         scheduler: LRScheduler,
         metrics: Dict[str, Any],
-        rollout_scheduler: Optional[callable] = None,
+        rollout_scheduler: Optional[Callable] = None,
         trial: bool = False,
     ) -> Dict[str, Any]:
         """

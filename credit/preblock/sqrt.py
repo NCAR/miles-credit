@@ -4,7 +4,7 @@ import torch
 
 class SqrtTransform(BasePreblock):
     """
-    Applies a log transformation to specified variables in a batch dict.
+    Applies a sqrt transformation to specified variables in a batch dict.
 
     Expected dict structure:
         batch[source][data_type]['source/var_type/var_shape/var_name']
@@ -34,25 +34,19 @@ class SqrtTransform(BasePreblock):
             )
 
     def forward(self, batch: dict) -> dict:
+        batch = self._copy_batch(batch)
         for var_key in self.variables:
             source = var_key.split("/")[0]
 
-            if source not in batch:
-                raise KeyError(f"SqrtTransform: source '{source}' not found in batch.")
-
             for data_type in self.data_types:
-                # Silent skip: data_type absent (e.g. 'target' during inference)
-                if data_type not in batch[source]:
+                if data_type not in batch:
+                    continue
+                if source not in batch[data_type]:
+                    raise KeyError(f"SqrtTransform: source '{source}' not found in batch['{data_type}'].")
+                if var_key not in batch[data_type][source]:
                     continue
 
-                # Silent skip: variable not present in this data_type
-                if var_key not in batch[source][data_type]:
-                    print(batch[source][data_type].keys())
-                    print(f"SqrtTransform: data_type '{data_type}' not found in batch.")
-                    continue
-
-                x = batch[source][data_type][var_key]
-                # Out-of-place: safe for autograd
-                batch[source][data_type][var_key] = torch.sqrt(x)
+                x = batch[data_type][source][var_key]
+                batch[data_type][source][var_key] = torch.sqrt(x)
 
         return batch
