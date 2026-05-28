@@ -313,6 +313,22 @@ def _convert(args: argparse.Namespace) -> None:
             }
         )
         if mean_path or std_path:
+            # V1 configs often point to a residual (6h-difference) std file.
+            # V2 predicts absolute values, so the scaler must use absolute std.
+            # If the std_path looks like a residual file, try to find the absolute version.
+            if std_path and "residual" in os.path.basename(std_path):
+                abs_candidate = std_path.replace("std_residual", "std")
+                if os.path.exists(abs_candidate):
+                    changes.append(
+                        f"std_path: auto-switched from residual to absolute std ({os.path.basename(abs_candidate)})"
+                    )
+                    std_path = abs_candidate
+                else:
+                    print(
+                        "  WARNING: std_path appears to be a residual std file; V2 trains on absolute\n"
+                        "  values so loss will be inflated. Provide an absolute std file via --std-path.",
+                        file=sys.stderr,
+                    )
             # Build BridgeScaler JSON files from old z-score NetCDF files.
             # Group variables by (field_type, dim) so the converter knows the
             # v2 key structure.
