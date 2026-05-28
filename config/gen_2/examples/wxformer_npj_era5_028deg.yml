@@ -50,7 +50,12 @@ preblocks:
 trainer:
   type: era5-gen2
 
-  mode: fsdp
+  parallelism:
+    data: fsdp2             # ddp | fsdp2 | none
+    tensor: 1               # tensor-parallel degree  (1 = disabled)
+    domain: 1               # domain-parallel shards  (1 = disabled)
+
+  # mode: fsdp            # legacy key — ignored when parallelism: block is present
   cpu_offload: False
   activation_checkpoint: True
 

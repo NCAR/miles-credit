@@ -133,7 +133,29 @@ postblocks:
 trainer:
   type: era5-gen2           # use the v2 trainer (new nested data schema)
 
-  mode: none               # none | ddp | fsdp  (ddp recommended for multi-GPU)
+  # ---- Parallelism ----
+  # Remove this block entirely for single-GPU training.
+  # data: ddp  — standard multi-GPU data parallel (recommended baseline)
+  # data: fsdp2 — shard model + optimizer across GPUs (large models)
+  # tensor: N  — split attention heads across N GPUs (very large models)
+  # domain: N  — split spatial domain across N GPUs (pairs with ddp or fsdp2)
+  # Example: 4-GPU DDP-only run
+  #   parallelism:
+  #     data: ddp
+  # Example: 4-GPU domain-parallel (2 domain shards × 2 data-parallel replicas)
+  #   parallelism:
+  #     data: ddp
+  #     domain: 2
+  # Example: 4-GPU FSDP2 + domain (no tensor parallelism)
+  #   parallelism:
+  #     data: fsdp2
+  #     domain: 2
+  parallelism:
+    data: ddp               # ddp | fsdp2 | none
+    tensor: 1               # tensor-parallel degree (1 = disabled)
+    domain: 1               # domain-parallel shards (1 = disabled)
+
+  # mode: none             # legacy key — ignored when parallelism: block is present
   cpu_offload: False
   activation_checkpoint: True
 
