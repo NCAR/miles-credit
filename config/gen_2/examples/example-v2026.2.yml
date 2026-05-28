@@ -58,8 +58,6 @@ data:
   one_shot: True
   lead_time_periods: 6
   skip_periods: null
-  static_first: True
-  scaler_type: 'std_new'
 
 
 # ---- USER SETTINGS: validation data ---- #
@@ -99,8 +97,6 @@ validation_data:
   one_shot: True
   lead_time_periods: 6
   skip_periods: null
-  static_first: True
-  scaler_type: 'std_new'
 
 
 # ---- USER SETTINGS: training hyperparameters ---- #
