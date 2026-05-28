@@ -242,7 +242,7 @@ def test_register_field_success(minimal_config: Dict[str, Any], patch_base_datas
     assert ds.file_dict["prognostic"] is not None, "Expected file_dict['prognostic'] to be set, got None"
 
 
-def test_register_field_invalid_type(minimal_config: Dict[str, Any]) -> None:
+def test_register_field_invalid_type(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """Test that an invalid field type raises KeyError."""
     config = minimal_config.copy()
     config["source"]["TestSource_Base"]["variables"]["invalid_field"] = {"vars_2D": ["x"]}
@@ -250,7 +250,7 @@ def test_register_field_invalid_type(minimal_config: Dict[str, Any]) -> None:
         BaseDataset(config)
 
 
-def test_register_field_null_config(minimal_config: Dict[str, Any]) -> None:
+def test_register_field_null_config(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """Test that a null field config is handled correctly."""
     config = minimal_config.copy()
     config["source"]["TestSource_Base"]["variables"]["prognostic"] = None
@@ -373,6 +373,94 @@ def test_getitem_return_target_false(minimal_config: Dict[str, Any], patch_base_
     sample = ds[(ds.datetimes[0], 0)]
     assert "target" not in sample
     assert "target_datetime" not in sample["metadata"]
+
+
+# ---------------------------------------------------------------------------
+# temporal_mode: persist tests
+# ---------------------------------------------------------------------------
+
+
+def test_temporal_mode_default_is_none(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """temporal_mode is None by default (no key in source config)."""
+    ds = BaseDataset(minimal_config)
+    assert ds.temporal_mode == "exact"
+
+
+def test_temporal_mode_set_from_config(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """temporal_mode is read from the source config block."""
+    minimal_config["source"]["TestSource_Base"]["temporal_mode"] = "persist"
+    ds = BaseDataset(minimal_config)
+    assert ds.temporal_mode == "persist"
+
+
+def test_persist_snaps_to_last_native_timestamp(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """__getitem__ with temporal_mode=persist snaps fine-resolution t to last native timestamp."""
+    minimal_config["source"]["TestSource_Base"]["temporal_mode"] = "persist"
+    ds = BaseDataset(minimal_config)
+    t_native = ds.datetimes[0]
+
+    # A timestamp 1 hour after the first native tick (within the same 6h native interval)
+    t_fine = t_native + pd.Timedelta("1h")
+    sample_native = ds[(t_native, 0)]
+    sample_fine = ds[(t_fine, 0)]
+
+    # Both should resolve to the same native timestamp
+    assert sample_fine["metadata"]["input_datetime"] == sample_native["metadata"]["input_datetime"]
+
+
+def test_persist_before_range_raises(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """_resolve_persist_timestamp raises ValueError when t < first native timestamp."""
+    minimal_config["source"]["TestSource_Base"]["temporal_mode"] = "persist"
+    ds = BaseDataset(minimal_config)
+    t_before = ds.datetimes[0] - pd.Timedelta("1h")
+
+    with pytest.raises(ValueError, match="before the first available native timestamp"):
+        ds._resolve_persist_timestamp(t_before)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_persist_cache_hit_returns_same_object(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """Two calls with t values that resolve to the same native timestamp return the same cached dict."""
+    minimal_config["source"]["TestSource_Base"]["temporal_mode"] = "persist"
+    ds = BaseDataset(minimal_config)
+    t_native = ds.datetimes[0]
+    t_fine = t_native + pd.Timedelta("1h")
+
+    sample_a = ds[(t_native, 0)]
+    sample_b = ds[(t_fine, 0)]
+
+    assert sample_a is sample_b
+
+
+def test_persist_new_interval_evicts_cache(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """Moving to a new native interval evicts the previous cached entries."""
+    minimal_config["source"]["TestSource_Base"]["temporal_mode"] = "persist"
+    ds = BaseDataset(minimal_config)
+    t0 = ds.datetimes[0]
+    t1 = ds.datetimes[1]  # next native tick
+
+    sample_t0 = ds[(t0, 0)]
+    assert len(ds._persist_cache) == 1  # pyright: ignore[reportPrivateUsage]
+
+    # Advance to next native interval — cache should evict t0 entry
+    ds[(t1, 0)]
+    cached_keys = list(ds._persist_cache.keys())  # pyright: ignore[reportPrivateUsage]
+    assert all(k[0] == t1 for k in cached_keys)
+    assert sample_t0 is not ds._persist_cache.get((t0, True))  # pyright: ignore[reportPrivateUsage]
+
+
+def test_persist_i0_and_i1_are_separate_cache_entries(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None
+) -> None:
+    """i==0 and i>0 are cached under separate keys for the same native timestamp."""
+    minimal_config["source"]["TestSource_Base"]["temporal_mode"] = "persist"
+    ds = BaseDataset(minimal_config)
+    t = ds.datetimes[0]
+
+    sample_i0 = ds[(t, 0)]
+    sample_i1 = ds[(t, 1)]
+
+    assert sample_i0 is not sample_i1
+    assert len(ds._persist_cache) == 2  # pyright: ignore[reportPrivateUsage]
 
 
 # ---------------------------------------------------------------------------

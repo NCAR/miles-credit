@@ -31,7 +31,7 @@ class LogTransform(BasePreblock):
         super().__init__()
         self.variables = variables
         self.data_types = data_types or ["input", "target"]
-        self.eps = torch.tensor(eps)
+        self.eps = torch.tensor(float(eps))
 
         # Validate data_types at init
         invalid = set(self.data_types) - set(self.VALID_DATA_TYPES)
@@ -48,6 +48,7 @@ class LogTransform(BasePreblock):
             raise ValueError(f"Unsupported log base '{base}'. Choose from: 'e', '2', '10'.")
 
     def forward(self, batch: dict) -> dict:
+        batch = self._copy_batch(batch)
         for var_key in self.variables:
             source = var_key.split("/")[0]
 

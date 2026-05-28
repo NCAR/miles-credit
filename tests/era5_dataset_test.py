@@ -28,7 +28,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from credit.datasets.local import LocalDataset
-from credit.datasets.era5 import ARCOERA5Dataset
+from credit.datasets.era5 import ARCOERA5Dataset, WeatherBench2ERA5Dataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 
@@ -205,12 +205,12 @@ def minimal_arco_era5_config() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_dataset_len(minimal_config: dict[str, Any]):
+def test_dataset_len(minimal_config: dict[str, Any], patch_era5_io_multiyear: dict[int, xr.Dataset]):
     ds: LocalDataset = LocalDataset(minimal_config)
     assert len(ds) > 0
 
 
-def test_return_target(minimal_config: dict[str, Any]):
+def test_return_target(minimal_config: dict[str, Any], patch_era5_io_multiyear: dict[int, xr.Dataset]):
     ds: LocalDataset = LocalDataset(minimal_config, return_target=True)
     t: pd.Timestamp = ds.datetimes[0]
 
@@ -475,3 +475,84 @@ def Test_ARCOERA5_single_load(minimal_arco_era5_config: dict[str, Any]):
     )
     assert sample["target"]["Test_ARCOERA5/prognostic/3d/temperature"].min() > 200
     assert ~torch.any(torch.isnan(sample["target"]["Test_ARCOERA5/prognostic/3d/temperature"]))
+
+
+@pytest.fixture
+def minimal_wb2_era5_config():
+    return {
+        "timestep": "6h",
+        "forecast_len": 1,
+        "start_datetime": "2020-01-01",
+        "end_datetime": "2020-01-02",
+        "source": {
+            "WeatherBench2_ERA5": {
+                "dataset_type": "weatherbench2_era5",
+                "resolution": "64x32",
+                "level_coord": "level",
+                "levels": [500, 850],
+                "variables": {
+                    "prognostic": {
+                        "vars_3D": ["temperature", "u_component_of_wind"],
+                        "vars_2D": ["surface_pressure", "2m_temperature"],
+                    },
+                    "dynamic_forcing": None,
+                    "static": {
+                        "vars_2D": ["geopotential_at_surface"],
+                    },
+                    "diagnostic": {
+                        "vars_2D": ["total_precipitation_6hr"],
+                    },
+                },
+            }
+        },
+    }
+
+
+def test_wb2_era5_64x32_single_load(minimal_wb2_era5_config):
+    """Integration test: fetch one sample from the public WeatherBench2 64x32 GCS store.
+
+    Verifies that the variable names in the config are present in the zarr store
+    and that the returned tensors have the expected shapes and plausible values.
+    The 64x32 (lon×lat) grid has 64 longitudes and 32 latitudes.
+    """
+    wb2_ds = WeatherBench2ERA5Dataset(minimal_wb2_era5_config, return_target=True)
+    sample = wb2_ds[("2020-01-01 00:00", 0)]
+
+    assert isinstance(sample, dict)
+    assert "input" in sample
+    assert "metadata" in sample
+    assert "target" in sample
+
+    n_levels = len(minimal_wb2_era5_config["source"]["WeatherBench2_ERA5"]["levels"])  # 2
+    lat, lon = 64, 32
+
+    # 3D variable: (n_levels, 1, lat, lon)
+    temp_in = sample["input"]["WeatherBench2_ERA5/prognostic/3d/temperature"]
+    assert temp_in.shape == (n_levels, 1, lat, lon), f"Unexpected shape: {temp_in.shape}"
+    assert temp_in.dtype == torch.float32
+    assert temp_in.min() > 180, "Temperature below 180 K is implausible"
+    assert ~torch.any(torch.isnan(temp_in))
+
+    u_in = sample["input"]["WeatherBench2_ERA5/prognostic/3d/u_component_of_wind"]
+    assert u_in.shape == (n_levels, 1, lat, lon)
+
+    # 2D variable: (1, 1, lat, lon)
+    sp_in = sample["input"]["WeatherBench2_ERA5/prognostic/2d/surface_pressure"]
+    assert sp_in.shape == (1, 1, lat, lon), f"Unexpected shape: {sp_in.shape}"
+    assert sp_in.dtype == torch.float32
+    assert ~torch.any(torch.isnan(sp_in))
+
+    t2m_in = sample["input"]["WeatherBench2_ERA5/prognostic/2d/2m_temperature"]
+    assert t2m_in.shape == (1, 1, lat, lon)
+
+    sfc_geo = sample["input"]["WeatherBench2_ERA5/static/2d/geopotential_at_surface"]
+    assert sfc_geo.shape == (1, 1, lat, lon)
+
+    # Target contains prognostic + diagnostic; static and dynamic_forcing should be absent
+    assert "WeatherBench2_ERA5/prognostic/3d/temperature" in sample["target"]
+    assert "WeatherBench2_ERA5/diagnostic/2d/total_precipitation_6hr" in sample["target"]
+    assert "WeatherBench2_ERA5/static/2d/geopotential_at_surface" not in sample["target"]
+
+    temp_tgt = sample["target"]["WeatherBench2_ERA5/prognostic/3d/temperature"]
+    assert temp_tgt.shape == (n_levels, 1, lat, lon)
+    assert ~torch.any(torch.isnan(temp_tgt))

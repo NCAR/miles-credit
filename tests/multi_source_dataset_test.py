@@ -43,16 +43,19 @@ def multi_config() -> dict[str, Any]:
         "source": {
             "Base1": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                 },
             },
             "Base2": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {"dynamic_forcing": {"vars_2D": ["d2m"]}, "diagnostic": {"vars_3D": ["V"]}},
             },
             "Base3": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "diagnostic": {"vars_3D": ["V"]},
                     "static": {"vars_2D": ["orog"]},
@@ -72,6 +75,7 @@ def multi_config_time_subsets() -> dict[str, Any]:
         "source": {
             "Base1": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                 },
@@ -80,11 +84,13 @@ def multi_config_time_subsets() -> dict[str, Any]:
             },
             "Base2": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {"dynamic_forcing": {"vars_2D": ["d2m"]}, "diagnostic": {"vars_3D": ["V"]}},
                 "timestep": "12h",
             },
             "Base3": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "static": {"vars_2D": ["orog"]},
                 },
@@ -103,6 +109,7 @@ def one_source_config() -> dict[str, Any]:
         "source": {
             "Single_Base": {
                 "dataset_type": "base",
+                "mode": "remote",
                 "variables": {
                     "prognostic": {"vars_3D": ["T", "U"], "vars_2D": ["t2m"]},
                     "dynamic_forcing": {"vars_2D": ["d2m"]},
@@ -263,6 +270,102 @@ def test_multi_source_timestamp_intersection_time_subsets(multi_config_time_subs
     assert len(ds) == len(DATETIMES_SUBSET) - 1
     assert ds.datetimes[0] == DATETIMES_SUBSET[0]
     assert ds.datetimes[-1] == DATETIMES_SUBSET[-2]
+
+
+@pytest.fixture
+def persist_config() -> dict[str, Any]:
+    """Config with a 6h master clock and a 12h-resolution persist source."""
+    return {
+        "source": {
+            "Base1": {
+                "dataset_type": "base",
+                "mode": "remote",
+                "variables": {
+                    "prognostic": {"vars_3D": ["T"], "vars_2D": ["t2m"]},
+                },
+            },
+            "Base2": {
+                "dataset_type": "base",
+                "mode": "remote",
+                "variables": {"dynamic_forcing": {"vars_2D": ["precip"]}},
+                "timestep": "12h",
+                "temporal_mode": "persist",
+            },
+        },
+        "timestep": "6h",
+        "forecast_len": 1,
+        "start_datetime": "2024-01-01",
+        "end_datetime": "2024-01-03",
+    }
+
+
+def test_persist_master_clock_retains_fine_ticks(persist_config):
+    """Persist sources clip the master clock to coverage range but don't filter
+    to exact timestamps, so a 6h master clock survives even when a persist source
+    has 12h native resolution."""
+    ds = MultiSourceDataset(persist_config)
+    # Expected: all 6h ticks from start to end - 1 * 6h
+    expected_count = len(
+        pd.date_range(
+            persist_config["start_datetime"],
+            pd.Timestamp(persist_config["end_datetime"]) - pd.Timedelta(persist_config["timestep"]),
+            freq=persist_config["timestep"],
+        )
+    )
+    assert len(ds.datetimes) == expected_count
+    # Consecutive ticks are 6h apart, not 12h
+    assert (ds.datetimes[1] - ds.datetimes[0]) == pd.Timedelta("6h")
+
+
+def test_persist_source_returns_data_at_fine_tick(persist_config):
+    """Persist sources should return data even at timestamps between their native ticks."""
+    ds = MultiSourceDataset(persist_config)
+    # datetimes[1] is 06:00 — falls between Base2's native 00:00 and 12:00
+    t = ds.datetimes[1]
+    sample = ds[(t, 0)]
+    assert "input" in sample
+    assert "Base1" in sample["input"]
+    assert "Base2" in sample["input"]
+
+
+def test_persist_cache_reuse_via_multisource(persist_config):
+    """Two consecutive fine-resolution ticks that snap to the same native interval
+    should return the identical (cached) Base2 input dict."""
+    ds = MultiSourceDataset(persist_config)
+    base2_ds = ds.datasets["Base2"]
+
+    # Both 00:00 and 06:00 resolve to Base2's native 00:00
+    t0 = ds.datetimes[0]  # 2024-01-01 00:00
+    t1 = ds.datetimes[1]  # 2024-01-01 06:00
+    sample0 = ds[(t0, 0)]
+    sample1 = ds[(t1, 0)]
+
+    # The persist cache should be populated
+    assert len(base2_ds._persist_cache) > 0
+
+    # Both samples should hold the same (cached) Base2 input dict
+    assert sample0["input"]["Base2"] is sample1["input"]["Base2"]
+
+
+def test_persist_cache_evicts_on_new_interval(persist_config):
+    """Accessing a tick in a new native interval evicts the stale cache entry."""
+    ds = MultiSourceDataset(persist_config)
+    base2_ds = ds.datasets["Base2"]
+
+    # First native interval: 00:00–06:00 both snap to 00:00
+    t0 = ds.datetimes[0]  # 2024-01-01 00:00
+    t1 = ds.datetimes[1]  # 2024-01-01 06:00
+    ds[(t0, 0)]
+    ds[(t1, 0)]
+    assert len(base2_ds._persist_cache) == 1  # only one resolved timestamp in cache
+
+    # Second native interval: 12:00 snaps to 12:00 (different resolved timestamp)
+    t2 = ds.datetimes[2]  # 2024-01-01 12:00
+    ds[(t2, 0)]
+    # Stale 00:00 entry is evicted; only 12:00 entry remains
+    assert len(base2_ds._persist_cache) == 1
+    cached_ts = next(iter(base2_ds._persist_cache))[0]
+    assert cached_ts == pd.Timestamp("2024-01-01 12:00")
 
 
 def test_multi_source_dataloader_default_collate(multi_config):

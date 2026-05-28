@@ -133,10 +133,15 @@ class ConcatToTensor(BasePreblock):
         metadata["input"]["_channel_map"] = input_channel_map
         metadata["target"]["_channel_map"] = output_channel_map
 
-        input_tensor = torch.cat(input_tensors, dim=1)
+        # Normalize device: rollout batches mix CPU (dataloader) and accelerator
+        # (model output) tensors; torch.cat requires a uniform device.
+        accel = next((t.device for t in input_tensors if t.device.type != "cpu"), None)
+        if accel is not None:
+            input_tensors = [t.to(accel) for t in input_tensors]
+        input_tensor = torch.cat(input_tensors, dim=1).float()
 
         if target_tensors:
-            target_tensor = torch.cat(target_tensors, dim=1)
+            target_tensor = torch.cat(target_tensors, dim=1).float()
             return input_tensor, target_tensor, metadata
 
         return input_tensor, metadata

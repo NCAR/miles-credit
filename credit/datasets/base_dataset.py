@@ -158,7 +158,7 @@ class BaseDataset(AbstractBaseDataset):
             return_target: Whether to return the target (t+1) in addition to the input (t). This is used for prognostic and diagnostic fields.
 
         """
-
+        super().__init__(data_config, return_target)
         # Enforce types
         if not isinstance(data_config, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError(f"Expected data_config to be a dict, but got {type(data_config)}")
@@ -225,12 +225,32 @@ class BaseDataset(AbstractBaseDataset):
         if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
 
+        # temporal_mode: "exact" (default, exact timestamp match required) or
+        # "persist" (snap to last native timestamp via asof(); used for coarser sources)
+        self.temporal_mode: str = self.curr_source_cfg.get("temporal_mode", "exact")
+        self._persist_cache: dict = {}
+
         # Placeholder for static metadata
         self.static_metadata: dict[str, Any] = {}
 
+        # If the engine argument for xr.open_dataset needs to be specified, add the engine option to your data source config
+        if "engine" in self.curr_source_cfg:
+            self.engine = self.curr_source_cfg["engine"]
+        else:
+            self.engine = None
+
+        # By default, we suggest that the inherited dataset use both file_dict and var_dict.
+        # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
+        #   tuples produced by _map_files. _extract_field can then use the list to find the
+        #   appropriate file for a given timestamp.
+        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field
+        #   can then use this to know which variables to extract for each field type from the file.
+        self.file_dict: dict[str, Any] = {}
+        self.var_dict: dict[str, Any] = {}
+
         # Only if this is __NOT__ an inherited class, we will immediately run init_register_all_fields.
         # In an inherited class, you should call super().init_register_all_fields() at the end of your
-        # __init__ method after you have set up any additional parameters needed for your
+        # __init__ method after you have set up any additional parameters needed for your dataset.
         if type(self) is BaseDataset:
             self.init_register_all_fields()
 
@@ -244,6 +264,12 @@ class BaseDataset(AbstractBaseDataset):
 
     def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
         """Return a nested input/target sample dict.
+
+        When ``temporal_mode == "persist"``, the requested timestamp *t* is
+        snapped to the last native timestamp at-or-before *t* via
+        ``pd.DatetimeIndex.asof()``.  The result is cached so that multiple
+        fine-resolution master-clock ticks within the same native interval
+        only trigger a single file read.
 
         Args:
             args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
@@ -259,8 +285,57 @@ class BaseDataset(AbstractBaseDataset):
         """
         t, i = args
         t = pd.Timestamp(t)
-        t_target = t + self.dt
 
+        if self.temporal_mode == "persist":
+            t_resolved = self._resolve_persist_timestamp(t)
+            cache_key = (t_resolved, i == 0)
+            if cache_key not in self._persist_cache:
+                # Evict entries from previous native intervals to keep cache small
+                stale = [k for k in self._persist_cache if k[0] != t_resolved]
+                for k in stale:
+                    del self._persist_cache[k]
+                self._persist_cache[cache_key] = self._load_sample(t_resolved, i)
+            return self._persist_cache[cache_key]
+
+        return self._load_sample(t, i)
+
+    def _resolve_persist_timestamp(self, t: pd.Timestamp) -> pd.Timestamp:
+        """Snap *t* to the last native timestamp at or before *t*.
+
+        Uses ``pd.DatetimeIndex.asof()`` so non-uniform or non-zero-aligned
+        cadences are handled correctly.
+
+        Args:
+            t: Master-clock timestamp to resolve.
+
+        Returns:
+            The last native timestamp ``<= t``.
+
+        Raises:
+            ValueError: If *t* is before the first native timestamp.
+        """
+        resolved = self.datetimes.asof(t)
+        if pd.isna(resolved):
+            raise ValueError(
+                f"Persist source '{self.curr_source_name}': timestamp {t} is before "
+                f"the first available native timestamp {self.datetimes[0]}."
+            )
+        return resolved
+
+    def _load_sample(self, t: pd.Timestamp, i: int) -> dict[str, Any]:
+        """Build and return the sample dict for timestamp *t* and step index *i*.
+
+        This is the inner implementation called by ``__getitem__``, separated
+        so the persist cache can call it without re-entering the dispatch logic.
+
+        Args:
+            t: Timestamp to load (already resolved for persist sources).
+            i: Within-sequence step index (0 = initial step).
+
+        Returns:
+            Sample dict with ``"input"``, ``"metadata"``, and optionally ``"target"``.
+        """
+        t_target = t + self.dt
         input_data: dict[str, Any] = {}
 
         # Dynamic forcing is loaded at every step
@@ -283,7 +358,6 @@ class BaseDataset(AbstractBaseDataset):
         if self.return_target:
             target_data: dict[str, Any] = {}
             for field_type in ("prognostic", "diagnostic"):
-                # if self.file_dict.get(field_type) and
                 if field_type in self.var_dict:
                     self._extract_field(field_type, t_target, target_data)
 
@@ -535,15 +609,6 @@ class BaseDataset(AbstractBaseDataset):
                 "Expected 'variables' key in source config, but it was not found. "
                 + f"Full source config provided: \n{self.curr_source_cfg}"
             )
-
-        # By default, we suggest that the inherited dataset use both file_dict and var_dict.
-        # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
-        #   tuples produced by _map_files. _extract_field can then use the list to find the
-        #   appropriate file for a given timestamp.
-        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field
-        #   can then use this to know which variables to extract for each field type from the file.
-        self.file_dict: dict[str, Any] = {}
-        self.var_dict: dict[str, Any] = {}
         for field_type, field_config in self.curr_source_cfg["variables"].items():
             # Notice that we are expecting to call the same _register_field method for each field type.
             # Check or override this method as needed based on the expected structure of your config for each field type.
@@ -591,6 +656,7 @@ class BaseDataset(AbstractBaseDataset):
             field_config (dict[str, Any]): Validated field-type config dict.
 
         Raises:
+            FileNotFoundError: If ``self.mode == "local"`` and the glob pattern matches no files.
             ValueError: If ``self.mode`` is not a recognised mode.
 
         Returns:
@@ -600,9 +666,14 @@ class BaseDataset(AbstractBaseDataset):
                 The expected return type should be consistent within a dataset class.
         """
         if self.mode == "local":
-            files = sorted(glob(field_config.get("path", "")))
+            path = field_config.get("path", "")
+            files = sorted(glob(path))
+            if not files:
+                raise FileNotFoundError(
+                    f"No files found matching '{path}'. Check that the path exists and is accessible from this machine."
+                )
             time_fmt: str = field_config.get("filename_time_format", "%Y")
-            return _map_files(files, time_fmt) if files else None
+            return _map_files(files, time_fmt)
         elif self.mode == "remote":
             return True
         else:

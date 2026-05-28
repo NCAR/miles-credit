@@ -32,7 +32,8 @@ Output key format (flat, slash-delimited):
 
     field_type: "prognostic" | "dynamic_forcing" | "static" | "diagnostic"
     dim       : "2d"  (surface / single-level)
-                "3d"  (multi-level upper-air; requires level_coord + levels in config)
+                "3d"  (multi-level upper-air; requires level_coord in config;
+                       if levels is omitted all levels in the file are used)
     varname   : variable name as given in config (e.g. "T", "SP", "tsi")
 
 Tensor shapes (no batch dimension):
@@ -126,15 +127,13 @@ class LocalDataset(BaseDataset):
 
         self.dataset_type = "local"
         self.level_coord: str | None = self.curr_source_cfg.get("level_coord")
-        self.levels: list[int] | None = self.curr_source_cfg.get("levels")
+        self.levels: list | None = self.curr_source_cfg.get("levels")
         self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
             "datetime_fmt": "unix_ns",
         }
         self.mode = "local"
         self.time_coord = self.curr_source_cfg.get("time_coord", "time")
-        # Initialize the field registration based on the provided config and populate
-        #   dictionary of variables and file paths for each field type
         self.init_register_all_fields()
 
     def _extract_field(
@@ -169,20 +168,24 @@ class LocalDataset(BaseDataset):
         with xr.open_dataset(_find_file(file_intervals, t)) as ds:
             # Select the time step; static fields have no time dim
             if self.time_coord in ds.dims:
-                if isinstance(ds.time.values[0], cftime.datetime):
-                    calendar = ds.time.values[0].calendar
+                if isinstance(ds[self.time_coord].values[0], cftime.datetime):
+                    calendar = ds[self.time_coord].values[0].calendar
                     t_sel = _to_cftime(t, calendar)
                 else:
                     t_sel = t
-                ds_t = ds.sel(time=t_sel)
+                ds_t = ds.sel({self.time_coord: t_sel})
             else:
                 ds_t = ds
 
             # 3D variables: (n_levels, lat, lon) → (n_levels, 1, lat, lon)
             for vname in vars_3D:
-                if not self.level_coord or not self.levels:
-                    raise ValueError(f"Cannot load 3D variable '{vname}' without 'level_coord' and 'levels' in config.")
-                arr = ds_t[vname].sel({self.level_coord: self.levels}).values
+                if self.levels is None:
+                    arr = ds_t[vname].values
+                    if self.level_coord in ds_t.coords:
+                        self.levels = ds_t[self.level_coord].values.tolist()
+                        self.static_metadata["levels"] = self.levels
+                else:
+                    arr = ds_t[vname].sel({self.level_coord: self.levels}).values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
                 key = self._get_field_name(field_type, "3d", vname)
                 sample[key] = tensor
