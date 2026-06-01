@@ -1,4 +1,4 @@
-from bridgescaler import load_scaler, scale_var_dict
+from bridgescaler import load_scaler_dict, scale_var_dict
 from credit.postblock.base import BasePostblock
 
 
@@ -34,7 +34,7 @@ class BridgeScalerTransformer(BasePostblock):
         self.method = method
         self.scaler_path = scaler_path
         self.key = key
-        self.scaler = load_scaler(scaler_path)
+        self.scaler = load_scaler_dict(scaler_path)
 
     def forward(self, batch_dict: dict) -> dict:
         batch_dict[self.key] = scale_var_dict(batch_dict[self.key], self.scaler, self.method, self.variables)
