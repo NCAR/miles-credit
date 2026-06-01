@@ -10,18 +10,17 @@ import os
 import torch
 import yaml
 import sys
-from pathlib import Path
-from credit.pbs import launch_script, launch_script_mpi
 import shutil
 from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransformer
+from credit.preblock.scaler import combine_scaler_dicts
 from credit.trainers.utils import cycle, load_dataset, load_dataloader
+import torch.distributed as dist
 from torch.distributed import gather_object, barrier
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", dest="model_config", required=True, type=str, help="Path to config file")
-    parser.add_argument("-l", dest="launch", type=int, default=0, help="Submit workers to PBS.")
     parser.add_argument(
         "--backend", type=str, default="nccl", choices=["nccl", "gloo", "mpi"], help="Backend for distributed training."
     )
@@ -46,16 +45,6 @@ def main():
     os.makedirs(save_loc, exist_ok=True)
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
         shutil.copy(config, os.path.join(save_loc, "model.yml"))
-
-    if launch:
-        script_path = Path(__file__).absolute()
-        if conf["pbs"]["queue"] == "casper":
-            logging.info("Launching to PBS on Casper")
-            launch_script(config, script_path)
-        else:
-            logging.info("Launching to PBS on Derecho")
-            launch_script_mpi(config, script_path)
-        sys.exit()
 
     if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
         setup(rank, world_size, conf["trainer"]["mode"], backend)
@@ -87,16 +76,20 @@ def main():
         batch = next(dl)
         processed_batch = apply_preblocks_before_scaler(preblocks, batch, device)
         preblocks[scaler_block_key].fit_scaler_batch(processed_batch)
-    barrier()
-    if rank == 0:
-        all_scalers = []
+
+    scaler_block = preblocks[scaler_block_key]
+    # Gather the per-rank fitted scaler dicts onto rank 0 (or run single-process).
+    if dist.is_initialized() and world_size > 1:
+        barrier()
+        all_scalers = [None] * world_size if rank == 0 else None
+        gather_object(scaler_block.scaler, all_scalers, dst=0)
     else:
-        all_scalers = []
-    gather_object(preblocks[scaler_block_key].scaler, all_scalers, dst=0)
+        all_scalers = [scaler_block.scaler]
+
     if rank == 0:
         root.info("Combining scalers.")
-        combined_scaler = sum(all_scalers)
-        save_scaler_dict(combined_scaler, preblocks.scaler_path)
+        combined_scaler = combine_scaler_dicts(all_scalers)
+        save_scaler_dict(combined_scaler, scaler_block.scaler_path)
     return
 
 

@@ -15,6 +15,7 @@ except (ImportError, Exception):
     _BRIDGESCALER_AVAILABLE = False
 
 from credit.preblock.regrid import Regridder
+from credit.preblock._utils import _parse_variable_selection
 
 
 def create_synthetic_data() -> dict:
@@ -216,3 +217,132 @@ def test_scaler_round_trip(scaler_file):
     data = fwd(data)
     data = inv(data)
     assert torch.allclose(data["input"]["Test_ERA5"][var].float(), original.float(), atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# _parse_variable_selection
+# ---------------------------------------------------------------------------
+def _selection_state() -> dict:
+    """A state dict following the CREDIT convention: state[data_type][source][var_name].
+
+    var_name uses the canonical `source/field_type/dim/varname` layout, and the
+    source key (e.g. "era5") matches the first segment of each variable name.
+    """
+    return {
+        "input": {
+            "era5": {
+                "era5/prognostic/3d/T": object(),
+                "era5/prognostic/3d/U": object(),
+                "era5/prognostic/2d/SP": object(),
+                "era5/static/2d/Z": object(),
+            },
+        },
+        "target": {
+            "era5": {
+                "era5/prognostic/3d/T": object(),
+                "era5/diagnostic/2d/precip": object(),
+            },
+        },
+        "prediction": {
+            "era5": {
+                "era5/prognostic/3d/T": object(),
+            },
+        },
+    }
+
+
+def test_parse_variable_selection_expands_partial():
+    """A partial name expands to every variable beneath it in the hierarchy."""
+    state = _selection_state()
+    result = _parse_variable_selection(["era5/prognostic/3d"], state)
+    assert result == ["era5/prognostic/3d/T", "era5/prognostic/3d/U"]
+
+
+def test_parse_variable_selection_full_name_matches_only_itself():
+    """A full variable name matches exactly and does not pull in siblings."""
+    state = _selection_state()
+    result = _parse_variable_selection(["era5/prognostic/3d/T"], state)
+    assert result == ["era5/prognostic/3d/T"]
+
+
+def test_parse_variable_selection_empty_list_returns_all():
+    """An empty selection returns every variable across all data types (deduped)."""
+    state = _selection_state()
+    result = _parse_variable_selection([], state)
+    assert result == [
+        "era5/prognostic/3d/T",
+        "era5/prognostic/3d/U",
+        "era5/prognostic/2d/SP",
+        "era5/static/2d/Z",
+        "era5/diagnostic/2d/precip",
+    ]
+
+
+def test_parse_variable_selection_dedupes_across_data_types():
+    """A variable present in multiple data types appears only once."""
+    state = _selection_state()
+    result = _parse_variable_selection(["era5/prognostic/3d/T"], state)
+    assert result == ["era5/prognostic/3d/T"]
+
+
+def test_parse_variable_selection_data_types_filter():
+    """Only the requested data types contribute candidate variables."""
+    state = _selection_state()
+    result = _parse_variable_selection([], state, data_types=["prediction"])
+    assert result == ["era5/prognostic/3d/T"]
+
+    result = _parse_variable_selection(["era5"], state, data_types=["target"])
+    assert result == ["era5/prognostic/3d/T", "era5/diagnostic/2d/precip"]
+
+
+def test_parse_variable_selection_missing_data_type_ignored():
+    """A requested data type that is absent from the state is skipped, not an error."""
+    state = _selection_state()
+    result = _parse_variable_selection([], state, data_types=["prediction", "nonexistent"])
+    assert result == ["era5/prognostic/3d/T"]
+
+
+def test_parse_variable_selection_prefix_boundary():
+    """Matching respects '/' boundaries: a prefix that is not a full path segment
+    does not match."""
+    state = _selection_state()
+    # "era5/prognostic/3" is a string prefix of "era5/prognostic/3d/..." but not a
+    # hierarchy ancestor, so nothing should match.
+    result = _parse_variable_selection(["era5/prognostic/3"], state)
+    assert result == []
+
+
+def test_parse_variable_selection_preserves_selection_order():
+    """Multiple partials expand in the order they are listed."""
+    state = _selection_state()
+    result = _parse_variable_selection(["era5/static", "era5/prognostic/2d"], state)
+    assert result == ["era5/static/2d/Z", "era5/prognostic/2d/SP"]
+
+
+def test_parse_variable_selection_multiple_sources():
+    """Variables are collected across all sources within a data type, and a
+    source-level partial selects only that source's variables."""
+    state = {
+        "input": {
+            "era5": {
+                "era5/prognostic/3d/T": object(),
+                "era5/prognostic/2d/SP": object(),
+            },
+            "gfs": {
+                "gfs/prognostic/3d/T": object(),
+                "gfs/static/2d/Z": object(),
+            },
+        },
+    }
+    # Empty list pulls in every variable from every source.
+    assert _parse_variable_selection([], state) == [
+        "era5/prognostic/3d/T",
+        "era5/prognostic/2d/SP",
+        "gfs/prognostic/3d/T",
+        "gfs/static/2d/Z",
+    ]
+    # A source-rooted partial selects only that source's variables.
+    assert _parse_variable_selection(["gfs"], state) == [
+        "gfs/prognostic/3d/T",
+        "gfs/static/2d/Z",
+    ]

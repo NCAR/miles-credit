@@ -46,6 +46,7 @@ preblocks:
   scaler:
     type: "bridgescaler_transformer"
     args:
+      variables: []
       scaler_path: "/Users/dgagne/data/weatherbench2/scaler.json"
       scaler_type: "standard"
 
