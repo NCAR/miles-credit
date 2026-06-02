@@ -103,7 +103,12 @@ def _make_conf(save_loc: str, scaler_path: str) -> dict:
             # the per-test scalers below are built separately.
             "scaler": {
                 "type": "bridgescaler_transform",
-                "args": {"variables": [], "scaler_path": scaler_path, "scaler_type": "standard"},
+                "args": {
+                    "variables": [],
+                    "scaler_path": scaler_path,
+                    "scaler_type": "standard",
+                    "scaler_params": {"channels_last": False},
+                },
             },
         },
     }

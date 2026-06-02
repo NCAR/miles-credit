@@ -8,10 +8,31 @@ from credit.datasets.downscaling_dataset import DownscalingDataset
 
 @pytest.fixture
 def config():
-    """Load test configuration from YAML."""
-    config_path = Path("tests/data/downscaling/dataset.yml")
+    """Load test configuration from YAML.
+
+    Paths in the YAML (``rootpath``) are written relative to the repository
+    root, so they are resolved to absolute paths here. This lets the tests run
+    regardless of the directory pytest is invoked from.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    config_path = Path(__file__).parent / "data" / "downscaling" / "dataset.yml"
     with open(config_path) as f:
-        return yaml.safe_load(f)
+        conf = yaml.safe_load(f)
+
+    def _absolutize_rootpaths(node):
+        """Recursively rewrite relative ``rootpath`` values to absolute paths."""
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "rootpath" and isinstance(value, str) and not Path(value).is_absolute():
+                    node[key] = str(repo_root / value)
+                else:
+                    _absolutize_rootpaths(value)
+        elif isinstance(node, list):
+            for item in node:
+                _absolutize_rootpaths(item)
+
+    _absolutize_rootpaths(conf["data"])
+    return conf
 
 
 @pytest.fixture

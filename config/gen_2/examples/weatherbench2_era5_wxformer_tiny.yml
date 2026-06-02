@@ -8,23 +8,17 @@ data:
       dataset_type: "weatherbench2_era5"
       resolution: "240x121"   # optional; overridden by the resolution kwarg
       level_coord: "level"
-      levels: [ 50, 100, 150, 200, 250,  300, 400, 500, 600, 700, 850, 925, 1000 ]
+      levels: [500, 850]
       variables:
         prognostic:
-          vars_3D: ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_humidity", "geopotential"]
-          vars_2D: ["surface_pressure", "2m_temperature", '2m_dewpoint_temperature',
-                    '10m_u_component_of_wind', '10m_v_component_of_wind']
+          vars_3D: ["temperature", "specific_humidity"]
+          vars_2D: ["surface_pressure", "2m_temperature"]
         diagnostic:
-          vars_2D: ['total_precipitation_6hr', 'total_cloud_cover', 'sea_ice_cover',
-                    'mean_surface_sensible_heat_flux', 'mean_surface_latent_heat_flux',
-                    'mean_surface_net_short_wave_radiation_flux', 'mean_surface_net_long_wave_radiation_flux',
-                     'mean_top_net_long_wave_radiation_flux', 'mean_top_net_short_wave_radiation_flux']
+          vars_2D: ['total_precipitation_6hr']
         dynamic_forcing:
-          vars_2D: ["sea_surface_temperature", 'mean_top_downward_short_wave_radiation_flux',
-                    'low_vegetation_cover', 'high_vegetation_cover',
-                    'leaf_area_index_high_vegetation', 'leaf_area_index_low_vegetation']
+          vars_2D: ["sea_surface_temperature", 'mean_top_downward_short_wave_radiation_flux']
         static:
-          vars_2D: ["land_sea_mask", "geopotential_at_surface", 'lake_cover']
+          vars_2D: ["land_sea_mask", "geopotential_at_surface"]
   start_datetime: "1979-01-01"
   end_datetime: "2017-12-31 18:00:00"
   timestep: "6h"
@@ -62,11 +56,11 @@ postblocks:
 trainer:
   type: era5-gen2           # use the v2 trainer (new nested data schema)
 
-  mode: ddp
-  epochs: 100
-  train_batch_size: 32
-  batches_per_epoch: 100
-  thread_workers: 2
+  mode: none
+  epochs: 1
+  train_batch_size: 2
+  batches_per_epoch: 3
+  thread_workers: 4
   valid_thread_workers: 2
   prefetch_factor: 2
 

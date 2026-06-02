@@ -15,7 +15,7 @@ PREBLOCK_REGISTRY = {
     "regrid": Regridder,
     "concat": ConcatToTensor,
     "era5_normalizer": ERA5Normalizer,
-    "bridgescaler_transform": BridgeScalerTransformer,
+    "bridgescaler_transformer": BridgeScalerTransformer,
 }
 
 

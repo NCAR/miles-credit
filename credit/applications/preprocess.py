@@ -26,7 +26,6 @@ def main():
     )
     args = parser.parse_args()
     config = args.model_config
-    launch = int(args.launch)
     backend = args.backend
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
