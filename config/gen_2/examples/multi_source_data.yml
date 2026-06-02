@@ -52,8 +52,18 @@ data:
                 dynamic_forcing:
                     vars_2D: ['tisr']
             num_integration_steps: 2160 # default is 360 for a single hour
+<<<<<<< HEAD
             #latlon_grid_path: "/glade/derecho/scratch/kevinyang/datasets/goes/goes19_abi_conus_lat_lon.nc"
             latlon_grid_path: "/glade/derecho/scratch/cbecker/test_CREDIT_data/era5_local_testing_data_onedeg_2021.nc"
+=======
+            # Grid source — provide EXACTLY ONE of the following:
+            #   (a) lat_spec + lon_spec : build a rectangular grid in-memory (both required together), or
+            #   (b) latlon_grid_path    : read the grid from a NetCDF file.
+            # Supplying both, or neither, raises a config error.
+            lat_spec: [90, -90, 192]    # [start, end, num_points], endpoints inclusive
+            lon_spec: [0, 358.75, 288]  # excludes the 360° wrap
+#            latlon_grid_path: '/glade/derecho/scratch/cbecker/test_CREDIT_data/era5_local_testing_data_onedeg_2021.nc'
+>>>>>>> c8c8ab40 (address Daniel's comment and add option to build latlon grid from spec)
 
 preblocks:
     log_transform:

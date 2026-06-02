@@ -10,7 +10,6 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
-from unittest.mock import MagicMock, patch
 
 from credit.datasets.tisr import (
     _era5_tsi_data,  # pyright: ignore[reportPrivateUsage]
@@ -22,7 +21,7 @@ from credit.datasets.tisr import (
     _get_cosine_zenith_angle,  # pyright: ignore[reportPrivateUsage]
     _get_instantaneous_toa_tisr,  # pyright: ignore[reportPrivateUsage]
     _get_integrated_toa_tisr,  # pyright: ignore[reportPrivateUsage]
-    _load_latlon_grid,  # pyright: ignore[reportPrivateUsage]
+    _get_latlon_grid,  # pyright: ignore[reportPrivateUsage]
     _compute_tisr,  # pyright: ignore[reportPrivateUsage]
     TISRDataset,
 )
@@ -186,9 +185,9 @@ class TestJ2000Days:
         assert abs((t2 - t1) - 1.0) < 1e-9, f"One day apart should differ by 1.0 J2000 days, got {t2 - t1}"
 
     def test_j2000_days_output_dtype(self):
-        """Output dtype must be float64."""
+        """Output dtype must be float32."""
         result = _get_j2000_days(pd.Timestamp("2020-06-21 12:00:00"))
-        assert result.dtype == torch.float64, f"Expected float64, got {result.dtype}"
+        assert result.dtype == torch.float32, f"Expected float32, got {result.dtype}"
 
 
 # =============================================================================
@@ -225,7 +224,7 @@ class TestSolarTime:
 
     def test_solar_time_at_j2000_epoch(self):
         """At J2000 epoch, rotational_phase=0, eq_of_time≈-3s → solar_time≈0."""
-        j2000 = torch.tensor([0.0], dtype=torch.float64)
+        j2000 = torch.tensor([0.0], dtype=torch.float32)
         op = _get_orbital_parameters(j2000)
         solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
         assert abs(solar_time.item()) < 0.01, f"Solar time at J2000 epoch should be near 0, got {solar_time.item()}"
@@ -255,27 +254,27 @@ class TestSolarGeometry:
         At solar noon (solar_time=0.5) on the prime meridian (lon=0°), the hour
         angle should be 180°.
         """
-        solar_time = torch.tensor([0.5], dtype=torch.float64)  # midday
-        longitude = torch.tensor([0.0], dtype=torch.float64)  # prime meridian
+        solar_time = torch.tensor([0.5], dtype=torch.float32)  # midday
+        longitude = torch.tensor([0.0], dtype=torch.float32)  # prime meridian
         ha = _get_hour_angle(solar_time, longitude)
         assert abs(ha.item() - 180.0) < 1e-3, f"Hour angle at solar noon / lon=0 should be 180°, got {ha.item()}"
 
     def test_cosine_zenith_equator_equinox_noon(self):
         """At solar noon on the equator with declination=0, cos_zenith should be 1.0."""
-        cos_dec = torch.tensor([[[1.0]]], dtype=torch.float64)
-        sin_dec = torch.tensor([[[0.0]]], dtype=torch.float64)
-        lat = torch.tensor([[[0.0]]], dtype=torch.float64)  # equator, degrees
-        ha = torch.tensor([[[0.0]]], dtype=torch.float64)  # solar noon, degrees
+        cos_dec = torch.tensor([[[1.0]]], dtype=torch.float32)
+        sin_dec = torch.tensor([[[0.0]]], dtype=torch.float32)
+        lat = torch.tensor([[[0.0]]], dtype=torch.float32)  # equator, degrees
+        ha = torch.tensor([[[0.0]]], dtype=torch.float32)  # solar noon, degrees
 
         cz = _get_cosine_zenith_angle(cos_dec, sin_dec, lat, ha)
         assert abs(cz.item() - 1.0) < 1e-5, f"cos_zenith at equatorial noon/equinox should be 1.0, got {cz.item()}"
 
     def test_cosine_zenith_nightside_is_zero(self):
         """Below-horizon values must be clamped to 0 (not negative)."""
-        cos_dec = torch.tensor([[[0.5]]], dtype=torch.float64)
-        sin_dec = torch.tensor([[[0.866]]], dtype=torch.float64)
-        lat = torch.tensor([[[-80.0]]], dtype=torch.float64)  # near south pole
-        ha = torch.tensor([[[180.0]]], dtype=torch.float64)  # midnight
+        cos_dec = torch.tensor([[[0.5]]], dtype=torch.float32)
+        sin_dec = torch.tensor([[[0.866]]], dtype=torch.float32)
+        lat = torch.tensor([[[-80.0]]], dtype=torch.float32)  # near south pole
+        ha = torch.tensor([[[180.0]]], dtype=torch.float32)  # midnight
 
         cz = _get_cosine_zenith_angle(cos_dec, sin_dec, lat, ha)
         assert cz.item() >= 0.0, "Nightside cos_zenith must be >= 0"
@@ -291,9 +290,9 @@ class TestInstantaneousFlux:
 
     def test_flux_nonnegative(self):
         """Radiation flux must always be non-negative."""
-        tsi = torch.tensor([[[1361.0]]], dtype=torch.float64)
-        solar_factor = torch.tensor([[[1.0]]], dtype=torch.float64)
-        cos_zenith = torch.tensor([[[-0.5, 0.0, 0.5, 1.0]]], dtype=torch.float64)
+        tsi = torch.tensor([[[1361.0]]], dtype=torch.float32)
+        solar_factor = torch.tensor([[[1.0]]], dtype=torch.float32)
+        cos_zenith = torch.tensor([[[-0.5, 0.0, 0.5, 1.0]]], dtype=torch.float32)
         flux = _get_instantaneous_toa_tisr(tsi, solar_factor, cos_zenith)
         assert (flux >= 0).all(), "Flux must be non-negative everywhere"
 
@@ -308,13 +307,13 @@ class TestIntegratedTISR:
 
     def test_integration_shape(self):
         """Output of _get_integrated_toa_tisr must drop the time dimension."""
-        inst = torch.rand(361, 5, 4, dtype=torch.float64)
+        inst = torch.rand(361, 5, 4, dtype=torch.float32)
         result = _get_integrated_toa_tisr(inst, pd.Timedelta(hours=1), 360)
         assert result.shape == (5, 4), f"Expected shape (5, 4), got {result.shape}"
 
     def test_num_integration_steps_validation(self):
         """Non-positive or non-integer num_integration_steps must raise ValueError."""
-        inst = torch.rand(361, 5, 4, dtype=torch.float64)
+        inst = torch.rand(361, 5, 4, dtype=torch.float32)
         with pytest.raises(ValueError):
             _get_integrated_toa_tisr(inst, pd.Timedelta(hours=1), 0)
         with pytest.raises(ValueError):
@@ -322,15 +321,15 @@ class TestIntegratedTISR:
 
     def test_mismatched_steps_raises(self):
         """Passing wrong number of time steps must raise ValueError."""
-        inst = torch.rand(100, 5, 4, dtype=torch.float64)  # 100 != 360 + 1
+        inst = torch.rand(100, 5, 4, dtype=torch.float32)  # 100 != 360 + 1
         with pytest.raises(ValueError):
             _get_integrated_toa_tisr(inst, pd.Timedelta(hours=1), 360)
 
-    def test_output_dtype_is_float64(self):
-        """Integrated TISR output dtype must be float64."""
-        inst = torch.rand(361, 3, 4, dtype=torch.float64)
+    def test_output_dtype_is_float32(self):
+        """Integrated TISR output dtype must be float32."""
+        inst = torch.rand(361, 3, 4, dtype=torch.float32)
         result = _get_integrated_toa_tisr(inst, pd.Timedelta(hours=1), 360)
-        assert result.dtype == torch.float64, f"Expected float64 output, got {result.dtype}"
+        assert result.dtype == torch.float32, f"Expected float32 output, got {result.dtype}"
 
     @pytest.mark.parametrize("num_steps", [60, 180, 360, 720])
     def test_convergence_with_more_bins(self, num_steps):
@@ -348,8 +347,8 @@ class TestIntegratedTISR:
             tsi = _get_tsi(ts, times_t, tsi_v).unsqueeze(-1).unsqueeze(-1)
             j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
             op = _get_orbital_parameters(j2000_days)
-            lat_t = torch.tensor(lat_deg, dtype=torch.float64).reshape(1, -1, 1)
-            lon_t = torch.tensor(lon_deg, dtype=torch.float64).reshape(1, 1, -1)
+            lat_t = torch.tensor(lat_deg, dtype=torch.float32).reshape(1, -1, 1)
+            lon_t = torch.tensor(lon_deg, dtype=torch.float32).reshape(1, 1, -1)
             solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
             ha = _get_hour_angle(solar_time, lon_t)
             cz = _get_cosine_zenith_angle(op["cos_declination"], op["sin_declination"], lat_t, ha)
@@ -378,8 +377,8 @@ class TestIntegratedTISR:
             tsi = _get_tsi(ts, times_t, tsi_v).unsqueeze(-1).unsqueeze(-1)
             j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
             op = _get_orbital_parameters(j2000_days)
-            lat_t = torch.tensor(lat_deg, dtype=torch.float64).reshape(1, -1, 1)
-            lon_t = torch.tensor(lon_deg, dtype=torch.float64).reshape(1, 1, -1)
+            lat_t = torch.tensor(lat_deg, dtype=torch.float32).reshape(1, -1, 1)
+            lon_t = torch.tensor(lon_deg, dtype=torch.float32).reshape(1, 1, -1)
             solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
             ha = _get_hour_angle(solar_time, lon_t)
             cz = _get_cosine_zenith_angle(op["cos_declination"], op["sin_declination"], lat_t, ha)
@@ -404,8 +403,8 @@ class TestIntegratedTISR:
         tsi = _get_tsi(ts, times_torch, tsi_values_torch).unsqueeze(-1).unsqueeze(-1)
         j2000_days = _get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1)
         op = _get_orbital_parameters(j2000_days)
-        lat_t = torch.tensor(lat_deg, dtype=torch.float64).reshape(1, -1, 1)
-        lon_t = torch.tensor(lon_deg, dtype=torch.float64).reshape(1, 1, -1)
+        lat_t = torch.tensor(lat_deg, dtype=torch.float32).reshape(1, -1, 1)
+        lon_t = torch.tensor(lon_deg, dtype=torch.float32).reshape(1, 1, -1)
         solar_time = _get_solar_time(op["rotational_phase"], op["eq_of_time_seconds"])
         ha = _get_hour_angle(solar_time, lon_t)
         cz = _get_cosine_zenith_angle(op["cos_declination"], op["sin_declination"], lat_t, ha)
@@ -418,48 +417,48 @@ class TestIntegratedTISR:
 
 
 # =============================================================================
-# 9. _load_latlon_grid
+# 9. _get_latlon_grid
 # =============================================================================
 
 
-class TestLoadLatlonGrid:
-    """Tests for _load_latlon_grid covering both grid types and error paths."""
+class TestGetLatlonGrid:
+    """Tests for _get_latlon_grid covering file grids, spec grids, and error paths."""
 
     def test_rectangular_grid_shape(self, rectangular_nc):
         """Rectangular grid: output tensors must have shape (1, ny, nx)."""
-        lat, lon = _load_latlon_grid(rectangular_nc)
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
         assert lat.shape == (1, 4, 8), f"Expected (1, 4, 8), got {lat.shape}"
         assert lon.shape == (1, 4, 8), f"Expected (1, 4, 8), got {lon.shape}"
 
     def test_rectangular_grid_dtype(self, rectangular_nc):
-        """Rectangular grid: output tensors must be float64."""
-        lat, lon = _load_latlon_grid(rectangular_nc)
-        assert lat.dtype == torch.float64
-        assert lon.dtype == torch.float64
+        """Rectangular grid: output tensors must be float32."""
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
+        assert lat.dtype == torch.float32
+        assert lon.dtype == torch.float32
 
     def test_rectangular_grid_values(self, rectangular_nc):
         """Rectangular grid: lat range must be [-90, 90], lon range [0, 360)."""
-        lat, lon = _load_latlon_grid(rectangular_nc)
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
         assert lat.min().item() == pytest.approx(-90.0)
         assert lat.max().item() == pytest.approx(90.0)
         assert lon.min().item() == pytest.approx(0.0)
 
     def test_curvilinear_grid_shape(self, curvilinear_nc):
         """Curvilinear grid: output tensors must have shape (1, ny, nx)."""
-        lat, lon = _load_latlon_grid(curvilinear_nc)
+        lat, lon = _get_latlon_grid(path=curvilinear_nc)
         assert lat.shape == (1, 4, 8), f"Expected (1, 4, 8), got {lat.shape}"
         assert lon.shape == (1, 4, 8), f"Expected (1, 4, 8), got {lon.shape}"
 
     def test_curvilinear_grid_dtype(self, curvilinear_nc):
-        """Curvilinear grid: output tensors must be float64."""
-        lat, lon = _load_latlon_grid(curvilinear_nc)
-        assert lat.dtype == torch.float64
-        assert lon.dtype == torch.float64
+        """Curvilinear grid: output tensors must be float32."""
+        lat, lon = _get_latlon_grid(path=curvilinear_nc)
+        assert lat.dtype == torch.float32
+        assert lon.dtype == torch.float32
 
     def test_missing_file_raises(self, tmp_path):
         """Non-existent file must raise ValueError."""
         with pytest.raises(ValueError, match="Could not open"):
-            _load_latlon_grid(str(tmp_path / "does_not_exist.nc"))
+            _get_latlon_grid(path=str(tmp_path / "does_not_exist.nc"))
 
     def test_missing_latlon_raises(self, tmp_path):
         """NetCDF file with no recognisable lat/lon fields must raise ValueError."""
@@ -467,7 +466,57 @@ class TestLoadLatlonGrid:
         ds = xr.Dataset({"temperature": (["x"], np.zeros(4))})
         ds.to_netcdf(path)
         with pytest.raises(ValueError, match="No latitude/longitude found"):
-            _load_latlon_grid(path)
+            _get_latlon_grid(path=path)
+
+    def test_spec_grid_shape_and_values(self):
+        """Spec mode: [start, end, num_points] endpoints inclusive, shape (1, ny, nx)."""
+        lat, lon = _get_latlon_grid(lat_spec=[90, -90, 721], lon_spec=[0, 359.75, 1440])
+        assert lat.shape == (1, 721, 1440), f"Got {lat.shape}"
+        assert lon.shape == (1, 721, 1440), f"Got {lon.shape}"
+        assert lat[0, 0, 0].item() == pytest.approx(90.0)
+        assert lat[0, -1, 0].item() == pytest.approx(-90.0)
+        assert lon[0, 0, 0].item() == pytest.approx(0.0)
+
+    def test_spec_grid_dtype(self):
+        """Spec mode: output tensors must be float32."""
+        lat, lon = _get_latlon_grid(lat_spec=[90, -90, 3], lon_spec=[0, 180, 90])
+        assert lat.dtype == torch.float32
+        assert lon.dtype == torch.float32
+
+    def test_neither_source_raises(self):
+        """Supplying neither path nor specs must raise ValueError."""
+        with pytest.raises(ValueError, match="exactly one grid source"):
+            _get_latlon_grid()
+
+    def test_both_sources_raises(self, rectangular_nc):
+        """Supplying both path and specs must raise ValueError."""
+        with pytest.raises(ValueError, match="exactly one grid source"):
+            _get_latlon_grid(path=rectangular_nc, lat_spec=[90, -90, 3], lon_spec=[0, 180, 90])
+
+    def test_one_sided_spec_raises(self):
+        """Only one of lat_spec/lon_spec must raise ValueError."""
+        with pytest.raises(ValueError, match="Both 'lat_spec' and 'lon_spec'"):
+            _get_latlon_grid(lat_spec=[90, -90, 3])
+
+    def test_bad_spec_length_raises(self):
+        """Spec not of length 3 must raise ValueError."""
+        with pytest.raises(ValueError, match="must be \\[start, end, num_points\\]"):
+            _get_latlon_grid(lat_spec=[90, -90], lon_spec=[0, 180, 90])
+
+    def test_non_int_num_points_raises(self):
+        """num_points must be an int (float like 2.5 rejected)."""
+        with pytest.raises(ValueError, match="num_points must be an int"):
+            _get_latlon_grid(lat_spec=[90, -90, 2.5], lon_spec=[0, 180, 90])
+
+    def test_bool_num_points_raises(self):
+        """num_points must be a real int, not a bool (True is an int subclass)."""
+        with pytest.raises(ValueError, match="num_points must be an int"):
+            _get_latlon_grid(lat_spec=[90, -90, True], lon_spec=[0, 180, 90])
+
+    def test_zero_num_points_raises(self):
+        """num_points must be >= 1."""
+        with pytest.raises(ValueError, match="num_points must be >= 1"):
+            _get_latlon_grid(lat_spec=[90, -90, 0], lon_spec=[0, 180, 90])
 
 
 # =============================================================================
@@ -476,45 +525,53 @@ class TestLoadLatlonGrid:
 
 
 class TestComputeTISR:
-    """Tests for _compute_tisr using a mocked NetCDF lat/lon grid."""
+    """Tests for _compute_tisr using a lat/lon grid built from a NetCDF file."""
 
     def test_output_shape(self, rectangular_nc):
         """Output shape must be (ny, nx) — the spatial grid, no time dim."""
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
         result = _compute_tisr(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             integration_period=pd.Timedelta(hours=1),
             num_integration_steps=360,
-            latlon_grid_path=rectangular_nc,
+            latitude=lat,
+            longitude=lon,
         )
         assert result.shape == (4, 8), f"Expected (4, 8), got {result.shape}"
 
     def test_output_dtype(self, rectangular_nc):
-        """Output must be float64."""
+        """Output must be float32."""
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
         result = _compute_tisr(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             integration_period=pd.Timedelta(hours=1),
             num_integration_steps=360,
-            latlon_grid_path=rectangular_nc,
+            latitude=lat,
+            longitude=lon,
         )
-        assert result.dtype == torch.float64, f"Expected float64, got {result.dtype}"
+        assert result.dtype == torch.float32, f"Expected float32, got {result.dtype}"
 
     def test_output_nonnegative(self, rectangular_nc):
         """All integrated TISR values must be non-negative."""
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
         result = _compute_tisr(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             integration_period=pd.Timedelta(hours=1),
             num_integration_steps=360,
-            latlon_grid_path=rectangular_nc,
+            latitude=lat,
+            longitude=lon,
         )
         assert (result >= 0).all(), "Integrated TISR must be non-negative everywhere"
 
     def test_polar_night_via_compute_tisr(self, rectangular_nc):
         """South pole in June must receive zero TISR via the full _compute_tisr pipeline."""
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
         result = _compute_tisr(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             integration_period=pd.Timedelta(hours=1),
             num_integration_steps=360,
-            latlon_grid_path=rectangular_nc,
+            latitude=lat,
+            longitude=lon,
         )
         # rectangular_nc has lat starting at -90; first row is the south pole
         south_pole_row = result[0, :]
@@ -524,10 +581,12 @@ class TestComputeTISR:
 
     def test_different_integration_period(self, rectangular_nc):
         """6-hour integration period must give more energy than 1-hour."""
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
         kwargs = dict(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             num_integration_steps=360,
-            latlon_grid_path=rectangular_nc,
+            latitude=lat,
+            longitude=lon,
         )
         result_1h = _compute_tisr(integration_period=pd.Timedelta(hours=1), **kwargs)
         result_6h = _compute_tisr(integration_period=pd.Timedelta(hours=6), **kwargs)
@@ -539,29 +598,41 @@ class TestComputeTISR:
 # =============================================================================
 
 
+def _make_tisr_data_config(grid_source: dict, num_integration_steps: int | None = 360) -> dict:
+    """Build a minimal but complete data_config for a single TISR source.
+
+    Args:
+        grid_source: Grid keys to merge into the source config, e.g.
+            ``{"latlon_grid_path": ...}`` or ``{"lat_spec": [...], "lon_spec": [...]}``.
+        num_integration_steps: Value for the config key, or None to omit it
+            (exercises the default).
+    """
+    source_cfg: dict = {
+        "dataset_type": "tisr",
+        "variables": {
+            "prognostic": None,
+            "diagnostic": None,
+            "dynamic_forcing": {"vars_2D": ["tisr"]},
+        },
+        **grid_source,
+    }
+    if num_integration_steps is not None:
+        source_cfg["num_integration_steps"] = num_integration_steps
+
+    return {
+        "source": {"TISR": source_cfg},
+        "timestep": "1h",  # -> self.dt = 1 hour, as the tests assume
+        "forecast_len": 1,
+        "start_datetime": "2020-06-01T00:00:00",
+        "end_datetime": "2020-06-04T00:00:00",
+    }
+
+
 @pytest.fixture()
 def tisr_dataset(rectangular_nc):
-    """TISRDataset with BaseDataset.__init__ mocked out.
-
-    Patches BaseDataset.__init__ to do nothing, then manually sets the
-    attributes that TISRDataset.__init__ and its methods depend on, so that
-    the full CREDIT config pipeline is not required.
-    """
-    with patch("credit.datasets.tisr.BaseDataset.__init__", return_value=None):
-        ds = TISRDataset.__new__(TISRDataset)
-        # Attributes normally provided by BaseDataset.__init__
-        ds.curr_source_cfg = {
-            "dataset_type": "tisr",
-            "num_integration_steps": 360,
-            "latlon_grid_path": rectangular_nc,
-        }
-        ds.dt = pd.Timedelta(hours=1)
-        ds.var_dict = {"dynamic_forcing": {"vars_2D": ["tisr"]}}
-        ds.init_register_all_fields = MagicMock()
-        ds._get_field_name = MagicMock(return_value="src/dynamic_forcing/2d/tisr")
-        # Run the real __init__ with a dummy data_config (BaseDataset.__init__ is mocked)
-        TISRDataset.__init__(ds, data_config={}, return_target=False)
-    return ds
+    """A real TISRDataset built through the actual BaseDataset.__init__ path (no mocking)."""
+    data_config = _make_tisr_data_config({"latlon_grid_path": rectangular_nc})
+    return TISRDataset(data_config, return_target=False)
 
 
 class TestTISRDataset:
@@ -577,18 +648,8 @@ class TestTISRDataset:
 
     def test_init_default_num_integration_steps(self, rectangular_nc):
         """__init__ must default num_integration_steps to 360 when not in config."""
-        with patch("credit.datasets.tisr.BaseDataset.__init__", return_value=None):
-            ds = TISRDataset.__new__(TISRDataset)
-            ds.curr_source_cfg = {
-                "dataset_type": "tisr",
-                "latlon_grid_path": rectangular_nc,
-                # num_integration_steps intentionally omitted
-            }
-            ds.dt = pd.Timedelta(hours=1)
-            ds.var_dict = {}
-            ds.init_register_all_fields = MagicMock()
-            ds._get_field_name = MagicMock()
-            TISRDataset.__init__(ds, data_config={}, return_target=False)
+        data_config = _make_tisr_data_config({"latlon_grid_path": rectangular_nc}, num_integration_steps=None)
+        ds = TISRDataset(data_config, return_target=False)
         assert ds.num_integration_steps == 360
 
     def test_init_sets_latlon_grid_path(self, tisr_dataset, rectangular_nc):
@@ -601,15 +662,10 @@ class TestTISRDataset:
 
     def test_init_wrong_dataset_type_raises(self, rectangular_nc):
         """__init__ must assert-fail if dataset_type is not 'tisr'."""
-        with patch("credit.datasets.tisr.BaseDataset.__init__", return_value=None):
-            ds = TISRDataset.__new__(TISRDataset)
-            ds.curr_source_cfg = {"dataset_type": "wrong"}
-            ds.dt = pd.Timedelta(hours=1)
-            ds.var_dict = {}
-            ds.init_register_all_fields = MagicMock()
-            ds._get_field_name = MagicMock()
-            with pytest.raises(AssertionError):
-                TISRDataset.__init__(ds, data_config={}, return_target=False)
+        data_config = _make_tisr_data_config({"latlon_grid_path": rectangular_nc})
+        data_config["source"]["TISR"]["dataset_type"] = "wrong"
+        with pytest.raises(AssertionError):
+            TISRDataset(data_config, return_target=False)
 
     def test_get_file_source_returns_none(self, tisr_dataset):
         """_get_file_source must always return None."""
@@ -638,7 +694,7 @@ class TestTISRDataset:
         """_extract_field must compute TISR and store it in the sample dict."""
         sample = {}
         tisr_dataset._extract_field("dynamic_forcing", pd.Timestamp("2020-06-21 12:00:00"), sample)
-        key = "src/dynamic_forcing/2d/tisr"
+        key = "TISR/dynamic_forcing/2d/tisr"
         assert key in sample, f"Expected key '{key}' in sample"
         assert sample[key].shape == (1, 1, 4, 8), f"Expected shape (1, 1, 4, 8), got {sample[key].shape}"
         assert (sample[key] >= 0).all(), "TISR values must be non-negative"
@@ -833,6 +889,13 @@ class TestInstantaneousFluxParity:
 
 class TestIntegratedTISRParity:
     """Integrated TISR must match the JAX get_toa_incident_solar_radiation."""
+
+    @pytest.fixture(autouse=True)
+    def _force_float64(self, monkeypatch):
+        # Parity is measured against float64 JAX, so run the port in float64
+        # too — otherwise we'd be measuring the float32/float64 gap, not
+        # algorithmic fidelity. Production code stays float32 (see functional tests above).
+        monkeypatch.setattr("credit.datasets.tisr._TORCH_DTYPE", torch.float64)
 
     @pytest.mark.parametrize("ts_str", TIMESTAMPS)
     def test_integrated_tisr_matches_jax(self, ts_str):

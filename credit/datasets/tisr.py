@@ -38,13 +38,13 @@ from credit.datasets.base_dataset import BaseDataset
 
 logger = logging.getLogger(__name__)
 
-_TORCH_DTYPE = torch.float64
+_TORCH_DTYPE = torch.float32
 
 
 # ------------------------------------------------------------------
 # Total Solar Irradiance (TSI) Data and Interpolation
 # ------------------------------------------------------------------
-def _era5_tsi_data() -> tuple[torch.Tensor, torch.Tensor]:
+def _era5_tsi_data(device: torch.device | str = "cpu") -> tuple[torch.Tensor, torch.Tensor]:
     """ERA5-compatible Total Solar Irradiance (TSI) time series.
 
     Sourced from
@@ -64,7 +64,7 @@ def _era5_tsi_data() -> tuple[torch.Tensor, torch.Tensor]:
               to each entry in *times*.
     """
     # Mid-year fractional years from 1951 through 2034 (one value per year)
-    times = torch.arange(1951.5, 2035.5, 1.0, dtype=_TORCH_DTYPE)
+    times = torch.arange(1951.5, 2035.5, 1.0, dtype=_TORCH_DTYPE, device=device)
     tsi_values = 0.9965 * torch.tensor(
         [
             # 1951–1995: non-repeating observational sequence (45 values)
@@ -157,6 +157,7 @@ def _era5_tsi_data() -> tuple[torch.Tensor, torch.Tensor]:
             1365.6918,
         ],
         dtype=_TORCH_DTYPE,
+        device=device,
     )
     return times, tsi_values
 
@@ -216,7 +217,7 @@ def _get_tsi(
 
     # Fractional year: e.g. 1 Jan noon ≈ year + 0.001; 31 Dec midnight ≈ year + 0.999
     year_frac = (ts.dayofyear - 1 + day_frac) / year_len
-    frac_year = torch.tensor((ts.year + year_frac).to_numpy(), dtype=tsi_times.dtype)
+    frac_year = torch.tensor((ts.year + year_frac).to_numpy(), dtype=tsi_times.dtype, device=tsi_times.device)
 
     # Interpolate TSI values at the given fractional years using linear interpolation
     idx = torch.searchsorted(
@@ -235,27 +236,43 @@ def _get_tsi(
 
 
 # ------------------------------------------------------------------
-# Lat/Lon Grid Loading
+# Lat/Lon Grid Loading and Construction
 # ------------------------------------------------------------------
-def _load_latlon_grid(path: str) -> torch.Tensor:
-    """Read a lat/lon grid from a NetCDF file and return it as a (1, ny, nx) tensor pair.
+def _get_latlon_grid(
+    path: str | None = None,
+    lat_spec: Sequence[float] | None = None,
+    lon_spec: Sequence[float] | None = None,
+    device: torch.device | str = "cpu",
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Obtain a lat/lon grid, either by reading a NetCDF file or building one from specs.
 
-    Handles two common grid representations:
+    Exactly one of the two modes must be supplied:
 
-    * **Curvilinear grids** – latitude and longitude are stored as 2-D
-      variables of shape ``(ny, nx)`` and are read directly.
-    * **Rectangular grids** – latitude and longitude are stored as 1-D
-      coordinate arrays of lengths ``ny`` and ``nx`` respectively; a 2-D
-      meshgrid is constructed from them.
+    * **From file** (``path``) – read latitude/longitude from a NetCDF file.
+      Handles two representations:
 
-    Common field name aliases (``latitude``/``lat``/``XLAT``/``nav_lat``
-    and ``longitude``/``lon``/``XLONG``/``nav_lon``) are tried in order of
-    preference so that files from different models/tools are accepted
-    without preprocessing.
+      - *Curvilinear grids* – latitude/longitude stored as 2-D variables of
+        shape ``(ny, nx)``, read directly.
+      - *Rectangular grids* – latitude/longitude stored as 1-D coordinate
+        arrays of lengths ``ny`` and ``nx``; a 2-D meshgrid is constructed.
+
+      Common field name aliases (``latitude``/``lat``/``XLAT``/``nav_lat`` and
+      ``longitude``/``lon``/``XLONG``/``nav_lon``) are tried in order so files
+      from different models/tools are accepted without preprocessing.
+
+    * **From specs** (``lat_spec`` and ``lon_spec``) – synthesize a rectangular
+      grid in-memory without any file I/O. Each spec is ``[start, end, num_points]``
+      with both endpoints inclusive (so ``[90, -90, 721]`` yields the ERA5 0.25°
+      latitude axis). Both specs must be supplied together; callers are expected
+      to validate the pair (see :class:`TISRDataset.__init__`).
 
     Args:
-        path (str): Path to a NetCDF file containing latitude/longitude
-            information.
+        path (str | None): Path to a NetCDF file containing latitude/longitude
+            information. Mutually exclusive with ``lat_spec``/``lon_spec``.
+        lat_spec (Sequence[float] | None): Latitude axis as ``[start, end, num_points]``
+            (e.g. ``[90, -90, 721]``). Mutually exclusive with ``path``.
+        lon_spec (Sequence[float] | None): Longitude axis as ``[start, end, num_points]``
+            (e.g. ``[0, 359.75, 1440]``). Mutually exclusive with ``path``.
 
     Returns:
         tuple[torch.Tensor, torch.Tensor]:
@@ -263,16 +280,67 @@ def _load_latlon_grid(path: str) -> torch.Tensor:
             - **lon_tensor** – Longitude grid in degrees, shape ``(1, ny, nx)``.
 
     Raises:
-        ValueError: If the file cannot be opened by xarray.
-        ValueError: If no recognised latitude or longitude field is found.
-        ValueError: If the lat/lon arrays are neither 1-D nor 2-D after
-            squeezing size-1 leading dimensions.
+        ValueError: If neither or both modes are supplied; if only one of
+            ``lat_spec``/``lon_spec`` is given; if a spec is not length 3, or its
+            ``num_points`` is not an int >= 1; if the file cannot be opened; if no
+            recognised latitude/longitude field is found; or if the lat/lon arrays
+            are neither 1-D nor 2-D after squeezing.
     """
-    # Preferred alias order; first match wins for each coordinate
+    # Determine which mode is active. Spec mode counts as active if *either* axis
+    # is given, so supplying only a path vs. only spec(s) routes correctly here;
+    # a one-sided spec pair is validated upstream in __init__.
+    from_file = path is not None
+    from_spec = lat_spec is not None or lon_spec is not None
+
+    # True in exactly the two bad cases: neither source, or both sources.
+    if from_file == from_spec:
+        raise ValueError(
+            "Provide exactly one grid source: either 'path' or ('lat_spec' and 'lon_spec'), not both or neither."
+        )
+
+    # ----------------------------------------------------------------
+    # Mode 1: build a rectangular grid from [start, end, num_points] specs
+    # ----------------------------------------------------------------
+    if from_spec:
+        # Both axes are required together; a one-sided pair has no sensible
+        # default. Guards direct callers (TISRDataset.__init__ also checks this).
+        if lat_spec is None or lon_spec is None:
+            raise ValueError(
+                "Both 'lat_spec' and 'lon_spec' are required when building from specs. "
+                f"Got lat_spec={lat_spec!r}, lon_spec={lon_spec!r}."
+            )
+
+        def _axis(name: str, spec: Sequence[float]) -> torch.Tensor:
+            if len(spec) != 3:
+                raise ValueError(
+                    f"{name} spec must be [start, end, num_points], got {list(spec)!r} "
+                    f"({len(spec)} element(s) instead of 3)"
+                )
+            start, end = float(spec[0]), float(spec[1])
+            n = spec[2]
+            # num_points must be a true int (reject bool and float like 2.5).
+            if not isinstance(n, int) or isinstance(n, bool):
+                raise ValueError(f"{name} spec {list(spec)!r}: num_points must be an int, got {type(n).__name__}")
+            if n < 1:
+                raise ValueError(f"{name} spec {list(spec)!r}: num_points must be >= 1, got {n}")
+            # linspace over n points, both endpoints inclusive (n == 1 -> just start).
+            return torch.linspace(start, end, n, dtype=_TORCH_DTYPE, device=device)
+
+        lat_1d = _axis("lat", lat_spec)
+        lon_1d = _axis("lon", lon_spec)
+        # ij indexing -> shape (ny, nx), matching the file-read curvilinear case.
+        lat_tensor, lon_tensor = torch.meshgrid(lat_1d, lon_1d, indexing="ij")
+        # Prepend singleton dim -> (1, ny, nx), matching mode 1.
+        return lat_tensor.unsqueeze(0), lon_tensor.unsqueeze(0)
+
+    # ----------------------------------------------------------------
+    # Mode 2: read the grid from a NetCDF file
+    # ----------------------------------------------------------------
+    # Alias names tried in priority order; first present wins for each axis.
     _LAT_NAMES = ("latitude", "lat", "XLAT", "nav_lat")
     _LON_NAMES = ("longitude", "lon", "XLONG", "nav_lon")
 
-    # Open the NetCDF file; propagate any I/O error as a descriptive ValueError
+    # Wrap I/O errors as a descriptive, path-tagged ValueError.
     try:
         ds = xr.open_dataset(path)
     except Exception as exc:
@@ -301,12 +369,12 @@ def _load_latlon_grid(path: str) -> torch.Tensor:
     #   - 1-D arrays of shape (ny,) and (nx,) for rectangular grids. Any other shape is unexpected and will raise an error.
     if lat.ndim == 2 and lon.ndim == 2:
         # curvilinear grid case: lat and lon are already 2-D arrays of shape (ny, nx)
-        lat_tensor = torch.tensor(lat.values, dtype=_TORCH_DTYPE)
-        lon_tensor = torch.tensor(lon.values, dtype=_TORCH_DTYPE)
+        lat_tensor = torch.tensor(lat.values, dtype=_TORCH_DTYPE, device=device)
+        lon_tensor = torch.tensor(lon.values, dtype=_TORCH_DTYPE, device=device)
     elif lat.ndim == 1 and lon.ndim == 1:
         # rectangular grid case: lat and lon are 1-D arrays; create a 2-D meshgrid
-        lat_1d = torch.tensor(lat.values, dtype=_TORCH_DTYPE)
-        lon_1d = torch.tensor(lon.values, dtype=_TORCH_DTYPE)
+        lat_1d = torch.tensor(lat.values, dtype=_TORCH_DTYPE, device=device)
+        lon_1d = torch.tensor(lon.values, dtype=_TORCH_DTYPE, device=device)
         lat_tensor, lon_tensor = torch.meshgrid(lat_1d, lon_1d, indexing="ij")
     else:
         ds.close()
@@ -325,6 +393,7 @@ def _load_latlon_grid(path: str) -> torch.Tensor:
 # ------------------------------------------------------------------
 def _get_j2000_days(
     timestamp: pd.Timestamp | pd.DatetimeIndex,
+    device: torch.device | str = "cpu",
 ) -> torch.Tensor:
     """Convert UTC timestamp(s) to fractional days since the J2000.0 epoch.
 
@@ -343,7 +412,7 @@ def _get_j2000_days(
     dti = pd.DatetimeIndex([timestamp] if isinstance(timestamp, pd.Timestamp) else timestamp)
 
     # Convert to Julian date and then to days since J2000 epoch, returning as a PyTorch tensor
-    return torch.tensor(dti.to_julian_date().to_numpy() - _J2000_EPOCH, dtype=_TORCH_DTYPE)
+    return torch.tensor(dti.to_julian_date().to_numpy() - _J2000_EPOCH, dtype=_TORCH_DTYPE, device=device)
 
 
 def _get_orbital_parameters(
@@ -638,7 +707,8 @@ def _compute_tisr(
     t: pd.Timestamp,
     integration_period: pd.Timedelta,
     num_integration_steps: int,
-    latlon_grid_path: str,
+    latitude: torch.Tensor,
+    longitude: torch.Tensor,
 ) -> torch.Tensor:
     """Full pipeline for integrated top-of-atmosphere TISR at a target timestamp.
 
@@ -671,8 +741,8 @@ def _compute_tisr(
         num_integration_steps (int): Number of equally-spaced sub-intervals used
             by the trapezoidal integrator. Higher values increase accuracy.
             Must be a positive integer.
-        latlon_grid_path (str): Path to the file containing the latitude/longitude
-            grid over which TISR is computed.
+        latitude (torch.Tensor): Latitude grid in degrees, shape ``(1, ny, nx)``.
+        longitude (torch.Tensor): Longitude grid in degrees, shape ``(1, ny, nx)``.
 
     Returns:
         torch.Tensor: Integrated TOA TISR over the accumulation window, in J/m².
@@ -687,19 +757,18 @@ def _compute_tisr(
         freq=integration_period / num_integration_steps,
     )
 
-    # Load the spatial grid; latitude and longitude are broadcast-compatible
-    # tensors used for zenith angle and solar time calculations below.
-    latitude, longitude = _load_latlon_grid(latlon_grid_path)
+    # Reuse the cached grid's device so callers don't pass it separately.
+    device = latitude.device
 
     # Retrieve the total solar irradiance (TSI) time series and interpolate it
     # onto ts. Unsqueeze to add singleton spatial dims for broadcasting: (time, 1, 1).
-    times, tsi_values = _era5_tsi_data()
+    times, tsi_values = _era5_tsi_data(device=device)
     tsi = _get_tsi(ts, times, tsi_values).unsqueeze(-1).unsqueeze(-1)
 
     # Compute orbital parameters (declination, equation of time, Earth-Sun distance,
     # etc.) for each timestep. J2000 days are unsqueezed to (time, 1, 1) so the
     # result broadcasts cleanly against the spatial grid.
-    orbital = _get_orbital_parameters(_get_j2000_days(ts).unsqueeze(-1).unsqueeze(-1))
+    orbital = _get_orbital_parameters(_get_j2000_days(ts, device=device).unsqueeze(-1).unsqueeze(-1))
 
     # Derive the cosine of the solar zenith angle at every grid point and timestep.
     cos_zenith = _get_cosine_zenith_angle(
@@ -749,14 +818,22 @@ class TISRDataset(BaseDataset):
     count are configurable for other use cases. Input timestamps must fall within the TSI data
     range (1951-2034).
 
-    Note that the TISR dataset is typically used as a dynamic forcing/input variable rather than a target,
-    so the ``return_target`` parameter is set to False by default. TISR dataset is not loading any data
-    from local or remote files, but rather performing the computation on-the-fly (no need to specify
-    loading mode like most other datasets).
+    Note that the TISR dataset is typically used as a dynamic forcing/input variable rather than a
+    target, so the ``return_target`` parameter is set to False by default. TISR dataset is not loading
+    any data from local or remote files, but rather performing the computation on-the-fly (no need to
+    specify loading mode like most other datasets). Because computation happens inside ``__getitem__``,
+    the dataset emits CPU tensors by default. When used with a multi-worker ``DataLoader``
+    (``num_workers > 0``), keep ``device="cpu"`` (the default) and let the training loop move each
+    collated batch to the GPU; constructing CUDA tensors in worker subprocesses is unsupported by
+    PyTorch. The ``device`` config key is provided mainly for single-process (``num_workers=0``) use.
+
+    Exactly one grid source must be configured: either ``latlon_grid_path`` (read from a NetCDF
+    file) or both ``lat_spec`` and ``lon_spec`` (build a rectangular grid in-memory, no file read).
+    Each spec is a ``[start, end, num_points]`` list with both endpoints inclusive.
 
     See module docstring for full description of output format and file naming.
 
-    Example YAML configuration (local mode):
+    Example YAML configuration (grid read from file):
 
         data:
             source:
@@ -767,8 +844,28 @@ class TISRDataset(BaseDataset):
                         diagnostic: null
                         dynamic_forcing:
                             var_2d: ['tisr']  # only accept 'tisr'
-                    num_integration_steps: 360
+                    num_integration_steps: 2160  # 360 steps per hour → 6h integration with 1h accumulation windows
                     latlon_grid_path: "/glade/derecho/scratch/cbecker/test_CREDIT_data/era5_local_testing_data_onedeg_2021.nc"
+
+            start_datetime: "2021-06-01"
+            end_datetime: "2021-06-04"
+            timestep: "6h"
+            forecast_len: 0
+
+    Example YAML configuration (grid built in-memory from specs):
+
+        data:
+            source:
+                Example_TISR:
+                    dataset_type: "tisr"
+                    variables:
+                        prognostic: null
+                        diagnostic: null
+                        dynamic_forcing:
+                            var_2d: ['tisr']
+                    num_integration_steps: 2160
+                    lat_spec: [90, -90, 721]      # [start, end, num_points], endpoints inclusive
+                    lon_spec: [0, 359.75, 1440]   # 0.25° grid; excludes the 360° wrap
 
             start_datetime: "2021-06-01"
             end_datetime: "2021-06-04"
@@ -798,9 +895,57 @@ class TISRDataset(BaseDataset):
         # Initialize the field registration based on the provided config
         self.init_register_all_fields()
 
-        # Load the latitude-longitude grid file path from the config; this is needed to compute
-        # the cosine of the solar zenith angle for each grid point
-        self.latlon_grid_path: str = self.curr_source_cfg.get("latlon_grid_path")
+        # Device for on-the-fly TISR computation. Defaults to CPU and should
+        # almost always stay there: this dataset produces tensors inside
+        # __getitem__, which run in DataLoader worker subprocesses when
+        # num_workers > 0. CUDA tensors cannot be created in forked workers
+        # ("Cannot re-initialize CUDA in forked subprocess") and don't survive
+        # the default collate + IPC, so the trainer should move collated CPU
+        # batches to the GPU instead. Only set device="cuda" here if you load
+        # this dataset single-process (num_workers=0).
+        self.device: torch.device = torch.device(self.curr_source_cfg.get("device", "cpu"))
+        if self.device.type != "cpu":
+            logger.warning(
+                "TISRDataset configured with device=%s. Computing tensors on a "
+                "non-CPU device inside the dataset is incompatible with "
+                "multi-worker DataLoaders (num_workers > 0). Prefer device='cpu' "
+                "and move batches to the GPU in the training loop.",
+                self.device,
+            )
+
+        # Grid source from config — exactly one of: 'latlon_grid_path' (file)
+        # or both 'lat_spec'/'lon_spec' (in-memory). All keys optional individually.
+        path = self.curr_source_cfg.get("latlon_grid_path")
+        lat_spec = self.curr_source_cfg.get("lat_spec")
+        lon_spec = self.curr_source_cfg.get("lon_spec")
+
+        # Spec axes must be supplied as a pair; catch a one-sided pair here with a
+        # clear message before it reaches _get_latlon_grid.
+        if (lat_spec is None) != (lon_spec is None):
+            raise ValueError(
+                "TISR config: 'lat_spec' and 'lon_spec' must be supplied together. "
+                f"Got lat_spec={lat_spec!r}, lon_spec={lon_spec!r}."
+            )
+
+        # True in the two bad cases (neither source, or both); raise with the actual keys.
+        has_path = path is not None
+        has_spec = lat_spec is not None  # lon_spec is guaranteed to match by the check above
+        if has_path == has_spec:
+            raise ValueError(
+                "TISR config must specify exactly one grid source: either "
+                "'latlon_grid_path' (read from file) or both 'lat_spec' and "
+                "'lon_spec' (build in-memory). "
+                f"Got latlon_grid_path={path!r}, lat_spec={lat_spec!r}, lon_spec={lon_spec!r}."
+            )
+
+        # Build the static grid once and cache it, keeping I/O off the per-sample path.
+        self.latlon_grid_path: str | None = path
+        self.latitude, self.longitude = _get_latlon_grid(
+            path=path,
+            lat_spec=lat_spec,
+            lon_spec=lon_spec,
+            device=self.device,
+        )
 
     def _get_file_source(self, field_config: dict[str, Any]) -> None:
         """Returns None since TISR dataset is not loading any data from local or remote files."""
@@ -827,17 +972,19 @@ class TISRDataset(BaseDataset):
         # Check if the var_dict exists for the field type
         vd = self.var_dict.get(field_type)
         if not vd:
+            logger.debug("No var_dict entry for field_type '%s', skipping.", field_type)
             return
 
         # Check if the field type has any 2-D variables and if it is "tisr"
         vars_2D = vd.get("vars_2D", [])
         if not vars_2D:
+            logger.debug("No vars_2D in var_dict for field_type '%s', skipping.", field_type)
             return
         if vars_2D != ["tisr"]:
             raise ValueError(f"TISRDataset only supports vars_2D=['tisr'], got {vars_2D}")
 
         # Compute the top-of-atmosphere solar radiation, expand to be (1, 1, lat, lon),
         # and store it in the sample dictionary
-        tisr = _compute_tisr(t, self.dt, self.num_integration_steps, self.latlon_grid_path)
+        tisr = _compute_tisr(t, self.dt, self.num_integration_steps, self.latitude, self.longitude)
         key = self._get_field_name(field_type, "2d", "tisr")
         sample[key] = tisr.unsqueeze(0).unsqueeze(0)
