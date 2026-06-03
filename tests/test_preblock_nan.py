@@ -160,7 +160,7 @@ def test_fill_nan_registered():
 
 def test_fill_nan_built_from_config():
     """build_preblocks instantiates FillNan from a config dict and it works."""
-    blocks = build_preblocks({"fill": {"type": "fill_nan", "args": {"fill_value": 5.0}}})
+    blocks = build_preblocks({"per_step": {"fill": {"type": "fill_nan", "args": {"fill_value": 5.0}}}})
     result = blocks["fill"](create_nan_data())
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/U"]
     assert t[0, 0, 0, 0, 0] == 5.0
