@@ -70,7 +70,19 @@ class EMATracker:
         self.shadow: OrderedDict = OrderedDict()
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
         for k, v in state.items():
+            if self._is_spectral_norm_buffer(k, state):
+                continue  # power-iteration vectors must not be EMA-averaged
             self.shadow[k] = v.detach().float().cpu().clone()
+
+    @staticmethod
+    def _is_spectral_norm_buffer(key: str, state: dict) -> bool:
+        # nn.utils.spectral_norm stores weight_u / weight_v alongside weight_orig.
+        # Averaging these vectors destroys the power-iteration convergence and causes
+        # sigma = u^T W v → 0 in eval mode → weight explodes.
+        if key.endswith("_u") or key.endswith("_v"):
+            orig_key = key[:-2] + "_orig"
+            return orig_key in state
+        return False
 
     @torch.no_grad()
     def update(self, model: torch.nn.Module):
@@ -78,6 +90,8 @@ class EMATracker:
         effective_decay = min(self.decay, (1 + self.step) / (10 + self.step))
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
         for k, v in state.items():
+            if k not in self.shadow:
+                continue  # spectral norm buffers are excluded
             self.shadow[k].mul_(effective_decay).add_(v.detach().float().cpu(), alpha=1.0 - effective_decay)
 
     @torch.no_grad()
@@ -102,6 +116,21 @@ class EMATracker:
         self.decay = d["decay"]
         self.shadow = d["shadow"]
         self.step = d.get("step", 0)
+        # Checkpoints saved before the _is_spectral_norm_buffer filter was added
+        # (pre-2026-05-15) may have EMA-averaged weight_u / weight_v in the shadow.
+        # Averaged unit vectors are not unit vectors, so sigma = u^T W v becomes
+        # wrong in eval mode and causes val loss to explode on resume.  Strip them.
+        stale = [k for k in self.shadow if self._is_spectral_norm_buffer(k, self.shadow)]
+        for k in stale:
+            del self.shadow[k]
+        if stale:
+            logger.warning(
+                "EMA shadow contained %d spectral-norm buffer(s) (%s…) — stripped on load. "
+                "This checkpoint was saved before the spectral-norm filter was added; "
+                "resume will proceed correctly with the current code.",
+                len(stale),
+                stale[0],
+            )
 
 
 class BaseTrainer(ABC):
@@ -170,7 +199,7 @@ class BaseTrainer(ABC):
             ema_decay = trainer_conf.get("ema_decay", 0.9999)
             self.ema: Optional[EMATracker] = EMATracker(self.model, decay=ema_decay)
             ema_path = os.path.join(self.save_loc, "checkpoint_ema.pt")
-            if os.path.exists(ema_path):
+            if self.load_weights and os.path.exists(ema_path):
                 ema_ckpt = torch.load(ema_path, map_location="cpu", weights_only=False)
                 self.ema.load_state_dict(ema_ckpt["model_state_dict"])
                 logger.info(f"Resumed EMA from {ema_path} (step {self.ema.step})")

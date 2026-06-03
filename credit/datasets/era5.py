@@ -396,6 +396,7 @@ class WeatherBench2ERA5Dataset(BaseDataset):
         # Initialised lazily on the first __getitem__ call (worker-safe).
         self._fs = None
         self.store = None
+        self.mode = "remote"
         super().init_register_all_fields()
 
     # ------------------------------------------------------------------

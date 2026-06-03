@@ -216,3 +216,282 @@ def test_scaler_round_trip(scaler_file):
     data = fwd(data)
     data = inv(data)
     assert torch.allclose(data["input"]["Test_ERA5"][var].float(), original.float(), atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# build_preblocks and build_postblocks — two-section format enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPreblocks:
+    """Tests for build_preblocks() config validation and section selection."""
+
+    def test_flat_format_raises_value_error(self):
+        """Old flat format (no ic_only/per_step sections) raises ValueError."""
+        from credit.preblock import build_preblocks
+
+        with pytest.raises(ValueError, match="unexpected top-level keys"):
+            build_preblocks({"concat": {"type": "concat"}})
+
+    def test_unknown_section_key_raises(self):
+        """A key that is neither ic_only nor per_step raises ValueError."""
+        from credit.preblock import build_preblocks
+
+        with pytest.raises(ValueError, match="unexpected top-level keys"):
+            build_preblocks({"per_step": {}, "bad_section": {}})
+
+    def test_valid_two_section_per_step_builds(self):
+        """per_step section builds an nn.ModuleDict with the named block."""
+        import torch.nn as nn
+        from credit.preblock import build_preblocks
+
+        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        assert isinstance(preblocks, nn.ModuleDict)
+        assert "concat" in preblocks
+
+    def test_valid_two_section_ic_only_builds(self):
+        """ic_only section builds an nn.ModuleDict with the named block."""
+        import torch.nn as nn
+        from credit.preblock import build_preblocks
+
+        preblocks = build_preblocks({"ic_only": {"concat": {"type": "concat"}}}, phase="ic_only")
+        assert isinstance(preblocks, nn.ModuleDict)
+        assert "concat" in preblocks
+
+    def test_empty_config_returns_empty_module_dict(self):
+        """Empty config builds an empty ModuleDict without error."""
+        import torch.nn as nn
+        from credit.preblock import build_preblocks
+
+        preblocks = build_preblocks({}, phase="per_step")
+        assert isinstance(preblocks, nn.ModuleDict)
+        assert len(preblocks) == 0
+
+    def test_missing_phase_returns_empty_module_dict(self):
+        """Requesting a phase absent from the config returns an empty ModuleDict."""
+        from credit.preblock import build_preblocks
+
+        # ic_only is configured but per_step is requested
+        preblocks = build_preblocks({"ic_only": {"concat": {"type": "concat"}}}, phase="per_step")
+        assert len(preblocks) == 0
+
+    def test_invalid_phase_raises(self):
+        """An unrecognized phase name raises ValueError."""
+        from credit.preblock import build_preblocks
+
+        with pytest.raises(ValueError, match="phase must be one of"):
+            build_preblocks({}, phase="invalid_phase")
+
+
+class TestBuildPostblocks:
+    """Tests for build_postblocks() config validation (mirrors build_preblocks)."""
+
+    def test_flat_format_raises_value_error(self):
+        """Old flat postblock format raises ValueError."""
+        from credit.postblock import build_postblocks
+
+        with pytest.raises(ValueError, match="unexpected top-level keys"):
+            build_postblocks({"reconstruct": {"type": "reconstruct"}})
+
+    def test_valid_two_section_per_step_builds(self):
+        """per_step section builds a ModuleDict with the named block."""
+        import torch.nn as nn
+        from credit.postblock import build_postblocks
+
+        postblocks = build_postblocks({"per_step": {"reconstruct": {"type": "reconstruct"}}}, phase="per_step")
+        assert isinstance(postblocks, nn.ModuleDict)
+        assert "reconstruct" in postblocks
+
+    def test_empty_config_returns_empty_module_dict(self):
+        from credit.postblock import build_postblocks
+
+        postblocks = build_postblocks({}, phase="per_step")
+        assert len(postblocks) == 0
+
+
+# ---------------------------------------------------------------------------
+# ConcatToTensor — channel ordering and channel map correctness
+# ---------------------------------------------------------------------------
+
+
+class TestConcatToTensorChannelOrder:
+    """ConcatToTensor must sort channels by FIELD_TYPE_RANK regardless of insertion order."""
+
+    def test_channel_order_follows_field_type_rank(self):
+        """prognostic(0) < static(1) < dynamic_forcing(2) regardless of dict insertion order."""
+        from credit.preblock.concat import ConcatToTensor
+
+        B, H, W = 1, 4, 4
+        # Insert in reverse-rank order to verify the sort is applied
+        batch = {
+            "input": {
+                "era5": {
+                    "era5/dynamic_forcing/2d/df": torch.full((B, 1, 1, H, W), 9.0),
+                    "era5/static/2d/st": torch.full((B, 1, 1, H, W), 5.0),
+                    "era5/prognostic/2d/p": torch.full((B, 1, 1, H, W), 3.0),
+                }
+            }
+        }
+        ct = ConcatToTensor()
+        tensor, _meta = ct(batch)
+        # Shape: (B, 3_channels, 1_timestep, H, W)
+        assert tensor.shape == (B, 3, 1, H, W)
+        assert tensor[0, 0, 0, 0, 0].item() == pytest.approx(3.0)  # prognostic
+        assert tensor[0, 1, 0, 0, 0].item() == pytest.approx(5.0)  # static
+        assert tensor[0, 2, 0, 0, 0].item() == pytest.approx(9.0)  # dynamic_forcing
+
+    def test_input_channel_map_contains_all_variables(self):
+        """input _channel_map has an entry for every variable key in the batch."""
+        from credit.preblock.concat import ConcatToTensor
+
+        B, H, W = 1, 4, 4
+        var_keys = [
+            "era5/prognostic/2d/T",
+            "era5/static/2d/z",
+            "era5/dynamic_forcing/2d/insolation",
+        ]
+        batch = {"input": {"era5": {k: torch.randn(B, 1, 1, H, W) for k in var_keys}}}
+        ct = ConcatToTensor()
+        _, meta = ct(batch)
+        channel_map = meta["input"]["_channel_map"]
+        for key in var_keys:
+            assert key in channel_map, f"Expected {key!r} in input _channel_map"
+
+    def test_target_channel_map_excludes_non_predictable_fields(self):
+        """Target _channel_map includes only prognostic and diagnostic; not static or dynfrc."""
+        from credit.preblock.concat import ConcatToTensor
+
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {
+                "era5": {
+                    "era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W),
+                    "era5/static/2d/z": torch.randn(B, 1, 1, H, W),
+                    "era5/dynamic_forcing/2d/insolation": torch.randn(B, 1, 1, H, W),
+                    "era5/diagnostic/2d/cape": torch.randn(B, 1, 1, H, W),
+                }
+            }
+        }
+        ct = ConcatToTensor()
+        _, meta = ct(batch)
+        target_map = meta["target"]["_channel_map"]
+        assert "era5/prognostic/2d/T" in target_map
+        assert "era5/diagnostic/2d/cape" in target_map
+        assert "era5/static/2d/z" not in target_map
+        assert "era5/dynamic_forcing/2d/insolation" not in target_map
+
+    def test_channel_map_slices_are_non_overlapping(self):
+        """Each variable's slice in _channel_map is disjoint from all others."""
+        from credit.preblock.concat import ConcatToTensor
+
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {
+                "era5": {
+                    "era5/prognostic/2d/a": torch.randn(B, 1, 1, H, W),
+                    "era5/prognostic/2d/b": torch.randn(B, 1, 1, H, W),
+                    "era5/static/2d/c": torch.randn(B, 1, 1, H, W),
+                }
+            }
+        }
+        ct = ConcatToTensor()
+        _, meta = ct(batch)
+        channel_map = meta["input"]["_channel_map"]
+
+        covered = []
+        for info in channel_map.values():
+            s = info["slice"]
+            covered.extend(range(s.start, s.stop))
+
+        assert len(covered) == len(set(covered)), "Channel slices must not overlap"
+
+
+# ---------------------------------------------------------------------------
+# apply_preblocks — return format and mutation safety (purity)
+# ---------------------------------------------------------------------------
+
+
+class TestApplyPreblocks:
+    """Tests for apply_preblocks() return format and input-batch immutability."""
+
+    def test_return_format_with_concat_has_x_y_metadata(self):
+        """apply_preblocks returns {"x", "y", "metadata"} when ConcatToTensor is the final block."""
+        from credit.preblock import apply_preblocks, build_preblocks
+
+        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+            "target": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+        }
+        result = apply_preblocks(preblocks, batch)
+
+        assert {"x", "y", "metadata"} <= set(result.keys())
+        assert isinstance(result["x"], torch.Tensor)
+        assert isinstance(result["y"], torch.Tensor)
+
+    def test_metadata_contains_input_and_target_channel_maps(self):
+        """Metadata from apply_preblocks contains populated _channel_map for input and target."""
+        from credit.preblock import apply_preblocks, build_preblocks
+
+        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        var_key = "era5/prognostic/2d/T"
+        batch = {
+            "input": {"era5": {var_key: torch.randn(B, 1, 1, H, W)}},
+            "target": {"era5": {var_key: torch.randn(B, 1, 1, H, W)}},
+        }
+        result = apply_preblocks(preblocks, batch)
+
+        meta = result["metadata"]
+        assert "_channel_map" in meta["input"], "input _channel_map missing from metadata"
+        assert "_channel_map" in meta["target"], "target _channel_map missing from metadata"
+        assert var_key in meta["input"]["_channel_map"]
+        assert var_key in meta["target"]["_channel_map"]
+
+    def test_does_not_mutate_input_tensor_values(self):
+        """apply_preblocks does not modify the caller's batch tensors in-place."""
+        from credit.preblock import apply_preblocks, build_preblocks
+
+        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        original_tensor = torch.ones(B, 1, 1, H, W)
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": original_tensor}},
+        }
+        before = original_tensor.clone()
+        _ = apply_preblocks(preblocks, batch)
+
+        # Reference identity preserved — same object, same values
+        assert batch["input"]["era5"]["era5/prognostic/2d/T"] is original_tensor
+        torch.testing.assert_close(original_tensor, before)
+
+    def test_does_not_add_keys_to_caller_batch(self):
+        """apply_preblocks does not add or remove keys from the caller's batch dict."""
+        from credit.preblock import apply_preblocks, build_preblocks
+
+        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+        }
+        original_keys = set(batch.keys())
+        _ = apply_preblocks(preblocks, batch)
+
+        assert set(batch.keys()) == original_keys
+
+    def test_empty_chain_returns_nested_dict_unchanged(self):
+        """An empty preblock chain passes the batch through unmodified."""
+        from credit.preblock import apply_preblocks, build_preblocks
+
+        preblocks = build_preblocks({}, phase="per_step")
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+        }
+        result = apply_preblocks(preblocks, batch)
+
+        # Without ConcatToTensor, _run_preblock_group returns the batch dict
+        assert isinstance(result, dict)
+        assert "input" in result
+        assert "era5/prognostic/2d/T" in result["input"]["era5"]

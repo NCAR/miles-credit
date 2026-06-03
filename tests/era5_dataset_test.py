@@ -205,12 +205,12 @@ def minimal_arco_era5_config() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_dataset_len(minimal_config: dict[str, Any]):
+def test_dataset_len(minimal_config: dict[str, Any], patch_era5_io_multiyear: dict[int, xr.Dataset]):
     ds: LocalDataset = LocalDataset(minimal_config)
     assert len(ds) > 0
 
 
-def test_return_target(minimal_config: dict[str, Any]):
+def test_return_target(minimal_config: dict[str, Any], patch_era5_io_multiyear: dict[int, xr.Dataset]):
     ds: LocalDataset = LocalDataset(minimal_config, return_target=True)
     t: pd.Timestamp = ds.datetimes[0]
 
