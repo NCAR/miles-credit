@@ -8,6 +8,105 @@ import yaml
 from ._common import _prompt, _prompt_bool, _repo_root
 
 
+def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out, source_name="ERA5"):
+    """Convert old mean/std NetCDF files into two BridgeScaler JSON files.
+
+    Creates one JSON for the preblock (batch-dict key structure) and one for
+    the postblock (reconstructed prediction-dict structure).
+
+    Parameters
+    ----------
+    mean_path, std_path : str
+        Paths to NetCDF files with per-variable means and standard deviations.
+        3-D variables have a 'level' dimension; 2-D variables are scalars.
+    var_groups : dict
+        ``{(field_type, dim): [varname, ...]}`` — maps ("prognostic", "3d") etc.
+        to the list of variable names that belong to that group.
+    pre_out : str
+        Output path for the preblock scaler JSON.
+    post_out : str
+        Output path for the postblock scaler JSON.
+
+    Returns
+    -------
+    pre_keys : list[str]
+        Full key paths included in the preblock scaler
+        (e.g. ``"era5/prognostic/3d/temperature"``).
+    post_prog_vars : list[str]
+        Short variable names of prognostic vars in the postblock scaler.
+    """
+    import numpy as np
+    import xarray as xr
+
+    try:
+        import torch
+        from bridgescaler.distributed_tensor import DStandardScalerTensor
+        from bridgescaler import save_scaler_dict
+    except ImportError as e:
+        print(f"  WARNING: cannot build BridgeScaler JSON — {e}", file=sys.stderr)
+        print("  Falling back to era5_normalizer preblock.", file=sys.stderr)
+        return None, None
+
+    ds_mean = xr.open_dataset(mean_path)
+    ds_std = xr.open_dataset(std_path)
+    nc_vars = set(ds_mean.data_vars) & set(ds_std.data_vars)
+
+    def _make_scaler(varname, n_levels):
+        mean_vals = np.array(ds_mean[varname].values, dtype=np.float32)
+        std_vals = np.array(ds_std[varname].values, dtype=np.float32)
+        if mean_vals.ndim == 0:
+            mean_vals = mean_vals.reshape(1)
+            std_vals = std_vals.reshape(1)
+        sc = DStandardScalerTensor(channels_last=False)
+        sc.mean_x_ = torch.tensor(mean_vals, dtype=torch.float32)
+        sc.var_x_ = torch.tensor(std_vals**2, dtype=torch.float32)
+        sc.x_columns_ = list(range(len(mean_vals)))
+        sc._fit = True
+        sc.n_ = 1
+        return sc
+
+    # --- preblock dict: {"input": {source: {full_key: scaler}},
+    #                     "target": {source: {full_key: scaler}}}
+    # Must match the raw batch dict produced by the dataset. The dataset uses
+    # full-path strings as leaf keys: e.g. "ERA5/prognostic/3d/u_component_of_wind".
+    pre_input = {}  # all field types (prognostic, dynamic_forcing, static)
+    pre_target = {}  # prognostic only (model prediction targets)
+    pre_keys = []
+
+    # --- postblock dict: {source: {full_key: scaler}}
+    # Must match y_processed structure written by Reconstruct.
+    post_dict = {}
+
+    for (field_type, dim), varnames in var_groups.items():
+        for varname in varnames:
+            if varname not in nc_vars:
+                continue
+            n_levels = int(ds_mean[varname].size)
+            sc = _make_scaler(varname, n_levels)
+            full_key = f"{source_name}/{field_type}/{dim}/{varname}"
+            pre_input[full_key] = sc
+            pre_keys.append(full_key)
+            if field_type in ("prognostic", "diagnostic"):
+                pre_target[full_key] = sc
+                post_dict.setdefault(source_name, {})[full_key] = sc
+
+    ds_mean.close()
+    ds_std.close()
+
+    pre_dict = {"input": {source_name: pre_input}, "target": {source_name: pre_target}}
+    save_scaler_dict(pre_dict, pre_out)
+    save_scaler_dict(post_dict, post_out)
+
+    post_prog_vars = [
+        f"{source_name}/{ft}/{dim}/{varname}"
+        for (ft, dim), varnames in var_groups.items()
+        if ft == "prognostic"
+        for varname in varnames
+        if varname in nc_vars
+    ]
+    return pre_keys, post_prog_vars
+
+
 class _FlowSeqDumper(yaml.Dumper):
     """YAML dumper that writes lists of scalars as flow sequences [a, b, c]."""
 
@@ -111,7 +210,7 @@ def _convert(args: argparse.Namespace) -> None:
     changes = []
 
     # trainer.type
-    V1_TYPES = {"era5", "standard", "universal"}
+    V1_TYPES = {"era5", "era5-gen1", "standard", "universal"}
     if trainer_type in V1_TYPES:
         conf["trainer"]["type"] = "era5-gen2"
         changes.append(f"trainer.type: '{trainer_type}' → 'era5-gen2'")
@@ -189,7 +288,9 @@ def _convert(args: argparse.Namespace) -> None:
 
         # Keep non-flat keys (forecast_len, valid_forecast_len, backprop_on_timestep, …)
         keep_keys = {k: v for k, v in data.items() if k not in _V1_DATA_FLAT_KEYS}
-        level_coord = _prompt("level_coord (vertical coordinate name in your data files)").strip()
+        level_coord = getattr(args, "level_coord", None) or ""
+        if not level_coord:
+            level_coord = prompt("level_coord (vertical coordinate name in your data files)", default="level").strip()
         _all_dims = _zarr_dims(prog_path)
         if _all_dims is not None and level_coord not in _all_dims:
             print(f"  '{level_coord}' not found in file. Available options: {', '.join(_all_dims)}", file=sys.stderr)
@@ -197,7 +298,7 @@ def _convert(args: argparse.Namespace) -> None:
 
         conf["data"] = {
             "source": {
-                "ERA5": {"dataset_type": "era5", "level_coord": level_coord, "levels": levels, "variables": era5_vars}
+                "ERA5": {"dataset_type": "local", "level_coord": level_coord, "levels": levels, "variables": era5_vars}
             },
             "timestep": f"{lead_time}h",
             "forecast_len": data.get("forecast_len", 0),
@@ -212,17 +313,90 @@ def _convert(args: argparse.Namespace) -> None:
             }
         )
         if mean_path or std_path:
-            conf.setdefault("preblocks", {})["norm"] = {
-                "type": "era5_normalizer",
-                "args": {"mean_path": mean_path, "std_path": std_path},
-            }
+            # V1 configs often point to a residual (6h-difference) std file.
+            # V2 predicts absolute values, so the scaler must use absolute std.
+            # If the std_path looks like a residual file, try to find the absolute version.
+            if std_path and "residual" in os.path.basename(std_path):
+                abs_candidate = std_path.replace("std_residual", "std")
+                if os.path.exists(abs_candidate):
+                    changes.append(
+                        f"std_path: auto-switched from residual to absolute std ({os.path.basename(abs_candidate)})"
+                    )
+                    std_path = abs_candidate
+                else:
+                    print(
+                        "  WARNING: std_path appears to be a residual std file; V2 trains on absolute\n"
+                        "  values so loss will be inflated. Provide an absolute std file via --std-path.",
+                        file=sys.stderr,
+                    )
+            # Build BridgeScaler JSON files from old z-score NetCDF files.
+            # Group variables by (field_type, dim) so the converter knows the
+            # v2 key structure.
+            var_groups = {}
+            if vars_3d:
+                var_groups[("prognostic", "3d")] = vars_3d
+            if vars_2d:
+                var_groups[("prognostic", "2d")] = vars_2d
+            if dyn_vars:
+                var_groups[("dynamic_forcing", "2d")] = dyn_vars
+            if static_vars:
+                var_groups[("static", "2d")] = static_vars
+            if diag_vars:
+                var_groups[("diagnostic", "2d")] = diag_vars
+
+            base_out, _ = os.path.splitext(
+                getattr(args, "output", None)
+                or (
+                    f"{os.path.splitext(args.config)[0]}_gen2{os.path.splitext(args.config)[1]}"
+                    if os.path.splitext(args.config)[1]
+                    else f"{args.config}_gen2.yml"
+                )
+            )
+            pre_json = f"{base_out}_pre_scaler.json"
+            post_json = f"{base_out}_post_scaler.json"
+
+            pre_keys, post_prog_vars = _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_json, post_json)
+
+            if pre_keys is not None:
+                per_step_pre = conf.setdefault("preblocks", {}).setdefault("per_step", {})
+                per_step_pre["scaler"] = {
+                    "type": "bridgescaler_transform",
+                    "args": {
+                        "scaler_path": pre_json,
+                        "variables": pre_keys,
+                        "method": "transform",
+                    },
+                }
+                per_step_pre["concat"] = {"type": "concat"}
+                per_step_post = conf.setdefault("postblocks", {}).setdefault("per_step", {})
+                per_step_post["reconstruct"] = {"type": "reconstruct"}
+                per_step_post["scaler"] = {
+                    "type": "bridgescaler_transform",
+                    "args": {
+                        "scaler_path": post_json,
+                        "variables": post_prog_vars,
+                        "method": "inverse_transform",
+                    },
+                }
+                changes.append(f"preblocks.per_step.scaler: bridgescaler_transform → {pre_json}")
+                changes.append(f"postblocks.per_step.scaler: bridgescaler_transform (inverse) → {post_json}")
+            else:
+                # Fallback if bridgescaler/torch not available
+                per_step_pre = conf.setdefault("preblocks", {}).setdefault("per_step", {})
+                per_step_pre["norm"] = {
+                    "type": "era5_normalizer",
+                    "args": {"mean_path": mean_path, "std_path": std_path},
+                }
+                per_step_pre["concat"] = {"type": "concat"}
+                changes.append(
+                    "preblocks.per_step.norm: era5_normalizer (bridgescaler unavailable — install torch+bridgescaler to convert)"
+                )
+
         changes.append(
             f"data: flat V1 schema → nested V2 source schema  (ERA5, {n_levels} levels, timestep={lead_time}h)"
         )
         changes.append(f"data.start_datetime: {train_years[0]}-01-01 .. {train_years[1]}-12-31")
         changes.append(f"validation_data: {valid_years[0]}-01-01 .. {valid_years[1]}-12-31")
-        if mean_path:
-            changes.append("preblocks.norm: moved from data.mean_path / data.std_path")
         changes.append("  NOTE: review data paths — glob patterns may need updating for v2 file layout")
 
     # forecast_len: v1 uses 0 = single step, v2 uses 1 = single step

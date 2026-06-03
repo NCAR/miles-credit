@@ -92,6 +92,7 @@ class BridgeScalerTransformer(BasePreblock):
         if not self.variables_expanded:
             self.variables = _parse_variable_selection(self.variables, batch)
             self.variables_expanded = True
+        batch = self._copy_batch(batch)
         return scale_var_dict(batch, self.scaler, self.method, self.variables)
 
     def fit_scaler_batch(self, batch: dict) -> dict:

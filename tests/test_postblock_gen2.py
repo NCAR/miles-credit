@@ -132,16 +132,17 @@ def test_geopotential():
     msd = MockARCOERA5MultiSourceDataset(conf["data"])
     mdl = load_dataloader(conf, msd, 0, 1, True)
     batch = next(iter(mdl))
+    ic_raw = batch["input"]
     ct = ConcatToTensor()
     batch_tensor, meta = ct(batch)
     meta_2 = deepcopy(meta)
     meta_2["target"]["_channel_map"] = meta_2["input"]["_channel_map"]
     recon = Reconstruct()
-    output = recon({"prediction": batch_tensor, "metadata": meta_2})
+    full_data_dict = recon({"y_pred": batch_tensor, "ic_raw": ic_raw, "metadata": meta_2})
     output_var_name = "ARCO_ERA5/derived_diagnostic/3d/geopotential"
     geopotential_layer = GeopotentialDiagnostic(
         output_name=output_var_name,
-        data_keys=["prediction"],
+        data_keys=["y_processed"],
         surface_geopotential_var="ARCO_ERA5/static/2d/geopotential_at_surface",
         surface_pressure_var="ARCO_ERA5/prognostic/2d/surface_pressure",
         temperature_var="ARCO_ERA5/prognostic/3d/temperature",
@@ -149,9 +150,10 @@ def test_geopotential():
         level_info_file="ERA5_Lev_Info.nc",
         model_a_half_var="a_half",
         model_b_half_var="b_half",
+        static_source_key="ic_raw",
     )
-    diagnosed = geopotential_layer(output)
-    pred = diagnosed["prediction"]
+    diagnosed = geopotential_layer(full_data_dict)
+    pred = diagnosed["y_processed"]
     geo = pred["ARCO_ERA5"]["ARCO_ERA5/derived_diagnostic/3d/geopotential"]
     temp = pred["ARCO_ERA5"]["ARCO_ERA5/prognostic/3d/temperature"]
     assert geo.shape == temp.shape

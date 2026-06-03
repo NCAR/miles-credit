@@ -266,6 +266,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="v1 config YAML to convert")
     p.add_argument("-o", "--output", default=None, metavar="OUTPUT", help="Output path (default: <input>_gen2.yml)")
     p.add_argument("-y", "--defaults", action="store_true", help="Accept all defaults non-interactively")
+    p.add_argument(
+        "--level-coord",
+        default=None,
+        dest="level_coord",
+        metavar="NAME",
+        help="Vertical coordinate name in data files (e.g. 'level', 'pressure_level')",
+    )
 
     # ---- metrics ----
     p = sub.add_parser(
