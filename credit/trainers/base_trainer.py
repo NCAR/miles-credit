@@ -116,6 +116,21 @@ class EMATracker:
         self.decay = d["decay"]
         self.shadow = d["shadow"]
         self.step = d.get("step", 0)
+        # Checkpoints saved before the _is_spectral_norm_buffer filter was added
+        # (pre-2026-05-15) may have EMA-averaged weight_u / weight_v in the shadow.
+        # Averaged unit vectors are not unit vectors, so sigma = u^T W v becomes
+        # wrong in eval mode and causes val loss to explode on resume.  Strip them.
+        stale = [k for k in self.shadow if self._is_spectral_norm_buffer(k, self.shadow)]
+        for k in stale:
+            del self.shadow[k]
+        if stale:
+            logger.warning(
+                "EMA shadow contained %d spectral-norm buffer(s) (%s…) — stripped on load. "
+                "This checkpoint was saved before the spectral-norm filter was added; "
+                "resume will proceed correctly with the current code.",
+                len(stale),
+                stale[0],
+            )
 
 
 class BaseTrainer(ABC):
