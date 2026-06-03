@@ -1,5 +1,6 @@
 import argparse
 import logging
+import warnings
 
 from bridgescaler import save_scaler_dict
 
@@ -18,11 +19,102 @@ import torch.distributed as dist
 from torch.distributed import gather_object, barrier
 
 
+def _scaler_probe_range(scaler):
+    """Return ``(lo, hi, label)`` normalized probe endpoints for a fitted scaler.
+
+    The endpoints span the range of normalized values the scaler typically
+    produces, so an inverse transform reveals what physical values each scaler
+    maps that range to:
+
+      - minmax    -> ``[0, 1]``
+      - standard  -> ``[-4, 4]`` (±4 standard deviations)
+      - quantile  -> ``[0, 1]`` for a uniform output distribution, otherwise
+                     ``[-4, 4]`` (e.g. normal/logistic)
+    """
+    cls = type(scaler).__name__
+    if "MinMax" in cls:
+        return 0.0, 1.0, "minmax [0, 1]"
+    if "Quantile" in cls:
+        distribution = getattr(scaler, "distribution", "uniform")
+        if distribution == "uniform":
+            return 0.0, 1.0, f"quantile-{distribution} [0, 1]"
+        return -4.0, 4.0, f"quantile-{distribution} [-4, 4]"
+    return -4.0, 4.0, "standard [-4, 4]"
+
+
+def _scaler_device(scaler):
+    """Best-effort lookup of the torch device holding a scaler's fitted stats."""
+    for attr in ("mean_x_", "var_x_", "min_x_", "max_x_", "min_tensor", "max_tensor"):
+        t = getattr(scaler, attr, None)
+        if torch.is_tensor(t):
+            return t.device
+        if isinstance(t, dict):
+            for v in t.values():
+                if torch.is_tensor(v):
+                    return v.device
+    return torch.device("cpu")
+
+
+def _log_single_scaler(scaler, name, logger):
+    """Log the fitted parameters of one leaf scaler, one line per channel/level."""
+    columns = list(getattr(scaler, "x_columns_", []) or [])
+    cls = type(scaler).__name__
+    lo, hi, label = _scaler_probe_range(scaler)
+    logger.info("Scaler '%s' [%s] — %d channel(s), probe range %s", name, cls, len(columns), label)
+
+    mean = getattr(scaler, "mean_x_", None)
+    var = getattr(scaler, "var_x_", None)
+    vmin = getattr(scaler, "min_x_", None)
+    vmax = getattr(scaler, "max_x_", None)
+
+    # Inverse-transform the normalized probe endpoints to physical units. A
+    # (2, n_channels) probe tensor works for both channels-first and
+    # channels-last scalers (the channel dim is dim 1 either way).
+    inv = None
+    if columns:
+        try:
+            device = _scaler_device(scaler)
+            probe = torch.tensor([[lo] * len(columns), [hi] * len(columns)], dtype=torch.float32, device=device)
+            with torch.no_grad():
+                inv = scaler.inverse_transform(probe).detach().cpu()
+        except Exception as exc:  # noqa: BLE001 - logging-only, never fail preprocessing
+            logger.warning("  could not inverse-transform probe for '%s': %s", name, exc)
+
+    for i, col in enumerate(columns):
+        parts = []
+        if mean is not None and var is not None:
+            parts.append(f"mean={float(mean[i]):.4g} var={float(var[i]):.4g}")
+        if vmin is not None and vmax is not None:
+            parts.append(f"min={float(vmin[i]):.4g} max={float(vmax[i]):.4g}")
+        if inv is not None:
+            parts.append(f"inv[{lo:g} -> {hi:g}]=[{float(inv[0, i]):.4g}, {float(inv[1, i]):.4g}]")
+        logger.info("    %s: %s", col, "  ".join(parts) if parts else "(no stats available)")
+
+
+def log_fitted_scalers(scaler_dict, logger, path=()):
+    """Recursively log every fitted scaler in a nested ``scaler[data_type][source][var]`` dict."""
+    for key, value in scaler_dict.items():
+        if isinstance(value, dict):
+            log_fitted_scalers(value, logger, path + (key,))
+        else:
+            _log_single_scaler(value, "/".join(path + (key,)), logger)
+
+
 def main():
+    # gcsfs/aiohttp leave their async SSL transports open until garbage collection,
+    # which triggers a benign "unclosed transport" ResourceWarning from asyncio at
+    # teardown (after the scalers have already been fitted and saved). Silence it.
+    warnings.filterwarnings("ignore", category=ResourceWarning)
+    warnings.filterwarnings("ignore", category=UserWarning, module="bridgescaler")
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", dest="model_config", required=True, type=str, help="Path to config file")
     parser.add_argument(
-        "--backend", type=str, default="nccl", choices=["nccl", "gloo", "mpi"], help="Backend for distributed training."
+        "-b",
+        "--backend",
+        type=str,
+        default="nccl",
+        choices=["nccl", "gloo", "mpi"],
+        help="Backend for distributed training.",
     )
     args = parser.parse_args()
     config = args.model_config
@@ -89,6 +181,9 @@ def main():
         root.info("Combining scalers.")
         combined_scaler = combine_scaler_dicts(all_scalers)
         save_scaler_dict(combined_scaler, scaler_block.scaler_path)
+        root.info("Saved fitted scaler to %s", scaler_block.scaler_path)
+        root.info("Fitted scaler values by variable:")
+        log_fitted_scalers(combined_scaler, root)
     return
 
 

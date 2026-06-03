@@ -16,7 +16,7 @@ data:
         diagnostic:
           vars_2D: ['total_precipitation_6hr']
         dynamic_forcing:
-          vars_2D: ["sea_surface_temperature", 'mean_top_downward_short_wave_radiation_flux']
+          vars_2D: ["sea_surface_temperature"]
         static:
           vars_2D: ["land_sea_mask", "geopotential_at_surface"]
   start_datetime: "1979-01-01"
@@ -37,14 +37,22 @@ preblocks:
       data_types:
         - 'input'
         - 'target'
+  fill_nan:
+    type: "fill_nan"
+    args:
+      variables: []
+      data_types:
+        - 'input'
+        - 'target'
   scaler:
     type: "bridgescaler_transformer"
     args:
       variables: []
       scaler_path: "/Users/dgagne/data/weatherbench2/scaler.json"
-      scaler_type: "standard"
+      scaler_type: "quantile"
       scaler_params:
         channels_last: False
+        compression: 500
 
   vars_concat:
     type: "concat"
