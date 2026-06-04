@@ -1,0 +1,504 @@
+# CREDIT Model Zoo
+
+All models share the same CREDIT training pipeline (`credit train`), config-file interface, and distributed training support.
+Set `model: type:` in your config to select a model (see the **Key** column).
+
+---
+
+## Model Presets
+
+Named presets let you load a pretrained model — and run a full rollout — with almost no configuration.
+NCAR campaign presets bundle a **default config** (data paths, variable lists, normalization stats),
+so a two-line config is enough:
+
+```yaml
+# my_config.yml  — this is all you need for a full rollout
+model:
+  preset: wxformer-v2-025deg-6h
+
+save_loc: /glade/derecho/scratch/$USER/my_run
+```
+
+```bash
+credit_rollout_realtime --config my_config.yml   # inference
+credit_train            --config my_config.yml   # fine-tune from pretrained checkpoint
+```
+
+You can override any key — user-supplied values always win over the preset defaults:
+
+```yaml
+model:
+  preset: wxformer-v2-025deg-6h
+  pretrained_weights: /path/to/my/finetuned.pt   # different checkpoint
+  ff_dropout: 0.1                                  # any arch param
+
+data:
+  forecast_len: 40   # override just one data key; rest come from default_config
+```
+
+### Available presets
+
+| Preset name | Model | Resolution | Default config | Key match |
+|-------------|-------|:----------:|:--------------:|:---------:|
+| `wxformer-v2-025deg-6h` | WXFormer v2 CrossFormer | 0.25° 6h | ✓ | 100% |
+| `wxformer-025deg-1h` | WXFormer v2 CrossFormer | 0.25° 1h | ✓ | 100% |
+| `wxformer-1deg-6h` | WXFormer CrossFormer | 1° 6h | — | 100% |
+| `fuxi-025deg-6h` | FuXi U-Transformer | 0.25° 6h | ✓ | 100% |
+| `stormer-1.40625deg` | Stormer ViT | 1.40625° 6h | — | 192/393 (all 24 blocks: attn + MLP) |
+| `climax-1.40625deg` | ClimaX ViT | 1.40625° | — | 98/209 (all 8 blocks: norm + attn + MLP) |
+| `aurora-0.1deg` | Aurora Perceiver3D | 0.1° 6h | — | 302/308 (full Swin3D backbone) |
+
+**Default config ✓** — preset bundles a full working config; only `save_loc` is required from the user.
+
+**Why partial key match for Stormer, ClimaX, Aurora?**
+These models were trained outside CREDIT with their own data pipelines and variable orderings.
+CREDIT assumes its own input structure (channel ordering, normalization, surface/upper-air layout),
+so the input embedding and output projection layers cannot transfer directly — they are re-initialized
+and must be fine-tuned on CREDIT-format ERA5 data.
+The backbone transformer weights (attention, MLP, normalization layers) do transfer and provide a
+strong initialization for fine-tuning.
+These presets are intended as **transfer learning starting points**, not drop-in inference checkpoints.
+
+Preset files live in [`credit/models/presets/`](presets/).
+Add a new `.yml` file there to register a new preset — no code changes needed.
+See [`docs/source/Model_Presets.md`](../docs/source/Model_Presets.md) for full documentation.
+
+---
+
+## Distributed Training Support
+
+| Key | Model | DDP | FSDP | Act. Ckpt | `torch.compile` |
+|-----|-------|:---:|:----:|:---------:|:---------------:|
+| `wxformer` | WXFormer (CrossFormer backbone) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `wxformer-sdl` | WXFormer SDL ensemble (noise injection) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `wxformer-v2-sdl` | WXFormer v2 SDL ensemble | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `crossformer` | CrossFormer (conv decoder + skip) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `unet` | U-Net segmentation model | ✓ | ✓ | ✓ | ✓ |
+| `fuxi` | FuXi (Swin v2 backbone) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `swin` | Swin Transformer V2 Cr | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `camulator` | CAMulator (CAM emulator) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `graph` | Graph Residual Transformer GRU | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `stormer` | Stormer (plain ViT) | ✓ | ✓ | ✓ | ✓ |
+| `climax` | ClimaX (per-variable ViT) | ✓ | ✓ | ✓ | ✓ |
+| `fourcastnet` | FourCastNet v1 (AFNO ViT) | ✓ | ✓ | ✓ | ✓ |
+| `sfno` | SFNO (Spherical FNO) | ✓ | ✓ | ✓ | ⚠ rfft2 fallback only |
+| `swinrnn` | SwinRNN (Swin encoder-decoder RNN) | ✓ | ✓ | ✓ | ✓ |
+| `fengwu` | FengWu (cross-attention ViT) | ✓ | ✓ | ✓ | ✓ |
+| `graphcast` | GraphCast (icosahedral GNN) | ✓ | ✓ | ✓ | ⚠ use `dynamic=True` |
+| `healpix` | DLWP-HEALPix (HEALPix U-Net) | ✓ | ✓ | ✓ | ✓ |
+| `fourcastnet3` | FourCastNet v3 (spherical SNO, DISCO encoder-processor-decoder) | ✓ | ✓ | ✓ | ⚠ rfft2 fallback only |
+| `aurora` | Aurora (Perceiver3D + Swin3D) | ✓ | ✓ | ✓ | ✓ |
+| `pangu` | Pangu-Weather (3D Earth Transformer) | ✓ | ✓ | ✓ | ✓ |
+| `aifs` | AIFS (lat/lon Transformer) | ✓ | ✓ | ✓ | ✓ |
+| `itransformer` | iTransformer (inverted variable attention) | ✓ | ✓ | ✓ | ✓ |
+| `fuxi_ens` | FuXi-ENS (ViT + VAE ensemble head) | ✓ | ✓ | ✓ | ✓ |
+| `arches` | ArchesWeather (window + column attention) | ✓ | ✓ | ✓ | ✓ |
+| `mambavision` | MambaVision (Mamba + attention U-Net) | ✓ | ✓ | ✓ | ✓ |
+| `corrdiff` | CorrDiff (score-based conditional diffusion) | ✓ | ✓ | ✓ | ✓ |
+| `nextgen_wxformer` | NextGen WXFormer (CrossFormer U-Net + spectral GNN + column attention) | ✓ | ✓ | ✓ | ✗ spectral norm (default) |
+| `dlesym` | DLESyM (HEALPix ConvNeXt U-Net, DLESyM atmospheric backbone) | ✓ | ✓ | ✓ | ✓ |
+| `ace` | ACE2 (SFNO with 2-step input, AI2 Climate Emulator v2) | ✓ | ✓ | ✓ | ⚠ rfft2 fallback only |
+
+**Notes on FSDP / activation checkpointing:**
+Legacy WXFormer-family models (`wxformer`, `crossformer`, `unet`, `swin`, `fuxi`) use explicit fine-grained wrap policies (attention + feedforward blocks).  All other models use automatic policy discovery — CREDIT scans the live model for repeating `nn.Module` subtypes and uses those as the wrap/checkpoint units. Pass `activation_checkpoint: true` in the `trainer:` section to enable.
+
+**Notes on `torch.compile`:**
+- **✗ spectral norm (default)** — `torch.nn.utils.spectral_norm` is enabled by default on these models to prevent rollout explosions. It wraps weight parameters with forward hooks that `torch.compile` cannot trace through. To enable compilation, set `use_spectral_norm: false` in the `model:` config block. **Only do this if you have verified long-rollout stability without it** — removing spectral norm is likely to cause divergence after tens of steps. Native compile support without spectral norm is planned for a future release.
+- **⚠ rfft2 fallback only** — `sfno` and `fourcastnet3` use `torch-harmonics` Spherical Harmonic Transforms when the package is installed. The SHT CUDA kernels cause graph breaks under `torch.compile`; skip installing `torch-harmonics` to use the rfft2 fallback, which compiles without issues.
+- **⚠ GraphCast `dynamic=True`** — the icosahedral graph uses `scatter_add_` with dynamic edge counts. Pass `torch.compile(model, dynamic=True)` or `fullgraph=False` to avoid excessive recompilation.
+
+---
+
+## Pretrained Weight Compatibility
+
+Weights are cached at `/glade/derecho/scratch/schreck/credit_zoo/<model>/` (permanent home TBD).
+Set `pretrained_weights: <path>` in the `model:` config section to load them.
+`strict=False` is always used — missing keys (e.g. input/output projections for different channel counts) stay randomly initialized.
+
+| Key | Weights available | Keys loaded | What loads | What does not load |
+|-----|:-----------------:|:-----------:|------------|-------------------|
+| `wxformer` | ✓ NCAR runs | 100% | Full model — trained to convergence on CREDIT-format ERA5 | — |
+| `fuxi` | ✓ NCAR runs | 100% | Full model — trained to convergence on CREDIT-format ERA5 | — |
+| `stormer` | ✓ cached | 192/393 (49%) | All 24 transformer blocks: attn QKV/proj + MLP weights | Per-variable token embeddings (138 keys), adaLN modulation (48 keys), pos/patch embed, head |
+| `climax` | ✓ cached | 98/209 (47%) | All 8 transformer blocks: norm, attn QKV/proj + MLP weights | Per-variable token_embeds, channel_embed, pos_embed, head |
+| `fourcastnet` | ✓ cached | 98/150 (65%) | All 12 blocks: norm + MLP weights | AFNO filter weights (complex-stacked layout differs from checkpoint), pos/patch embed |
+| `aurora` | ✓ cached | 302/308 (98%) | Full Swin3D backbone (encoder + decoder + latent) | 6 LoRA adapter keys (expected — LoRA is fine-tuning-only) |
+| `sfno` | — | — | — | No public PyTorch weights |
+| `swinrnn` | — | — | — | No public weights |
+| `fengwu` | — | — | — | ONNX only |
+| `graphcast` | — | — | — | JAX only (CC BY-NC-SA; PyTorch port from NVIDIA PhysicsNeMo, Apache-2.0) |
+| `nextgen_wxformer` | — | — | — | No public weights |
+| `healpix` | — | — | — | No confirmed public weights |
+| `dlesym` | — | — | — | No pretrained weights; train from scratch |
+| `ace` | — | — | — | ACE2-ERA5 weights require fme package from AI2; not directly loadable |
+| `fourcastnet3` | ✓ cached | 0/N | — | CREDIT wrapper implements makani's `AtmoSphericNeuralOperatorNet` (DISCO conv encoder-processor-decoder); HuggingFace checkpoint is from a different architecture variant — zero key overlap |
+| `pangu` | — | — | — | ONNX only |
+| `aifs` | — | — | — | Restricted access |
+| `itransformer` | — | — | — | No public weather weights |
+| `fuxi_ens` | — | — | — | No public weights |
+| `arches` | — | — | — | No public weights |
+| `mambavision` | — | — | — | No public weather weights |
+| `corrdiff` | — | — | — | No public weights |
+
+**What partial loading means in practice:** the input embedding and output projection layers are re-initialized from scratch — they must be for any model trained on different variables or grid resolution.  The transformer backbone weights (attention, MLP, normalization) do transfer and give a meaningfully better initialization than random.  Fine-tuning on CREDIT-format ERA5 data starting from these weights converges faster than training from scratch.
+
+**Key remaps applied automatically:**
+- Outer prefix: `net.*` or `module.*` → `model.*` or `aurora.*` (wrapper attribute name)
+- MLP layer names: `mlp.fc1.*` → `mlp.net.0.*` or `mlp.0.*` depending on the CREDIT MLP implementation; `mlp.fc2.*` → `mlp.net.3.*` or `mlp.3.*`
+
+---
+
+## Credits & Licenses
+
+| Key | Original Paper | Original Code | Code License | Weights | Authors |
+|-----|---------------|--------------|:------------:|---------|---------|
+| `wxformer` | [CrossFormer](https://arxiv.org/abs/2108.01072) | [lucidrains/cross-former](https://github.com/lucidrains/cross-former) / [cheerss/CrossFormer](https://github.com/cheerss/CrossFormer) | MIT | — | John Schreck, William Chapman, David Gagne, Dhamma Kimpara |
+| `wxformer-sdl` | [CrossFormer](https://arxiv.org/abs/2108.01072) | [lucidrains/cross-former](https://github.com/lucidrains/cross-former) / [cheerss/CrossFormer](https://github.com/cheerss/CrossFormer) | MIT | — | John Schreck, William Chapman, David Gagne, Dhamma Kimpara |
+| `wxformer-v2-sdl` | [CrossFormer](https://arxiv.org/abs/2108.01072) | [lucidrains/cross-former](https://github.com/lucidrains/cross-former) / [cheerss/CrossFormer](https://github.com/cheerss/CrossFormer) | MIT | — | John Schreck, William Chapman, David Gagne, Dhamma Kimpara |
+| `crossformer` | [CrossFormer](https://arxiv.org/abs/2108.01072) | [lucidrains/cross-former](https://github.com/lucidrains/cross-former) / [cheerss/CrossFormer](https://github.com/cheerss/CrossFormer) | MIT | — | Wang et al. 2021 |
+| `unet` | — | [CREDIT](https://github.com/NCAR/miles-credit) | Apache-2.0 | — | John Schreck, Dhamma Kimpara, Yingkai Sha, David Gagne |
+| `fuxi` | [arXiv:2306.12873](https://arxiv.org/abs/2306.12873) | [tpys/fuxi](https://github.com/tpys/fuxi) | Unspecified | — | Chen et al. 2023, Fudan / Shanghai AI |
+| `swin` | [arXiv:2111.09883](https://arxiv.org/abs/2111.09883) | [microsoft/Swin-Transformer](https://github.com/microsoft/Swin-Transformer) | MIT | — | Liu et al. 2022, Microsoft Research |
+| `camulator` | — | [CREDIT](https://github.com/NCAR/miles-credit) | Apache-2.0 | — | William Chapman, John Schreck |
+| `graph` | — | [CREDIT](https://github.com/NCAR/miles-credit) | Apache-2.0 | — | Arnold Kazadi, David Gagne, Katelyn FitzGerald, Dhamma Kimpara |
+| `stormer` | [arXiv:2312.03876](https://arxiv.org/abs/2312.03876) | [tung-nd/stormer](https://github.com/tung-nd/stormer) | MIT | [HuggingFace](https://huggingface.co/tungnd/stormer) | Nguyen et al. 2023, UCLA |
+| `climax` | [arXiv:2301.10343](https://arxiv.org/abs/2301.10343) | [microsoft/ClimaX](https://github.com/microsoft/ClimaX) | MIT | [HuggingFace](https://huggingface.co/tungnd/climax) | Nguyen et al. 2023, Microsoft Research / UCLA |
+| `fourcastnet` | [arXiv:2202.11214](https://arxiv.org/abs/2202.11214) | [NVlabs/FourCastNet](https://github.com/NVlabs/FourCastNet) | BSD-3-Clause | [NERSC](https://portal.nersc.gov/project/m4134/FCN_weights_v0/) / [HuggingFace](https://huggingface.co/nvidia/fourcastnet1) | Pathak et al. 2022, NVIDIA |
+| `sfno` | [arXiv:2306.03838](https://arxiv.org/abs/2306.03838) | [NVIDIA/makani](https://github.com/NVIDIA/makani) | Apache-2.0 | [NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/modulus/models/sfno_73ch_small) | Bonev et al. 2023, NVIDIA |
+| `swinrnn` | [arXiv:2307.09650](https://arxiv.org/abs/2307.09650) | [microsoft/SwinRNN](https://github.com/microsoft/SwinRNN) | MIT | — | Chen et al. 2023, Microsoft |
+| `fengwu` | [arXiv:2304.02948](https://arxiv.org/abs/2304.02948) | [OpenEarthLab/FengWu](https://github.com/OpenEarthLab/FengWu) | CC BY-NC-SA | ONNX only | Chen et al. 2023, Shanghai AI Lab |
+| `graphcast` | [arXiv:2212.12794](https://arxiv.org/abs/2212.12794) | [google-deepmind/graphcast](https://github.com/google-deepmind/graphcast) (paper) · [NVIDIA/PhysicsNeMo](https://github.com/NVIDIA/physicsnemo) (PyTorch impl, Apache-2.0) | CC BY-NC-SA (weights) / Apache-2.0 (code) | JAX (`gs://dm_graphcast`) | Lam et al. 2023, Google DeepMind |
+| `nextgen_wxformer` | — | [CREDIT](https://github.com/NCAR/miles-credit) | Apache-2.0 | — | John Schreck, NCAR MILES |
+| `healpix` | — | [CognitiveModeling/dlwp-hpx](https://github.com/CognitiveModeling/dlwp-hpx) | Apache-2.0 | — | Weyn et al., CognitiveModeling / NVIDIA |
+| `dlesym` | [arXiv:2409.16247](https://arxiv.org/abs/2409.16247) | [NVIDIA/physicsnemo](https://github.com/NVIDIA/physicsnemo) | Apache-2.0 | [HuggingFace nvidia/dlesym-v1-era5](https://huggingface.co/nvidia/dlesym-v1-era5) | Vonich et al. 2024, NVIDIA |
+| `fourcastnet3` | [NVIDIA Research 2025](https://research.nvidia.com/publication/2025-07_fourcastnet-3) | [NVIDIA/makani](https://github.com/NVIDIA/makani) | Apache-2.0 | [HuggingFace](https://huggingface.co/nvidia/fourcastnet3) | Kurth et al. 2025, NVIDIA |
+| `aurora` | [arXiv:2405.13063](https://arxiv.org/abs/2405.13063) | [microsoft/aurora](https://github.com/microsoft/aurora) | MIT | [HuggingFace](https://huggingface.co/microsoft/aurora) | Chen et al. 2024, Microsoft Research |
+| `pangu` | [Nature 2023](https://doi.org/10.1038/s41586-023-06185-3) | [198808eric/Pangu-Weather](https://github.com/198808eric/Pangu-Weather) | Non-commercial | ONNX only | Bi et al. 2023, Huawei |
+| `aifs` | [arXiv:2406.01465](https://arxiv.org/abs/2406.01465) | [ecmwf/anemoi-models](https://github.com/ecmwf/anemoi-models) | Apache-2.0 | Restricted (ECMWF) | Lang et al. 2024, ECMWF |
+| `itransformer` | [arXiv:2310.06625](https://arxiv.org/abs/2310.06625) | [thuml/iTransformer](https://github.com/thuml/iTransformer) | MIT | — | Liu et al. 2024, Tsinghua / Ant Group |
+| `fuxi_ens` | [arXiv:2405.05925](https://arxiv.org/abs/2405.05925) | — | — | — | Zhong et al. 2024, Fudan |
+| `arches` | [arXiv:2405.14527](https://arxiv.org/abs/2405.14527) | [gcouairon/ArchesWeather](https://github.com/gcouairon/ArchesWeather) | MIT | — | Couairon et al. 2024 |
+| `mambavision` | [arXiv:2407.08083](https://arxiv.org/abs/2407.08083) | [NVlabs/MambaVision](https://github.com/NVlabs/MambaVision) | Apache-2.0 | — | Hatamizadeh & Kautz 2024, NVIDIA |
+| `corrdiff` | [arXiv:2309.15214](https://arxiv.org/abs/2309.15214) | [NVIDIA/modulus](https://github.com/NVIDIA/modulus) | Apache-2.0 | — | Mardani et al. 2023, NVIDIA / Stanford |
+| `ace` | [arXiv:2411.11268](https://arxiv.org/abs/2411.11268) | [ai2cm/ace](https://github.com/ai2cm/ace) | Apache-2.0 | fme package (AI2) | Watt-Meyer et al. 2024, Allen Institute for AI |
+
+---
+
+## Model Details
+
+### CREDIT-Native Models
+
+#### WXFormer / CrossFormer family
+Keys: `wxformer`, `wxformer-sdl`, `wxformer-v2-sdl`, `crossformer`, `crossformer-ensemble`
+
+John Schreck (NCAR MILES), with contributions from William Chapman, Yingkai Sha, David Gagne, and Dhamma Kimpara.
+Architecture based on [CrossFormer](https://arxiv.org/abs/2108.01072) (Wang et al. 2021); code adapted from [lucidrains/cross-former](https://github.com/lucidrains/cross-former) and [cheerss/CrossFormer](https://github.com/cheerss/CrossFormer).
+Source: [`credit/models/wxformer/`](wxformer/) · [`credit/models/crossformer/`](crossformer/)
+
+Multi-scale cross-attention transformer with a convolutional decoder and skip connections.
+The SDL variants add stochastic decomposition-layer noise for ensemble generation.
+
+#### CAMulator
+Key: `camulator`
+
+William Chapman, John Schreck (NCAR MILES).
+Source: [`credit/models/camulator.py`](camulator.py)
+
+Emulator of the Community Atmosphere Model (CAM) dynamics.
+
+#### U-Net
+Keys: `unet`, `unet_downscaling`
+
+Source: [`credit/models/unet.py`](unet.py)
+
+Encoder-decoder U-Net with attention modules.  Also available in downscaling variant.
+
+#### FuXi
+Key: `fuxi`
+
+Chen et al. 2023, Fudan University / Shanghai Academy of AI.
+Paper: [arXiv:2306.12873](https://arxiv.org/abs/2306.12873)
+Source: [`credit/models/fuxi/`](fuxi/)
+Original code: [tpys/fuxi](https://github.com/tpys/fuxi)
+CREDIT integration: John Schreck, Yingkai Sha
+
+Swin Transformer V2 backbone with U-Transformer architecture.
+
+#### Swin Transformer V2 Cr
+Key: `swin`
+
+Liu et al. 2022.
+Paper: [arXiv:2111.09883](https://arxiv.org/abs/2111.09883)
+Source: [`credit/models/swin.py`](swin.py)
+Original code: [microsoft/Swin-Transformer](https://github.com/microsoft/Swin-Transformer)
+
+#### Graph Residual Transformer GRU
+Key: `graph`
+
+Arnold Kazadi (NCAR MILES), with contributions from David Gagne, Katelyn FitzGerald, and Dhamma Kimpara.
+Source: [`credit/models/graph.py`](graph.py)
+
+---
+
+### Model Zoo
+
+#### Stormer
+Key: `stormer`
+Config: [`config/model_zoo/stormer.yml`](../../config/model_zoo/stormer.yml)
+
+Nguyen et al. 2023, UCLA.
+Paper: [arXiv:2312.03876](https://arxiv.org/abs/2312.03876)
+Source: [`credit/models/stormer/stormer.py`](stormer/stormer.py)
+Original code: [tung-nd/stormer](https://github.com/tung-nd/stormer)
+Pretrained weights: [HuggingFace tungnd/stormer](https://huggingface.co/tungnd/stormer) — MIT, 69-ch, 1.40625°
+
+Plain ViT with patch embedding and a residual prediction head.  Trained on ERA5 WeatherBench2 at 1.40625° resolution.
+
+Weight transfer: **192/393 keys load** (all 24 blocks: attn QKV/proj + MLP).  Not loaded: per-variable token embeddings (138 keys), adaLN modulation (48 keys), pos/patch embed, head — re-initialized for CREDIT ERA5 channel layout.
+
+#### ClimaX
+Key: `climax`
+Config: [`config/model_zoo/climax.yml`](../../config/model_zoo/climax.yml) *(see stormer.yml as template)*
+
+Nguyen et al. 2023, Microsoft Research / UCLA.
+Paper: [arXiv:2301.10343](https://arxiv.org/abs/2301.10343)
+Source: [`credit/models/climax/climax.py`](climax/climax.py)
+Original code: [microsoft/ClimaX](https://github.com/microsoft/ClimaX)
+Pretrained weights: [HuggingFace tungnd/climax](https://huggingface.co/tungnd/climax) — MIT, flexible channels, 5.625° / 1.40625°
+
+Per-variable tokenization ViT pre-trained on CMIP6.
+
+Weight transfer: **98/209 keys load** (all 8 blocks: norm1/2, attn QKV/proj + MLP).  Not loaded: per-variable token_embeds (one per input channel), channel_embed, pos_embed, head — re-initialized for CREDIT ERA5 channel layout.
+
+#### FourCastNet v1
+Key: `fourcastnet`
+Config: [`config/model_zoo/fourcastnet.yml`](../../config/model_zoo/fourcastnet.yml)
+
+Pathak et al. 2022, NVIDIA.
+Paper: [arXiv:2202.11214](https://arxiv.org/abs/2202.11214)
+Source: [`credit/models/fourcastnet/afno.py`](fourcastnet/afno.py)
+Original code: [NVlabs/FourCastNet](https://github.com/NVlabs/FourCastNet)
+Pretrained weights: [NERSC portal](https://portal.nersc.gov/project/m4134/FCN_weights_v0/) / [HuggingFace nvidia/fourcastnet1](https://huggingface.co/nvidia/fourcastnet1) — BSD-3, 20-ch, 0.25°
+
+AFNO (Adaptive Fourier Neural Operator) ViT.  Uses rfft2 for spectral mixing.
+
+Weight transfer: **98/150 keys load** (all 12 blocks: norm1/2 + MLP).  Not loaded: AFNO filter weights — the public checkpoint stores real and imaginary parts stacked as `w1/w2` shape `[2,8,96,96]`; CREDIT uses separate `w1r`/`w1i` tensors, so the key names differ.  Pos/patch embed also skipped (different input channel count).  The norm + MLP initialization is still a meaningful starting point for fine-tuning.
+
+#### SFNO (FourCastNet v2)
+Key: `sfno`
+Config: [`config/model_zoo/sfno.yml`](../../config/model_zoo/sfno.yml)
+
+Bonev et al. 2023, NVIDIA.
+Paper: [arXiv:2306.03838](https://arxiv.org/abs/2306.03838)
+Source: [`credit/models/sfno/sfno.py`](sfno/sfno.py)
+Original code: [NVIDIA/makani](https://github.com/NVIDIA/makani)
+Pretrained weights: [NVIDIA NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/modulus/models/sfno_73ch_small) — Apache-2, 73-ch, 0.25°
+
+Replaces rfft2 with Spherical Harmonic Transforms (SHTs) when `torch-harmonics` is installed; falls back to rfft2 otherwise.
+
+#### SwinRNN
+Key: `swinrnn`
+Config: [`config/model_zoo/swinrnn.yml`](../../config/model_zoo/swinrnn.yml)
+
+Chen et al. 2023.
+Paper: [arXiv:2307.09650](https://arxiv.org/abs/2307.09650)
+Source: [`credit/models/swinrnn/swinrnn.py`](swinrnn/swinrnn.py)
+Original code: [microsoft/SwinRNN](https://github.com/microsoft/SwinRNN)
+Pretrained weights: none publicly available
+
+Swin Transformer encoder-decoder with recurrent connections.  Token dimensions must be divisible by `patch_size × window_size × 4`; CREDIT wrapper pads automatically.
+
+#### FengWu
+Key: `fengwu`
+Config: [`config/model_zoo/fengwu.yml`](../../config/model_zoo/fengwu.yml)
+
+Chen et al. 2023, Shanghai AI Lab.
+Paper: [arXiv:2304.02948](https://arxiv.org/abs/2304.02948)
+Source: [`credit/models/fengwu/fengwu.py`](fengwu/fengwu.py)
+Original code: [OpenEarthLab/FengWu](https://github.com/OpenEarthLab/FengWu)
+Pretrained weights: ONNX only, CC BY-NC-SA (non-commercial)
+
+Multi-group cross-attention ViT.  Official weights are ONNX format; weight transfer into this PyTorch implementation requires manual extraction.
+
+#### GraphCast
+Key: `graphcast`
+Config: [`config/model_zoo/graphcast.yml`](../../config/model_zoo/graphcast.yml)
+
+Lam et al. 2023, Google DeepMind.
+Paper: [arXiv:2212.12794](https://arxiv.org/abs/2212.12794)
+Source: [`credit/models/graphcast/graphcast.py`](graphcast/graphcast.py)
+Original paper code: [google-deepmind/graphcast](https://github.com/google-deepmind/graphcast) (JAX, CC BY-NC-SA)
+PyTorch implementation: [NVIDIA/PhysicsNeMo](https://github.com/NVIDIA/physicsnemo) `GraphCastNet` (Apache-2.0)
+Pretrained weights: `gs://dm_graphcast` — CC BY-NC-SA (non-commercial), JAX/Haiku format
+
+Faithful port of PhysicsNeMo's `GraphCastNet`: icosahedral multi-mesh GNN with Grid2Mesh bipartite encoder, message-passing processor (alternating `MeshEdgeBlock` + `MeshNodeBlock`), and Mesh2Grid bipartite decoder.  Graph topology is built at model init from an icosahedral refinement hierarchy (mesh_level 0–6; default 6 = 40,962 nodes).  Official weights are JAX; direct weight transfer is not possible without format conversion.
+
+#### DLWP-HEALPix
+Key: `healpix`
+Config: [`config/model_zoo/healpix.yml`](../../config/model_zoo/healpix.yml)
+
+Weyn et al. / CognitiveModeling / NVIDIA.
+Source: [`credit/models/healpix/healpix.py`](healpix/healpix.py)
+Original code: [CognitiveModeling/dlwp-hpx](https://github.com/CognitiveModeling/dlwp-hpx) · [NVIDIA/physicsnemo dlwp_healpix](https://github.com/NVIDIA/physicsnemo/tree/main/examples/weather/dlwp_healpix)
+Pretrained weights: none confirmed publicly available
+
+HEALPix U-Net with lat/lon reprojection.  Inputs/outputs are reprojected to/from the 12-face HEALPix mesh internally.
+
+#### FourCastNet v3
+Key: `fourcastnet3`
+Config: [`config/model_zoo/fourcastnet3.yml`](../../config/model_zoo/fourcastnet3.yml)
+
+Kurth et al. 2025, NVIDIA.
+Paper: [NVIDIA Research 2025](https://research.nvidia.com/publication/2025-07_fourcastnet-3)
+Source: [`credit/models/fourcastnet3/fcn3.py`](fourcastnet3/fcn3.py)
+Original code: [NVIDIA/makani](https://github.com/NVIDIA/makani)
+Pretrained weights: [HuggingFace nvidia/fourcastnet3](https://huggingface.co/nvidia/fourcastnet3) — Apache-2, 72-ch, 0.25°, ~711M params
+
+Single-scale DISCO encoder-processor-decoder (`AtmoSphericNeuralOperatorNet` from makani).  Encoder: `DiscreteContinuousConvS2` equiangular→legendre-gauss; Processor: N alternating local-DISCO and global diagonal-harmonic `NeuralOperatorBlock`s; Decoder: bilinear `ResampleS2` + `DiscreteContinuousConvS2` legendre-gauss→equiangular.  Uses `torch-harmonics` SHTs when installed; falls back to rfft2 otherwise.  HuggingFace weights are from a different FCN3 training variant and do not transfer.
+
+#### Aurora
+Key: `aurora`
+Config: [`config/model_zoo/aurora.yml`](../../config/model_zoo/aurora.yml)
+
+Chen et al. 2024, Microsoft Research.
+Paper: [arXiv:2405.13063](https://arxiv.org/abs/2405.13063)
+Source: [`credit/models/aurora/model.py`](aurora/model.py)
+Original code: [microsoft/aurora](https://github.com/microsoft/aurora)
+Pretrained weights: [HuggingFace microsoft/aurora](https://huggingface.co/microsoft/aurora) — MIT
+
+Perceiver3D encoder + Swin3D processor.  3D pressure-level representation.
+
+Weight transfer: **302/308 keys load** (full Swin3D backbone: all encoder, decoder, and latent layers).  The 6 unloaded keys are LoRA adapter weights — LoRA is a fine-tuning overlay not present in the pretrained backbone, so those slots are always re-initialized.
+
+#### Pangu-Weather
+Key: `pangu`
+Config: [`config/model_zoo/pangu.yml`](../../config/model_zoo/pangu.yml)
+
+Bi et al. 2023, Huawei.
+Paper: [Nature 2023](https://doi.org/10.1038/s41586-023-06185-3)
+Source: [`credit/models/pangu/pangu.py`](pangu/pangu.py)
+Original code: [198808eric/Pangu-Weather](https://github.com/198808eric/Pangu-Weather)
+Pretrained weights: ONNX only, non-commercial
+
+3D Earth Transformer with hierarchical temporal aggregation.
+
+#### AIFS
+Key: `aifs`
+Config: [`config/model_zoo/aifs.yml`](../../config/model_zoo/aifs.yml)
+
+Lang et al. 2024, ECMWF.
+Paper: [arXiv:2406.01465](https://arxiv.org/abs/2406.01465)
+Source: [`credit/models/aifs/aifs.py`](aifs/aifs.py)
+Original code: [ecmwf/anemoi-models](https://github.com/ecmwf/anemoi-models)
+Pretrained weights: restricted access (ECMWF)
+
+Lat/lon Transformer processor; ECMWF operational NWP replacement.
+
+#### iTransformer
+Key: `itransformer`
+Config: [`config/model_zoo/itransformer.yml`](../../config/model_zoo/itransformer.yml)
+
+Liu et al. 2024, Tsinghua University / Ant Group.
+Paper: [arXiv:2310.06625](https://arxiv.org/abs/2310.06625)
+Source: [`credit/models/itransformer/itransformer.py`](itransformer/itransformer.py)
+Original code: [thuml/iTransformer](https://github.com/thuml/iTransformer)
+Pretrained weights: none for weather
+
+Inverts the standard Transformer: each input channel becomes one token (spatial H×W flattened → d_model), and attention operates across the variable dimension.  Directly models cross-variable dependencies without spatial downsampling.
+
+#### FuXi-ENS
+Key: `fuxi_ens`
+Config: [`config/model_zoo/fuxi_ens.yml`](../../config/model_zoo/fuxi_ens.yml)
+
+Zhong et al. 2024, Fudan University.
+Paper: [arXiv:2405.05925](https://arxiv.org/abs/2405.05925)
+Source: [`credit/models/fuxi_ens/fuxi_ens.py`](fuxi_ens/fuxi_ens.py)
+Pretrained weights: none publicly available
+
+ViT backbone with a VAE bottleneck for ensemble generation.  Patch-embedded tokens are passed through transformer blocks, projected to (μ, log σ²), reparameterization-sampled during training, and decoded back.  Set `use_vae: false` for a deterministic ViT without the KL term.  The KL loss is stored as `model.last_kl_loss` after each forward pass.
+
+#### ArchesWeather
+Key: `arches`
+Config: [`config/model_zoo/arches.yml`](../../config/model_zoo/arches.yml)
+
+Couairon et al. 2024.
+Paper: [arXiv:2405.14527](https://arxiv.org/abs/2405.14527)
+Source: [`credit/models/arches/arches.py`](arches/arches.py)
+Original code: [gcouairon/ArchesWeather](https://github.com/gcouairon/ArchesWeather)
+Pretrained weights: none publicly available
+
+Alternates `WindowAttentionBlock` (local spatial attention within ws×ws patches) and `ColumnAttentionBlock` (attention across `n_col_tokens` sub-vectors at each spatial position, approximating vertical coupling).  Decoded with PixelShuffle upsampling.  `n_col_tokens` must divide `d_model`.
+
+#### MambaVision
+Key: `mambavision`
+Config: [`config/model_zoo/mambavision.yml`](../../config/model_zoo/mambavision.yml)
+
+Hatamizadeh & Kautz 2024, NVIDIA.
+Paper: [arXiv:2407.08083](https://arxiv.org/abs/2407.08083)
+Source: [`credit/models/mambavision/mambavision.py`](mambavision/mambavision.py)
+Original code: [NVlabs/MambaVision](https://github.com/NVlabs/MambaVision)
+Pretrained weights: none for weather
+
+4-stage hierarchical U-Net that combines SSM (Mamba) and attention.  Stages 0–1 use residual depthwise-separable `ConvBlock`s; stages 2–3 use `MambaAttentionBlock` with an SSM + multi-head attention + FFN.  Pure-PyTorch `MambaApprox` (depthwise conv + gating) is used automatically when `mamba_ssm` is not installed.  Input spatial dims must be divisible by 8.
+
+#### CorrDiff
+Key: `corrdiff`
+Config: [`config/model_zoo/corrdiff.yml`](../../config/model_zoo/corrdiff.yml)
+
+Mardani et al. 2023, NVIDIA / Stanford.
+Paper: [arXiv:2309.15214](https://arxiv.org/abs/2309.15214)
+Source: [`credit/models/corrdiff/corrdiff.py`](corrdiff/corrdiff.py)
+Original code: [NVIDIA/modulus](https://github.com/NVIDIA/modulus)
+Pretrained weights: none publicly available
+
+EDM-preconditioned (Karras et al. 2022) score-based diffusion model.  A `CondEncoder` extracts multi-scale features from the coarse conditioning input and injects them into a `SongUNet` denoiser via channel concatenation.  `forward()` performs a single denoising step at σ=1 (suitable for training); `model.sample(x_cond)` runs the full 18-step Heun ODE sampler.
+
+#### DLESyM
+Key: `dlesym`
+Config: [`config/model_zoo/dlesym.yml`](../../config/model_zoo/dlesym.yml)
+
+Vonich et al. 2024, NVIDIA.
+Paper: [arXiv:2409.16247](https://arxiv.org/abs/2409.16247) · [arXiv:2311.06253](https://arxiv.org/abs/2311.06253)
+Source: [`credit/models/dlesym/dlesym.py`](dlesym/dlesym.py)
+Reference architecture: [NVIDIA/physicsnemo HEALPixRecUNet](https://github.com/NVIDIA/physicsnemo/tree/main/physicsnemo/models/dlwp_healpix) (Apache-2.0)
+Pretrained weights: [HuggingFace nvidia/dlesym-v1-era5](https://huggingface.co/nvidia/dlesym-v1-era5) — Apache-2.0, 1° HEALPix nside=64
+
+HEALPix ConvNeXt U-Net trained as the atmospheric backbone for the coupled DLESyM earth system model.  DLESyM-v1 uses a coupled atmosphere (8 vars, 4-step input) + ocean (SST) model on HEALPix nside=64.  The CREDIT port implements the atmospheric backbone architecture: ConvNeXt-style residual blocks with dilated HEALPix-aware convolutions in a 3-stage U-Net.  Lat/lon ↔ HEALPix reprojection is handled internally (requires `healpy` for correct pixel geometry; falls back to approximate grid without it).  The `frames` parameter controls input history (DLESyM uses 4 × 6h steps).
+
+Configuration key differences from PhysicsNeMo `HEALPixRecUNet`: CREDIT uses `n_channels` and `dilations` lists rather than Hydra DictConfigs; ConvGRU recurrent connections are replaced by deeper ConvNeXt residuals for compatibility with CREDIT's single-step training loop.  Pretrained DLESyM weights (PyTorch `HEALPixRecUNet`) cannot be directly transferred — the layer structures differ.
+
+Primary use case: train on CAMulator or ERA5 data at ~1° resolution with HEALPix-native convolutions.
+
+#### ACE2 (AI2 Climate Emulator v2)
+Key: `ace`
+Config: [`config/model_zoo/ace.yml`](../../config/model_zoo/ace.yml)
+
+Watt-Meyer et al. 2024, Allen Institute for AI.
+Paper: [arXiv:2411.11268](https://arxiv.org/abs/2411.11268)
+Source: [`credit/models/ace/ace.py`](ace/ace.py)
+Reference code: [ai2cm/ace](https://github.com/ai2cm/ace) (Apache-2.0)
+Pretrained weights: available via `fme` package — not directly loadable without weight remapping
+
+SFNO backbone (Bonev et al. 2023) with two consecutive time steps concatenated along the channel dimension.  Set `history_len: 2` in the data config; CREDIT automatically provides `(B, C, T=2, H, W)` which is reshaped to `(B, 2C, H, W)` before the SFNO.  Output is a single next time step `(B, C_out, 1, H, W)`.  The two-step input gives the model explicit access to the finite-difference tendency, which ACE2 found critical for stable long-rollout behavior.  The full ACE2-ERA5 model is 450M parameters at 1° with conservation constraints (dry air mass, moisture); this CREDIT port matches the architecture but omits the post-processing conservation layer.
+
+#### NextGen WXFormer
+Key: `nextgen_wxformer`
+Config: [`config/model_zoo/smoke/smoke_nextgen_wxformer_casper.yml`](../../config/model_zoo/smoke/smoke_nextgen_wxformer_casper.yml)
+
+John Schreck, NCAR MILES.
+Source: [`credit/models/wxformer/wxformer_next.py`](wxformer/wxformer_next.py)
+Pretrained weights: none publicly available
+
+CrossFormer U-Net augmented with three design additions over WXFormer: (1) learned pressure-level embeddings at input (Pangu/Aurora style), (2) column attention for explicit vertical coupling before the encoder (ArchesWeather inspired), (3) a spectral GNN bottleneck for global mixing between encoder and decoder (SFNO inspired).  Spectral normalization is applied throughout.  The `SpectralGNNBottleneck` uses learned aggregation/scatter weight matrices to project the spatial feature map onto K virtual spectral nodes and back, providing a parameter-efficient global receptive field without requiring a fixed graph topology.  Column attention pools to `col_attn_stride` spatial resolution before computing level-wise attention, keeping memory manageable on 640×1280 grids.
+
+---
+
+## Adding a New Model
+
+1. Create `credit/models/<name>/<name>.py` with a `CREDIT<Name>` wrapper class.
+2. The wrapper must accept `(B, C, H, W)` or `(B, C, T, H, W)` and return `(B, C, 1, H, W)`.
+3. Add `load_model` and `load_model_name` classmethods (see any zoo model for the pattern).
+4. Register in `credit/models/__init__.py` under `_MODEL_REGISTRY`.
+5. Add a config example in `config/model_zoo/<name>.yml`.
+6. Optionally add a preset in `credit/models/presets/<preset-name>.yml` — no code changes needed, just drop the file.
+7. Update this file.

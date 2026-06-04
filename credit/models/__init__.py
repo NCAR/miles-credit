@@ -1,6 +1,7 @@
 import os
 import sys
 import copy
+import inspect
 import logging
 import importlib
 
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 #   (module_path: str, class_name: str, log_message: str)  — internal lazy entries
 #   (cls: type,        log_message: str)                   — externally registered classes
 _MODEL_REGISTRY = {
+    # ── Legacy models ──────────────────────────────────────────────────────
     "crossformer": (
         "credit.models.crossformer",
         "CrossFormer",
@@ -40,10 +42,15 @@ _MODEL_REGISTRY = {
         "CrossFormerWithNoise",
         "Loading the ensemble CrossFormer model with a noise injection scheme ...",
     ),
+    "wxformer-sdl": (
+        "credit.models.wxformer.crossformer_ensemble",
+        "CrossFormerWithNoise",
+        "Loading the WXFormer SDL ensemble model (noise injection at each transformer scale) ...",
+    ),
     "crossformer-style": (
         "credit.models.wxformer.crossformer_ensemble",
         "CrossFormerWithNoise",
-        "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
+        "Loading the WXFormer SDL ensemble model (legacy alias for wxformer-sdl) ...",
     ),
     "unet": ("credit.models.unet", "SegmentationModel", "Loading a unet model"),
     "fuxi": ("credit.models.fuxi", "Fuxi", "Loading Fuxi model"),
@@ -65,6 +72,107 @@ _MODEL_REGISTRY = {
         "credit.models.unet_downscaling",
         "DownscalingSegmentationModel",
         "Loading downscaling U-net",
+    ),
+    # ── Model zoo ──────────────────────────────────────────────────────────
+    "aurora": (
+        "credit.models.aurora.model",
+        "CREDITAurora",
+        "Loading Aurora (Perceiver3D + Swin3D backbone) ...",
+    ),
+    "pangu": (
+        "credit.models.pangu.pangu",
+        "CREDITPangu",
+        "Loading Pangu-Weather (3D Earth Transformer) ...",
+    ),
+    "aifs": (
+        "credit.models.aifs.aifs",
+        "CREDITAifs",
+        "Loading AIFS (GNN encoder → Transformer processor → GNN decoder) ...",
+    ),
+    "stormer": (
+        "credit.models.stormer.stormer",
+        "CREDITStormer",
+        "Loading Stormer (plain ViT weather model) ...",
+    ),
+    "climax": (
+        "credit.models.climax.climax",
+        "CREDITClimaX",
+        "Loading ClimaX (per-variable tokenization ViT) ...",
+    ),
+    "fourcastnet": (
+        "credit.models.fourcastnet.afno",
+        "CREDITFourCastNet",
+        "Loading FourCastNet v1 (AFNO ViT) ...",
+    ),
+    "sfno": (
+        "credit.models.sfno.sfno",
+        "CREDITSfno",
+        "Loading SFNO (Spherical Fourier Neural Operator) ...",
+    ),
+    "swinrnn": (
+        "credit.models.swinrnn.swinrnn",
+        "CREDITSwinRNN",
+        "Loading SwinRNN (Swin encoder-decoder) ...",
+    ),
+    "fengwu": (
+        "credit.models.fengwu.fengwu",
+        "CREDITFengWu",
+        "Loading FengWu (2D Swin Transformer encoder-fuser-decoder) ...",
+    ),
+    "graphcast": (
+        "credit.models.graphcast.graphcast",
+        "CREDITGraphCast",
+        "Loading GraphCast (icosahedral GNN: Grid2Mesh → processor → Mesh2Grid) ...",
+    ),
+    "healpix": (
+        "credit.models.healpix.healpix",
+        "CREDITHEALPix",
+        "Loading DLWP-HEALPix (HEALPix U-Net with lat/lon reprojection) ...",
+    ),
+    "fourcastnet3": (
+        "credit.models.fourcastnet3.fcn3",
+        "CREDITFourCastNetV3",
+        "Loading FourCastNet3 (DISCO + diagonal-harmonic spherical operator) ...",
+    ),
+    "itransformer": (
+        "credit.models.itransformer.itransformer",
+        "CREDITiTransformer",
+        "Loading iTransformer (inverted attention across variables) ...",
+    ),
+    "fuxi_ens": (
+        "credit.models.fuxi_ens.fuxi_ens",
+        "CREDITFuXiENS",
+        "Loading FuXi-ENS (ViT + VAE ensemble perturbation head) ...",
+    ),
+    "arches": (
+        "credit.models.arches.arches",
+        "CREDITArchesWeather",
+        "Loading ArchesWeather (window + column attention) ...",
+    ),
+    "mambavision": (
+        "credit.models.mambavision.mambavision",
+        "CREDITMambaVision",
+        "Loading MambaVision (hybrid Mamba + attention U-Net) ...",
+    ),
+    "corrdiff": (
+        "credit.models.corrdiff.corrdiff",
+        "CREDITCorrDiff",
+        "Loading CorrDiff (score-based conditional diffusion) ...",
+    ),
+    "nextgen_wxformer": (
+        "credit.models.wxformer.wxformer_next",
+        "NextGenWXFormer",
+        "Loading NextGen WXFormer (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
+    ),
+    "dlesym": (
+        "credit.models.dlesym.dlesym",
+        "CREDITDLESyM",
+        "Loading DLESyM (HEALPix ConvNeXt U-Net, DLESyM atmospheric backbone) ...",
+    ),
+    "ace": (
+        "credit.models.ace.ace",
+        "CREDITACE",
+        "Loading ACE2 (SFNO with 2-step input, AI2 Climate Emulator v2) ...",
     ),
 }
 
@@ -143,9 +251,30 @@ def _load_model_entry(model_type):
         ) from exc
 
 
-# Define FSDP sharding and/or checkpointing policy
+def load_custom_model_modules(conf):
+    """Import every file listed under ``custom_models`` in the config.
+
+    Each file is executed as a standalone module.  The expected use-case is
+    that each file contains one or more classes decorated with
+    ``@register_model``, so the import triggers registration as a side-effect.
+
+    Args:
+        conf (dict): Top-level config dict.  If ``custom_models`` is absent or
+            empty this function is a no-op.
+
+    Raises:
+        FileNotFoundError: If a listed path does not exist on disk.
+    """
+    for raw_path in conf.get("custom_models", []):
+        path = os.path.expandvars(raw_path)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"custom_models: file not found: {path!r}")
+        spec = importlib.util.spec_from_file_location("_credit_custom_model", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+
 def load_fsdp_or_checkpoint_policy(conf):
-    # crossformer
     if "crossformer" in conf["model"]["type"]:
         from credit.models.crossformer import (
             Attention,
@@ -174,7 +303,6 @@ def load_fsdp_or_checkpoint_policy(conf):
             FeedForward,
             CrossEmbedLayer,
         }
-
     elif "unet" in conf["model"]["type"]:
         from credit.models.crossformer import (
             Attention,
@@ -189,14 +317,11 @@ def load_fsdp_or_checkpoint_policy(conf):
             FeedForward,
             CrossEmbedLayer,
         }
-    # FuXi
-    # FuXi supports "spectral_norm = True" only
     elif "fuxi" in conf["model"]["type"] or ("wrf" in conf["model"]["type"]) or ("dscale" in conf["model"]["type"]):
         from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
 
         transformer_layers_cls = {SwinTransformerV2Stage}
 
-    # Swin by itself
     elif "swin" in conf["model"]["type"]:
         from credit.models.swin import (
             SwinTransformerV2CrBlock,
@@ -210,7 +335,6 @@ def load_fsdp_or_checkpoint_policy(conf):
             WindowMultiHeadAttention,
         }
 
-    # other models not supported
     else:
         raise OSError(
             "You asked for FSDP but only crossformer, wxformer, swin, and fuxi are currently supported.",
@@ -218,29 +342,6 @@ def load_fsdp_or_checkpoint_policy(conf):
         )
 
     return transformer_layers_cls
-
-
-def load_custom_model_modules(conf):
-    """Import every file listed under ``custom_models`` in the config.
-
-    Each file is executed as a standalone module.  The expected use-case is
-    that each file contains one or more classes decorated with
-    ``@register_model``, so the import triggers registration as a side-effect.
-
-    Args:
-        conf (dict): Top-level config dict.  If ``custom_models`` is absent or
-            empty this function is a no-op.
-
-    Raises:
-        FileNotFoundError: If a listed path does not exist on disk.
-    """
-    for raw_path in conf.get("custom_models", []):
-        path = os.path.expandvars(raw_path)
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"custom_models: file not found: {path!r}")
-        spec = importlib.util.spec_from_file_location("_credit_custom_model", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
 
 
 def load_model(conf, load_weights=False, model_name=False):
@@ -319,7 +420,88 @@ def load_model(conf, load_weights=False, model_name=False):
                 return model.load_model_name(conf, model_name=model_name)
             else:
                 return model.load_model(conf)
-        return model(**model_conf)
+        # Pop pretrained_weights before filtering so it isn't passed to __init__
+        pretrained_weights = model_conf.pop("pretrained_weights", None)
+        # Inject channel layout from Gen2 data config so models can auto-detect
+        # channel positions without hardcoding them.  No-op for Gen1 configs or
+        # models whose source section is absent.
+        try:
+            from credit.datasets.channel_layout import build_channel_layout
+
+            ch_slices, _n_pred = build_channel_layout(conf)
+            model_conf["channel_layout"] = ch_slices
+        except Exception:
+            pass
+        # Filter kwargs to only those accepted by the constructor; zoo models have
+        # varied signatures and may not accept every top-level config key.
+        sig = inspect.signature(model.__init__)
+        params = sig.parameters
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            filtered_conf = model_conf  # accepts **kwargs — pass everything
+        else:
+            filtered_conf = {k: v for k, v in model_conf.items() if k in params}
+        model_instance = model(**filtered_conf)
+        if pretrained_weights:
+            import torch
+            from collections import Counter
+
+            ckpt_path = os.path.expandvars(pretrained_weights)
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            # Try common checkpoint key names in priority order
+            state = (
+                ckpt.get("model_state_dict")
+                or ckpt.get("state_dict")
+                or ckpt.get("model_state")
+                or (
+                    ckpt if isinstance(ckpt, dict) and any(isinstance(v, torch.Tensor) for v in ckpt.values()) else None
+                )
+            )
+            if state is None:
+                state = ckpt
+            model_state = model_instance.state_dict()
+            # Remap checkpoint key prefix to the model's prefix when they don't
+            # match (e.g. checkpoint uses "net.*" or "module.*" but our wrapper
+            # stores the inner model under a different attribute name).
+            if not any(k in model_state for k in state):
+                ckpt_prefix_counts = Counter(k.split(".")[0] for k in state if "." in k)
+                model_prefix_counts = Counter(k.split(".")[0] for k in model_state if "." in k)
+                if ckpt_prefix_counts and model_prefix_counts:
+                    ckpt_pfx = ckpt_prefix_counts.most_common(1)[0][0] + "."
+                    model_pfx = model_prefix_counts.most_common(1)[0][0] + "."
+                    if ckpt_pfx != model_pfx:
+                        state = {
+                            (model_pfx + k[len(ckpt_pfx) :] if k.startswith(ckpt_pfx) else k): v
+                            for k, v in state.items()
+                        }
+
+            # Secondary remap: checkpoints trained with standard fc1/fc2 MLP naming
+            # won't match CREDIT wrappers that use nn.Sequential (net.0/net.3) or
+            # flat Sequential (0/3).  Try both targets; keep whichever resolves.
+            def _remap_mlp(k):
+                k2 = k.replace(".mlp.fc1.", ".mlp.net.0.").replace(".mlp.fc2.", ".mlp.net.3.")
+                if k2 in model_state:
+                    return k2
+                k2 = k.replace(".mlp.fc1.", ".mlp.0.").replace(".mlp.fc2.", ".mlp.3.")
+                if k2 in model_state:
+                    return k2
+                return k
+
+            state = {_remap_mlp(k): v for k, v in state.items()}
+            # Filter to only keys that exist in the model with matching shapes.
+            # strict=False only skips missing/extra keys, not shape mismatches —
+            # shape mismatches raise RuntimeError even with strict=False.
+            compatible = {k: v for k, v in state.items() if k in model_state and model_state[k].shape == v.shape}
+            n_ckpt = len(state)
+            n_key_match = sum(1 for k in state if k in model_state)
+            n_loaded = len(compatible)
+            model_instance.load_state_dict(compatible, strict=False)
+            logger.info(
+                f"Loaded pretrained weights from {ckpt_path}: "
+                f"{n_loaded}/{n_ckpt} tensors loaded "
+                f"({n_key_match - n_loaded} key matches with shape mismatch, "
+                f"{n_ckpt - n_key_match} keys not in model)"
+            )
+        return model_instance
 
     else:
         msg = f"Model type {model_type} not supported. Exiting."

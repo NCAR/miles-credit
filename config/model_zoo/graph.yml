@@ -1,0 +1,116 @@
+save_loc: '/glade/campaign/cisl/aiml/akn7/model_weights/graph_unet_fine/epoch3'
+seed: 1000
+
+data:
+    variables: ['U', 'V', 'T', 'Q']
+    surface_variables: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
+    forcing_variables: ['TSI']
+    static_variables: ['Z_GDS4_SFC', 'LSM']
+    save_loc: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/STD_SixHourly_TOTAL_*'
+    save_loc_surface: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/STD_SixHourly_TOTAL_*'
+    save_loc_forcing: '/glade/u/home/ksha/CREDIT/data/forcing_norm_6h.nc'
+    save_loc_static: '/glade/u/home/ksha/CREDIT/data/static_norm_old.nc'
+    train_years: [1979, 2014]
+    valid_years: [2014, 2018]
+    mean_path: '/glade/u/home/ksha/CREDIT/data/mean_zero.nc'
+    std_path: '/glade/u/home/ksha/CREDIT/data/std_one.nc'
+    scaler_type: 'std_new'
+    history_len: 1
+    valid_history_len: 1
+    forecast_len: 0
+    valid_forecast_len: 0
+    one_shot: True
+    skip_periods: null
+
+model:
+    type: "graph"
+    levels: 15
+    history_len: 2
+    n_variables: 4
+    n_surface_variables: 7
+    n_static_variables: 3
+    hidden_size: 256
+    dim_head: 64
+    dropout: 0.
+    n_blocks: 4
+    edge_path: "/glade/derecho/scratch/dgagne/credit_scalers/grid_edge_pairs_k_49_onedeg_ball.nc"
+    use_spectral_norm: True
+    use_edge_attr: True
+
+loss:
+    training_loss: "mse"
+    validation_loss: "mse"
+    use_power_loss: False
+    use_spectral_loss: False
+    spectral_lambda_reg: 0.1
+    spectral_wavenum_init: 20
+    use_latitude_weights: True
+    latitude_weights: "/glade/u/home/wchapman/MLWPS/DataLoader/LSM_static_variables_ERA5_zhght.nc"
+    use_variable_weights: False
+
+predict:
+    mode: none
+    batch_size: 1
+    forecasts:
+        type: "custom"
+        start_year: 2019
+        start_month: 1
+        start_day: 1
+        start_hours: [0, 12]
+        duration: 10
+        days: 10
+    metadata: '/glade/u/home/schreck/miles-credit/credit/metadata/era5.yaml'
+    save_forecast: '/glade/derecho/scratch/schreck/tmp/model_zoo_train/graph/rollout'
+
+trainer:
+    type: era5
+    mode: ddp
+    activation_checkpoint: False
+    compile: False
+    load_weights: True
+    load_optimizer: False
+    load_scaler: False
+    load_scheduler: False
+    save_backup_weights: False
+    save_best_weights: True
+    save_metric_vars: False
+    update_learning_rate: False
+    learning_rate: 5.0e-04
+    weight_decay: 0
+    train_batch_size: 2
+    valid_batch_size: 2
+    ensemble_size: 1
+    batches_per_epoch: 1000
+    valid_batches_per_epoch: 50
+    stopping_patience: 200
+    skip_validation: False
+    start_epoch: 0
+    num_epoch: 1
+    reload_epoch: False
+    epochs: 100
+    use_scheduler: True
+    scheduler:
+        scheduler_type: cosine-annealing-restarts
+        first_cycle_steps: 1000
+        cycle_mult: 2.0
+        max_lr: 5.0e-04
+        min_lr: 1.0e-06
+        warmup_steps: 999
+        gamma: 0.8
+    amp: True
+    grad_accum_every: 1
+    grad_max_norm: 'dynamic'
+    thread_workers: 4
+    valid_thread_workers: 1
+    prefetch_factor: 2
+
+pbs:
+    conda: "credit-derecho"
+    project: "NAML0001"
+    job_name: "zoo_graph"
+    walltime: "12:00:00"
+    nodes: 1
+    ncpus: 64
+    ngpus: 4
+    mem: '480GB'
+    queue: 'main'

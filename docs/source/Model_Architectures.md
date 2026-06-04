@@ -1,213 +1,134 @@
 # Supported Models
 
-In your configuration file, you can select from multiple supported models. Below, we provide detailed information about each available architecture, including its purpose, design, and example configuration options.
+Set `model: type:` in your config to select a model.  A complete reference — including distributed training support, pretrained weight availability, licenses, and detailed architecture notes — lives in [`credit/models/MODELS.md`](../../credit/models/MODELS.md).
+
+---
 
 ## Available Models
 
-- [WxFormer](#wxformer)
-- [NCAR-FuXi](#ncar-fuxi)
-- [UNet](#unet)
-- [Graph Transformer](#graph-transformer)
+### CREDIT-Native
+
+| Key | Description |
+|-----|-------------|
+| `wxformer` | WXFormer (CrossFormer backbone, conv decoder, skip connections) |
+| `wxformer-sdl` | WXFormer SDL ensemble — noise injection at each transformer scale |
+| `crossformer` | CrossFormer with conv decoder head |
+| `fuxi` | FuXi — Swin Transformer V2 U-Transformer |
+| `unet` | U-Net segmentation model |
+| `camulator` | CAMulator — CAM atmospheric emulator |
+| `graph` | Graph Residual Transformer GRU |
+| `swin` | Swin Transformer V2 Cr |
+
+### Model Zoo
+
+| Key | Description | Paper |
+|-----|-------------|-------|
+| `stormer` | Stormer — plain ViT weather model | [arXiv:2312.03876](https://arxiv.org/abs/2312.03876) |
+| `climax` | ClimaX — per-variable tokenization ViT | [arXiv:2301.10343](https://arxiv.org/abs/2301.10343) |
+| `fourcastnet` | FourCastNet v1 — AFNO ViT | [arXiv:2202.11214](https://arxiv.org/abs/2202.11214) |
+| `sfno` | SFNO — Spherical Fourier Neural Operator | [arXiv:2306.03838](https://arxiv.org/abs/2306.03838) |
+| `swinrnn` | SwinRNN — Swin encoder-decoder with recurrent connections | [arXiv:2307.09650](https://arxiv.org/abs/2307.09650) |
+| `fengwu` | FengWu — multi-group cross-attention ViT | [arXiv:2304.02948](https://arxiv.org/abs/2304.02948) |
+| `graphcast` | GraphCast — icosahedral GNN encoder-processor-decoder | [arXiv:2212.12794](https://arxiv.org/abs/2212.12794) |
+| `healpix` | DLWP-HEALPix — HEALPix U-Net with lat/lon reprojection | — |
+| `fourcastnet3` | FourCastNet v3 — spherical SNO U-Net | [NVIDIA 2025](https://research.nvidia.com/publication/2025-07_fourcastnet-3) |
+| `aurora` | Aurora — Perceiver3D + Swin3D backbone | [arXiv:2405.13063](https://arxiv.org/abs/2405.13063) |
+| `pangu` | Pangu-Weather — 3D Earth Transformer | [Nature 2023](https://doi.org/10.1038/s41586-023-06185-3) |
+| `aifs` | AIFS — lat/lon Transformer processor (ECMWF) | [arXiv:2406.01465](https://arxiv.org/abs/2406.01465) |
+| `itransformer` | iTransformer — inverted variable attention | [arXiv:2310.06625](https://arxiv.org/abs/2310.06625) |
+| `fuxi_ens` | FuXi-ENS — ViT + VAE ensemble perturbation head | [arXiv:2405.05925](https://arxiv.org/abs/2405.05925) |
+| `arches` | ArchesWeather — window + column attention | [arXiv:2405.14527](https://arxiv.org/abs/2405.14527) |
+| `mambavision` | MambaVision — hybrid Mamba + attention U-Net | [arXiv:2407.08083](https://arxiv.org/abs/2407.08083) |
+| `corrdiff` | CorrDiff — score-based conditional diffusion | [arXiv:2309.15214](https://arxiv.org/abs/2309.15214) |
+| `nextgen_wxformer` | NextGen WXFormer — CrossFormer U-Net + spectral GNN bottleneck + column attention | — |
+| `dlesym` | DLESyM — HEALPix ConvNeXt U-Net (DLESyM atmospheric backbone) | [arXiv:2409.16247](https://arxiv.org/abs/2409.16247) |
+
 ---
 
-## WxFormer
-
-**WxFormer** is the flagship model developed by the MILES group at NCAR.
-
-It is a hybrid architecture that combines a CrossFormer-based encoder with a hierarchical decoder using transpose 
-convolutional layers. Its structure includes U-Net-like skip connections and a pyramid layout to facilitate multi-scale 
-feature representation.
-
-CrossFormer, the foundation of WxFormer, enables long-range dependency modeling and multi-scale spatial reasoning. 
-This approach has demonstrated comparable performance to other vision transformers like Swin, which forms the backbone of models such as FuXi.
-
-WxFormer is trained to predict the atmospheric state at time step *i+1*, given the state at time *i*, typically 
-with a one-hour time increment.
-
-For further architectural details and design motivations, see **Schreck et al., 2024**.
-
-### References
-
-- Schreck, John, et al. "[Community Research Earth Digital Intelligence Twin (CREDIT)](https://arxiv.org/abs/2411.07814)." *arXiv preprint arXiv:2411.07814* (2024).
-
-### WxFormer Config Options
-
-Below is an example configuration snippet for running **WxFormer** with CAMulator. These parameters define spatial structure, transformer layers, variable channels, and patch-level resolution.
+## WXFormer Config Example
 
 ```yaml
-type: "crossformer"
-frames: 1                         # number of input states (default: 1)
-image_height: 192                 # number of latitude grids (default: 640)
-image_width: 288                  # number of longitude grids (default: 1280)
-levels: 32                        # number of upper-air variable levels (default: 15)
-channels: 4                       # upper-air variable channels
-surface_channels: 3               # surface variable channels
-input_only_channels: 3            # dynamic forcing, forcing, static channels
-output_only_channels: 15          # diagnostic variable channels
-
-patch_width: 1                    # latitude grid size per 3D patch
-patch_height: 1                   # longitude grid size per 3D patch
-frame_patch_size: 1               # number of time frames per 3D patch
-
-dim: [256, 512, 1024, 2048]       # dimensionality of each layer
-depth: [2, 2, 18, 2]              # depth of each transformer block
-global_window_size: [4, 4, 2, 1]  # global attention window sizes
-local_window_size: 3              # local attention window size
-
-cross_embed_kernel_sizes:         # kernel sizes for cross-embedding
-  - [4, 8, 16, 32]
-  - [2, 4]
-  - [2, 4]
-  - [2, 4]
-
-cross_embed_strides: [2, 2, 2, 2] # cross-embedding strides
-attn_dropout: 0.0                 # dropout for attention layers
-ff_dropout: 0.0                   # dropout for feed-forward layers
-
-use_spectral_norm: True
-    
-# use interpolation to match the output size
-interp: True
-    
-# map boundary padding
-padding_conf:
-    activate: True
-    mode: earth
-    pad_lat: 48
-    pad_lon: 48
+model:
+  type: wxformer
+  frames: 1
+  image_height: 640
+  image_width: 1280
+  levels: 16
+  channels: 4
+  surface_channels: 7
+  input_only_channels: 3
+  output_only_channels: 0
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+  dim: [128, 256, 512, 1024]
+  depth: [2, 2, 8, 2]
+  global_window_size: [4, 4, 2, 1]
+  local_window_size: 3
+  cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  use_spectral_norm: true
+  interp: true
 ```
 
-## NCAR-FuXi
-
-**NCAR-FuXi** is again describedd in  **Schreck et al., 2024**. FuXi, a state-of-the-art AI NWP model, was selected as the AI NWP model baseline for **Schreck et al., 2024**. The implementation of FuXi baseline follows its original design as in **Chen et al 2024**, but with reduced model sizes. 
-
-### References
-
-- Schreck, John, et al. "[Community Research Earth Digital Intelligence Twin (CREDIT)](https://arxiv.org/abs/2411.07814)." *arXiv preprint arXiv:2411.07814* (2024).
-- Chen, Lei, et al. "[FuXi: A cascade machine learning forecasting system for 15-day global weather forecast.](https://www.nature.com/articles/s41612-023-00512-1)" npj climate and atmospheric science 6.1 (2023): 190.
-
-
-
-Below is an example configuration snippet for running **NCAR-FUXI** with the ERA5 dataset. These parameters define spatial structure, transformer layers, variable channels, and patch-level resolution.
+## FuXi Config Example
 
 ```yaml
-frames: 2               # number of input states
-image_height: &height 640       # number of latitude grids
-image_width: &width 1280       # number of longitude grids
-levels: &levels 16              # number of upper-air variable levels
-channels: 4             # upper-air variable channels
-surface_channels: 7     # surface variable channels
-input_only_channels: 3  # dynamic forcing, forcing, static channels
-output_only_channels: 0 # diagnostic variable channels
-
-# patchify layer
-patch_height: 4         # number of latitude grids in each 3D patch
-patch_width: 4          # number of longitude grids in each 3D patch
-frame_patch_size: 2     # number of input states in each 3D patch
-
-# hidden layers
-dim: 1024               # dimension (default: 1536)
-num_groups: 32          # number of groups (default: 32)
-num_heads: 8            # number of heads (default: 8)
-window_size: 7          # window size (default: 7)
-depth: 16               # number of swin transformers (default: 48)
-
-use_spectral_norm: True
-    
-# use interpolation to match the output size
-interp: True
-    
-# map boundary padding
-padding_conf:
-    activate: True
-    mode: earth
-    pad_lat: 48
-    pad_lon: 48
+model:
+  type: fuxi
+  frames: 2
+  image_height: 640
+  image_width: 1280
+  levels: 16
+  channels: 4
+  surface_channels: 7
+  input_only_channels: 3
+  output_only_channels: 0
+  patch_height: 4
+  patch_width: 4
+  frame_patch_size: 2
+  dim: 1024
+  num_groups: 32
+  num_heads: 8
+  window_size: 7
+  depth: 16
+  use_spectral_norm: true
+  interp: true
 ```
 
 ---
 
-## Add Your Own Model to CREDIT
+## `torch.compile` Compatibility
 
-CREDIT's `register_model` decorator lets you plug any PyTorch model into the factory system without modifying the library. Once registered, your model is indistinguishable from a built-in type: `load_model` will instantiate it, and all trainer, loss, and transform machinery works as normal.
+`torch.compile` can significantly speed up training and inference.
+Not all models are compatible — the main blocker is `torch.nn.utils.spectral_norm`.
 
-### Basic usage
+### Quick reference
 
-Define your model class and apply `@register_model` with the type key you want to use in config files:
+| Model | Compiles? | What to do |
+|-------|:---------:|------------|
+| `wxformer` / `wxformer-sdl` / `crossformer` / `fuxi` / `swin` / `camulator` / `graph` / `nextgen_wxformer` | ✗ default | Set `use_spectral_norm: false` in `model:` config |
+| `dlesym` | ✓ | Works out of the box |
+| `sfno` / `fourcastnet3` | ⚠ | Don't install `torch-harmonics`; rfft2 fallback compiles |
+| `graphcast` | ⚠ | Use `torch.compile(model, dynamic=True)` |
+| All others | ✓ | Works out of the box |
 
-```python
-import torch.nn as nn
-from credit.models import register_model
+### Why spectral norm blocks compilation
 
-@register_model("my_model", "Loading my custom model ...")
-class MyModel(nn.Module):
-    def __init__(self, in_channels: int, hidden_dim: int = 256):
-        super().__init__()
-        self.net = nn.Linear(in_channels, hidden_dim)
-
-    def forward(self, x):
-        return self.net(x)
-```
-
-The first argument to `register_model` becomes the value you set for `model.type` in your YAML config. The second argument is an optional log message shown when the model is loaded. If omitted, a default message is generated from the type key.
-
-### Matching the config signature
-
-Constructor keyword arguments are taken directly from the `model:` block in your config, so your `__init__` signature should match the keys you put there:
+`spectral_norm` registers a forward hook that recomputes a normalized weight on every call.
+`torch.compile`'s graph tracer cannot trace through these hooks.
+Spectral norm is used intentionally to prevent rollout explosions — do not remove it without testing long rollouts.
 
 ```yaml
 model:
-  type: "my_model"
-  in_channels: 128
-  hidden_dim: 512
+  type: wxformer
+  use_spectral_norm: false   # required for torch.compile; verify stability first
 ```
 
-### Registering via the config file
+### SFNO / FourCastNet3
 
-The recommended way to use a custom model with the CREDIT CLI is to add a `custom_models` list at the top level of your config file. Each entry is a path to a Python file containing `@register_model`-decorated classes. CREDIT imports these files before `load_model` runs, so the type becomes available just like any built-in.
-
-```yaml
-# ---- Optional: register custom model classes ---- #
-custom_models:
-  - '/path/to/my_experiment/models.py'
-
-save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/my_run'
-
-model:
-  type: "my_model"
-  in_channels: 128
-  hidden_dim: 512
-  ...
-```
-
-Environment variables (e.g. `$WORK`, `$USER`) in the paths are expanded automatically. You can list multiple files if your experiment registers more than one custom type:
-
-```yaml
-custom_models:
-  - '/path/to/my_experiment/backbone.py'
-  - '/path/to/my_experiment/head.py'
-```
-
-### Registering via a Python import (alternative)
-
-If you are calling `load_model` directly from your own script rather than using the CLI, you can register the model by importing the module that defines it before calling `load_model`:
-
-```python
-# my_experiment/train.py
-import yaml
-import my_experiment.models  # registers MyModel as a side-effect
-from credit.models import load_model
-
-with open("config.yml") as f:
-    conf = yaml.safe_load(f)
-
-model = load_model(conf)  # dispatches to MyModel
-```
-
-### Overwriting a built-in type
-
-If you pass a `model_type` key that already exists in the registry (e.g. `"fuxi"`), a warning is logged and your class replaces the built-in. This is useful for swapping in a modified version of an existing architecture during experimentation without changing library code.
-
-### Exposing `load_model` and `load_model_name` on your class
-
-Built-in models support `load_weights=True` in `load_model` via class-level `load_model` / `load_model_name` methods. If you need checkpoint loading through the same factory call, add those methods to your class following the same convention used in `credit/models/fuxi.py`.
+When `torch-harmonics` is installed these models use Spherical Harmonic Transform CUDA kernels that cause graph breaks under `torch.compile`. To use the rfft2 fallback (which compiles cleanly), do not install `torch-harmonics`.
