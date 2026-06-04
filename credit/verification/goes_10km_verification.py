@@ -110,91 +110,155 @@ def verification_per_timestep(dataset, climo, eval_conf, step_file_tuple):
     0.45
     """
 
-    step, file = step_file_tuple
+    step, f = step_file_tuple
     result_dict = {"forecast_step": step}
     
-    pred_da = xr.open_dataset(file)["BT_or_R"] # BT_or_R with t channel lat lon
-    # if "ensemble_member_label" in pred_da.coordinates:
-    #     # do ensemble verification
-    #     # spread
-
-
-    #     pred_da = pred_da.mean("ensemble_member_labels")
-
-
-    true_da = dataset[pred_da.t[0], "y"]["y"]
-
+    pred_da = xr.open_dataset(f)["BT_or_R"] # BT_or_R with t channel lat lon 
+    true_da = dataset[pred_da.t[0].values, "y"]["y"]
     w_lat = np.cos(np.deg2rad(pred_da.latitude))
 
-    diff = true_da - pred_da
+    if eval_conf.get("compute_bulk", True):
+        diff = pred_da - true_da
 
-    # mean error
-    me = diff.mean(dim=["t", "latitude", "longitude"])
-    result_dict = result_dict | unpack_da_to_dict(me, "ME")
+        # mean error
+        me = diff.mean(dim=["t", "latitude", "longitude"])
+        result_dict = result_dict | unpack_da_to_dict(me, "ME")
 
-    # MAE
-    mae = np.abs(diff).mean(dim=["t", "latitude", "longitude"])
-    result_dict = result_dict | unpack_da_to_dict(mae, "MAE")
+        # MAE
+        mae = np.abs(diff).mean(dim=["t", "latitude", "longitude"])
+        result_dict = result_dict | unpack_da_to_dict(mae, "MAE")
 
-    # RMSE (mean then sqrt)
-    mse = np.sqrt((diff ** 2).mean(dim=["t", "latitude", "longitude"]))
-    result_dict = result_dict | unpack_da_to_dict(mse, "RMSE")
+        # RMSE (mean then sqrt)
+        mse = np.sqrt((diff ** 2).mean(dim=["t", "latitude", "longitude"]))
+        result_dict = result_dict | unpack_da_to_dict(mse, "RMSE")
 
-    # 2D FFT
-    fft_pred = radial_fft_spectrum(pred_da, 10.0)
-    result_dict = result_dict | unpack_da_to_dict(fft_pred, "FFT")
-    fft_true = radial_fft_spectrum(true_da, 10.0)
-    result_dict = result_dict | unpack_da_to_dict(fft_true, "FFT_true")
+        # 2D FFT
+        fft_pred = radial_fft_spectrum(pred_da, 10.0)
+        result_dict = result_dict | unpack_da_to_dict(fft_pred, "FFT")
+        fft_true = radial_fft_spectrum(true_da, 10.0)
+        result_dict = result_dict | unpack_da_to_dict(fft_true, "FFT_true")
 
-    # MAESS compared to climo
-    # S = (x - x_r) / (x_p - x_r)
-    mae_climo = np.abs(climo - true_da).mean(dim=["latitude", "longitude"])
-    maess = (mae - mae_climo) / (-1 * mae_climo)
-    result_dict = result_dict | unpack_da_to_dict(maess, "MAESS")
+        # MAESS compared to climo
+        # S = (x - x_r) / (x_p - x_r)
+        mae_climo = np.abs(climo - true_da).mean(dim=["latitude", "longitude"])
+        maess = (mae - mae_climo) / (-1 * mae_climo)
+        result_dict = result_dict | unpack_da_to_dict(maess, "MAESS")
 
-    # FSS for channel 13
-    if eval_conf["compute_fss"]:
-        channel = 13
-        pred_da = pred_da.isel(t=0).sel(channel=channel) 
-        target_da = true_da.sel(channel=channel)
+    # FSS
+    pred_da_all = pred_da.isel(t=0)
+    target_da_all = true_da
+    for channel, fss_conf in eval_conf["FSS"].items():
+        pred_da = pred_da_all.sel(channel=channel)
+        target_da = target_da_all.sel(channel=channel) 
+        
+        if "raw" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+            result_dict = result_dict | FSS_raw_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
+        if "pct" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+            result_dict = result_dict | FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
 
-        def is_in_bin(da, bin_edges):
-            """
-            outputs a masked dataarray of where the values are within the bin_edges
-            """
-            return (bin_edges[0] < da) & (da <= bin_edges[1])
-
-        for threshold in eval_conf["C13_thresholds"]:
-            f_o = is_in_bin(target_da, [0., threshold]).mean()
-            result_dict = result_dict | {f"obs_freq_T{threshold}": float(f_o.values)}
-
-            for window_size in eval_conf["fss_window_sizes"]:
-            # binary threshold fss
-                fss = fss_2d(pred_da, target_da,
-                            event_threshold=threshold,
-                            window_size=(window_size, window_size),
-                            spatial_dims=("latitude", "longitude"),
-                            threshold_operator=np.less
-                            )
-                result_dict = result_dict | {f"FSS_WS{window_size}_C13_T{threshold}": float(fss.values)}
-
-        # categorical fss
-        for category_name, bin in eval_conf["sky_categories"].items():
-            pred_binary = is_in_bin(pred_da, bin)
-            target_binary = is_in_bin(target_da, bin)
-
-            f_o = target_binary.mean()
-            result_dict = result_dict | {f"obs_freq_{category_name}": float(f_o.values)}
-
-            for window_size in eval_conf["fss_window_sizes"]:
-                fss = fss_2d_binary(pred_binary, target_binary,
-                        window_size=(window_size, window_size),
-                        spatial_dims=("latitude", "longitude"),
-                        )
-                result_dict = result_dict | {f"FSS_WS{window_size}_C13_{category_name}": float(fss.values)}
+        if "pct_tropics" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+            # percentile FSS tropics
+            lat_bounds = [-21, 21]
+            target_da = target_da.sel(latitude = slice(*lat_bounds))
+            pred_da = pred_da.sel(latitude = slice(*lat_bounds))
+            
+            tropics_results = FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
+            tropics_results = {f"{k}_tropics": v for k,v in tropics_results.items()}
+            result_dict = result_dict | tropics_results
 
     return result_dict
 
+
+def is_in_bin(da, bin_edges):
+    """
+    outputs a masked dataarray of where the values are within the bin_edges
+    """
+    return (bin_edges[0] < da) & (da <= bin_edges[1])
+
+def FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel):
+    result_dict = {}
+
+    target_sorted = np.sort(target_da.values.flatten())
+    num_idxs = len(target_sorted)
+
+    def find_quantile_target(thresholds):
+        idxs = np.searchsorted(target_sorted, thresholds)
+        return idxs / num_idxs
+    
+    def find_pred_pct_thresholds(thresholds):
+        quantiles = find_quantile_target(thresholds)
+        pred_pct_thresholds = pred_da.quantile(quantiles)
+        return pred_pct_thresholds
+
+    # percentile FSS
+    for threshold in fss_conf["thresholds"]:
+        
+        f_o = is_in_bin(target_da, [0., threshold]).mean() # use original threshold for target obs
+        result_dict = result_dict | {f"obs_freq_C{channel:02}_PCT{threshold}": float(f_o.values)}
+        
+        threshold_pred = find_pred_pct_thresholds(threshold) # use corresponding value at percentile
+        # result_dict = result_dict | {f"obs_freq_C{channel:02}_PCT{threshold}": float(f_o.values)}
+
+        for window_size in eval_conf["fss_window_sizes"]:
+        # binary threshold fss
+            fss = fss_2d(pred_da, target_da,
+                        event_threshold=threshold_pred.values,
+                        window_size=(window_size, window_size),
+                        spatial_dims=("latitude", "longitude"),
+                        threshold_operator=np.less
+                        )
+            result_dict = result_dict | {f"FSS_WS{window_size}_C{channel:02}_PCT{threshold}": float(fss.values)}
+
+    # category percentile
+    for category_name, bin_edges in fss_conf["sky_categories"].items():
+        bin_edges_pred = find_pred_pct_thresholds(bin_edges) # get corresponding value at equiv percentile
+        pred_binary = is_in_bin(pred_da, bin_edges_pred.values)
+        result_dict = result_dict | {f"bin_edges_C{channel:02}_PCT_{category_name}": bin_edges_pred.values.flatten()}
+
+        target_binary = is_in_bin(target_da, bin_edges)
+        f_o = target_binary.mean()
+        result_dict = result_dict | {f"obs_freq_C{channel:02}_PCT_{category_name}": float(f_o.values)}
+
+        for window_size in eval_conf["fss_window_sizes"]:
+            fss = fss_2d_binary(pred_binary, target_binary,
+                    window_size=(window_size, window_size),
+                    spatial_dims=("latitude", "longitude"),
+                    )
+            result_dict = result_dict | {f"FSS_WS{window_size}_C{channel:02}_PCT_{category_name}": float(fss.values)}
+    return result_dict
+    
+def FSS_raw_threshold(pred_da, target_da, eval_conf, fss_conf, channel):
+    result_dict = {}
+
+    for threshold in fss_conf["thresholds"]:
+        f_o = is_in_bin(target_da, [0., threshold]).mean()
+        result_dict = result_dict | {f"obs_freq_C{channel:02}_T{threshold}": float(f_o.values)}
+
+        for window_size in eval_conf["fss_window_sizes"]:
+        # binary threshold fss
+            fss = fss_2d(pred_da, target_da,
+                        event_threshold=threshold,
+                        window_size=(window_size, window_size),
+                        spatial_dims=("latitude", "longitude"),
+                        threshold_operator=np.less
+                        )
+            result_dict = result_dict | {f"FSS_WS{window_size}_C{channel:02}_T{threshold}": float(fss.values)}
+
+    # categorical fss
+    for category_name, bin_edges in fss_conf["sky_categories"].items():
+        pred_binary = is_in_bin(pred_da, bin_edges)
+        target_binary = is_in_bin(target_da, bin_edges)
+
+        f_o = target_binary.mean()
+        result_dict = result_dict | {f"obs_freq_C{channel:02}_{category_name}": float(f_o.values)}
+
+        for window_size in eval_conf["fss_window_sizes"]:
+            fss = fss_2d_binary(pred_binary, target_binary,
+                    window_size=(window_size, window_size),
+                    spatial_dims=("latitude", "longitude"),
+                    )
+            result_dict = result_dict | {f"FSS_WS{window_size}_C{channel:02}_{category_name}": float(fss.values)}
+    return result_dict
 
 def unpack_da_to_dict(da, metric_prefix):
 

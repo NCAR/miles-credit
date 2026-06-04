@@ -13,7 +13,7 @@ from os.path import join
 import pandas as pd
 # ---------- #
 # Numerics
-from datetime import datetime, timedelta
+from dateutil.parser import parse
 import xarray as xr
 import numpy as np
 
@@ -53,7 +53,12 @@ def get_num_cpus():
     
     return int(num_cpus)
 
-
+def is_datetime_str(s):
+    try:
+        parse(s)
+        return True
+    except:
+        return False
 
 def get_rollout_init_times(conf):
 
@@ -87,7 +92,112 @@ def get_rollout_init_times(conf):
     elif forecast_conf["type"] == "custom":
         rollout_init_times = [pd.Timestamp(time) for time in forecast_conf["init_times"]]
         return rollout_init_times
+        
+    elif forecast_conf["type"] == "2025_test_rollout":
+        rollout_init_times = [
+            "2025-06-24T00:00:00",
+            "2025-07-06T06:00:00",
+            "2025-06-13T00:00:00",
+            "2025-06-18T12:00:00",
+            "2025-06-14T18:00:00",
+            "2025-07-07T00:00:00",
+            "2025-06-28T12:00:00",
+            "2025-07-02T00:00:00",
+            "2025-06-13T06:00:00",
+            "2025-06-22T18:00:00",
+            "2025-06-27T06:00:00",
+            "2025-07-05T18:00:00",
+            "2025-07-07T06:00:00",
+            "2025-07-04T18:00:00",
+            "2025-06-26T06:00:00",
+            "2025-06-18T06:00:00",
+            "2025-07-05T06:00:00",
+            "2025-07-01T06:00:00",
+            "2025-06-25T18:00:00",
+            "2025-06-27T12:00:00",
+            "2025-06-14T06:00:00",
+            "2025-06-16T12:00:00",
+            "2025-06-19T18:00:00",
+            "2025-06-25T12:00:00",
+            "2025-06-18T00:00:00",
+            "2025-06-22T12:00:00",
+            "2025-06-21T18:00:00",
+            "2025-06-29T06:00:00",
+            "2025-06-20T12:00:00",
+            "2025-06-19T12:00:00",
+            "2025-06-25T06:00:00",
+            "2025-07-01T12:00:00",
+            "2025-06-22T06:00:00",
+            "2025-07-04T00:00:00",
+            "2025-06-16T00:00:00",
+            "2025-06-15T12:00:00",
+            "2025-06-28T06:00:00",
+            "2025-07-02T12:00:00",
+            "2025-07-06T18:00:00",
+            "2025-07-03T12:00:00",
+            "2025-07-08T18:00:00",
+            "2025-06-24T18:00:00",
+            "2025-06-14T12:00:00",
+            "2025-06-21T12:00:00",
+            "2025-07-08T12:00:00",
+            "2025-07-08T06:00:00",
+            "2025-06-27T18:00:00",
+            "2025-06-27T00:00:00",
+            "2025-06-23T00:00:00",
+            "2025-07-06T00:00:00",
+            "2025-06-15T06:00:00",
+            "2025-07-06T12:00:00",
+            "2025-07-09T00:00:00",
+            "2025-06-24T06:00:00",
+            "2025-07-08T00:00:00",
+            "2025-06-16T06:00:00",
+            "2025-06-17T06:00:00",
+            "2025-06-16T18:00:00",
+            "2025-07-04T06:00:00",
+            "2025-06-28T18:00:00",
+            "2025-06-29T18:00:00",
+            "2025-07-03T18:00:00",
+            "2025-07-03T00:00:00",
+            "2025-06-22T00:00:00",
+            "2025-06-17T18:00:00",
+            "2025-06-20T00:00:00",
+            "2025-06-25T00:00:00",
+            "2025-06-19T00:00:00",
+            "2025-06-17T00:00:00",
+            "2025-07-02T06:00:00",
+            "2025-06-26T00:00:00",
+            "2025-07-03T06:00:00",
+            "2025-06-29T00:00:00",
+            "2025-06-15T18:00:00",
+            "2025-06-21T06:00:00",
+            "2025-06-20T18:00:00",
+            "2025-06-30T00:00:00",
+            "2025-06-30T12:00:00",
+            "2025-06-26T12:00:00",
+            "2025-06-26T18:00:00",
+            "2025-06-23T06:00:00",
+            "2025-07-05T00:00:00",
+            "2025-07-02T18:00:00",
+            "2025-06-30T06:00:00",
+            "2025-06-21T00:00:00",
+            "2025-06-14T00:00:00",
+            "2025-06-15T00:00:00",
+            "2025-07-01T18:00:00",
+            "2025-07-04T12:00:00",
+            "2025-06-19T06:00:00",
+            "2025-06-17T12:00:00",
+            "2025-06-29T12:00:00",
+            "2025-07-05T12:00:00",
+            "2025-06-18T18:00:00",
+            "2025-06-20T06:00:00",
+            "2025-06-30T18:00:00",
+            "2025-07-01T00:00:00",
+            "2025-06-28T00:00:00",
+            "2025-06-24T12:00:00",
+        ]
 
+        return [pd.Timestamp(t) for t in sorted(rollout_init_times)]
+    
     raise ValueError(f"{forecast_conf['type']} is not a valid rollout type")
 
 
@@ -236,6 +346,9 @@ def predict(rank, world_size, conf, p):
 
     # Load the forecasts we wish to compute
     rollout_init_times = get_rollout_init_times(conf)
+    if rollout_init_times[0].year == 2025:
+        conf["data"]["save_loc"] = conf["data"]["save_loc"][:-5] + "_2025.zarr"
+        logging.warning(f"loading 2025 zarr from {conf['save_loc']}")
 
     logger.info(f"rolling out with init times {rollout_init_times}")
 
@@ -246,7 +359,7 @@ def predict(rank, world_size, conf, p):
 
     dataset = load_predict_dataset(conf, 0, 0, rollout_init_times, device)
     dataloader = load_dataloader(conf, dataset, 0, 1, is_predict=True)
-
+    timestep = dataset.timestep
     # Class for saving in parallel
     result_processor = ForecastProcessor(conf, device)
 
@@ -300,6 +413,7 @@ def predict(rank, world_size, conf, p):
             if "era5" in batch.keys():
                 batch_era5 = batch["era5"]
             init_datetimes = batch["datetime"]
+            save_datetimes = init_datetimes.copy()
             batch_size = len(init_datetimes)
 
             mode = batch["mode"][0]
@@ -333,8 +447,10 @@ def predict(rank, world_size, conf, p):
 
                 batch = next(dl) # load in y timestep for metric computation and forecast timestamp
                 
-                save_datetimes = batch["datetime"]
-                # process according to y timestep
+                save_datetimes = [(pd.Timestamp(dt) + timestep).strftime("%Y-%m-%dT%H:%M:%S") for dt in save_datetimes]
+
+                # process according to computed timestep, in case goes timestep does not exist
+                # prevents overwriting files
 
                 result = p.apply_async(
                     result_processor.process,
@@ -529,14 +645,6 @@ def main():
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    #     wandb.init(
-    #         # set the wandb project where this run will be logged
-    #         project="Derecho parallelism",
-    #         name=f"Worker {os.environ["RANK"]} {os.environ["WORLD_SIZE"]}"
-    #         # track hyperparameters and run metadata
-    #         config=conf
-    #     )
-
     if number_of_subsets > 0:
         forecasts = load_forecasts(conf)
         if number_of_subsets > 0 and subset >= 0:
@@ -559,6 +667,11 @@ def main():
         # Ensure all processes are finished
         p.close()
         p.join()
+
+    # post check save_dir
+    for p in Path(forecast_save_loc).iterdir():
+        if is_datetime_str(p.name):
+            print(f"{len(list(p.iterdir()))} {p.name}")
     
 if __name__ == "__main__":
     main()

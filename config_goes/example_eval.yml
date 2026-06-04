@@ -1,9 +1,9 @@
 # common config for eval.py
 
-config: "/glade/derecho/scratch/dkimpara/goes_10km_train/10m_big/model.yml"
+config: "/glade/derecho/scratch/dkimpara/goes_10km_train/30m_omid/model.yml"
 
 # [Optional] location of forecast data. default: model config's save_forecast location (above)
-save_forecast: "/glade/derecho/scratch/dkimpara/goes_10km_train/10m_big/test_forecasts"
+save_forecast: "/glade/derecho/scratch/dkimpara/goes_10km_train/mpas/mpas_fixed_test"
 
 # [Optional] filename to save eval results filename default: verif.parquet
 # will save to directory save_forecast, or the default value of save_forecast
@@ -12,17 +12,35 @@ overwrite: True
 verification_type: "goes-10km"
 
 ############ custom eval configs ############
-climo_file: "/glade/derecho/scratch/dkimpara/goes_10km_train/baselines/climo/data_stats.nc"
+goes_zarr_file: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/goes_10km_2025.zarr"
+climo_file: "/glade/derecho/scratch/dkimpara/goes_10km_train/baselines/climo/data_stats_2025_test.nc"
+time_tol: "7m"
 
-compute_fss: True
-C13_thresholds: [260, 235]
-sky_categories: 
-    high: [0, 210,]
-    medium: [210, 235]
-    low: [235, 260]
-    none: [260, 1000]
-fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 18, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 150, 200, 250] #synoptic scale at 2500km
-# fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+compute_bulk: True
+compute_FSS_types: ["pct", "pct_tropics"] #["raw", "pct", "pct_tropics"]
+
+
+FSS:
+    13:
+        thresholds: [255, 235]
+        sky_categories: 
+            high: [0, 210]
+            medium_high: [210, 235]
+            medium: [235, 255]
+            low: [255, 275]
+            none: [275, 1000]
+
+    9: # mid-troposphere water vapor
+        thresholds: []
+        sky_categories: 
+            clouds_3: [0, 200]
+            clouds_2: [200, 220]
+            clouds_1: [220, 235]
+            moist: [235, 255]
+            dry: [255, 1000]
+
+fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 27, 30, 40, 50, 60, 70, 80, 90, 100, 120, 150, 200, 250] #synoptic scale at 2500km
+# fss_window_sizes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14]
 
 #############################################
 

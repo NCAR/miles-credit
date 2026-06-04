@@ -57,6 +57,7 @@ class GOES10kmDataset(Dataset):
             logger.info(f"initializing GOES10kmDataset with timestep [{self.timestep}] with {self.num_forecast_steps} steps")
         else: # don't need to handle init times, this is handled by rollout already
             self.init_times = self.ds.t
+            self.time_tol = time_config["time_tol"] # if out of time_tol, return NaN frame
             logger.warning("loading dataset for with 0 forecast steps! only for eval")
         
 
@@ -178,6 +179,10 @@ class GOES10kmDataset(Dataset):
                 data = torch.tensor(da.values).unsqueeze(1)
             else: # return a dataset after nanfilling
                 data = self.inverse_transform_ABI(da)
+                if np.abs(ds.t.values - ts) > self.time_tol: # if out of tolerance, return nan da
+                    data[:] = np.nan
+                    time_str = pd.Timestamp(ts).strftime("%Y-%m-%dT%H:%M:%S")
+                    return_data["datetime"] = time_str
 
             if self.padding:
                 data = torch.nn.functional.pad(data, (19,18,11,10), "constant", 0.0)

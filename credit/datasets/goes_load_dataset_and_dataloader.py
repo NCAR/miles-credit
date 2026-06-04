@@ -79,7 +79,7 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
         padding = not padding_conf["activate"] # opposite of what the model does
     else:
         padding = True
-
+    
     zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
     # years = [data_config["train_years"][0], data_config["valid_years"][1]] #all years
 
@@ -120,16 +120,20 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
                                         transform=era5_transform)
     else:
         era5dataset = None
+    if "2025" in data_config["save_loc"]:
+        valid_init_dir = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/valid_init_times_2025"
+    else:
+        valid_init_dir = "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/valid_init_times"
 
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
         if rank == 0: # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
-            dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
+            dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset, valid_init_dir=valid_init_dir)
             torch.distributed.barrier()
         else:
             torch.distributed.barrier()
-            dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
+            dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset, valid_init_dir=valid_init_dir)
     else:
-        dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset)
+        dataset = GOES10kmDataset(zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset, valid_init_dir=valid_init_dir)
         
     return dataset
 
@@ -214,11 +218,18 @@ def generate_rollout_sampling_modes(dataset, compute_metrics=False):
     return ["init"] + ["forcing"] * (num_forecast_steps - 1) + ["stop"]
 
 
-def load_verification_dataset(conf,):
+def load_verification_dataset(conf, verif_conf):
 
     logger.info("loading a GOES 10km dataset for evaluation")
 
     data_config = conf["data"]
+    if "goes_zarr_file" in verif_conf.keys():
+        data_config["save_loc"] = verif_conf["goes_zarr_file"]
+
+    time_config = {
+        "time_tol": pd.Timedelta(verif_conf["time_tol"])
+    }
+
     padding_conf = conf["model"].get("padding_conf", {})
     if padding_conf:
         padding = not padding_conf["activate"] # opposite of what the model does
@@ -227,5 +238,6 @@ def load_verification_dataset(conf,):
 
     zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
 
-    dataset = GOES10kmDataset(zarr_ds, data_config, time_config={}, padding=padding, evaluate=True, era5dataset=None)
+
+    dataset = GOES10kmDataset(zarr_ds, data_config, time_config=time_config, padding=padding, evaluate=True, era5dataset=None)
     return dataset

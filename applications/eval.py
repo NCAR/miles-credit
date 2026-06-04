@@ -49,6 +49,14 @@ if __name__ == "__main__":
         default=0,
         help="Submit workers to PBS.",
     )
+
+    parser.add_argument(
+        "-t",
+        dest="test",
+        type=int,
+        default=0,
+        help="test mode",
+    )
     # parser.add_argument(
     #     "-cpus",
     #     "--num_cpus",
@@ -63,6 +71,7 @@ if __name__ == "__main__":
     config = args_dict.pop("eval_config")
     launch = int(args_dict.pop("launch"))
     # num_cpus = int(args_dict.pop("num_cpus"))
+    test = int(args_dict.pop("test"))
 
     # Set up logger to print stuff
     root = logging.getLogger()
@@ -121,9 +130,12 @@ if __name__ == "__main__":
             launch_script_mpi(config, script_path)
         sys.exit()
 
-    num_process = conf.get("num_process", max(1, get_num_cpus() - 1))
+    if test:
+        num_process = 2
+    else:
+        num_process = conf.get("num_process", max(1, get_num_cpus() - 1))
 
-    dataset = load_verification_dataset(model_conf)
+    dataset = load_verification_dataset(model_conf, conf)
     climo = xr.open_dataset(conf["climo_file"])["mean"]
 
 

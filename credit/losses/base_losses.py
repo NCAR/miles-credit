@@ -9,6 +9,7 @@ from credit.losses.kcrps import KCRPSLoss
 from credit.losses.spectral import SpectralLoss2D
 from credit.losses.power import PSDLoss
 from credit.losses.almost_fair_crps import AlmostFairKCRPSLoss
+from credit.losses.amse import AMSELoss
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ def base_losses(conf, reduction="mean", validation=False):
         "almost-fair-crps": AlmostFairKCRPSLoss,
         "spectral": SpectralLoss2D,
         "power": PSDLoss,
+        "amse": AMSELoss,
     }
 
     if loss_type in losses:
