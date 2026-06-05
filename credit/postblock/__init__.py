@@ -3,12 +3,14 @@ import torch.nn as nn
 from credit.postblock.reconstruct import Reconstruct
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransformer
+from credit.postblock.regrid_se_to_latlon import SEToLatLonPostBlock
 
 
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
     "bridgescaler_transform": BridgeScalerTransformer,
     "wet_mask_samudra": WetMaskBlock,
+    "se_to_latlon": SEToLatLonPostBlock,
 }
 
 

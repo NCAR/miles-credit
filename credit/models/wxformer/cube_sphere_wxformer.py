@@ -1,15 +1,20 @@
 """
 cube_sphere_wxformer.py
 -----------------------
-CubeSphereWxFormer: weather transformer for the ne120 cubed-sphere SE grid.
+CubeSphereWxFormer: weather transformer for a cubed-sphere SE grid.
+
+The grid resolution is not baked in. The face-edge length E (361 for ne120),
+the padded encoder size, and the crop offset are all derived at construction
+from the SE index and the stride/window configuration, so the same class runs
+on ne30, ne120, or any other cubed-sphere layout.
 
 Architecture
 ~~~~~~~~~~~~
 Input SE tensors ``(B, C_in, 1, ncol)`` are reshaped to a 6-face cube
-``(B, 6, C_in, 361, 361)`` using the SE permutation index.  Optionally,
-a HaloExchange pass populates the border padding with real data from
-physically adjacent faces before zero-padding to 384×384.  Each face is
-then encoded by a CrossFormer stage (strided conv + within-face transformer
+``(B, 6, C_in, E, E)`` using the SE permutation index.  Optionally,
+a HaloExchange pass populates the border with real data from physically
+adjacent faces before padding up to the encoder size.  Each face is then
+encoded by a CrossFormer stage (strided conv + within-face transformer
 + cross-face attention).
 
 Each encoder stage (using CrossFormer building blocks from credit):
@@ -20,13 +25,14 @@ Each encoder stage (using CrossFormer building blocks from credit):
     4. FaceEdgeAttention (optional) — sparse MHA over physically adjacent
                                       cross-face border nodes
 
-Spatial sizes through 4 stages (padding: 384, strides: 4,2,2,2):
-    384 → 96 → 48 → 24 → 12
+With the default strides (2,2,2,2) and a 361-edge face padded to 384, the
+four stages downsample 384 → 192 → 96 → 48 → 24. The padded size is the
+smallest multiple of ``prod(strides) · lcm(windows)`` at or above the
+(halo-expanded) face, so every stage stays divisible by its attention windows.
 
-Window divisibility with local_window=12, global_window=6: all stages ✓
-
-Decoder mirrors CrossFormer: 3× UpBlock(ConvTranspose2d stride=2) + final
-Conv2d, then F.interpolate back to 361×361.
+Decoder mirrors the encoder: four ×2 UpBlocks return to the padded size, a
+Conv2d head projects to the output channels, and the face is then CROPPED back
+to E (the exact inverse of the input pad — no interpolation).
 
 Cross-face attention design
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -56,7 +62,7 @@ Both are controlled by ``adjacency_path``; if the file is missing or
 
 SE permutation index
 ~~~~~~~~~~~~~~~~~~~~
-``se_index[k]`` = flat cube position = face*361²+row*361+col for SE node k.
+``se_index[k]`` = flat cube position = face*E² + row*E + col for SE node k.
 
     SE → cube (scatter):  cube_flat[:,:,se_index] = se_tensor
     Cube → SE (gather):   se_tensor = cube_flat[:,:,se_index]
@@ -65,15 +71,15 @@ Padding cells (cube positions with no SE node) remain zero.
 
 Padding convention
 ~~~~~~~~~~~~~~~~~~
-Without halo exchange: faces are zero-padded from 361 to 384:
-    F.pad(x6, (0, 23, 0, 23))   → (B*6, C, 384, 384)
+Without halo exchange the face is zero-padded on the bottom/right from E to
+``padded_size``; the native face sits at ``[0:E, 0:E]``.
 
-With halo exchange (halo_size=h): first populated with neighbor data to
-361+2h, then zero-padded to 384:
-    halo(x6) → (B*6, C, 361+2h, 361+2h)
-    F.pad(...)  → (B*6, C, 384, 384)  with pad = 384 - (361+2h) each side
+With halo exchange (halo_size=h) the face is first widened to E+2h with real
+neighbor data, then zero-padded to ``padded_size``; the native face then sits
+at ``[h:h+E, h:h+E]``.
 
-After decoding we F.interpolate back to 361×361.
+After decoding we crop back to that window (``_crop_face``), which exactly
+inverts the pad — no interpolation, no resampling of real data.
 
 Usage
 -----
@@ -106,6 +112,7 @@ If __name__ == "__main__":
 from __future__ import annotations
 
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -119,16 +126,10 @@ from einops import rearrange
 
 logger = logging.getLogger(__name__)
 
-# ne120 constants
+# A cube always has 6 faces. Everything else (the face-edge length, the padded
+# encoder size, the crop offset) is derived per-model from the SE index and the
+# stride/window configuration, so the model is not tied to ne120 (361/384).
 NFACE = 6
-NFACE_EDGE = 361  # nodes per face edge
-NCOL = 777_602  # total SE nodes
-N_CUBE_FLAT = NFACE * NFACE_EDGE * NFACE_EDGE  # 781 926  (6 × 361²)
-
-# Pad each 361×361 face to 384×384 so all 4 encoder stages have H divisible
-# by attention window sizes (local=12, global=6):  384→96→48→24→12 ✓
-_PADDED = 384
-_PAD = _PADDED - NFACE_EDGE  # = 23
 
 
 # ---------------------------------------------------------------------------
@@ -270,11 +271,10 @@ class CubeSphereWxFormer(nn.Module):
         depth: tuple = (2, 2, 8, 2),
         dim_head: int = 32,
         face_attn_heads: int = 4,
-        # Window sizes chosen for padded spatial dims 384→96→48→24→12:
         global_window_size: tuple = (6, 6, 6, 6),
         local_window_size: int = 12,
         cross_embed_kernel_sizes: tuple = ((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
-        cross_embed_strides: tuple = (4, 2, 2, 2),
+        cross_embed_strides: tuple = (2, 2, 2, 2),
         attn_dropout: float = 0.0,
         ff_dropout: float = 0.0,
         # Face-boundary improvements
@@ -291,6 +291,12 @@ class CubeSphereWxFormer(nn.Module):
         # ── SE permutation index ─────────────────────────────────────────
         se_idx = np.load(se_index_path).astype(np.int64)
         self.register_buffer("se_index", torch.from_numpy(se_idx))
+
+        # Infer cube geometry from the index. se_index[k] = face*E² + row*E + col,
+        # so the cube holds NFACE·E² cells; E is the smallest edge length whose
+        # cube contains every index. Works for any resolution (ne30, ne120, …).
+        self.nface_edge = math.ceil(math.sqrt((int(se_idx.max()) + 1) / NFACE))
+        self.cube_flat = NFACE * self.nface_edge**2
 
         # ── Channel arithmetic ───────────────────────────────────────────
         self.input_channels = (channels * levels + surface_channels + input_only_channels) * frames
@@ -336,12 +342,13 @@ class CubeSphereWxFormer(nn.Module):
 
         local_wsizes = [local_window_size] * 4
 
-        # Cumulative strides at each stage: 4, 4*2=8, 8*2=16, 16*2=32
+        # Cumulative stride at each stage (e.g. strides (2,2,2,2) → 2,4,8,16).
         cum_strides = []
         s = 1
         for stride in cross_embed_strides:
             s *= stride
             cum_strides.append(s)
+        self.total_stride = s  # overall encoder downsampling factor
 
         self.encoder_stages = nn.ModuleList()
         for i, ((din, dout), ndepth, gw, lw, ksz, stride) in enumerate(
@@ -395,6 +402,19 @@ class CubeSphereWxFormer(nn.Module):
         else:
             self.halo_exchange = None
 
+        # ── Padded face size + crop offset ────────────────────────────────
+        # Each face is padded up to a size that (a) downsamples cleanly through
+        # every stage and (b) leaves each stage divisible by its attention
+        # windows. The smallest such size is the next multiple of
+        # total_stride · lcm(windows) at or above the (halo-expanded) face.
+        # The pad is added on the bottom/right only, so the inverse at the end
+        # of the decoder is a crop, not an interpolation (see forward()).
+        win_lcm = math.lcm(local_window_size, *global_window_size)
+        unit = self.total_stride * win_lcm
+        self.crop_off = halo_size if self.halo_exchange is not None else 0
+        pre_pad = self.nface_edge + 2 * self.crop_off
+        self.padded_size = math.ceil(pre_pad / unit) * unit
+
         # ── Face edge attention (Approach 2) ─────────────────────────────
         if self._has_adjacency:
             from credit.models.wxformer.edge_attn import FaceEdgeAttention
@@ -405,7 +425,7 @@ class CubeSphereWxFormer(nn.Module):
                 edge_width=edge_attn_width,
                 halo_size=halo_size,
                 strides=tuple(cum_strides),
-                padded_size=_PADDED,
+                padded_size=self.padded_size,
                 dropout=attn_dropout,
             )
         else:
@@ -421,41 +441,57 @@ class CubeSphereWxFormer(nn.Module):
                 num_heads=tile_attn_heads,
                 halo_size=halo_size,
                 strides=tuple(cum_strides),
-                padded_size=_PADDED,
+                padded_size=self.padded_size,
                 dropout=attn_dropout,
             )
         else:
             self.cross_face_tile_attn = None
 
         # ── Decoder ──────────────────────────────────────────────────────
-        # Channel sizes at each encoder stage output:
+        # Four ×2 UpBlocks mirror the four encoder stages, returning to the
+        # padded face size; a final Conv2d head projects to the output channels.
         d0, d1, d2, d3 = dim[0], dim[1], dim[2], dim[3]
         # num_groups for GroupNorm: d0 divides d3//2, d3//4, d3//8 for geometric dims
         _ng = max(1, d0)
-        self.up1 = UpBlock(d3, d3 // 2, _ng)  # 12→24: d3 → d3//2
-        self.up2 = UpBlock(d3 // 2 + d2, d3 // 4, _ng)  # 24→48: cat(d3//2, d2) → d3//4
-        self.up3 = UpBlock(d3 // 4 + d1, d3 // 8, _ng)  # 48→96: cat(d3//4, d1) → d3//8
-        self.up4 = nn.Conv2d(d3 // 8 + d0, self.output_channels, 3, padding=1)
-        # Zero-init the final projection: delta ≈ 0 at init, so the model starts
-        # from persistence (output ≈ x_res from the residual connection), which
+        self.up1 = UpBlock(d3, d3 // 2, _ng)  # cat: d3 → d3//2
+        self.up2 = UpBlock(d3 // 2 + d2, d3 // 4, _ng)  # cat(d3//2, d2) → d3//4
+        self.up3 = UpBlock(d3 // 4 + d1, d3 // 8, _ng)  # cat(d3//4, d1) → d3//8
+        self.up4 = UpBlock(d3 // 8 + d0, d0, _ng)  # cat(d3//8, d0) → d0
+        self.head = nn.Conv2d(d0, self.output_channels, 3, padding=1)
+        # Zero-init the head: delta ≈ 0 at init, so the model starts from
+        # persistence (output ≈ x_res from the residual connection), which
         # yields high positive ACC from the very first batch.
-        nn.init.zeros_(self.up4.weight)
-        nn.init.zeros_(self.up4.bias)
+        nn.init.zeros_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
 
     # ------------------------------------------------------------------
     # SE ↔ cube helpers
     # ------------------------------------------------------------------
 
     def se_to_cube(self, x: torch.Tensor) -> torch.Tensor:
-        """(B, C, ncol) → (B, C, 6, 361, 361)."""
+        """(B, C, ncol) → (B, C, 6, E, E) where E = nface_edge."""
         B, C, _ = x.shape
-        cube = x.new_zeros(B, C, N_CUBE_FLAT)
+        cube = x.new_zeros(B, C, self.cube_flat)
         cube[:, :, self.se_index] = x
-        return cube.reshape(B, C, NFACE, NFACE_EDGE, NFACE_EDGE)
+        return cube.reshape(B, C, NFACE, self.nface_edge, self.nface_edge)
 
     def cube_to_se(self, cube: torch.Tensor) -> torch.Tensor:
-        """(B, C, 6, 361, 361) → (B, C, ncol)."""
-        return cube.reshape(cube.shape[0], cube.shape[1], N_CUBE_FLAT)[:, :, self.se_index]
+        """(B, C, 6, E, E) → (B, C, ncol)."""
+        return cube.reshape(cube.shape[0], cube.shape[1], self.cube_flat)[:, :, self.se_index]
+
+    def _pad_face(self, x6: torch.Tensor) -> torch.Tensor:
+        """Widen each face to ``padded_size`` (halo on all sides if enabled, then
+        zero-pad on the bottom/right). Inverse of :meth:`_crop_face`."""
+        if self.halo_exchange is not None:
+            x6 = self.halo_exchange(x6)  # (..., E+2h, E+2h) with real neighbor data
+        pad = self.padded_size - x6.shape[-1]
+        return F.pad(x6, (0, pad, 0, pad))
+
+    def _crop_face(self, z: torch.Tensor) -> torch.Tensor:
+        """Crop a ``padded_size`` face back to the native ``nface_edge`` face,
+        mirroring the offset introduced by :meth:`_pad_face`."""
+        o, e = self.crop_off, self.nface_edge
+        return z[..., o : o + e, o : o + e]
 
     # ------------------------------------------------------------------
     # Forward
@@ -481,23 +517,17 @@ class CubeSphereWxFormer(nn.Module):
         # Merge time into channels: (B, C*T, ncol)
         x_flat = x.reshape(B, C * T, ncol)
 
-        # SE → cube: (B, C*T, 6, 361, 361)
+        # SE → cube: (B, C*T, 6, E, E)
         cube = self.se_to_cube(x_flat)
 
-        # Flatten faces into batch dim: (B*6, C*T, 361, 361)
-        x6 = cube.permute(0, 2, 1, 3, 4).reshape(B * NFACE, C * T, NFACE_EDGE, NFACE_EDGE)
+        # Flatten faces into batch dim: (B*6, C*T, E, E)
+        x6 = cube.permute(0, 2, 1, 3, 4).reshape(B * NFACE, C * T, self.nface_edge, self.nface_edge)
 
-        # ── Halo exchange (Approach 1): populate edge padding with neighbor data
-        if self.halo_exchange is not None:
-            # (B*6, C*T, 361, 361) → (B*6, C*T, 361+2h, 361+2h)
-            x6 = self.halo_exchange(x6)
-            # Pad from (361+2h) to 384
-            halo_pad = _PADDED - (NFACE_EDGE + 2 * self.halo_size)
-            x6 = F.pad(x6, (0, halo_pad, 0, halo_pad))
-        else:
-            # Standard zero-pad: 361 → 384
-            x6 = F.pad(x6, (0, _PAD, 0, _PAD))
-        # x6: (B*6, C*T, 384, 384)
+        # ── Pad each face up to padded_size (bottom/right only). With halo
+        # exchange the face is first widened by halo_size on every side with
+        # real neighbor data; either way the native face sits at
+        # [crop_off : crop_off + nface_edge] and is recovered by a crop below.
+        x6 = self._pad_face(x6)
 
         # Encoder: 4 stages, each downsampling + per-face transformer + face attention
         # followed optionally by FaceEdgeAttention and CrossFaceTileAttention
@@ -512,20 +542,21 @@ class CubeSphereWxFormer(nn.Module):
             if self.cross_face_tile_attn is not None:
                 z = self.cross_face_tile_attn(z, stage=i)
             encodings.append(z)
-        # encodings: [(B*6, d0, 96, 96), (B*6, d1, 48, 48), (B*6, d2, 24, 24), (B*6, d3, 12, 12)]
 
-        # Decoder with skip connections
-        z = self.up1(encodings[-1])  # → (B*6, d3//2, 24, 24)
-        z = self.up2(torch.cat([z, encodings[-2]], dim=1))  # → (B*6, d3//4, 48, 48)
-        z = self.up3(torch.cat([z, encodings[-3]], dim=1))  # → (B*6, d3//8, 96, 96)
-        z = self.up4(torch.cat([z, encodings[-4]], dim=1))  # → (B*6, C_out, 96, 96)
+        # Decoder with skip connections — four ×2 UpBlocks mirror the encoder
+        # back to padded_size, then the head projects to the output channels.
+        z = self.up1(encodings[-1])
+        z = self.up2(torch.cat([z, encodings[-2]], dim=1))
+        z = self.up3(torch.cat([z, encodings[-3]], dim=1))
+        z = self.up4(torch.cat([z, encodings[-4]], dim=1))
+        z = self.head(z)
 
-        # Interpolate back to 361×361 (from padded 96 × 4 = 384 logical size)
-        z = F.interpolate(z, size=(NFACE_EDGE, NFACE_EDGE), mode="bilinear", align_corners=False)
-        # z: (B*6, C_out, 361, 361)
+        # Unpad: crop the padded face back to the native cube face. This is the
+        # exact inverse of _pad_face — no interpolation.
+        z = self._crop_face(z)
 
-        # Reshape: (B, 6, C_out, 361, 361) → (B, C_out, 6, 361, 361)
-        out_cube = z.reshape(B, NFACE, self.output_channels, NFACE_EDGE, NFACE_EDGE)
+        # Reshape: (B, 6, C_out, E, E) → (B, C_out, 6, E, E)
+        out_cube = z.reshape(B, NFACE, self.output_channels, self.nface_edge, self.nface_edge)
         out_cube = out_cube.permute(0, 2, 1, 3, 4)
 
         # Cube → SE: (B, C_out, ncol)
@@ -614,10 +645,12 @@ class CubeSphereWxFormerNext(CubeSphereWxFormer):
         self.col_attn = ColumnAttention(channels, levels, num_heads=col_attn_heads, spatial_stride=col_attn_stride)
 
         dim = base_kwargs.get("dim", (64, 128, 256, 512))
+        # Deepest encoder stage resolution per face = padded_size / total_stride.
+        deepest = self.padded_size // self.total_stride
         self.sfno_bottleneck = SpectralGNNBottleneck(
             dim=dim[-1],
-            nlat=12,
-            nlon=12,
+            nlat=deepest,
+            nlon=deepest,
             num_spectral_nodes=num_spectral_nodes,
         )
 
@@ -639,21 +672,16 @@ class CubeSphereWxFormerNext(CubeSphereWxFormer):
         x_res = x[:, : self.output_channels, T - 1, :]  # (B, C_out, ncol)
 
         x_flat = x.reshape(B, C * T, ncol)
-        cube = self.se_to_cube(x_flat)  # (B, C*T, 6, 361, 361)
-        x6 = cube.permute(0, 2, 1, 3, 4).reshape(B * NFACE, C * T, NFACE_EDGE, NFACE_EDGE)
+        cube = self.se_to_cube(x_flat)  # (B, C*T, 6, E, E)
+        x6 = cube.permute(0, 2, 1, 3, 4).reshape(B * NFACE, C * T, self.nface_edge, self.nface_edge)
 
         # Level embedding + column attention on atmospheric input channels (frames=1)
         atmos = self.level_embedding(x6[:, : self._atmos_channels])
         atmos = self.col_attn(atmos)
         x6 = torch.cat([atmos, x6[:, self._atmos_channels :]], dim=1)
 
-        # Halo exchange / padding
-        if self.halo_exchange is not None:
-            x6 = self.halo_exchange(x6)
-            halo_pad = _PADDED - (NFACE_EDGE + 2 * self.halo_size)
-            x6 = F.pad(x6, (0, halo_pad, 0, halo_pad))
-        else:
-            x6 = F.pad(x6, (0, _PAD, 0, _PAD))
+        # Pad each face up to padded_size (inverse cropped after the decoder)
+        x6 = self._pad_face(x6)
 
         # Encoder
         encodings = []
@@ -666,24 +694,24 @@ class CubeSphereWxFormerNext(CubeSphereWxFormer):
                 z = self.cross_face_tile_attn(z, stage=i)
             encodings.append(z)
 
-        # Spectral GNN bottleneck at deepest encoder stage (per-face, 12×12)
+        # Spectral GNN bottleneck at the deepest encoder stage (per-face)
         encodings[-1] = self.sfno_bottleneck(encodings[-1])
         z = encodings[-1]
 
-        # Decoder with skip connections
+        # Decoder with skip connections, then project + unpad (crop, not interp)
         z = self.up1(z)
         z = self.up2(torch.cat([z, encodings[-2]], dim=1))
         z = self.up3(torch.cat([z, encodings[-3]], dim=1))
         z = self.up4(torch.cat([z, encodings[-4]], dim=1))
-
-        z = F.interpolate(z, size=(NFACE_EDGE, NFACE_EDGE), mode="bilinear", align_corners=False)
+        z = self.head(z)
+        z = self._crop_face(z)
 
         # Decoder column attention: atmospheric output channels only
         if self.dec_col_attn is not None:
             atmos_out = self.dec_col_attn(z[:, : self._atmos_channels])
             z = torch.cat([atmos_out, z[:, self._atmos_channels :]], dim=1)
 
-        out_cube = z.reshape(B, NFACE, self.output_channels, NFACE_EDGE, NFACE_EDGE)
+        out_cube = z.reshape(B, NFACE, self.output_channels, self.nface_edge, self.nface_edge)
         out_cube = out_cube.permute(0, 2, 1, 3, 4)
         out = self.cube_to_se(out_cube)
         out = out + x_res
@@ -750,7 +778,7 @@ if __name__ == "__main__":
             global_window_size=(6, 6, 6, 6),
             local_window_size=12,
             cross_embed_kernel_sizes=((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
-            cross_embed_strides=(4, 2, 2, 2),
+            cross_embed_strides=(2, 2, 2, 2),
             adjacency_path=adj_path if use_adj else None,
             halo_size=6,
             edge_attn_heads=2,
@@ -767,8 +795,9 @@ if __name__ == "__main__":
 
         B = 2
         C_in = 2 * 6 + 6 + 1  # 19
-        x = torch.randn(B, C_in, 1, NCOL, device=device)
-        logger.info("Input  shape: %s  (B=%d, C=%d, T=1, ncol=%d)", tuple(x.shape), B, C_in, NCOL)
+        ncol = model.se_index.numel()
+        x = torch.randn(B, C_in, 1, ncol, device=device)
+        logger.info("Input  shape: %s  (B=%d, C=%d, T=1, ncol=%d)", tuple(x.shape), B, C_in, ncol)
 
         with torch.no_grad():
             y = model(x)
@@ -776,7 +805,7 @@ if __name__ == "__main__":
         logger.info("Output shape: %s", tuple(y.shape))
 
         C_out = 2 * 6 + 6 + 5  # 23
-        expected = (B, C_out, 1, NCOL)
+        expected = (B, C_out, 1, ncol)
         assert tuple(y.shape) == expected, f"Shape mismatch — expected {expected}, got {tuple(y.shape)}"
         logger.info("Shape check PASSED.")
 
