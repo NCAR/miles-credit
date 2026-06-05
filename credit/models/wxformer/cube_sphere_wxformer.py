@@ -48,9 +48,9 @@ Two complementary approaches fix autoregressive rollout artifacts at the
 12 cube-sphere face edges:
 
   Approach 1 — HaloExchange:
-    Before F.pad, copy halo_size rows/cols from each neighbor face into the
-    padding region.  The physically nearest strip of the neighbor replaces
-    zero-padding, giving the encoder real context at boundaries.
+    Before the encoder, build the full padded face tile by gathering true
+    cubed-sphere ghost cells from physically equivalent SE-owned cells. This
+    fills edge, corner, and vertex ghost regions, not just neighbor strips.
 
   Approach 2 — FaceEdgeAttention:
     After each encoder stage, run sparse MHA between the edge_width border
@@ -74,9 +74,11 @@ Padding convention
 Without halo exchange the face is zero-padded on the bottom/right from E to
 ``padded_size``; the native face sits at ``[0:E, 0:E]``.
 
-With halo exchange (halo_size=h) the face is first widened to E+2h with real
-neighbor data, then zero-padded to ``padded_size``; the native face then sits
-at ``[h:h+E, h:h+E]``.
+With halo exchange the native face is centered inside the padded encoder tile
+at ``[crop_top:crop_top+E, crop_left:crop_left+E]``. Every other padded
+coordinate is mapped through the cubed-sphere geometry back to a physically
+equivalent SE-owned cell. For ne120 with the default 384 tile, the crop offset
+is 11.
 
 After decoding we crop back to that window (``_crop_face``), which exactly
 inverts the pad — no interpolation, no resampling of real data.
@@ -391,29 +393,36 @@ class CubeSphereWxFormer(nn.Module):
                 fa = FaceAttention(dim=dout, heads=face_attn_heads)
             self.encoder_stages.append(FaceTransformerBlock(cel, tfm, fa))
 
+        # ── Padded face size + crop offset ────────────────────────────────
+        # Each face is padded up to a size that (a) downsamples cleanly through
+        # every stage and (b) leaves each stage divisible by its attention
+        # windows. The smallest such size is the next multiple of
+        # total_stride · lcm(windows) at or above the native face. With
+        # adjacency enabled, HaloExchange fills the entire padded face with
+        # true cubed-sphere ghost cells; otherwise we fall back to scratch
+        # zero-padding on the bottom/right.
+        win_lcm = math.lcm(local_window_size, *global_window_size)
+        unit = self.total_stride * win_lcm
+        self.padded_size = math.ceil(self.nface_edge / unit) * unit
+        pad_total = self.padded_size - self.nface_edge
+        self.crop_top = pad_total // 2 if self._has_adjacency and halo_size > 0 else 0
+        self.crop_left = pad_total // 2 if self._has_adjacency and halo_size > 0 else 0
+        self.crop_off = self.crop_top
+
         # ── Halo exchange (Approach 1) ────────────────────────────────────
         if self._has_adjacency and halo_size > 0:
             from credit.models.wxformer.halo import HaloExchange
 
             self.halo_exchange: Optional[nn.Module] = HaloExchange(
                 adjacency_path=adjacency_path,
+                se_index_path=se_index_path,
+                padded_size=self.padded_size,
+                crop_top=self.crop_top,
+                crop_left=self.crop_left,
                 halo_size=halo_size,
             )
         else:
             self.halo_exchange = None
-
-        # ── Padded face size + crop offset ────────────────────────────────
-        # Each face is padded up to a size that (a) downsamples cleanly through
-        # every stage and (b) leaves each stage divisible by its attention
-        # windows. The smallest such size is the next multiple of
-        # total_stride · lcm(windows) at or above the (halo-expanded) face.
-        # The pad is added on the bottom/right only, so the inverse at the end
-        # of the decoder is a crop, not an interpolation (see forward()).
-        win_lcm = math.lcm(local_window_size, *global_window_size)
-        unit = self.total_stride * win_lcm
-        self.crop_off = halo_size if self.halo_exchange is not None else 0
-        pre_pad = self.nface_edge + 2 * self.crop_off
-        self.padded_size = math.ceil(pre_pad / unit) * unit
 
         # ── Face edge attention (Approach 2) ─────────────────────────────
         if self._has_adjacency:
@@ -423,7 +432,7 @@ class CubeSphereWxFormer(nn.Module):
                 dims=dim,
                 num_heads=edge_attn_heads,
                 edge_width=edge_attn_width,
-                halo_size=halo_size,
+                halo_size=self.crop_top,
                 strides=tuple(cum_strides),
                 padded_size=self.padded_size,
                 dropout=attn_dropout,
@@ -439,7 +448,7 @@ class CubeSphereWxFormer(nn.Module):
                 dims=dim,
                 tile_size=global_window_size[0],
                 num_heads=tile_attn_heads,
-                halo_size=halo_size,
+                halo_size=self.crop_top,
                 strides=tuple(cum_strides),
                 padded_size=self.padded_size,
                 dropout=attn_dropout,
@@ -480,18 +489,22 @@ class CubeSphereWxFormer(nn.Module):
         return cube.reshape(cube.shape[0], cube.shape[1], self.cube_flat)[:, :, self.se_index]
 
     def _pad_face(self, x6: torch.Tensor) -> torch.Tensor:
-        """Widen each face to ``padded_size`` (halo on all sides if enabled, then
-        zero-pad on the bottom/right). Inverse of :meth:`_crop_face`."""
+        """Widen each face to ``padded_size``.
+
+        With adjacency enabled, HaloExchange returns a fully ghost-filled
+        padded face. Otherwise this falls back to scratch zero-padding on the
+        bottom/right.
+        """
         if self.halo_exchange is not None:
-            x6 = self.halo_exchange(x6)  # (..., E+2h, E+2h) with real neighbor data
+            return self.halo_exchange(x6)
         pad = self.padded_size - x6.shape[-1]
         return F.pad(x6, (0, pad, 0, pad))
 
     def _crop_face(self, z: torch.Tensor) -> torch.Tensor:
         """Crop a ``padded_size`` face back to the native ``nface_edge`` face,
         mirroring the offset introduced by :meth:`_pad_face`."""
-        o, e = self.crop_off, self.nface_edge
-        return z[..., o : o + e, o : o + e]
+        e = self.nface_edge
+        return z[..., self.crop_top : self.crop_top + e, self.crop_left : self.crop_left + e]
 
     # ------------------------------------------------------------------
     # Forward
@@ -523,10 +536,10 @@ class CubeSphereWxFormer(nn.Module):
         # Flatten faces into batch dim: (B*6, C*T, E, E)
         x6 = cube.permute(0, 2, 1, 3, 4).reshape(B * NFACE, C * T, self.nface_edge, self.nface_edge)
 
-        # ── Pad each face up to padded_size (bottom/right only). With halo
-        # exchange the face is first widened by halo_size on every side with
-        # real neighbor data; either way the native face sits at
-        # [crop_off : crop_off + nface_edge] and is recovered by a crop below.
+        # ── Build each padded face tile. With halo exchange this is a full
+        # cubed-sphere ghost gather into the padded tile. Without halo exchange
+        # this is ordinary scratch padding on the bottom/right. The native face
+        # is recovered by _crop_face after decoding.
         x6 = self._pad_face(x6)
 
         # Encoder: 4 stages, each downsampling + per-face transformer + face attention

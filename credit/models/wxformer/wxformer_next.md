@@ -89,9 +89,12 @@ reshaped into six cube faces inside the model:
 2. **SE → cube** (inside the model). A permutation index (`se_index`) scatters the
    SE columns into a (6, E, E) tensor, where E is the face-edge length (361 for
    ne120). This is a pure reindex, not interpolation.
-3. **encode / decode**. Each face is padded up to a size that downsamples cleanly
-   through the four stages (361 → 384 with the default windows), encoded by a
-   CrossFormer stage, mixed across faces by attention, then decoded back.
+3. **true cubed-sphere halo → encode / decode**. Each face is placed inside a
+   padded encoder tile (361 → 384 for ne120 with the default windows). If
+   `adjacency_path` and `se_index_path` are available, the non-native padded
+   cells are populated from physically equivalent SE-owned cells before the
+   CrossFormer encoder sees the tensor. Each face is then encoded by a
+   CrossFormer stage, mixed across faces by attention, and decoded back.
 4. **cube → SE → lat/lon**. The cube is gathered back to SE columns. For
    verification on the native lat/lon grid, the `se_to_latlon` postblock
    (`credit/postblock/regrid_se_to_latlon.py`) maps predictions back with a fixed
@@ -106,12 +109,31 @@ ne120, or any other cubed-sphere resolution given the matching static files.
 
 ### Pad, not interpolate
 
-Going from a 361-edge face to the padded 384 is a pad on the bottom and right.
-The inverse at the end of the decoder is therefore a **crop**, not a resample.
-We do not interpolate predictions back to the face size: a crop is the exact
-inverse of the pad and avoids blurring every output field. With the default
-strides `[2, 2, 2, 2]` the encoder runs 384 → 192 → 96 → 48 → 24 and the decoder
-mirrors it back.
+Going from a 361-edge face to the padded 384 is a pad, not a resample. With
+halo exchange enabled, the native face is centered inside the padded tile:
+
+```text
+        padded face tile: 384 x 384
+
+        +--------------------------------------+
+        | ghost / padding rows from neighbors  |
+        |   +------------------------------+   |
+        |   |                              |   |
+        |   | native SE face: 361 x 361    |   |
+        |   |                              |   |
+        |   +------------------------------+   |
+        | ghost / padding cols/corners         |
+        +--------------------------------------+
+
+        ne120 default: crop_top = crop_left = 11
+        native crop:   [11:372, 11:372]
+```
+
+The inverse at the end of the decoder is therefore a **crop**, not an
+interpolation. We do not interpolate predictions back to the face size: the crop
+is the exact inverse of the input placement and avoids blurring every output
+field. With the default strides `[2, 2, 2, 2]` the encoder runs
+384 → 192 → 96 → 48 → 24 and the decoder mirrors it back.
 
 ### Cross-face coupling
 
@@ -120,10 +142,62 @@ Three optional mechanisms keep the six faces consistent at their shared edges
 
 - **FaceAttention** mixes the six face tokens at every spatial position, the
   video-transformer trick applied to cube faces. Always on.
-- **HaloExchange** copies real neighbor data into each face border before padding,
-  so the encoder sees true context at boundaries instead of zeros.
+- **HaloExchange** fills the padded tile with true cubed-sphere ghost cells, so
+  the encoder sees physically adjacent context at edges, corners, and vertices
+  instead of zeros.
 - **FaceEdgeAttention** runs sparse attention between the border nodes of
   physically adjacent faces, enforcing edge consistency in feature space.
+
+### True ghost halo exchange
+
+The halo is not lat/lon-style circular padding and it is not polar padding. The
+lat/lon models can wrap east/west and use special handling near the poles
+because the grid has a longitude seam and polar singularities. The cubed-sphere
+SE grid has neither. Each face boundary is adjacent to a different logical face,
+with rotations and edge ownership determined by the cube topology.
+
+The implementation in `halo.py` builds a full gather map for the padded tile:
+
+1. Invert each padded face coordinate back to a point on the unit sphere.
+2. Assign that point to the SE-owned cube face using the same dominant-axis
+   ownership convention used by `se_index`.
+3. Gather from the owning SE cell.
+
+That means all ghost regions are resolved by real owned cells:
+
+```text
+      simplified cubed-sphere face layout
+
+                 +------+
+                 |  F5  |    north polar face
+          +------+------+------+------+
+          |  F3  |  F0  |  F2  |  F1  |    equatorial belt
+          +------+------+------+------+
+                 |  F4  |    south polar face
+                 +------+
+```
+
+For each face, the padded tile is filled by following the actual cube topology:
+
+```text
+        before halo exchange                 after halo exchange
+
+        +------------------+                 +------------------+
+        | zeros / scratch  |                 | neighbor ghosts  |
+        |   +----------+   |                 |   +----------+   |
+        |   | native   |   |       ->        |   | native   |   |
+        |   | face     |   |                 |   | face     |   |
+        |   +----------+   |                 |   +----------+   |
+        | zeros / scratch  |                 | edge+corner data |
+        +------------------+                 +------------------+
+```
+
+This matters for rollout. A strip-only exchange can improve edge rows and
+columns, but leaves corner/vertex regions ambiguous. The current full ghost
+exchange resolves the corners as well because every padded coordinate is mapped
+through the sphere back to an SE-owned cell. That prevents the model from
+learning artifacts tied to scratch padding at cube vertices, where rollout
+errors otherwise accumulate.
 
 ```yaml
 model:
@@ -180,10 +254,11 @@ model:
   use_spectral_norm: true
 ```
 
-Full WeatherBench2 configs live in `config/model_zoo/`:
-`wxformer_cubesphere_wb2.yml`, `wxformer_cubesphere_next_wb2.yml`, and
-`wxformer_cubesphere_next_large_wb2.yml` (a 580M-parameter variant). Smoke configs
-are under `config/model_zoo/smoke/`.
+The active WeatherBench2 cubed-sphere example config in this checkout is:
+
+```text
+config/gen_2/examples/wxformer_cubesphere_next_wb2.yml
+```
 
 ### Eval pipeline
 
@@ -212,6 +287,13 @@ in the credit-mesaclip repo under `mesaclip/static/`):
 Conservative variants of the regrid weights (`*_conserve.nc`) are available for
 budget-sensitive evaluation.
 
+The forward weight file must match the source grid exactly. The WeatherBench2
+example uses the pole-inclusive 721×1440 grid and therefore uses
+`latlon721x1440_to_se_ne120.nc`. The local Casper smoke ERA5 files use a
+640×1280 Gaussian-like grid, so the smoke test generated a separate
+`latlon640x1280_to_se_ne120.nc` weight file before running the same preblock
+chain.
+
 ## Lineage
 
 **Author:** John Schreck (NCAR/MILES). Built on the WXFormer / CrossFormer
@@ -226,7 +308,33 @@ which keeps it grid-agnostic and avoids any FFT or spherical-harmonic transform.
 
 ## Validation status
 
-`nextgen_wxformer` and the cubed-sphere models train and smoke-test on
-WeatherBench2 ERA5. They are research models and have not yet replaced the v1
-production WXFormer. The cubed-sphere path additionally depends on the
-credit-mesaclip static files listed above.
+`nextgen_wxformer` and the cubed-sphere models train and smoke-test on ERA5.
+They are research models and have not yet replaced the v1 production WXFormer.
+The cubed-sphere path additionally depends on the credit-mesaclip static files
+listed above.
+
+Recent V100 validation of the full cubed-sphere Gen2 stack used:
+
+```text
+preblocks: era5_normalizer -> tripole_to_se -> concat
+model:     cube_sphere_wxformer_next
+postblock: reconstruct
+trainer:   era5-gen2, batch_size=1, use_ema=false
+```
+
+The local smoke run completed 5 train batches and 2 validation batches with the
+full halo path enabled:
+
+```text
+final train_loss: 0.127039
+final train_acc:  0.921265
+final train_mae:  0.202630
+
+final valid_loss: 0.134260
+final valid_acc:  0.926276
+final valid_mae:  0.205541
+```
+
+Those numbers are normalized-loss smoke-test values. They are useful for stack
+validation and tensor-order checks, not a formal skill score against the lat/lon
+production model.

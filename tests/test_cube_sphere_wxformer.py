@@ -6,6 +6,8 @@ the grid-agnostic geometry inference without needing the ne120 static files.
 """
 
 import math
+import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,6 +17,7 @@ from credit.models.wxformer.cube_sphere_wxformer import (
     NFACE,
     CubeSphereWxFormer,
 )
+from credit.models.wxformer.halo import HaloExchange
 
 
 def _write_full_cube_index(tmp_path, edge):
@@ -107,3 +110,47 @@ def test_pad_crop_is_identity(tmp_path):
     assert padded.shape[-1] == model.padded_size
     cropped = model._crop_face(padded)
     assert torch.equal(cropped, face)
+
+
+def test_ne120_full_ghost_halo_map_uses_only_owned_cells():
+    """The production ne120 halo map fills edges/corners from real SE-owned cells."""
+    static_dir = Path(
+        os.environ.get(
+            "MESACLIP_STATIC",
+            Path(__file__).resolve().parents[2] / "credit-mesaclip" / "mesaclip" / "static",
+        )
+    )
+    se_index_path = static_dir / "se_index_ne120.npy"
+    adjacency_path = static_dir / "se_face_adjacency_ne120.npz"
+    if not se_index_path.exists() or not adjacency_path.exists():
+        pytest.skip("ne120 cubed-sphere static files are not available")
+
+    face_edge = 361
+    padded_size = 384
+    crop = 11
+    halo = HaloExchange(
+        adjacency_path=adjacency_path,
+        se_index_path=se_index_path,
+        padded_size=padded_size,
+        crop_top=crop,
+        crop_left=crop,
+    )
+
+    src = halo.source_flat_index.cpu().numpy()
+    se_index = np.load(se_index_path).astype(np.int64)
+    owned = np.zeros(NFACE * face_edge * face_edge, dtype=bool)
+    owned[se_index] = True
+    owned_cube = owned.reshape(NFACE, face_edge, face_edge)
+    identity = np.arange(NFACE * face_edge * face_edge).reshape(NFACE, face_edge, face_edge)
+
+    assert src.shape == (NFACE, padded_size, padded_size)
+    assert owned[src].all()
+
+    center = src[:, crop : crop + face_edge, crop : crop + face_edge]
+    assert np.array_equal(center[owned_cube], identity[owned_cube])
+    assert owned[center[~owned_cube]].all()
+
+    assert owned[src[:, :crop, :crop]].all()
+    assert owned[src[:, :crop, crop + face_edge :]].all()
+    assert owned[src[:, crop + face_edge :, :crop]].all()
+    assert owned[src[:, crop + face_edge :, crop + face_edge :]].all()
