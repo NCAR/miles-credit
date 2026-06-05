@@ -149,13 +149,23 @@ class TripoleToSEPreBlock(nn.Module):
         Accepts either:
           * ``(B, C, H, W)``       → ``(B, C, ncol)``
           * ``(B, C, T, H, W)``    → ``(B, C, T, ncol)``  (gen2 time dimension)
+
+        During autoregressive Gen2 rollout, previous-step prognostic fields
+        have already been reconstructed on the SE grid with shape
+        ``(B, C, T, 1, ncol)``.  Those tensors are converted to the same
+        ``(B, C, T, ncol)`` shape produced by the source-grid regrid while
+        current-step forcing/target tensors are still regridded from lat-lon.
         """
         if not isinstance(x, torch.Tensor):
             x = torch.as_tensor(x)
         if x.dim() == 5:
             B, C, T, H, W = x.shape
+            if H * W == self.n_dst:
+                return x.reshape(B, C, T, self.n_dst)
             out = self._regrid_4d(x.reshape(B, C * T, H, W))  # (B, C*T, ncol)
             return out.reshape(B, C, T, self.n_dst)
+        if x.dim() == 4 and x.shape[-2] * x.shape[-1] == self.n_dst:
+            return x
         return self._regrid_4d(x)  # 4-D: (B, C, H, W) → (B, C, ncol)
 
     def forward(self, batch: dict) -> dict:
