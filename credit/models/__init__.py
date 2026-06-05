@@ -174,16 +174,6 @@ _MODEL_REGISTRY = {
         "CREDITACE",
         "Loading ACE2 (SFNO with 2-step input, AI2 Climate Emulator v2) ...",
     ),
-    "cube_sphere_wxformer": (
-        "credit.models.wxformer.cube_sphere_wxformer",
-        "CubeSphereWxFormer",
-        "Loading CubeSphereWxFormer (CrossFormer encoder-decoder on ne120 cubed-sphere SE grid) ...",
-    ),
-    "cube_sphere_wxformer_next": (
-        "credit.models.wxformer.cube_sphere_wxformer",
-        "CubeSphereWxFormerNext",
-        "Loading CubeSphereWxFormerNext (CubeSphereWxFormer + level embed + column attn + SpectralGNN) ...",
-    ),
 }
 
 # Backward-compatible name -> (module_path, class_name) for direct attribute access
