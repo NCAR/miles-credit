@@ -5,6 +5,7 @@ from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransformer
 from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.postblock.geopotential import GeopotentialDiagnostic
+from credit.postblock.regrid_se_to_latlon import SEToLatLonPostBlock
 
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
@@ -15,6 +16,7 @@ POSTBLOCK_REGISTRY = {
     "global_water_fixer": GlobalWaterFixer,
     "global_energy_fixer": GlobalEnergyFixer,
     "geopotential_diagnostic": GeopotentialDiagnostic,
+    "se_to_latlon": SEToLatLonPostBlock,
 }
 
 _VALID_SECTIONS = {"per_step", "post_rollout"}

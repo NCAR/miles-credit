@@ -66,6 +66,22 @@ _MODEL_REGISTRY = {
         "DownscalingSegmentationModel",
         "Loading downscaling U-net",
     ),
+    # ── WXFormer next generation ─────────────────────────────────────────────
+    "nextgen_wxformer": (
+        "credit.models.wxformer.wxformer_next",
+        "NextGenWXFormer",
+        "Loading NextGen WXFormer (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
+    ),
+    "cube_sphere_wxformer": (
+        "credit.models.wxformer.cube_sphere_wxformer",
+        "CubeSphereWxFormer",
+        "Loading CubeSphereWxFormer (CrossFormer encoder-decoder on a cubed-sphere SE grid) ...",
+    ),
+    "cube_sphere_wxformer_next": (
+        "credit.models.wxformer.cube_sphere_wxformer",
+        "CubeSphereWxFormerNext",
+        "Loading CubeSphereWxFormerNext (CubeSphereWxFormer + level embed + column attn + SpectralGNN) ...",
+    ),
 }
 
 # Backward-compatible name -> (module_path, class_name) for direct attribute access
