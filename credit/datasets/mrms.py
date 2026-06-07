@@ -1,24 +1,16 @@
 """
 mrms.py
 -------------------------------------------------------
-MRMSDataset with nested input/target structure.
+MRMSDataset: PyTorch Dataset for MRMS data with nested input/target structure.
 
 Sample structure returned by __getitem__:
 
     {
-        "input": {
-            "{source_name}/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
-            "{source_name}/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor,
-            ...
-        },
-        "target": {                                  # only when return_target=True
-            "{source_name}/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
-            ...
-        },
-        "metadata": {
-            "input_datetime":  int,                  # nanoseconds since epoch
-            "target_datetime": int,                  # only when return_target=True
-        },
+        "input":    {<user_provided_name>: {"<user_provided_name>/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
+                                            "<user_provided_name>/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor}},
+        "target":   {<user_provided_name>: {"<user_provided_name>/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
+                                            "<user_provided_name>/prognostic/2d/MultiSensor_QPE_06H_Pass2_00.00": tensor}},  # only populated when return_target=True
+        "metadata": {<user_provided_name>: {"input_datetime": int, "target_datetime": int}},
     }
 
 All MRMS variables are 2D. Tensor shape (no batch dimension):
@@ -51,14 +43,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from glob import glob
 import gzip
 
 import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _find_file, _map_files, _start_s3_fs
+from credit.datasets._utils import _find_file, _start_s3_fs
 from credit.datasets.base_dataset import BaseDataset
 
 
@@ -169,32 +160,6 @@ class MRMSDataset(BaseDataset):
 
         # Initialize the s3fs on the first call to _extract_field within __getitem__
         self._fs = None
-
-    def _get_file_source(
-        self,
-        field_config: dict[str, Any],
-    ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
-        """Return the file source for a field. Override in subclasses for different modes/backends.
-
-        Args:
-            field_config (dict[str, Any]): Validated field-type config dict.
-
-        Raises:
-            ValueError: If ``self.mode`` is not a recognised mode.
-
-        Returns:
-            list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None: Depending on the mode and field type,
-                this method may return a list of (start_time, end_time, file_path) tuples produced by _map_files,
-                a boolean indicating the presence of the field (e.g., for remote data), or None if the field is disabled.
-                The expected return type should be consistent within a dataset class.
-        """
-        if self.mode == "local":
-            files = sorted(glob(field_config.get("path", "")))
-            time_fmt: str = field_config.get("filename_time_format", "%Y%m%d-%H%M%S")
-            return _map_files(files, time_fmt) if files else None
-        else:
-            # Remote mode: S3 path is constructed at runtime from the timestamp
-            return True
 
     def _extract_field(
         self,

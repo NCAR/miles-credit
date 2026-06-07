@@ -11,13 +11,27 @@ from __future__ import annotations
 
 import bisect
 import cftime
-import os
 import re
 from datetime import datetime as dt_cls
 
 import pandas as pd
 import s3fs
 
+
+# Set of all recognised strftime codes — used for path-template detection
+_STRFTIME_CODES: frozenset[str] = frozenset(
+    {
+        "%Y",
+        "%y",
+        "%m",
+        "%d",
+        "%H",
+        "%M",
+        "%S",
+        "%j",
+        "%f",
+    }
+)
 
 # Maps strftime format codes to non-capturing regex fragments
 _STRFTIME_TO_REGEX: dict[str, str] = {
@@ -41,6 +55,53 @@ _STRFTIME_TO_FREQ: list[tuple[str, str]] = [
     ("%d", "D"),
     ("%m", "M"),
 ]
+
+
+def _path_template_to_glob(template: str) -> str:
+    """Replace strftime codes in *template* with ``*`` to produce a glob pattern.
+
+    Args:
+        template: Path string that may contain strftime codes, e.g.
+            ``"/data/%Y/%m/era5_*.nc"``.
+
+    Returns:
+        Glob-compatible pattern, e.g. ``"/data/*/*/era5_*.nc"``.
+    """
+    result = template
+    for code in _STRFTIME_CODES:
+        result = result.replace(code, "*")
+    return result
+
+
+def _extract_time_fmt(template: str) -> str:
+    """Extract the strftime format substring from a path template.
+
+    Returns the slice of *template* from the first strftime code to the end of
+    the last one, preserving any literal characters between them.
+
+    Example::
+
+        _extract_time_fmt("/data/%Y/%m/era5_*.nc")  # "%Y/%m"
+        _extract_time_fmt("/data/era5_%Y%m%d.nc")   # "%Y%m%d"
+
+    Args:
+        template: Path template containing at least one strftime code.
+
+    Returns:
+        The strftime format string (suitable for ``strptime``).
+    """
+    first_pos = len(template)
+    last_pos = 0
+    for code in _STRFTIME_CODES:
+        idx = 0
+        while True:
+            pos = template.find(code, idx)
+            if pos == -1:
+                break
+            first_pos = min(first_pos, pos)
+            last_pos = max(last_pos, pos + len(code))
+            idx = pos + 1
+    return template[first_pos:last_pos] if last_pos > 0 else template
 
 
 def _strftime_to_regex(fmt: str) -> re.Pattern:
@@ -90,14 +151,15 @@ def _map_files(
 
     Args:
         file_list: Sorted list of file paths returned by glob.
-        time_fmt: strftime format string, e.g. ``"%Y"``, ``"%Y%m%d-%H%M%S"``.
+        time_fmt: strftime format string extracted from the path template,
+            e.g. ``"%Y"``, ``"%Y/%m"``.  The regex is searched against the
+            full file path so date components in directory names are matched.
 
     Returns:
         List of ``(start, end, path)`` tuples sorted by start time.
 
     Raises:
-        ValueError: If *time_fmt* does not match the basename of any file
-            in *file_list*.
+        ValueError: If *time_fmt* does not match any file in *file_list*.
     """
     if len(file_list) == 1:
         return [(pd.Timestamp.min, pd.Timestamp.max, file_list[0])]
@@ -107,13 +169,11 @@ def _map_files(
 
     intervals: list[tuple[pd.Timestamp, pd.Timestamp, str]] = []
     for f in file_list:
-        basename = os.path.basename(f)
-        m = pattern.search(basename)
+        m = pattern.search(f)
         if m is None:
             raise ValueError(
-                f"filename_time_format '{time_fmt}' did not match "
-                f"filename '{basename}'. Verify that the format matches "
-                "the date portion of your filenames."
+                f"Time format '{time_fmt}' did not match path '{f}'. "
+                "Verify that your path contains strftime codes covering the date portion."
             )
         parsed = dt_cls.strptime(m.group(0), time_fmt)
         period = pd.Period(parsed, freq)

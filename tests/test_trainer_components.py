@@ -7,6 +7,7 @@ All tests run on CPU with no data files required.
 import pytest
 import torch
 import torch.nn as nn
+import torch.nn.utils as nnu
 import warnings
 
 try:
@@ -948,6 +949,110 @@ class TestEMATrackerEdgeCases:
         assert ema.step == 1
         ema.update(model)
         assert ema.step == 2
+
+    def test_load_state_dict_strips_legacy_spectral_norm_uv(self):
+        """load_state_dict must strip weight_u/weight_v from checkpoints saved before
+        the spectral-norm filter was added.  Averaged u/v vectors are not unit vectors;
+        leaving them in the shadow causes sigma = u^T W v to underestimate the spectral
+        norm, making weight = weight_orig / sigma blow up in eval mode on resume."""
+        sn_model = nn.Sequential(
+            nnu.spectral_norm(nn.Linear(8, 8)),
+            nnu.spectral_norm(nn.Linear(8, 4)),
+        )
+
+        # Run a forward pass so u/v are initialised (they start unset)
+        _ = sn_model(torch.randn(2, 8))
+
+        ema = EMATracker(sn_model, decay=0.9999)
+        # Confirm the filter already works during __init__
+        assert not any(k.endswith("_u") or k.endswith("_v") for k in ema.shadow)
+
+        # Simulate a pre-filter checkpoint: inject averaged (non-unit) u/v
+        state = sn_model.state_dict()
+        legacy_shadow = dict(ema.shadow)
+        for k, v in state.items():
+            if k.endswith("_u") or k.endswith("_v"):
+                fake = torch.randn_like(v)
+                legacy_shadow[k] = v.float() * 0.5 + fake * 0.3  # not a unit vector
+
+        legacy_state = {"shadow": legacy_shadow, "decay": 0.9999, "step": 500}
+
+        ema2 = EMATracker(sn_model, decay=0.9999)
+        ema2.load_state_dict(legacy_state)
+
+        # After load, shadow must have no u/v keys
+        bad_keys = [k for k in ema2.shadow if k.endswith("_u") or k.endswith("_v")]
+        assert bad_keys == [], f"load_state_dict left stale u/v keys in shadow: {bad_keys}"
+
+        # swap + eval forward must produce a sane sigma (≈1.0, not tiny)
+        ema2.swap(sn_model)
+        sn_model.eval()
+        with torch.no_grad():
+            _ = sn_model(torch.randn(2, 8))
+        for mod in sn_model.modules():
+            if hasattr(mod, "weight_orig"):
+                u = getattr(mod, "weight_u")
+                v = getattr(mod, "weight_v")
+                w = mod.weight_orig.reshape(mod.weight_orig.size(0), -1)
+                sigma = (u @ w @ v).item()
+                assert sigma > 0.1, f"sigma={sigma:.4f} too small — u/v still corrupted after fix"
+        ema2.swap(sn_model)
+
+    def test_spectral_norm_resume_val_loss_stable(self):
+        """End-to-end: val loss must not explode when resuming from a legacy EMA checkpoint
+        (one whose shadow contained weight_u / weight_v before the filter was added)."""
+
+        sn_model = nn.Sequential(
+            nnu.spectral_norm(nn.Linear(16, 32)),
+            nn.ReLU(),
+            nnu.spectral_norm(nn.Linear(32, 16)),
+        )
+        opt = torch.optim.Adam(sn_model.parameters(), lr=1e-3)
+        ema = EMATracker(sn_model, decay=0.9999)
+
+        x = torch.randn(8, 16)
+        y = torch.randn(8, 16)
+
+        # Train briefly
+        sn_model.train()
+        for _ in range(30):
+            opt.zero_grad()
+            loss = (sn_model(x) - y).pow(2).mean()
+            loss.backward()
+            opt.step()
+            ema.update(sn_model)
+
+        # Reference val loss (EMA weights, clean checkpoint)
+        ema.swap(sn_model)
+        sn_model.eval()
+        with torch.no_grad():
+            ref_loss = (sn_model(x) - y).pow(2).mean().item()
+        ema.swap(sn_model)
+        sn_model.train()
+
+        # Build a legacy shadow (inject u/v as if saved by old code)
+        state = sn_model.state_dict()
+        legacy_shadow = dict(ema.shadow)
+        for k, v in state.items():
+            if k.endswith("_u") or k.endswith("_v"):
+                fake = torch.randn_like(v)
+                legacy_shadow[k] = v.float() * 0.5 + fake * 0.3
+        legacy_ema_state = {"shadow": legacy_shadow, "decay": 0.9999, "step": ema.step}
+
+        # Resume with patched load_state_dict
+        ema2 = EMATracker(sn_model, decay=0.9999)
+        ema2.load_state_dict(legacy_ema_state)
+
+        ema2.swap(sn_model)
+        sn_model.eval()
+        with torch.no_grad():
+            resumed_loss = (sn_model(x) - y).pow(2).mean().item()
+        ema2.swap(sn_model)
+
+        assert resumed_loss < ref_loss * 5, (
+            f"Val loss exploded on resume: {resumed_loss:.4f} vs ref {ref_loss:.4f} "
+            f"(ratio {resumed_loss / ref_loss:.1f}x) — legacy u/v stripping may be broken"
+        )
 
 
 # ---------------------------------------------------------------------------

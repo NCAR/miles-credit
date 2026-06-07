@@ -1,25 +1,16 @@
 """
 goes.py
 -------------------------------------------------------
-GOESDataset with nested input/target structure.
+GOESDataset: PyTorch Dataset for GOES data with nested input/target structure.
 
 Sample structure returned by __getitem__:
 
     {
-        "input": {
-            "{source_name}/prognostic/2d/CMI_C04": tensor,
-            "{source_name}/prognostic/2d/CMI_C07": tensor,
-            ...
-        },
-        "target": {                                  # only when return_target=True
-            "{source_name}/prognostic/2d/CMI_C04": tensor,
-            "{source_name}/prognostic/2d/CMI_C07": tensor,
-            ...
-        },
-        "metadata": {
-            "input_datetime":  int,                  # nanoseconds since epoch
-            "target_datetime": int,                  # only when return_target=True
-        },
+        "input":    {<user_provided_name>: {"<user_provided_name>/prognostic/2d/CMI_C04": tensor,
+                                            "<user_provided_name>/prognostic/2d/CMI_C07": tensor}},
+        "target":   {<user_provided_name>: {"<user_provided_name>/prognostic/2d/CMI_C04": tensor,
+                                            "<user_provided_name>/prognostic/2d/CMI_C07": tensor}},  # only populated when return_target=True
+        "metadata": {<user_provided_name>: {"input_datetime": int, "target_datetime": int}},
     }
 
 All GOES variables are 2D. Tensor shape (no batch dimension):
@@ -160,8 +151,8 @@ class GOESDataset(BaseDataset):
                         prognostic:
                             vars_2D: ["CMI_C04", "CMI_C07", "CMI_C08", "CMI_C09", "CMI_C10", "CMI_C13"]
                             path: "/glade/derecho/scratch/kevinyang/datasets/goes/"
-                    diagnostic: null
-                    dynamic_forcing: null
+                        diagnostic: null
+                        dynamic_forcing: null
                 latlon2d_dir: "/glade/derecho/scratch/kevinyang/datasets/goes/"
                 extent: [-130, -60, 20, 55]
 
@@ -182,8 +173,8 @@ class GOESDataset(BaseDataset):
                     variables:
                         prognostic:
                             vars_2D: ["CMI_C04", "CMI_C07", "CMI_C08", "CMI_C09", "CMI_C10", "CMI_C13"]
-                    diagnostic: null
-                    dynamic_forcing: null
+                        diagnostic: null
+                        dynamic_forcing: null
                 latlon2d_dir: "/glade/derecho/scratch/kevinyang/datasets/goes/"
                 extent: [-130, -60, 20, 55]
 
