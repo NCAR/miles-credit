@@ -66,9 +66,8 @@ def mrms_xr_dataset():
 @pytest.fixture
 def patch_mrms_io(monkeypatch, mrms_xr_dataset):
     """Patch glob + xr.open_dataset so MRMSDataset loads from the fake dataset."""
-    MRMS_MODULE = "credit.datasets.mrms"
     monkeypatch.setattr(
-        f"{MRMS_MODULE}.glob",
+        "credit.datasets.base_dataset.glob",
         lambda pattern: ["/fake/MRMS_20240601-000000.nc"],
     )
     monkeypatch.setattr(xr, "open_dataset", lambda path, **kw: mrms_xr_dataset)

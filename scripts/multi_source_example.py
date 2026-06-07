@@ -28,22 +28,20 @@ print(sample["input"]["ERA5_UpperAir"].keys())
 preblocks = build_preblocks(config["preblocks"])
 batch = apply_preblocks(preblocks, sample)
 print("BATCH KEYS:", batch.keys())
-print("Input shape:", batch["input"].shape)
-print("Target shape:", batch["target"].shape)
-target_shape = batch["target"].shape
+print("Input shape:", batch["x"].shape)
+print("Target shape:", batch["y"].shape)
+target_shape = batch["y"].shape
 
 print("METADATA KEYS:", batch["metadata"].keys())
 print("METADATA KEYS:", batch["metadata"]["input"].keys())
 print("METADATA KEYS:", batch["metadata"]["input"]["ERA5_LowerAir"].keys())
 print("METADATA KEYS:", batch["metadata"]["input"]["ERA5_LowerAir"]["datetime"])
-# print("METADATA CHANNEL_MAP KEYS:", batch['metadata']['target']['_channel_map']['ERA5_LowerAir/prognostic/3d/V'].keys())
-# print("METADATA CHANNEL_MAP KEYS:", batch['metadata']['input']['_channel_map']['ERA5_LowerAir/prognostic/3d/V']['slice'])
 
 fake_prediction = torch.tensor(np.random.normal(0, 1, target_shape))
-batch["prediction"] = fake_prediction
-sample["prediction"] = fake_prediction
+batch["y_pred"] = fake_prediction
+sample["y_pred"] = fake_prediction
 
 postblocks = build_postblocks(config["postblocks"])
 postbatch = apply_postblocks(postblocks, batch)
 print("POSTBATCH KEYS:", postbatch.keys())
-print(postbatch["prediction"]["ERA5_UpperAir"].keys())
+print(postbatch["y_pred"].shape)
