@@ -38,7 +38,7 @@ preblocks:
     args:
       variables:
         - 'WBERA5/prognostic/3d/specific_humidity'
-        - "WBERA5/prognostic/3d/surface_pressure"
+        - "WBERA5/prognostic/2d/surface_pressure"
         - "WBERA5/diagnostic/2d/total_precipitation_6hr"
       data_types:
         - 'input'

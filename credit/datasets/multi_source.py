@@ -147,7 +147,7 @@ class MultiSourceDataset(AbstractBaseDataset):
             sub_config = make_single_source_subconfig(config, user_dataset_name)
             # Route to the appropriate dataset class based on the "dataset_name" field in the sub-config
             cls = route_to_dataset_class(sub_config["source"][user_dataset_name])
-            self.datasets[user_dataset_name] = cls(sub_config, return_target)
+            self.datasets[user_dataset_name] = cls(sub_config, return_target=return_target)
             logger.info(f"MultiSourceDataset: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
 
         self.datetimes: pd.DatetimeIndex = self._build_master_clock(config)
