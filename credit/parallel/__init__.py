@@ -11,7 +11,7 @@ Config block (trainer.parallelism):
 Total GPUs = dp_size × tensor × domain
   where dp_size = world_size // (tensor × domain)
 
-Usage (called from distributed_model_wrapper_v2):
+Usage (called from distributed_model_wrapper_gen2):
     mesh, submeshes = build_device_mesh(conf["trainer"]["parallelism"])
     if submeshes.get("tp"):
         model = apply_tensor_parallel(model, submeshes["tp"])

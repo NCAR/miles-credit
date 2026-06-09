@@ -326,7 +326,7 @@ def distributed_model_wrapper(conf, neural_network, device):
 # ===========================================================================
 
 
-def distributed_model_wrapper_v2(conf: dict, model, device):
+def distributed_model_wrapper_gen2(conf: dict, model, device):
     """Wrap a model for V2 distributed training.
 
     Reads trainer.parallelism (or falls back to trainer.mode for legacy configs)
@@ -355,11 +355,14 @@ def distributed_model_wrapper_v2(conf: dict, model, device):
     _world_size = dist.get_world_size() if dist.is_initialized() else 1
     dp_size = _world_size // max(tp_size * domain_size, 1)
 
-    # Validation
-    if domain_size > 1 and data_mode == "none" and tp_size == 1:
+    # Validation: with data=none and more than one data-parallel replica, the
+    # replicated parameters' gradients never sync across dp — regardless of
+    # whether the extra ranks come from domain or tensor parallelism.
+    if data_mode == "none" and dp_size > 1:
         logging.warning(
-            "domain > 1 with data=none and tensor=1: gradients will NOT sync "
-            "across data-parallel replicas. Wrap with data=ddp or data=fsdp2."
+            f"data=none with dp_size={dp_size} (world={_world_size}, tensor={tp_size}, "
+            f"domain={domain_size}): gradients will NOT sync across data-parallel "
+            "replicas. Wrap with data=ddp or data=fsdp2."
         )
 
     # Build DeviceMesh
@@ -431,14 +434,14 @@ def distributed_model_wrapper_v2(conf: dict, model, device):
 
     # Apply activation checkpointing if requested and FSDP2 didn't do it
     if conf.get("trainer", {}).get("activation_checkpoint", False) and data_mode != "fsdp2":
-        _apply_activation_checkpointing_v2(model, conf)
+        _apply_activation_checkpointing_gen2(model, conf)
 
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
     return model
 
 
-def _apply_activation_checkpointing_v2(model, conf):
+def _apply_activation_checkpointing_gen2(model, conf):
     """Apply no-reentrant AC to blocks that opt in via _fsdp2_shard = True (non-FSDP2 path)."""
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
         CheckpointImpl,

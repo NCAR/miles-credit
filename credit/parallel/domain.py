@@ -65,15 +65,36 @@ def unpad_shard_interp(y_pred, padding_opt, manager, image_h, image_w):
 
 
 def sync_domain_gradients(model, manager):
+    """Average gradients across the domain-parallel group.
+
+    Gradients are flattened into one bucket per (dtype, device) so the sync is a
+    handful of large all_reduces instead of one small all_reduce per parameter
+    (hundreds of latency-bound NCCL calls per step for a real model).
+    """
     if manager is None or manager.domain_parallel_size <= 1:
         return
+    from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+
     group = manager.domain_group
+
+    buckets = {}
     for p in model.parameters():
         if p.grad is not None:
             grad = p.grad
             # With FSDP2, p.grad is a DTensor. to_local() returns the local shard
-            # as a view of the underlying storage (Shard placement), so the
-            # in-place all_reduce updates the DTensor's local data correctly.
+            # as a view of the underlying storage (Shard placement), so an
+            # in-place all_reduce on it updates the DTensor's data correctly.
+            # DTensor locals are NOT bucketed: shards can be 0-sized or oddly
+            # strided per rank, which breaks the flatten/unflatten round-trip.
             if hasattr(grad, "to_local"):
-                grad = grad.to_local()
-            dist.all_reduce(grad, op=dist.ReduceOp.AVG, group=group)
+                local = grad.to_local()
+                if local.numel() > 0:
+                    dist.all_reduce(local, op=dist.ReduceOp.AVG, group=group)
+            else:
+                buckets.setdefault((grad.dtype, grad.device), []).append(grad)
+
+    for grads in buckets.values():
+        flat = _flatten_dense_tensors(grads)
+        dist.all_reduce(flat, op=dist.ReduceOp.AVG, group=group)
+        for g, synced in zip(grads, _unflatten_dense_tensors(flat, grads)):
+            g.copy_(synced)
