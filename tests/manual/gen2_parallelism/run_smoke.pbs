@@ -1,0 +1,90 @@
+#!/bin/bash -l
+#PBS -A NAML0001
+#PBS -N v2parallel_smoke
+#PBS -l walltime=01:00:00
+#PBS -l select=1:ncpus=64:ngpus=4:mem=440GB
+#PBS -q develop@desched1
+#PBS -j oe
+#PBS -k eod
+#
+# Manual HPC smoke test for the V2 (gen2) parallelism matrix.
+# NOT run by GitHub CI (lives under tests/manual/). Requires a multi-GPU
+# Derecho node and the credit-main-derecho conda env.
+#
+# Submit from a Casper or Derecho login node:
+#   qsub tests/manual/gen2_parallelism/run_smoke.pbs
+#
+# Each config trains 1 epoch / 5 batches with a tiny model. We launch each
+# parallelism mode with torchrun, choosing nproc-per-node so every parallel
+# dimension is genuinely exercised. Results land in $LOGDIR/SUMMARY.txt.
+#
+# NOTE: fsdp2_tp_domain needs dp>1 to actually shard, i.e. world = tensor*domain*dp
+#       = 2*2*2 = 8 GPUs (2 nodes). On 4 GPUs dp=1 and the FSDP2 layer self-skips
+#       by design (TP+domain still run). Bump select to 2 nodes / nproc to 8 for
+#       a full 3-way test.
+
+set -u
+module --force purge
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+
+REPO=/glade/work/schreck/repos/miles-credit-main
+TORCHRUN=/glade/work/schreck/conda-envs/credit-main-derecho/bin/torchrun
+LOGDIR=/glade/derecho/scratch/schreck/tmp/v2parallel_smoke_logs
+mkdir -p "$LOGDIR"
+
+cd "$REPO"
+export PYTHONPATH="applications:${PYTHONPATH:-}"
+export LOGLEVEL=INFO
+export NCCL_DEBUG=WARN
+export NCCL_SOCKET_IFNAME=lo
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+
+CFGDIR=tests/manual/gen2_parallelism/configs
+SUMMARY="$LOGDIR/SUMMARY.txt"
+: > "$SUMMARY"
+
+echo "Host : $(hostname)"
+echo "Date : $(date)"
+echo "GPUs : 4 (single node)"
+
+# name:config:nproc   (nproc chosen so each parallelism dim is genuinely exercised)
+RUNS=(
+  "ddp:smoke_v2parallel_ddp_derecho.yml:2"
+  "fsdp2:smoke_v2parallel_fsdp2_derecho.yml:2"
+  "fsdp2_ac:smoke_v2parallel_fsdp2_ac_derecho.yml:2"
+  "domain:smoke_v2parallel_domain_derecho.yml:4"
+  "combo:smoke_v2parallel_combo_derecho.yml:4"
+  "tp_fsdp:smoke_v2parallel_tp_fsdp_derecho.yml:4"
+  "tp_domain:smoke_v2parallel_tp_domain_derecho.yml:4"
+  "fsdp2_tp_domain:smoke_v2parallel_fsdp2_tp_domain_derecho.yml:4"
+)
+
+PORT=29500
+for entry in "${RUNS[@]}"; do
+  name="${entry%%:*}"; rest="${entry#*:}"; cfg="${rest%%:*}"; nproc="${rest##*:}"
+  log="$LOGDIR/${name}.log"
+  echo "===================================================================="
+  echo ">>> [$name] nproc=$nproc cfg=$cfg  (port $PORT)"
+  echo "    log: $log"
+  timeout 720 ${TORCHRUN} \
+    --nnodes=1 --nproc-per-node="$nproc" \
+    --rdzv-backend=c10d --rdzv-endpoint="localhost:${PORT}" \
+    applications/train_gen2.py -c "${CFGDIR}/${cfg}" \
+    > "$log" 2>&1
+  rc=$?
+  if [ $rc -eq 0 ]; then
+    echo "PASS  $name (nproc=$nproc)" | tee -a "$SUMMARY"
+  elif [ $rc -eq 124 ]; then
+    echo "TIMEOUT $name (nproc=$nproc) — see $log" | tee -a "$SUMMARY"
+  else
+    echo "FAIL  $name (nproc=$nproc) rc=$rc — tail:" | tee -a "$SUMMARY"
+    tail -n 15 "$log" | sed 's/^/      /' | tee -a "$SUMMARY"
+  fi
+  PORT=$((PORT+1))
+done
+
+echo "===================================================================="
+echo "SUMMARY:"
+cat "$SUMMARY"
+echo "Done at $(date)"

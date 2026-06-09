@@ -1,0 +1,48 @@
+# V2 parallelism smoke matrix
+
+Manual HPC smoke test for the gen2 (`trainer.parallelism`) parallelism stack:
+FSDP2, domain, tensor, DDP, and their combinations. Each config trains 1 epoch /
+5 batches with a tiny model, so a full sweep is a few minutes of GPU time.
+
+These are **not** run by GitHub CI — they need a multi-GPU Derecho node, NCCL,
+and the `credit-main-derecho` conda env.
+
+## Run the whole matrix
+
+```bash
+qsub tests/manual/gen2_parallelism/run_smoke.pbs
+```
+
+Results (per-mode PASS/FAIL + log tails) are written to
+`/glade/derecho/scratch/$USER/tmp/v2parallel_smoke_logs/SUMMARY.txt`, with one
+`<mode>.log` per run.
+
+## Run a single mode by hand
+
+```bash
+torchrun --nnodes=1 --nproc-per-node=2 \
+  --rdzv-backend=c10d --rdzv-endpoint=localhost:29500 \
+  applications/train_gen2.py \
+  -c tests/manual/gen2_parallelism/configs/smoke_v2parallel_fsdp2_derecho.yml
+```
+
+## Configs and the GPU count each mode needs
+
+`world = tensor * domain * dp`. FSDP2 only shards when `dp > 1`; with `dp == 1`
+it self-skips by design (a warning is logged) and the other dims still run.
+
+| Config | data | tensor | domain | GPUs to exercise fully |
+|--------|------|--------|--------|------------------------|
+| `smoke_v2parallel_ddp_derecho.yml`             | ddp   | 1 | 1 | 2 |
+| `smoke_v2parallel_fsdp2_derecho.yml`           | fsdp2 | 1 | 1 | 2 |
+| `smoke_v2parallel_fsdp2_ac_derecho.yml`        | fsdp2 | 1 | 1 | 2 (+ activation checkpoint) |
+| `smoke_v2parallel_domain_derecho.yml`          | ddp   | 1 | 2 | 4 (dp=2, domain=2) |
+| `smoke_v2parallel_combo_derecho.yml`           | fsdp2 | 1 | 2 | 4 (dp=2, domain=2) |
+| `smoke_v2parallel_tp_fsdp_derecho.yml`         | fsdp2 | 2 | 1 | 4 (tp=2, dp=2) |
+| `smoke_v2parallel_tp_domain_derecho.yml`       | none  | 2 | 2 | 4 (tp=2, domain=2) |
+| `smoke_v2parallel_fsdp2_tp_domain_derecho.yml` | fsdp2 | 2 | 2 | 8 / 2 nodes (tp=2, domain=2, dp=2) |
+| `smoke_v2parallel_ac_casper.yml`               | none  | 1 | 1 | 1 (Casper V100, activation checkpoint only) |
+
+`run_smoke.pbs` covers the 8 Derecho configs on a single 4-GPU node. For the full
+3-way `fsdp2_tp_domain` test, raise `select` to 2 nodes and `nproc-per-node` to 8.
+The `ac_casper` config is the single-GPU Casper variant; run it on Casper.

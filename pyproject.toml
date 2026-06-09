@@ -119,4 +119,6 @@ convention = "google"
 
 [tool.pytest.ini_options]
 addopts = "--continue-on-collection-errors"
+# tests/manual holds HPC/multi-GPU/MPI tests that CI runners can't run; never collect them.
+norecursedirs = ["tests/manual"]
 

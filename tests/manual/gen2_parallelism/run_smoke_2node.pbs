@@ -1,0 +1,60 @@
+#!/bin/bash -l
+#PBS -A NAML0001
+#PBS -N gen2par_3way
+#PBS -l walltime=00:30:00
+#PBS -l select=2:ncpus=64:ngpus=4:mem=440GB
+#PBS -q develop@desched1
+#PBS -j oe
+#PBS -k eod
+#
+# Full 3-way parallelism smoke test: fsdp2 + tensor=2 + domain=2 on 8 GPUs
+# (2 Derecho nodes), so dp = 8 / (2*2) = 2 and FSDP2 genuinely shards.
+# The single-node run_smoke.pbs can only give dp=1 for this config, where
+# FSDP2 self-skips by design.
+#
+# Multi-node uses mpiexec + python, NOT torchrun: torchrun under mpiexec
+# spawns nproc-per-node children per MPI rank (N^2 processes) and NCCL
+# fails on duplicate GPUs. MPI sets the rank env vars get_rank_info() reads.
+#
+# Submit:  qsub tests/manual/gen2_parallelism/run_smoke_2node.pbs
+
+set -u
+module --force purge
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+
+REPO=/glade/work/schreck/repos/miles-credit-main
+PY=/glade/work/schreck/conda-envs/credit-main-derecho/bin/python
+LOGDIR=/glade/derecho/scratch/schreck/tmp/v2parallel_smoke_logs
+mkdir -p "$LOGDIR"
+
+cd "$REPO"
+export PYTHONPATH="applications:${PYTHONPATH:-}"
+export LOGLEVEL=INFO
+export NCCL_DEBUG=WARN
+export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+
+CFG=tests/manual/gen2_parallelism/configs/smoke_v2parallel_fsdp2_tp_domain_derecho.yml
+LOG="$LOGDIR/fsdp2_tp_domain_8gpu.log"
+
+nodes_arr=($(sort -u "$PBS_NODEFILE"))
+head_node="${nodes_arr[0]}"
+head_node_ip=$(ssh "${head_node}" hostname -i | awk '{print $1}')
+MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
+
+echo "Host  : $(hostname)"
+echo "Date  : $(date)"
+echo "Nodes : ${#nodes_arr[@]} (head ${head_node_ip})  GPUs: 8"
+echo "Log   : $LOG"
+
+MASTER_ADDR=${head_node_ip} MASTER_PORT=${MASTER_PORT} \
+mpiexec -n 8 --ppn 4 --cpu-bind none \
+    ${PY} applications/train_gen2.py -c "$CFG" > "$LOG" 2>&1
+rc=$?
+
+if [ $rc -eq 0 ]; then
+  echo "PASS  fsdp2_tp_domain (8 GPU / 2 node, dp=2)" | tee -a "$LOGDIR/SUMMARY.txt"
+else
+  echo "FAIL  fsdp2_tp_domain (8 GPU / 2 node) rc=$rc — tail:" | tee -a "$LOGDIR/SUMMARY.txt"
+  tail -n 20 "$LOG" | sed 's/^/      /' | tee -a "$LOGDIR/SUMMARY.txt"
+fi
+echo "Done at $(date)"
