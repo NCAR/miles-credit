@@ -458,15 +458,29 @@ def load_dataloader(
     world_size: int,
     is_train: bool,
 ) -> DataLoader:
-    """Build a DataLoader with DistributedMultiStepBatchSampler."""
+    """Build a DataLoader with DistributedMultiStepBatchSampler.
+
+    NOTE — sampler contract:
+      * `rank`/`world_size` must be the DATA-PARALLEL coordinates (see
+        credit.parallel.mesh.data_parallel_coords), never the global rank when
+        tensor or domain parallelism is active. TP peers must receive the same
+        batch (the row-parallel all_reduce sums partial outputs of one input);
+        domain peers must receive the same batch (halo exchange passes boundary
+        rows of one sample).
+      * `seed` must be IDENTICAL on every rank. DistributedSampler (which
+        DistributedMultiStepBatchSampler subclasses) has each rank take its
+        slice of one shared permutation; per-rank seeds make each rank permute
+        differently and take the rank-th slice of a different permutation, so
+        samples get silently duplicated and dropped. Per-epoch variation comes
+        from sampler.set_epoch(epoch), which the trainer calls.
+    """
+    seed = conf.get("seed", 42)
     if is_train:
         batch_size = conf["trainer"]["train_batch_size"]
         shuffle = True
-        seed = conf.get("seed", 42) + rank
     else:
         batch_size = conf["trainer"]["valid_batch_size"]
         shuffle = False
-        seed = conf.get("seed", 42)
 
     forecast_len = conf["data"]["forecast_len"]
     num_workers = conf["trainer"].get("thread_workers" if is_train else "valid_thread_workers", 4)

@@ -337,6 +337,46 @@ in `padding_conf` so that `image_height + sum(pad_lat)` meets this requirement. 
 example, with `domain: 2` and `image_height: 640`, `pad_lat: [160, 160]` gives
 `H_padded = 960`, `960 % 320 = 0`.
 
+#### Data sharding and rank layout (the sampler contract)
+
+The dataset sampler must shard samples over the **data-parallel** dimension
+only, never over the global rank. Ranks that differ only in their tensor- or
+domain-parallel coordinate must receive the **same** batch:
+
+- **TP peers** compute partial outputs of the same activation; the row-parallel
+  `all_reduce` sums them. If TP peers get different samples, the sum mixes
+  partial outputs of different inputs, producing garbage activations. Worse, the
+  replicated (non-TP) parameters then receive different gradients on each TP
+  rank, and since nothing syncs across the tp dimension, the replicas silently
+  drift apart.
+- **Domain peers** hold different latitude bands of the same sample; the halo
+  exchange passes boundary rows between them. Different samples per domain rank
+  corrupt every halo.
+
+`init_device_mesh` arranges ranks row-major over `(dp, tp, domain)` with dp
+outermost and domain innermost (`DomainParallelManager` uses the same layout:
+domain groups are consecutive ranks). For global rank `g`:
+
+```
+dp_rank = g // (tensor × domain)
+dp_size = world_size // (tensor × domain)
+```
+
+`train_gen2.py` computes this via `credit.parallel.mesh.data_parallel_coords`
+and passes `dp_rank` / `dp_size` to the dataloader. Two further rules follow:
+
+1. **The sampler seed must be identical on every rank.** `DistributedSampler`
+   has each rank take its slice of one shared permutation; per-rank seeds make
+   each rank permute differently, silently duplicating and dropping samples.
+   Per-epoch variation comes from `sampler.set_epoch(epoch)` (the gen2 trainer
+   calls this), not from the seed.
+2. **Model RNG (dropout etc.) is seeded by `dp_rank`, not the global rank**, so
+   TP/domain peers generate identical masks while dp replicas still differ.
+
+If you write a new entry point or trainer that supports the `parallelism:`
+block, reuse `data_parallel_coords` — passing the global rank/world_size into a
+dataloader is correct only when `tensor: 1` and `domain: 1`.
+
 #### Common configurations
 
 | Mode | Config | GPUs | When to use |

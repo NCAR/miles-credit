@@ -22,7 +22,7 @@ from argparse import ArgumentParser
 
 import torch
 
-from credit.distributed import distributed_model_wrapper, distributed_model_wrapper_v2, setup, get_rank_info
+from credit.distributed import distributed_model_wrapper, distributed_model_wrapper_gen2, setup, get_rank_info
 from credit.seed import seed_everything
 from credit.losses import load_loss
 from credit.trainers import load_trainer
@@ -100,17 +100,17 @@ def main_cli():
         sys.exit()
 
     _trainer_conf = conf["trainer"]
-    _has_v2_parallelism = "parallelism" in _trainer_conf
+    _has_gen2_parallelism = "parallelism" in _trainer_conf
 
     # V2 parallelism configs use the parallelism: block; rank info is always set by torchrun env vars.
     # V1 legacy configs use trainer.mode to determine rank detection.
-    _rank_mode = "ddp" if _has_v2_parallelism else _trainer_conf.get("mode", "none")
+    _rank_mode = "ddp" if _has_gen2_parallelism else _trainer_conf.get("mode", "none")
     local_rank, world_rank, world_size = get_rank_info(_rank_mode)
     rank = world_rank
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
-    if _has_v2_parallelism:
+    if _has_gen2_parallelism:
         if world_size > 1:
             setup(rank, world_size, "ddp", backend)
     elif _trainer_conf.get("mode", "none") in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
@@ -123,17 +123,30 @@ def main_cli():
     else:
         device = torch.device("cpu")
 
+    # Dataset sharding uses the DATA-PARALLEL coordinate, not the global rank.
+    # Ranks that differ only in tensor/domain coordinate must see the same batch
+    # (TP all_reduce sums partial outputs; domain halo exchange passes boundary
+    # rows) — see credit.parallel.mesh.data_parallel_coords for the full contract.
+    if _has_gen2_parallelism:
+        from credit.parallel.mesh import data_parallel_coords
+
+        data_rank, data_world_size = data_parallel_coords(conf)
+    else:
+        data_rank, data_world_size = rank, world_size
+
     train_dataset = load_dataset(conf, is_train=True)
-    train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
+    train_loader = load_dataloader(conf, train_dataset, rank=data_rank, world_size=data_world_size, is_train=True)
 
     skip_validation = conf["trainer"].get("skip_validation", False)
     if skip_validation:
         valid_loader = None
     else:
         valid_dataset = load_dataset(conf, is_train=False)
-        valid_loader = load_dataloader(conf, valid_dataset, rank=rank, world_size=world_size, is_train=False)
+        valid_loader = load_dataloader(conf, valid_dataset, rank=data_rank, world_size=data_world_size, is_train=False)
 
-    seed = conf.get("seed", 42) + rank
+    # Seed RNG by the data-parallel rank so TP/domain peers generate identical
+    # dropout masks etc.; dp replicas still differ for ensemble diversity.
+    seed = conf.get("seed", 42) + data_rank
     seed_everything(seed)
     inject_flat_var_keys(conf)
     if "post_conf" in conf["model"]:
@@ -148,8 +161,8 @@ def main_cli():
     if conf["trainer"].get("compile", False):
         m = torch.compile(m)
 
-    if _has_v2_parallelism:
-        model = distributed_model_wrapper_v2(conf, m, device)
+    if _has_gen2_parallelism:
+        model = distributed_model_wrapper_gen2(conf, m, device)
     elif _trainer_conf.get("mode", "none") in ["ddp", "fsdp", "domain_parallel", "fsdp+domain_parallel"]:
         model = distributed_model_wrapper(conf, m, device)
     else:

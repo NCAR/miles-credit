@@ -84,6 +84,58 @@ def build_device_mesh(parallelism_conf: dict, device: str = "cuda"):
     return mesh, submeshes
 
 
+def data_parallel_coords(conf: dict):
+    """Return (dp_rank, dp_size) for dataset/dataloader sharding.
+
+    THE SAMPLER CONTRACT
+    --------------------
+    Dataset samples must be sharded over the **data-parallel** dimension only,
+    never over the global rank. Ranks that differ only in their tensor- or
+    domain-parallel coordinate MUST receive the *same* batch:
+
+      - TP ranks compute partial outputs of the same activation; the row-parallel
+        all_reduce sums them. Feeding different samples to TP peers silently sums
+        partial outputs of *different* inputs — garbage activations, and the
+        replicated (non-TP) parameters drift apart because nothing syncs them
+        across the tp dimension.
+      - Domain ranks hold different spatial shards of the same sample; the halo
+        exchange passes boundary rows between them. Different samples per domain
+        rank corrupt every halo.
+
+    So a DataLoader/DistributedSampler must be built with
+    ``rank=dp_rank, num_replicas=dp_size`` from this function — NOT the global
+    rank/world_size — whenever tensor > 1 or domain > 1.
+
+    RANK LAYOUT
+    -----------
+    ``init_device_mesh`` arranges ranks row-major over (dp, tp, domain), with
+    dp outermost and domain innermost. ``DomainParallelManager`` builds the same
+    layout (domain groups are consecutive ranks). Hence for global rank g:
+
+        domain_coord = g % domain
+        tp_coord     = (g // domain) % tp
+        dp_rank      = g // (tp * domain)
+
+    Returns:
+        (dp_rank, dp_size): the data-parallel coordinate of this rank and the
+        number of data-parallel replicas. Falls back to (0, 1) when torch
+        distributed is not initialized.
+    """
+    p = parse_parallelism_conf(conf)
+    tp_size = int(p.get("tensor", 1))
+    domain_size = int(p.get("domain", 1))
+
+    if not dist.is_initialized():
+        return 0, 1
+
+    world_size = dist.get_world_size()
+    rank = dist.get_rank()
+    non_dp = max(tp_size * domain_size, 1)
+    if world_size % non_dp != 0:
+        raise ValueError(f"world_size={world_size} not divisible by tensor*domain={non_dp}")
+    return rank // non_dp, world_size // non_dp
+
+
 def parse_parallelism_conf(conf: dict) -> dict:
     """Extract and validate the parallelism block from a trainer config.
 

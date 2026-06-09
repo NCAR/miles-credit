@@ -160,6 +160,13 @@ class TrainerERA5Gen2(BaseTrainer):
 
         grad_accum_every = self.conf.get("trainer", {}).get("grad_accum_every", 1)
 
+        # Reseed the shared shuffle permutation each epoch. Without this the
+        # sampler (now seeded identically on all ranks — required for disjoint
+        # sharding) would yield the same order every epoch.
+        _sampler = getattr(trainloader, "batch_sampler", None) or getattr(trainloader, "sampler", None)
+        if hasattr(_sampler, "set_epoch"):
+            _sampler.set_epoch(epoch)
+
         batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
         self.model.train()
 
@@ -245,9 +252,8 @@ class TrainerERA5Gen2(BaseTrainer):
                         ).mean()
                     accum_log(logs, {"loss": loss.item()})
                     scaler.scale(loss / grad_accum_every).backward(retain_graph=self.retain_graph)
-
-                if self.distributed:
-                    torch.distributed.barrier()
+                # No barrier here: NCCL collectives (grad sync, halo exchange)
+                # already order ranks; a per-timestep barrier only adds latency.
 
             full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
 
@@ -256,12 +262,18 @@ class TrainerERA5Gen2(BaseTrainer):
                 sync_domain_gradients(self.model, self.domain_manager)
                 scaler.unscale_(optimizer)
                 if self.grad_max_norm == "dynamic":
-                    local_norm = torch.norm(
+                    # Global L2 norm: sum SQUARED norms across ranks, then sqrt.
+                    # (Summing the norms themselves and sqrt-ing mixes units.)
+                    # Note this still over-counts replicated grads when tp/domain
+                    # ranks hold copies; acceptable for a clip threshold.
+                    local_sq = (
                         torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
+                        .square()
+                        .sum()
                     )
                     if self.distributed:
-                        dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
-                    global_norm = local_norm.sqrt()
+                        dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
+                    global_norm = local_sq.sqrt()
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
                 elif self.grad_max_norm > 0.0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
@@ -431,8 +443,6 @@ class TrainerERA5Gen2(BaseTrainer):
                 full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
 
                 batch_loss = torch.Tensor([loss.item() if torch.is_tensor(loss) else loss]).to(self.device)
-                if self.distributed:
-                    torch.distributed.barrier()
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)
