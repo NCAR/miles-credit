@@ -34,6 +34,17 @@ import torch.distributed as dist
 logger = logging.getLogger(__name__)
 
 
+def _assert_plain_1x1(conv: nn.Conv2d, cls_name: str) -> None:
+    """Require a plain 1×1 conv: the Tp wrappers rebuild the layer with default
+    stride/padding/dilation/groups, so anything non-default would be silently
+    dropped rather than replicated."""
+    assert conv.kernel_size in ((1, 1), 1), f"{cls_name} only supports 1x1 convolutions"
+    assert conv.stride in ((1, 1), 1), f"{cls_name}: stride {conv.stride} unsupported (must be 1)"
+    assert conv.padding in ((0, 0), 0), f"{cls_name}: padding {conv.padding} unsupported (must be 0)"
+    assert conv.dilation in ((1, 1), 1), f"{cls_name}: dilation {conv.dilation} unsupported (must be 1)"
+    assert conv.groups == 1, f"{cls_name}: groups {conv.groups} unsupported (must be 1)"
+
+
 # ---------------------------------------------------------------------------
 # Column-parallel Conv2d (k=1)
 # ---------------------------------------------------------------------------
@@ -48,7 +59,7 @@ class TpColConv2d(nn.Module):
 
     def __init__(self, conv: nn.Conv2d, tp_group):
         super().__init__()
-        assert conv.kernel_size == (1, 1) or conv.kernel_size == 1, "TpColConv2d only supports 1x1 convolutions"
+        _assert_plain_1x1(conv, "TpColConv2d")
         self.tp_group = tp_group
         tp_size = dist.get_world_size(tp_group)
         tp_rank = dist.get_rank(tp_group)
@@ -83,7 +94,7 @@ class TpRowConv2d(nn.Module):
 
     def __init__(self, conv: nn.Conv2d, tp_group):
         super().__init__()
-        assert conv.kernel_size == (1, 1) or conv.kernel_size == 1, "TpRowConv2d only supports 1x1 convolutions"
+        _assert_plain_1x1(conv, "TpRowConv2d")
         self.tp_group = tp_group
         tp_size = dist.get_world_size(tp_group)
         tp_rank = dist.get_rank(tp_group)
@@ -93,20 +104,25 @@ class TpRowConv2d(nn.Module):
         chunk = in_ch // tp_size
         start, end = tp_rank * chunk, (tp_rank + 1) * chunk
 
-        has_bias = conv.bias is not None
-        self.conv = nn.Conv2d(chunk, conv.out_channels, 1, bias=has_bias)
+        # Bias is kept as a full replicated parameter and added AFTER the
+        # all_reduce. Putting it inside the conv (zeroed on rank != 0) is wrong:
+        # every rank's bias copy receives the same gradient, so the *summed*
+        # effective bias trains at tp_size × the intended learning rate (and
+        # weight decay treats the copies independently). Adding it post-reduce
+        # keeps the replicas identical and the effective LR correct.
+        self.conv = nn.Conv2d(chunk, conv.out_channels, 1, bias=False)
         with torch.no_grad():
             self.conv.weight.copy_(conv.weight[:, start:end])
-            if has_bias:
-                # Only rank 0 contributes the bias to avoid double-counting.
-                if tp_rank == 0:
-                    self.conv.bias.copy_(conv.bias)
-                else:
-                    self.conv.bias.zero_()
+        if conv.bias is not None:
+            self.bias = nn.Parameter(conv.bias.detach().clone())
+        else:
+            self.register_parameter("bias", None)
 
     def forward(self, x):
         out = self.conv(x)  # partial output
         dist.all_reduce(out, op=dist.ReduceOp.SUM, group=self.tp_group)
+        if self.bias is not None:
+            out = out + self.bias.view(1, -1, 1, 1)
         return out
 
 
@@ -167,19 +183,21 @@ class TpRowLinear(nn.Module):
         chunk = in_f // tp_size
         start, end = tp_rank * chunk, (tp_rank + 1) * chunk
 
-        has_bias = linear.bias is not None
-        self.linear = nn.Linear(chunk, linear.out_features, bias=has_bias)
+        # Full replicated bias added AFTER the all_reduce — see TpRowConv2d for
+        # why an in-layer bias zeroed on rank != 0 trains at tp_size × the LR.
+        self.linear = nn.Linear(chunk, linear.out_features, bias=False)
         with torch.no_grad():
             self.linear.weight.copy_(linear.weight[:, start:end])
-            if has_bias:
-                if tp_rank == 0:
-                    self.linear.bias.copy_(linear.bias)
-                else:
-                    self.linear.bias.zero_()
+        if linear.bias is not None:
+            self.bias = nn.Parameter(linear.bias.detach().clone())
+        else:
+            self.register_parameter("bias", None)
 
     def forward(self, x):
         out = self.linear(x)
         dist.all_reduce(out, op=dist.ReduceOp.SUM, group=self.tp_group)
+        if self.bias is not None:
+            out = out + self.bias
         return out
 
 
