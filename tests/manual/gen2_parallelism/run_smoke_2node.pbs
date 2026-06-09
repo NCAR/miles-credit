@@ -32,6 +32,9 @@ export PYTHONPATH="applications:${PYTHONPATH:-}"
 export LOGLEVEL=INFO
 export NCCL_DEBUG=WARN
 export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+# Per-node GPU visibility; without this the MPI ranks see no GPUs and
+# ProcessGroupNCCL init fails ("no GPUs found"). Matches credit submit.
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 CFG=tests/manual/gen2_parallelism/configs/smoke_v2parallel_fsdp2_tp_domain_derecho.yml
 LOG="$LOGDIR/fsdp2_tp_domain_8gpu.log"
