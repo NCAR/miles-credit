@@ -173,7 +173,7 @@ class BaseTrainer(ABC):
             int(_p.get("domain", 1)) > 1 or int(_p.get("tensor", 1)) > 1
         )
         self.start_epoch = trainer_conf.get("start_epoch", 0)
-        self.epochs = trainer_conf.get("epochs", 70)
+        self.epochs = trainer_conf.get("epochs", 1)
         self.skip_validation = trainer_conf.get("skip_validation", False)
         self.load_weights = trainer_conf.get("load_weights", False)
         self.use_scheduler = trainer_conf.get("use_scheduler", True)
