@@ -57,6 +57,24 @@ validation_data:
   end_datetime: '2018-12-31'
 preblocks:
   per_step:
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: /glade/derecho/scratch/schreck/credit_tests/convert_025deg/wxformer_025deg_gen2_pre_scaler.json
+        variables:
+        - ERA5/prognostic/3d/U
+        - ERA5/prognostic/3d/V
+        - ERA5/prognostic/3d/T
+        - ERA5/prognostic/3d/Q
+        - ERA5/prognostic/2d/SP
+        - ERA5/prognostic/2d/t2m
+        - ERA5/prognostic/2d/V500
+        - ERA5/prognostic/2d/U500
+        - ERA5/prognostic/2d/T500
+        - ERA5/prognostic/2d/Z500
+        - ERA5/prognostic/2d/Q500
+        - ERA5/dynamic_forcing/2d/tsi
+        method: transform
     concat:
       type: concat
 model:
@@ -186,3 +204,20 @@ postblocks:
   per_step:
     reconstruct:
       type: reconstruct
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: /glade/derecho/scratch/schreck/credit_tests/convert_025deg/wxformer_025deg_gen2_post_scaler.json
+        variables:
+        - ERA5/prognostic/3d/U
+        - ERA5/prognostic/3d/V
+        - ERA5/prognostic/3d/T
+        - ERA5/prognostic/3d/Q
+        - ERA5/prognostic/2d/SP
+        - ERA5/prognostic/2d/t2m
+        - ERA5/prognostic/2d/V500
+        - ERA5/prognostic/2d/U500
+        - ERA5/prognostic/2d/T500
+        - ERA5/prognostic/2d/Z500
+        - ERA5/prognostic/2d/Q500
+        method: inverse_transform
