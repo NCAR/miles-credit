@@ -89,7 +89,7 @@ def patch_era5_io_multiyear(
     """
 
     def fake_glob(pattern: str) -> list[str]:
-        if pattern == "/fake/*.zarr":
+        if pattern == "/fake/era5_*.zarr":
             return ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"]
         raise ValueError(f"Unexpected glob pattern: {pattern}")
 
@@ -115,7 +115,7 @@ def patch_refactor_io_multiyear(
     """
 
     def fake_glob(pattern: str) -> list[str]:
-        if pattern == "/fake/*.zarr":
+        if pattern == "/fake/era5_*.zarr":
             return ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"]
         raise ValueError(f"Unexpected glob pattern: {pattern}")
 
@@ -148,19 +148,19 @@ def minimal_config() -> dict[str, Any]:
                     "prognostic": {
                         "vars_3D": ["T", "U"],
                         "vars_2D": ["SP"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "dynamic_forcing": {
                         "vars_2D": ["tsi"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "static": {
                         "vars_2D": ["LSM"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "diagnostic": {
                         "vars_2D": ["TP"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                 },
             }

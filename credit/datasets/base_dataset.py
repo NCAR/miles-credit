@@ -18,7 +18,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 import torch
 
-from credit.datasets._utils import _map_files  # pyright: ignore[reportPrivateUsage]
+from credit.datasets._utils import _map_files, _path_template_to_glob, _extract_time_fmt  # pyright: ignore[reportPrivateUsage]
 
 # Expected types of fields
 # * ``prognostic``      — input at step 0 and target (autoregressive rollout)
@@ -666,14 +666,9 @@ class BaseDataset(AbstractBaseDataset):
                 The expected return type should be consistent within a dataset class.
         """
         if self.mode == "local":
-            path = field_config.get("path", "")
-            files = sorted(glob(path))
-            if not files:
-                raise FileNotFoundError(
-                    f"No files found matching '{path}'. Check that the path exists and is accessible from this machine."
-                )
-            time_fmt: str = field_config.get("filename_time_format", "%Y")
-            return _map_files(files, time_fmt)
+            path_template: str = field_config.get("path", "")
+            files = sorted(glob(_path_template_to_glob(path_template)))
+            return _map_files(files, _extract_time_fmt(path_template)) if files else None
         elif self.mode == "remote":
             return True
         else:

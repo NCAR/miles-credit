@@ -526,6 +526,10 @@ def _build_rollout_pbs_script(
             #PBS -k eod
             {output_line}
 
+            module load conda/latest
+
+            conda activate {args.conda_env}
+
             REPO={repo}
             CONFIG={config}
             NGPUS={args.gpus}

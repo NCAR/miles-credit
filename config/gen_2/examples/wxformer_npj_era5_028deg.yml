@@ -18,7 +18,7 @@ data:
         prognostic:
           vars_3D: ['U', 'V', 'T', 'Q']
           vars_2D: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
-          path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL*'
+          path: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/y_TOTAL_%Y-*.zarr'
 
         static:
           vars_2D: ['Z_GDS4_SFC', 'LSM']
@@ -26,7 +26,7 @@ data:
 
         dynamic_forcing:
           vars_2D: ['tsi']
-          path: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/*.nc'
+          path: '/glade/derecho/scratch/dgagne/credit_solar_nc_1h_0.25deg/solar_irradiance_%Y-*.nc'
 
         diagnostic: null
 
