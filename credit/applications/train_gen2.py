@@ -22,7 +22,7 @@ from argparse import ArgumentParser
 
 import torch
 
-from credit.distributed import distributed_model_wrapper, distributed_model_wrapper_gen2, setup, get_rank_info
+from credit.distributed import distributed_model_wrapper_gen2, setup, get_rank_info
 from credit.seed import seed_everything
 from credit.losses import load_loss
 from credit.trainers import load_trainer
@@ -100,21 +100,18 @@ def main_cli():
         sys.exit()
 
     _trainer_conf = conf["trainer"]
-    _has_gen2_parallelism = "parallelism" in _trainer_conf
+    assert "parallelism" in _trainer_conf, (
+        "Gen2 training configs must define trainer.parallelism with data, tensor, and domain fields."
+    )
 
-    # V2 parallelism configs use the parallelism: block; rank info is always set by torchrun env vars.
-    # V1 legacy configs use trainer.mode to determine rank detection.
-    _rank_mode = "ddp" if _has_gen2_parallelism else _trainer_conf.get("mode", "none")
-    local_rank, world_rank, world_size = get_rank_info(_rank_mode)
+    # V2 parallelism configs use torchrun-style rank env vars.
+    local_rank, world_rank, world_size = get_rank_info("ddp")
     rank = world_rank
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
-    if _has_gen2_parallelism:
-        if world_size > 1:
-            setup(rank, world_size, "ddp", backend)
-    elif _trainer_conf.get("mode", "none") in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
-        setup(rank, world_size, _trainer_conf["mode"], backend)
+    if world_size > 1:
+        setup(rank, world_size, "ddp", backend)
 
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
@@ -127,12 +124,9 @@ def main_cli():
     # Ranks that differ only in tensor/domain coordinate must see the same batch
     # (TP all_reduce sums partial outputs; domain halo exchange passes boundary
     # rows) — see credit.parallel.mesh.data_parallel_coords for the full contract.
-    if _has_gen2_parallelism:
-        from credit.parallel.mesh import data_parallel_coords
+    from credit.parallel.mesh import data_parallel_coords
 
-        data_rank, data_world_size = data_parallel_coords(conf)
-    else:
-        data_rank, data_world_size = rank, world_size
+    data_rank, data_world_size = data_parallel_coords(conf)
 
     train_dataset = load_dataset(conf, is_train=True)
     train_loader = load_dataloader(conf, train_dataset, rank=data_rank, world_size=data_world_size, is_train=True)
@@ -161,12 +155,7 @@ def main_cli():
     if conf["trainer"].get("compile", False):
         m = torch.compile(m)
 
-    if _has_gen2_parallelism:
-        model = distributed_model_wrapper_gen2(conf, m, device)
-    elif _trainer_conf.get("mode", "none") in ["ddp", "fsdp", "domain_parallel", "fsdp+domain_parallel"]:
-        model = distributed_model_wrapper(conf, m, device)
-    else:
-        model = m
+    model = distributed_model_wrapper_gen2(conf, m, device)
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 

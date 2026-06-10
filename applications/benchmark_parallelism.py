@@ -77,10 +77,11 @@ def main():
     p.setdefault("domain", 1)
 
     p_conf = parse_parallelism_conf(conf)
-    _mode = p_conf["data"] if p_conf["data"] != "none" else conf["trainer"].get("mode", "none")
-    _any_dist = _mode in ("fsdp2", "fsdp", "ddp") or p_conf.get("tensor", 1) > 1 or p_conf.get("domain", 1) > 1
+    _any_dist = (
+        p_conf["data"] in ("fsdp2", "ddp") or int(p_conf.get("tensor", 1)) > 1 or int(p_conf.get("domain", 1)) > 1
+    )
     if _any_dist:
-        setup(rank, world_size, _mode)
+        setup(rank, world_size, "ddp")
 
     device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
     torch.cuda.set_device(device)

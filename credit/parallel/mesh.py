@@ -139,29 +139,14 @@ def data_parallel_coords(conf: dict):
 def parse_parallelism_conf(conf: dict) -> dict:
     """Extract and validate the parallelism block from a trainer config.
 
-    Falls back to inferring from legacy trainer.mode if parallelism block
-    is absent — so old V1 configs that go through the V2 path still work.
-
     Returns a normalized parallelism dict with keys: data, tensor, domain.
     """
     trainer = conf.get("trainer", {})
+    if "parallelism" not in trainer:
+        raise ValueError("Gen2 configs must define trainer.parallelism with data, tensor, and domain fields.")
 
-    if "parallelism" in trainer:
-        p = trainer["parallelism"].copy()
-        p.setdefault("data", "none")
-        p.setdefault("tensor", 1)
-        p.setdefault("domain", 1)
-        return p
-
-    # Legacy mode: infer from trainer.mode string
-    mode = trainer.get("mode", "none")
-    mapping = {
-        "fsdp": {"data": "fsdp2", "tensor": 1, "domain": 1},
-        "ddp": {"data": "ddp", "tensor": 1, "domain": 1},
-        "none": {"data": "none", "tensor": 1, "domain": 1},
-        "domain_parallel": {"data": "none", "tensor": 1, "domain": trainer.get("domain_parallel_size", 1)},
-        "fsdp+domain_parallel": {"data": "fsdp2", "tensor": 1, "domain": trainer.get("domain_parallel_size", 1)},
-    }
-    result = mapping.get(mode, {"data": "none", "tensor": 1, "domain": 1})
-    logger.debug(f"Inferred parallelism from legacy mode='{mode}': {result}")
-    return result
+    p = trainer["parallelism"].copy()
+    p.setdefault("data", "none")
+    p.setdefault("tensor", 1)
+    p.setdefault("domain", 1)
+    return p

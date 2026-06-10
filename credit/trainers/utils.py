@@ -552,12 +552,12 @@ def load_model_states_and_optimizer(conf, model, device):
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
         )
-        if conf["trainer"]["mode"] == "fsdp":
+        if mode == "fsdp":
             opt = FSDPOptimizerWrapper(opt, model)
         return opt
 
     def _make_scaler():
-        return ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        return ShardedGradScaler(enabled=amp) if mode == "fsdp" else GradScaler(enabled=amp)
 
     if not load_weights:
         optimizer = _make_optimizer(model)

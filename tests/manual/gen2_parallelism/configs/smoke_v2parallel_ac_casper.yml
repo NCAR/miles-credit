@@ -148,7 +148,6 @@ loss:
   use_variable_weights: false
 trainer:
   type: era5-gen2
-  mode: ddp
   parallelism:
     data: none
     tensor: 1

@@ -329,8 +329,7 @@ def distributed_model_wrapper(conf, neural_network, device):
 def distributed_model_wrapper_gen2(conf: dict, model, device):
     """Wrap a model for V2 distributed training.
 
-    Reads trainer.parallelism (or falls back to trainer.mode for legacy configs)
-    and applies, in order:
+    Reads trainer.parallelism and applies, in order:
       1. Domain parallelism (spatial H-shard, Negin's layer swap)
       2. Tensor parallelism (Col/Row linear split across TP group)
       3. FSDP2 or DDP over the data-parallel group

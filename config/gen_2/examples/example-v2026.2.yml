@@ -108,7 +108,6 @@ trainer:
     tensor: 1               # tensor-parallel degree  (1 = disabled)
     domain: 1               # domain-parallel shards  (1 = disabled)
 
-  # mode: ddp             # legacy key — ignored when parallelism: block is present
   cpu_offload: False
   activation_checkpoint: True
 

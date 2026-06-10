@@ -162,7 +162,7 @@ class TestParallelismConfigMath:
 # ---------------------------------------------------------------------------
 
 from credit.parallel import mesh as mesh_mod  # noqa: E402
-from credit.parallel.mesh import data_parallel_coords  # noqa: E402
+from credit.parallel.mesh import data_parallel_coords, parse_parallelism_conf  # noqa: E402
 
 
 class TestDataParallelCoords:
@@ -184,6 +184,10 @@ class TestDataParallelCoords:
     def test_no_dist_falls_back(self):
         conf = {"trainer": {"parallelism": {"data": "none", "tensor": 1, "domain": 1}}}
         assert data_parallel_coords(conf) == (0, 1)
+
+    def test_missing_parallelism_raises(self):
+        with pytest.raises(ValueError, match="trainer.parallelism"):
+            parse_parallelism_conf({"trainer": {"mode": "fsdp"}})
 
     def test_tp2_peers_share_dp_rank(self, monkeypatch):
         # 4 GPUs, tp=2: ranks (0,1) form one tp group → same dp_rank; (2,3) the other.
