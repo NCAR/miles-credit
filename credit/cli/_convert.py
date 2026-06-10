@@ -215,6 +215,22 @@ def _convert(args: argparse.Namespace) -> None:
         conf["trainer"]["type"] = "era5-gen2"
         changes.append(f"trainer.type: '{trainer_type}' → 'era5-gen2'")
 
+    # trainer.parallelism — required by the v2 trainer; replaces legacy trainer.mode
+    if "parallelism" not in conf["trainer"]:
+        mode = conf["trainer"].pop("mode", "none")
+        domain_size = conf["trainer"].pop("domain_parallel_size", 1)
+        _mode_map = {
+            "fsdp": {"data": "fsdp2", "tensor": 1, "domain": 1},
+            "ddp": {"data": "ddp", "tensor": 1, "domain": 1},
+            "domain_parallel": {"data": "none", "tensor": 1, "domain": domain_size},
+            "fsdp+domain_parallel": {"data": "fsdp2", "tensor": 1, "domain": domain_size},
+        }
+        conf["trainer"]["parallelism"] = _mode_map.get(mode, {"data": "none", "tensor": 1, "domain": 1})
+        changes.append(f"trainer.mode: '{mode}' → trainer.parallelism: {conf['trainer']['parallelism']}")
+    elif "mode" in conf["trainer"]:
+        conf["trainer"].pop("mode")
+        changes.append("removed legacy trainer.mode (parallelism block already present)")
+
     # data schema: v1 flat → v2 nested source
     _V1_DATA_FLAT_KEYS = {
         "variables",
