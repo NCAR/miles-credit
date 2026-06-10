@@ -84,6 +84,21 @@ for entry in "${RUNS[@]}"; do
   PORT=$((PORT+1))
 done
 
+# ── Cross-mode parity: same dp layout ⇒ identical loss trajectories ────────
+# ddp (dp=2) vs domain (dp=2 × domain=2); tp_domain vs fsdp2_tp_domain (dp=1).
+# Catches dataloader/halo/TP wiring bugs that still "train" but diverge.
+PYCHK=/glade/work/schreck/conda-envs/credit-main-derecho/bin/python
+# tp pair: identical code path => exact. ddp/domain: crop-vs-interp output
+# operator differs ~1%, so compare with rtol (see check_parity.py docstring).
+for pair in "ddp domain --rtol 0.05" "tp_domain fsdp2_tp_domain"; do
+  set -- $pair
+  if $PYCHK tests/manual/gen2_parallelism/check_parity.py "$LOGDIR/$1.log" "$LOGDIR/$2.log" "${@:3}"; then
+    echo "PASS  parity: $1 ~= $2" | tee -a "$SUMMARY"
+  else
+    echo "FAIL  parity: $1 != $2 — distributed wiring bug, see check_parity.py" | tee -a "$SUMMARY"
+  fi
+done
+
 echo "===================================================================="
 echo "SUMMARY:"
 cat "$SUMMARY"
