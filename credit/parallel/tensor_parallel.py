@@ -317,4 +317,50 @@ def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
         )
     else:
         logger.info(f"Tensor parallelism applied to {count} block(s)")
+    # Stash the group so the trainer can sync replicated-parameter gradients
+    # across the TP dimension at accumulation boundaries.
+    model._tp_group = tp_group
     return model
+
+
+def sync_replicated_gradients(model: nn.Module, tp_group) -> None:
+    """Average gradients of replicated (non-TP-sharded) params across the TP group.
+
+    The Tp col/row weights are genuinely sharded per rank and must NOT be
+    synced. Everything else (embeddings, norms, non-TP blocks, and the
+    replicated row-parallel biases) holds an identical copy on every TP rank.
+    Their gradients are identical in exact arithmetic given identical inputs,
+    but with data=none nothing enforces that, and nondeterministic kernels
+    drift the replicas apart over a long run. Averaging at the accumulation
+    boundary pins the replicas together.
+
+    Plain dense grads are flattened into one bucket per (dtype, device);
+    DTensor grads (FSDP2) are reduced in place per local shard — TP peers
+    share the same dp coordinate, so their shard shapes are identical.
+    """
+    from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+
+    sharded_ids = set()
+    for m in model.modules():
+        if isinstance(m, (TpColConv2d, TpRowConv2d)):
+            sharded_ids.update(id(p) for p in m.conv.parameters())
+        elif isinstance(m, (TpColLinear, TpRowLinear)):
+            sharded_ids.update(id(p) for p in m.linear.parameters())
+
+    buckets = {}
+    for p in model.parameters():
+        if p.grad is None or id(p) in sharded_ids:
+            continue
+        grad = p.grad
+        if hasattr(grad, "to_local"):
+            local = grad.to_local()
+            if local.numel() > 0:
+                dist.all_reduce(local, op=dist.ReduceOp.AVG, group=tp_group)
+        else:
+            buckets.setdefault((grad.dtype, grad.device), []).append(grad)
+
+    for grads in buckets.values():
+        flat = _flatten_dense_tensors(grads)
+        dist.all_reduce(flat, op=dist.ReduceOp.AVG, group=tp_group)
+        for g, synced in zip(grads, _unflatten_dense_tensors(flat, grads)):
+            g.copy_(synced)
