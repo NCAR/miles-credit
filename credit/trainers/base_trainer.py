@@ -66,13 +66,28 @@ class EMATracker:
     def __init__(self, model: torch.nn.Module, decay: float = 0.9999):
         self.decay = decay
         self.step = 0
+        # Keep a reference for the sharded (FSDP2/DTensor) path: gathering the
+        # full shadow at save time and re-sharding on load need the live
+        # params' mesh/placements.
+        self._model = model
         # shadow lives on CPU to save GPU memory
         self.shadow: OrderedDict = OrderedDict()
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+        # FSDP2 state dicts hold DTensors. EMA is elementwise, so each rank
+        # EMAs its own LOCAL shard — mathematically identical to EMA of the
+        # full weights, with zero extra communication per step. The full
+        # shadow is only materialized at save time (state_dict gathers) and
+        # re-sharded on load.
+        self._sharded = any(hasattr(v, "to_local") for v in state.values())
         for k, v in state.items():
             if self._is_spectral_norm_buffer(k, state):
                 continue  # power-iteration vectors must not be EMA-averaged
-            self.shadow[k] = v.detach().float().cpu().clone()
+            self.shadow[k] = self._local(v).detach().float().cpu().clone()
+
+    @staticmethod
+    def _local(v: torch.Tensor) -> torch.Tensor:
+        """Return the local shard of a DTensor (a view of its storage), else v."""
+        return v.to_local() if hasattr(v, "to_local") else v
 
     @staticmethod
     def _is_spectral_norm_buffer(key: str, state: dict) -> bool:
@@ -92,12 +107,23 @@ class EMATracker:
         for k, v in state.items():
             if k not in self.shadow:
                 continue  # spectral norm buffers are excluded
-            self.shadow[k].mul_(effective_decay).add_(v.detach().float().cpu(), alpha=1.0 - effective_decay)
+            self.shadow[k].mul_(effective_decay).add_(
+                self._local(v).detach().float().cpu(), alpha=1.0 - effective_decay
+            )
 
     @torch.no_grad()
     def swap(self, model: torch.nn.Module):
         """Swap model weights with EMA shadow weights (and vice-versa)."""
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+        if self._sharded:
+            # DTensor locals are views of the live param storage — copy in
+            # place per shard; no load_state_dict round trip needed (or valid).
+            for k in self.shadow:
+                live = self._local(state[k])
+                tmp = live.detach().clone()
+                live.copy_(self.shadow[k].to(device=live.device, dtype=live.dtype))
+                self.shadow[k] = tmp.float().cpu()
+            return
         device = next(iter(state.values())).device
         dtype = next(iter(state.values())).dtype
         for k in self.shadow:
@@ -110,12 +136,66 @@ class EMATracker:
             model.load_state_dict(state)
 
     def state_dict(self):
-        return {"shadow": self.shadow, "decay": self.decay, "step": self.step}
+        """Return the EMA state with a FULL (unsharded) shadow.
+
+        In the sharded (FSDP2) case this gathers each shard into the full
+        tensor via the live param's mesh/placements — it is a COLLECTIVE and
+        must be called on every rank (rank 0 then saves). The saved format is
+        identical to the non-sharded one, so rollout/inference and non-FSDP2
+        resume load it unchanged.
+        """
+        if not self._sharded:
+            return {"shadow": self.shadow, "decay": self.decay, "step": self.step}
+
+        from torch.distributed.tensor import DTensor
+
+        model = self._model
+        state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+        full = OrderedDict()
+        for k, shard in self.shadow.items():
+            live = state[k]
+            if isinstance(live, DTensor):
+                # Explicit shape/stride: from_local otherwise INFERS the global
+                # shape as local x world_size, which is wrong for unevenly
+                # sharded params (FSDP2 pads dim-0 shards, so ranks hold
+                # different local sizes) — ranks then disagree on the
+                # all_gather size and deadlock.
+                d = DTensor.from_local(
+                    shard.to(device=live.device, dtype=torch.float32),
+                    device_mesh=live.device_mesh,
+                    placements=live.placements,
+                    shape=live.shape,
+                    stride=live.stride(),
+                )
+                full[k] = d.full_tensor().cpu()
+            else:
+                full[k] = shard
+        return {"shadow": full, "decay": self.decay, "step": self.step}
 
     def load_state_dict(self, d):
         self.decay = d["decay"]
         self.shadow = d["shadow"]
         self.step = d.get("step", 0)
+        if self._sharded:
+            # Checkpoint holds the FULL shadow; slice each tensor back to this
+            # rank's shard using the live param's mesh/placements.
+            from torch.distributed.tensor import DTensor, distribute_tensor
+
+            model = self._model
+            state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+            resharded = OrderedDict()
+            for k, full in self.shadow.items():
+                live = state.get(k)
+                if isinstance(live, DTensor):
+                    d_t = distribute_tensor(
+                        full.to(device=live.device, dtype=torch.float32),
+                        device_mesh=live.device_mesh,
+                        placements=live.placements,
+                    )
+                    resharded[k] = d_t.to_local().detach().float().cpu().clone()
+                else:
+                    resharded[k] = full
+            self.shadow = resharded
         # Checkpoints saved before the _is_spectral_norm_buffer filter was added
         # (pre-2026-05-15) may have EMA-averaged weight_u / weight_v in the shadow.
         # Averaged unit vectors are not unit vectors, so sigma = u^T W v becomes
@@ -203,16 +283,10 @@ class BaseTrainer(ABC):
         logger.info(f"Training metric: {self.training_metric} (direction: {'min' if self.direction is min else 'max'})")
 
         # ---- EMA setup ----
+        # FSDP2 is supported: EMATracker detects DTensor state and EMAs each
+        # rank's local shard (elementwise, so identical to full-weight EMA);
+        # the full shadow is gathered only at save and re-sharded on load.
         use_ema = trainer_conf.get("use_ema", False)
-        if use_ema and self.mode == "fsdp2":
-            # EMATracker clones model.state_dict(), which under FSDP2 returns
-            # this rank's DTensor SHARDS — the shadow would mix DTensor shards
-            # with plain CPU tensors and only ever cover 1/dp of the weights.
-            # Gathering the full state dict every step is too expensive. Fail
-            # loudly instead of silently corrupting the EMA.
-            raise ValueError(
-                "use_ema=True is not supported with FSDP2 (parallelism data: fsdp2). Disable EMA or use data: ddp."
-            )
         if use_ema:
             ema_decay = trainer_conf.get("ema_decay", 0.9999)
             self.ema: Optional[EMATracker] = EMATracker(self.model, decay=ema_decay)
@@ -343,6 +417,8 @@ class BaseTrainer(ABC):
             logger.info(f"Saving FSDP2 checkpoint to {self.save_loc}")
             model_sd = fsdp2_state_dict(self.model)
             optim_sd = fsdp2_optimizer_state_dict(self.model, optimizer)
+            # EMA state_dict gathers the full shadow — collective, all ranks.
+            ema_sd = self.ema.state_dict() if self.ema is not None else None
             if self.rank == 0:
                 state_dict = {
                     "epoch": epoch,
@@ -352,6 +428,11 @@ class BaseTrainer(ABC):
                     "scaler_state_dict": scaler.state_dict(),
                 }
                 torch.save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
+                if ema_sd is not None:
+                    torch.save(
+                        {"epoch": epoch, "model_state_dict": ema_sd},
+                        os.path.join(self.save_loc, "checkpoint_ema.pt"),
+                    )
                 if self.save_every_epoch:
                     copy_checkpoint(os.path.join(self.save_loc, "checkpoint.pt"), epoch)
         elif self.mode != "fsdp":
