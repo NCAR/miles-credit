@@ -117,7 +117,6 @@ trainer:
     tensor: 1
     domain: 1
 
-  cpu_offload: False
   activation_checkpoint: True
 
   load_weights: False     # set True to resume from checkpoint

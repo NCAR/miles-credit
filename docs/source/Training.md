@@ -226,7 +226,10 @@ Set `trainer.type: era5-gen2` in your config. Key fields:
 ```yaml
 trainer:
     type: era5-gen2
-    mode: ddp               # none | ddp | fsdp
+    parallelism:
+        data: ddp           # none | ddp | fsdp2
+        tensor: 1           # tensor-parallel degree (1 = disabled)
+        domain: 1           # domain-parallel shards (1 = disabled)
     train_batch_size: 8     # per-GPU; total = batch_size × n_gpus
     num_epoch: 5            # epochs per job submission
     epochs: &epochs 70      # total training target
