@@ -109,6 +109,18 @@ class TrainerERA5Gen2(BaseTrainer):
         # If True, log a warning on NaN loss instead of raising TrialPruned.
         self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
 
+        # Ring-CRPS ensemble training: one member per dp rank (see
+        # credit.losses.crps). ensemble_size repeat_interleave puts members on
+        # the batch axis instead — the ring would pair member i on rank r only
+        # with member i on rank j, biasing the spread term. Mutually exclusive.
+        self.is_ring_crps = conf.get("loss", {}).get("training_loss") == "ring-crps"
+        if self.is_ring_crps and self.ensemble_size > 1:
+            raise ValueError(
+                "ring-crps puts one ensemble member per dp rank and cannot be "
+                "combined with trainer.ensemble_size > 1 (members on the batch "
+                "axis). Use one or the other."
+            )
+
     # ------------------------------------------------------------------
     # Training loop
     # ------------------------------------------------------------------
@@ -263,6 +275,9 @@ class TrainerERA5Gen2(BaseTrainer):
                             full_data_dict["y_pred"],
                         ).mean()
                     accum_log(logs, {"loss": loss.item()})
+                    if self.is_ring_crps:
+                        # Ensemble spread proxy: std of this member's error.
+                        accum_log(logs, {"std": (full_data_dict["y_pred"] - full_data_dict["y"]).detach().std().item()})
                     scaler.scale(loss / grad_accum_every).backward(retain_graph=self.retain_graph)
                 # No barrier here: NCCL collectives (grad sync, halo exchange)
                 # already order ranks; a per-timestep barrier only adds latency.
@@ -315,6 +330,12 @@ class TrainerERA5Gen2(BaseTrainer):
                 dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
             results_dict["train_loss"].append(batch_loss[0].item())
             results_dict["train_forecast_len"].append(self.forecast_len)
+
+            if self.is_ring_crps and "std" in logs:
+                batch_std = torch.Tensor([logs["std"]]).to(self.device)
+                if self.distributed:
+                    dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
+                results_dict["train_std"].append(batch_std[0].item())
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(results_dict["train_loss"])

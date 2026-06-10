@@ -128,8 +128,19 @@ def main_cli():
 
     data_rank, data_world_size = data_parallel_coords(conf)
 
+    # Ring-CRPS ensemble training: one ensemble member per dp rank, so every
+    # dp rank must see the SAME training batches (member diversity comes from
+    # the per-dp-rank seed below). Validation keeps dp sharding — it uses the
+    # standard criterion on deterministic (eval-mode) forwards.
+    ring_ensemble = conf["loss"]["training_loss"] == "ring-crps"
+    train_rank, train_world_size = (0, 1) if ring_ensemble else (data_rank, data_world_size)
+    if ring_ensemble and data_world_size > 1:
+        logging.info(
+            f"ring-crps ensemble training: {data_world_size} members (one per dp rank), dp data sharding disabled"
+        )
+
     train_dataset = load_dataset(conf, is_train=True)
-    train_loader = load_dataloader(conf, train_dataset, rank=data_rank, world_size=data_world_size, is_train=True)
+    train_loader = load_dataloader(conf, train_dataset, rank=train_rank, world_size=train_world_size, is_train=True)
 
     skip_validation = conf["trainer"].get("skip_validation", False)
     if skip_validation:

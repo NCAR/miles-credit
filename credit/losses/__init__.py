@@ -45,6 +45,13 @@ def load_loss(conf, reduction="none", validation=False):
 
     use_weighted_loss = loss_conf.get("use_latitude_weights", False) or loss_conf.get("use_variable_weights", False)
 
+    if not validation and loss_conf["training_loss"] == "ring-crps" and use_weighted_loss:
+        raise ValueError(
+            "ring-crps returns a scalar and cannot be combined with "
+            "use_latitude_weights / use_variable_weights (VariableTotalLoss2D "
+            "needs an elementwise loss). Disable the weights for ring-crps training."
+        )
+
     if use_weighted_loss:
         logger.info("Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights")
         return VariableTotalLoss2D(conf, validation=validation)

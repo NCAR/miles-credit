@@ -5,6 +5,7 @@ from credit.losses.logcosh import LogCoshLoss
 from credit.losses.xtanh import XTanhLoss
 from credit.losses.xsigmoid import XSigmoidLoss
 from credit.losses.msle import MSLELoss
+from credit.losses.crps import RingCRPSLoss
 from credit.losses.kcrps import KCRPSLoss
 from credit.losses.spectral import SpectralLoss2D
 from credit.losses.power import PSDLoss
@@ -48,6 +49,7 @@ def base_losses(conf, reduction="mean", validation=False):
         "xsigmoid": XSigmoidLoss,
         "KCRPS": KCRPSLoss,
         "almost-fair-crps": AlmostFairKCRPSLoss,
+        "ring-crps": RingCRPSLoss,
         "spectral": SpectralLoss2D,
         "power": PSDLoss,
         "covmse": CovarianceWeightedMSELoss,
