@@ -178,6 +178,18 @@ class TrainerERA5Gen2(BaseTrainer):
             loss = 0
             full_data_dict = {}
 
+            # Suppress gradient sync on non-boundary micro-steps during
+            # gradient accumulation — otherwise DDP all-reduces / FSDP2
+            # reduce-scatters on every backward, multiplying comms by
+            # grad_accum_every. Both wrappers expose a per-iteration flag
+            # (what no_sync() toggles), checked at the next forward/backward.
+            is_accum_boundary = (steps + 1) % grad_accum_every == 0 or steps == batches_per_epoch - 1
+            if grad_accum_every > 1:
+                if self.mode == "fsdp2" and hasattr(self.model, "set_requires_gradient_sync"):
+                    self.model.set_requires_gradient_sync(is_accum_boundary)
+                elif isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                    self.model.require_backward_grad_sync = is_accum_boundary
+
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
 
@@ -258,8 +270,13 @@ class TrainerERA5Gen2(BaseTrainer):
             full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
 
             # optimizer step at accumulation boundary
-            if (steps + 1) % grad_accum_every == 0 or steps == batches_per_epoch - 1:
+            if is_accum_boundary:
                 sync_domain_gradients(self.model, self.domain_manager)
+                _tp_group = getattr(self._raw_model, "_tp_group", None)
+                if _tp_group is not None:
+                    from credit.parallel.tensor_parallel import sync_replicated_gradients
+
+                    sync_replicated_gradients(self.model, _tp_group)
                 scaler.unscale_(optimizer)
                 if self.grad_max_norm == "dynamic":
                     # Global L2 norm: sum SQUARED norms across ranks, then sqrt.
@@ -443,6 +460,14 @@ class TrainerERA5Gen2(BaseTrainer):
                 full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
 
                 batch_loss = torch.Tensor([loss.item() if torch.is_tensor(loss) else loss]).to(self.device)
+                # Average validation loss across ranks (the train loop already
+                # does this). Without it each rank tracks a different local
+                # valid_loss, and fit() makes early-stopping / best-checkpoint
+                # decisions from divergent per-rank histories — ranks can then
+                # break out of training at different epochs and hang in the
+                # next collective.
+                if self.distributed:
+                    dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)

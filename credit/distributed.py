@@ -424,7 +424,16 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
 
     elif data_mode == "ddp":
         dp_group = dp_mesh.get_group() if dp_mesh is not None else None
-        ddp_kwargs = dict(device_ids=[device], static_graph=True)
+        # static_graph caches the reducer plan from the first iteration, which
+        # is incompatible with toggling require_backward_grad_sync for
+        # gradient accumulation. Only enable it when not accumulating — and
+        # when it's off, DDP needs find_unused_parameters for models with
+        # allocated-but-unused modules (e.g. WXFormer's cube_embedding when
+        # patch sizes are 1), which static_graph otherwise tolerated.
+        _grad_accum = int(conf.get("trainer", {}).get("grad_accum_every", 1))
+        ddp_kwargs = dict(device_ids=[device], static_graph=_grad_accum == 1)
+        if _grad_accum > 1:
+            ddp_kwargs["find_unused_parameters"] = True
         if dp_group is not None:
             ddp_kwargs["process_group"] = dp_group
         model = torch.nn.parallel.DistributedDataParallel(model, **ddp_kwargs)
