@@ -224,3 +224,57 @@ def fsdp2_load_state_dict(model: nn.Module, state_dict: dict) -> None:
 
     opts = StateDictOptions(full_state_dict=True, broadcast_from_rank0=True)
     set_model_state_dict(model, state_dict, options=opts)
+
+
+def fsdp2_optimizer_state_dict(model: nn.Module, optimizer) -> dict:
+    """Gather a full (unsharded) optimizer state dict from an FSDP2 model.
+
+    A raw ``optimizer.state_dict()`` under FSDP2 contains this rank's DTensor
+    SHARDS only — saving that from rank 0 silently drops every other rank's
+    optimizer state. This gathers the full state on every rank so rank 0 can
+    save a checkpoint that survives resume (at any world size).
+    """
+    from torch.distributed.checkpoint.state_dict import (
+        get_optimizer_state_dict,
+        StateDictOptions,
+    )
+
+    opts = StateDictOptions(full_state_dict=True, broadcast_from_rank0=False)
+    return get_optimizer_state_dict(model, optimizer, options=opts)
+
+
+def fsdp2_load_optimizer_state_dict(model: nn.Module, optimizer, state_dict: dict) -> None:
+    """Load a full optimizer state dict into an FSDP2-sharded optimizer.
+
+    Params that never received gradients (unused modules, frozen layers) have
+    no saved state: AdamW creates per-param state lazily on the first step
+    with a non-None grad. ``set_optimizer_state_dict`` however requires an
+    entry for every optimizer param and raises KeyError otherwise (e.g.
+    WXFormer's cube_embedding with patch sizes of 1 is allocated but never
+    called). Synthesize lazy-init (zero) state for those params — equivalent
+    to their pre-first-gradient condition.
+    """
+    from torch.distributed.checkpoint.state_dict import (
+        set_optimizer_state_dict,
+        StateDictOptions,
+    )
+
+    state = state_dict.get("state", {})
+    opt_param_ids = {id(p) for g in optimizer.param_groups for p in g["params"]}
+    patched = []
+    for fqn, p in model.named_parameters():
+        if id(p) in opt_param_ids and fqn not in state:
+            # p.shape on a DTensor is the full logical shape.
+            state[fqn] = {
+                "step": torch.tensor(0.0),
+                "exp_avg": torch.zeros(p.shape, dtype=torch.float32),
+                "exp_avg_sq": torch.zeros(p.shape, dtype=torch.float32),
+            }
+            patched.append(fqn)
+    if patched:
+        logger.info(
+            f"FSDP2 optimizer load: synthesized lazy-init state for {len(patched)} stateless params: {patched[:4]}{'...' if len(patched) > 4 else ''}"
+        )
+
+    opts = StateDictOptions(full_state_dict=True, broadcast_from_rank0=True)
+    set_optimizer_state_dict(model, optimizer, optim_state_dict=state_dict, options=opts)

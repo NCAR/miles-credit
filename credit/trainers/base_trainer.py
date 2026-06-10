@@ -204,6 +204,15 @@ class BaseTrainer(ABC):
 
         # ---- EMA setup ----
         use_ema = trainer_conf.get("use_ema", False)
+        if use_ema and self.mode == "fsdp2":
+            # EMATracker clones model.state_dict(), which under FSDP2 returns
+            # this rank's DTensor SHARDS — the shadow would mix DTensor shards
+            # with plain CPU tensors and only ever cover 1/dp of the weights.
+            # Gathering the full state dict every step is too expensive. Fail
+            # loudly instead of silently corrupting the EMA.
+            raise ValueError(
+                "use_ema=True is not supported with FSDP2 (parallelism data: fsdp2). Disable EMA or use data: ddp."
+            )
         if use_ema:
             ema_decay = trainer_conf.get("ema_decay", 0.9999)
             self.ema: Optional[EMATracker] = EMATracker(self.model, decay=ema_decay)
@@ -315,19 +324,30 @@ class BaseTrainer(ABC):
         scaler: GradScaler,
     ) -> None:
         """Save model, optimizer, scheduler, and scaler state."""
+        if int(self.conf.get("trainer", {}).get("parallelism", {}).get("tensor", 1)) > 1:
+            logger.warning(
+                "Checkpointing with tensor parallelism (tensor > 1) saves only this "
+                "rank's TP shards under rewritten keys — the checkpoint will NOT be "
+                "loadable into an unsharded model. TP checkpoint support is not "
+                "implemented yet."
+            )
         sched_state = scheduler.state_dict() if self.use_scheduler and scheduler is not None else None
 
         if self.mode == "fsdp2":
-            from credit.parallel.fsdp2 import fsdp2_state_dict
+            from credit.parallel.fsdp2 import fsdp2_state_dict, fsdp2_optimizer_state_dict
 
-            # FSDP2: all ranks gather full state dict, rank 0 saves
+            # FSDP2: all ranks gather full (unsharded) state dicts, rank 0 saves.
+            # The optimizer state must also be gathered — a raw
+            # optimizer.state_dict() holds only this rank's DTensor shards, so
+            # saving it from rank 0 silently drops every other rank's state.
             logger.info(f"Saving FSDP2 checkpoint to {self.save_loc}")
             model_sd = fsdp2_state_dict(self.model)
+            optim_sd = fsdp2_optimizer_state_dict(self.model, optimizer)
             if self.rank == 0:
                 state_dict = {
                     "epoch": epoch,
                     "model_state_dict": model_sd,
-                    "optimizer_state_dict": optimizer.state_dict(),
+                    "optimizer_state_dict": optim_sd,
                     "scheduler_state_dict": sched_state,
                     "scaler_state_dict": scaler.state_dict(),
                 }

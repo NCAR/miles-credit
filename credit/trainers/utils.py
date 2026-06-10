@@ -506,7 +506,15 @@ def load_dataloader(
 
 
 def load_model_states_and_optimizer(conf, model, device):
-    """Load model weights, optimizer, scheduler, and gradient scaler."""
+    """Load model weights, optimizer, scheduler, and gradient scaler.
+
+    The effective checkpoint mode comes from the gen2 ``trainer.parallelism``
+    block when present (the legacy ``trainer.mode`` key is unreliable there:
+    gen2 configs commonly carry ``mode: ddp`` alongside ``data: fsdp2``).
+    FSDP2 models need the DCP full-state-dict APIs — a plain
+    ``model.module.load_state_dict`` either crashes (no ``.module``) or
+    mismatches DTensor parameters.
+    """
     conf["save_loc"] = save_loc = os.path.expandvars(conf["save_loc"])
 
     learning_rate = float(conf["trainer"]["learning_rate"])
@@ -517,6 +525,25 @@ def load_model_states_and_optimizer(conf, model, device):
     load_optimizer_conf = conf["trainer"].get("load_optimizer", False)
     load_scaler_conf = conf["trainer"].get("load_scaler", False)
     load_scheduler_conf = conf["trainer"].get("load_scheduler", False)
+
+    # Effective mode: gen2 parallelism block overrides the legacy mode key.
+    _p = conf["trainer"].get("parallelism", {})
+    mode = conf["trainer"].get("mode", "none")
+    if _p.get("data") == "fsdp2":
+        mode = "fsdp2"
+    elif _p.get("data") == "ddp":
+        mode = "ddp"
+    elif _p and _p.get("data", "none") == "none":
+        # tensor/domain-only parallelism: model is not DDP-wrapped
+        mode = "none"
+
+    if load_weights and int(_p.get("tensor", 1)) > 1:
+        raise NotImplementedError(
+            "Resuming with tensor parallelism (tensor > 1) is not supported: "
+            "checkpoints save only rank 0's TP shards under rewritten keys. "
+            "Train TP runs from scratch or restructure to checkpoint before "
+            "applying TP."
+        )
 
     def _make_optimizer(model):
         opt = torch.optim.AdamW(
@@ -538,18 +565,23 @@ def load_model_states_and_optimizer(conf, model, device):
         scaler = _make_scaler()
 
     elif not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
-        if conf["trainer"]["mode"] == "fsdp":
+        if mode == "fsdp":
             optimizer = _make_optimizer(model)
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
         else:
             ckpt = os.path.join(save_loc, "checkpoint.pt")
             checkpoint = torch.load(ckpt, map_location=device)
-            if conf["trainer"]["mode"] == "ddp":
+            if mode == "fsdp2":
+                from credit.parallel.fsdp2 import fsdp2_load_state_dict
+
+                fsdp2_load_state_dict(model, checkpoint["model_state_dict"])
+            elif mode == "ddp":
                 load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+                load_state_dict_error_handler(load_msg)
             else:
                 load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
-            load_state_dict_error_handler(load_msg)
+                load_state_dict_error_handler(load_msg)
             optimizer = _make_optimizer(model)
 
         scheduler = load_scheduler(optimizer, conf)
@@ -562,14 +594,21 @@ def load_model_states_and_optimizer(conf, model, device):
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location=device)
 
-        if conf["trainer"]["mode"] == "fsdp":
+        if mode == "fsdp":
             optimizer = _make_optimizer(model)
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
             if load_optimizer_conf:
                 checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
+        elif mode == "fsdp2":
+            from credit.parallel.fsdp2 import fsdp2_load_state_dict, fsdp2_load_optimizer_state_dict
+
+            fsdp2_load_state_dict(model, checkpoint["model_state_dict"])
+            optimizer = _make_optimizer(model)
+            if load_optimizer_conf:
+                fsdp2_load_optimizer_state_dict(model, optimizer, checkpoint["optimizer_state_dict"])
         else:
-            if conf["trainer"]["mode"] == "ddp":
+            if mode == "ddp":
                 load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
             else:
                 load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
