@@ -561,16 +561,20 @@ class BaseTrainer(ABC):
             torch.distributed.barrier()
 
         # Preflight: synthetic forward/backward/optimizer step to measure peak VRAM.
-        # Valid for ddp/none (per-rank footprint matches the rank-local estimate;
-        # the check unwraps .module and triggers no collectives). Skipped when
-        # parameters are sharded (fsdp/fsdp2/tensor/domain): the rank-local pass
-        # is unrepresentative and a sharded forward would hang on collectives.
+        # Only safe on an unwrapped model. Sharded modes (fsdp/fsdp2/tensor/domain)
+        # would hang on collectives, and a DDP-wrapped model's parameters carry
+        # reducer autograd hooks: a rank-0-only backward advances rank 0's reducer
+        # iteration state out-of-band, which deadlocks the next gradient sync
+        # under static_graph (observed: gen2 ddp smoke hangs at step 2).
         _p_fit = conf.get("trainer", {}).get("parallelism", {})
-        _sharded = (
-            self.mode in ("fsdp", "fsdp2") or int(_p_fit.get("tensor", 1)) > 1 or int(_p_fit.get("domain", 1)) > 1
+        _wrapped = (
+            self.mode in ("fsdp", "fsdp2")
+            or int(_p_fit.get("tensor", 1)) > 1
+            or int(_p_fit.get("domain", 1)) > 1
+            or isinstance(self.model, torch.nn.parallel.DistributedDataParallel)
         )
-        if _sharded:
-            logger.info("Skipping rank-local GPU memory preflight: parameters are sharded under this parallelism mode.")
+        if _wrapped:
+            logger.info("Skipping rank-local GPU memory preflight: model is wrapped/sharded for distributed training.")
         else:
             check_model_gpu_memory(conf, self.model, optimizer, rank=self.rank)
 
