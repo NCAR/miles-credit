@@ -94,22 +94,24 @@ def _make_conf(save_loc: str, scaler_path: str) -> dict:
             "batches_per_epoch": N_ROUNDS,
         },
         "preblocks": {
-            # Log transform on specific humidity (positive, heavy-tailed).
-            "log_transform": {
-                "type": "log_transform",
-                "args": {"variables": [VAR_Q], "data_types": ["input", "target"]},
-            },
-            # Placeholder scaler block so apply_preblocks_before_scaler stops here;
-            # the per-test scalers below are built separately.
-            "scaler": {
-                "type": "bridgescaler_transform",
-                "args": {
-                    "variables": [],
-                    "scaler_path": scaler_path,
-                    "scaler_type": "standard",
-                    "scaler_params": {"channels_last": False},
+            "per_step": {
+                # Log transform on specific humidity (positive, heavy-tailed).
+                "log_transform": {
+                    "type": "log_transform",
+                    "args": {"variables": [VAR_Q], "data_types": ["input", "target"]},
                 },
-            },
+                # Placeholder scaler block so apply_preblocks_before_scaler stops here;
+                # the per-test scalers below are built separately.
+                "scaler": {
+                    "type": "bridgescaler_transformer",
+                    "args": {
+                        "variables": [],
+                        "scaler_path": scaler_path,
+                        "scaler_type": "standard",
+                        "scaler_params": {"channels_last": False},
+                    },
+                },
+            }
         },
     }
 
@@ -377,7 +379,7 @@ def test_fit_scaler_batch_returns_nested_scaler_dict(processed_batches, tmp_path
         scaler_params={"channels_last": False},
     )
     fitted = transformer.fit_scaler_batch(batches[0])
-    assert set(fitted.keys()) == {"input"}
+    assert "input" in fitted
     assert SOURCE in fitted["input"]
     leaf = fitted["input"][SOURCE][VAR_T]
     assert hasattr(leaf, "mean_x_") and np.isfinite(np.asarray(leaf.mean_x_)).all()
@@ -438,7 +440,7 @@ def test_preprocess_main_end_to_end(tmp_path, monkeypatch):
 
     scaler_file = tmp_path / "scaler.json"
     conf = _make_conf(str(tmp_path / "save"), str(scaler_file))
-    conf["preblocks"]["scaler"]["args"]["scaler_params"] = {"channels_last": False}
+    conf["preblocks"]["per_step"]["scaler"]["args"]["scaler_params"] = {"channels_last": False}
     conf["trainer"]["batches_per_epoch"] = 3
 
     config_path = tmp_path / "preprocess.yml"

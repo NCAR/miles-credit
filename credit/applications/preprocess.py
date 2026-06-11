@@ -153,6 +153,7 @@ def main():
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
     preblocks = build_preblocks(conf["preblocks"])
+    print(preblocks)
     scaler_block_key = None
     for k, v in preblocks.items():
         if isinstance(v, BridgeScalerTransformer):
@@ -160,7 +161,14 @@ def main():
             break
     if scaler_block_key is None:
         raise ValueError("BridgeScalerTransformer not found in preblocks.")
-    batches_per_epoch = trainer_conf.get("batches_per_epoch", 1)
+    _bpe = trainer_conf.get("batches_per_epoch", 0) or 0
+    if hasattr(train_loader.sampler, "batches_per_epoch"):
+        dataset_batches = train_loader.sampler.batches_per_epoch()
+    elif hasattr(train_loader.dataset, "batches_per_epoch"):
+        dataset_batches = train_loader.dataset.batches_per_epoch()
+    else:
+        dataset_batches = len(train_loader)
+    batches_per_epoch = _bpe if 0 < _bpe < dataset_batches else dataset_batches
     dl = cycle(train_loader)
     for i in range(batches_per_epoch):
         root.info(f"Worker {rank}: Processing batch {i} of {batches_per_epoch}.")
