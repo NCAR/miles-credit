@@ -49,7 +49,7 @@ data:
           path: /glade/campaign/cisl/aiml/credit/static_scalers/static_norm_old.nc
         diagnostic: null
   timestep: 6h
-  forecast_len: 1
+  forecast_len: 2
   start_datetime: '2015-01-01'
   end_datetime: '2016-12-31'
 validation_data:

@@ -37,18 +37,26 @@ sharding slices fused projections across q/k/v boundaries and lacks the
 backward all-reduce. The `tp_*` configs are kept for the #415 work but are not
 in the matrix.
 
+Every config trains **multistep** (`forecast_len: 2`), which exercises the
+domain-parallel between-step gather (`gather_spatial` of `y_processed`) and
+the rollout assembly in every mode. For each mode the matrix runs two phases:
+a **fresh** run (train 1 epoch, save `checkpoint.pt`) and a **resume** run
+(reload weights + optimizer + scaler + scheduler, train a second epoch) —
+proving the save/load plumbing stays in sync per parallelism mode (FSDP2 DCP
+full-state APIs, domain rewritten keys, and the sharded EMA shadow, which is
+enabled in `fsdp2_ac` via `use_ema: true`).
+
 | Config | data | tensor | domain | GPUs to exercise fully |
 |--------|------|--------|--------|------------------------|
-| `smoke_v2parallel_ddp_derecho.yml`              | ddp   | 1 | 1 | 2 |
-| `smoke_v2parallel_fsdp2_derecho.yml`            | fsdp2 | 1 | 1 | 2 |
-| `smoke_v2parallel_fsdp2_ac_derecho.yml`         | fsdp2 | 1 | 1 | 2 (+ activation checkpoint) |
-| `smoke_v2parallel_domain_derecho.yml`           | ddp   | 1 | 2 | 4 (dp=2, domain=2) |
-| `smoke_v2parallel_combo_derecho.yml`            | fsdp2 | 1 | 2 | 4 (dp=2, domain=2) |
-| `smoke_v2parallel_ddp_multistep_derecho.yml`    | ddp   | 1 | 1 | 2 (forecast_len=2) |
-| `smoke_v2parallel_domain_multistep_derecho.yml` | ddp   | 1 | 2 | 4 (forecast_len=2 + between-step gather) |
-| `smoke_v2parallel_ac_casper.yml`                | none  | 1 | 1 | 1 (Casper V100, activation checkpoint only) |
+| `smoke_v2parallel_ddp_derecho.yml`      | ddp   | 1 | 1 | 2 |
+| `smoke_v2parallel_fsdp2_derecho.yml`    | fsdp2 | 1 | 1 | 2 |
+| `smoke_v2parallel_fsdp2_ac_derecho.yml` | fsdp2 | 1 | 1 | 2 (+ activation checkpoint + EMA) |
+| `smoke_v2parallel_domain_derecho.yml`   | ddp   | 1 | 2 | 4 (dp=2, domain=2) |
+| `smoke_v2parallel_combo_derecho.yml`    | fsdp2 | 1 | 2 | 4 (dp=2, domain=2) |
+| `smoke_v2parallel_ac_casper.yml`        | none  | 1 | 1 | 1 (Casper V100, activation checkpoint, single-process) |
 
-`run_smoke.pbs` covers the 7 Derecho configs on a single 4-GPU node, plus two
-parity gates (ddp vs domain, single-step and multistep). `run_smoke_2node.pbs`
+`run_smoke.pbs` covers the 5 Derecho configs (fresh + resume each, 10 runs) on
+a single 4-GPU node, plus a ddp-vs-domain parity gate. `run_smoke_2node.pbs`
 runs the combo config on 8 GPUs / 2 nodes so FSDP2 shards across nodes. The
-`ac_casper` config is the single-GPU Casper variant; run it on Casper.
+`ac_casper` config is the single-GPU Casper variant; run it on Casper with
+plain `python` (no launcher) to exercise the single-process path.

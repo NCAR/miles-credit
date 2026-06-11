@@ -49,7 +49,7 @@ data:
           path: /glade/campaign/cisl/aiml/credit/static_scalers/static_norm_old.nc
         diagnostic: null
   timestep: 6h
-  forecast_len: 1
+  forecast_len: 2
   start_datetime: '2015-01-01'
   end_datetime: '2016-12-31'
 validation_data:
@@ -184,6 +184,7 @@ trainer:
     warmup_steps: 10
     gamma: 1.0
   amp: false
+  use_ema: true
   grad_accum_every: 1
   grad_max_norm: 1.0
   thread_workers: 4
