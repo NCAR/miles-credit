@@ -2,7 +2,7 @@ import os
 
 import torch
 
-import credit.losses.weighted_loss as weighted_loss
+import credit.domain_parallel.manager as domain_manager_mod
 from credit.losses.kcrps import KCRPSLoss
 from credit.losses.covariance import CovarianceWeightedMSELoss
 from credit.losses.weighted_loss import VariableTotalLoss2D
@@ -56,7 +56,7 @@ def test_variable_total_loss_slices_latitude_weights_for_domain_shard(monkeypatc
     }
     loss_fn = VariableTotalLoss2D(conf)
     loss_fn.lat_weights = torch.arange(1, 7, dtype=torch.float32).view(1, 6, 1)
-    monkeypatch.setattr(weighted_loss, "get_domain_parallel_manager", lambda: FakeDomainManager())
+    monkeypatch.setattr(domain_manager_mod, "get_domain_parallel_manager", lambda: FakeDomainManager())
 
     target = torch.zeros(1, 1, 3, 2)
     pred = torch.ones_like(target)

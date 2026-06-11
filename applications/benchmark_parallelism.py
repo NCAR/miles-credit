@@ -56,7 +56,9 @@ def make_synthetic_input(conf, device):
 def main():
     args = parse_args()
 
-    rank = int(os.environ.get("LOCAL_RANK", 0))
+    # RANK is the global rank; LOCAL_RANK alone would collide across nodes.
+    rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", 0)))
+    local_rank = int(os.environ.get("LOCAL_RANK", rank))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
 
     with open(args.config) as f:
@@ -83,7 +85,7 @@ def main():
     if _any_dist:
         setup(rank, world_size, "ddp")
 
-    device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
+    device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
     torch.cuda.set_device(device)
 
     # Build model

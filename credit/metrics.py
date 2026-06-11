@@ -2,7 +2,23 @@ import torch
 import numpy as np
 from datetime import datetime
 from credit.losses.weighted_loss import latitude_weights
-from credit.domain_parallel.manager import get_domain_parallel_manager
+from credit.parallel.domain import shard_lat_weights
+
+
+def _w_lat_for_target(metrics_obj, target):
+    """Sharded, device-resident latitude weights, cached per (H, dtype, device).
+
+    The shard and the host-to-device copy are invariant for a run, so caching
+    avoids re-doing both on every metrics call.
+    """
+    if metrics_obj.w_lat is None:
+        return 1.0
+    key = (target.shape[-2], target.dtype, target.device)
+    if getattr(metrics_obj, "_w_lat_key", None) != key:
+        w = shard_lat_weights(metrics_obj.w_lat, target.shape[-2])
+        metrics_obj._w_lat_cached = w.to(dtype=target.dtype, device=target.device)
+        metrics_obj._w_lat_key = key
+    return metrics_obj._w_lat_cached
 
 
 class LatWeightedMetrics:
@@ -30,35 +46,7 @@ class LatWeightedMetrics:
             self.ensemble_size = conf["predict"].get("ensemble_size", 1)
 
     def _get_w_lat(self, target):
-        if self.w_lat is None:
-            return 1.0
-
-        weights = self.w_lat
-        target_h = target.shape[-2]
-        weights_h = weights.shape[-2]
-
-        if weights_h == target_h:
-            return weights.to(dtype=target.dtype, device=target.device)
-
-        manager = get_domain_parallel_manager()
-        if manager is None or manager.domain_parallel_size <= 1:
-            # If not using DP, but sizes don't match, we still return weights
-            # but it will likely fail later or broadcast unexpectedly.
-            # However, in DP mode, we MUST shard.
-            return weights.to(dtype=target.dtype, device=target.device)
-
-        if weights_h % manager.domain_parallel_size != 0:
-            raise ValueError(
-                f"Latitude weights height ({weights_h}) is not divisible by "
-                f"domain_parallel_size ({manager.domain_parallel_size})."
-            )
-
-        shard_h = weights_h // manager.domain_parallel_size
-        if shard_h != target_h:
-            raise ValueError(f"Latitude weights shard height ({shard_h}) does not match target height ({target_h}).")
-
-        start = manager.domain_rank * shard_h
-        return weights.narrow(-2, start, shard_h).contiguous().to(dtype=target.dtype, device=target.device)
+        return _w_lat_for_target(self, target)
 
     def __call__(self, pred, y, clim=None, transform=None, forecast_datetime=0):
         # forecast_datetime is passed for interface consistency but not used here
@@ -147,32 +135,7 @@ class LatWeightedMetricsClimatology:
         self.w_var = None
 
     def _get_w_lat(self, target):
-        if self.w_lat is None:
-            return 1.0
-
-        weights = self.w_lat
-        target_h = target.shape[-2]
-        weights_h = weights.shape[-2]
-
-        if weights_h == target_h:
-            return weights.to(dtype=target.dtype, device=target.device)
-
-        manager = get_domain_parallel_manager()
-        if manager is None or manager.domain_parallel_size <= 1:
-            return weights.to(dtype=target.dtype, device=target.device)
-
-        if weights_h % manager.domain_parallel_size != 0:
-            raise ValueError(
-                f"Latitude weights height ({weights_h}) is not divisible by "
-                f"domain_parallel_size ({manager.domain_parallel_size})."
-            )
-
-        shard_h = weights_h // manager.domain_parallel_size
-        if shard_h != target_h:
-            raise ValueError(f"Latitude weights shard height ({shard_h}) does not match target height ({target_h}).")
-
-        start = manager.domain_rank * shard_h
-        return weights.narrow(-2, start, shard_h).contiguous().to(dtype=target.dtype, device=target.device)
+        return _w_lat_for_target(self, target)
 
     def get_climatology(self, forecast_datetime, variable):
         """Extract the climatology for the given forecast datetime and variable."""

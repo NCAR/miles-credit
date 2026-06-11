@@ -11,12 +11,15 @@ import optuna
 
 from credit.losses.base_losses import is_crps_loss
 from credit.parallel.domain import (
+    gather_spatial,
     get_domain_manager,
     get_raw_model,
     shard_spatial,
     unpad_shard_interp,
     sync_domain_gradients,
 )
+from credit.parallel.collectives import all_reduce_avg
+from credit.parallel.fsdp2 import fsdp2_is_applied
 from credit.postblock import build_postblocks, apply_postblocks
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.trainers.rollout_utils import assemble_rollout_batch
@@ -48,6 +51,13 @@ class TrainerERA5Gen2(BaseTrainer):
         """
         super().__init__(model, rank, conf)
         logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
+
+        # The config can request fsdp2 while the wrapper skips it (dp_size <= 1).
+        # AMP decisions must follow what was actually applied: when FSDP2 is
+        # active its MixedPrecisionPolicy replaces autocast; when it was
+        # skipped, plain autocast (trainer.amp) is all the mixed precision
+        # this run has.
+        self._fsdp2_active = fsdp2_is_applied(model)
 
         # ---- Domain parallel manager (None when not using domain parallel) ----
         self.domain_manager = get_domain_manager(model)
@@ -119,6 +129,67 @@ class TrainerERA5Gen2(BaseTrainer):
         self.is_ring_crps = loss_name == "ring-crps"
         self.is_crps_ensemble = is_crps_loss(loss_name) and self.ensemble_size > 1
         self.use_batch_axis_ensemble = self.ensemble_size > 1 and not self.is_ring_crps
+
+    # ------------------------------------------------------------------
+    # Domain-parallel forward helpers (shared by train and validate)
+    # ------------------------------------------------------------------
+
+    def _sharded_forward(self, full_data_dict, amp_enabled):
+        """Model forward with domain-parallel pad/shard handling.
+
+        Pads + shards the input over the domain group, runs the model with its
+        internal padding suppressed (the trainer pre-pads the full grid), unpads
+        the prediction back to the shard's target shape, flattens 5D output to
+        4D, and shards y to match y_pred's spatial shard. A no-op passthrough
+        (plus the forward) when domain parallelism is off.
+        """
+        if self._domain_pre_pad is not None:
+            full_data_dict["x"] = self._domain_pre_pad.pad(full_data_dict["x"])
+        full_data_dict["x"] = shard_spatial(full_data_dict["x"], self.domain_manager)
+
+        if self._domain_pre_pad is not None:
+            self._raw_model._skip_internal_padding = True
+        try:
+            with torch.autocast(device_type="cuda", enabled=amp_enabled):
+                full_data_dict["y_pred"] = self.model(full_data_dict["x"])
+        finally:
+            if self._domain_pre_pad is not None:
+                self._raw_model._skip_internal_padding = False
+        if self._domain_pre_pad is not None:
+            full_data_dict["y_pred"] = unpad_shard_interp(
+                full_data_dict["y_pred"],
+                self._domain_pre_pad,
+                self.domain_manager,
+                self._domain_image_h,
+                self._domain_image_w,
+            )
+        if full_data_dict["y_pred"].dim() == 5:
+            full_data_dict["y_pred"] = full_data_dict["y_pred"].flatten(1, 2)
+
+        # domain parallel: shard y to match y_pred's spatial shard
+        if "y" in full_data_dict and full_data_dict["y"] is not None:
+            _y = full_data_dict["y"]
+            if _y.dim() == 5:
+                _y = _y.flatten(1, 2)
+            full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
+
+    def _gather_for_next_step(self, full_data_dict):
+        """Gather domain-sharded y_processed back to full height between rollout steps.
+
+        assemble_rollout_batch concats the previous step's prognostics with
+        full-height forcings/statics, so every domain rank needs the full-grid
+        prediction; shard_spatial re-shards the assembled input at the next
+        forward. No-op without domain parallelism. Gradient-free by design:
+        Reconstruct detaches y_processed.
+        """
+        if self.domain_manager is None or self.domain_manager.domain_parallel_size <= 1:
+            return
+        y_processed = full_data_dict.get("y_processed")
+        if not isinstance(y_processed, dict):
+            return
+        for source_vars in y_processed.values():
+            for var_key, tensor in source_vars.items():
+                source_vars[var_key] = gather_spatial(tensor, self.domain_manager)
 
     # ------------------------------------------------------------------
     # Training loop
@@ -227,41 +298,15 @@ class TrainerERA5Gen2(BaseTrainer):
                 if self.flag_clamp:
                     full_data_dict["x"] = torch.clamp(full_data_dict["x"], min=self.clamp_min, max=self.clamp_max)
 
-                # domain parallel: pad + shard input before forward
-                if self._domain_pre_pad is not None:
-                    full_data_dict["x"] = self._domain_pre_pad.pad(full_data_dict["x"])
-                full_data_dict["x"] = shard_spatial(full_data_dict["x"], self.domain_manager)
-
-                # FSDP2 uses MixedPrecisionPolicy; skip manual autocast to avoid
-                # conflicts with SpectralNorm power-iteration buffers.
-                _amp = self.amp and self.mode != "fsdp2"
-                if self._domain_pre_pad is not None:
-                    self._raw_model._skip_internal_padding = True
-                try:
-                    with torch.autocast(device_type="cuda", enabled=_amp):
-                        full_data_dict["y_pred"] = self.model(full_data_dict["x"])
-                finally:
-                    if self._domain_pre_pad is not None:
-                        self._raw_model._skip_internal_padding = False
-                if self._domain_pre_pad is not None:
-                    full_data_dict["y_pred"] = unpad_shard_interp(
-                        full_data_dict["y_pred"],
-                        self._domain_pre_pad,
-                        self.domain_manager,
-                        self._domain_image_h,
-                        self._domain_image_w,
-                    )
-                if full_data_dict["y_pred"].dim() == 5:
-                    full_data_dict["y_pred"] = full_data_dict["y_pred"].flatten(1, 2)
-
-                # domain parallel: shard y to match y_pred's spatial shard
-                if "y" in full_data_dict and full_data_dict["y"] is not None:
-                    _y = full_data_dict["y"]
-                    if _y.dim() == 5:
-                        _y = _y.flatten(1, 2)
-                    full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
+                # FSDP2's MixedPrecisionPolicy replaces manual autocast (and
+                # conflicts with SpectralNorm power-iteration buffers); when
+                # FSDP2 was skipped (dp_size <= 1), plain autocast applies.
+                _amp = self.amp and not self._fsdp2_active
+                self._sharded_forward(full_data_dict, _amp)
 
                 full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
+                if t < self.forecast_len:
+                    self._gather_for_next_step(full_data_dict)
 
                 if t in self.backprop_on_timestep:
                     if self.flag_clamp:
@@ -324,12 +369,12 @@ class TrainerERA5Gen2(BaseTrainer):
                 for name, value in metrics_dict.items():
                     value = torch.Tensor([value]).to(self.device, non_blocking=True)
                     if self.distributed:
-                        dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                        all_reduce_avg(value)
                     results_dict[f"train_{name}"].append(value[0].item())
 
             batch_loss = torch.Tensor([logs.get("loss", 0.0)]).to(self.device)
             if self.distributed:
-                dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+                all_reduce_avg(batch_loss)
             results_dict["train_loss"].append(batch_loss[0].item())
             results_dict["train_forecast_len"].append(self.forecast_len)
 
@@ -432,37 +477,12 @@ class TrainerERA5Gen2(BaseTrainer):
                     if self.flag_clamp:
                         full_data_dict["x"] = torch.clamp(full_data_dict["x"], min=self.clamp_min, max=self.clamp_max)
 
-                    # domain parallel: pad + shard input before forward
-                    if self._domain_pre_pad is not None:
-                        full_data_dict["x"] = self._domain_pre_pad.pad(full_data_dict["x"])
-                    full_data_dict["x"] = shard_spatial(full_data_dict["x"], self.domain_manager)
-
-                    if self._domain_pre_pad is not None:
-                        self._raw_model._skip_internal_padding = True
-                    try:
-                        full_data_dict["y_pred"] = self.model(full_data_dict["x"])
-                    finally:
-                        if self._domain_pre_pad is not None:
-                            self._raw_model._skip_internal_padding = False
-                    if self._domain_pre_pad is not None:
-                        full_data_dict["y_pred"] = unpad_shard_interp(
-                            full_data_dict["y_pred"],
-                            self._domain_pre_pad,
-                            self.domain_manager,
-                            self._domain_image_h,
-                            self._domain_image_w,
-                        )
-                    if full_data_dict["y_pred"].dim() == 5:
-                        full_data_dict["y_pred"] = full_data_dict["y_pred"].flatten(1, 2)
-
-                    # domain parallel: shard y to match y_pred's spatial shard
-                    if "y" in full_data_dict and full_data_dict["y"] is not None:
-                        _y = full_data_dict["y"]
-                        if _y.dim() == 5:
-                            _y = _y.flatten(1, 2)
-                        full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
+                    # Validation runs full precision (no autocast), as before.
+                    self._sharded_forward(full_data_dict, False)
 
                     full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
+                    if t < self.valid_forecast_len:
+                        self._gather_for_next_step(full_data_dict)
 
                     if t == self.valid_forecast_len:
                         if self.flag_clamp:
@@ -477,7 +497,7 @@ class TrainerERA5Gen2(BaseTrainer):
                         for name, value in metrics_dict.items():
                             value = torch.Tensor([value]).to(self.device, non_blocking=True)
                             if self.distributed:
-                                dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                                all_reduce_avg(value)
                             results_dict[f"valid_{name}"].append(value[0].item())
 
                 full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
@@ -490,7 +510,7 @@ class TrainerERA5Gen2(BaseTrainer):
                 # break out of training at different epochs and hang in the
                 # next collective.
                 if self.distributed:
-                    dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+                    all_reduce_avg(batch_loss)
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)
