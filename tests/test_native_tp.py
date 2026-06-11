@@ -318,6 +318,88 @@ class TestApplyNativeTensorParallel:
             apply_native_tensor_parallel(nn.Linear(4, 4), _fake_tp_mesh(2))
 
 
+_REPO_ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[1])
+
+
+def _gloo_tp_worker(rank, world, port, result_q):
+    """Spawned worker: serial vs tp=2 forward/backward on a real gloo mesh."""
+    import sys
+
+    if _REPO_ROOT not in sys.path:
+        sys.path.insert(0, _REPO_ROOT)
+    import os
+
+    import torch
+    import torch.distributed as dist
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    dist.init_process_group("gloo", rank=rank, world_size=world)
+    try:
+        from torch.distributed.device_mesh import init_device_mesh
+
+        from credit.models.wxformer.wxformer_next import Transformer
+        from credit.parallel.tensor_parallel import _is_tp_sharded_param, apply_native_tensor_parallel
+
+        kw = dict(local_window_size=4, global_window_size=2, depth=2, dim_head=4)
+        torch.manual_seed(0)
+        serial = Transformer(16, **kw).eval()
+        tp_model = Transformer(16, **kw).eval()
+        tp_model.load_state_dict(serial.state_dict())
+
+        mesh = init_device_mesh("cpu", (world,), mesh_dim_names=("tp",))
+        tp_model = apply_native_tensor_parallel(tp_model, mesh["tp"])
+
+        torch.manual_seed(7)
+        x = torch.randn(2, 16, 8, 8)
+        with torch.no_grad():
+            diff = (serial(x) - tp_model(x)).abs().max().item()
+
+        tp_model.train()
+        tp_model(x).mean().backward()
+        n_sharded = sum(1 for p in tp_model.parameters() if _is_tp_sharded_param(p))
+        n_grads = sum(1 for p in tp_model.parameters() if p.grad is not None)
+        n_total = sum(1 for p in tp_model.parameters())
+        if rank == 0:
+            result_q.put(("ok", diff, n_sharded, n_grads, n_total))
+    except Exception as exc:  # surface worker failures to the test process
+        if rank == 0:
+            result_q.put(("error", repr(exc)))
+        raise
+    finally:
+        dist.destroy_process_group()
+
+
+class TestGlooTpParity:
+    """Real 2-process DTensor run on CPU/gloo: the wiring test the mocked
+    plan-construction tests cannot cover. tp=2 must reproduce the serial
+    forward (to fp32 reassociation) and every param must receive a grad."""
+
+    def test_tp2_matches_serial_forward_and_backward(self):
+        import torch.multiprocessing as mp
+
+        ctx = mp.get_context("spawn")
+        result_q = ctx.Queue()
+        world = 2
+        procs = [ctx.Process(target=_gloo_tp_worker, args=(r, world, 29637, result_q)) for r in range(world)]
+        for p in procs:
+            p.start()
+        try:
+            result = result_q.get(timeout=600)
+        finally:
+            for p in procs:
+                p.join(timeout=60)
+                if p.is_alive():
+                    p.terminate()
+
+        assert result[0] == "ok", f"worker failed: {result[1]}"
+        _, diff, n_sharded, n_grads, n_total = result
+        assert diff < 1e-5, f"tp=2 diverges from serial: max diff {diff}"
+        # 2 depth layers x (2 attention x 4 + 2 FFN x 2) sharded Linears, weight+bias
+        assert n_sharded > 0
+        assert n_grads == n_total, f"missing grads: {n_grads}/{n_total}"
+
+
 class TestIsTpShardedParam:
     def _fake_dtensor(self, names, shard_flags):
         p = MagicMock()

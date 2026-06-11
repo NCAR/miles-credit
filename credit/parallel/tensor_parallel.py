@@ -385,8 +385,13 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
     logger.info(f"Native tensor parallelism applied to {count} block(s), degree={tp_size}")
 
     # Stash the group so the trainer can sync replicated-parameter gradients
-    # across the TP dimension at accumulation boundaries.
+    # across the TP dimension at accumulation boundaries. _tp_native marks
+    # the model for the checkpoint paths: native TP params keep their FQNs
+    # and logical shapes, so the DCP full-state APIs save/load them like any
+    # FSDP2 DTensor (the legacy warn-on-save / raise-on-resume guards do not
+    # apply).
     model._tp_group = _tp_group_from_mesh(tp_mesh)
+    model._tp_native = True
     return model
 
 
@@ -431,12 +436,14 @@ def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
         model (same object, modified in-place).
     """
     raise NotImplementedError(
-        "Tensor parallelism (trainer.parallelism.tensor > 1) is disabled: the "
-        "hand-rolled column sharding slices fused projections (e.g. WXFormer's "
-        "to_qkv) across q/k/v boundaries, and the backward all-reduce at the "
-        "column-parallel input (Megatron's 'f' operator) is missing, so "
-        "tensor > 1 silently trains wrong outputs and gradients. Native TP "
-        "via torch parallelize_module lands with issue #415. Set "
+        "Tensor parallelism (trainer.parallelism.tensor > 1) is disabled for "
+        "this model: the hand-rolled column sharding slices fused projections "
+        "(e.g. WXFormer's to_qkv) across q/k/v boundaries, and the backward "
+        "all-reduce at the column-parallel input (Megatron's 'f' operator) is "
+        "missing, so tensor > 1 silently trains wrong outputs and gradients. "
+        "Native DTensor TP (issue #415) is available for models that declare "
+        "_tp_plan blocks — currently the wxformer_next family (model type "
+        "nextgen_wxformer). Use one of those, or set "
         "trainer.parallelism.tensor: 1."
     )
     tp_group = _tp_group_from_mesh(tp_mesh)

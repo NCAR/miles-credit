@@ -400,14 +400,16 @@ class BaseTrainer(ABC):
     ) -> None:
         """Save model, optimizer, scheduler, and scaler state."""
         _p_save = self.conf.get("trainer", {}).get("parallelism", {})
-        if int(_p_save.get("tensor", 1)) > 1:
+        _tp_native = getattr(getattr(self, "_raw_model", None), "_tp_native", False)
+        if int(_p_save.get("tensor", 1)) > 1 and not (_tp_native and self.mode == "fsdp2"):
             logger.warning(
                 "Checkpointing with tensor parallelism (tensor > 1) saves only this "
                 "rank's TP shards under rewritten keys — the checkpoint will NOT be "
                 "loadable into an unsharded model, and resume will refuse it. This "
-                "warn-on-save / raise-on-resume asymmetry is deliberate: TP is "
+                "warn-on-save / raise-on-resume asymmetry is deliberate: legacy TP is "
                 "experimental (issue #415) and raising here would kill the run at "
-                "its first checkpoint."
+                "its first checkpoint. (Native DTensor TP with data: fsdp2 saves "
+                "full state via the DCP APIs and does not hit this.)"
             )
         if int(_p_save.get("domain", 1)) > 1:
             logger.warning(

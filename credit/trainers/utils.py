@@ -544,12 +544,21 @@ def load_model_states_and_optimizer(conf, model, device):
     mode = effective_mode(conf)
 
     if load_weights and int(_p.get("tensor", 1)) > 1:
-        raise NotImplementedError(
-            "Resuming with tensor parallelism (tensor > 1) is not supported: "
-            "checkpoints save only rank 0's TP shards under rewritten keys. "
-            "Train TP runs from scratch or restructure to checkpoint before "
-            "applying TP."
-        )
+        # Native DTensor TP (wxformer_next, issue #415) keeps param FQNs and
+        # logical shapes, so the fsdp2/DCP full-state path below resumes it
+        # like any FSDP2 model. Only the legacy module-swapping TP (and native
+        # TP outside the DCP path) cannot be resumed.
+        from credit.parallel.domain import get_raw_model
+
+        _tp_native = getattr(get_raw_model(model), "_tp_native", False)
+        if not (_tp_native and mode == "fsdp2"):
+            raise NotImplementedError(
+                "Resuming with tensor parallelism (tensor > 1) is only supported "
+                "for natively-TP models (wxformer_next family) with data: fsdp2, "
+                "which resume through the DCP full-state APIs. Legacy hand-rolled "
+                "TP checkpoints save only rank 0's TP shards under rewritten keys "
+                "and cannot be resumed."
+            )
 
     def _make_optimizer(model):
         opt = torch.optim.AdamW(

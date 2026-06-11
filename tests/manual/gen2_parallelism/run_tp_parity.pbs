@@ -80,6 +80,47 @@ for entry in "${RUNS[@]}"; do
   PORT=$((PORT+1))
 done
 
+# ── tp2 resume phase ────────────────────────────────────────────────────────
+# Native TP params keep their FQNs and logical shapes, so the fsdp2/DCP
+# full-state save/load must round-trip under tp=2 (the legacy TP raised here).
+if [ -f "$LOGDIR/tp2.log" ] && grep -q "PASS  tp2" "$SUMMARY"; then
+  resume_cfg="$LOGDIR/tp2_resume.yml"
+  $PYCHK - "${CFGDIR}/smoke_tp_parity_nextgen_tp2_derecho.yml" "$resume_cfg" <<'PYEOF'
+import sys
+import yaml
+
+src, dst = sys.argv[1], sys.argv[2]
+conf = yaml.safe_load(open(src))
+conf["trainer"].update(
+    load_weights=True,
+    load_optimizer=True,
+    load_scaler=True,
+    load_scheduler=True,
+    reload_epoch=True,
+    epochs=2,
+    num_epoch=2,
+)
+yaml.safe_dump(conf, open(dst, "w"), sort_keys=False)
+PYEOF
+  rlog="$LOGDIR/tp2_resume.log"
+  echo ">>> [tp2_resume] nproc=4 cfg=$resume_cfg  (port $PORT)"
+  timeout 1500 ${TORCHRUN} \
+    --nnodes=1 --nproc-per-node=4 \
+    --rdzv-backend=c10d --rdzv-endpoint="localhost:${PORT}" \
+    applications/train_gen2.py -c "$resume_cfg" \
+    > "$rlog" 2>&1
+  rrc=$?
+  if [ $rrc -eq 0 ] && grep -q "Epoch: 1" "$rlog"; then
+    echo "PASS  tp2_resume (epoch 1 trained from DCP checkpoint)" | tee -a "$SUMMARY"
+  else
+    echo "FAIL  tp2_resume rc=$rrc — tail:" | tee -a "$SUMMARY"
+    tail -n 15 "$rlog" | sed 's/^/      /' | tee -a "$SUMMARY"
+  fi
+  PORT=$((PORT+1))
+else
+  echo "SKIP  tp2_resume (tp2 fresh run did not pass)" | tee -a "$SUMMARY"
+fi
+
 # ── Parity gate ─────────────────────────────────────────────────────────────
 if $PYCHK tests/manual/gen2_parallelism/check_parity.py "$LOGDIR/tp1.log" "$LOGDIR/tp2.log"; then
   echo "PASS  parity: tp1 == tp2 (exact)" | tee -a "$SUMMARY"
