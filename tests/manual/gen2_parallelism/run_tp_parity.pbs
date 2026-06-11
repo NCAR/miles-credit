@@ -1,0 +1,95 @@
+#!/bin/bash -l
+#PBS -A NAML0001
+#PBS -N tp415_parity
+#PBS -l walltime=01:00:00
+#PBS -l select=1:ncpus=64:ngpus=4:mem=440GB
+#PBS -q develop@desched1
+#PBS -j oe
+#PBS -k eod
+#
+# Native tensor parallelism acceptance test (issue #415): tp=2 must match
+# tp=1 with the same data-parallel layout, seed, and weights — the test the
+# legacy hand-rolled TP could never pass (its contiguous column slicing
+# scrambled the fused qkv boundaries, so tp > 1 trained wrong outputs).
+#
+# Layout: 4 GPUs.
+#   run A: nextgen_wxformer, data=fsdp2, tensor=1, nproc=2  -> dp=2
+#   run B: nextgen_wxformer, data=fsdp2, tensor=2, nproc=4  -> dp=2, tp=2
+# Same dp layout + fixed seed => the loss trajectories must agree. The exact
+# comparison is the goal; the rowwise all_reduce reassociates float32 sums,
+# so a 1e-4 relative-tolerance pass with an exact-print mismatch means
+# fp reassociation, not a wiring bug (a real bug diverges to percent level
+# within a few steps — see check_parity.py).
+#
+# Submit from a Casper or Derecho login node:
+#   qsub tests/manual/gen2_parallelism/run_tp_parity.pbs
+
+set -u
+module --force purge
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+
+REPO=${REPO:-/glade/work/schreck/repos/miles-credit-tp415}
+TORCHRUN=/glade/work/schreck/conda-envs/credit-main-derecho/bin/torchrun
+PYCHK=/glade/work/schreck/conda-envs/credit-main-derecho/bin/python
+LOGDIR=/glade/derecho/scratch/schreck/tmp/tp415_parity_logs
+mkdir -p "$LOGDIR"
+
+cd "$REPO"
+export PYTHONPATH="applications:${PYTHONPATH:-}"
+export LOGLEVEL=INFO
+export NCCL_DEBUG=WARN
+export NCCL_SOCKET_IFNAME=lo
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+
+CFGDIR=tests/manual/gen2_parallelism/configs
+SUMMARY="$LOGDIR/SUMMARY.txt"
+: > "$SUMMARY"
+
+echo "Host : $(hostname)"
+echo "Date : $(date)"
+
+# name:config:nproc
+RUNS=(
+  "tp1:smoke_tp_parity_nextgen_tp1_derecho.yml:2"
+  "tp2:smoke_tp_parity_nextgen_tp2_derecho.yml:4"
+)
+
+PORT=29520
+for entry in "${RUNS[@]}"; do
+  name="${entry%%:*}"; rest="${entry#*:}"; cfg="${rest%%:*}"; nproc="${rest##*:}"
+  log="$LOGDIR/${name}.log"
+  rm -rf "/glade/derecho/scratch/schreck/credit_tests/smoke_tp_parity_nextgen_${name}"
+  echo "===================================================================="
+  echo ">>> [$name] nproc=$nproc cfg=$cfg  (port $PORT)"
+  echo "    log: $log"
+  timeout 1500 ${TORCHRUN} \
+    --nnodes=1 --nproc-per-node="$nproc" \
+    --rdzv-backend=c10d --rdzv-endpoint="localhost:${PORT}" \
+    applications/train_gen2.py -c "${CFGDIR}/${cfg}" \
+    > "$log" 2>&1
+  rc=$?
+  if [ $rc -eq 0 ]; then
+    echo "PASS  $name (nproc=$nproc)" | tee -a "$SUMMARY"
+  elif [ $rc -eq 124 ]; then
+    echo "TIMEOUT $name (nproc=$nproc) — see $log" | tee -a "$SUMMARY"
+  else
+    echo "FAIL  $name (nproc=$nproc) rc=$rc — tail:" | tee -a "$SUMMARY"
+    tail -n 15 "$log" | sed 's/^/      /' | tee -a "$SUMMARY"
+  fi
+  PORT=$((PORT+1))
+done
+
+# ── Parity gate ─────────────────────────────────────────────────────────────
+if $PYCHK tests/manual/gen2_parallelism/check_parity.py "$LOGDIR/tp1.log" "$LOGDIR/tp2.log"; then
+  echo "PASS  parity: tp1 == tp2 (exact)" | tee -a "$SUMMARY"
+elif $PYCHK tests/manual/gen2_parallelism/check_parity.py "$LOGDIR/tp1.log" "$LOGDIR/tp2.log" --rtol 1e-4; then
+  echo "PASS  parity: tp1 ~= tp2 (within 1e-4 — fp reassociation in the rowwise all_reduce)" | tee -a "$SUMMARY"
+else
+  echo "FAIL  parity: tp1 != tp2 — TP wiring bug, see $LOGDIR" | tee -a "$SUMMARY"
+fi
+
+echo "===================================================================="
+echo "SUMMARY:"
+cat "$SUMMARY"
+echo "Done at $(date)"
