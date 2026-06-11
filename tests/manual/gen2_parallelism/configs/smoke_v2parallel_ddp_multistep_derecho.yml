@@ -1,4 +1,4 @@
-save_loc: /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_tp_fsdp
+save_loc: /glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_ddp_multistep
 seed: 1000
 data:
   source:
@@ -49,7 +49,7 @@ data:
           path: /glade/campaign/cisl/aiml/credit/static_scalers/static_norm_old.nc
         diagnostic: null
   timestep: 6h
-  forecast_len: 1
+  forecast_len: 2
   start_datetime: '2015-01-01'
   end_datetime: '2016-12-31'
 validation_data:
@@ -95,7 +95,7 @@ model:
   - 16
   - 32
   - 64
-  dim_head: 4
+  dim_head: 8
   depth:
   - 2
   - 2
@@ -149,8 +149,8 @@ loss:
 trainer:
   type: era5-gen2
   parallelism:
-    data: fsdp2
-    tensor: 2
+    data: ddp
+    tensor: 1
     domain: 1
   load_weights: false
   load_optimizer: false
@@ -190,7 +190,7 @@ trainer:
   prefetch_factor: 2
 pbs:
   conda: /glade/work/schreck/conda-envs/credit-main-derecho
-  job_name: smoke_v2_tp_fsdp
+  job_name: smoke_v2_ddp
   project: NAML0001
   walltime: 01:00:00
   nodes: 1

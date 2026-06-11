@@ -18,16 +18,16 @@
 # parallelism mode with torchrun, choosing nproc-per-node so every parallel
 # dimension is genuinely exercised. Results land in $LOGDIR/SUMMARY.txt.
 #
-# NOTE: fsdp2_tp_domain needs dp>1 to actually shard, i.e. world = tensor*domain*dp
-#       = 2*2*2 = 8 GPUs (2 nodes). On 4 GPUs dp=1 and the FSDP2 layer self-skips
-#       by design (TP+domain still run). Bump select to 2 nodes / nproc to 8 for
-#       a full 3-way test.
+# NOTE: tensor parallelism is disabled (apply_tensor_parallel raises) until the
+#       native-TP rewrite lands with issue #415, so the matrix has no tp modes.
+#       The multistep entries exercise the domain-parallel between-step gather
+#       (gather_spatial of y_processed) with forecast_len=2.
 
 set -u
 module --force purge
 module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
 
-REPO=/glade/work/schreck/repos/miles-credit-main
+REPO=${REPO:-/glade/work/schreck/repos/miles-credit-main}
 TORCHRUN=/glade/work/schreck/conda-envs/credit-main-derecho/bin/torchrun
 LOGDIR=/glade/derecho/scratch/schreck/tmp/v2parallel_smoke_logs
 mkdir -p "$LOGDIR"
@@ -55,9 +55,8 @@ RUNS=(
   "fsdp2_ac:smoke_v2parallel_fsdp2_ac_derecho.yml:2"
   "domain:smoke_v2parallel_domain_derecho.yml:4"
   "combo:smoke_v2parallel_combo_derecho.yml:4"
-  "tp_fsdp:smoke_v2parallel_tp_fsdp_derecho.yml:4"
-  "tp_domain:smoke_v2parallel_tp_domain_derecho.yml:4"
-  "fsdp2_tp_domain:smoke_v2parallel_fsdp2_tp_domain_derecho.yml:4"
+  "ddp_multistep:smoke_v2parallel_ddp_multistep_derecho.yml:2"
+  "domain_multistep:smoke_v2parallel_domain_multistep_derecho.yml:4"
 )
 
 PORT=29500
@@ -85,12 +84,12 @@ for entry in "${RUNS[@]}"; do
 done
 
 # ── Cross-mode parity: same dp layout ⇒ identical loss trajectories ────────
-# ddp (dp=2) vs domain (dp=2 × domain=2); tp_domain vs fsdp2_tp_domain (dp=1).
-# Catches dataloader/halo/TP wiring bugs that still "train" but diverge.
+# ddp (dp=2) vs domain (dp=2 × domain=2), single-step and multistep.
+# Catches dataloader/halo/rollout-gather wiring bugs that still "train" but
+# diverge. ddp/domain: crop-vs-interp output operator differs ~1%, so compare
+# with rtol (see check_parity.py docstring).
 PYCHK=/glade/work/schreck/conda-envs/credit-main-derecho/bin/python
-# tp pair: identical code path => exact. ddp/domain: crop-vs-interp output
-# operator differs ~1%, so compare with rtol (see check_parity.py docstring).
-for pair in "ddp domain --rtol 0.05" "tp_domain fsdp2_tp_domain"; do
+for pair in "ddp domain --rtol 0.05" "ddp_multistep domain_multistep --rtol 0.05"; do
   set -- $pair
   if $PYCHK tests/manual/gen2_parallelism/check_parity.py "$LOGDIR/$1.log" "$LOGDIR/$2.log" "${@:3}"; then
     echo "PASS  parity: $1 ~= $2" | tee -a "$SUMMARY"

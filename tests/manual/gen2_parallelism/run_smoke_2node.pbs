@@ -7,10 +7,11 @@
 #PBS -j oe
 #PBS -k eod
 #
-# Full 3-way parallelism smoke test: fsdp2 + tensor=2 + domain=2 on 8 GPUs
-# (2 Derecho nodes), so dp = 8 / (2*2) = 2 and FSDP2 genuinely shards.
-# The single-node run_smoke.pbs can only give dp=1 for this config, where
-# FSDP2 self-skips by design.
+# Multi-node parallelism smoke test: fsdp2 + domain=2 on 8 GPUs
+# (2 Derecho nodes), so dp = 8 / 2 = 4 and FSDP2 shards across nodes.
+# Exercises multi-node NCCL, the dp-rank dataloader contract, and the halo
+# exchange together. (The old 3-way tp test is retired until the native-TP
+# rewrite, issue #415 — apply_tensor_parallel raises on tensor > 1.)
 #
 # Multi-node uses mpiexec + python, NOT torchrun: torchrun under mpiexec
 # spawns nproc-per-node children per MPI rank (N^2 processes) and NCCL
@@ -22,7 +23,7 @@ set -u
 module --force purge
 module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
 
-REPO=/glade/work/schreck/repos/miles-credit-main
+REPO=${REPO:-/glade/work/schreck/repos/miles-credit-main}
 PY=/glade/work/schreck/conda-envs/credit-main-derecho/bin/python
 LOGDIR=/glade/derecho/scratch/schreck/tmp/v2parallel_smoke_logs
 mkdir -p "$LOGDIR"
@@ -36,8 +37,8 @@ export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
 # ProcessGroupNCCL init fails ("no GPUs found"). Matches credit submit.
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-CFG=tests/manual/gen2_parallelism/configs/smoke_v2parallel_fsdp2_tp_domain_derecho.yml
-LOG="$LOGDIR/fsdp2_tp_domain_8gpu.log"
+CFG=tests/manual/gen2_parallelism/configs/smoke_v2parallel_combo_derecho.yml
+LOG="$LOGDIR/combo_8gpu.log"
 
 nodes_arr=($(sort -u "$PBS_NODEFILE"))
 head_node="${nodes_arr[0]}"
@@ -55,9 +56,9 @@ mpiexec -n 8 --ppn 4 --cpu-bind none \
 rc=$?
 
 if [ $rc -eq 0 ]; then
-  echo "PASS  fsdp2_tp_domain (8 GPU / 2 node, dp=2)" | tee -a "$LOGDIR/SUMMARY.txt"
+  echo "PASS  combo fsdp2+domain (8 GPU / 2 node, dp=4)" | tee -a "$LOGDIR/SUMMARY.txt"
 else
-  echo "FAIL  fsdp2_tp_domain (8 GPU / 2 node) rc=$rc — tail:" | tee -a "$LOGDIR/SUMMARY.txt"
+  echo "FAIL  combo fsdp2+domain (8 GPU / 2 node) rc=$rc — tail:" | tee -a "$LOGDIR/SUMMARY.txt"
   tail -n 20 "$LOG" | sed 's/^/      /' | tee -a "$LOGDIR/SUMMARY.txt"
 fi
 echo "Done at $(date)"
