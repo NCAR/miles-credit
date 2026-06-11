@@ -1,0 +1,53 @@
+save_loc: '/glade/u/home/$USER/CREDIT/goes'
+seed: 31415
+
+data:
+  source:
+    Example_GOES:  # User-provided name (arbitrary key)
+      dataset_type: "goes"
+      goes_position: "east" # or "west"
+      mode: "remote"
+      product: "ABI-L2-MCMIPC"
+      variables:
+        prognostic:
+          vars_2D: ["CMI_C01", "CMI_C02", "CMI_C03", "CMI_C04","CMI_C05", "CMI_C06", "CMI_C07", "CMI_C08", "CMI_C09", "CMI_C10", "CMI_C11", "CMI_C12", "CMI_C13", "CMI_C14", "CMI_C15", "CMI_C16"]
+        diagnostic: null
+        dynamic_forcing: null
+      latlon2d_dir: "/glade/derecho/scratch/kevinyang/datasets/goes/"
+      extent: [-110, -90, 30, 40]
+
+  start_datetime: "2021-06-01 00:00:00"
+  end_datetime: "2021-06-01 01:00:00"
+  timestep: "10min"
+
+  history_len: 1
+  forecast_len: 1
+
+preblocks:
+  per_step:
+    scaler:
+      type: "bridgescaler_transformer"
+      args:
+        variables: []
+        scaler_path: "/glade/u/home/$USER/CREDIT/goes/scaler.json"
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
+
+    vars_concat:
+      type: "concat"
+
+postblocks:
+  reconstruct:
+    type: "reconstruct"
+
+trainer:
+  type: era5-gen2           # use the v2 trainer (new nested data schema)
+
+  mode: none
+  epochs: 1
+  train_batch_size: 1
+  batches_per_epoch: 0
+  thread_workers: 16
+  valid_thread_workers: 2
+  prefetch_factor: 2
