@@ -344,7 +344,7 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
     Returns:
         Wrapped model (and stores domain_manager on it if domain > 1).
     """
-    from credit.parallel.mesh import build_device_mesh, parse_parallelism_conf
+    from credit.parallel.mesh import build_device_mesh, dp_world_size, parse_parallelism_conf
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
     p = parse_parallelism_conf(conf)
@@ -352,7 +352,7 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
     tp_size = int(p.get("tensor", 1))
     domain_size = int(p.get("domain", 1))
     _world_size = dist.get_world_size() if dist.is_initialized() else 1
-    dp_size = _world_size // max(tp_size * domain_size, 1)
+    dp_size = dp_world_size(p, _world_size)
 
     # Validation: with data=none and more than one data-parallel replica, the
     # replicated parameters' gradients never sync across dp — regardless of
@@ -365,7 +365,7 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
         )
 
     # Build DeviceMesh
-    mesh, submeshes = build_device_mesh(p, device="cuda")
+    mesh, submeshes = build_device_mesh(p, device="cuda" if torch.cuda.is_available() else "cpu")
 
     # ── 1. Domain parallelism ─────────────────────────────────────────────
     domain_manager = None
@@ -402,6 +402,7 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
     # ── 3. Data parallelism ───────────────────────────────────────────────
     dp_mesh = submeshes.get("dp")
 
+    fsdp2_applied = False
     if data_mode == "fsdp2":
         if dp_size <= 1:
             # FSDP2 with dp=1 is a no-op for gradient sync and converts params to
@@ -409,39 +410,45 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
             logging.warning(
                 f"[V2] FSDP2 requested but dp_size={dp_size} (world={dist.get_world_size()}, "
                 f"tensor={tp_size}, domain={domain_size}). Skipping FSDP2 — use data=none or "
-                "increase GPUs so dp_size > 1."
+                "increase GPUs so dp_size > 1. Mixed precision falls back to plain autocast "
+                "(trainer.amp); fsdp2_mp_policy does not apply."
             )
-            if domain_manager is not None:
-                model._domain_parallel_manager = domain_manager
         else:
             from credit.parallel import apply_fsdp2
 
             model = apply_fsdp2(model, dp_mesh, conf)
-            if domain_manager is not None:
-                model._domain_parallel_manager = domain_manager
+            fsdp2_applied = True
             logging.info("[V2] FSDP2 applied over dp_mesh")
 
     elif data_mode == "ddp":
-        dp_group = dp_mesh.get_group() if dp_mesh is not None else None
-        # static_graph caches the reducer plan from the first iteration, which
-        # is incompatible with toggling require_backward_grad_sync for
-        # gradient accumulation. Only enable it when not accumulating — and
-        # when it's off, DDP needs find_unused_parameters for models with
-        # allocated-but-unused modules (e.g. WXFormer's cube_embedding when
-        # patch sizes are 1), which static_graph otherwise tolerated.
-        _grad_accum = int(conf.get("trainer", {}).get("grad_accum_every", 1))
-        ddp_kwargs = dict(device_ids=[device], static_graph=_grad_accum == 1)
-        if _grad_accum > 1:
-            ddp_kwargs["find_unused_parameters"] = True
-        if dp_group is not None:
-            ddp_kwargs["process_group"] = dp_group
-        model = torch.nn.parallel.DistributedDataParallel(model, **ddp_kwargs)
-        if domain_manager is not None:
-            model._domain_parallel_manager = domain_manager
-        logging.info("[V2] DDP applied")
+        if not dist.is_initialized():
+            # Single-process run of a ddp config (plain `python`/`credit train`
+            # with no launcher): there is no process group, and DDP would raise.
+            logging.warning("[V2] DDP requested but no process group is initialized — running unwrapped.")
+        else:
+            dp_group = dp_mesh.get_group() if dp_mesh is not None else None
+            # static_graph caches the reducer plan from the first iteration, which
+            # is incompatible with toggling require_backward_grad_sync for
+            # gradient accumulation. Only enable it when not accumulating — and
+            # when it's off, DDP needs find_unused_parameters for models with
+            # allocated-but-unused modules (e.g. WXFormer's cube_embedding when
+            # patch sizes are 1), which static_graph otherwise tolerated.
+            _grad_accum = int(conf.get("trainer", {}).get("grad_accum_every", 1))
+            ddp_kwargs = dict(device_ids=[device], static_graph=_grad_accum == 1)
+            if _grad_accum > 1:
+                ddp_kwargs["find_unused_parameters"] = True
+            if dp_group is not None:
+                ddp_kwargs["process_group"] = dp_group
+            model = torch.nn.parallel.DistributedDataParallel(model, **ddp_kwargs)
+            logging.info("[V2] DDP applied")
 
-    # Apply activation checkpointing if requested and FSDP2 didn't do it
-    if conf.get("trainer", {}).get("activation_checkpoint", False) and data_mode != "fsdp2":
+    if domain_manager is not None:
+        model._domain_parallel_manager = domain_manager
+
+    # Apply activation checkpointing if requested and FSDP2 didn't already do
+    # it (apply_fsdp2 wraps before sharding; when FSDP2 is skipped at
+    # dp_size <= 1 the request must still be honored here).
+    if conf.get("trainer", {}).get("activation_checkpoint", False) and not fsdp2_applied:
         _apply_activation_checkpointing_gen2(model, conf)
 
     if torch.distributed.is_initialized():
@@ -451,16 +458,6 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
 
 def _apply_activation_checkpointing_gen2(model, conf):
     """Apply no-reentrant AC to blocks that opt in via _fsdp2_shard = True (non-FSDP2 path)."""
-    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-        CheckpointImpl,
-        apply_activation_checkpointing,
-        checkpoint_wrapper,
-    )
-    import functools
+    from credit.parallel.fsdp2 import _apply_activation_checkpointing
 
-    def _has_shard_attr(m):
-        return bool(getattr(type(m), "_fsdp2_shard", False))
-
-    wrapper = functools.partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
-    apply_activation_checkpointing(model, checkpoint_wrapper_fn=wrapper, check_fn=_has_shard_attr)
-    logging.info("[V2] Activation checkpointing applied")
+    _apply_activation_checkpointing(model)

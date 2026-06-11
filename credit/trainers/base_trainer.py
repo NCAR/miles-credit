@@ -245,9 +245,14 @@ class BaseTrainer(ABC):
         # trainer.mode key is ignored). V1 configs keep using trainer.mode.
         _p = trainer_conf.get("parallelism", {})
         self.mode = effective_mode(conf)
-        self.distributed = self.mode in ("fsdp", "ddp", "fsdp2", "domain_parallel", "fsdp+domain_parallel") or (
-            int(_p.get("domain", 1)) > 1 or int(_p.get("tensor", 1)) > 1
-        )
+        # is_initialized: single-process runs of a distributed config (no
+        # launcher, world_size 1) have no process group — collectives must be
+        # skipped or they raise.
+        self.distributed = (
+            self.mode in ("fsdp", "ddp", "fsdp2", "domain_parallel", "fsdp+domain_parallel")
+            or int(_p.get("domain", 1)) > 1
+            or int(_p.get("tensor", 1)) > 1
+        ) and (torch.distributed.is_available() and torch.distributed.is_initialized())
         self.start_epoch = trainer_conf.get("start_epoch", 0)
         self.epochs = trainer_conf.get("epochs", 1)
         self.skip_validation = trainer_conf.get("skip_validation", False)
@@ -394,7 +399,8 @@ class BaseTrainer(ABC):
         scaler: GradScaler,
     ) -> None:
         """Save model, optimizer, scheduler, and scaler state."""
-        if int(self.conf.get("trainer", {}).get("parallelism", {}).get("tensor", 1)) > 1:
+        _p_save = self.conf.get("trainer", {}).get("parallelism", {})
+        if int(_p_save.get("tensor", 1)) > 1:
             logger.warning(
                 "Checkpointing with tensor parallelism (tensor > 1) saves only this "
                 "rank's TP shards under rewritten keys — the checkpoint will NOT be "
@@ -402,6 +408,14 @@ class BaseTrainer(ABC):
                 "warn-on-save / raise-on-resume asymmetry is deliberate: TP is "
                 "experimental (issue #415) and raising here would kill the run at "
                 "its first checkpoint."
+            )
+        if int(_p_save.get("domain", 1)) > 1:
+            logger.warning(
+                "Checkpointing with domain parallelism saves full weights but under "
+                "rewritten keys (DomainParallelConv2d inserts '.conv'/'.norm' "
+                "segments). Resume under the same domain config works; loading into "
+                "an unwrapped model (rollout/inference, domain=1) will raise on the "
+                "unexpected keys until the checkpoint is remapped."
             )
         sched_state = scheduler.state_dict() if self.use_scheduler and scheduler is not None else None
 
@@ -546,9 +560,17 @@ class BaseTrainer(ABC):
         if self.distributed and torch.distributed.is_initialized():
             torch.distributed.barrier()
 
-        # Preflight: synthetic forward/backward/optimizer step to measure peak VRAM
-        if self.distributed:
-            logger.info("Skipping rank-local GPU memory preflight for distributed training.")
+        # Preflight: synthetic forward/backward/optimizer step to measure peak VRAM.
+        # Valid for ddp/none (per-rank footprint matches the rank-local estimate;
+        # the check unwraps .module and triggers no collectives). Skipped when
+        # parameters are sharded (fsdp/fsdp2/tensor/domain): the rank-local pass
+        # is unrepresentative and a sharded forward would hang on collectives.
+        _p_fit = conf.get("trainer", {}).get("parallelism", {})
+        _sharded = (
+            self.mode in ("fsdp", "fsdp2") or int(_p_fit.get("tensor", 1)) > 1 or int(_p_fit.get("domain", 1)) > 1
+        )
+        if _sharded:
+            logger.info("Skipping rank-local GPU memory preflight: parameters are sharded under this parallelism mode.")
         else:
             check_model_gpu_memory(conf, self.model, optimizer, rank=self.rank)
 

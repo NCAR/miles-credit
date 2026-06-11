@@ -132,13 +132,12 @@ class TestUnpadShardInterp:
 
 
 class TestParallelismConfigMath:
-    """Verify dp_size = world_size // (tp * domain) arithmetic."""
+    """Verify dp_size = world_size // (tp * domain) arithmetic (the real helper)."""
 
     def _dp_size(self, world_size, tp, domain):
-        total = tp * domain
-        if world_size % total != 0:
-            raise ValueError
-        return world_size // total
+        from credit.parallel.mesh import dp_world_size
+
+        return dp_world_size({"tensor": tp, "domain": domain}, world_size)
 
     def test_fsdp2_only_4gpu(self):
         assert self._dp_size(4, 1, 1) == 4
@@ -299,3 +298,117 @@ class TestTensorParallelParity:
         grouped = torch.nn.Conv2d(8, 16, 1, groups=2)
         with pytest.raises(AssertionError):
             TpRowConv2d(grouped, tp_group=None)
+
+
+# ---------------------------------------------------------------------------
+# apply_tensor_parallel is disabled pending the native-TP rewrite (issue #415)
+# ---------------------------------------------------------------------------
+
+
+class TestApplyTensorParallelDisabled:
+    def test_raises_not_implemented(self):
+        from credit.parallel.tensor_parallel import apply_tensor_parallel
+
+        with pytest.raises(NotImplementedError, match="#415"):
+            apply_tensor_parallel(torch.nn.Linear(4, 4), tp_mesh=None)
+
+
+# ---------------------------------------------------------------------------
+# shard_lat_weights — shared lat-weight sharding (loss + metrics)
+# ---------------------------------------------------------------------------
+
+
+class TestShardLatWeights:
+    def test_matching_height_passthrough(self):
+        from credit.parallel.domain import shard_lat_weights
+
+        w = torch.arange(6, dtype=torch.float32).view(1, 6, 1)
+        assert shard_lat_weights(w, 6) is w
+
+    def test_mismatch_without_manager_raises(self):
+        from credit.parallel.domain import shard_lat_weights
+
+        w = torch.arange(6, dtype=torch.float32).view(1, 6, 1)
+        with pytest.raises(ValueError, match="does not match"):
+            shard_lat_weights(w, 3)
+
+    def test_domain_shard_selected(self, monkeypatch):
+        import credit.domain_parallel.manager as manager_mod
+        from credit.parallel.domain import shard_lat_weights
+
+        mgr = _make_manager(rank=1, n=2)
+        monkeypatch.setattr(manager_mod, "get_domain_parallel_manager", lambda: mgr)
+        w = torch.arange(6, dtype=torch.float32).view(1, 6, 1)
+        out = shard_lat_weights(w, 3)
+        assert torch.equal(out.flatten(), torch.tensor([3.0, 4.0, 5.0]))
+
+    def test_indivisible_raises(self, monkeypatch):
+        import credit.domain_parallel.manager as manager_mod
+        from credit.parallel.domain import shard_lat_weights
+
+        mgr = _make_manager(rank=0, n=4)
+        monkeypatch.setattr(manager_mod, "get_domain_parallel_manager", lambda: mgr)
+        w = torch.arange(6, dtype=torch.float32).view(1, 6, 1)
+        with pytest.raises(ValueError, match="not divisible"):
+            shard_lat_weights(w, 1)
+
+
+# ---------------------------------------------------------------------------
+# gather_spatial — between-step gather for domain-parallel multistep rollout
+# ---------------------------------------------------------------------------
+
+
+class TestGatherSpatial:
+    def test_no_manager_passthrough(self):
+        from credit.parallel.domain import gather_spatial
+
+        x = torch.randn(1, 2, 4, 4)
+        assert gather_spatial(x, None) is x
+
+    def test_single_domain_passthrough(self):
+        from credit.parallel.domain import gather_spatial
+
+        x = torch.randn(1, 2, 4, 4)
+        assert gather_spatial(x, _make_manager(0, 1)) is x
+
+
+# ---------------------------------------------------------------------------
+# fsdp2 helpers
+# ---------------------------------------------------------------------------
+
+
+class TestFsdp2Helpers:
+    def test_fsdp2_is_applied_false_on_plain_module(self):
+        from credit.parallel.fsdp2 import fsdp2_is_applied
+
+        assert fsdp2_is_applied(torch.nn.Linear(4, 4)) is False
+
+    def test_mp_policy_accepts_parse_dtype_aliases(self):
+        """fsdp2_mp_policy goes through credit.mixed_precision.parse_dtype,
+        so V1-accepted aliases (case-insensitive, 'half') must work."""
+        from credit.parallel.fsdp2 import _build_mp_policy
+
+        conf = {
+            "trainer": {
+                "amp": True,
+                "fsdp2_mp_policy": {
+                    "param_dtype": "Half",
+                    "reduce_dtype": "FLOAT32",
+                    "output_dtype": "bfloat16",
+                },
+            },
+            "model": {"use_spectral_norm": False},
+        }
+        policy = _build_mp_policy(conf)
+        assert policy.param_dtype == torch.float16
+        assert policy.reduce_dtype == torch.float32
+
+    def test_mp_policy_rejects_garbage_dtype(self):
+        from credit.parallel.fsdp2 import _build_mp_policy
+
+        conf = {
+            "trainer": {"amp": True, "fsdp2_mp_policy": {"param_dtype": "floof32"}},
+            "model": {"use_spectral_norm": False},
+        }
+        with pytest.raises(ValueError):
+            _build_mp_policy(conf)

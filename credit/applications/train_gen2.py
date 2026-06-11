@@ -101,13 +101,17 @@ def main_cli():
 
     _trainer_conf = conf["trainer"]
     assert "parallelism" in _trainer_conf, (
-        "Gen2 training configs must define trainer.parallelism with data, tensor, and domain fields."
+        "Gen2 training configs must define trainer.parallelism with data, tensor, "
+        "and domain fields. Configs from before the parallelism block (legacy "
+        "trainer.mode) can be migrated with `credit convert`."
     )
 
     # V2 parallelism configs read rank info from the launcher (torchrun or MPI).
     # Without a launcher (plain `python`/`credit train` on one GPU), run
     # single-process instead of letting get_rank_info sys.exit hunting for env vars.
-    _launcher_env = ("LOCAL_RANK", "OMPI_COMM_WORLD_RANK", "PMI_RANK")
+    # RANK: torchrun; OMPI: Open MPI; PMI: cray-mpich/MPICH; PALS: Cray PALS
+    # without PMI passthrough; SLURM_PROCID: srun.
+    _launcher_env = ("LOCAL_RANK", "RANK", "OMPI_COMM_WORLD_RANK", "PMI_RANK", "PALS_RANKID", "SLURM_PROCID")
     if any(v in os.environ for v in _launcher_env):
         local_rank, world_rank, world_size = get_rank_info("ddp")
     else:

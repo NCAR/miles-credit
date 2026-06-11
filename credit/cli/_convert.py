@@ -227,6 +227,14 @@ def _convert(args: argparse.Namespace) -> None:
         }
         conf["trainer"]["parallelism"] = _mode_map.get(mode, {"data": "none", "tensor": 1, "domain": 1})
         changes.append(f"trainer.mode: '{mode}' → trainer.parallelism: {conf['trainer']['parallelism']}")
+        if mode in ("fsdp", "fsdp+domain_parallel"):
+            print(
+                "WARNING: fsdp (FSDP1) checkpoints (model_checkpoint.pt / "
+                "optimizer_checkpoint.pt) cannot be resumed under fsdp2, which "
+                "reads checkpoint.pt['model_state_dict']. Existing FSDP1 runs "
+                "must keep their original config to resume; use the converted "
+                "config for new runs."
+            )
     elif "mode" in conf["trainer"]:
         conf["trainer"].pop("mode")
         changes.append("removed legacy trainer.mode (parallelism block already present)")

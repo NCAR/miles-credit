@@ -64,37 +64,63 @@ def unpad_shard_interp(y_pred, padding_opt, manager, image_h, image_w):
     return y_pred
 
 
+def shard_lat_weights(weights, target_h):
+    """Match latitude weights to a (possibly domain-sharded) target height.
+
+    Single source of truth for the lat-weight sharding used by the loss and
+    both metrics classes. Returns weights unchanged when heights match;
+    otherwise narrows to this rank's domain shard. Raises ValueError when the
+    mismatch cannot be explained by domain sharding.
+    """
+    weights_h = weights.shape[-2]
+    if weights_h == target_h:
+        return weights
+    from credit.domain_parallel.manager import get_domain_parallel_manager
+
+    manager = get_domain_parallel_manager()
+    if manager is None or manager.domain_parallel_size <= 1:
+        raise ValueError(f"Latitude weights height ({weights_h}) does not match target height ({target_h}).")
+    if weights_h % manager.domain_parallel_size != 0:
+        raise ValueError(
+            f"Latitude weights height ({weights_h}) is not divisible by "
+            f"domain_parallel_size ({manager.domain_parallel_size})."
+        )
+    shard_h = weights_h // manager.domain_parallel_size
+    if shard_h != target_h:
+        raise ValueError(f"Latitude weights shard height ({shard_h}) does not match target height ({target_h}).")
+    return weights.narrow(-2, manager.domain_rank * shard_h, shard_h).contiguous()
+
+
+def gather_spatial(tensor, manager):
+    """Inverse of shard_spatial: all-gather H-shards across the domain group.
+
+    Used between autoregressive rollout steps — the next step's input is
+    assembled at full height on every domain rank, then re-sharded by
+    shard_spatial. Plain (non-differentiable) all_gather is correct here:
+    Reconstruct detaches y_processed between steps, so no gradient flows
+    through the gathered tensors.
+    """
+    if manager is None or manager.domain_parallel_size <= 1:
+        return tensor
+    import torch
+
+    local = tensor.contiguous()
+    shards = [torch.empty_like(local) for _ in range(manager.domain_parallel_size)]
+    dist.all_gather(shards, local, group=manager.domain_group)
+    return torch.cat(shards, dim=-2)
+
+
 def sync_domain_gradients(model, manager):
     """Average gradients across the domain-parallel group.
 
-    Gradients are flattened into one bucket per (dtype, device) so the sync is a
-    handful of large all_reduces instead of one small all_reduce per parameter
-    (hundreds of latency-bound NCCL calls per step for a real model).
+    See credit.parallel.collectives.allreduce_grads_avg for the bucketing and
+    DTensor handling.
     """
     if manager is None or manager.domain_parallel_size <= 1:
         return
-    from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+    from credit.parallel.collectives import allreduce_grads_avg
 
-    group = manager.domain_group
-
-    buckets = {}
-    for p in model.parameters():
-        if p.grad is not None:
-            grad = p.grad
-            # With FSDP2, p.grad is a DTensor. to_local() returns the local shard
-            # as a view of the underlying storage (Shard placement), so an
-            # in-place all_reduce on it updates the DTensor's data correctly.
-            # DTensor locals are NOT bucketed: shards can be 0-sized or oddly
-            # strided per rank, which breaks the flatten/unflatten round-trip.
-            if hasattr(grad, "to_local"):
-                local = grad.to_local()
-                if local.numel() > 0:
-                    dist.all_reduce(local, op=dist.ReduceOp.AVG, group=group)
-            else:
-                buckets.setdefault((grad.dtype, grad.device), []).append(grad)
-
-    for grads in buckets.values():
-        flat = _flatten_dense_tensors(grads)
-        dist.all_reduce(flat, op=dist.ReduceOp.AVG, group=group)
-        for g, synced in zip(grads, _unflatten_dense_tensors(flat, grads)):
-            g.copy_(synced)
+    allreduce_grads_avg(
+        (p.grad for p in model.parameters() if p.grad is not None),
+        manager.domain_group,
+    )

@@ -24,6 +24,21 @@ import torch.distributed as dist
 logger = logging.getLogger(__name__)
 
 
+def dp_world_size(parallelism_conf: dict, world_size: int) -> int:
+    """Number of data-parallel replicas for a given world size.
+
+    Single source of truth for the dp-size arithmetic (build_device_mesh,
+    data_parallel_coords, and the model wrapper must all agree).
+
+    Raises:
+        ValueError: if world_size is not divisible by tensor * domain.
+    """
+    non_dp = max(int(parallelism_conf.get("tensor", 1)) * int(parallelism_conf.get("domain", 1)), 1)
+    if world_size % non_dp != 0:
+        raise ValueError(f"world_size={world_size} not divisible by tensor*domain={non_dp}")
+    return world_size // non_dp
+
+
 def build_device_mesh(parallelism_conf: dict, device: str = "cuda"):
     """Build a DeviceMesh from a parallelism config block.
 
@@ -49,10 +64,7 @@ def build_device_mesh(parallelism_conf: dict, device: str = "cuda"):
     data_mode = parallelism_conf.get("data", "none")
 
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    total_non_dp = tp_size * domain_size
-    if world_size % total_non_dp != 0:
-        raise ValueError(f"world_size={world_size} not divisible by tensor*domain={total_non_dp}")
-    dp_size = world_size // total_non_dp
+    dp_size = dp_world_size(parallelism_conf, world_size)
 
     # Build ordered dim list: always dp first, then tp, then domain
     dims = []
@@ -122,18 +134,14 @@ def data_parallel_coords(conf: dict):
         distributed is not initialized.
     """
     p = parse_parallelism_conf(conf)
-    tp_size = int(p.get("tensor", 1))
-    domain_size = int(p.get("domain", 1))
 
     if not dist.is_initialized():
         return 0, 1
 
     world_size = dist.get_world_size()
     rank = dist.get_rank()
-    non_dp = max(tp_size * domain_size, 1)
-    if world_size % non_dp != 0:
-        raise ValueError(f"world_size={world_size} not divisible by tensor*domain={non_dp}")
-    return rank // non_dp, world_size // non_dp
+    non_dp = max(int(p.get("tensor", 1)) * int(p.get("domain", 1)), 1)
+    return rank // non_dp, dp_world_size(p, world_size)
 
 
 def parse_parallelism_conf(conf: dict) -> dict:
@@ -143,7 +151,11 @@ def parse_parallelism_conf(conf: dict) -> dict:
     """
     trainer = conf.get("trainer", {})
     if "parallelism" not in trainer:
-        raise ValueError("Gen2 configs must define trainer.parallelism with data, tensor, and domain fields.")
+        raise ValueError(
+            "Gen2 configs must define trainer.parallelism with data, tensor, and "
+            "domain fields. Configs from before the parallelism block (legacy "
+            "trainer.mode) can be migrated with `credit convert`."
+        )
 
     p = trainer["parallelism"].copy()
     p.setdefault("data", "none")

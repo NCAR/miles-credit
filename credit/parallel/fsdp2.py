@@ -125,9 +125,11 @@ def _build_mp_policy(conf: dict):
         )
         return None
 
-    param_dtype = _parse_dtype(mp_conf.get("param_dtype", "bfloat16"))
-    reduce_dtype = _parse_dtype(mp_conf.get("reduce_dtype", "float32"))
-    output_dtype = _parse_dtype(mp_conf.get("output_dtype", "bfloat16"))
+    from credit.mixed_precision import parse_dtype
+
+    param_dtype = parse_dtype(mp_conf.get("param_dtype", "bfloat16"))
+    reduce_dtype = parse_dtype(mp_conf.get("reduce_dtype", "float32"))
+    output_dtype = parse_dtype(mp_conf.get("output_dtype", "bfloat16"))
 
     return MixedPrecisionPolicy(
         param_dtype=param_dtype,
@@ -137,15 +139,15 @@ def _build_mp_policy(conf: dict):
     )
 
 
-def _parse_dtype(s: str) -> torch.dtype:
-    mapping = {
-        "float32": torch.float32,
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-    }
-    if s not in mapping:
-        raise ValueError(f"Unknown dtype '{s}'. Choose from {list(mapping)}")
-    return mapping[s]
+def fsdp2_is_applied(model: nn.Module) -> bool:
+    """Return True if ``fully_shard`` was actually applied to this model.
+
+    The config can request fsdp2 while the wrapper skips it (dp_size <= 1),
+    so AMP/scaler decisions must check the model, not the config.
+    """
+    from torch.distributed.fsdp import FSDPModule
+
+    return isinstance(model, FSDPModule)
 
 
 def _has_fsdp2_shard(module: nn.Module) -> bool:
@@ -202,16 +204,19 @@ def _is_shardable(module: nn.Module, ac_enabled: bool) -> bool:
 
 
 def fsdp2_state_dict(model: nn.Module) -> dict:
-    """Gather a full (unsharded) state dict from an FSDP2 model on all ranks.
+    """Gather a full (unsharded) state dict from an FSDP2 model.
 
-    Returns the full state dict on every rank so rank 0 can save it.
+    Collective — call on all ranks. ``cpu_offload=True`` streams the gathered
+    tensors to CPU and returns the state dict on rank 0 only (other ranks get
+    an empty dict), avoiding an all-ranks GPU memory spike of full-model size
+    at every checkpoint save.
     """
     from torch.distributed.checkpoint.state_dict import (
         get_model_state_dict,
         StateDictOptions,
     )
 
-    opts = StateDictOptions(full_state_dict=True, broadcast_from_rank0=False)
+    opts = StateDictOptions(full_state_dict=True, cpu_offload=True, broadcast_from_rank0=False)
     return get_model_state_dict(model, options=opts)
 
 
@@ -231,15 +236,16 @@ def fsdp2_optimizer_state_dict(model: nn.Module, optimizer) -> dict:
 
     A raw ``optimizer.state_dict()`` under FSDP2 contains this rank's DTensor
     SHARDS only — saving that from rank 0 silently drops every other rank's
-    optimizer state. This gathers the full state on every rank so rank 0 can
-    save a checkpoint that survives resume (at any world size).
+    optimizer state. Collective — call on all ranks; ``cpu_offload=True``
+    returns the gathered state on rank 0 only (CPU tensors), so non-saving
+    ranks never materialize the ~3x-model-size optimizer state on GPU.
     """
     from torch.distributed.checkpoint.state_dict import (
         get_optimizer_state_dict,
         StateDictOptions,
     )
 
-    opts = StateDictOptions(full_state_dict=True, broadcast_from_rank0=False)
+    opts = StateDictOptions(full_state_dict=True, cpu_offload=True, broadcast_from_rank0=False)
     return get_optimizer_state_dict(model, optimizer, options=opts)
 
 

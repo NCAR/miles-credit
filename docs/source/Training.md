@@ -274,13 +274,24 @@ data-parallel replicas.
 **Data parallelism (`data:`)** — `fsdp2` shards model parameters and gradients
 across the data-parallel group using PyTorch FSDP2. This is the recommended default
 for large models. Use `ddp` if you need gradient debugging or the model fits
-comfortably in one GPU's memory. Note that `amp: False` is required with `fsdp2`
-because FSDP2 uses its own `MixedPrecisionPolicy` internally.
+comfortably in one GPU's memory. With `fsdp2`, `amp: True` enables FSDP2's own
+`MixedPrecisionPolicy` (bf16 by default; override via `trainer.fsdp2_mp_policy`)
+instead of manual autocast — the trainer disables autocast and the GradScaler
+automatically because the policy replaces both. With spectral norm the policy
+is skipped (fp32 compute, sharding only) unless `fsdp2_mp_policy` is set
+explicitly.
 
 **Tensor parallelism (`tensor:`)** — splits each weight matrix column-wise across
 `tensor` GPUs within a node. This reduces per-GPU activation memory at the cost of
-intra-node all-reduce communication. Values of 2 or 4 are typical. Tensor parallel
-degree must divide evenly into the total GPU count.
+intra-node all-reduce communication.
+
+> **Currently disabled.** `tensor > 1` raises `NotImplementedError`: the legacy
+> hand-rolled sharding slices fused projections (e.g. WXFormer's `to_qkv`)
+> across q/k/v boundaries and lacks the backward all-reduce at the
+> column-parallel input, so it trains mathematically wrong outputs and
+> gradients. Native TP via torch's `parallelize_module` lands with issue #415.
+> The protocol below documents the intended interface and stays in place for
+> that rewrite.
 
 **Adding TP support to a new model** — tensor parallelism uses an opt-in protocol.
 Any `nn.Module` block that wants TP support declares two class attributes pointing

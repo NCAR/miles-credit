@@ -282,6 +282,15 @@ def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
     Returns:
         model (same object, modified in-place).
     """
+    raise NotImplementedError(
+        "Tensor parallelism (trainer.parallelism.tensor > 1) is disabled: the "
+        "hand-rolled column sharding slices fused projections (e.g. WXFormer's "
+        "to_qkv) across q/k/v boundaries, and the backward all-reduce at the "
+        "column-parallel input (Megatron's 'f' operator) is missing, so "
+        "tensor > 1 silently trains wrong outputs and gradients. Native TP "
+        "via torch parallelize_module lands with issue #415. Set "
+        "trainer.parallelism.tensor: 1."
+    )
     tp_group = _tp_group_from_mesh(tp_mesh)
     count = 0
 
@@ -334,11 +343,11 @@ def sync_replicated_gradients(model: nn.Module, tp_group) -> None:
     drift the replicas apart over a long run. Averaging at the accumulation
     boundary pins the replicas together.
 
-    Plain dense grads are flattened into one bucket per (dtype, device);
-    DTensor grads (FSDP2) are reduced in place per local shard — TP peers
-    share the same dp coordinate, so their shard shapes are identical.
+    See credit.parallel.collectives.allreduce_grads_avg for the bucketing and
+    DTensor handling. TP peers share the same dp coordinate, so their DTensor
+    shard shapes are identical.
     """
-    from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+    from credit.parallel.collectives import allreduce_grads_avg
 
     sharded_ids = set()
     for m in model.modules():
@@ -347,20 +356,7 @@ def sync_replicated_gradients(model: nn.Module, tp_group) -> None:
         elif isinstance(m, (TpColLinear, TpRowLinear)):
             sharded_ids.update(id(p) for p in m.linear.parameters())
 
-    buckets = {}
-    for p in model.parameters():
-        if p.grad is None or id(p) in sharded_ids:
-            continue
-        grad = p.grad
-        if hasattr(grad, "to_local"):
-            local = grad.to_local()
-            if local.numel() > 0:
-                dist.all_reduce(local, op=dist.ReduceOp.AVG, group=tp_group)
-        else:
-            buckets.setdefault((grad.dtype, grad.device), []).append(grad)
-
-    for grads in buckets.values():
-        flat = _flatten_dense_tensors(grads)
-        dist.all_reduce(flat, op=dist.ReduceOp.AVG, group=tp_group)
-        for g, synced in zip(grads, _unflatten_dense_tensors(flat, grads)):
-            g.copy_(synced)
+    allreduce_grads_avg(
+        (p.grad for p in model.parameters() if p.grad is not None and id(p) not in sharded_ids),
+        tp_group,
+    )
