@@ -15,6 +15,28 @@ from credit.losses.covariance import CovarianceWeightedMSELoss
 logger = logging.getLogger(__name__)
 
 
+LOSSES = {
+    "mse": nn.MSELoss,
+    "mae": nn.L1Loss,
+    "msle": MSLELoss,
+    "huber": nn.HuberLoss,
+    "logcosh": LogCoshLoss,
+    "xtanh": XTanhLoss,
+    "xsigmoid": XSigmoidLoss,
+    "KCRPS": KCRPSLoss,
+    "almost-fair-crps": AlmostFairKCRPSLoss,
+    "ring-crps": RingCRPSLoss,
+    "spectral": SpectralLoss2D,
+    "power": PSDLoss,
+    "covmse": CovarianceWeightedMSELoss,
+}
+CRPS_LOSSES = frozenset(name for name in LOSSES if "crps" in name.casefold())
+
+
+def is_crps_loss(loss_type):
+    return loss_type in CRPS_LOSSES
+
+
 def base_losses(conf, reduction="mean", validation=False):
     """Load a specified loss function by its type.
 
@@ -38,24 +60,7 @@ def base_losses(conf, reduction="mean", validation=False):
 
     logger.info(f"Loaded the {loss_type} loss function with parameters: {loss_params}")
 
-    # Standard loss registry
-    losses = {
-        "mse": nn.MSELoss,
-        "mae": nn.L1Loss,
-        "msle": MSLELoss,
-        "huber": nn.HuberLoss,
-        "logcosh": LogCoshLoss,
-        "xtanh": XTanhLoss,
-        "xsigmoid": XSigmoidLoss,
-        "KCRPS": KCRPSLoss,
-        "almost-fair-crps": AlmostFairKCRPSLoss,
-        "ring-crps": RingCRPSLoss,
-        "spectral": SpectralLoss2D,
-        "power": PSDLoss,
-        "covmse": CovarianceWeightedMSELoss,
-    }
-
-    if loss_type in losses:
-        return losses[loss_type](**loss_params)
+    if loss_type in LOSSES:
+        return LOSSES[loss_type](**loss_params)
     else:
         raise ValueError(f"Loss type '{loss_type}' not supported")

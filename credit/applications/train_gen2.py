@@ -24,11 +24,10 @@ import torch
 
 from credit.distributed import distributed_model_wrapper_gen2, setup, get_rank_info
 from credit.seed import seed_everything
-from credit.losses import load_loss
+from credit.losses.base_losses import is_crps_loss
 from credit.trainers import load_trainer
 from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
-from credit.metrics import LatWeightedMetrics
 from credit.trainers.utils import (
     inject_flat_var_keys,
     load_dataset,
@@ -83,6 +82,13 @@ def main_cli():
         "train.py requires the Gen2 nested data schema (conf['data']['source']). "
         "For the legacy flat schema, use applications/train.py."
     )
+    loss_name = conf["loss"]["training_loss"]
+    ensemble_size = int(conf["trainer"].get("ensemble_size", 1))
+    if is_crps_loss(loss_name) and ensemble_size <= 1:
+        raise ValueError(
+            f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "
+            f"got trainer.ensemble_size={ensemble_size}."
+        )
 
     save_loc = os.path.expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
@@ -133,16 +139,21 @@ def main_cli():
     from credit.parallel.mesh import data_parallel_coords
 
     data_rank, data_world_size = data_parallel_coords(conf)
+    if loss_name == "ring-crps" and ensemble_size != data_world_size:
+        raise ValueError(
+            "ring-crps uses one ensemble member per data-parallel rank, so "
+            f"trainer.ensemble_size must match the data-parallel world size; "
+            f"got trainer.ensemble_size={ensemble_size}, data-parallel world size={data_world_size}."
+        )
 
-    # Ring-CRPS ensemble training: one ensemble member per dp rank, so every
-    # dp rank must see the SAME training batches (member diversity comes from
-    # the per-dp-rank seed below). Validation keeps dp sharding — it uses the
-    # standard criterion on deterministic (eval-mode) forwards.
-    ring_ensemble = conf["loss"]["training_loss"] == "ring-crps"
-    train_rank, train_world_size = (0, 1) if ring_ensemble else (data_rank, data_world_size)
-    if ring_ensemble and data_world_size > 1:
+    # CRPS ensemble training requires every dp rank to see the SAME training
+    # batches. Member diversity comes from ensemble sampling in the trainer and
+    # per-dp-rank RNG seeds. Validation keeps dp sharding.
+    ensemble_mode = is_crps_loss(loss_name) and ensemble_size > 1
+    train_rank, train_world_size = (0, 1) if ensemble_mode else (data_rank, data_world_size)
+    if ensemble_mode and data_world_size > 1:
         logging.info(
-            f"ring-crps ensemble training: {data_world_size} members (one per dp rank), dp data sharding disabled"
+            f"CRPS ensemble training: {data_world_size} dp ranks receive shared batches; dp data sharding disabled"
         )
 
     train_dataset = load_dataset(conf, is_train=True)
@@ -176,8 +187,12 @@ def main_cli():
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
+    from credit.losses import load_loss
+
     train_criterion = load_loss(conf)
     valid_criterion = load_loss(conf, validation=True)
+    from credit.metrics import LatWeightedMetrics
+
     metrics = LatWeightedMetrics(conf)
 
     trainer_cls = load_trainer(conf)
