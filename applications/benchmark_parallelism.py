@@ -21,7 +21,7 @@ import torch
 import torch.distributed as dist
 import yaml
 
-from credit.distributed import distributed_model_wrapper_v2, setup
+from credit.distributed import distributed_model_wrapper_gen2, setup
 from credit.models import load_model
 from credit.parallel.mesh import parse_parallelism_conf
 
@@ -89,7 +89,7 @@ def main():
     # Build model
     model = load_model(conf)
     model.to(device)
-    model = distributed_model_wrapper_v2(conf, model, device)
+    model = distributed_model_wrapper_gen2(conf, model, device)
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)

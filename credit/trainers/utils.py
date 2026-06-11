@@ -505,15 +505,28 @@ def load_dataloader(
     )
 
 
+def effective_mode(conf):
+    """Distributed mode for checkpoint/AMP code paths.
+
+    The gen2 ``trainer.parallelism`` block is the sole source of truth when
+    present: ``data`` maps directly to the mode and any stale legacy
+    ``trainer.mode`` key is ignored (tensor/domain-only parallelism is "none"
+    — the model is not DDP/FSDP-wrapped). V1 configs have no parallelism
+    block and keep using ``trainer.mode``.
+    """
+    trainer = conf.get("trainer", {})
+    if "parallelism" in trainer:
+        data = trainer["parallelism"].get("data", "none")
+        return data if data in ("fsdp2", "ddp") else "none"
+    return trainer.get("mode", "none")
+
+
 def load_model_states_and_optimizer(conf, model, device):
     """Load model weights, optimizer, scheduler, and gradient scaler.
 
-    The effective checkpoint mode comes from the gen2 ``trainer.parallelism``
-    block when present (the legacy ``trainer.mode`` key is unreliable there:
-    gen2 configs commonly carry ``mode: ddp`` alongside ``data: fsdp2``).
-    FSDP2 models need the DCP full-state-dict APIs — a plain
-    ``model.module.load_state_dict`` either crashes (no ``.module``) or
-    mismatches DTensor parameters.
+    The effective mode comes from ``effective_mode`` — FSDP2 models need the
+    DCP full-state-dict APIs; a plain ``model.module.load_state_dict`` either
+    crashes (no ``.module``) or mismatches DTensor parameters.
     """
     conf["save_loc"] = save_loc = os.path.expandvars(conf["save_loc"])
 
@@ -526,16 +539,8 @@ def load_model_states_and_optimizer(conf, model, device):
     load_scaler_conf = conf["trainer"].get("load_scaler", False)
     load_scheduler_conf = conf["trainer"].get("load_scheduler", False)
 
-    # Effective mode: gen2 parallelism block overrides the legacy mode key.
     _p = conf["trainer"].get("parallelism", {})
-    mode = conf["trainer"].get("mode", "none")
-    if _p.get("data") == "fsdp2":
-        mode = "fsdp2"
-    elif _p.get("data") == "ddp":
-        mode = "ddp"
-    elif _p and _p.get("data", "none") == "none":
-        # tensor/domain-only parallelism: model is not DDP-wrapped
-        mode = "none"
+    mode = effective_mode(conf)
 
     if load_weights and int(_p.get("tensor", 1)) > 1:
         raise NotImplementedError(
