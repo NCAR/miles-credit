@@ -17,17 +17,337 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from einops import rearrange
+from torch import einsum
 
 from credit.models.base_model import BaseModel
 from credit.models.wxformer.crossformer import (
     CrossEmbedLayer,
-    Transformer,
+    DynamicPositionBias,
+    LayerNorm,
     UpBlockPS,
     apply_spectral_norm,
     cast_tuple,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Linear-projection transformer blocks (native tensor parallelism, issue #415)
+#
+# These mirror crossformer's Attention/FeedForward/Transformer but use
+# nn.Linear instead of 1x1 nn.Conv2d for the qkv / attention-out / FFN
+# projections, and split the fused to_qkv into separate q/k/v projections.
+# Both changes are mathematically identical to the conv versions (a 1x1 conv
+# IS a Linear over the channel dim) and are required for torch's native
+# DTensor tensor parallelism: parallelize_module styles are Linear-only, and
+# ColwiseParallel shards a fused qkv contiguously, which scrambles the q/k/v
+# boundaries. Old conv-format checkpoints load via remap_conv_state_dict.
+# ---------------------------------------------------------------------------
+
+
+class FeedForward(nn.Module):
+    """Pre-norm channel MLP with Linear projections (channels-last GEMM).
+
+    Keeps the exact parameter FQNs of the conv version (``layers.0`` norm,
+    ``layers.1`` up-projection, ``layers.4`` down-projection) so checkpoint
+    remapping only reshapes weights, never renames keys.
+    """
+
+    _tp_plan = {"layers.1": "colwise", "layers.4": "rowwise"}
+
+    def __init__(self, dim, mult=4, dropout=0.0):
+        super().__init__()
+        self.layers = nn.Sequential(
+            LayerNorm(dim),
+            nn.Linear(dim, dim * mult),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim * mult, dim),
+        )
+
+    def forward(self, x):
+        # x: (B, C, H, W). Channel LayerNorm first, then Linear projections
+        # channels-last.
+        x = self.layers[0](x)
+        x = x.permute(0, 2, 3, 1)
+        for layer in self.layers[1:]:
+            x = layer(x)
+        return x.permute(0, 3, 1, 2)
+
+
+class Attention(nn.Module):
+    """Short/long window attention with Linear q/k/v/out projections.
+
+    Same math as crossformer's conv Attention, but the fused ``to_qkv`` 1x1
+    conv is split into separate ``to_q``/``to_k``/``to_v`` Linears (the
+    torchtitan pattern) so native ColwiseParallel sharding keeps whole heads
+    on each rank. The forward derives the head count from the local channel
+    width, so it is correct both serially and under tensor parallelism
+    (where each rank holds heads // tp heads).
+
+    Args:
+        dim (int): Input dimension.
+        attn_type (str): Type of attention, either "short" or "long".
+        window_size (int): Size of the attention window.
+        dim_head (int, optional): Dimension of each attention head. Defaults to 32.
+        dropout (float, optional): Dropout rate. Defaults to 0.0.
+    """
+
+    _tp_plan = {"to_q": "colwise", "to_k": "colwise", "to_v": "colwise", "to_out": "rowwise"}
+
+    @staticmethod
+    def _tp_constraints(instance, tp_size):
+        if instance.heads % tp_size != 0:
+            raise ValueError(
+                f"Attention TP: heads={instance.heads} not divisible by tp_size={tp_size}. "
+                f"Choose a TP degree that divides {instance.heads}, or increase dim_head."
+            )
+
+    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0):
+        super().__init__()
+        assert attn_type in {
+            "short",
+            "long",
+        }, "attention type must be one of local or distant"
+        if dim < dim_head:
+            raise ValueError(
+                f"Attention: dim={dim} is smaller than dim_head={dim_head}; "
+                f"set dim_head <= {dim} or increase the smallest dim in the model."
+            )
+        heads = dim // dim_head
+        self.heads = heads
+        self.dim_head = dim_head
+        self.scale = dim_head**-0.5
+        inner_dim = dim_head * heads
+
+        self.attn_type = attn_type
+        self.window_size = window_size
+
+        self.norm = LayerNorm(dim)
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.to_q = nn.Linear(dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(dim, inner_dim, bias=False)
+        self.to_out = nn.Linear(inner_dim, dim)
+
+        # positions
+
+        self.dpb = DynamicPositionBias(dim // 4)
+
+        # calculate and store indices for retrieving bias
+
+        pos = torch.arange(window_size)
+        grid = torch.stack(torch.meshgrid(pos, pos, indexing="ij"))
+        grid = rearrange(grid, "c i j -> (i j) c")
+        rel_pos = grid[:, None] - grid[None, :]
+        rel_pos += window_size - 1
+        rel_pos_indices = (rel_pos * torch.tensor([2 * window_size - 1, 1])).sum(dim=-1)
+
+        self.register_buffer("rel_pos_indices", rel_pos_indices, persistent=False)
+
+    def forward(self, x):
+        """
+        Forward pass of the Attention module.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch, dim, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of the same shape as input.
+        """
+        *_, height, width, wsz, device = (*x.shape, self.window_size, x.device)
+
+        # prenorm
+
+        x = self.norm(x)
+
+        # rearrange for short or long distance attention, channels-last tokens
+
+        if self.attn_type == "short":
+            x = rearrange(x, "b d (h s1) (w s2) -> (b h w) (s1 s2) d", s1=wsz, s2=wsz)
+        elif self.attn_type == "long":
+            x = rearrange(x, "b d (l1 h) (l2 w) -> (b h w) (l1 l2) d", l1=wsz, l2=wsz)
+
+        # queries / keys / values
+
+        q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
+
+        # split heads — LOCAL head count: under tensor parallelism the
+        # colwise-sharded projections return inner_dim // tp channels here
+
+        heads = q.shape[-1] // self.dim_head
+        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=heads), (q, k, v))
+        q = q * self.scale
+
+        sim = einsum("b h i d, b h j d -> b h i j", q, k)
+
+        # add dynamic positional bias
+
+        pos = torch.arange(-wsz, wsz + 1, device=device)
+        rel_pos = torch.stack(torch.meshgrid(pos, pos, indexing="ij"))
+        rel_pos = rearrange(rel_pos, "c i j -> (i j) c")
+        rel_pos = rel_pos.to(x.dtype)
+        biases = self.dpb(rel_pos)
+        rel_pos_bias = biases[self.rel_pos_indices]
+
+        sim = sim + rel_pos_bias
+
+        # attend
+
+        attn = sim.softmax(dim=-1)
+        attn = self.dropout(attn)
+
+        # merge heads
+
+        out = einsum("b h i j, b h j d -> b h i d", attn, v)
+        out = rearrange(out, "b h n d -> b n (h d)")
+        out = self.to_out(out)
+
+        # rearrange back for long or short distance attention
+
+        if self.attn_type == "short":
+            out = rearrange(
+                out,
+                "(b h w) (s1 s2) d -> b d (h s1) (w s2)",
+                h=height // wsz,
+                w=width // wsz,
+                s1=wsz,
+                s2=wsz,
+            )
+        elif self.attn_type == "long":
+            out = rearrange(
+                out,
+                "(b h w) (l1 l2) d -> b d (l1 h) (l2 w)",
+                h=height // wsz,
+                w=width // wsz,
+                l1=wsz,
+                l2=wsz,
+            )
+
+        return out
+
+
+class Transformer(nn.Module):
+    _fsdp2_shard = True
+
+    def __init__(
+        self,
+        dim,
+        *,
+        local_window_size,
+        global_window_size,
+        depth=4,
+        dim_head=32,
+        attn_dropout=0.0,
+        ff_dropout=0.0,
+    ):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+
+        for _ in range(depth):
+            self.layers.append(
+                nn.ModuleList(
+                    [
+                        Attention(
+                            dim,
+                            attn_type="short",
+                            window_size=local_window_size,
+                            dim_head=dim_head,
+                            dropout=attn_dropout,
+                        ),
+                        FeedForward(dim, dropout=ff_dropout),
+                        Attention(
+                            dim,
+                            attn_type="long",
+                            window_size=global_window_size,
+                            dim_head=dim_head,
+                            dropout=attn_dropout,
+                        ),
+                        FeedForward(dim, dropout=ff_dropout),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        for short_attn, short_ff, long_attn, long_ff in self.layers:
+            x = short_attn(x) + x
+            x = short_ff(x) + x
+            x = long_attn(x) + x
+            x = long_ff(x) + x
+
+        return x
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint remap: conv-projection format -> Linear-projection format
+# ---------------------------------------------------------------------------
+
+
+def remap_conv_state_dict(state_dict: dict) -> dict:
+    """Convert a pre-Linear-refactor NextGenWXFormer state dict to the new format.
+
+    Old checkpoints store the transformer projections as 1x1 Conv2d weights:
+      - ``*.to_qkv.weight``        (3*inner, dim, 1, 1)  fused q/k/v
+      - ``*.to_out.weight``        (dim, inner, 1, 1)
+      - ``*.layers.1.weight`` / ``*.layers.4.weight``  FFN up/down (O, I, 1, 1)
+    plus the ``weight_orig``/``weight_u``/``weight_v`` variants when spectral
+    norm was active. The Linear refactor keeps every other key unchanged.
+
+    Remap rules:
+      - fused ``to_qkv`` tensors are split into ``to_q``/``to_k``/``to_v``
+        (``weight_v`` is copied to all three: the input-side power-iteration
+        vector has the same shape for each split, and u/v re-converge within
+        a few steps anyway)
+      - 1x1 conv kernels at the converted positions are viewed as (O, I)
+
+    Idempotent: new-format state dicts pass through unchanged.
+
+    Note: with spectral norm active, the old model normalized the fused qkv
+    matrix jointly while the refactored model normalizes q/k/v separately —
+    the loaded weights are identical, but the regularization differs slightly.
+
+    Args:
+        state_dict: model state dict (old conv format or new Linear format).
+
+    Returns:
+        A new state dict in the Linear-projection format.
+    """
+    linear_suffixes = (
+        ".to_out.weight",
+        ".to_out.weight_orig",
+        ".layers.1.weight",
+        ".layers.1.weight_orig",
+        ".layers.4.weight",
+        ".layers.4.weight_orig",
+    )
+    out = {}
+    remapped = 0
+    for key, val in state_dict.items():
+        if ".to_qkv." in key:
+            stem, suffix = key.rsplit(".to_qkv.", 1)
+            if suffix in ("weight", "weight_orig"):
+                parts = val.reshape(val.shape[0], -1).chunk(3, dim=0)
+            elif suffix == "weight_u":
+                parts = val.chunk(3, dim=0)
+            elif suffix == "weight_v":
+                parts = (val, val, val)
+            else:
+                raise KeyError(f"remap_conv_state_dict: unexpected to_qkv key {key!r}")
+            for name, part in zip(("to_q", "to_k", "to_v"), parts):
+                out[f"{stem}.{name}.{suffix}"] = part.contiguous()
+            remapped += 1
+        elif key.endswith(linear_suffixes) and val.dim() == 4 and val.shape[-2:] == (1, 1):
+            out[key] = val.reshape(val.shape[0], val.shape[1])
+            remapped += 1
+        else:
+            out[key] = val
+    if remapped:
+        logger.info(f"remap_conv_state_dict: converted {remapped} conv-projection tensors to Linear format")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +716,7 @@ class NextGenWXFormer(BaseModel):
             ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location="cpu")
         state = checkpoint.get("model_state_dict", checkpoint)
-        model.load_state_dict(state, strict=False)
+        model.load_state_dict(remap_conv_state_dict(state), strict=False)
         return model
 
     @classmethod
@@ -405,7 +725,7 @@ class NextGenWXFormer(BaseModel):
         ckpt = os.path.join(os.path.expandvars(conf["save_loc"]), model_name)
         checkpoint = torch.load(ckpt, map_location="cpu")
         state = checkpoint.get("model_state_dict", checkpoint)
-        model.load_state_dict(state, strict=False)
+        model.load_state_dict(remap_conv_state_dict(state), strict=False)
         return model
 
 
