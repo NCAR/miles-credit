@@ -301,7 +301,7 @@ def supports_native_tp(model: nn.Module) -> bool:
     Currently only wxformer_next's transformer blocks declare plans (and
     CubeSphereWxFormer by inheritance).
     """
-    return any(getattr(type(m), "_tp_plan", None) for m in model.modules())
+    return any(getattr(m, "_tp_plan", None) for m in model.modules())
 
 
 def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
@@ -360,7 +360,7 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
             continue
         seen.add(mid)
 
-        plan_spec = getattr(type(module), "_tp_plan", None)
+        plan_spec = getattr(module, "_tp_plan", None)
         if not plan_spec:
             continue
 

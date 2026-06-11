@@ -55,10 +55,10 @@ class FeedForward(nn.Module):
     remapping only reshapes weights, never renames keys.
     """
 
-    _tp_plan = {"layers.1": "colwise", "layers.4": "rowwise"}
-
-    def __init__(self, dim, mult=4, dropout=0.0):
+    def __init__(self, dim, mult=4, dropout=0.0, tp_plan=None):
         super().__init__()
+        # Native-TP opt-in: dotted submodule paths -> colwise/rowwise.
+        self._tp_plan = tp_plan if tp_plan is not None else {"layers.1": "colwise", "layers.4": "rowwise"}
         self.layers = nn.Sequential(
             LayerNorm(dim),
             nn.Linear(dim, dim * mult),
@@ -95,8 +95,6 @@ class Attention(nn.Module):
         dropout (float, optional): Dropout rate. Defaults to 0.0.
     """
 
-    _tp_plan = {"to_q": "colwise", "to_k": "colwise", "to_v": "colwise", "to_out": "rowwise"}
-
     @staticmethod
     def _tp_constraints(instance, tp_size):
         if instance.heads % tp_size != 0:
@@ -105,8 +103,14 @@ class Attention(nn.Module):
                 f"Choose a TP degree that divides {instance.heads}, or increase dim_head."
             )
 
-    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0):
+    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0, tp_plan=None):
         super().__init__()
+        # Native-TP opt-in: dotted submodule paths -> colwise/rowwise.
+        self._tp_plan = (
+            tp_plan
+            if tp_plan is not None
+            else {"to_q": "colwise", "to_k": "colwise", "to_v": "colwise", "to_out": "rowwise"}
+        )
         assert attn_type in {
             "short",
             "long",
