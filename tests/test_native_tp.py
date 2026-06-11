@@ -677,3 +677,67 @@ class TestIsTpShardedParam:
     def test_2d_mesh_tp_shard_detected(self):
         p = self._fake_dtensor(("dp", "tp"), (True, True))
         assert _is_tp_sharded_param(p) is True
+
+
+class TestGen2SeedOrdering:
+    """Pin the two-stage seeding pattern used by credit/applications/train_gen2.py.
+
+    FSDP2's fully_shard does NOT broadcast params from rank 0 (unlike DDP), so
+    every rank must construct identical weights: stage 1 seeds with the base
+    config seed on ALL ranks before load_model, then stage 2 re-seeds with
+    seed + data_rank AFTER the model is built/wrapped so runtime RNG (dropout,
+    stochastic preblocks, ensemble perturbations) keeps per-dp-rank diversity.
+    Seeding with the rank offset BEFORE construction makes each rank build a
+    different model; under FSDP2 the global model becomes a mixture of inits
+    that varies with the mesh layout (the tp=1 vs tp=2 parity bug, issue #415).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _restore_global_rng_flags(self):
+        det = torch.are_deterministic_algorithms_enabled()
+        bench = torch.backends.cudnn.benchmark
+        cudnn_det = torch.backends.cudnn.deterministic
+        yield
+        torch.use_deterministic_algorithms(det)
+        torch.backends.cudnn.benchmark = bench
+        torch.backends.cudnn.deterministic = cudnn_det
+
+    @staticmethod
+    def _build_then_offset(base_seed, data_rank):
+        """The train_gen2.py pattern: seed identically, build, re-seed per dp rank."""
+        from credit.seed import seed_everything
+
+        seed_everything(base_seed)
+        model = NextGenWXFormer(**_tiny_model_conf())
+        seed_everything(base_seed + data_rank)
+        return model
+
+    def test_identical_init_across_dp_rank_offsets(self):
+        sd0 = self._build_then_offset(42, data_rank=0).state_dict()
+        sd1 = self._build_then_offset(42, data_rank=1).state_dict()
+        assert sd0.keys() == sd1.keys()
+        for k in sd0:
+            assert torch.equal(sd0[k], sd1[k]), f"init differs across dp ranks at {k}"
+
+    def test_rank_offset_before_build_diverges(self):
+        # The old (buggy) order: per-rank seed BEFORE construction. Documents
+        # why stage-1 seeding must not include the data_rank offset.
+        from credit.seed import seed_everything
+
+        seed_everything(42 + 0)
+        sd0 = NextGenWXFormer(**_tiny_model_conf()).state_dict()
+        seed_everything(42 + 1)
+        sd1 = NextGenWXFormer(**_tiny_model_conf()).state_dict()
+        assert any(not torch.equal(sd0[k], sd1[k]) for k in sd0)
+
+    def test_post_build_reseed_gives_per_rank_runtime_diversity(self):
+        # Stage 2 still differentiates runtime RNG across dp ranks (and is
+        # reproducible for a fixed rank).
+        self._build_then_offset(42, data_rank=0)
+        draw_rank0 = torch.rand(8)
+        self._build_then_offset(42, data_rank=1)
+        draw_rank1 = torch.rand(8)
+        self._build_then_offset(42, data_rank=0)
+        draw_rank0_again = torch.rand(8)
+        assert not torch.equal(draw_rank0, draw_rank1)
+        assert torch.equal(draw_rank0, draw_rank0_again)
