@@ -433,6 +433,28 @@ def _gloo_tp_worker(rank, world, port, result_q, partial_sn=False):
         dist.destroy_process_group()
 
 
+def _spawn_gloo(worker, port, *args):
+    """Run a 2-process gloo worker and return rank 0's queued result tuple."""
+    import torch.multiprocessing as mp
+
+    ctx = mp.get_context("spawn")
+    result_q = ctx.Queue()
+    world = 2
+    procs = [ctx.Process(target=worker, args=(r, world, port, result_q, *args)) for r in range(world)]
+    for p in procs:
+        p.start()
+    try:
+        result = result_q.get(timeout=600)
+    finally:
+        for p in procs:
+            p.join(timeout=60)
+            if p.is_alive():
+                p.terminate()
+
+    assert result[0] == "ok", f"worker failed: {result[1]}"
+    return result[1:]
+
+
 class TestGlooTpParity:
     """Real 2-process DTensor run on CPU/gloo: the wiring test the mocked
     plan-construction tests cannot cover. tp=2 must reproduce the serial
@@ -440,24 +462,7 @@ class TestGlooTpParity:
 
     @staticmethod
     def _run(port, partial_sn=False):
-        import torch.multiprocessing as mp
-
-        ctx = mp.get_context("spawn")
-        result_q = ctx.Queue()
-        world = 2
-        procs = [ctx.Process(target=_gloo_tp_worker, args=(r, world, port, result_q, partial_sn)) for r in range(world)]
-        for p in procs:
-            p.start()
-        try:
-            result = result_q.get(timeout=600)
-        finally:
-            for p in procs:
-                p.join(timeout=60)
-                if p.is_alive():
-                    p.terminate()
-
-        assert result[0] == "ok", f"worker failed: {result[1]}"
-        return result[1:]
+        return _spawn_gloo(_gloo_tp_worker, port, partial_sn)
 
     def test_tp2_matches_serial_forward_and_backward(self):
         diff, n_sharded, n_grads, n_total = self._run(29637)
@@ -476,6 +481,168 @@ class TestGlooTpParity:
         assert diff < 1e-5, f"reduced tp=2 diverges from serial: max diff {diff}"
         assert n_sharded == 28 - 7
         assert n_grads == n_total, f"missing grads: {n_grads}/{n_total}"
+
+
+def _gloo_clip_worker(rank, world, port, result_q):
+    """Spawned worker: mixed-mesh gradient clipping on a real gloo tp mesh.
+
+    Partial spectral norm leaves the SN blocks' params as plain tensors while
+    the other blocks' projections become DTensors on the 1D tp mesh, so the
+    grads form a DTensor group plus a plain group — the same heterogeneous
+    collection whose per-grad-norm stack crashes torch.nn.utils.clip_grad_norm_
+    under the 2D (dp, tp) FSDP2+TP composition. The credit clip must match
+    torch's clip applied to the serial replica."""
+    import sys
+
+    if _REPO_ROOT not in sys.path:
+        sys.path.insert(0, _REPO_ROOT)
+    import os
+
+    import torch
+    import torch.distributed as dist
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    dist.init_process_group("gloo", rank=rank, world_size=world)
+    try:
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor
+
+        from credit.models.wxformer.crossformer import apply_spectral_norm as _apply_sn
+        from credit.models.wxformer.wxformer_next import Transformer
+        from credit.parallel.collectives import clip_grad_norm_ as credit_clip
+        from credit.parallel.tensor_parallel import apply_native_tensor_parallel
+
+        kw = dict(local_window_size=4, global_window_size=2, depth=2, dim_head=4)
+        torch.manual_seed(0)
+        serial = Transformer(16, **kw).eval()
+        tp_model = Transformer(16, **kw).eval()
+        for m in (serial, tp_model):
+            _apply_sn(m.layers[0][0])
+            _apply_sn(m.layers[0][1])
+        tp_model.load_state_dict(serial.state_dict())
+
+        mesh = init_device_mesh("cpu", (world,), mesh_dim_names=("tp",))
+        tp_model = apply_native_tensor_parallel(tp_model, mesh["tp"])
+
+        torch.manual_seed(7)
+        x = torch.randn(2, 16, 8, 8)
+        serial(x).mean().backward()
+        tp_model(x).mean().backward()
+
+        def full_grads():
+            return {
+                n: (p.grad.full_tensor() if isinstance(p.grad, DTensor) else p.grad).clone()
+                for n, p in tp_model.named_parameters()
+                if p.grad is not None
+            }
+
+        grads = [p.grad for p in tp_model.parameters() if p.grad is not None]
+        n_meshes = len({g.device_mesh if isinstance(g, DTensor) else None for g in grads})
+        # torch's own norm machinery rejects this heterogeneous collection
+        torch_raises = False
+        try:
+            torch.nn.utils.get_total_norm(grads, 2.0)
+        except (RuntimeError, ValueError):
+            torch_raises = True
+
+        # Reference clip on the materialized full grads: torch's own math on
+        # plain tensors, isolated from any tp-vs-serial backward fp noise.
+        ref_grads = full_grads()
+        ref_total = torch.nn.utils.get_total_norm(list(ref_grads.values()), 2.0)
+        max_norm = 0.5 * ref_total.item()  # low enough that the clip really scales
+        holders = []  # clip_grads_with_norm_ reads .grad off its parameters
+        for g in ref_grads.values():
+            h = torch.nn.Parameter(torch.empty_like(g))
+            h.grad = g
+            holders.append(h)
+        torch.nn.utils.clip_grads_with_norm_(holders, max_norm, ref_total)
+
+        serial_total = torch.nn.utils.clip_grad_norm_(serial.parameters(), max_norm=max_norm)
+        tp_total = credit_clip(tp_model.parameters(), max_norm=max_norm)
+
+        norm_err = abs(tp_total.item() - ref_total.item())
+        serial_norm_diff = abs(tp_total.item() - serial_total.item())
+        clipped = full_grads()
+        clip_err = max((clipped[n] - ref_grads[n]).abs().max().item() for n in ref_grads)
+        if rank == 0:
+            result_q.put(
+                ("ok", n_meshes, torch_raises, isinstance(tp_total, DTensor), norm_err, serial_norm_diff, clip_err)
+            )
+    except Exception as exc:  # surface worker failures to the test process
+        if rank == 0:
+            result_q.put(("error", repr(exc)))
+        raise
+    finally:
+        dist.destroy_process_group()
+
+
+class TestGlooClipParity:
+    """Mixed-mesh clip_grad_norm_ on a real 2-process gloo run: a DTensor
+    grad group (TP-sharded projections) plus a plain-tensor group (the
+    SN-skipped blocks) — the grouping path that the (dp, tp)-vs-(dp,) crash
+    on GPU exercises. Clipped grads and the returned total norm must match
+    torch's clip on the serial replica."""
+
+    def test_mixed_mesh_clip_matches_torch_on_full_grads(self):
+        n_meshes, torch_raises, total_is_dtensor, norm_err, serial_norm_diff, clip_err = _spawn_gloo(
+            _gloo_clip_worker, 29639
+        )
+        assert n_meshes == 2, "test setup must produce a DTensor group AND a plain group"
+        assert torch_raises, "torch handled the mixed collection; the helper may be obsolete"
+        assert not total_is_dtensor, "clip must return a plain tensor, not a DTensor"
+        # vs torch's clip applied to the materialized full grads (same values,
+        # only the norm reduction structure differs)
+        assert norm_err < 1e-6, f"total norm diverges from torch on full grads: {norm_err}"
+        assert clip_err < 1e-7, f"clipped grads diverge from torch on full grads: {clip_err}"
+        # vs the serial replica (includes tp-vs-serial backward fp noise)
+        assert serial_norm_diff < 1e-4, f"total norm diverges from serial replica: {serial_norm_diff}"
+
+
+class TestClipGradNormPlainParity:
+    """credit.parallel.collectives.clip_grad_norm_ must be bit-identical to
+    torch.nn.utils.clip_grad_norm_ on plain tensors: the DDP and
+    single-process gen2 modes already green in the smoke matrix must not
+    change behavior."""
+
+    @staticmethod
+    def _params(seed=0):
+        torch.manual_seed(seed)
+        params = [nn.Parameter(torch.randn(s)) for s in ((4, 4), (8,), (2, 3, 5))]
+        for p in params:
+            p.grad = torch.randn_like(p)
+        return params
+
+    def _assert_matches_torch(self, max_norm, norm_type=2.0):
+        from credit.parallel.collectives import clip_grad_norm_
+
+        ref_params, out_params = self._params(), self._params()
+        ref = torch.nn.utils.clip_grad_norm_(ref_params, max_norm=max_norm, norm_type=norm_type)
+        out = clip_grad_norm_(out_params, max_norm=max_norm, norm_type=norm_type)
+        assert torch.equal(out, ref)
+        assert out.dtype == ref.dtype
+        assert out.device == ref.device
+        for p_ref, p_out in zip(ref_params, out_params):
+            assert torch.equal(p_out.grad, p_ref.grad)
+
+    def test_l2_clip_active(self):
+        self._assert_matches_torch(max_norm=0.1)
+
+    def test_l2_clip_inactive(self):
+        self._assert_matches_torch(max_norm=1e6)
+
+    def test_inf_norm(self):
+        self._assert_matches_torch(max_norm=0.05, norm_type=float("inf"))
+
+    def test_tensor_max_norm(self):
+        # the trainer's dynamic path passes the global norm as a 0-dim tensor
+        self._assert_matches_torch(max_norm=torch.tensor(0.1))
+
+    def test_no_grads_returns_zero(self):
+        from credit.parallel.collectives import clip_grad_norm_
+
+        out = clip_grad_norm_([nn.Parameter(torch.randn(3))], max_norm=1.0)
+        assert torch.equal(out, torch.tensor(0.0))
 
 
 class TestIsTpShardedParam:
