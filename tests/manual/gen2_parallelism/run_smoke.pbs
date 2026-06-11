@@ -111,7 +111,7 @@ conf["trainer"].update(
     epochs=2,
     num_epoch=2,
 )
-yaml.safe_dump(conf, open(dst, "w"))
+yaml.safe_dump(conf, open(dst, "w"), sort_keys=False)
 PYEOF
   rlog="$LOGDIR/${name}_resume.log"
   echo ">>> [${name}_resume] nproc=$nproc cfg=$resume_cfg  (port $PORT)"
