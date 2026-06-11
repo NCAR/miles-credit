@@ -5,21 +5,32 @@ Covers:
   - Numerical equivalence: conv-projection transformer (crossformer) vs the
     Linear-projection transformer (wxformer_next) with remapped weights
   - Full-model old-format checkpoint loading
+  - apply_native_tensor_parallel: opt-in detection, plan construction,
+    divisibility / spectral-norm / non-Linear validation errors
 
 The multi-GPU tp=2 vs tp=1 parity run lives in tests/manual/gen2_parallelism/.
 """
 
 import pytest
 import torch
+import torch.nn as nn
+from unittest.mock import MagicMock
 
 from credit.models.wxformer.crossformer import (
     Transformer as ConvTransformer,
     apply_spectral_norm,
 )
 from credit.models.wxformer.wxformer_next import (
+    Attention,
+    FeedForward,
     NextGenWXFormer,
     Transformer as LinearTransformer,
     remap_conv_state_dict,
+)
+from credit.parallel.tensor_parallel import (
+    _is_tp_sharded_param,
+    apply_native_tensor_parallel,
+    supports_native_tp,
 )
 
 
@@ -201,3 +212,141 @@ class TestFullModelRemapRoundTrip:
         y = model(x)
         assert tuple(y.shape) == (1, 6, 1, 32, 64)
         assert not torch.isnan(y).any()
+
+
+# ---------------------------------------------------------------------------
+# apply_native_tensor_parallel (no dist init: parallelize_module is mocked)
+# ---------------------------------------------------------------------------
+
+
+def _fake_tp_mesh(tp_size=2):
+    mesh = MagicMock()
+    mesh.size.return_value = tp_size
+    mesh.get_group.return_value = "fake_tp_group"
+    return mesh
+
+
+@pytest.fixture
+def captured_plans(monkeypatch):
+    """Mock parallelize_module and record (module, plan) for every call."""
+    calls = []
+
+    def fake_parallelize(module, mesh, plan):
+        calls.append((module, plan))
+        return module
+
+    monkeypatch.setattr("torch.distributed.tensor.parallel.parallelize_module", fake_parallelize)
+    return calls
+
+
+class TestSupportsNativeTp:
+    def test_true_for_wxformer_next(self):
+        model = NextGenWXFormer(**_tiny_model_conf())
+        assert supports_native_tp(model) is True
+
+    def test_false_for_conv_transformer(self):
+        assert supports_native_tp(ConvTransformer(16, **TINY_TRANSFORMER_KW)) is False
+
+    def test_false_for_plain_module(self):
+        assert supports_native_tp(nn.Linear(4, 4)) is False
+
+
+class TestApplyNativeTensorParallel:
+    def test_plan_construction_attention(self, captured_plans):
+        from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel
+
+        block = Attention(16, attn_type="short", window_size=4, dim_head=4)
+        apply_native_tensor_parallel(block, _fake_tp_mesh(2))
+
+        assert len(captured_plans) == 1
+        _, plan = captured_plans[0]
+        assert set(plan) == {"to_q", "to_k", "to_v", "to_out"}
+        assert all(isinstance(plan[p], ColwiseParallel) for p in ("to_q", "to_k", "to_v"))
+        assert isinstance(plan["to_out"], RowwiseParallel)
+
+    def test_plan_construction_feedforward(self, captured_plans):
+        from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel
+
+        block = FeedForward(16)
+        apply_native_tensor_parallel(block, _fake_tp_mesh(2))
+
+        _, plan = captured_plans[0]
+        assert isinstance(plan["layers.1"], ColwiseParallel)
+        assert isinstance(plan["layers.4"], RowwiseParallel)
+
+    def test_full_model_parallelizes_all_blocks(self, captured_plans):
+        model = NextGenWXFormer(**_tiny_model_conf())
+        out = apply_native_tensor_parallel(model, _fake_tp_mesh(2))
+
+        # 4 stages x depth 1 x (2 attention + 2 FFN) blocks each
+        assert len(captured_plans) == 16
+        assert out is model
+        assert model._tp_group == "fake_tp_group"
+
+    def test_heads_not_divisible_raises(self, captured_plans):
+        # dim=16, dim_head=4 -> heads=4; tp=3 does not divide 4
+        block = Attention(16, attn_type="short", window_size=4, dim_head=4)
+        with pytest.raises(ValueError, match="heads=4 not divisible by tp_size=3"):
+            apply_native_tensor_parallel(block, _fake_tp_mesh(3))
+        assert not captured_plans
+
+    def test_ffn_width_not_divisible_raises(self, captured_plans):
+        # dim=16, mult=4 -> out_features=64; tp=5 does not divide 64
+        block = FeedForward(16)
+        with pytest.raises(ValueError, match="not divisible by tp_size=5"):
+            apply_native_tensor_parallel(block, _fake_tp_mesh(5))
+
+    def test_spectral_norm_raises(self, captured_plans):
+        block = Attention(16, attn_type="short", window_size=4, dim_head=4)
+        apply_spectral_norm(block)
+        with pytest.raises(RuntimeError, match="use_spectral_norm"):
+            apply_native_tensor_parallel(block, _fake_tp_mesh(2))
+
+    def test_non_linear_target_raises(self, captured_plans):
+        class BadBlock(nn.Module):
+            _tp_plan = {"proj": "colwise"}
+
+            def __init__(self):
+                super().__init__()
+                self.proj = nn.Conv2d(4, 8, 1)
+
+        with pytest.raises(TypeError, match="requires nn.Linear"):
+            apply_native_tensor_parallel(BadBlock(), _fake_tp_mesh(2))
+
+    def test_no_optin_blocks_raises(self, captured_plans):
+        with pytest.raises(ValueError, match="no blocks with _tp_plan"):
+            apply_native_tensor_parallel(nn.Linear(4, 4), _fake_tp_mesh(2))
+
+
+class TestIsTpShardedParam:
+    def _fake_dtensor(self, names, shard_flags):
+        p = MagicMock()
+        p.device_mesh.mesh_dim_names = names
+        placements = []
+        for flag in shard_flags:
+            pl = MagicMock()
+            pl.is_shard.return_value = flag
+            placements.append(pl)
+        p.placements = tuple(placements)
+        return p
+
+    def test_plain_tensor_is_not_sharded(self):
+        assert _is_tp_sharded_param(torch.randn(3)) is False
+
+    def test_tp_shard_detected_1d_mesh(self):
+        p = self._fake_dtensor(("tp",), (True,))
+        assert _is_tp_sharded_param(p) is True
+
+    def test_tp_replicate_not_sharded(self):
+        # RowwiseParallel bias: Replicate on the tp mesh
+        p = self._fake_dtensor(("tp",), (False,))
+        assert _is_tp_sharded_param(p) is False
+
+    def test_2d_mesh_dp_shard_only_not_tp_sharded(self):
+        # FSDP2-only param after composition: sharded on dp, replicated on tp
+        p = self._fake_dtensor(("dp", "tp"), (True, False))
+        assert _is_tp_sharded_param(p) is False
+
+    def test_2d_mesh_tp_shard_detected(self):
+        p = self._fake_dtensor(("dp", "tp"), (True, True))
+        assert _is_tp_sharded_param(p) is True
