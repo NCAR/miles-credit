@@ -412,3 +412,45 @@ class TestFsdp2Helpers:
         }
         with pytest.raises(ValueError):
             _build_mp_policy(conf)
+
+
+# ---------------------------------------------------------------------------
+# Per-instance opt-in for FSDP2 sharding / TP paths (review: no hardcoding)
+# ---------------------------------------------------------------------------
+
+
+class TestBlockOptInConfigurable:
+    def test_fsdp2_shard_default_and_override(self):
+        from credit.models.wxformer.crossformer import UpBlock, UpBlockPS
+        from credit.parallel.fsdp2 import _has_fsdp2_shard
+
+        on = UpBlock(8, 8, num_groups=2)
+        off = UpBlock(8, 8, num_groups=2, fsdp2_shard=False)
+        assert _has_fsdp2_shard(on) is True
+        assert _has_fsdp2_shard(off) is False
+        assert _has_fsdp2_shard(UpBlockPS(8, 8, num_groups=2)) is True
+        assert _has_fsdp2_shard(UpBlockPS(8, 8, num_groups=2, fsdp2_shard=False)) is False
+
+    def test_transformer_fsdp2_shard_override(self):
+        from credit.models.wxformer.crossformer import Transformer
+        from credit.parallel.fsdp2 import _has_fsdp2_shard
+
+        kw = dict(local_window_size=2, global_window_size=2, depth=1)
+        assert _has_fsdp2_shard(Transformer(32, **kw)) is True
+        assert _has_fsdp2_shard(Transformer(32, fsdp2_shard=False, **kw)) is False
+
+    def test_class_attr_style_still_detected(self):
+        from credit.parallel.fsdp2 import _has_fsdp2_shard
+
+        class Legacy(torch.nn.Module):
+            _fsdp2_shard = True
+
+        assert _has_fsdp2_shard(Legacy()) is True
+
+    def test_tp_paths_default_and_override(self):
+        from credit.models.wxformer.crossformer import Attention, FeedForward
+
+        ff = FeedForward(32)
+        assert (ff._tp_col, ff._tp_row) == ("layers.1", "layers.4")
+        attn = Attention(32, attn_type="short", window_size=2, tp_col="custom.q", tp_row="custom.o")
+        assert (attn._tp_col, attn._tp_row) == ("custom.q", "custom.o")
