@@ -6,10 +6,13 @@ Covers:
     Linear-projection transformer (wxformer_next) with remapped weights
   - Full-model old-format checkpoint loading
   - apply_native_tensor_parallel: opt-in detection, plan construction,
-    divisibility / spectral-norm / non-Linear validation errors
+    divisibility / non-Linear validation errors, and the reduced form:
+    spectral-norm-wrapped blocks are skipped (replicated) with a warning
 
 The multi-GPU tp=2 vs tp=1 parity run lives in tests/manual/gen2_parallelism/.
 """
+
+import logging
 
 import pytest
 import torch
@@ -296,11 +299,61 @@ class TestApplyNativeTensorParallel:
         with pytest.raises(ValueError, match="not divisible by tp_size=5"):
             apply_native_tensor_parallel(block, _fake_tp_mesh(5))
 
-    def test_spectral_norm_raises(self, captured_plans):
+    def test_spectral_norm_block_skipped_not_raised(self, captured_plans, caplog):
         block = Attention(16, attn_type="short", window_size=4, dim_head=4)
         apply_spectral_norm(block)
-        with pytest.raises(RuntimeError, match="use_spectral_norm"):
-            apply_native_tensor_parallel(block, _fake_tp_mesh(2))
+        with caplog.at_level(logging.WARNING, logger="credit.parallel.tensor_parallel"):
+            out = apply_native_tensor_parallel(block, _fake_tp_mesh(2))
+        assert not captured_plans
+        assert "NO effect" in caplog.text
+        assert "use_spectral_norm" in caplog.text
+        # group still stashed so the trainer keeps the replicas pinned
+        assert out._tp_group == "fake_tp_group"
+        assert out._tp_native is True
+
+    def test_partial_spectral_norm_skips_only_wrapped_blocks(self, captured_plans, caplog):
+        # depth=2 -> 8 _tp_plan blocks (2 attention + 2 FFN per depth layer).
+        # SN on the first depth layer's short attention + short FFN: those two
+        # blocks skip, the other six shard.
+        model = LinearTransformer(16, **TINY_TRANSFORMER_KW)
+        apply_spectral_norm(model.layers[0][0])
+        apply_spectral_norm(model.layers[0][1])
+        with caplog.at_level(logging.WARNING, logger="credit.parallel.tensor_parallel"):
+            apply_native_tensor_parallel(model, _fake_tp_mesh(2))
+        assert len(captured_plans) == 6
+        skipped = {id(model.layers[0][0]), id(model.layers[0][1])}
+        assert all(id(m) not in skipped for m, _ in captured_plans)
+        assert "6 block(s) sharded, 2 block(s) skipped" in caplog.text
+        assert "use_spectral_norm: false" in caplog.text
+        assert model._tp_group == "fake_tp_group"
+
+    def test_full_model_with_spectral_norm_shards_nothing(self, captured_plans, caplog):
+        # The real default config: use_spectral_norm=True wraps every Linear
+        # inside the encoder Transformer stages, i.e. ALL _tp_plan layers, so
+        # reduced TP is a documented no-op until spectral norm is disabled.
+        model = NextGenWXFormer(**_tiny_model_conf(use_spectral_norm=True))
+        with caplog.at_level(logging.WARNING, logger="credit.parallel.tensor_parallel"):
+            out = apply_native_tensor_parallel(model, _fake_tp_mesh(2))
+        assert not captured_plans
+        assert "all 16 _tp_plan block(s)" in caplog.text
+        assert "NO effect" in caplog.text
+        assert out._tp_group == "fake_tp_group"
+
+    def test_skipped_block_not_constraint_checked(self, captured_plans):
+        # heads=4 is not divisible by tp=3, but the block is SN-wrapped and
+        # skipped, so the constraint must not fire (it stays replicated).
+        block = Attention(16, attn_type="short", window_size=4, dim_head=4)
+        apply_spectral_norm(block)
+        apply_native_tensor_parallel(block, _fake_tp_mesh(3))
+        assert not captured_plans
+
+    def test_parametrize_style_spectral_norm_also_skipped(self, captured_plans):
+        # The wxformer apply_spectral_norm uses the hook style (weight_orig);
+        # the parametrize-based variant must be detected too.
+        block = FeedForward(16)
+        nn.utils.parametrizations.spectral_norm(block.layers[1])
+        apply_native_tensor_parallel(block, _fake_tp_mesh(2))
+        assert not captured_plans
 
     def test_non_linear_target_raises(self, captured_plans):
         class BadBlock(nn.Module):
@@ -321,8 +374,13 @@ class TestApplyNativeTensorParallel:
 _REPO_ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[1])
 
 
-def _gloo_tp_worker(rank, world, port, result_q):
-    """Spawned worker: serial vs tp=2 forward/backward on a real gloo mesh."""
+def _gloo_tp_worker(rank, world, port, result_q, partial_sn=False):
+    """Spawned worker: serial vs tp=2 forward/backward on a real gloo mesh.
+
+    With partial_sn=True, spectral norm wraps the first depth layer's short
+    attention + short FFN on BOTH models: those two blocks must be skipped
+    (replicated full-width) while the other six shard, and the composed
+    forward must still match serial."""
     import sys
 
     if _REPO_ROOT not in sys.path:
@@ -338,6 +396,7 @@ def _gloo_tp_worker(rank, world, port, result_q):
     try:
         from torch.distributed.device_mesh import init_device_mesh
 
+        from credit.models.wxformer.crossformer import apply_spectral_norm as _apply_sn
         from credit.models.wxformer.wxformer_next import Transformer
         from credit.parallel.tensor_parallel import _is_tp_sharded_param, apply_native_tensor_parallel
 
@@ -345,6 +404,10 @@ def _gloo_tp_worker(rank, world, port, result_q):
         torch.manual_seed(0)
         serial = Transformer(16, **kw).eval()
         tp_model = Transformer(16, **kw).eval()
+        if partial_sn:
+            for m in (serial, tp_model):
+                _apply_sn(m.layers[0][0])
+                _apply_sn(m.layers[0][1])
         tp_model.load_state_dict(serial.state_dict())
 
         mesh = init_device_mesh("cpu", (world,), mesh_dim_names=("tp",))
@@ -375,13 +438,14 @@ class TestGlooTpParity:
     plan-construction tests cannot cover. tp=2 must reproduce the serial
     forward (to fp32 reassociation) and every param must receive a grad."""
 
-    def test_tp2_matches_serial_forward_and_backward(self):
+    @staticmethod
+    def _run(port, partial_sn=False):
         import torch.multiprocessing as mp
 
         ctx = mp.get_context("spawn")
         result_q = ctx.Queue()
         world = 2
-        procs = [ctx.Process(target=_gloo_tp_worker, args=(r, world, 29637, result_q)) for r in range(world)]
+        procs = [ctx.Process(target=_gloo_tp_worker, args=(r, world, port, result_q, partial_sn)) for r in range(world)]
         for p in procs:
             p.start()
         try:
@@ -393,10 +457,24 @@ class TestGlooTpParity:
                     p.terminate()
 
         assert result[0] == "ok", f"worker failed: {result[1]}"
-        _, diff, n_sharded, n_grads, n_total = result
+        return result[1:]
+
+    def test_tp2_matches_serial_forward_and_backward(self):
+        diff, n_sharded, n_grads, n_total = self._run(29637)
         assert diff < 1e-5, f"tp=2 diverges from serial: max diff {diff}"
-        # 2 depth layers x (2 attention x 4 + 2 FFN x 2) sharded Linears, weight+bias
-        assert n_sharded > 0
+        # 2 depth layers x (2 attn x [q,k,v,out weights] + 2 FFN x [up w+b, down w])
+        assert n_sharded == 28
+        assert n_grads == n_total, f"missing grads: {n_grads}/{n_total}"
+
+    def test_tp2_partial_spectral_norm_matches_serial(self):
+        # Reduced TP: SN on the first short attention (4 sharded params lost)
+        # and first short FFN (3 lost) — 21 sharded, the SN blocks replicated.
+        # Composition both ways (sharded block -> replicated block -> sharded
+        # block) must still reproduce the serial forward, and grads must reach
+        # every param including the SN weight_orig tensors.
+        diff, n_sharded, n_grads, n_total = self._run(29638, partial_sn=True)
+        assert diff < 1e-5, f"reduced tp=2 diverges from serial: max diff {diff}"
+        assert n_sharded == 28 - 7
         assert n_grads == n_total, f"missing grads: {n_grads}/{n_total}"
 
 

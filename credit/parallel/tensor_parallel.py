@@ -275,6 +275,21 @@ def _to_row_parallel(layer: nn.Module, tp_group):
 # ---------------------------------------------------------------------------
 
 
+def _has_spectral_norm(layer: nn.Module) -> bool:
+    """True if spectral norm wraps the layer's weight.
+
+    Covers both registration styles: the hook-based ``nn.utils.spectral_norm``
+    used by the wxformer family's ``apply_spectral_norm`` (registers
+    ``weight_orig``/``weight_u``/``weight_v``) and the parametrize-based
+    ``nn.utils.parametrizations.spectral_norm`` (registers
+    ``parametrizations.weight``).
+    """
+    if hasattr(layer, "weight_orig"):
+        return True
+    parametrizations = getattr(layer, "parametrizations", None)
+    return parametrizations is not None and "weight" in parametrizations
+
+
 def supports_native_tp(model: nn.Module) -> bool:
     """True if any submodule declares a native ``_tp_plan``.
 
@@ -308,9 +323,16 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
       - every planned layer is an nn.Linear (the refactored wxformer_next
         projections; 1x1 convs are NOT supported — that was the legacy path)
       - colwise out_features / rowwise in_features divisible by the TP degree
-      - no spectral norm on planned layers (the power-iteration hook mixes
-        plain-tensor u/v buffers with DTensor weights and breaks; set
-        model.use_spectral_norm: false when trainer.parallelism.tensor > 1)
+
+    Spectral norm reduces (does not break) TP: the power-iteration hook mixes
+    plain-tensor u/v buffers with DTensor weights, so blocks whose planned
+    layers carry spectral norm are SKIPPED — left fully replicated on every
+    TP rank — with a warning. The skip is per block, never per layer: a
+    colwise layer's sharded output is only valid feeding its rowwise partner,
+    so the whole colwise/rowwise group stays together. Replicated blocks are
+    still correct (TP peers see identical inputs by the dp contract, and the
+    trainer's sync_replicated_gradients pins the replicas), but for full TP
+    set model.use_spectral_norm: false.
 
     Args:
         model: The model to convert (modified in place).
@@ -329,6 +351,7 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
     styles = {"colwise": ColwiseParallel, "rowwise": RowwiseParallel}
     tp_size = tp_mesh.size()
     count = 0
+    skipped = 0
 
     seen = set()
     for module in model.modules():
@@ -339,6 +362,16 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
 
         plan_spec = getattr(type(module), "_tp_plan", None)
         if not plan_spec:
+            continue
+
+        # Spectral norm on any planned layer disqualifies the WHOLE block:
+        # a colwise layer's sharded output is only consumed correctly by its
+        # rowwise partner, so the colwise/rowwise group must shard (or stay
+        # replicated) as a unit. A replicated block is still correct — TP
+        # peers see identical inputs (dp contract) and a preceding rowwise
+        # all_reduce already restored the full activation.
+        if any(_has_spectral_norm(_rgetattr(module, path)) for path in plan_spec):
+            skipped += 1
             continue
 
         check_fn = getattr(type(module), "_tp_constraints", None)
@@ -353,13 +386,6 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
                     f"Native TP: {type(module).__name__}._tp_plan[{path!r}] resolves to "
                     f"{type(layer).__name__}, but parallelize_module requires nn.Linear. "
                     "Conv projections must be refactored to Linear (issue #415)."
-                )
-            if hasattr(layer, "weight_orig"):
-                raise RuntimeError(
-                    f"Native TP: {type(module).__name__}.{path} has spectral norm applied, "
-                    "which is incompatible with DTensor sharding (the power-iteration "
-                    "hook mixes plain u/v buffers with DTensor weights). Set "
-                    "model.use_spectral_norm: false when trainer.parallelism.tensor > 1."
                 )
             if style == "colwise" and layer.out_features % tp_size != 0:
                 raise ValueError(
@@ -376,13 +402,31 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
         parallelize_module(module, tp_mesh, plan)
         count += 1
 
-    if count == 0:
+    if count == 0 and skipped == 0:
         raise ValueError(
             "apply_native_tensor_parallel: no blocks with _tp_plan found. Check "
             "supports_native_tp(model) before calling, or use a model that opts in "
             "(wxformer_next family)."
         )
-    logger.info(f"Native tensor parallelism applied to {count} block(s), degree={tp_size}")
+    if skipped and count:
+        logger.warning(
+            f"Native TP is REDUCED: {count} block(s) sharded, {skipped} block(s) skipped "
+            "because their projection layers carry spectral norm (the power-iteration "
+            "hook is incompatible with DTensor sharding). Skipped blocks stay fully "
+            "replicated on every TP rank. For full tensor parallelism set "
+            "model.use_spectral_norm: false."
+        )
+    elif skipped:
+        logger.warning(
+            f"Native TP had NO effect: all {skipped} _tp_plan block(s) carry spectral "
+            f"norm, so nothing was sharded. Every parameter is replicated and the "
+            f"{tp_size} TP ranks repeat identical compute with no memory savings. "
+            "Training remains correct (replicas are kept in sync), but set "
+            "model.use_spectral_norm: false to actually shard the model, or set "
+            "trainer.parallelism.tensor: 1 to reclaim the ranks for data parallelism."
+        )
+    else:
+        logger.info(f"Native tensor parallelism applied to {count} block(s), degree={tp_size}")
 
     # Stash the group so the trainer can sync replicated-parameter gradients
     # across the TP dimension at accumulation boundaries. _tp_native marks
