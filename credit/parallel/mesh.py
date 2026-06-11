@@ -149,4 +149,17 @@ def parse_parallelism_conf(conf: dict) -> dict:
     p.setdefault("data", "none")
     p.setdefault("tensor", 1)
     p.setdefault("domain", 1)
+
+    if p["data"] not in ("fsdp2", "ddp", "none"):
+        raise ValueError(f"trainer.parallelism.data must be 'fsdp2', 'ddp', or 'none', got {p['data']!r}")
+    for key in ("tensor", "domain"):
+        try:
+            p[key] = int(p[key])
+        except (TypeError, ValueError):
+            raise ValueError(f"trainer.parallelism.{key} must be an integer >= 1, got {p[key]!r}")
+        if p[key] < 1:
+            raise ValueError(f"trainer.parallelism.{key} must be an integer >= 1, got {p[key]}")
+    unknown = set(p) - {"data", "tensor", "domain"}
+    if unknown:
+        raise ValueError(f"Unknown trainer.parallelism key(s): {sorted(unknown)} (expected data, tensor, domain)")
     return p

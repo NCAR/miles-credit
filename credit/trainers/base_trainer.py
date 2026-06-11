@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
 from credit.trainers.preflight import check_dataloader_startup, check_model_gpu_memory
-from credit.trainers.utils import cleanup
+from credit.trainers.utils import cleanup, effective_mode
 
 try:
     from torch.utils.tensorboard import SummaryWriter as _SummaryWriter
@@ -161,14 +161,10 @@ class BaseTrainer(ABC):
         # ---- Extract all trainer settings ----
         trainer_conf = conf["trainer"]
         self.save_loc = os.path.expandvars(conf["save_loc"])
-        self.mode = trainer_conf.get("mode", "none")
-        # V2 parallelism block: promote mode so checkpoint/AMP use the right path
+        # Gen2: the parallelism block is the sole source of truth (a stale
+        # trainer.mode key is ignored). V1 configs keep using trainer.mode.
         _p = trainer_conf.get("parallelism", {})
-        _data_mode = _p.get("data", "none")
-        if _data_mode == "fsdp2":
-            self.mode = "fsdp2"
-        elif _data_mode == "ddp" and self.mode not in ("ddp", "fsdp", "fsdp2"):
-            self.mode = "ddp"
+        self.mode = effective_mode(conf)
         self.distributed = self.mode in ("fsdp", "ddp", "fsdp2", "domain_parallel", "fsdp+domain_parallel") or (
             int(_p.get("domain", 1)) > 1 or int(_p.get("tensor", 1)) > 1
         )
@@ -328,8 +324,10 @@ class BaseTrainer(ABC):
             logger.warning(
                 "Checkpointing with tensor parallelism (tensor > 1) saves only this "
                 "rank's TP shards under rewritten keys — the checkpoint will NOT be "
-                "loadable into an unsharded model. TP checkpoint support is not "
-                "implemented yet."
+                "loadable into an unsharded model, and resume will refuse it. This "
+                "warn-on-save / raise-on-resume asymmetry is deliberate: TP is "
+                "experimental (issue #415) and raising here would kill the run at "
+                "its first checkpoint."
             )
         sched_state = scheduler.state_dict() if self.use_scheduler and scheduler is not None else None
 

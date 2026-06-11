@@ -104,8 +104,14 @@ def main_cli():
         "Gen2 training configs must define trainer.parallelism with data, tensor, and domain fields."
     )
 
-    # V2 parallelism configs use torchrun-style rank env vars.
-    local_rank, world_rank, world_size = get_rank_info("ddp")
+    # V2 parallelism configs read rank info from the launcher (torchrun or MPI).
+    # Without a launcher (plain `python`/`credit train` on one GPU), run
+    # single-process instead of letting get_rank_info sys.exit hunting for env vars.
+    _launcher_env = ("LOCAL_RANK", "OMPI_COMM_WORLD_RANK", "PMI_RANK")
+    if any(v in os.environ for v in _launcher_env):
+        local_rank, world_rank, world_size = get_rank_info("ddp")
+    else:
+        local_rank, world_rank, world_size = 0, 0, 1
     rank = world_rank
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
