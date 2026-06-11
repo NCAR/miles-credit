@@ -170,9 +170,14 @@ def main_cli():
         valid_dataset = load_dataset(conf, is_train=False)
         valid_loader = load_dataloader(conf, valid_dataset, rank=data_rank, world_size=data_world_size, is_train=False)
 
-    # Seed RNG by the data-parallel rank so TP/domain peers generate identical
-    # dropout masks etc.; dp replicas still differ for ensemble diversity.
-    seed = conf.get("seed", 42) + data_rank
+    # Two-stage seeding. Stage 1: seed identically on ALL ranks before model
+    # construction so every rank initializes the SAME weights. FSDP2's
+    # fully_shard does not broadcast params from rank 0 (unlike DDP), so each
+    # rank keeps its own dim-0 shard of whatever it built locally — per-rank
+    # init seeds would make the global model a mixture of different inits,
+    # varying with the mesh layout (e.g. tp=1 vs tp=2 train different models).
+    # Ring-CRPS also requires identical weights on all dp replicas.
+    seed = conf.get("seed", 42)
     seed_everything(seed)
     inject_flat_var_keys(conf)
     if "post_conf" in conf["model"]:
@@ -188,6 +193,13 @@ def main_cli():
         m = torch.compile(m)
 
     model = distributed_model_wrapper_gen2(conf, m, device)
+
+    # Stage 2: now that the model is built and wrapped, re-seed by the
+    # data-parallel rank so training-time RNG (dropout masks, stochastic
+    # preblocks, ensemble perturbations) differs across dp replicas for
+    # ensemble diversity. TP/domain peers share a data_rank, so they still
+    # draw identical masks as required by the parallelism contract.
+    seed_everything(seed + data_rank)
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
