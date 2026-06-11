@@ -41,6 +41,90 @@ def setup(rank, world_size, mode, backend="nccl"):
     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
 
+# torch's conventional default rendezvous port; used as a deterministic
+# fallback when no MPI broadcast is available to agree on a random port.
+DEFAULT_MASTER_PORT = 29500
+
+
+def resolve_master_addr():
+    """Resolve a routable (non-loopback) IP address for the current host.
+
+    ``socket.gethostbyname(socket.gethostname())`` frequently returns a
+    loopback address (``127.0.0.1``) on HPC nodes whose hostname maps to
+    localhost in ``/etc/hosts``, which makes it unusable as a rendezvous
+    address. This prefers a non-loopback result from hostname resolution, and
+    otherwise discovers the outbound-interface IP by opening a dummy UDP
+    socket (no packets are actually sent).
+
+    Returns:
+        str: A best-effort non-loopback IPv4 address, falling back to
+            ``127.0.0.1`` if none can be determined.
+    """
+    try:
+        addr = socket.gethostbyname(socket.gethostname())
+        if not addr.startswith("127."):
+            return addr
+    except OSError:
+        pass
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Connecting a UDP socket only sets the kernel's chosen source address;
+        # it does not send any traffic. The destination need not be reachable.
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        sock.close()
+
+
+def resolve_socket_ifname():
+    """Return the network interface name owning this host's routable address.
+
+    Used to set ``GLOO_SOCKET_IFNAME`` so Gloo binds to a real (non-loopback)
+    interface instead of falling back to ``127.0.0.1``.
+
+    Returns:
+        str | None: The matching interface name, or ``None`` if it cannot be
+            determined (no routable address, ``psutil`` unavailable, or no
+            matching interface), in which case the caller should leave
+            ``GLOO_SOCKET_IFNAME`` unset.
+    """
+    addr = resolve_master_addr()
+    if addr.startswith("127."):
+        return None
+    try:
+        import psutil
+    except ImportError:
+        return None
+    for ifname, addrs in psutil.net_if_addrs().items():
+        for snic in addrs:
+            if snic.family == socket.AF_INET and snic.address == addr:
+                return ifname
+    return None
+
+
+def configure_gloo_ifname():
+    """Bind Gloo to a routable interface when ``GLOO_SOCKET_IFNAME`` is unset.
+
+    PyTorch's Gloo backend (used for CPU-side collectives even in NCCL runs)
+    binds to loopback when it cannot resolve the hostname to a local address,
+    which breaks those collectives across nodes. This sets
+    ``GLOO_SOCKET_IFNAME`` to the interface owning this host's routable address
+    as a best-effort default. It is a no-op if the variable is already set or
+    no interface can be determined, and it intentionally leaves
+    ``NCCL_SOCKET_IFNAME`` alone so NCCL is free to auto-select the
+    high-speed interconnect.
+    """
+    if "GLOO_SOCKET_IFNAME" in os.environ:
+        return
+    ifname = resolve_socket_ifname()
+    if ifname is not None:
+        os.environ["GLOO_SOCKET_IFNAME"] = ifname
+        logging.info("Set GLOO_SOCKET_IFNAME=%s for Gloo CPU collectives", ifname)
+
+
 def get_rank_info(trainer_mode):
     """Gets rank and size information for distributed training.
 
@@ -58,6 +142,7 @@ def get_rank_info(trainer_mode):
                 WORLD_SIZE = int(os.environ["WORLD_SIZE"])
                 WORLD_RANK = int(os.environ["RANK"])
             else:
+                logging.info("Using MPI for distributed training.")
                 from mpi4py import MPI
 
                 comm = MPI.COMM_WORLD
@@ -66,14 +151,23 @@ def get_rank_info(trainer_mode):
                 LOCAL_RANK = shmem_comm.Get_rank()
                 WORLD_SIZE = comm.Get_size()
                 WORLD_RANK = comm.Get_rank()
-
-                # Set MASTER_ADDR and MASTER_PORT if not already set.
-                # (broadcast these from rank 0 - they must be consistent on every node)
-                if "MASTER_ADDR" not in os.environ:
-                    os.environ["MASTER_ADDR"] = comm.bcast(socket.gethostbyname(socket.gethostname()), root=0)
-                if "MASTER_PORT" not in os.environ:
-                    os.environ["MASTER_PORT"] = comm.bcast(str(np.random.randint(1000, 8000)), root=0)
-
+                print("MASTER_ADDR: ", os.environ.get("MASTER_ADDR", "Not set"))
+                # Set MASTER_ADDR and MASTER_PORT consistently on every rank.
+                # bcast is a collective: every rank must call it, in the same order.
+                # Rank 0 picks the values (honoring any pre-set env vars) and broadcasts
+                # them so all workers agree, rather than each rank reading its own env.
+                if WORLD_RANK == 0:
+                    master_addr = os.environ.get("MASTER_ADDR", resolve_master_addr())
+                    master_port = os.environ.get("MASTER_PORT", str(np.random.randint(20000, 30000)))
+                else:
+                    master_addr = None
+                    master_port = None
+                os.environ["MASTER_ADDR"] = comm.bcast(master_addr, root=0)
+                os.environ["MASTER_PORT"] = comm.bcast(master_port, root=0)
+                comm.barrier()
+                print("MASTER_ADDR: ", os.environ.get("MASTER_ADDR", "Still Not set"))
+                logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
+                logging.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
                 if 0 == WORLD_RANK:
                     logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
                     logging.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
@@ -101,6 +195,29 @@ def get_rank_info(trainer_mode):
                     "Can't find the environment variables for local rank. "
                     "If you are on casper you'll want to use torchrun for now."
                 )
+
+            # The MPI broadcast path above is unavailable here, so we cannot
+            # guarantee these agree across nodes. Set sane defaults only if the
+            # launcher hasn't already provided them, and warn that multi-node
+            # jobs must export MASTER_ADDR/MASTER_PORT explicitly to be safe.
+            if "MASTER_ADDR" not in os.environ:
+                os.environ["MASTER_ADDR"] = resolve_master_addr()
+                logging.warning(
+                    "MASTER_ADDR was not set and could not be broadcast via MPI; "
+                    "defaulting to %s. For multi-node jobs, export MASTER_ADDR "
+                    "explicitly so all nodes agree on the rendezvous address.",
+                    os.environ["MASTER_ADDR"],
+                )
+            if "MASTER_PORT" not in os.environ:
+                os.environ["MASTER_PORT"] = str(DEFAULT_MASTER_PORT)
+                logging.warning(
+                    "MASTER_PORT was not set; defaulting to %s.",
+                    os.environ["MASTER_PORT"],
+                )
+
+        # Point Gloo at a routable interface so its CPU-side collectives don't
+        # fall back to loopback (runs for both the MPI and fallback branches).
+        configure_gloo_ifname()
 
     else:
         LOCAL_RANK = 0
