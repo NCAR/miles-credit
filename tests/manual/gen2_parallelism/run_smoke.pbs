@@ -18,8 +18,9 @@
 # parallelism mode with torchrun, choosing nproc-per-node so every parallel
 # dimension is genuinely exercised. Results land in $LOGDIR/SUMMARY.txt.
 #
-# NOTE: tensor parallelism is disabled (apply_tensor_parallel raises) until the
-#       native-TP rewrite lands with issue #415, so the matrix has no tp modes.
+# NOTE: legacy tensor parallelism is disabled (apply_tensor_parallel raises),
+#       so this matrix has no tp modes. Native TP for wxformer_next (issue
+#       #415) has its own acceptance run: run_tp_parity.pbs (tp=2 vs tp=1).
 #       The multistep entries exercise the domain-parallel between-step gather
 #       (gather_spatial of y_processed) with forecast_len=2.
 
