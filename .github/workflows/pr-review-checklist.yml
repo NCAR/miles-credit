@@ -1,0 +1,59 @@
+name: PR Review Checklist
+
+# Posts a review checklist as a comment when a pull request is opened.
+# Uses pull_request_target (not pull_request) so the comment can be posted on
+# pull requests from forks too. This is safe because the job only posts a fixed
+# comment — it never checks out or executes any code from the pull request.
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  checklist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post review checklist comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          MARKER="<!-- pr-review-checklist -->"
+
+          # Guard against double-posting: if a checklist comment (identified by
+          # the hidden marker) already exists on this PR, do nothing. This covers
+          # workflow re-runs and closed/reopened PRs.
+          if gh pr view "$PR_NUMBER" --repo "$REPO" --json comments \
+               --jq '.comments[].body' | grep -qF "$MARKER"; then
+            echo "Checklist comment already present; skipping."
+            exit 0
+          fi
+
+          cat > checklist.md <<'EOF'
+          <!-- pr-review-checklist -->
+          # PR Review Checklist
+          ## Required
+          - [ ] There is a clear description of what issue or feature the pull request is addressing.
+          - [ ] Issues covered by the pull request are tagged in the description.
+          - [ ] All CI checks and tests pass.
+          - [ ] Tests have been updated to cover code changes.
+          - [ ] Documentation has been updated to cover code changes and renders properly.
+          - [ ] The dependency lists in pyproject.toml and requirements.txt have been updated.
+          - [ ] The reviewer has provided both positive and constructive feedback in their review response.
+          - [ ] Changes affecting GPU-related functionality have been run by the submitter on Casper and/or Derecho to verify that the code runs as expected.
+
+          ## Recommended
+          - [ ] Updated public facing methods have full docstrings.
+          - [ ] Variable names balance being unambiguous and concise.
+          - [ ] Comments have been added to describe more complex operations.
+          - [ ] Code minimizes redundancy with the use of loops, function/method calls, and robust data structures.
+          - [ ] If dependencies are added, they should not burden the user with additional installation steps or break other parts of the code.
+          - [ ] If dependencies are removed, changes to existing code should be tested and any issues addressed.
+          - [ ] Tests cover expected outcomes of a function and known edge cases.
+          - [ ] Type annotation is added to inputs and outputs of functions/methods.
+          EOF
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file checklist.md
