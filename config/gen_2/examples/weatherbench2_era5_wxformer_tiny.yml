@@ -1,0 +1,78 @@
+save_loc: '/Users/dgagne/data/weatherbench2'
+#save_loc: '/glade/derecho/scratch/$USER/CREDIT/weatherbench2'
+seed: 31415
+
+data:
+  source:
+    WBERA5:
+      dataset_type: "weatherbench2_era5"
+      resolution: "240x121"   # optional; overridden by the resolution kwarg
+      level_coord: "level"
+      levels: [500, 850]
+      variables:
+        prognostic:
+          vars_3D: ["temperature", "specific_humidity"]
+          vars_2D: ["surface_pressure", "2m_temperature"]
+        diagnostic:
+          vars_2D: ['total_precipitation_6hr']
+        dynamic_forcing:
+          vars_2D: ["sea_surface_temperature"]
+        static:
+          vars_2D: ["land_sea_mask", "geopotential_at_surface"]
+  start_datetime: "1979-01-01"
+  end_datetime: "2017-12-31 18:00:00"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+preblocks:
+  per_step:
+    log_transform:
+      type: "log_transform"
+      args:
+        variables:
+          - 'WBERA5/prognostic/3d/specific_humidity'
+          - "WBERA5/prognostic/2d/surface_pressure"
+          - "WBERA5/diagnostic/2d/total_precipitation_6hr"
+        data_types:
+          - 'input'
+          - 'target'
+    fill_nan:
+      type: "fill_nan"
+      args:
+        variables: []
+        data_types:
+          - 'input'
+          - 'target'
+    scaler:
+      type: "bridgescaler_transformer"
+      args:
+        variables: []
+        scaler_path: "/Users/dgagne/data/weatherbench2/scaler.json"
+        scaler_type: "quantile"
+        scaler_params:
+          channels_last: False
+          compression: 500
+
+    vars_concat:
+      type: "concat"
+
+postblocks:
+  reconstruct:
+    type: "reconstruct"
+
+trainer:
+  type: era5-gen2           # use the v2 trainer (new nested data schema)
+
+  mode: none
+  epochs: 1
+  train_batch_size: 2
+  batches_per_epoch: 3
+  thread_workers: 4
+  valid_thread_workers: 2
+  prefetch_factor: 2
+
+
+
+

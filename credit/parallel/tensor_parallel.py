@@ -301,14 +301,14 @@ def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
             continue
         seen.add(mid)
 
-        col_path = getattr(type(module), "_tp_col", None)
-        row_path = getattr(type(module), "_tp_row", None)
+        col_path = getattr(module, "_tp_col", None)
+        row_path = getattr(module, "_tp_row", None)
         if col_path is None or row_path is None:
             continue
 
         # Optional per-block constraint check — implement _tp_constraints(instance, tp_size)
         # on a block class to catch invalid configurations early (e.g. heads % tp_size != 0).
-        check_fn = getattr(type(module), "_tp_constraints", None)
+        check_fn = getattr(module, "_tp_constraints", None)
         if check_fn is not None:
             check_fn(module, dist.get_world_size(tp_group))
 

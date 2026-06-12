@@ -373,8 +373,8 @@ class WeatherBench2ERA5Dataset(BaseDataset):
     def __init__(
         self,
         data_config: dict,
-        resolution: str = "1440x721",
         return_target: bool = False,
+        resolution: str = "1440x721",
     ) -> None:
         super().__init__(data_config, return_target)
         assert self.curr_source_cfg["dataset_type"] == "weatherbench2_era5", (

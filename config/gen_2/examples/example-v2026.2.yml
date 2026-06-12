@@ -232,9 +232,9 @@ model:
   attn_dropout: 0.
   ff_dropout: 0.
 
-  interp: False
+  interp: True                      # final bilinear resize to grid; mild low-pass, suppresses residual checkerboard
   use_spectral_norm: True
-  upsample_with_ps: True            # Upsample with pixel shuffle
+  upsample_with_ps: True            # pixel-shuffle (ICNR-initialized) decoder avoids checkerboard artifacts
 
   padding_conf:
     activate: True
@@ -247,7 +247,7 @@ model:
 loss:
   training_loss: "mse"
 
-  use_power_loss: False
+  use_power_loss: True              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
   use_spectral_loss: False
 
   use_latitude_weights: True

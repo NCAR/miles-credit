@@ -8,7 +8,7 @@ from ._ask import _ask
 from ._common import _setup_logging
 from ._convert import _convert, _init
 from ._plot import _metrics, _plot
-from ._submit import _realtime, _rollout, _rollout_ensemble, _submit, _train
+from ._submit import _preprocess, _realtime, _rollout, _rollout_ensemble, _submit, _train
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -18,8 +18,9 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:
-              credit init     --grid 0.25deg -o my_config.yml
-              credit train    -c config.yml
+              credit init       --grid 0.25deg -o my_config.yml
+              credit preprocess -c config.yml
+              credit train      -c config.yml
               credit realtime -c config.yml --init-time 2024-01-15T00 --steps 40
               credit rollout  -c config.yml
               credit submit   --cluster casper  -c config.yml --gpus 1
@@ -45,6 +46,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "-o", "--output", default="config.yml", metavar="FILE", help="Output file path (default: config.yml)"
     )
     p.add_argument("--force", action="store_true", help="Overwrite existing output file")
+
+    # ---- preprocess ----
+    p = sub.add_parser("preprocess", help="Fit preprocessing scalers (BridgeScaler) over the training data")
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
+    p.add_argument(
+        "--backend", default="nccl", choices=["nccl", "gloo", "mpi"], help="Distributed backend (default: nccl)"
+    )
 
     # ---- train ----
     p = sub.add_parser("train", help="Train a CREDIT v2 model")
@@ -115,18 +123,20 @@ def _build_parser() -> argparse.ArgumentParser:
             Use --dry-run to inspect the script before submitting.
 
             Modes:
-              train     (default) Submit a training job.  Use --reload / --chain for
-                        resuming and chaining multiple epochs across jobs.
-              rollout   Submit N parallel PBS rollout jobs covering all init times.
-                        Use --jobs N to set parallelism.  No afterok chain.
-              realtime  Submit a single realtime forecast job.
-                        Requires --init-time and --steps.
+              train      (default) Submit a training job.  Use --reload / --chain for
+                         resuming and chaining multiple epochs across jobs.
+              preprocess Submit a single job to fit preprocessing scalers.
+              rollout    Submit N parallel PBS rollout jobs covering all init times.
+                         Use --jobs N to set parallelism.  No afterok chain.
+              realtime   Submit a single realtime forecast job.
+                         Requires --init-time and --steps.
 
             Examples:
               credit submit --cluster casper  -c config.yml --gpus 1 --walltime 04:00:00
               credit submit --cluster derecho -c config.yml --gpus 4 --nodes 2 --dry-run
               credit submit --cluster casper  -c config.yml --mode train --reload
               credit submit --cluster derecho -c config.yml --mode train --chain 10
+              credit submit --cluster casper  -c config.yml --mode preprocess
               credit submit --cluster casper  -c config.yml --mode rollout --jobs 10
               credit submit --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00 --steps 40
         """),
@@ -137,8 +147,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mode",
         dest="submit_mode",
         default="train",
-        choices=["train", "rollout", "realtime"],
-        help="Submission mode: train (default), rollout, or realtime",
+        choices=["train", "preprocess", "rollout", "realtime"],
+        help="Submission mode: train (default), preprocess, rollout, or realtime",
     )
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per node")
     p.add_argument("--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only")
@@ -314,6 +324,7 @@ def main() -> None:
 
     dispatch = {
         "init": _init,
+        "preprocess": _preprocess,
         "train": _train,
         "rollout": _rollout,
         "rollout-ensemble": _rollout_ensemble,

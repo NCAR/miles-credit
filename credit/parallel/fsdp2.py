@@ -153,12 +153,11 @@ def fsdp2_is_applied(model: nn.Module) -> bool:
 def _has_fsdp2_shard(module: nn.Module) -> bool:
     """Return True if module opted into per-block FSDP2 sharding.
 
-    Any nn.Module subclass can opt in by declaring::
-
-        class MyBlock(nn.Module):
-            _fsdp2_shard = True
+    Blocks opt in by setting ``self._fsdp2_shard = True`` in ``__init__``
+    (exposed as an init arg on the wxformer blocks) or by declaring it as a
+    class attribute; instance lookup covers both.
     """
-    return bool(getattr(type(module), "_fsdp2_shard", False))
+    return bool(getattr(module, "_fsdp2_shard", False))
 
 
 def _apply_activation_checkpointing(model: nn.Module) -> None:
