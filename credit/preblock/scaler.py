@@ -79,8 +79,8 @@ class BridgeScalerTransformer(BasePreblock):
         # ``scaler`` holds the nested dict of fitted scalers used for transform /
         # inverse_transform (loaded from disk, or accumulated by fit_scaler_batch).
         # ``scaler_template`` is the single unfitted prototype used to fit new data.
-        if exists(expandvars(self.scaler_path)):
-            self.scaler = load_scaler_dict(scaler_path)
+        if exists(self.scaler_path):
+            self.scaler = load_scaler_dict(self.scaler_path)
             self.scaler_template = None
         else:
             full_scaler_path = expandvars(self.scaler_path)
