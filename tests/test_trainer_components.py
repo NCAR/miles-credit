@@ -1068,15 +1068,31 @@ class TestBaseTrainerAdditionalInit:
         trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
         assert trainer.direction is max
 
-    def test_distributed_true_for_ddp_mode(self, tmp_path):
-        """mode='ddp' should set distributed=True (line 137)."""
+    def test_distributed_requires_process_group(self, tmp_path):
+        """A distributed mode without an initialized process group must NOT set
+        distributed=True — single-process runs of a ddp/fsdp config would
+        otherwise call collectives with no group and crash."""
+        for mode in ("ddp", "fsdp"):
+            conf = _minimal_conf(mode=mode)
+            conf["save_loc"] = str(tmp_path)
+            trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+            assert trainer.distributed is False
+
+    def test_distributed_true_for_ddp_mode(self, tmp_path, monkeypatch):
+        """mode='ddp' with an initialized process group sets distributed=True."""
+        import credit.trainers.base_trainer as bt
+
+        monkeypatch.setattr(bt.torch.distributed, "is_initialized", lambda: True)
         conf = _minimal_conf(mode="ddp")
         conf["save_loc"] = str(tmp_path)
         trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
         assert trainer.distributed is True
 
-    def test_distributed_true_for_fsdp_mode(self, tmp_path):
-        """mode='fsdp' should set distributed=True."""
+    def test_distributed_true_for_fsdp_mode(self, tmp_path, monkeypatch):
+        """mode='fsdp' with an initialized process group sets distributed=True."""
+        import credit.trainers.base_trainer as bt
+
+        monkeypatch.setattr(bt.torch.distributed, "is_initialized", lambda: True)
         conf = _minimal_conf(mode="fsdp")
         conf["save_loc"] = str(tmp_path)
         trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)

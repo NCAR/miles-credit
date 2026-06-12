@@ -99,8 +99,11 @@ validation_data:
 trainer:
   type: era5-gen2
 
-  mode: ddp
-  cpu_offload: False
+  parallelism:
+    data: ddp               # ddp | fsdp2 | none
+    tensor: 1               # tensor-parallel degree  (1 = disabled)
+    domain: 1               # domain-parallel shards  (1 = disabled)
+
   activation_checkpoint: True
 
   load_weights: False

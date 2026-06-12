@@ -112,8 +112,11 @@ postblocks:
 trainer:
   type: era5-gen2           # use the v2 trainer (new nested data schema)
 
-  mode: "none"              # none | ddp | fsdp  (ddp recommended for multi-GPU)
-  cpu_offload: False
+  parallelism:
+    data: none              # none | ddp | fsdp2
+    tensor: 1
+    domain: 1
+
   activation_checkpoint: True
 
   load_weights: False     # set True to resume from checkpoint

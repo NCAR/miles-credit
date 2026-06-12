@@ -1,3 +1,4 @@
+import logging
 import os
 
 import torch
@@ -458,15 +459,29 @@ def load_dataloader(
     world_size: int,
     is_train: bool,
 ) -> DataLoader:
-    """Build a DataLoader with DistributedMultiStepBatchSampler."""
+    """Build a DataLoader with DistributedMultiStepBatchSampler.
+
+    NOTE — sampler contract:
+      * `rank`/`world_size` must be the DATA-PARALLEL coordinates (see
+        credit.parallel.mesh.data_parallel_coords), never the global rank when
+        tensor or domain parallelism is active. TP peers must receive the same
+        batch (the row-parallel all_reduce sums partial outputs of one input);
+        domain peers must receive the same batch (halo exchange passes boundary
+        rows of one sample).
+      * `seed` must be IDENTICAL on every rank. DistributedSampler (which
+        DistributedMultiStepBatchSampler subclasses) has each rank take its
+        slice of one shared permutation; per-rank seeds make each rank permute
+        differently and take the rank-th slice of a different permutation, so
+        samples get silently duplicated and dropped. Per-epoch variation comes
+        from sampler.set_epoch(epoch), which the trainer calls.
+    """
+    seed = conf.get("seed", 42)
     if is_train:
         batch_size = conf["trainer"]["train_batch_size"]
         shuffle = True
-        seed = conf.get("seed", 42) + rank
     else:
         batch_size = conf["trainer"]["valid_batch_size"]
         shuffle = False
-        seed = conf.get("seed", 42)
 
     forecast_len = conf["data"]["forecast_len"]
     num_workers = conf["trainer"].get("thread_workers" if is_train else "valid_thread_workers", 4)
@@ -491,8 +506,29 @@ def load_dataloader(
     )
 
 
+def effective_mode(conf):
+    """Distributed mode for checkpoint/AMP code paths.
+
+    The gen2 ``trainer.parallelism`` block is the sole source of truth when
+    present: ``data`` maps directly to the mode and any stale legacy
+    ``trainer.mode`` key is ignored (tensor/domain-only parallelism is "none"
+    — the model is not DDP/FSDP-wrapped). V1 configs have no parallelism
+    block and keep using ``trainer.mode``.
+    """
+    trainer = conf.get("trainer", {})
+    if "parallelism" in trainer:
+        data = trainer["parallelism"].get("data", "none")
+        return data if data in ("fsdp2", "ddp") else "none"
+    return trainer.get("mode", "none")
+
+
 def load_model_states_and_optimizer(conf, model, device):
-    """Load model weights, optimizer, scheduler, and gradient scaler."""
+    """Load model weights, optimizer, scheduler, and gradient scaler.
+
+    The effective mode comes from ``effective_mode`` — FSDP2 models need the
+    DCP full-state-dict APIs; a plain ``model.module.load_state_dict`` either
+    crashes (no ``.module``) or mismatches DTensor parameters.
+    """
     conf["save_loc"] = save_loc = os.path.expandvars(conf["save_loc"])
 
     learning_rate = float(conf["trainer"]["learning_rate"])
@@ -504,6 +540,17 @@ def load_model_states_and_optimizer(conf, model, device):
     load_scaler_conf = conf["trainer"].get("load_scaler", False)
     load_scheduler_conf = conf["trainer"].get("load_scheduler", False)
 
+    _p = conf["trainer"].get("parallelism", {})
+    mode = effective_mode(conf)
+
+    if load_weights and int(_p.get("tensor", 1)) > 1:
+        raise NotImplementedError(
+            "Resuming with tensor parallelism (tensor > 1) is not supported: "
+            "checkpoints save only rank 0's TP shards under rewritten keys. "
+            "Train TP runs from scratch or restructure to checkpoint before "
+            "applying TP."
+        )
+
     def _make_optimizer(model):
         opt = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
@@ -511,12 +558,24 @@ def load_model_states_and_optimizer(conf, model, device):
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
         )
-        if conf["trainer"]["mode"] == "fsdp":
+        if mode == "fsdp":
             opt = FSDPOptimizerWrapper(opt, model)
         return opt
 
     def _make_scaler():
-        return ShardedGradScaler(enabled=amp) if conf["trainer"]["mode"] == "fsdp" else GradScaler(enabled=amp)
+        from credit.parallel.fsdp2 import fsdp2_is_applied
+
+        if mode == "fsdp":
+            return ShardedGradScaler(enabled=amp)
+        if mode == "fsdp2" and fsdp2_is_applied(model):
+            # FSDP2 mixed precision comes from fsdp2_mp_policy (bf16, no loss
+            # scaling needed). A plain GradScaler checks found_inf per-rank on
+            # DTensor shards with no cross-rank sync, so one rank skipping its
+            # step desyncs parameters and scale across the dp group.
+            if amp:
+                logging.info("FSDP2 active: GradScaler disabled (mixed precision handled by fsdp2_mp_policy)")
+            return GradScaler(enabled=False)
+        return GradScaler(enabled=amp)
 
     if not load_weights:
         optimizer = _make_optimizer(model)
@@ -524,18 +583,26 @@ def load_model_states_and_optimizer(conf, model, device):
         scaler = _make_scaler()
 
     elif not (load_optimizer_conf or load_scaler_conf or load_scheduler_conf):
-        if conf["trainer"]["mode"] == "fsdp":
+        if mode == "fsdp":
             optimizer = _make_optimizer(model)
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
         else:
             ckpt = os.path.join(save_loc, "checkpoint.pt")
-            checkpoint = torch.load(ckpt, map_location=device)
-            if conf["trainer"]["mode"] == "ddp":
-                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            # fsdp2: load to CPU — fsdp2_load_state_dict broadcasts from rank 0,
+            # so loading the full unsharded checkpoint onto every rank's GPU
+            # only adds an OOM-sized memory spike for the models that needed
+            # sharding in the first place.
+            checkpoint = torch.load(ckpt, map_location="cpu" if mode == "fsdp2" else device)
+            if mode == "fsdp2":
+                from credit.parallel.fsdp2 import fsdp2_load_state_dict
+
+                fsdp2_load_state_dict(model, checkpoint["model_state_dict"])
             else:
-                load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
-            load_state_dict_error_handler(load_msg)
+                # getattr: single-process runs of a data=ddp config are not
+                # DDP-wrapped (no process group), so there is no .module.
+                load_msg = getattr(model, "module", model).load_state_dict(checkpoint["model_state_dict"], strict=False)
+                load_state_dict_error_handler(load_msg)
             optimizer = _make_optimizer(model)
 
         scheduler = load_scheduler(optimizer, conf)
@@ -546,19 +613,23 @@ def load_model_states_and_optimizer(conf, model, device):
 
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
-        checkpoint = torch.load(ckpt, map_location=device)
+        checkpoint = torch.load(ckpt, map_location="cpu" if mode == "fsdp2" else device)
 
-        if conf["trainer"]["mode"] == "fsdp":
+        if mode == "fsdp":
             optimizer = _make_optimizer(model)
             checkpoint_io = TorchFSDPCheckpointIO()
             checkpoint_io.load_unsharded_model(model, os.path.join(save_loc, "model_checkpoint.pt"))
             if load_optimizer_conf:
                 checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
+        elif mode == "fsdp2":
+            from credit.parallel.fsdp2 import fsdp2_load_state_dict, fsdp2_load_optimizer_state_dict
+
+            fsdp2_load_state_dict(model, checkpoint["model_state_dict"])
+            optimizer = _make_optimizer(model)
+            if load_optimizer_conf:
+                fsdp2_load_optimizer_state_dict(model, optimizer, checkpoint["optimizer_state_dict"])
         else:
-            if conf["trainer"]["mode"] == "ddp":
-                load_msg = model.module.load_state_dict(checkpoint["model_state_dict"], strict=False)
-            else:
-                load_msg = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            load_msg = getattr(model, "module", model).load_state_dict(checkpoint["model_state_dict"], strict=False)
             load_state_dict_error_handler(load_msg)
             optimizer = _make_optimizer(model)
             if load_optimizer_conf:
