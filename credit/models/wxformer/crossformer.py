@@ -66,6 +66,29 @@ class CubeEmbedding(nn.Module):
         return x
 
 
+def icnr_init_(weight, scale, init=nn.init.kaiming_normal_):
+    """ICNR init for a sub-pixel conv feeding nn.PixelShuffle (Aitken et al. 2017).
+
+    Initializes the conv weight so that, immediately after PixelShuffle(scale), the
+    output equals a nearest-neighbor upsample of a single initialized sub-kernel.
+    All scale**2 sub-pixel channels start identical, which removes the checkerboard
+    grid pattern present at initialization with default init.
+
+    Args:
+        weight: conv weight of shape (out_ch * scale**2, in_ch, kh, kw).
+        scale: PixelShuffle upscale factor.
+        init: in-place initializer applied to the sub-kernel.
+    """
+    out_ch = weight.shape[0] // (scale**2)
+    sub = torch.zeros(out_ch, *weight.shape[1:], device=weight.device, dtype=weight.dtype)
+    init(sub)
+    # PixelShuffle consumes channels in contiguous (r**2) blocks per output channel,
+    # so each sub-kernel must be repeated contiguously along the channel dim.
+    sub = sub.repeat_interleave(scale**2, dim=0)
+    with torch.no_grad():
+        weight.copy_(sub)
+
+
 class UpBlock(nn.Module):
     def __init__(
         self,
@@ -115,8 +138,10 @@ class UpBlockPS(nn.Module):
         super().__init__()
         # FSDP2 per-block sharding / activation-checkpointing opt-in
         self._fsdp2_shard = fsdp2_shard
-        # sub-pixel conv at low res
+        # sub-pixel conv at low res (ICNR init removes checkerboard at initialization)
         self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
+        icnr_init_(self.conv.weight, scale)
+        nn.init.zeros_(self.conv.bias)
         self.ps = nn.PixelShuffle(scale)
         # sharpening branch (identity init)
         self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
@@ -608,14 +633,17 @@ class CrossFormer(BaseModel):
             self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
             self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
             scale = 2
+            ps_conv = nn.Conv2d(
+                2 * (last_dim // 8),  # in_channels
+                self.output_channels * (scale**2),  # conv_out = target_channels * 4
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            )
+            icnr_init_(ps_conv.weight, scale)  # checkerboard-free sub-pixel init
+            nn.init.zeros_(ps_conv.bias)
             self.up_block4 = nn.Sequential(
-                nn.Conv2d(
-                    2 * (last_dim // 8),  # in_channels
-                    self.output_channels * (scale**2),  # conv_out = target_channels * 4
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                ),
+                ps_conv,
                 nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
                 nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
             )
