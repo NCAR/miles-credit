@@ -199,9 +199,9 @@ class LatWeightedMetricsClimatology:
         anomalies_pred = torch.stack(anomalies_pred, dim=1)
         anomalies_y = torch.stack(anomalies_y, dim=1)
 
-        for i, var in enumerate(self.acc_vars):
-            pred_prime = anomalies_pred[:, i] - torch.mean(anomalies_pred[:, i])
-            y_prime = anomalies_y[:, i] - torch.mean(anomalies_y[:, i])
+        for i, var in enumerate(ordered_acc_vars):
+            pred_prime = anomalies_pred[:, i]
+            y_prime = anomalies_y[:, i]
 
             # Offset the denominator incase its zero.
             denominator = torch.sqrt(torch.sum(w_var * w_lat * pred_prime**2) * torch.sum(w_var * w_lat * y_prime**2))
