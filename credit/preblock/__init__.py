@@ -117,6 +117,15 @@ def _run_preblock_group(group: nn.ModuleDict, batch: dict, device=None):
     return out
 
 
+def _move_batch_to_device(batch, device):
+    """Recursively move all tensors in a nested dict to device."""
+    if isinstance(batch, dict):
+        return {k: _move_batch_to_device(v, device) for k, v in batch.items()}
+    if torch.is_tensor(batch):
+        return batch.to(device)
+    return batch
+
+
 def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=None):
     for preblock in preblocks.values():
         if isinstance(preblock, BridgeScalerTransformer):
@@ -129,6 +138,8 @@ def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=
                 batch, meta = result
         else:
             batch = result
+    if device is not None:
+        batch = _move_batch_to_device(batch, device)
     return batch
 
 
