@@ -1,3 +1,4 @@
+import torch
 from bridgescaler import load_scaler_dict, scale_var_dict
 from bridgescaler.distributed_tensor import DStandardScalerTensor, DQuantileScalerTensor, DMinMaxScalerTensor
 from credit.preblock.base import BasePreblock
@@ -10,6 +11,30 @@ _SCALER_REGISTRY = {
     "quantile": DQuantileScalerTensor,
     "minmax": DMinMaxScalerTensor,
 }
+
+
+def _move_leaf_scaler_to_cpu(scaler):
+    """Move all tensor attributes of a single fitted scaler object to CPU in-place."""
+    for attr, val in vars(scaler).items():
+        if torch.is_tensor(val):
+            setattr(scaler, attr, val.cpu())
+        elif isinstance(val, dict):
+            for k, v in val.items():
+                if torch.is_tensor(v):
+                    val[k] = v.cpu()
+    return scaler
+
+
+def move_scaler_dict_to_cpu(scaler_dict):
+    """Recursively move all tensor statistics in a nested scaler dict to CPU.
+
+    Required before ``gather_object`` in multi-GPU runs: each rank's scaler
+    holds tensors on its own device, and combining scalers from different
+    devices raises a device-mismatch error.
+    """
+    if isinstance(scaler_dict, dict):
+        return {k: move_scaler_dict_to_cpu(v) for k, v in scaler_dict.items()}
+    return _move_leaf_scaler_to_cpu(scaler_dict)
 
 
 def _combine_scaler_dicts(a, b):
@@ -83,7 +108,7 @@ class BridgeScalerTransformer(BasePreblock):
             self.scaler = load_scaler_dict(self.scaler_path)
             self.scaler_template = None
         else:
-            full_scaler_path = expandvars(self.scaler_path)
+            full_scaler_path = self.scaler_path
             makedirs(full_scaler_path.rsplit("/", 1)[0], exist_ok=True)
             self.scaler = None
             self.scaler_template = _SCALER_REGISTRY[scaler_type](**scaler_params)
