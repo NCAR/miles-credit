@@ -6,7 +6,7 @@ from credit.preblock.sqrt import SqrtTransform
 from credit.preblock.regrid import Regridder
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.norm import ERA5Normalizer
-from credit.preblock.nan import FillNan
+from credit.preblock.fill_values import FillValues
 from credit.preblock.scaler import BridgeScalerTransformer
 
 
@@ -16,7 +16,7 @@ PREBLOCK_REGISTRY = {
     "regrid": Regridder,
     "concat": ConcatToTensor,
     "era5_normalizer": ERA5Normalizer,
-    "fill_nan": FillNan,
+    "fill_values": FillValues,
     "bridgescaler_transformer": BridgeScalerTransformer,
 }
 
