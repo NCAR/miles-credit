@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 # Explicit torch functions rather than Python operators so the lookup in forward()
 # is a single dict access with no branching.
 _OPS = {
-    "eq": torch.eq,   # x == search
-    "ne": torch.ne,   # x != search
-    "lt": torch.lt,   # x <  search
-    "le": torch.le,   # x <= search
-    "gt": torch.gt,   # x >  search
-    "ge": torch.ge,   # x >= search
+    "eq": torch.eq,  # x == search
+    "ne": torch.ne,  # x != search
+    "lt": torch.lt,  # x <  search
+    "le": torch.le,  # x <= search
+    "gt": torch.gt,  # x >  search
+    "ge": torch.ge,  # x >= search
 }
 
 
@@ -70,9 +70,9 @@ class FillValues(BasePreblock):
 
         # --- state ---
         self.rules = rules
-        self.variables = variables or []                # empty list means "all variables" (expanded on first forward)
-        self.variables_expanded = False                 # expanded lazily on first forward pass once batch structure is known
-        self._overlap_checked = False                   # overlap check runs once on the first forward pass
+        self.variables = variables or []  # empty list means "all variables" (expanded on first forward)
+        self.variables_expanded = False  # expanded lazily on first forward pass once batch structure is known
+        self._overlap_checked = False  # overlap check runs once on the first forward pass
         self.data_types = data_types or ["input", "target"]  # which batch splits to apply rules to
 
         # --- validation ---
@@ -108,9 +108,12 @@ class FillValues(BasePreblock):
                         "FillValues: rules %d and %d overlap "
                         "(search=%r, op=%r and search=%r, op=%r). "
                         "Rule %d (the later one) wins at overlapping positions.",
-                        i, j,
-                        self.rules[i]["search"], self.rules[i].get("op", "eq"),
-                        self.rules[j]["search"], self.rules[j].get("op", "eq"),
+                        i,
+                        j,
+                        self.rules[i]["search"],
+                        self.rules[i].get("op", "eq"),
+                        self.rules[j]["search"],
+                        self.rules[j].get("op", "eq"),
                         j,
                     )
 
