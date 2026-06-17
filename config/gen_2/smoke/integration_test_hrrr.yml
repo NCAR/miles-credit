@@ -82,31 +82,32 @@ validation_data:
 # ---- USER SETTINGS: preblocks/postblocks before/after passed to model ---- #
 
 preblocks:
-
-  pressure_log_transform:
-    type: "log_transform"
-    args:
-      variables:
-        - 'Example_HRRR/prognostic/2d/sp'
-      data_types:
-        - 'input'
-        - 'target'
-
-  q_sqrt_transform:
-      type: "sqrt_transform"
+  per_step:
+    pressure_log_transform:
+      type: "log_transform"
       args:
-          variables:
-                - 'Example_HRRR/prognostic/3d/Q'
-          data_types:
-            - 'input'
-            - 'target'
+        variables:
+          - 'Example_HRRR/prognostic/2d/sp'
+        data_types:
+          - 'input'
+          - 'target'
 
-  vars_concat:
-    type: "concat"
+    q_sqrt_transform:
+        type: "sqrt_transform"
+        args:
+            variables:
+                  - 'Example_HRRR/prognostic/3d/Q'
+            data_types:
+              - 'input'
+              - 'target'
+
+    vars_concat:
+      type: "concat"
 
 postblocks:
-  reconstruct:
-    type: "reconstruct"
+  per_step:
+    reconstruct:
+      type: "reconstruct"
 
 # ---- USER SETTINGS: training hyperparameters ---- #
 trainer:
