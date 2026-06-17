@@ -101,6 +101,16 @@ preblocks:
               - 'input'
               - 'target'
 
+    scaler:
+      # please run `credit preprocess` before `credit train`
+      type: "bridgescaler_transformer"
+      args:
+        variables: []
+        scaler_path: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/scaler_quantile.json"
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
+
     vars_concat:
       type: "concat"
 
