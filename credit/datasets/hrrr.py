@@ -170,6 +170,7 @@ VAR_REGISTRY: dict[str, dict[str, str | None]] = {
     "W": {"idx_name": "VVEL", "idx_level": None},  # vertical velocity (Pa/s)
     "GH": {"idx_name": "HGT", "idx_level": None},  # geopotential height (gpm)
     "ABSV": {"idx_name": "ABSV", "idx_level": None},  # absolute vorticity (1/s)
+    "P": {"idx_name": "PRES", "idx_level": None},  # pressure (Pa)
     # Moisture
     "Q": {"idx_name": "SPFH", "idx_level": None},  # specific humidity (kg/kg)
     "RH": {"idx_name": "RH", "idx_level": None},  # relative humidity (%)
