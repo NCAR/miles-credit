@@ -97,9 +97,9 @@ def test_fill_values_preserves_inf():
 
 
 def test_fill_values_eq_replaces_exact_zeros():
-    """op=eq replaces values exactly equal to search."""
+    """op='==' replaces values exactly equal to search."""
     batch = create_mixed_data()
-    result = FillValues(rules=[{"search": 0.0, "op": "eq", "fill": 1e-4}])(batch)
+    result = FillValues(rules=[{"search": 0.0, "op": "==", "fill": 1e-4}])(batch)
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
     assert t[0, 1, 0, 1, 1] == pytest.approx(1e-4)  # was 0.0
     assert t[0, 2, 0, 2, 2] == pytest.approx(-0.5)  # was -0.5, untouched
@@ -107,9 +107,9 @@ def test_fill_values_eq_replaces_exact_zeros():
 
 
 def test_fill_values_lt_clamps_negatives():
-    """op=lt replaces all values strictly less than search."""
+    """op='<' replaces all values strictly less than search."""
     batch = create_mixed_data()
-    result = FillValues(rules=[{"search": 0.0, "op": "lt", "fill": 99.0}])(batch)
+    result = FillValues(rules=[{"search": 0.0, "op": "<", "fill": 99.0}])(batch)
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
     assert t[0, 2, 0, 2, 2] == pytest.approx(99.0)  # was -0.5 → replaced
     assert t[0, 1, 0, 1, 1] == pytest.approx(0.0)  # was 0.0 → untouched (not < 0)
@@ -117,9 +117,9 @@ def test_fill_values_lt_clamps_negatives():
 
 
 def test_fill_values_le_includes_zero():
-    """op=le replaces values less than or equal to search."""
+    """op='<=' replaces values less than or equal to search."""
     batch = create_mixed_data()
-    result = FillValues(rules=[{"search": 0.0, "op": "le", "fill": 1e-4}])(batch)
+    result = FillValues(rules=[{"search": 0.0, "op": "<=", "fill": 1e-4}])(batch)
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
     assert t[0, 1, 0, 1, 1] == pytest.approx(1e-4)  # was 0.0 → replaced
     assert t[0, 2, 0, 2, 2] == pytest.approx(1e-4)  # was -0.5 → replaced
@@ -127,9 +127,9 @@ def test_fill_values_le_includes_zero():
 
 
 def test_fill_values_ge_replaces_large_values():
-    """op=ge replaces values greater than or equal to search."""
+    """op='>=' replaces values greater than or equal to search."""
     batch = create_mixed_data()
-    result = FillValues(rules=[{"search": 1.0, "op": "ge", "fill": 0.5}])(batch)
+    result = FillValues(rules=[{"search": 1.0, "op": ">=", "fill": 0.5}])(batch)
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
     assert t[0, 0, 0, 2, 2] == pytest.approx(0.5)  # was 1.0 → replaced
     assert t[0, 2, 0, 2, 2] == pytest.approx(-0.5)  # was -0.5 → untouched
@@ -137,9 +137,9 @@ def test_fill_values_ge_replaces_large_values():
 
 
 def test_fill_values_eq_replaces_inf():
-    """op=eq with search=inf replaces only exact inf positions."""
+    """op='==' with search=inf replaces only exact inf positions."""
     batch = create_mixed_data()
-    result = FillValues(rules=[{"search": float("inf"), "op": "eq", "fill": 0.0}])(batch)
+    result = FillValues(rules=[{"search": float("inf"), "op": "==", "fill": 0.0}])(batch)
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
     assert t[1, 0, 0, 0, 0] == pytest.approx(0.0)  # was inf → replaced
     assert t[0, 0, 0, 2, 2] == pytest.approx(1.0)  # was 1.0 → untouched
@@ -147,9 +147,9 @@ def test_fill_values_eq_replaces_inf():
 
 
 def test_fill_values_gt_catches_inf():
-    """op=gt with a finite threshold also catches inf (inf > any finite number)."""
+    """op='>' with a finite threshold also catches inf (inf > any finite number)."""
     batch = create_mixed_data()
-    result = FillValues(rules=[{"search": 1e10, "op": "gt", "fill": 0.0}])(batch)
+    result = FillValues(rules=[{"search": 1e10, "op": ">", "fill": 0.0}])(batch)
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
     assert t[1, 0, 0, 0, 0] == pytest.approx(0.0)  # was inf → replaced (inf > 1e10)
     assert t[0, 0, 0, 2, 2] == pytest.approx(1.0)  # was 1.0 → untouched (1.0 not > 1e10)
@@ -164,9 +164,9 @@ def test_fill_values_nan_rule_does_not_affect_inf():
 
 
 def test_fill_values_gt_excludes_exact_match():
-    """op=gt replaces values strictly greater than search, leaving the exact value untouched."""
+    """op='>' replaces values strictly greater than search, leaving the exact value untouched."""
     batch = create_mixed_data()
-    result = FillValues(rules=[{"search": 0.0, "op": "gt", "fill": 99.0}])(batch)
+    result = FillValues(rules=[{"search": 0.0, "op": ">", "fill": 99.0}])(batch)
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
     assert t[0, 0, 0, 2, 2] == pytest.approx(99.0)  # was 1.0 → replaced (> 0)
     assert t[0, 1, 0, 1, 1] == pytest.approx(0.0)  # was 0.0 → untouched (not > 0)
@@ -174,9 +174,9 @@ def test_fill_values_gt_excludes_exact_match():
 
 
 def test_fill_values_ne_replaces_non_matching():
-    """op=ne replaces all values not equal to search."""
+    """op='!=' replaces all values not equal to search."""
     batch = create_mixed_data()
-    result = FillValues(rules=[{"search": 1.0, "op": "ne", "fill": 99.0}])(batch)
+    result = FillValues(rules=[{"search": 1.0, "op": "!=", "fill": 99.0}])(batch)
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
     assert t[0, 1, 0, 1, 1] == pytest.approx(99.0)  # was 0.0 → replaced (≠ 1.0)
     assert t[0, 2, 0, 2, 2] == pytest.approx(99.0)  # was -0.5 → replaced (≠ 1.0)
@@ -189,7 +189,7 @@ def test_fill_values_numeric_op_never_touches_nan():
     shape = (1, 1, 1, 2, 2)
     t = torch.tensor([float("nan"), 0.0, -1.0, 2.0]).reshape(shape)
     batch = {"input": {"Test_ERA5": {"Test_ERA5/prognostic/3d/T": t}}}
-    for op in ("eq", "ne", "lt", "le", "gt", "ge"):
+    for op in ("==", "!=", "<", "<=", ">", ">="):
         b = {"input": {"Test_ERA5": {"Test_ERA5/prognostic/3d/T": t.clone()}}}
         result = FillValues(rules=[{"search": 0.0, "op": op, "fill": 99.0}])(b)
         out = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].flatten()
@@ -210,8 +210,8 @@ def test_fill_values_overlap_warning(caplog):
     # le: 0.0 and eq: 0.0 both match the position where x == 0.0
     fv = FillValues(
         rules=[
-            {"search": 0.0, "op": "le", "fill": 1e-4},
-            {"search": 0.0, "op": "eq", "fill": 99.0},
+            {"search": 0.0, "op": "<=", "fill": 1e-4},
+            {"search": 0.0, "op": "==", "fill": 99.0},
         ]
     )
     with caplog.at_level(logging.WARNING, logger="credit.preblock.fill_values"):
@@ -227,8 +227,8 @@ def test_fill_values_overlap_warning_emitted_only_once(caplog):
 
     fv = FillValues(
         rules=[
-            {"search": 0.0, "op": "le", "fill": 1e-4},
-            {"search": 0.0, "op": "eq", "fill": 99.0},
+            {"search": 0.0, "op": "<=", "fill": 1e-4},
+            {"search": 0.0, "op": "==", "fill": 99.0},
         ]
     )
     with caplog.at_level(logging.WARNING, logger="credit.preblock.fill_values"):
@@ -372,7 +372,7 @@ def test_fill_values_built_from_config():
                 "args": {
                     "rules": [
                         {"search": "nan", "fill": -1.0},
-                        {"search": 0.0, "op": "eq", "fill": 1e-4},
+                        {"search": 0.0, "op": "==", "fill": 1e-4},
                     ]
                 },
             }

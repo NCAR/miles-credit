@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 # Explicit torch functions rather than Python operators so the lookup in forward()
 # is a single dict access with no branching.
 _OPS = {
-    "eq": torch.eq,  # x == search
-    "ne": torch.ne,  # x != search
-    "lt": torch.lt,  # x <  search
-    "le": torch.le,  # x <= search
-    "gt": torch.gt,  # x >  search
-    "ge": torch.ge,  # x >= search
+    "==": torch.eq,
+    "!=": torch.ne,
+    "<": torch.lt,
+    "<=": torch.le,
+    ">": torch.gt,
+    ">=": torch.ge,
 }
 
 
@@ -30,8 +30,8 @@ class FillValues(BasePreblock):
     Each rule is a dict with:
 
     - ``search``: the string ``"nan"`` (matches NaN) or a float (used with ``op``).
-    - ``op``: comparison operator — ``"eq"``, ``"ne"``, ``"lt"``, ``"le"``, ``"gt"``, ``"ge"``
-      (default ``"eq"``; ignored when ``search`` is ``"nan"``).
+    - ``op``: comparison operator — ``"=="``, ``"!="``\, ``"<"``, ``"<="``, ``">"``, ``">="``
+      (default ``"=="``;  ignored when ``search`` is ``"nan"``).
     - ``fill``: the replacement value.
 
     Numeric ops (``search`` is a float) never match NaN positions — use ``search: "nan"``
@@ -48,10 +48,10 @@ class FillValues(BasePreblock):
                 - search: nan        # NaN       → -1.0
                   fill: -1.0
                 - search: 0.0        # == 0.0    → 1.0e-4
-                  op: eq
+                  op: "=="
                   fill: 1.0e-4
                 - search: 0.0        # < 0.0     → 0.0  (clamp negatives)
-                  op: lt
+                  op: "<"
                   fill: 0.0
             variables:               # optional — defaults to all variables
                 - "era5/prognostic/3d/Q"
@@ -90,7 +90,7 @@ class FillValues(BasePreblock):
                 # 'search' must be a number when not "nan"
                 if not isinstance(rule["search"], (int, float)):
                     raise ValueError(f"Rule 'search' must be 'nan' or a number, got: {rule['search']!r}")
-                op = rule.get("op", "eq")
+                op = rule.get("op", "==")
                 # op is only validated for numeric searches; it's ignored for "nan"
                 if op not in _OPS:
                     raise ValueError(f"Rule 'op' must be one of {sorted(_OPS)}, got: {op!r}")
@@ -150,7 +150,7 @@ class FillValues(BasePreblock):
                     if rule["search"] == "nan":
                         mask = torch.isnan(x)
                     else:
-                        op_fn = _OPS[rule.get("op", "eq")]
+                        op_fn = _OPS[rule.get("op", "==")]
                         # AND with not_nan so NaN positions are never matched by numeric ops
                         mask = not_nan & op_fn(x, rule["search"])
                     masks.append((mask, rule["fill"]))
