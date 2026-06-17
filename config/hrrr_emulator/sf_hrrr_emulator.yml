@@ -22,22 +22,21 @@ data:
   source:
     Example_HRRR:
       dataset_type: "hrrr"
-      product: "wrfprs"
+      product: "wrfnat"
       mode: "remote"
       level_coord: "level"
-      levels: [250, 500, 925, 1000]
+      levels: [1, 3, 5, 7, 9, 11]
       variables:
         # Prognostic: model both predicts and receives as input next step
         prognostic:
-          vars_3D: ['T', 'U', 'V', 'Q']
-          vars_2D: ['sp']
+          vars_3D: ['T', 'U', 'V', 'Q', 'P', 'GH']
+          vars_2D: ['sp', 't2m', 'd2m']
 
         # Diagnostic: model predicts these but does not feed them back as input
         diagnostic: null
 
         # Dynamic forcing: time-varying inputs (not predicted)
-        dynamic_forcing:
-          vars_3D: [ 'GH' ]
+        dynamic_forcing: null
 
         # Static: time-invariant inputs (not predicted)
         static:
@@ -45,20 +44,6 @@ data:
       # [lon_min, lon_max, lat_min, lat_max]
       extent: [-124.358202, -120.477473, 36.527802, 38.797260]
       # should be from 38.797260, -124.358202 to 36.527802, -120.477473
-
-    Example_HRRR_SUBH:
-      dataset_type: "hrrr"
-      product: "wrfsubh" # 2D only
-      mode: "remote"
-      variables:
-        prognostic:
-          vars_2D: ['t2m']
-        
-        diagnostic:
-          vars_2D: ['d2m']
-
-      # Extent to match the one above
-      extent: [-124.358202, -120.477473, 36.527802, 38.797260]
 
   start_datetime: "2025-01-01"
   end_datetime: "2025-01-02"
@@ -183,11 +168,11 @@ model:
   frames: 1
   image_height: 111       # Updated for new HRRR extent
   image_width: 132        # Updated for new HRRR extent
-  levels: 4               # number of HRRR model levels (matches data.levels above)
-  channels: 4             # 3D prognostic variables (T, U, V, Q)
-  surface_channels: 2     # 2D prognostic variables (sp, t2m)
-  input_only_channels: 5  # dynamic_forcing (GH x4) + static (orog)
-  output_only_channels: 1 # diagnostic variables (d2m)
+  levels: 6               # Bottom 6 odd levels (1, 3, 5, 7, 9, 11)
+  channels: 6             # 3D prognostic variables (T, U, V, Q, P, GH)
+  surface_channels: 3     # 2D prognostic variables (sp, t2m, d2m)
+  input_only_channels: 1  # static (orog)
+  output_only_channels: 0 # no diagnostic predicted
 
   patch_width: 1
   patch_height: 1

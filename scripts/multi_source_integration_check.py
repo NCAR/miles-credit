@@ -96,9 +96,8 @@ for source_name, source_target_channel_map in batch["metadata"]["target"]["_chan
     print(f"METADATA CHANNEL_MAP KEYS: Source: {source_name}, Keys: {source_target_channel_map.keys()}")
     print(f"METADATA CHANNEL_MAP KEYS: Source: {source_name}, Slice: {source_target_channel_map['slice']}")
 
-fake_prediction = torch.tensor(np.random.normal(0, 1, target_shape))
-batch["prediction"] = fake_prediction
-sample["prediction"] = fake_prediction
+# prediction key for gen2 trainer
+batch["y_pred"] = torch.tensor(np.random.normal(0, 1, target_shape), dtype=torch.float32)
 
 postblocks = build_postblocks(config["postblocks"])
 postbatch = apply_postblocks(postblocks, batch)
