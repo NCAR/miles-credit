@@ -18,8 +18,8 @@ import numpy as np
 setup_timer_start = time.perf_counter()
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
-config_path = BASE_DIR.parent / "config" / "gen_2" / "smoke" / "integration_test_hrrr.yml"
-# config_path = BASE_DIR.parent / "config" / "gen_2" / "examples" / "multi_source_data.yml"
+config_path = BASE_DIR.parent / "config" / "hrrr_emulator" / "sf_hrrr_emulator.yml"
+# config_path = BASE_DIR.parent / "config" / "gen_2" / "smoke" / "integration_test_hrrr.yml"
 # config_path = BASE_DIR.parent / "config" / "multi_source_data_local.yml"
 
 with open(config_path, "r") as f:
@@ -67,18 +67,22 @@ for source_name, source_data in sample["input"].items():
 preblocks = build_preblocks(config["preblocks"])
 batch = apply_preblocks(preblocks, sample)
 print("BATCH KEYS:", batch.keys())
-print("Input shape:", batch["input"].shape)
-print("Target shape:", batch["target"].shape)
-target_shape = batch["target"].shape
 
-print("# Input is Nan:", torch.isnan(batch["input"]).sum().item())
-print("# Total in input:", batch["input"].numel())
-print("Input min value:", batch["input"].min().item())
-print("Input max value:", batch["input"].max().item())
-print("# Target is Nan:", torch.isnan(batch["target"]).sum().item())
-print("# Total in target:", batch["target"].numel())
-print("Target min value:", batch["target"].min().item())
-print("Target max value:", batch["target"].max().item())
+input_key = "x" if "x" in batch else "input"
+target_key = "y" if "y" in batch else "target"
+
+print(f"Input shape ({input_key}):", batch[input_key].shape)
+print(f"Target shape ({target_key}):", batch[target_key].shape)
+target_shape = batch[target_key].shape
+
+print("# Input is Nan:", torch.isnan(batch[input_key]).sum().item())
+print("# Total in input:", batch[input_key].numel())
+print("Input min value:", batch[input_key].min().item())
+print("Input max value:", batch[input_key].max().item())
+print("# Target is Nan:", torch.isnan(batch[target_key]).sum().item())
+print("# Total in target:", batch[target_key].numel())
+print("Target min value:", batch[target_key].min().item())
+print("Target max value:", batch[target_key].max().item())
 
 print("METADATA KEYS:", batch["metadata"].keys())
 print("METADATA KEYS:", batch["metadata"]["input"].keys())
