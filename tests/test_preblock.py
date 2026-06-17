@@ -625,3 +625,26 @@ class TestApplyPreblocks:
         assert isinstance(result, dict)
         assert "input" in result
         assert "era5/prognostic/2d/T" in result["input"]["era5"]
+
+    def test_concat_result_exposes_input_tensor_under_x(self):
+        """The concat result is a dict keyed by "x"; the rollout apps read result["x"].
+
+        rollout_to_netcdf_gen2 previously unpacked this as ``x, _ = apply_preblocks(...)``,
+        which iterates the dict keys (strings) instead of returning the tensor, so the
+        following ``x.to(device)`` raised AttributeError/ValueError. Reading result["x"]
+        is the contract the apps must use.
+        """
+        from credit.preblock import apply_preblocks, build_preblocks
+
+        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+            "target": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+        }
+        result = apply_preblocks(preblocks, batch)
+
+        assert "x" in result
+        assert isinstance(result["x"], torch.Tensor)
+        # the tensor is usable as a tensor (what the rollout app does next)
+        assert result["x"].float().shape[0] == B
