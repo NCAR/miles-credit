@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 #   cls: type                             — externally registered classes
 _POSTBLOCK_REGISTRY = {
     "reconstruct": ("credit.postblock.reconstruct", "Reconstruct"),
-    "bridgescaler_transform": ("credit.postblock.scaler", "BridgeScalerTransformer"),
+    "bridgescaler_transformer": ("credit.postblock.scaler", "BridgeScalerTransformer"),
     "wet_mask_samudra": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "mslp_diagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
     "tracer_fixer": ("credit.postblock.gen1", "TracerFixer"),
@@ -147,7 +147,7 @@ def build_postblocks(conf: dict, phase: str = "per_step") -> nn.ModuleDict:
             reconstruct:
               type: reconstruct
             inverse_scale:
-              type: bridgescaler_transform
+              type: bridgescaler_transformer
               args:
                 method: inverse_transform
                 scaler_path: /path/to/scaler.json

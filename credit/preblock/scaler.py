@@ -51,7 +51,7 @@ class BridgeScalerTransformer(BasePreblock):
 
     Example config::
 
-        type: "bridgescaler_transform"
+        type: "bridgescaler_transformer"
         args:
             scaler_path: "/path/to/scaler.json"
             variables:

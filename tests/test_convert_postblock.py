@@ -92,7 +92,7 @@ def test_convert_writes_postblocks(tmp_path, mean_std_nc):
     assert "scaler" in keys
     assert keys.index("reconstruct") < keys.index("scaler"), "reconstruct must come before scaler"
     assert per_step["reconstruct"]["type"] == "reconstruct"
-    assert per_step["scaler"]["type"] == "bridgescaler_transform"
+    assert per_step["scaler"]["type"] == "bridgescaler_transformer"
     assert per_step["scaler"]["args"]["method"] == "inverse_transform"
     assert "key" not in per_step["scaler"]["args"], "key should not be set; default y_processed is correct"
 
@@ -120,7 +120,7 @@ def test_convert_postblocks_inverse_transform(tmp_path, mean_std_nc):
         "per_step": {
             "reconstruct": {"type": "reconstruct"},
             "scaler": {
-                "type": "bridgescaler_transform",
+                "type": "bridgescaler_transformer",
                 "args": {
                     "scaler_path": post_json,
                     "variables": post_vars,
