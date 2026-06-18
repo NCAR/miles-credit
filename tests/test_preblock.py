@@ -361,21 +361,21 @@ class TestBuildPreblocks:
         from credit.preblock import build_preblocks
 
         with pytest.raises(ValueError, match="unexpected top-level keys"):
-            build_preblocks({"concat": {"type": "concat"}})
+            build_preblocks({"preblocks": {"concat": {"type": "concat"}}})
 
     def test_unknown_section_key_raises(self):
         """A key that is neither ic_only nor per_step raises ValueError."""
         from credit.preblock import build_preblocks
 
         with pytest.raises(ValueError, match="unexpected top-level keys"):
-            build_preblocks({"per_step": {}, "bad_section": {}})
+            build_preblocks({"preblocks": {"per_step": {}, "bad_section": {}}})
 
     def test_valid_two_section_per_step_builds(self):
         """per_step section builds an nn.ModuleDict with the named block."""
         import torch.nn as nn
         from credit.preblock import build_preblocks
 
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         assert isinstance(preblocks, nn.ModuleDict)
         assert "concat" in preblocks
 
@@ -384,7 +384,7 @@ class TestBuildPreblocks:
         import torch.nn as nn
         from credit.preblock import build_preblocks
 
-        preblocks = build_preblocks({"ic_only": {"concat": {"type": "concat"}}}, phase="ic_only")
+        preblocks = build_preblocks({"preblocks": {"ic_only": {"concat": {"type": "concat"}}}}, phase="ic_only")
         assert isinstance(preblocks, nn.ModuleDict)
         assert "concat" in preblocks
 
@@ -402,7 +402,7 @@ class TestBuildPreblocks:
         from credit.preblock import build_preblocks
 
         # ic_only is configured but per_step is requested
-        preblocks = build_preblocks({"ic_only": {"concat": {"type": "concat"}}}, phase="per_step")
+        preblocks = build_preblocks({"preblocks": {"ic_only": {"concat": {"type": "concat"}}}}, phase="per_step")
         assert len(preblocks) == 0
 
     def test_invalid_phase_raises(self):
@@ -421,14 +421,16 @@ class TestBuildPostblocks:
         from credit.postblock import build_postblocks
 
         with pytest.raises(ValueError, match="unexpected top-level keys"):
-            build_postblocks({"reconstruct": {"type": "reconstruct"}})
+            build_postblocks({"postblocks": {"reconstruct": {"type": "reconstruct"}}})
 
     def test_valid_two_section_per_step_builds(self):
         """per_step section builds a ModuleDict with the named block."""
         import torch.nn as nn
         from credit.postblock import build_postblocks
 
-        postblocks = build_postblocks({"per_step": {"reconstruct": {"type": "reconstruct"}}}, phase="per_step")
+        postblocks = build_postblocks(
+            {"postblocks": {"per_step": {"reconstruct": {"type": "reconstruct"}}}}, phase="per_step"
+        )
         assert isinstance(postblocks, nn.ModuleDict)
         assert "reconstruct" in postblocks
 
@@ -548,7 +550,7 @@ class TestApplyPreblocks:
         """apply_preblocks returns {"x", "y", "metadata"} when ConcatToTensor is the final block."""
         from credit.preblock import apply_preblocks, build_preblocks
 
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         batch = {
             "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
@@ -564,7 +566,7 @@ class TestApplyPreblocks:
         """Metadata from apply_preblocks contains populated _channel_map for input and target."""
         from credit.preblock import apply_preblocks, build_preblocks
 
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         var_key = "era5/prognostic/2d/T"
         batch = {
@@ -583,7 +585,7 @@ class TestApplyPreblocks:
         """apply_preblocks does not modify the caller's batch tensors in-place."""
         from credit.preblock import apply_preblocks, build_preblocks
 
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         original_tensor = torch.ones(B, 1, 1, H, W)
         batch = {
@@ -600,7 +602,7 @@ class TestApplyPreblocks:
         """apply_preblocks does not add or remove keys from the caller's batch dict."""
         from credit.preblock import apply_preblocks, build_preblocks
 
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         batch = {
             "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},

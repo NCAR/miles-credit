@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from credit.preblock import PREBLOCK_REGISTRY, build_preblocks
+from credit.preblock import build_preblocks
 from credit.preblock.nan import FillNan
 
 
@@ -155,12 +155,14 @@ def test_fill_nan_invalid_data_type_raises():
 
 def test_fill_nan_registered():
     """FillNan is registered under the 'fill_nan' key."""
-    assert PREBLOCK_REGISTRY["fill_nan"] is FillNan
+    from credit.preblock import _load_preblock_entry
+
+    assert _load_preblock_entry("fill_nan") is FillNan
 
 
 def test_fill_nan_built_from_config():
     """build_preblocks instantiates FillNan from a config dict and it works."""
-    blocks = build_preblocks({"per_step": {"fill": {"type": "fill_nan", "args": {"fill_value": 5.0}}}})
+    blocks = build_preblocks({"preblocks": {"per_step": {"fill": {"type": "fill_nan", "args": {"fill_value": 5.0}}}}})
     result = blocks["fill"](create_nan_data())
     t = result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/U"]
     assert t[0, 0, 0, 0, 0] == 5.0

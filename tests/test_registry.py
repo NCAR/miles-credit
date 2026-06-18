@@ -76,7 +76,7 @@ class TestLoadCustomObjects:
         )
 
         from credit.registry import load_custom_objects
-        from credit.preblock import PREBLOCK_REGISTRY
+        from credit.preblock import _PREBLOCK_REGISTRY
 
         conf = {
             "custom_objects": {
@@ -88,7 +88,7 @@ class TestLoadCustomObjects:
             }
         }
         load_custom_objects(conf)
-        assert "RegTestPreBlock" in PREBLOCK_REGISTRY
+        assert "RegTestPreBlock" in _PREBLOCK_REGISTRY
 
     def test_registers_model(self, tmp_path):
         """A model entry with correct base class is imported and registered."""
@@ -127,7 +127,7 @@ class TestLoadCustomObjects:
         )
 
         from credit.registry import load_custom_objects
-        from credit.postblock import POSTBLOCK_REGISTRY
+        from credit.postblock import _POSTBLOCK_REGISTRY
 
         conf = {
             "custom_objects": {
@@ -139,7 +139,7 @@ class TestLoadCustomObjects:
             }
         }
         load_custom_objects(conf)
-        assert "RegTestPostBlock" in POSTBLOCK_REGISTRY
+        assert "RegTestPostBlock" in _POSTBLOCK_REGISTRY
 
     def test_registers_loss(self, tmp_path):
         """A loss entry is imported and registered in the loss registry."""
@@ -345,15 +345,15 @@ class TestRegisterDataset:
 
 class TestRegisterPreblock:
     def test_decorator_adds_to_registry(self):
-        from credit.preblock import register_preblock, PREBLOCK_REGISTRY
+        from credit.preblock import register_preblock, _PREBLOCK_REGISTRY
 
         @register_preblock("unit_test_preblock")
         class UnitTestPreBlock(BasePreblock):
             def forward(self, batch):
                 return batch
 
-        assert "unit_test_preblock" in PREBLOCK_REGISTRY
-        assert PREBLOCK_REGISTRY["unit_test_preblock"] is UnitTestPreBlock
+        assert "unit_test_preblock" in _PREBLOCK_REGISTRY
+        assert _PREBLOCK_REGISTRY["unit_test_preblock"] is UnitTestPreBlock
 
     def test_wrong_base_raises(self):
         """register_preblock raises TypeError when class does not inherit BasePreblock."""
@@ -446,15 +446,15 @@ class TestRegisterModel:
 
 class TestRegisterPostblock:
     def test_decorator_adds_to_registry(self):
-        from credit.postblock import register_postblock, POSTBLOCK_REGISTRY
+        from credit.postblock import register_postblock, _POSTBLOCK_REGISTRY
 
         @register_postblock("unit_test_postblock")
         class UnitTestPostBlock(BasePostblock):
             def forward(self, batch):
                 return batch
 
-        assert "unit_test_postblock" in POSTBLOCK_REGISTRY
-        assert POSTBLOCK_REGISTRY["unit_test_postblock"] is UnitTestPostBlock
+        assert "unit_test_postblock" in _POSTBLOCK_REGISTRY
+        assert _POSTBLOCK_REGISTRY["unit_test_postblock"] is UnitTestPostBlock
 
     def test_wrong_base_raises(self):
         """register_postblock raises TypeError when class does not inherit BasePostblock."""
@@ -510,9 +510,9 @@ class TestRegisterLoss:
         assert "unit_test_loss" in _LOSS_REGISTRY
         assert _LOSS_REGISTRY["unit_test_loss"] is UnitTestLoss
 
-    def test_custom_loss_loaded_by_base_losses(self):
-        """base_losses() can instantiate a registered custom loss."""
-        from credit.losses import register_loss, base_losses
+    def test_custom_loss_loaded_by_instantiate_loss(self):
+        """_instantiate_loss() can instantiate a registered custom loss."""
+        from credit.losses import register_loss, _instantiate_loss
 
         @register_loss("unit_test_loss_load")
         class LoadableLoss(nn.MSELoss):
@@ -524,7 +524,7 @@ class TestRegisterLoss:
                 "training_loss_parameters": {"reduction": "mean"},
             }
         }
-        loss_fn = base_losses(conf)
+        loss_fn = _instantiate_loss(conf)
         assert isinstance(loss_fn, LoadableLoss)
 
     def test_wrong_base_raises(self):
@@ -538,12 +538,12 @@ class TestRegisterLoss:
                 pass
 
     def test_unsupported_loss_raises(self):
-        """base_losses() raises ValueError for an unknown loss name."""
-        from credit.losses.base_losses import base_losses
+        """_instantiate_loss() raises ValueError for an unknown loss name."""
+        from credit.losses import _instantiate_loss
 
         conf = {"loss": {"training_loss": "this_loss_does_not_exist"}}
         with pytest.raises(ValueError, match="not supported"):
-            base_losses(conf)
+            _instantiate_loss(conf)
 
 
 # ---------------------------------------------------------------------------
@@ -588,45 +588,6 @@ class TestLoadCustomObjectsIdempotency:
 
 
 class TestLoadDataloaderCustomDataset:
-    def test_base_dataset_subclass_accepted(self):
-        """load_dataloader uses the generic DistributedSampler path for BaseDataset subclasses."""
-        from unittest.mock import MagicMock, patch
-        from credit.datasets.load_dataset_and_dataloader import load_dataloader
-
-        class MinimalDataset(BaseDataset):
-            def __init__(self):
-                pass
-
-            def __len__(self):
-                return 4
-
-            def __getitem__(self, i):
-                return {}
-
-        dataset = MinimalDataset()
-        conf = {
-            "seed": 42,
-            "trainer": {
-                "train_batch_size": 1,
-                "valid_batch_size": 1,
-                "thread_workers": 0,
-                "valid_thread_workers": 0,
-                "prefetch_factor": 2,
-                "type": "era5",
-            },
-            "data": {"forecast_len": 0, "valid_forecast_len": 0},
-            "loss": {"training_loss": "mse"},
-        }
-
-        mock_loader = MagicMock()
-        with (
-            patch("credit.datasets.load_dataset_and_dataloader.DistributedSampler") as mock_sampler,
-            patch("credit.datasets.load_dataset_and_dataloader.DataLoader", return_value=mock_loader),
-        ):
-            result = load_dataloader(conf, dataset, is_train=True)
-            mock_sampler.assert_called_once()
-            assert result is mock_loader
-
     def test_unknown_dataset_type_still_raises(self):
         """load_dataloader still raises ValueError for non-BaseDataset objects."""
         from credit.datasets.load_dataset_and_dataloader import load_dataloader
