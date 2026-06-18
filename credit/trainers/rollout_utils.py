@@ -2,7 +2,191 @@
 
 import logging
 
+import pandas as pd
+import torch
+from tqdm import tqdm
+import os
+from credit.models import load_model
+from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
+from credit.postblock import apply_postblocks
+from credit.preblock import apply_preblocks
+
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+
+
+def parse_length(length_str: str, timestep: str) -> int:
+    """Convert a duration string to a number of autoregressive steps.
+
+    Example: "10d" with timestep "6h" → 40 steps.
+    """
+    total = pd.Timedelta(length_str)
+    step = pd.Timedelta(timestep)
+    n = int(total / step)
+    if n <= 0:
+        raise ValueError(f"Inference length '{length_str}' is not positive for timestep '{timestep}'.")
+    return n
+
+
+def batch_init_times(batch_conf: dict) -> list[pd.Timestamp]:
+    """Generate the ordered list of init timestamps from inference.batch_forecast.initialization."""
+    init_conf = batch_conf["initialization"]
+    start = pd.Timestamp(init_conf["start_date"])
+    end = pd.Timestamp(init_conf["end_date"])
+    interval = pd.Timedelta(init_conf["date_interval"])
+    times = init_conf.get("times", ["00:00"])
+
+    init_times = []
+    current = start
+    while current <= end:
+        for time_str in times:
+            h, m = (int(x) for x in time_str.split(":"))
+            init_times.append(current + pd.Timedelta(hours=h, minutes=m))
+        current += interval
+
+    return sorted(set(init_times))
+
+
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
+
+
+def load_model_for_inference(conf: dict, device: torch.device) -> torch.nn.Module:
+    """Load and optionally wrap the model for the requested inference mode.
+
+    Reads ``conf["inference"]["mode"]`` and delegates to the appropriate loader:
+    - ``none``: uses the canonical ``load_model(conf, load_weights=True)``
+    - ``ddp``:  wraps with DDP then loads checkpoint into ``model.module``
+    - ``fsdp``: wraps with FSDP then restores sharded state via ``load_model_state``
+    """
+    from credit.distributed import distributed_model_wrapper
+
+    mode = conf["inference"]["mode"]
+    save_loc = os.path.expandvars(conf["save_loc"])
+
+    # distributed_model_wrapper reads conf["trainer"]["mode"], so patch it.
+    conf.setdefault("trainer", {})["mode"] = mode
+    conf["trainer"].setdefault("activation_checkpoint", False)
+
+    if mode == "none":
+        return load_model(conf, load_weights=True).to(device)
+
+    if mode == "ddp":
+        model = load_model(conf).to(device)
+        model = distributed_model_wrapper(conf, model, device)
+        # Mirror BaseModel.load_model: prefer model_checkpoint.pt, fall back to checkpoint.pt
+        ckpt_path = os.path.join(save_loc, "model_checkpoint.pt")
+        if not os.path.isfile(ckpt_path):
+            ckpt_path = os.path.join(save_loc, "checkpoint.pt")
+        ckpt = torch.load(ckpt_path, map_location=device)
+        key = "model_state_dict" if "model_state_dict" in ckpt else None
+        load_state_dict_error_handler(model.module.load_state_dict(ckpt[key] if key else ckpt, strict=False))
+        return model
+
+    if mode == "fsdp":
+        model = load_model(conf, load_weights=True).to(device)
+        model = distributed_model_wrapper(conf, model, device)
+        return load_model_state(conf, model, device)
+
+    raise ValueError(f"Unsupported inference mode: {mode!r}. Choose none | ddp | fsdp.")
+
+
+# ---------------------------------------------------------------------------
+# Core rollout loop
+# ---------------------------------------------------------------------------
+
+
+def run_forecast(
+    conf: dict,
+    n_steps: int,
+    save_dir: str,
+    ic_preblocks,
+    step_preblocks,
+    step_postblocks,
+    rollout_postblocks,
+    model: torch.nn.Module,
+    batch_iter,
+    device: torch.device,
+    pool,
+    save_output_fn,
+) -> None:
+    """Run one autoregressive forecast, consuming n_steps batches from batch_iter.
+
+    Mirrors trainer_gen2.py: full_data_dict carries the super-dict through
+    preblocks → model → postblocks → assemble_rollout_batch at every step.
+
+    The first batch consumed is the IC (step index 0, returns all variable groups).
+    Steps 1..n_steps-1 each consume one dynamic-forcing-only batch from the iterator.
+    The final step n_steps runs the model on state assembled from the previous step's
+    output and does not load an additional forcing batch.
+
+    Args:
+        conf: full config dict.
+        n_steps: number of autoregressive steps.
+        save_dir: output directory passed to save_output_fn.
+        ic_preblocks: preblocks built for phase ``"ic_only"``.
+        step_preblocks: preblocks built for phase ``"per_step"``.
+        step_postblocks: postblocks built for phase ``"per_step"``.
+        rollout_postblocks: postblocks built for phase ``"post_rollout"``.
+        model: the loaded (and optionally wrapped) model.
+        batch_iter: iterator over a DataLoader whose sampler yields IC then
+            forcing batches in step order for one init time.
+        device: target device.
+        pool: multiprocessing pool passed through to save_output_fn.
+        save_output_fn: callable(y_processed, init_time, step, fhr_per_step,
+            save_dir, pool) invoked after each model step.
+    """
+    dt = pd.Timedelta(conf["data"]["timestep"])
+    fhr_per_step = int(dt.total_seconds() / 3600)
+
+    full_data_dict: dict = {}
+
+    # ── Step 0 (IC): load initial condition, run preblocks ──────────────────
+    ic_batch = next(batch_iter)
+
+    # Extract init_time from the IC batch metadata (stored as nanoseconds since epoch).
+    source_name = next(iter(ic_batch["metadata"]))
+    init_time = pd.Timestamp(ic_batch["metadata"][source_name]["input_datetime"][0].item())
+    init_str = init_time.strftime("%Y-%m-%dT%HZ")
+
+    full_data_dict["ic_raw"] = ic_batch.get("input", {})
+    full_data_dict["ic_preprocessed"] = apply_preblocks(ic_preblocks, ic_batch, device=device)
+    full_data_dict.update(apply_preblocks(step_preblocks, full_data_dict["ic_preprocessed"], device=device))
+
+    logger.info("Forecast init: %s  steps: %d  fhr_max: %dh", init_str, n_steps, n_steps * fhr_per_step)
+
+    # ── Autoregressive loop ──────────────────────────────────────────────────
+    with torch.no_grad():
+        for step in tqdm(range(1, n_steps + 1), desc=f"Rollout {init_str}"):
+            full_data_dict["y_pred"] = model(full_data_dict["x"])
+
+            # postblocks: Reconstruct → inverse_scaler → physics fixers
+            full_data_dict = apply_postblocks(step_postblocks, full_data_dict)
+
+            save_output_fn(full_data_dict["y_processed"], init_time, step, fhr_per_step, save_dir, pool)
+
+            if step < n_steps:
+                # Load dynamic forcing for the next step from the shared iterator.
+                frc_batch = next(batch_iter)
+
+                # route predictions → prognostic/diagnostic, new forcing → dynamic_forcing,
+                # IC statics → static
+                next_batch = assemble_rollout_batch(full_data_dict, frc_batch)
+
+                # drop None target so ConcatToTensor doesn't trip over it
+                next_batch = {k: v for k, v in next_batch.items() if v is not None}
+
+                full_data_dict.update(apply_preblocks(step_preblocks, next_batch, device=device))
+
+    # post_rollout postblocks (e.g. global physics fixers applied once)
+    apply_postblocks(rollout_postblocks, full_data_dict)
+
+    logger.info("Done: %s", init_str)
 
 
 def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
