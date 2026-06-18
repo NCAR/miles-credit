@@ -162,7 +162,7 @@ trainer:
 preblocks:
   per_step:
     scaler:
-      type: bridgescaler_transform
+      type: bridgescaler_transformer
       args:
         scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
@@ -182,7 +182,7 @@ postblocks:
     reconstruct:
       type: reconstruct
     scaler:
-      type: bridgescaler_transform
+      type: bridgescaler_transformer
       args:
         scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_post.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
@@ -246,6 +246,8 @@ loss:
 
   use_power_loss: True              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
   use_spectral_loss: False
+  spectral_lambda_reg: 0.1         # weight for power/spectral loss: total_loss = training_loss + spectral_lambda_reg * power_loss
+  spectral_wavenum_init: 20        # wavenumber above which the spectral/power loss is applied
 
   use_latitude_weights: True
   latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'

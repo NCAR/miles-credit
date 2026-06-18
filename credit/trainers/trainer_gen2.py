@@ -41,13 +41,11 @@ class TrainerERA5Gen2(BaseTrainer):
         super().__init__(model, rank, conf)
         logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
 
-        preblock_cfg = conf.get("preblocks", {})
-        self.ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
-        self.step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+        self.ic_preblocks = build_preblocks(conf, phase="ic_only")
+        self.step_preblocks = build_preblocks(conf, phase="per_step")
 
-        postblock_cfg = conf.get("postblocks", {})
-        self.step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
-        self.rollout_postblocks = build_postblocks(postblock_cfg, phase="post_rollout")
+        self.step_postblocks = build_postblocks(conf, phase="per_step")
+        self.rollout_postblocks = build_postblocks(conf, phase="post_rollout")
 
         # ---- Data schema extraction (new nested schema) ----
         data_conf = conf["data"]

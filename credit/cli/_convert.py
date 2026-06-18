@@ -360,7 +360,7 @@ def _convert(args: argparse.Namespace) -> None:
             if pre_keys is not None:
                 per_step_pre = conf.setdefault("preblocks", {}).setdefault("per_step", {})
                 per_step_pre["scaler"] = {
-                    "type": "bridgescaler_transform",
+                    "type": "bridgescaler_transformer",
                     "args": {
                         "scaler_path": pre_json,
                         "variables": pre_keys,
@@ -371,15 +371,15 @@ def _convert(args: argparse.Namespace) -> None:
                 per_step_post = conf.setdefault("postblocks", {}).setdefault("per_step", {})
                 per_step_post["reconstruct"] = {"type": "reconstruct"}
                 per_step_post["scaler"] = {
-                    "type": "bridgescaler_transform",
+                    "type": "bridgescaler_transformer",
                     "args": {
                         "scaler_path": post_json,
                         "variables": post_prog_vars,
                         "method": "inverse_transform",
                     },
                 }
-                changes.append(f"preblocks.per_step.scaler: bridgescaler_transform → {pre_json}")
-                changes.append(f"postblocks.per_step.scaler: bridgescaler_transform (inverse) → {post_json}")
+                changes.append(f"preblocks.per_step.scaler: bridgescaler_transformer → {pre_json}")
+                changes.append(f"postblocks.per_step.scaler: bridgescaler_transformer (inverse) → {post_json}")
             else:
                 # Fallback if bridgescaler/torch not available
                 per_step_pre = conf.setdefault("preblocks", {}).setdefault("per_step", {})

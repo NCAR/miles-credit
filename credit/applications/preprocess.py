@@ -181,7 +181,7 @@ Examples:
     train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
-    preblocks = build_preblocks(conf["preblocks"])
+    preblocks = build_preblocks(conf)
     print(preblocks)
     scaler_block_key = None
     for k, v in preblocks.items():

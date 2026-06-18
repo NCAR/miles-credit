@@ -165,7 +165,7 @@ def _plot(args) -> None:
 
     sample = dataset[(ts, 0)]
     batch = default_collate([sample])
-    preblocks = build_preblocks(conf.get("preblocks", {}))
+    preblocks = build_preblocks(conf)
     _batch = apply_preblocks(preblocks, batch, device=device)
     # apply_preblocks renames 'input' → 'x' and 'target' → 'y'
     x = _batch.get("x", _batch.get("input"))
