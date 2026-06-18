@@ -62,6 +62,7 @@ _SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
     "HRRR_NAT": ("credit.datasets.hrrr", "HRRRDataset"),
     "HRRR_SUBH": ("credit.datasets.hrrr", "HRRRDataset"),
     "TISR": ("credit.datasets.tisr", "TISRDataset"),
+    "GFS": ("credit.datasets.gfs", "GFSDataset"),
 }
 
 
@@ -150,6 +151,7 @@ class MultiSourceDataset(AbstractBaseDataset):
             self.datasets[user_dataset_name] = cls(sub_config, return_target=return_target)
             logger.info(f"MultiSourceDataset: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
 
+        self.dt: pd.Timedelta = pd.Timedelta(config["timestep"])
         self.datetimes: pd.DatetimeIndex = self._build_master_clock(config)
 
         self.static_metadata: dict[str, dict[str, Any]] = {
@@ -203,6 +205,9 @@ class MultiSourceDataset(AbstractBaseDataset):
           ticks are snapped to the last native timestamp inside
           ``BaseDataset.__getitem__``.
         """
+        if "datetimes" in config:
+            return pd.DatetimeIndex(config["datetimes"])
+
         if not self.datasets:
             return pd.DatetimeIndex([])
 

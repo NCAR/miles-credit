@@ -31,7 +31,7 @@ class MultiStepBatchSamplerSubset(Sampler):
         self.dataset = dataset
         self.num_forecast_steps = num_forecast_steps
         self.init_times = dataset.datetimes
-        self.dt = dataset.datetimes[1] - dataset.datetimes[0]
+        self.dt = getattr(dataset, "dt", dataset.datetimes[1] - dataset.datetimes[0])
         self.index_subset = index_subset
         self.batch_size = batch_size
         self.num_start_batches = (len(self.index_subset) + self.batch_size - 1) // self.batch_size
