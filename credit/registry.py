@@ -141,11 +141,10 @@ def load_custom_objects(conf):
         # module_name is the Python class name; defaults to the dict key when omitted.
         module_name = entry.get("module_name") or registry_name
 
-        # Skip entries we have already processed in this process lifetime.
+        # Skip entries we have already successfully registered in this process lifetime.
         _key = (object_type, module_path, registry_name)
         if _key in _REGISTERED_ENTRIES:
             continue
-        _REGISTERED_ENTRIES.add(_key)
 
         # Validate object_type before doing any I/O.
         if object_type not in _REGISTRY_MAP:
@@ -178,4 +177,5 @@ def load_custom_objects(conf):
         reg_module_path, reg_func_name = _REGISTRY_MAP[object_type]
         register_fn = getattr(importlib.import_module(reg_module_path), reg_func_name)
         register_fn(registry_name)(cls)
+        _REGISTERED_ENTRIES.add(_key)
         logger.info(f"Registered custom {object_type} {label!r}")
