@@ -49,7 +49,7 @@ preblocks:
       type: "bridgescaler_transformer"
       args:
         variables: []
-        scaler_path: "/Users/dgagne/data/weatherbench2/scaler.json"
+        scaler_path: "/Users/dgagne/data/weatherbench2/scaler_20260615.json"
         scaler_type: "quantile"
         scaler_params:
           channels_last: False
@@ -65,7 +65,7 @@ postblocks:
 trainer:
   type: era5-gen2           # use the v2 trainer (new nested data schema)
 
-  mode: none
+  mode: ddp
   epochs: 1
   train_batch_size: 2
   batches_per_epoch: 3
