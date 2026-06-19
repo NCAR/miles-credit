@@ -299,6 +299,14 @@ class GlobalMassFixer(nn.Module):
         # y_pred (batch, var, time, lat, lon)
         # pick the first time-step, y_pred is expected to have the next step only
         # !!! Note: time dimension is collapsed throughout !!!
+        # Gen2 trainer delivers 4D (B, C, H, W) — insert a dummy time dim so the
+        # index syntax [:, inds, step, ...] works uniformly with gen1's 5D path.
+        _y_4d = y_pred.dim() == 4
+        _x_4d = x_input.dim() == 4
+        if _y_4d:
+            y_pred = y_pred.unsqueeze(2)
+        if _x_4d:
+            x_input = x_input.unsqueeze(2)
 
         q_input = x_input[:, self.q_ind_start : self.q_ind_end, -1, ...]
         q_pred = y_pred[:, self.q_ind_start : self.q_ind_end, 0, ...]
@@ -380,6 +388,11 @@ class GlobalMassFixer(nn.Module):
             # expand fixed vars to (batch, level, time, lat, lon)
             sp_pred = sp_pred.unsqueeze(1).unsqueeze(2)
             y_pred = concat_fix(y_pred, sp_pred, self.sp_ind, self.sp_ind, N_vars)
+
+        # Restore the original tensor shape (squeeze back the dummy time dim that
+        # may have been inserted above for 4D gen2 inputs).
+        if _y_4d and y_pred.dim() == 5:
+            y_pred = y_pred.squeeze(2)
 
         if self.state_trans:
             y_pred = self.state_trans.transform_array(y_pred)
@@ -506,6 +519,15 @@ class GlobalWaterFixer(nn.Module):
             x_input = self.state_trans.inverse_transform_input(x_input)
             y_pred = self.state_trans.inverse_transform(y_pred)
 
+        # Gen2 trainer delivers 4D (B, C, H, W) — insert a dummy time dim so the
+        # index syntax [:, inds, step, ...] works uniformly with gen1's 5D path.
+        _y_4d = y_pred.dim() == 4
+        _x_4d = x_input.dim() == 4
+        if _y_4d:
+            y_pred = y_pred.unsqueeze(2)
+        if _x_4d:
+            x_input = x_input.unsqueeze(2)
+
         q_input = x_input[:, self.q_ind_start : self.q_ind_end, -1, ...]
 
         # y_pred (batch, var, time, lat, lon)
@@ -558,6 +580,11 @@ class GlobalWaterFixer(nn.Module):
         # return fixed precip back to y_pred
         precip = precip.unsqueeze(1).unsqueeze(2)
         y_pred = concat_fix(y_pred, precip, self.precip_ind, self.precip_ind, N_vars)
+
+        # Restore the original tensor shape (squeeze back the dummy time dim that
+        # may have been inserted above for 4D gen2 inputs).
+        if _y_4d and y_pred.dim() == 5:
+            y_pred = y_pred.squeeze(2)
 
         if self.state_trans:
             y_pred = self.state_trans.transform_array(y_pred)
