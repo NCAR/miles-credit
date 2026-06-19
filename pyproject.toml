@@ -71,6 +71,7 @@ agent  = ["anthropic>=0.40"]
 [tool.setuptools]
 
 packages = ["credit.applications", "credit", "credit.models", "credit.models.wxformer", "credit.metadata", "credit.datasets",
+    "credit.datasets.gen_1", "credit.datasets.gen_2",
     "credit.trainers", "credit.losses", "credit.transforms", "credit.postblock", "credit.ocean"]
 
 [tool.setuptools.package-data]

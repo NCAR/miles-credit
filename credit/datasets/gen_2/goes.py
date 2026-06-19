@@ -32,7 +32,7 @@ import torch
 import xarray as xr
 
 from credit.datasets._utils import _infer_period_freq, _find_file, _start_s3_fs
-from credit.datasets.base_dataset import BaseDataset
+from credit.datasets.gen_2.base_dataset import BaseDataset
 
 
 def _build_spatial_slices(

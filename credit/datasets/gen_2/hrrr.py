@@ -56,7 +56,7 @@ transfers ~3 MB instead of ~200 MB (~60-100x reduction).
 Variable lookup is driven by :data:`VAR_REGISTRY`.  Extend it at import
 time to add variables without subclassing::
 
-    from credit.datasets.hrrr import VAR_REGISTRY
+    from credit.datasets.gen_2.hrrr import VAR_REGISTRY
     VAR_REGISTRY["MYVAR"] = {
         "shortName": "myvar", "typeOfLevel": "isobaricInhPa",
         "idx_name": "MYVAR", "idx_level": None,
@@ -134,7 +134,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ _HRRR_HTTPS_BASE = f"https://{_S3_BUCKET}.s3.amazonaws.com"
 #:
 #: Extend at import time to add variables without subclassing::
 #:
-#:     from credit.datasets.hrrr import VAR_REGISTRY
+#:     from credit.datasets.gen_2.hrrr import VAR_REGISTRY
 #:     VAR_REGISTRY["MYVAR"] = {"idx_name": "MYVAR", "idx_level": "surface"}
 VAR_REGISTRY: dict[str, dict[str, str | None]] = {
     # -------------------------------------------------------------------------

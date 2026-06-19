@@ -17,7 +17,7 @@ Sample structure returned by __getitem__::
 
 Usage::
 
-    from credit.datasets.multi_source import MultiSourceDataset
+    from credit.datasets.gen_2.multi_source import MultiSourceDataset
     from credit.samplers import DistributedMultiStepBatchSampler
     from torch.utils.data import DataLoader
 
@@ -43,7 +43,7 @@ from typing import Any
 
 import pandas as pd
 
-from credit.datasets.base_dataset import AbstractBaseDataset, BaseDataset
+from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
 
 logger = logging.getLogger(__name__)
 
@@ -52,16 +52,16 @@ logger = logging.getLogger(__name__)
 # herbie, s3fs, …) are never loaded unless that source type is actually
 # requested.  Add entries here to register new data sources.
 _SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
-    "BASE": ("credit.datasets.base_dataset", "BaseDataset"),  # placeholders / testing
-    "LOCAL": ("credit.datasets.local", "LocalDataset"),
-    "ARCO_ERA5": ("credit.datasets.era5", "ARCOERA5Dataset"),
-    "WEATHERBENCH2_ERA5": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
-    "MRMS": ("credit.datasets.mrms", "MRMSDataset"),
-    "GOES": ("credit.datasets.goes", "GOESDataset"),
-    "HRRR": ("credit.datasets.hrrr", "HRRRDataset"),
-    "HRRR_NAT": ("credit.datasets.hrrr", "HRRRDataset"),
-    "HRRR_SUBH": ("credit.datasets.hrrr", "HRRRDataset"),
-    "TISR": ("credit.datasets.tisr", "TISRDataset"),
+    "BASE": ("credit.datasets.gen_2.base_dataset", "BaseDataset"),  # placeholders / testing
+    "LOCAL": ("credit.datasets.gen_2.local", "LocalDataset"),
+    "ARCO_ERA5": ("credit.datasets.gen_2.era5", "ARCOERA5Dataset"),
+    "WEATHERBENCH2_ERA5": ("credit.datasets.gen_2.era5", "WeatherBench2ERA5Dataset"),
+    "MRMS": ("credit.datasets.gen_2.mrms", "MRMSDataset"),
+    "GOES": ("credit.datasets.gen_2.goes", "GOESDataset"),
+    "HRRR": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "HRRR_NAT": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "HRRR_SUBH": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "TISR": ("credit.datasets.gen_2.tisr", "TISRDataset"),
 }
 
 
