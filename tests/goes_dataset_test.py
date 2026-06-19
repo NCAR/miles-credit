@@ -12,7 +12,7 @@ import torch
 import xarray as xr
 from torch.utils.data import DataLoader
 
-from credit.datasets.goes import GOESDataset
+from credit.datasets.gen_2.goes import GOESDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 CMI_C04 = "CMI_C04"

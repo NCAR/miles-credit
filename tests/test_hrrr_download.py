@@ -15,9 +15,9 @@ import time
 
 import pytest
 
-from credit.datasets.hrrr_download import download_hrrr
-from credit.datasets.hrrr import VALID_PRODUCTS
-from credit.datasets.multi_source import make_single_source_subconfig
+from credit.datasets.gen_2.hrrr_download import download_hrrr
+from credit.datasets.gen_2.hrrr import VALID_PRODUCTS
+from credit.datasets.gen_2.multi_source import make_single_source_subconfig
 
 # ---------------------------------------------------------------------------
 # Parsing tests

@@ -25,8 +25,8 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from credit.datasets.base_dataset import AbstractBaseDataset, BaseDataset
-from credit.datasets.multi_source import MultiSourceDataset
+from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
+from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 # Shared constants

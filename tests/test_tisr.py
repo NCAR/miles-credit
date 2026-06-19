@@ -11,7 +11,7 @@ import pytest
 import torch
 import xarray as xr
 
-from credit.datasets.tisr import (
+from credit.datasets.gen_2.tisr import (
     _era5_tsi_data,  # pyright: ignore[reportPrivateUsage]
     _get_tsi,  # pyright: ignore[reportPrivateUsage]
     _get_j2000_days,  # pyright: ignore[reportPrivateUsage]
@@ -895,7 +895,7 @@ class TestIntegratedTISRParity:
         # Parity is measured against float64 JAX, so run the port in float64
         # too — otherwise we'd be measuring the float32/float64 gap, not
         # algorithmic fidelity. Production code stays float32 (see functional tests above).
-        monkeypatch.setattr("credit.datasets.tisr._TORCH_DTYPE", torch.float64)
+        monkeypatch.setattr("credit.datasets.gen_2.tisr._TORCH_DTYPE", torch.float64)
 
     @pytest.mark.parametrize("ts_str", TIMESTAMPS)
     def test_integrated_tisr_matches_jax(self, ts_str):

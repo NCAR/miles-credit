@@ -27,8 +27,8 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from credit.datasets.local import LocalDataset
-from credit.datasets.era5 import ARCOERA5Dataset, WeatherBench2ERA5Dataset
+from credit.datasets.gen_2.local import LocalDataset
+from credit.datasets.gen_2.era5 import ARCOERA5Dataset, WeatherBench2ERA5Dataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 
@@ -93,7 +93,7 @@ def patch_era5_io_multiyear(
             return ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"]
         raise ValueError(f"Unexpected glob pattern: {pattern}")
 
-    monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
+    monkeypatch.setattr("credit.datasets.gen_2.base_dataset.glob", fake_glob)
 
     def fake_open_dataset(path: str) -> xr.Dataset:
         for year in (2022, 2023):
@@ -119,7 +119,7 @@ def patch_refactor_io_multiyear(
             return ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"]
         raise ValueError(f"Unexpected glob pattern: {pattern}")
 
-    monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
+    monkeypatch.setattr("credit.datasets.gen_2.base_dataset.glob", fake_glob)
 
     def fake_open_dataset(path: str) -> xr.Dataset:
         for year in (2022, 2023):
