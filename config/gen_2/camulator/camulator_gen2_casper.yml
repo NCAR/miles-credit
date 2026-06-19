@@ -172,11 +172,11 @@ preblocks:
 # Loss is computed on y_pred AFTER step_postblocks run (trainer_gen2.py
 # line 318), so fixers modify the gradient-attached tensor before backprop.
 #
-# energy_fixer_updown is DEFERRED: GlobalEnergyFixerUpDown.forward reads
-# TOA_down_solar from y_pred[:, TOA_down_solar_ind, ...], but SOLIN is
-# a dynamic_forcing input-only variable (x ch 132) not present in y_pred.
-# Follow-up: add a small main-side change to source TOA_down_solar from
-# x["x"][:, solin_x_ind, ...] when a config flag is set, then re-enable.
+# energy_fixer_updown is ENABLED via the config-gated TOA_down_solar_from_input
+# flag: GlobalEnergyFixerUpDown.forward normally reads TOA_down_solar from
+# y_pred, but in gen2 SOLIN is a dynamic_forcing input-only variable (x ch 132)
+# absent from y_pred, so it is sourced from x["x"] at input ch 132 instead.
+# See issue #429 (longer-term: first-class postblock access to input forcings).
 # -----------------------------------------------------------------------
 postblocks:
   per_step:
@@ -291,6 +291,61 @@ postblocks:
             precip_ind: 130
             # evapor_ind: QFLX ch 138 in y_pred
             evapor_ind: 138
+
+    energy_fixer_updown:
+      type: global_energy_fixer_updown
+      args:
+        post_conf:
+          data:
+            scaler_type: std_new
+            mean_path: '/glade/derecho/scratch/wchapman/b_credit_runs/mean_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc'
+            std_path: '/glade/derecho/scratch/wchapman/b_credit_runs/std_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc'
+            save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+            lead_time_periods: 6
+            variables: [U, V, T, Qtot]
+            surface_variables: [PS, TREFHT]
+            dynamic_forcing_variables: [SOLIN, SST, ICEFRAC, co2vmr_3d]
+            diagnostic_variables: [PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX, FSDS_J, FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+            forcing_variables: []
+            static_variables: [z_norm, LANDM_COSLAT]
+            static_first: True
+            levels: 32
+            all_varnames: [U, V, T, Qtot, PS, TREFHT, SOLIN, SST, ICEFRAC, co2vmr_3d,
+                           PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX,
+                           FSDS_J, FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+          # GlobalEnergyFixerUpDown.__init__ reads global_mass_fixer for grid/sigma setup
+          # (lon2d, lat2d, hyai, hybi, grid_type, midpoint, save_loc_physics).
+          global_mass_fixer:
+            grid_type: sigma
+            midpoint: True
+            lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+            save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+          global_energy_fixer_updown:
+            simple_demo: False
+            denorm: True
+            grid_type: sigma
+            midpoint: True
+            surface_geopotential_name: [PHIS]
+            T_inds: [64, 95]
+            q_inds: [96, 127]
+            U_inds: [0, 31]
+            V_inds: [32, 63]
+            sp_inds: 128
+            # gen2: SOLIN is input-only (x ch 132), absent from y_pred.
+            # TOA_down_solar_from_input=True sources it from x["x"] at input_ind 132.
+            # TOA_down_solar_ind is a dummy required by __init__'s unconditional int(cfg[...]);
+            # it is unused when TOA_down_solar_from_input is True.
+            TOA_down_solar_from_input: True
+            TOA_down_solar_input_ind: 132   # SOLIN in x["x"]
+            TOA_down_solar_ind: 145         # dummy (unused); avoids KeyError in __init__
+            TOA_up_solar_ind: 145           # FSUTOA in y_pred
+            TOA_up_OLR_ind: 146             # FLUT in y_pred
+            surf_down_solar_ind: 139        # FSDS_J in y_pred
+            surf_up_solar_ind: 141          # FSUS in y_pred
+            surf_down_LW_ind: 140           # FLDS_J in y_pred
+            surf_up_LW_ind: 142             # FLUS in y_pred
+            surf_SH_ind: 143                # SHFLX in y_pred
+            surf_LH_ind: 144                # LHFLX in y_pred
 
     reconstruct:
       type: reconstruct
