@@ -67,7 +67,7 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _find_file, _to_cftime  # pyright: ignore[reportPrivateUsage]
+from ._utils import _find_file, _to_cftime
 from credit.datasets.gen_2.base_dataset import BaseDataset
 
 

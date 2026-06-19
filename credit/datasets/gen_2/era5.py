@@ -45,7 +45,7 @@ import torch
 import xarray as xr
 import zarr
 
-from credit.datasets._utils import _to_cftime  # pyright: ignore[reportPrivateUsage]
+from ._utils import _to_cftime
 from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
 
 

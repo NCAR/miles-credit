@@ -5,7 +5,7 @@ import os
 import shutil
 import netCDF4 as nc
 from datetime import datetime, timedelta
-from credit.datasets.datamap import DataMap  # assuming the module is importable
+from credit.datasets.gen_1.datamap import DataMap
 
 # tests generated using claude to smoke-test integration
 

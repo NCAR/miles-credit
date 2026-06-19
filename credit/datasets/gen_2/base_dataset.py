@@ -18,7 +18,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 import torch
 
-from credit.datasets._utils import _map_files, _path_template_to_glob, _extract_time_fmt  # pyright: ignore[reportPrivateUsage]
+from ._utils import _map_files, _path_template_to_glob, _extract_time_fmt
 
 # Expected types of fields
 # * ``prognostic``      — input at step 0 and target (autoregressive rollout)

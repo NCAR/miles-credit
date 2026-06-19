@@ -49,7 +49,7 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _find_file, _start_s3_fs
+from ._utils import _find_file, _start_s3_fs
 from credit.datasets.gen_2.base_dataset import BaseDataset
 
 
