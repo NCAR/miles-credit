@@ -1,0 +1,456 @@
+# Gen2 config for the CAMulator model (CESM-coupled climate emulator).
+# Converted from the gen1 config at:
+#   /glade/work/wchapman/Roman_Coupling/camulator_ud/climate/camulator_config.yml
+#
+# This config is for a SMOKE / FIRST-TRAIN run:
+#   - Single GPU, no physics post-blocks (those come in a follow-up)
+#   - 2-year training window (1980-1981), 1-year validation (2013)
+#   - Reduced batch/epoch counts for fast iteration
+#
+# BridgeScaler JSONs generated from gen1 mean/std NetCDF via `credit convert`:
+#   pre:  /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_pre_scaler.json
+#   post: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_post_scaler.json
+#
+# -----------------------------------------------------------------------
+# Gen2 channel layout (empirically derived from FIELD_TYPE_RANK ordering):
+#   prognostic < static < dynamic_forcing < diagnostic
+#
+# INPUT tensor (x, 153 channels):
+#   ch   0- 31  U          (prognostic/3d, 32 levels)
+#   ch  32- 63  V          (prognostic/3d, 32 levels)
+#   ch  64- 95  T          (prognostic/3d, 32 levels)
+#   ch  96-127  Qtot       (prognostic/3d, 32 levels)
+#   ch 128      PS         (prognostic/2d)
+#   ch 129      TREFHT     (prognostic/2d)
+#   ch 130      z_norm     (static/2d)
+#   ch 131      LANDM_COSLAT (static/2d)
+#   ch 132      SOLIN      (dynamic_forcing/2d)   ← used by energy fixer
+#   ch 133      SST        (dynamic_forcing/2d)
+#   ch 134      ICEFRAC    (dynamic_forcing/2d)
+#   ch 135      co2vmr_3d  (dynamic_forcing/2d)
+#   ch 136      PRECT      (diagnostic/2d, prev step)
+#   ch 137-152  remaining 16 diagnostics
+#
+# OUTPUT tensor (y_pred, 147 channels):
+#   ch   0- 31  U          (prognostic/3d)
+#   ch  32- 63  V          (prognostic/3d)
+#   ch  64- 95  T          (prognostic/3d)
+#   ch  96-127  Qtot       (prognostic/3d)
+#   ch 128      PS         (prognostic/2d)
+#   ch 129      TREFHT     (prognostic/2d)
+#   ch 130      PRECT      (diagnostic/2d)
+#   ch 131      TS         (diagnostic/2d)
+#   ch 132      CLDHGH     (diagnostic/2d)
+#   ch 133      CLDLOW     (diagnostic/2d)
+#   ch 134      CLDMED     (diagnostic/2d)
+#   ch 135      TAUX       (diagnostic/2d)
+#   ch 136      TAUY       (diagnostic/2d)
+#   ch 137      U10        (diagnostic/2d)
+#   ch 138      QFLX       (diagnostic/2d)
+#   ch 139      FSDS_J     (diagnostic/2d)
+#   ch 140      FLDS_J     (diagnostic/2d)
+#   ch 141      FSUS       (diagnostic/2d)
+#   ch 142      FLUS       (diagnostic/2d)
+#   ch 143      SHFLX      (diagnostic/2d)
+#   ch 144      LHFLX      (diagnostic/2d)
+#   ch 145      FSUTOA     (diagnostic/2d)
+#   ch 146      FLUT       (diagnostic/2d)
+#
+# Gen1 vs Gen2 physics fixer index comparison:
+#   Index         Gen1  Gen2  Notes
+#   q_inds        [96,127] [96,127]  SAME
+#   sp_inds       128   128   SAME
+#   T_inds        [64,95] [64,95]  SAME
+#   U_inds        [0,31]  [0,31]  SAME
+#   V_inds        [32,63] [32,63] SAME
+#   precip_ind    130   130   SAME
+#   evapor_ind    138   138   SAME (QFLX)
+#   TOA_up_solar_ind 145  145  SAME (FSUTOA)
+#   TOA_up_OLR_ind   146  146  SAME (FLUT)
+#   surf_down_solar_ind 141 139  DIFF (FSDS_J: gen1=141, gen2=139)
+#   surf_up_solar_ind   143 141  DIFF (FSUS)
+#   surf_down_LW_ind    142 140  DIFF (FLDS_J)
+#   surf_up_LW_ind      144 142  DIFF (FLUS)
+#   surf_SH_ind         139 143  DIFF (SHFLX)
+#   surf_LH_ind         140 144  DIFF (LHFLX)
+#   TOA_down_solar (SOLIN) input x ch 132 (not in y_pred in gen2)
+# -----------------------------------------------------------------------
+
+save_loc: '/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/'
+seed: 1000
+
+data:
+  source:
+    ERA5:
+      dataset_type: local
+      level_coord: level
+      # All 32 hybrid-sigma levels (floating-point hPa values from the zarr)
+      levels: [3.643465757369995, 7.59481954574585, 14.356632232666016, 24.612220764160156,
+               35.923248291015625, 43.193748474121094, 51.67749786376953, 61.5204963684082,
+               73.75096130371094, 87.82122802734375, 103.31712341308594, 121.5472412109375,
+               142.99403381347656, 168.22508239746094, 197.9080810546875, 232.82861328125,
+               273.91082763671875, 322.2419128417969, 379.10089111328125, 445.9925842285156,
+               524.6871948242188, 609.7786865234375, 691.389404296875, 763.4044799804688,
+               820.8583984375, 859.5347900390625, 887.020263671875, 912.64453125,
+               936.1984252929688, 957.4854736328125, 976.3253784179688, 992.5560913085938]
+      variables:
+        prognostic:
+          vars_3D: [U, V, T, Qtot]
+          vars_2D: [PS, TREFHT]
+          path: "/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/cesm_zarr_links/cesm_%Y.zarr"
+          filename_time_format: '%Y'
+        dynamic_forcing:
+          vars_2D: [SOLIN, SST, ICEFRAC, co2vmr_3d]
+          path: "/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/cesm_zarr_links/cesm_%Y.zarr"
+          filename_time_format: '%Y'
+        static:
+          vars_2D: [z_norm, LANDM_COSLAT]
+          path: "/glade/derecho/scratch/wchapman/b_credit_runs/statics_b_credit_runs_f32_02.nc"
+        diagnostic:
+          vars_2D: [PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX, FSDS_J,
+                    FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+          path: "/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/cesm_zarr_links/cesm_%Y.zarr"
+          filename_time_format: '%Y'
+
+  timestep: 6h
+  # forecast_len=1 means single-step in gen2 semantics (gen1 used 0=single-step)
+  forecast_len: 1
+  valid_forecast_len: 1
+  start_datetime: '1980-01-01'
+  end_datetime: '1981-12-31'
+
+validation_data:
+  start_datetime: '2013-01-01'
+  end_datetime: '2013-12-31'
+
+preblocks:
+  per_step:
+    scaler:
+      type: bridgescaler_transformer
+      args:
+        scaler_path: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_pre_scaler.json
+        variables:
+          - ERA5/prognostic/3d/U
+          - ERA5/prognostic/3d/V
+          - ERA5/prognostic/3d/T
+          - ERA5/prognostic/3d/Qtot
+          - ERA5/prognostic/2d/PS
+          - ERA5/prognostic/2d/TREFHT
+          - ERA5/dynamic_forcing/2d/SOLIN
+          - ERA5/dynamic_forcing/2d/SST
+          - ERA5/dynamic_forcing/2d/ICEFRAC
+          - ERA5/dynamic_forcing/2d/co2vmr_3d
+          - ERA5/diagnostic/2d/PRECT
+          - ERA5/diagnostic/2d/TS
+          - ERA5/diagnostic/2d/CLDHGH
+          - ERA5/diagnostic/2d/CLDLOW
+          - ERA5/diagnostic/2d/CLDMED
+          - ERA5/diagnostic/2d/TAUX
+          - ERA5/diagnostic/2d/TAUY
+          - ERA5/diagnostic/2d/U10
+          - ERA5/diagnostic/2d/QFLX
+          - ERA5/diagnostic/2d/FSDS_J
+          - ERA5/diagnostic/2d/FLDS_J
+          - ERA5/diagnostic/2d/FSUS
+          - ERA5/diagnostic/2d/FLUS
+          - ERA5/diagnostic/2d/SHFLX
+          - ERA5/diagnostic/2d/LHFLX
+          - ERA5/diagnostic/2d/FSUTOA
+          - ERA5/diagnostic/2d/FLUT
+        method: transform
+    concat:
+      type: concat
+
+# -----------------------------------------------------------------------
+# Physics conservation fixers using main's gen2 postblock schema.
+# All three active fixers use the native registry types from gen1.py
+# (tracer_fixer, global_mass_fixer, global_water_fixer) — NO forked code.
+#
+# Pipeline order (per_step): fixers first (internal denorm/renorm via
+# Normalize_ERA5_and_Forcing), then reconstruct (splits y_pred into
+# y_processed for downstream use), then inverse bridgescaler.
+# Loss is computed on y_pred AFTER step_postblocks run (trainer_gen2.py
+# line 318), so fixers modify the gradient-attached tensor before backprop.
+#
+# energy_fixer_updown is DEFERRED: GlobalEnergyFixerUpDown.forward reads
+# TOA_down_solar from y_pred[:, TOA_down_solar_ind, ...], but SOLIN is
+# a dynamic_forcing input-only variable (x ch 132) not present in y_pred.
+# Follow-up: add a small main-side change to source TOA_down_solar from
+# x["x"][:, solin_x_ind, ...] when a config flag is set, then re-enable.
+# -----------------------------------------------------------------------
+postblocks:
+  per_step:
+    tracer_fixer:
+      type: tracer_fixer
+      args:
+        post_conf:
+          data:
+            scaler_type: std_new
+            mean_path: '/glade/derecho/scratch/wchapman/b_credit_runs/mean_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc'
+            std_path: '/glade/derecho/scratch/wchapman/b_credit_runs/std_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc'
+            save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+            lead_time_periods: 6
+            # Variable lists drive Normalize_ERA5_and_Forcing channel ordering.
+            # static_first: True matches gen2 x layout (static before dyn_forcing).
+            variables: [U, V, T, Qtot]
+            surface_variables: [PS, TREFHT]
+            dynamic_forcing_variables: [SOLIN, SST, ICEFRAC, co2vmr_3d]
+            diagnostic_variables: [PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX, FSDS_J, FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+            forcing_variables: []
+            static_variables: [z_norm, LANDM_COSLAT]
+            static_first: True
+            levels: 32
+            all_varnames: [U, V, T, Qtot, PS, TREFHT, SOLIN, SST, ICEFRAC, co2vmr_3d,
+                           PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX,
+                           FSDS_J, FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+          tracer_fixer:
+            denorm: True
+            # tracer_inds: absolute channel indices in y_pred (output tensor, 147 ch).
+            # Qtot: 96-127 (32 hybrid-sigma levels), PRECT:130, CLDHGH:132, CLDLOW:133,
+            # CLDMED:134, FSDS_J:139, FSUS:141, FSUTOA:145, FLUT:146
+            tracer_inds: [96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108,
+                          109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120,
+                          121, 122, 123, 124, 125, 126, 127, 130, 132, 133, 134, 139,
+                          141, 145, 146]
+            tracer_thres: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0]
+            tracer_thres_max: null
+
+    mass_fixer:
+      type: global_mass_fixer
+      args:
+        post_conf:
+          data:
+            scaler_type: std_new
+            mean_path: '/glade/derecho/scratch/wchapman/b_credit_runs/mean_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc'
+            std_path: '/glade/derecho/scratch/wchapman/b_credit_runs/std_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc'
+            save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+            lead_time_periods: 6
+            variables: [U, V, T, Qtot]
+            surface_variables: [PS, TREFHT]
+            dynamic_forcing_variables: [SOLIN, SST, ICEFRAC, co2vmr_3d]
+            diagnostic_variables: [PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX, FSDS_J, FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+            forcing_variables: []
+            static_variables: [z_norm, LANDM_COSLAT]
+            static_first: True
+            levels: 32
+            all_varnames: [U, V, T, Qtot, PS, TREFHT, SOLIN, SST, ICEFRAC, co2vmr_3d,
+                           PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX,
+                           FSDS_J, FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+          global_mass_fixer:
+            fix_level_num: 14
+            simple_demo: False
+            denorm: True
+            grid_type: sigma
+            midpoint: True
+            lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+            save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+            # q_inds: [first, last] channel in y_pred for Qtot (ch 96-127)
+            q_inds: [96, 127]
+            # sp_inds: PS channel in y_pred (ch 128) — sigma-level grid requires sp
+            sp_inds: 128
+
+    water_fixer:
+      type: global_water_fixer
+      args:
+        post_conf:
+          data:
+            scaler_type: std_new
+            mean_path: '/glade/derecho/scratch/wchapman/b_credit_runs/mean_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc'
+            std_path: '/glade/derecho/scratch/wchapman/b_credit_runs/std_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc'
+            save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+            lead_time_periods: 6
+            variables: [U, V, T, Qtot]
+            surface_variables: [PS, TREFHT]
+            dynamic_forcing_variables: [SOLIN, SST, ICEFRAC, co2vmr_3d]
+            diagnostic_variables: [PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX, FSDS_J, FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+            forcing_variables: []
+            static_variables: [z_norm, LANDM_COSLAT]
+            static_first: True
+            levels: 32
+            all_varnames: [U, V, T, Qtot, PS, TREFHT, SOLIN, SST, ICEFRAC, co2vmr_3d,
+                           PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX,
+                           FSDS_J, FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
+          # GlobalWaterFixer.__init__ reads global_mass_fixer for grid/sigma setup
+          global_mass_fixer:
+            grid_type: sigma
+            midpoint: True
+            lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+          global_water_fixer:
+            simple_demo: False
+            denorm: True
+            grid_type: sigma
+            midpoint: True
+            save_loc_physics: '/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+            # q_inds: Qtot ch 96-127 in y_pred
+            q_inds: [96, 127]
+            # sp_inds: PS ch 128 in y_pred
+            sp_inds: 128
+            # precip_ind: PRECT ch 130 in y_pred
+            precip_ind: 130
+            # evapor_ind: QFLX ch 138 in y_pred
+            evapor_ind: 138
+
+    reconstruct:
+      type: reconstruct
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_post_scaler.json
+        variables:
+          - ERA5/prognostic/3d/U
+          - ERA5/prognostic/3d/V
+          - ERA5/prognostic/3d/T
+          - ERA5/prognostic/3d/Qtot
+          - ERA5/prognostic/2d/PS
+          - ERA5/prognostic/2d/TREFHT
+          - ERA5/diagnostic/2d/PRECT
+          - ERA5/diagnostic/2d/TS
+          - ERA5/diagnostic/2d/CLDHGH
+          - ERA5/diagnostic/2d/CLDLOW
+          - ERA5/diagnostic/2d/CLDMED
+          - ERA5/diagnostic/2d/TAUX
+          - ERA5/diagnostic/2d/TAUY
+          - ERA5/diagnostic/2d/U10
+          - ERA5/diagnostic/2d/QFLX
+          - ERA5/diagnostic/2d/FSDS_J
+          - ERA5/diagnostic/2d/FLDS_J
+          - ERA5/diagnostic/2d/FSUS
+          - ERA5/diagnostic/2d/FLUS
+          - ERA5/diagnostic/2d/SHFLX
+          - ERA5/diagnostic/2d/LHFLX
+          - ERA5/diagnostic/2d/FSUTOA
+          - ERA5/diagnostic/2d/FLUT
+        method: inverse_transform
+
+model:
+  type: camulator
+  frames: 1
+  image_height: 192
+  image_width: 288
+  levels: 32
+
+  # Channel counts match gen1 config exactly
+  channels: 4               # 3D prognostic: U, V, T, Qtot
+  surface_channels: 2       # 2D prognostic: PS, TREFHT
+  input_only_channels: 6    # dynamic_forcing (4) + static (2)
+  output_only_channels: 17  # diagnostic: PRECT TS CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSDS_J FLDS_J FSUS FLUS SHFLX LHFLX FSUTOA FLUT
+
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+
+  dim: [256, 512, 1024, 2048]
+  depth: [2, 2, 18, 2]
+  global_window_size: [4, 4, 2, 1]
+  local_window_size: 3
+  cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  use_spectral_norm: True
+  interp: True
+
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: [48, 48]
+    pad_lon: [48, 48]
+
+  # Physics conservation fixers are now wired through postblocks:, not model.post_conf
+  post_conf:
+    activate: False
+
+loss:
+  training_loss: mse
+  validation_loss: mse
+  use_power_loss: False
+  use_spectral_loss: False
+  use_latitude_weights: True
+  latitude_weights: "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+  use_variable_weights: False
+
+trainer:
+  type: era5-gen2
+
+  parallelism:
+    data: none   # single GPU
+    tensor: 1
+    domain: 1
+
+  load_weights: False
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+
+  save_backup_weights: False
+  save_best_weights: True
+  save_metric_vars: [PRECT, TREFHT, TAUX, TAUY, U, T]
+
+  update_learning_rate: False
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  train_batch_size: 1
+  valid_batch_size: 1
+  ensemble_size: 1
+
+  batches_per_epoch: 5
+  valid_batches_per_epoch: 2
+  stopping_patience: 50
+  skip_validation: False
+
+  start_epoch: 0
+  reload_epoch: False
+  epochs: 2
+
+  use_scheduler: True
+  scheduler:
+    scheduler_type: cosine-annealing-restarts
+    first_cycle_steps: 50
+    cycle_mult: 1.0
+    max_lr: 1.0e-04
+    min_lr: 1.0e-07
+    warmup_steps: 5
+    gamma: 1.0
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 1.0
+
+  use_ema: False
+  use_tensorboard: False
+
+  thread_workers: 4
+  valid_thread_workers: 2
+  prefetch_factor: 2
+
+predict:
+  mode: none
+  save_forecast: '/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/rollout'
+  forecasts:
+    type: custom
+    start_year: 2013
+    start_month: 1
+    start_day: 1
+    start_hours: [0]
+    duration: 4
+    days: 2
+  metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
+  batch_size: 1
+
+pbs:
+  conda: "/glade/u/home/schreck/.conda/envs/credit-casper"
+  job_name: "camulator_gen2"
+  project: "NAML0001"
+  walltime: "04:00:00"
+  ncpus: 8
+  ngpus: 1
+  mem: "128GB"
+  gpu_type: "v100"
