@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 
 # CREDIT framework
-from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
+from credit.datasets.gen_1.era5_multistep_batcher import Predict_Dataset_Batcher
 from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoader
 from credit.parser import credit_main_parser
 from credit.datasets import setup_data_loading

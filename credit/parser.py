@@ -16,7 +16,7 @@ from glob import glob
 from collections import Counter
 
 from credit.data import get_forward_data
-from credit.datasets.downscaling_dataset import DownscalingDataset
+from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
 
 # from credit.datasets.datamap import DataMap
 from credit.datasets.count_channels import count_channels

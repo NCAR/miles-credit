@@ -137,7 +137,7 @@ def _plot(args) -> None:
     import pandas as pd
     from torch.utils.data import default_collate
 
-    from credit.datasets.multi_source import MultiSourceDataset
+    from credit.datasets.gen_2.multi_source import MultiSourceDataset
     from credit.preblock import apply_preblocks, build_preblocks
 
     # Build the effective validation data config: start from training data, then overlay
