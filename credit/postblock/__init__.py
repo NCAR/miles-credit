@@ -5,7 +5,13 @@ from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransformer
 from credit.postblock.mslp import MSLPDiagnostic
 
-from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import (
+    TracerFixer,
+    GlobalMassFixer,
+    GlobalWaterFixer,
+    GlobalEnergyFixer,
+    GlobalEnergyFixerUpDown,
+)
 from credit.postblock.geopotential import GeopotentialDiagnostic
 
 POSTBLOCK_REGISTRY = {
@@ -17,6 +23,7 @@ POSTBLOCK_REGISTRY = {
     "global_mass_fixer": GlobalMassFixer,
     "global_water_fixer": GlobalWaterFixer,
     "global_energy_fixer": GlobalEnergyFixer,
+    "global_energy_fixer_updown": GlobalEnergyFixerUpDown,
     "geopotential_diagnostic": GeopotentialDiagnostic,
 }
 
