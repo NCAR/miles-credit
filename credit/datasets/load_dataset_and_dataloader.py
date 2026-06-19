@@ -1,18 +1,18 @@
-from credit.datasets.era5_multistep import (
+from credit.datasets.gen_1.era5_multistep import (
     ERA5_and_Forcing_MultiStep,
     RepeatingIndexSampler,
 )
-from credit.datasets.era5_singlestep import ERA5_and_Forcing_SingleStep
-from credit.datasets.era5_multistep_batcher import (
+from credit.datasets.gen_1.era5_singlestep import ERA5_and_Forcing_SingleStep
+from credit.datasets.gen_1.era5_multistep_batcher import (
     ERA5_MultiStep_Batcher,
     MultiprocessingBatcher,
     MultiprocessingBatcherPrefetch,
 )
-from credit.datasets.om4_multistep_batcher import (
+from credit.datasets.gen_1.om4_multistep_batcher import (
     Ocean_MultiStep_Batcher,
     Ocean_Tensor_Batcher,
 )
-from credit.datasets.downscaling_dataset import DownscalingDataset
+from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
 from credit.datasets import setup_data_loading
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -527,15 +527,8 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
             prefetch_factor=prefetch_factor,
             sampler=BatchForecastLenSampler(dataset),  # Ensure len is correct
         )
-    elif type(dataset) in (
-        ERA5_MultiStep_Batcher,
-        Ocean_MultiStep_Batcher,
-        Ocean_Tensor_Batcher,
-    ):
-        if type(dataset) in (Ocean_MultiStep_Batcher, Ocean_Tensor_Batcher):
-            sampler = BatchForecastLenSamplerSamudra(dataset)
-        else:
-            sampler = BatchForecastLenSampler(dataset)
+    elif type(dataset) in (Ocean_MultiStep_Batcher, Ocean_Tensor_Batcher):
+        sampler = BatchForecastLenSamplerSamudra(dataset)
 
         dataloader = DataLoader(
             dataset,

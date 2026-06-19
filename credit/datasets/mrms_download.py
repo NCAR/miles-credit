@@ -53,7 +53,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from credit.datasets.MRMS import _S3_URI, _apply_extent
+from credit.datasets.gen_2.mrms import _S3_URI, _apply_extent
 
 logger = logging.getLogger(__name__)
 

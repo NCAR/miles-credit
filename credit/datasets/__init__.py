@@ -19,15 +19,15 @@ _DATASET_REGISTRY = {}
 # Enables ``from credit.datasets import ERA5Dataset`` without eager imports; kept for backward compatibility.
 # Entries are mostly classes, but also includes functions (build_channel_layout, update_x).
 _CLASS_SOURCES = {
-    "BaseDataset": ("credit.datasets.base_dataset", "BaseDataset"),
-    "MultiSourceDataset": ("credit.datasets.multi_source", "MultiSourceDataset"),
-    "ERA5Dataset": ("credit.datasets.era5", "ERA5Dataset"),
-    "ARCOERA5Dataset": ("credit.datasets.era5", "ARCOERA5Dataset"),
-    "WeatherBench2ERA5Dataset": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
-    "GOESDataset": ("credit.datasets.goes", "GOESDataset"),
-    "MRMSDataset": ("credit.datasets.mrms", "MRMSDataset"),
-    "HRRRDataset": ("credit.datasets.hrrr", "HRRRDataset"),
-    "TISRDataset": ("credit.datasets.tisr", "TISRDataset"),
+    "BaseDataset": ("credit.datasets.gen_2.base_dataset", "BaseDataset"),
+    "MultiSourceDataset": ("credit.datasets.gen_2.multi_source", "MultiSourceDataset"),
+    "ERA5Dataset": ("credit.datasets.gen_2.era5", "ERA5Dataset"),
+    "ARCOERA5Dataset": ("credit.datasets.gen_2.era5", "ARCOERA5Dataset"),
+    "WeatherBench2ERA5Dataset": ("credit.datasets.gen_2.era5", "WeatherBench2ERA5Dataset"),
+    "GOESDataset": ("credit.datasets.gen_2.goes", "GOESDataset"),
+    "MRMSDataset": ("credit.datasets.gen_2.mrms", "MRMSDataset"),
+    "HRRRDataset": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "TISRDataset": ("credit.datasets.gen_2.tisr", "TISRDataset"),
     "build_channel_layout": ("credit.datasets.channel_layout", "build_channel_layout"),
     "update_x": ("credit.datasets.channel_layout", "update_x"),
 }
@@ -65,7 +65,7 @@ def register_dataset(dataset_type):
     Example::
 
         from credit.datasets import register_dataset
-        from credit.datasets.base_dataset import BaseDataset
+        from credit.datasets.gen_2.base_dataset import BaseDataset
 
         @register_dataset("my_dataset")
         class MyDataset(BaseDataset):
@@ -74,13 +74,15 @@ def register_dataset(dataset_type):
     """
 
     def decorator(cls):
-        from credit.datasets.base_dataset import BaseDataset  # imported here to avoid loading it at module import time
+        from credit.datasets.gen_2.base_dataset import (
+            BaseDataset,
+        )  # imported here to avoid loading it at module import time
 
         # isinstance(cls, type) guards against passing an instance or function;
         # issubclass then confirms it inherits the required base class.
         if not (isinstance(cls, type) and issubclass(cls, BaseDataset)):
             raise TypeError(
-                f"register_dataset: '{cls.__name__}' must inherit from credit.datasets.base_dataset.BaseDataset."
+                f"register_dataset: '{cls.__name__}' must inherit from credit.datasets.gen_2.base_dataset.BaseDataset."
             )
         if dataset_type in _DATASET_REGISTRY:  # warn instead of silently overwriting
             logger.warning(f"register_dataset: overwriting existing registry entry for '{dataset_type}'")
