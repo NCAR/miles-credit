@@ -45,7 +45,7 @@ data:
       extent: [-124.358202, -120.477473, 36.527802, 38.797260]
       # should be from 38.797260, -124.358202 to 36.527802, -120.477473
 
-  start_datetime: "2020-01-01"
+  start_datetime: "2024-01-01"
   end_datetime: "2025-01-01"
   timestep: "1h"
 
@@ -154,9 +154,9 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 16
-  valid_thread_workers: 16
-  prefetch_factor: 4
+  thread_workers: 64
+  valid_thread_workers: 64
+  prefetch_factor: 8
 
 
 # ---- Architecture (based on HRRR Extent, A×B) ---- #
