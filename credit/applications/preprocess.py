@@ -109,6 +109,13 @@ def main():
     parser = argparse.ArgumentParser(
         epilog="""
 Examples:
+  # Recommended: submit via PBS using the credit CLI.
+  # Note: torchrun is hardcoded internally; --device and --backend cannot be forwarded.
+  # Device selection is automatic based on hardware detected at runtime (GPU if available, CPU otherwise).
+  credit submit --cluster casper  -c config.yml --mode preprocess
+  credit submit --cluster derecho -c config.yml --mode preprocess
+
+  # For reference only (not the recommended path): run directly with torchrun.
   # GPU run (auto-selects nccl backend)
   torchrun --nproc_per_node=4 preprocess.py -c config.yml
 
