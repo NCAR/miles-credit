@@ -103,7 +103,7 @@ postblocks = build_postblocks(config["postblocks"])
 postbatch = apply_postblocks(postblocks, batch)
 print("POSTBATCH KEYS:", postbatch.keys())
 
-for source_name, postbatch_data in postbatch["prediction"].items():
+for source_name, postbatch_data in postbatch["y_processed"].items():
     print(f"POSTBATCH KEYS: Source: {source_name}, Keys: {postbatch_data.keys()}")
 
 inspection_timer_end = time.perf_counter()

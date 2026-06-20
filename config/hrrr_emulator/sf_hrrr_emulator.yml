@@ -45,8 +45,8 @@ data:
       extent: [-124.358202, -120.477473, 36.527802, 38.797260]
       # should be from 38.797260, -124.358202 to 36.527802, -120.477473
 
-  start_datetime: "2025-01-01"
-  end_datetime: "2025-01-02"
+  start_datetime: "2020-01-01"
+  end_datetime: "2025-01-01"
   timestep: "1h"
 
   # history_len: 1            # number of past states fed as input
@@ -61,8 +61,8 @@ data:
 
 # ---- USER SETTINGS: validation data ---- #
 validation_data:
-  start_datetime: "2025-01-03"
-  end_datetime: "2025-01-04"
+  start_datetime: "2025-01-01"
+  end_datetime: "2026-01-01"
   timestep: "1h"
 
 # ---- USER SETTINGS: preblocks/postblocks before/after passed to model ---- #
@@ -87,15 +87,15 @@ preblocks:
               - 'input'
               - 'target'
 
-    # scaler:
-    #   # please run `credit preprocess` before `credit train`
-    #   type: "bridgescaler_transformer"
-    #   args:
-    #     variables: []
-    #     scaler_path: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/scaler_quantile.json"
-    #     scaler_type: "standard"
-    #     scaler_params:
-    #       channels_last: False
+    scaler:
+      # please run `credit preprocess` before `credit train`
+      type: "bridgescaler_transformer"
+      args:
+        variables: []
+        scaler_path: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/scaler_quantile.json"
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
 
     vars_concat:
       type: "concat"
@@ -154,9 +154,9 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 4
-  valid_thread_workers: 4
-  prefetch_factor: 2
+  thread_workers: 16
+  valid_thread_workers: 16
+  prefetch_factor: 4
 
 
 # ---- Architecture (based on HRRR Extent, A×B) ---- #
