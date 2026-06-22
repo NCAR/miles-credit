@@ -299,14 +299,6 @@ class GlobalMassFixer(nn.Module):
         # y_pred (batch, var, time, lat, lon)
         # pick the first time-step, y_pred is expected to have the next step only
         # !!! Note: time dimension is collapsed throughout !!!
-        # Gen2 trainer delivers 4D (B, C, H, W) — insert a dummy time dim so the
-        # index syntax [:, inds, step, ...] works uniformly with gen1's 5D path.
-        _y_4d = y_pred.dim() == 4
-        _x_4d = x_input.dim() == 4
-        if _y_4d:
-            y_pred = y_pred.unsqueeze(2)
-        if _x_4d:
-            x_input = x_input.unsqueeze(2)
 
         q_input = x_input[:, self.q_ind_start : self.q_ind_end, -1, ...]
         q_pred = y_pred[:, self.q_ind_start : self.q_ind_end, 0, ...]
@@ -388,11 +380,6 @@ class GlobalMassFixer(nn.Module):
             # expand fixed vars to (batch, level, time, lat, lon)
             sp_pred = sp_pred.unsqueeze(1).unsqueeze(2)
             y_pred = concat_fix(y_pred, sp_pred, self.sp_ind, self.sp_ind, N_vars)
-
-        # Restore the original tensor shape (squeeze back the dummy time dim that
-        # may have been inserted above for 4D gen2 inputs).
-        if _y_4d and y_pred.dim() == 5:
-            y_pred = y_pred.squeeze(2)
 
         if self.state_trans:
             y_pred = self.state_trans.transform_array(y_pred)
@@ -519,15 +506,6 @@ class GlobalWaterFixer(nn.Module):
             x_input = self.state_trans.inverse_transform_input(x_input)
             y_pred = self.state_trans.inverse_transform(y_pred)
 
-        # Gen2 trainer delivers 4D (B, C, H, W) — insert a dummy time dim so the
-        # index syntax [:, inds, step, ...] works uniformly with gen1's 5D path.
-        _y_4d = y_pred.dim() == 4
-        _x_4d = x_input.dim() == 4
-        if _y_4d:
-            y_pred = y_pred.unsqueeze(2)
-        if _x_4d:
-            x_input = x_input.unsqueeze(2)
-
         q_input = x_input[:, self.q_ind_start : self.q_ind_end, -1, ...]
 
         # y_pred (batch, var, time, lat, lon)
@@ -580,11 +558,6 @@ class GlobalWaterFixer(nn.Module):
         # return fixed precip back to y_pred
         precip = precip.unsqueeze(1).unsqueeze(2)
         y_pred = concat_fix(y_pred, precip, self.precip_ind, self.precip_ind, N_vars)
-
-        # Restore the original tensor shape (squeeze back the dummy time dim that
-        # may have been inserted above for 4D gen2 inputs).
-        if _y_4d and y_pred.dim() == 5:
-            y_pred = y_pred.squeeze(2)
 
         if self.state_trans:
             y_pred = self.state_trans.transform_array(y_pred)
@@ -951,14 +924,6 @@ class GlobalEnergyFixerUpDown(nn.Module):
         # ------------------------------------------------------------------ #
         # Variable indices — up/down fluxes
         self.TOA_down_solar_ind = int(cfg["TOA_down_solar_ind"])
-
-        # gen2: SOLIN (TOA down-solar) is an input-only dynamic forcing, absent from
-        # y_pred. When TOA_down_solar_from_input is set, source it from x["x"] at the
-        # given input channel instead of from y_pred. See issue #429.
-        self.TOA_down_solar_from_input = bool(cfg.get("TOA_down_solar_from_input", False))
-        if self.TOA_down_solar_from_input:
-            self.TOA_down_solar_input_ind = int(cfg["TOA_down_solar_input_ind"])
-
         self.TOA_up_solar_ind = int(cfg["TOA_up_solar_ind"])
         self.TOA_up_OLR_ind = int(cfg["TOA_up_OLR_ind"])
 
@@ -987,15 +952,6 @@ class GlobalEnergyFixerUpDown(nn.Module):
         if self.state_trans:
             x_input = self.state_trans.inverse_transform_input(x_input)
             y_pred = self.state_trans.inverse_transform(y_pred)
-
-        # Gen2 trainer delivers 4D (B, C, H, W) — insert a dummy time dim so the
-        # index syntax [:, inds, step, ...] works uniformly with gen1's 5D path.
-        _y_4d = y_pred.dim() == 4
-        _x_4d = x_input.dim() == 4
-        if _y_4d:
-            y_pred = y_pred.unsqueeze(2)
-        if _x_4d:
-            x_input = x_input.unsqueeze(2)
 
         # ------------------------------------------------------------------ #
         # Atmosphere state at t0 and t1
@@ -1026,12 +982,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
 
         # ------------------------------------------------------------------ #
         # TOA net flux: down_SW - up_SW - up_LW  (positive = energy in)
-        if self.TOA_down_solar_from_input:
-            # gen2: SOLIN is an input-only dynamic forcing absent from y_pred;
-            # source from the last input frame (the forcing for the predicted step).
-            TOA_down_solar = x_input[:, self.TOA_down_solar_input_ind, -1, ...]
-        else:
-            TOA_down_solar = y_pred[:, self.TOA_down_solar_ind, 0, ...]
+        TOA_down_solar = y_pred[:, self.TOA_down_solar_ind, 0, ...]
         TOA_up_solar = y_pred[:, self.TOA_up_solar_ind, 0, ...]
         TOA_up_OLR = y_pred[:, self.TOA_up_OLR_ind, 0, ...]
         R_T = (TOA_down_solar - TOA_up_solar - TOA_up_OLR) / self.N_seconds
@@ -1073,11 +1024,6 @@ class GlobalEnergyFixerUpDown(nn.Module):
         # Write corrected T back to y_pred
         T_pred = T_pred.unsqueeze(2)
         y_pred = concat_fix(y_pred, T_pred, self.T_ind_start, self.T_ind_end, N_vars)
-
-        # Restore the original tensor shape (squeeze back the dummy time dim that
-        # may have been inserted above for 4D gen2 inputs).
-        if _y_4d and y_pred.dim() == 5:
-            y_pred = y_pred.squeeze(2)
 
         if self.state_trans:
             y_pred = self.state_trans.transform_array(y_pred)
