@@ -109,7 +109,7 @@ postblocks:
 trainer:
   type: era5-gen2           # use the v2 trainer (new nested data schema)
 
-  mode: "none"              # none | ddp | fsdp  (ddp recommended for multi-GPU)
+  mode: "ddp"              # none | ddp | fsdp  (ddp recommended for multi-GPU)
   cpu_offload: False
   activation_checkpoint: True
 
@@ -154,9 +154,9 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 64
-  valid_thread_workers: 64
-  prefetch_factor: 8
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 2
 
 
 # ---- Architecture (based on HRRR Extent, A×B) ---- #
@@ -237,10 +237,19 @@ predict:
 pbs: #derecho
   conda: "credit-derecho"
   project: "NAML0001"
-  job_name: "credit_integration_test_hrrr_gen2"
-  walltime: "01:00:00"
-  nodes: 8
-  ncpus: 64
+  job_name: "credit_hrrr_gen2"
+  walltime: "08:00:00"
+  nodes: 4
   ngpus: 4
   mem: '480GB'
   queue: 'main'
+
+# pbs: #casper
+#   conda: "credit"
+#   project: "NAML0001"
+#   job_name: "credit_hrrr_gen2"
+#   walltime: "08:00:00"
+#   nodes: 1
+#   ngpus: 4
+#   mem: '480GB'
+#   queue: 'main'
