@@ -1,0 +1,79 @@
+# ============================================================
+# SKEBS unit-test configuration
+#
+# Uses a small 32×64 equiangular grid so tests run quickly
+# on CPU without GPU or real data files.
+# ============================================================
+
+model:
+  image_height: 32          # nlat
+  image_width:  64          # nlon
+  channels:     3           # prognostic 3-D variables (e.g. U, V, T)
+  levels:       8           # vertical levels
+  surface_channels: 2       # e.g. SP, T2m
+  output_only_channels: 0
+  input_only_channels:  0
+  frames: 1
+
+data:
+  forecast_len:       1     # 2 steps total (0-indexed + 1)
+  valid_forecast_len: 1
+  retain_graph:       false
+  save_loc_static:    "__mock__"   # replaced by fixture
+  std_path:           "__mock__"   # replaced by fixture
+
+skebs:
+  # Wind / temperature / humidity channel indices
+  # Layout assumed: [U×levels | V×levels | T×levels | surface | output_only]
+  # levels=8, so:
+  #   U: 0..7, V: 8..15, T: 16..23, surface: 24..25
+  U_inds: [0, 1, 2, 3, 4, 5, 6, 7]
+  V_inds: [8, 9, 10, 11, 12, 13, 14, 15]
+  T_inds: [16, 17, 18, 19, 20, 21, 22, 23]
+  Q_inds: []
+  SP_ind: 24
+
+  static_inds: []           # no static fields in the toy test
+  use_statics:  false
+
+  # Pattern parameters (Berner 2009 defaults)
+  alpha_init:   0.125
+
+  # Filter settings
+  max_pattern_wavenum:          12
+  pattern_filter_anneal_start:  8
+  # backscatter filter
+  filter_backscatter: true
+  max_backscatter_wavenum:      14
+  spectral_backscatter_filter_anneal_start: 10
+
+  # Physical constants (can be overridden in forward)
+  # override_r:   0.02
+  # override_dE:  1.0e-4
+
+  # Vertical masking
+  zero_out_levels_top_of_model: 3
+
+  # Backscatter network
+  dissipation_type: "FCNN"   # simplest option; no learned weights
+  dissipation_scaling_coefficient: 1.0
+
+  # Training flags
+  freeze_dissipation_weights: false
+  freeze_noise:                true
+  freeze_alpha:              true
+  train_pattern_filter:     false
+  train_backscatter_filter: false
+
+  # Ansatz vs standard perturbation
+  ansatz_perturb: false
+
+  # Debug / IO (all disabled for unit tests)
+  write_rollout_debug_files: false
+  write_train_debug_files:   false
+  write_train_every:         999
+  save_loc: "/tmp/skebs_test_output"
+  iteration_stop: 0
+
+tracer_fixer:
+  activate: false
