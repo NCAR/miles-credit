@@ -37,8 +37,8 @@ class ERA5Dataset(Dataset):
             5) Stored Zarr data should be chunked efficiently for a fast read (recommend small chunks across time dimension).
             
             """ 
-    def __init__(self, config, time_config, source, transform=None):
-        
+    def __init__(self, config, time_config, source, transforms=None):
+
         self.source_name = source
 
         # valid sampling modes
@@ -73,14 +73,9 @@ class ERA5Dataset(Dataset):
             else:
                 self.file_dict[field_type] = None
 
-        # handle transform:
-        if not transform:
-            self.transform_xarray = lambda x: x
-        else:
-            self.transform_xarray = transform.transform_xarray
-            print("transforming prognostic data with given transform")
+        # per-field transforms: dict of field_type -> ERA5FieldTransform
+        self.transforms = transforms or {}
 
-        
     def _timestamps(self):
         return pd.date_range(self.start_datetime,
                                        self.end_datetime - self.num_forecast_steps * self.timestep,
@@ -138,14 +133,16 @@ class ERA5Dataset(Dataset):
         opens the dataset, reshapes and concats the variables into an np array, packs it into the return dict if the data exists
         assumes both vars_3D and vars_2D are in teh same file
         """
-        if self.file_dict[field_type]: #if the file map is not None, do the op
+        if self.file_dict[field_type] and self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]:
+            #if the file map is not None, and there are variables do the op
             ds = xr.open_dataset(self.file_dict[field_type][ts.year])
             if field_type != "static":
                 ds = ds.sel(time=ts)
 
             ds = ds[self.var_dict[field_type]["vars_3D"] + self.var_dict[field_type]["vars_2D"]]
-            if field_type in ["prognostic", "dynamic_forcing"]:
-                ds = self.transform_xarray(ds)
+            field_transform = self.transforms.get(field_type)
+            if field_transform:
+                ds = field_transform.transform_xarray(ds)
 
             ds_3D = ds[self.var_dict[field_type]["vars_3D"]]
             ds_2D = ds[self.var_dict[field_type]["vars_2D"]]
@@ -158,6 +155,8 @@ class ERA5Dataset(Dataset):
 
             if data_np.size > 0:
                 return_data[field_type] = torch.tensor(data_np).float()
+        else:
+            return_data[field_type] = torch.tensor([])
 
         return return_data
     
@@ -190,8 +189,10 @@ class ERA5Dataset(Dataset):
             data_2D = np.expand_dims(ds_2D.to_array().values, axis=1)
             data_list.append(data_2D)
 
-        combined_data = np.concatenate(data_list, axis=0)
-        
+        if data_list:
+            combined_data = np.concatenate(data_list, axis=0)
+        else:
+            combined_data = np.array([])
         return combined_data
     
 
@@ -199,7 +200,7 @@ class ERA5Dataset(Dataset):
 if __name__ == "__main__":
     import yaml
 
-    path = "/glade/u/home/dkimpara/miles-credit/config/era5_new_data_config.yaml"
+    path = "/glade/derecho/scratch/dkimpara/goes_10km_train/DOP/10m_big_dop/model.yml"
     with open(path) as cnfg:
         config = yaml.safe_load(cnfg)
 
@@ -208,8 +209,8 @@ if __name__ == "__main__":
     time_config = {
         "timestep": pd.Timedelta(data_config["timestep"]),
         "num_forecast_steps": data_config["forecast_len"] + 1,
-        "start_datetime": data_config["start_datetime"],
-        "end_datetime": data_config["end_datetime"]
+        "start_datetime": data_config['train']["start_datetime"],
+        "end_datetime": data_config['train']["end_datetime"]
     }
     source = "ERA5"
     dataset = ERA5Dataset(config, time_config, source)

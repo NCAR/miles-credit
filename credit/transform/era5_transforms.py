@@ -58,4 +58,32 @@ class ERA5StandardTransform:
 
         return torch.cat([prog_inv_transformed,
                           tensor[-self.num_prognostic_variables : ]
-                          ])    
+                          ])
+
+
+class ERA5FieldTransform:
+    """Z-score normalizer for a single ERA5 field type (prognostic, dynamic_forcing, etc.).
+
+    Reads mean/std paths from the field's 'transform' config block, e.g.:
+
+        dynamic_forcing:
+            vars_2D: ['tsi']
+            path: '...'
+            transform:
+                mean_path: '/path/to/mean.nc'
+                std_path:  '/path/to/std.nc'
+    """
+
+    def __init__(self, mean_path, std_path, vars_3D, vars_2D, num_levels, device):
+        self.device = device
+
+        self.mean_ds = xr.open_dataset(mean_path).sortby("level", ascending=True)
+        self.std_ds  = xr.open_dataset(std_path).sortby("level", ascending=True)
+
+    def transform_xarray(self, ds):
+        variables = list(ds.keys())
+        return (ds - self.mean_ds[variables]) / self.std_ds[variables]
+
+    def inverse_transform_xarray(self, ds):
+        variables = list(ds.keys())
+        return ds * self.std_ds[variables] + self.mean_ds[variables]

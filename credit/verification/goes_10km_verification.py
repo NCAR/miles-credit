@@ -9,7 +9,7 @@ import xarray as xr
 
 from credit.verification.standard import radial_fft_spectrum
 from scores.spatial import fss_2d, fss_2d_binary
-
+from sklearn.metrics import confusion_matrix
 
 
 logger = logging.getLogger(__name__)
@@ -143,28 +143,44 @@ def verification_per_timestep(dataset, climo, eval_conf, step_file_tuple):
         mae_climo = np.abs(climo - true_da).mean(dim=["latitude", "longitude"])
         maess = (mae - mae_climo) / (-1 * mae_climo)
         result_dict = result_dict | unpack_da_to_dict(maess, "MAESS")
-
-    # FSS
+    
+    # confusion matrix
     pred_da_all = pred_da.isel(t=0)
     target_da_all = true_da
     for channel, fss_conf in eval_conf["FSS"].items():
         pred_da = pred_da_all.sel(channel=channel)
         target_da = target_da_all.sel(channel=channel) 
-        
-        if "raw" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
-            result_dict = result_dict | FSS_raw_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
-        if "pct" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
-            result_dict = result_dict | FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
+        if "pct" in eval_conf.get("compute_FSS_types", ["pct", "pct_tropics"]):
+            result_dict = result_dict | confusion_matrix_percentile_categories(pred_da, target_da, fss_conf, channel)
 
-        if "pct_tropics" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+        if "pct_tropics" in eval_conf.get("compute_FSS_types", ["pct", "pct_tropics"]):
             # percentile FSS tropics
             lat_bounds = [-21, 21]
             target_da = target_da.sel(latitude = slice(*lat_bounds))
             pred_da = pred_da.sel(latitude = slice(*lat_bounds))
             
-            tropics_results = FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
+            tropics_results = confusion_matrix_percentile_categories(pred_da, target_da, fss_conf, channel)
             tropics_results = {f"{k}_tropics": v for k,v in tropics_results.items()}
             result_dict = result_dict | tropics_results
+    # FSS
+    # for channel, fss_conf in eval_conf["FSS"].items():
+    #     pred_da = pred_da_all.sel(channel=channel)
+    #     target_da = target_da_all.sel(channel=channel) 
+        
+    #     if "raw" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+    #         result_dict = result_dict | FSS_raw_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
+    #     if "pct" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+    #         result_dict = result_dict | FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
+
+    #     if "pct_tropics" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+    #         # percentile FSS tropics
+    #         lat_bounds = [-21, 21]
+    #         target_da = target_da.sel(latitude = slice(*lat_bounds))
+    #         pred_da = pred_da.sel(latitude = slice(*lat_bounds))
+            
+    #         tropics_results = FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
+    #         tropics_results = {f"{k}_tropics": v for k,v in tropics_results.items()}
+    #         result_dict = result_dict | tropics_results
 
     return result_dict
 
@@ -260,6 +276,58 @@ def FSS_raw_threshold(pred_da, target_da, eval_conf, fss_conf, channel):
             result_dict = result_dict | {f"FSS_WS{window_size}_C{channel:02}_{category_name}": float(fss.values)}
     return result_dict
 
+def confusion_matrix_percentile_categories(pred_da, target_da, fss_conf, channel):
+    result_dict = {}
+
+    target_sorted = np.sort(target_da.values.flatten())
+    num_idxs = len(target_sorted)
+
+    def find_quantile_target(thresholds):
+        idxs = np.searchsorted(target_sorted, thresholds)
+        return idxs / num_idxs
+
+    def find_pred_pct_thresholds(thresholds):
+        quantiles = find_quantile_target(thresholds)
+        pred_pct_thresholds = pred_da.quantile(quantiles)
+        return pred_pct_thresholds
+
+    bins = list(fss_conf["sky_categories"].items()) # list of lists of bins
+    bins = sorted(bins, key=lambda x: x[1][0]) # sort by lower bound
+
+    target_bins = [bin[1] for bin in bins] # grab the bounds
+    target_bin_bounds = [x[0] for x in target_bins][1:] # get bin bounds, remove first lower bound
+    target_categorical = np.digitize(target_da, target_bin_bounds, right=True)
+
+    pred_bins = [find_pred_pct_thresholds(thresh) for thresh in target_bins]
+    pred_bin_bounds = [x[0] for x in pred_bins][1:]
+    pred_categorical = np.digitize(pred_da, pred_bin_bounds, right=True)
+
+    # use sklearn confusion matrix
+    conf_matrix = confusion_matrix(target_categorical.flatten(), pred_categorical.flatten(), normalize="true")
+
+    bin_names = [bin[0] for bin in bins]
+    for obs_cat, row in zip(bin_names, conf_matrix):
+        result_dict = result_dict | {f"confusion_C{channel:02}_obs_{obs_cat}": row}
+
+    return result_dict
+
+
+    # for category_name, bin_edges in fss_conf["sky_categories"].items():
+    #     bin_edges_pred = find_pred_pct_thresholds(bin_edges) # get corresponding value at equiv percentile
+    #     pred_binary = is_in_bin(pred_da, bin_edges_pred.values)
+    #     pred_binarized[category_name] = pred_binary
+    
+    # # now compute confusion matrix obs cat as outer loop
+    # # sklearn def:
+    # # Confusion matrix whose i-th row and j-th column entry indicates the number of samples
+    # # with true label being i-th class and predicted label being j-th class.
+    # for category_name, bin_edges in fss_conf["sky_categories"].items():
+    #     target_binary = is_in_bin(target_da, bin_edges)
+        
+    #     for pred_cat, pred_binary in pred_binarized.items():
+
+    #         result_dict | {f"confusion_obs_{category_name}_pred_{pred_cat}"}
+    
 def unpack_da_to_dict(da, metric_prefix):
 
     results_dict = {}

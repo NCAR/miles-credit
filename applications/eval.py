@@ -160,7 +160,18 @@ if __name__ == "__main__":
     # take nanmean of all verifications and save
     def nanmean_cell(*values):
         arrays = [np.atleast_1d(np.array(v, dtype=float)) for v in values]
-        result = np.nanmean(arrays, axis=0)
+        #fix nan shapes
+        try:
+            template = next(arr for arr in arrays if arr.shape != (1,))
+            filled = []
+            for arr in arrays:
+                if arr.shape != template.shape:
+                    filled.append(np.full_like(template, np.nan))
+                else:
+                    filled.append(arr)
+            result = np.nanmean(filled, axis=0)
+        except StopIteration:
+            result = np.nanmean(arrays, axis=0)
         return result[0] if result.size == 1 else result
     
     dfs = list(df_dict.values())
@@ -171,7 +182,7 @@ if __name__ == "__main__":
     )
     df.attrs["init_times"] = list(df_dict.keys())
 
-    # df.sort(key= lambda x: x["forecast_step"]) # sort of forecast hours are in order
+    df.sort_values("forecast_step", axis=0) # sort of forecast hours are in order
     df.to_parquet(eval_save_loc) # parquet keeps all the dtypes, don't have to split up np arrays in the entries
     logging.info(f"saved verification to {eval_save_loc}")
 

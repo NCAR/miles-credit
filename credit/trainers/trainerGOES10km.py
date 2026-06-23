@@ -253,10 +253,19 @@ class Trainer(BaseTrainer):
                 # load era5 forcing
                 # concat order is prognostic, static, forcing
                 if "era5" in batch.keys():
-                    x_era5 = torch.concat([batch_era5["prognostic"].to(self.device),
-                                           era5_static.detach().clone(),
-                                           batch_era5["dynamic_forcing"].to(self.device)],
-                                           dim=1).float()
+                    if batch_era5["prognostic"].shape[1] == 0: # DOP only
+                        x_era5 = torch.concat([batch_era5["dynamic_forcing"].to(self.device),
+                                                era5_static.detach().clone(),
+                                                ],dim=1).float()
+                        # era5_static = era5_static.detach().clone()
+                        # if ensemble_size > 1:
+                        #     era5_static = torch.repeat_interleave(era5_static, ensemble_size, 0)
+                        # x = torch.cat([x, era5_static], dim=1)
+                    else:
+                        x_era5 = torch.concat([batch_era5["prognostic"].to(self.device),
+                                            era5_static.detach().clone(),
+                                            batch_era5["dynamic_forcing"].to(self.device)],
+                                            dim=1).float()
                     forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device).float()
 
                     if ensemble_size > 1:

@@ -10,12 +10,12 @@ from credit.samplers import DistributedMultiStepBatchSampler
 
 import logging
 
-from credit.transform import load_transform
+from credit.transform import load_era5_transforms
 logger = logging.getLogger(__name__)
 
-def load_era5_forcing(conf, start_datetime, end_datetime, transform=None):
-    if not transform:
-        logger.warning("NOT loading ERA5 transform")
+def load_era5_forcing(conf, start_datetime, end_datetime, transforms=None):
+    if not transforms:
+        logger.warning("NOT loading ERA5 transforms")
 
     time_config = {
         "timestep": pd.Timedelta("1h"),
@@ -23,7 +23,7 @@ def load_era5_forcing(conf, start_datetime, end_datetime, transform=None):
         "start_datetime": start_datetime,
         "end_datetime": end_datetime,
     }
-    return ERA5Dataset(conf, time_config, "ERA5", transform=transform)
+    return ERA5Dataset(conf, time_config, "ERA5", transforms=transforms)
 
 def load_dataset(conf, rank, world_size, device, is_train=True):
 
@@ -50,11 +50,10 @@ def load_dataset(conf, rank, world_size, device, is_train=True):
     if "ERA5" in data_config.get("source", {}).keys():
         logger.info("loading an era5 dataset for forcing")
 
-        era5_transform = load_transform(conf, "ERA5", device=device)
         era5dataset = load_era5_forcing(conf,
                                         time_config["start_datetime"],
                                         time_config["end_datetime"] + pd.Timedelta("1D"),
-                                        transform=era5_transform)
+                                        transforms=load_era5_transforms(conf, device))
     else:
         era5dataset = None
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
@@ -112,12 +111,11 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
     
     if "ERA5" in data_config.get("source", {}).keys():
         logger.info("loading an era5 dataset for forcing")
-        era5_transform = load_transform(conf, "ERA5", device=device)
 
         era5dataset = load_era5_forcing(conf,
                                         time_config["start_datetime"].values,
                                         time_config["end_datetime"].values,
-                                        transform=era5_transform)
+                                        transforms=load_era5_transforms(conf, device))
     else:
         era5dataset = None
     if "2025" in data_config["save_loc"]:
