@@ -44,7 +44,16 @@ def _build_denorm_stats(conf):
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
 
-    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", {})
+    # Support both v1 (preblocks.norm.args) and v2 (preblocks.per_step.norm.args) schemas
+    preblocks_cfg = conf.get("preblocks", {})
+    norm_args = (
+        preblocks_cfg.get("per_step", {}).get("norm", {}).get("args") or preblocks_cfg.get("norm", {}).get("args") or {}
+    )
+    if not norm_args.get("mean_path") or not norm_args.get("std_path"):
+        raise KeyError(
+            "preblocks norm mean_path/std_path not found in config. "
+            "Set preblocks.per_step.norm.args.mean_path and std_path, or omit --denorm."
+        )
     mean_ds = xr.open_dataset(norm_args["mean_path"]).load()
     std_ds = xr.open_dataset(norm_args["std_path"]).load()
 
@@ -131,7 +140,14 @@ def _plot(args) -> None:
     from credit.datasets.multi_source import MultiSourceDataset
     from credit.preblock import apply_preblocks, build_preblocks
 
-    data_conf = conf.get("data_valid", conf["data"])
+    # Build the effective validation data config: start from training data, then overlay
+    # validation_data overrides (date range, etc.) if present.  This mirrors how the
+    # trainer constructs its validation dataloader.
+    import copy
+
+    data_conf = copy.deepcopy(conf["data"])
+    val_override = conf.get("validation_data") or conf.get("data_valid") or {}
+    data_conf.update(val_override)
     dataset = MultiSourceDataset(data_conf, return_target=True)
 
     if args.sample_date is not None:
@@ -151,9 +167,12 @@ def _plot(args) -> None:
     batch = default_collate([sample])
     preblocks = build_preblocks(conf.get("preblocks", {}))
     _batch = apply_preblocks(preblocks, batch, device=device)
-    x = _batch["input"]
-    if "target" in _batch:
-        y = _batch["target"]
+    # apply_preblocks renames 'input' → 'x' and 'target' → 'y'
+    x = _batch.get("x", _batch.get("input"))
+    if x is None:
+        print("ERROR: preblocks did not produce an 'x' or 'input' key in batch.", file=sys.stderr)
+        sys.exit(1)
+    y = _batch.get("y", _batch.get("target"))
     if "meta" in _batch:
         meta = _batch["meta"]
     with torch.no_grad():

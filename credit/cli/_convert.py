@@ -526,6 +526,9 @@ def _init(args: argparse.Namespace) -> None:
         print(f"File already exists: {output}  (use --force to overwrite)", file=sys.stderr)
         sys.exit(1)
 
+    parent = os.path.dirname(output)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     shutil.copy(template, output)
     print(f"Created  : {output}")
     print(f"Template : {template_rel}")

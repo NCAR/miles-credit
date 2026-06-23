@@ -1,5 +1,4 @@
-save_loc: '/Users/dgagne/data/weatherbench2'
-#save_loc: '/glade/derecho/scratch/$USER/CREDIT/weatherbench2'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT/weatherbench2'
 seed: 31415
 
 data:
@@ -38,9 +37,12 @@ preblocks:
         data_types:
           - 'input'
           - 'target'
-    fill_nan:
-      type: "fill_nan"
+    fill_values:
+      type: "fill_values"
       args:
+        rules:
+          - search: nan
+            fill: 0.0
         variables: []
         data_types:
           - 'input'
@@ -49,7 +51,7 @@ preblocks:
       type: "bridgescaler_transformer"
       args:
         variables: []
-        scaler_path: "/Users/dgagne/data/weatherbench2/scaler.json"
+        scaler_path: "/glade/derecho/scratch/$USER/CREDIT/weatherbench2/scaler.json"
         scaler_type: "quantile"
         scaler_params:
           channels_last: False
@@ -58,20 +60,34 @@ preblocks:
     vars_concat:
       type: "concat"
 
-postblocks:
-  reconstruct:
-    type: "reconstruct"
-
 trainer:
-  type: era5-gen2           # use the v2 trainer (new nested data schema)
-
   mode: none
-  epochs: 1
   train_batch_size: 2
-  batches_per_epoch: 3
+  batches_per_epoch: 3  # 0 means use all data
   thread_workers: 4
-  valid_thread_workers: 2
   prefetch_factor: 2
+
+pbs:
+  # Casper
+  conda: "credit-casper"
+  project: "NAML0001"
+  job_name: "credit_preprocess"
+  walltime: "04:00:00"
+  ngpus: 1
+  ncpus: 8
+  mem: "128GB"
+  queue: "casper"
+  gpu_type: "a100_80gb"
+
+  # Derecho (uncomment and comment out Casper block above to use)
+  # conda: "credit-derecho"
+  # project: "NAML0001"
+  # job_name: "credit_preprocess"
+  # walltime: "04:00:00"
+  # ngpus: 4
+  # ncpus: 64
+  # mem: "480GB"
+  # queue: "main"
 
 
 
