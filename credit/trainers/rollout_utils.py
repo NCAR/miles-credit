@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
+def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict, history_len: int = 1) -> dict:
     """Assemble a batch dict for the rollout preblock pass at autoregressive step t > 0.
 
     Constructs a dataset-schema batch by routing each variable from the
@@ -24,6 +24,15 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
     ``curr_batch["target"]`` is forwarded so preblocks normalize the training
     target in the same pass.
 
+    When ``history_len > 1`` the carried-forward (static / non-predicted) tensors
+    taken from ``ic_preprocessed`` still carry the t=0 history window along the
+    time dimension (dim=2). The newly-routed prognostic and dynamic_forcing
+    tensors are single-step, so this function slices the carried-forward tensors
+    to their newest step (``[..., -1:, ...]``) to keep every variable single-step.
+    The trainer then slides the full ``history_len``-step input window itself
+    (drop oldest, append this newest step). With ``history_len == 1`` no slicing
+    happens and behaviour is identical to the original.
+
     Args:
         full_data_dict: the rollout state dict.  Must contain:
             ``"y_processed"`` — nested ``{source: {var_key: tensor}}`` from the
@@ -32,6 +41,9 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
             providing the authoritative variable key list and static tensors.
         curr_batch: current step's raw batch from the dataset.  Provides
             dynamic forcing fields and the training target.
+        history_len: length of the model's input time window. When > 1, static /
+            non-predicted tensors are sliced to their newest time step so the
+            assembled batch is single-step along the time dimension.
 
     Returns:
         dict with keys ``"input"`` (nested source→var dict) and ``"target"``
@@ -52,6 +64,14 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
             f"Got {type(corrected_pred).__name__}."
         )
 
+    def _newest_step(tensor):
+        # Slice the time dimension (dim=2) to its newest step when running a
+        # multi-step history, so carried-forward statics line up single-step
+        # with the freshly-routed prognostic / dynamic_forcing tensors.
+        if history_len > 1 and tensor.dim() >= 3 and tensor.shape[2] > 1:
+            return tensor[:, :, -1:, ...]
+        return tensor
+
     assembled_input: dict = {}
 
     for source, source_vars in ic_preprocessed["input"].items():
@@ -71,7 +91,7 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
                         "assemble_rollout_batch: '%s' not in y_processed; carrying forward from ic_preprocessed.",
                         var_key,
                     )
-                    assembled_input[source][var_key] = ic_tensor
+                    assembled_input[source][var_key] = _newest_step(ic_tensor)
 
             elif field_type == "dynamic_forcing":
                 if var_key in curr_source:
@@ -82,11 +102,11 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
                         "carrying forward from ic_preprocessed.",
                         var_key,
                     )
-                    assembled_input[source][var_key] = ic_tensor
+                    assembled_input[source][var_key] = _newest_step(ic_tensor)
 
             else:
                 # static and any other non-predicted field: carry forward from ic_preprocessed
-                assembled_input[source][var_key] = ic_tensor
+                assembled_input[source][var_key] = _newest_step(ic_tensor)
 
     return {
         "input": assembled_input,
