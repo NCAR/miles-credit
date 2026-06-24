@@ -503,6 +503,7 @@ def load_dataloader(
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
         pin_memory=True,
+        persistent_workers=num_workers > 0,
     )
 
 
