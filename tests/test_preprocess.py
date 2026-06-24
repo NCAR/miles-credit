@@ -103,7 +103,7 @@ def _make_conf(save_loc: str, scaler_path: str) -> dict:
                 # Placeholder scaler block so apply_preblocks_before_scaler stops here;
                 # the per-test scalers below are built separately.
                 "scaler": {
-                    "type": "bridgescaler_transformer",
+                    "type": "bridgescaler_transform",
                     "args": {
                         "variables": [],
                         "scaler_path": scaler_path,
