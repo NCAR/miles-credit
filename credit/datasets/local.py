@@ -185,7 +185,7 @@ class LocalDataset(BaseDataset):
                         self.levels = ds_t[self.level_coord].values.tolist()
                         self.static_metadata["levels"] = self.levels
                 else:
-                    arr = ds_t[vname].sel({self.level_coord: self.levels}).values
+                    arr = ds_t[vname].sel({self.level_coord: self.levels}, method="nearest").values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
                 key = self._get_field_name(field_type, "3d", vname)
                 sample[key] = tensor
