@@ -1,15 +1,25 @@
 import torch.nn as nn
 
-from credit.postblock.reconstruct import Reconstruct
+from credit.postblock.reconstruct import Reconstruct, FlattenToTensor
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransformer
 from credit.postblock.mslp import MSLPDiagnostic
 
-from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+# gen2 (name-based) conservation fixers — addressed by variable name, no internal
+# scaling. The gen1 index-based classes remain in credit/postblock/gen1.py for the
+# V1 trainer / in-model PostBlock path.
+from credit.postblock.conservation import (
+    TracerFixer,
+    GlobalMassFixer,
+    GlobalWaterFixer,
+    GlobalEnergyFixerUpDown,
+)
+from credit.postblock.gen1 import GlobalEnergyFixer
 from credit.postblock.geopotential import GeopotentialDiagnostic
 
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
+    "flatten_to_tensor": FlattenToTensor,
     "bridgescaler_transform": BridgeScalerTransformer,
     "wet_mask_samudra": WetMaskBlock,
     "mslp_diagnostic": MSLPDiagnostic,
@@ -17,6 +27,7 @@ POSTBLOCK_REGISTRY = {
     "global_mass_fixer": GlobalMassFixer,
     "global_water_fixer": GlobalWaterFixer,
     "global_energy_fixer": GlobalEnergyFixer,
+    "global_energy_fixer_updown": GlobalEnergyFixerUpDown,
     "geopotential_diagnostic": GeopotentialDiagnostic,
 }
 
