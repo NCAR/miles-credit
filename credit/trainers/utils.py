@@ -440,8 +440,8 @@ def inject_postblock_info(conf: dict) -> None:
             cfg_ud["sp_inds"] = _find_ind("surface_pressure_name", single=True)
 
 
-def _resolve_data_conf(conf: dict, is_train: bool) -> dict:
-    """Resolve the data config for train or validation.
+def load_dataset(conf: dict, is_train: bool) -> MultiSourceDataset:
+    """Build a MultiSourceDataset for train or validation.
 
     For validation, conf["validation_data"] is used as-is if present, with one
     exception: "source" is inherited from conf["data"] if omitted. If validation_data
@@ -457,23 +457,19 @@ def _resolve_data_conf(conf: dict, is_train: bool) -> dict:
         - validation_data missing other keys: raises ValueError listing missing keys
     """
     if is_train:
-        return conf["data"]
+        data_conf = conf["data"]
+    else:
+        data_conf = dict(conf.get("validation_data") or conf["data"])
+        if "source" not in data_conf:
+            data_conf["source"] = conf["data"]["source"]  # inherit source from training if omitted
+        missing = set(conf["data"]) - set(data_conf)
+        if missing:
+            raise ValueError(
+                f"validation_data is missing keys: {missing}. "
+                "Either add them or remove validation_data to use training config."
+            )
 
-    data_conf = dict(conf.get("validation_data") or conf["data"])
-    if "source" not in data_conf:
-        data_conf["source"] = conf["data"]["source"]  # inherit source from training if omitted
-    missing = set(conf["data"]) - set(data_conf)
-    if missing:
-        raise ValueError(
-            f"validation_data is missing keys: {missing}. "
-            "Either add them or remove validation_data to use training config."
-        )
-    return data_conf
-
-
-def load_dataset(conf: dict, is_train: bool) -> MultiSourceDataset:
-    """Build a MultiSourceDataset for train or validation."""
-    return MultiSourceDataset(_resolve_data_conf(conf, is_train), return_target=True)
+    return MultiSourceDataset(data_conf, return_target=True)
 
 
 def load_dataloader(
