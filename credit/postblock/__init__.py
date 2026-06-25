@@ -4,6 +4,8 @@ from credit.postblock.reconstruct import Reconstruct
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransformer
 from credit.postblock.mslp import MSLPDiagnostic
+from credit.postblock.exp import ExpTransform
+from credit.postblock.square import SquareTransform
 
 from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.postblock.geopotential import GeopotentialDiagnostic
@@ -11,6 +13,8 @@ from credit.postblock.geopotential import GeopotentialDiagnostic
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
     "bridgescaler_transform": BridgeScalerTransformer,
+    "exp_transform": ExpTransform,
+    "square_transform": SquareTransform,
     "wet_mask_samudra": WetMaskBlock,
     "mslp_diagnostic": MSLPDiagnostic,
     "tracer_fixer": TracerFixer,
