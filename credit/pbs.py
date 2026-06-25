@@ -266,6 +266,8 @@ module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
 export LOGLEVEL=INFO
 export NCCL_DEBUG=WARN
 export CUDA_VISIBLE_DEVICES={cuda_devices}
+export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+
 
 echo "Host   : $(hostname)"
 echo "Date   : $(date)"
