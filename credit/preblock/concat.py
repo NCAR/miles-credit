@@ -49,12 +49,12 @@ class ConcatToTensor(BasePreblock):
 
     ``metadata`` keys are passed through as-is (not concatenated).
 
-    In addition to the tensors, two channel maps are attached to metadata under
-    ``metadata["_channel_map"]``:
+    In addition to the tensors, two channel maps are attached to metadata:
 
-    * ``"input"``  — every variable and its slice in the concatenated input tensor.
-    * ``"output"`` — prognostic + diagnostic variables only, with slices
-      reindexed from 0 to match ``y_pred`` channel ordering.
+    * ``metadata["input"]["_channel_map"]``  — every variable and its slice in
+      the concatenated input tensor.
+    * ``metadata["target"]["_channel_map"]`` — prognostic + diagnostic variables
+      only, with slices reindexed from 0 to match ``y_pred`` channel ordering.
 
     Each entry has the form::
 
@@ -67,7 +67,7 @@ class ConcatToTensor(BasePreblock):
 
     Example config::
 
-        type: "concatenate_to_tensor"
+        type: "concat"
         args:
           to_device: true   # set false to skip .to(device) in apply_preblocks
     """
@@ -76,9 +76,9 @@ class ConcatToTensor(BasePreblock):
         super().__init__()
         self.to_device = to_device
 
-    def forward(self, batch):
+    def forward(self, batch: dict | tuple) -> tuple:
         if isinstance(batch, tuple):
-            return batch
+            return batch  # already concatenated — pass through unchanged
         input_tensors = []
         target_tensors = []
         metadata: dict = {"input": {}, "target": {}}
@@ -112,8 +112,10 @@ class ConcatToTensor(BasePreblock):
                         input_channel_map[var_key] = entry
                         input_cursor += n_ch
 
-                        # Also track predictable variables for the output map
-                        # Key format: source/field_type/dim/varname
+                        # Build a separate output channel map for prognostic + diagnostic variables
+                        # only. Its cursor starts at 0 because y_pred from the model contains
+                        # only these predictable outputs — statics and dynamic forcings are
+                        # inputs only and are absent from y_pred.
                         parts = var_key.split("/")
                         if len(parts) >= 2 and parts[1] in _PREDICTABLE_FIELD_TYPES:
                             output_channel_map[var_key] = {

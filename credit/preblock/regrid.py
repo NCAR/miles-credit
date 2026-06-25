@@ -1,30 +1,54 @@
 import torch
 import numpy as np
 import xarray as xr
+from os.path import expandvars
 from credit.preblock.base import BasePreblock
 
 
 class Regridder(BasePreblock):
-    """
-    Regridding layer using weights file provided by the ESMF library.
+    """Regridding preblock using a sparse weight matrix from an ESMF weights file.
+
+    Applies conservative (or bilinear, depending on the weight file) regridding
+    to selected variables in ``batch[data_type][source][var_key]``. The sparse
+    weight matrix ``W`` (shape ``n_b × n_a``) is assembled once and cached
+    per device; subsequent calls on the same device are free of data movement.
+
     Args:
-        weight_file: path to weights file
-        variables: list of variable keys to regrid (e.g. ['era5/prognostic/3d/T'])
-        data_types: list of data types to process (default: ['input', 'target'])
-        reshape_to_xy: whether to reshape the flattened array back to xy coordinates
-        flip_axis (list, tuple, or None): axes to flip before regridding (e.g. [-1, -2])
+        weight_file: Path to an ESMF-format NetCDF weights file. Supports
+            ``$ENV`` variable expansion.
+        variables: Variable keys to regrid (e.g. ``["era5/prognostic/3d/T"]``).
+        data_types: Batch splits to process. Defaults to ``["input", "target"]``.
+        reshape_to_xy: If ``True`` (default), reshape the flat output back to
+            ``(ny, nx)`` using ``dst_grid_dims`` from the weights file, or from
+            the unique destination coordinates for unstructured grids.
+        flip_axis: Axes to flip on the input before regridding (e.g. ``[-1, -2]``
+            to flip both spatial axes). ``None`` skips flipping.
+
+    Config example::
+
+        type: "regrid"
+        args:
+            weight_file: "$SCRATCH/weights/era5_to_1deg.nc"
+            variables:
+                - "era5/prognostic/3d/T"
+            reshape_to_xy: true
     """
 
     def __init__(
-        self, weight_file, variables: list[str], data_types: list[str] = None, reshape_to_xy=True, flip_axis=None
+        self,
+        weight_file: str,
+        variables: list[str],
+        data_types: list[str] = None,
+        reshape_to_xy: bool = True,
+        flip_axis: list[int] = None,
     ):
         super().__init__()
-        with xr.open_dataset(weight_file) as grid_weights:
+        with xr.open_dataset(expandvars(weight_file)) as grid_weights:
             rows = grid_weights["row"].values - 1  # ESMF indices are 1-based
             cols = grid_weights["col"].values - 1  # ESMF indices are 1-based
-            weights = grid_weights["S"].values
-            n_a = grid_weights.sizes["n_a"]
-            n_b = grid_weights.sizes["n_b"]
+            weights = grid_weights["S"].values  # "S" is ESMF's variable name for the sparse regrid weights
+            n_a = grid_weights.sizes["n_a"]  # number of source grid points
+            n_b = grid_weights.sizes["n_b"]  # number of destination grid points
             raw_dst = grid_weights["dst_grid_dims"].values
             if len(raw_dst) == 2:
                 # Structured weight file: dst_grid_dims = [nlon, nlat]; reverse to [nlat, nlon]
@@ -46,7 +70,7 @@ class Regridder(BasePreblock):
         invalid = set(self.data_types) - set(self.VALID_DATA_TYPES)
         if invalid:
             raise ValueError(f"Invalid data_types {invalid}. Valid options are {self.VALID_DATA_TYPES}.")
-        # store as buffers (CPU tensors)
+        # Register as persistent buffers so they are saved in state_dict and move with the model.
         self.register_buffer("row", torch.from_numpy(rows.astype(np.int64)), persistent=True)
         self.register_buffer("col", torch.from_numpy(cols.astype(np.int64)), persistent=True)
         self.register_buffer("weights", torch.from_numpy(weights.astype(np.float32)), persistent=True)
@@ -54,17 +78,21 @@ class Regridder(BasePreblock):
         self.n_a = int(n_a)
         self.n_b = int(n_b)
         self.dst_shape = dst_shape
+        # Lazy sparse weight cache: built on first use and reused while the device stays the same.
         self._W = None
         self._W_device = None
 
     def _get_W(self, device):
+        """Return the sparse weight matrix on *device*, building and caching it on first call."""
         if self._W is not None and self._W_device == device:
             return self._W
 
         idx = torch.stack([self.row, self.col], dim=0).to(device)
         val = self.weights.to(device=device)
 
-        W = torch.sparse_coo_tensor(idx, val, size=(self.n_b, self.n_a), device=device).coalesce()
+        W = torch.sparse_coo_tensor(
+            idx, val, size=(self.n_b, self.n_a), device=device
+        ).coalesce()  # coalesce merges duplicate indices, required for efficient sparse mm
 
         self._W = W
         self._W_device = device
@@ -75,7 +103,8 @@ class Regridder(BasePreblock):
         W = self._get_W(device)
         if self.flip_axis is not None:
             x = torch.flip(x, dims=self.flip_axis)
-        lead_shape = x.shape[:-2]
+        lead_shape = x.shape[:-2]  # all dims except the last two spatial dims (lat, lon)
+        # Flatten leading dims and transpose: sparse mm expects (n_a, N) input, returns (n_b, N).
         x_flat = x.reshape(-1, self.n_a).T
         y_flat = torch.sparse.mm(W, x_flat).T
 
@@ -86,17 +115,17 @@ class Regridder(BasePreblock):
             return y_flat
 
     def forward(self, batch: dict) -> dict:
-        batch = self._copy_batch(batch)
+        batch = self._copy_batch(batch)  # shallow copy — avoids mutating the caller's dict
         for var_key in self.variables:
-            source = var_key.split("/")[0]
+            source = var_key.split("/")[0]  # e.g. "era5" from "era5/prognostic/3d/T"
 
             for data_type in self.data_types:
                 if data_type not in batch:
-                    continue
+                    continue  # data type absent in this batch (e.g. no "target" during inference)
                 if source not in batch[data_type]:
                     raise KeyError(f"Regridder: source '{source}' not found in batch['{data_type}'].")
                 if var_key not in batch[data_type][source]:
-                    continue
+                    continue  # variable absent in this data type (e.g. statics only exist in "input")
                 batch[data_type][source][var_key] = self._regrid(batch[data_type][source][var_key])
 
         return batch
