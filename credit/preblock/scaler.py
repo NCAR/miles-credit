@@ -158,13 +158,13 @@ class BridgeScalerTransformer(BasePreblock):
         if not self.variables_expanded:
             self.variables = _parse_variable_selection(self.variables, batch, self.data_types)
             self.variables_expanded = True
-        batch = self._copy_batch(batch)
+        batch = self._copy_batch(batch)  # shallow copy — avoids mutating the caller's dict
         if self.data_types is not None:
             # Slice to the requested data types — useful in multi-step training where
             # the input is already scaled but the target still needs to be scaled.
             sub_batch = {dt: batch[dt] for dt in self.data_types if dt in batch}
             scaled = scale_var_dict(sub_batch, self.scaler, self.method, self.variables)
-            batch.update(scaled)
+            batch.update(scaled)  # write the scaled data types back into the full batch
             return batch
         return scale_var_dict(batch, self.scaler, self.method, self.variables)
 
