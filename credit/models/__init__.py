@@ -174,7 +174,6 @@ def load_fsdp_or_checkpoint_policy(conf):
             FeedForward,
             CrossEmbedLayer,
         }
-
     elif "unet" in conf["model"]["type"]:
         from credit.models.crossformer import (
             Attention,
