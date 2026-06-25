@@ -11,9 +11,9 @@ class SquareTransform(BasePostblock):
 
     Inverts ``y = sqrt(x)`` back to ``x = y^2``.
 
-    Note: values may be slightly negative due to floating-point effects;
-    squaring maps these to small positive values, preserving the non-negative physical
-    constraint for quantities such as specific humidity or precipitation.
+    Note: values may be slightly negative due to floating-point effects; squaring maps
+    these to small positive numbers. Clamping to zero is intentionally avoided to
+    preserve gradient flow if this postblock is ever connected to a differentiable loss.
 
     ``variables`` supports the same shorthand as the scaler: an empty list
     transforms every variable; partial paths (e.g. ``"era5/prognostic"``) expand
