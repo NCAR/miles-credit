@@ -7,7 +7,7 @@ from credit.preblock._utils import (
 )  # shared utility — lives in preblock but used by both pre and postblocks
 
 
-class BridgeScalerTransformer(BasePostblock):
+class BridgeScalerTransform(BasePostblock):
     """Scaling postblock using a fitted bridgescaler dict.
 
     Applies per-variable scaling to the nested output dict at ``batch_dict[key]``

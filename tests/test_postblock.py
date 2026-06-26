@@ -2,7 +2,7 @@
 
 Covers: gen1 physics fixers (TracerFixer, GlobalMassFixer, GlobalWaterFixer,
 GlobalEnergyFixer, GlobalEnergyFixerUpDown), Reconstruct, ExpTransform,
-SquareTransform, and BridgeScalerTransformer (postblock scaler).
+SquareTransform, and BridgeScalerTransform (postblock scaler).
 """
 
 import yaml
@@ -21,7 +21,7 @@ from credit.postblock.gen1 import (
     GlobalEnergyFixer,
     GlobalEnergyFixerUpDown,
 )
-from credit.postblock.scaler import BridgeScalerTransformer as PostScaler
+from credit.postblock.scaler import BridgeScalerTransform as PostScaler
 from credit.postblock.exp import ExpTransform
 from credit.postblock.reconstruct import Reconstruct
 from credit.postblock.square import SquareTransform

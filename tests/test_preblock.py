@@ -14,7 +14,7 @@ from credit.preblock import apply_preblocks, build_preblocks
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.log import LogTransform
 from credit.preblock.regrid import Regridder
-from credit.preblock.scaler import BridgeScalerTransformer
+from credit.preblock.scaler import BridgeScalerTransform
 from credit.preblock.sqrt import SqrtTransform
 from credit.preblock._utils import _parse_variable_selection
 from credit.postblock import build_postblocks
@@ -178,7 +178,7 @@ def scaler_file(tmp_path):
 def test_scaler_output_shape(scaler_file):
     """Transform preserves the input tensor shape for every variable."""
     path, variables, data = scaler_file
-    scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
+    scaler = BridgeScalerTransform(scaler_path=path, variables=list(variables), method="transform")
     original_shapes = {v: data["input"]["Test_ERA5"][v].shape for v in variables}
     result = scaler(data)
     for v in variables:
@@ -188,7 +188,7 @@ def test_scaler_output_shape(scaler_file):
 def test_scaler_transform_changes_values(scaler_file):
     """Transform produces different values than the raw input."""
     path, variables, data = scaler_file
-    scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
+    scaler = BridgeScalerTransform(scaler_path=path, variables=list(variables), method="transform")
     var = list(variables)[0]
     original = data["input"]["Test_ERA5"][var].clone()
     result = scaler(data)
@@ -199,8 +199,8 @@ def test_scaler_round_trip(scaler_file):
     """transform followed by inverse recovers the original tensor."""
     path, variables, data = scaler_file
     var_list = list(variables)
-    fwd = BridgeScalerTransformer(scaler_path=path, variables=var_list, method="transform")
-    inv = BridgeScalerTransformer(scaler_path=path, variables=var_list, method="inverse_transform")
+    fwd = BridgeScalerTransform(scaler_path=path, variables=var_list, method="transform")
+    inv = BridgeScalerTransform(scaler_path=path, variables=var_list, method="inverse_transform")
     var = var_list[0]
     original = data["input"]["Test_ERA5"][var].clone()
     data = fwd(data)
@@ -215,7 +215,7 @@ def test_scaler_data_types_input_only(scaler_file):
     input_before = data["input"]["Test_ERA5"][var].clone()
     target_before = data["target"]["Test_ERA5"][var].clone()
 
-    scaler = BridgeScalerTransformer(
+    scaler = BridgeScalerTransform(
         scaler_path=path, variables=list(variables), method="transform", data_types=["input"]
     )
     result = scaler(data)
@@ -235,7 +235,7 @@ def test_scaler_data_types_target_only(scaler_file):
     input_before = data["input"]["Test_ERA5"][var].clone()
     target_before = data["target"]["Test_ERA5"][var].clone()
 
-    scaler = BridgeScalerTransformer(
+    scaler = BridgeScalerTransform(
         scaler_path=path, variables=list(variables), method="transform", data_types=["target"]
     )
     result = scaler(data)
@@ -255,7 +255,7 @@ def test_scaler_data_types_none_scales_all(scaler_file):
     input_before = data["input"]["Test_ERA5"][var].clone()
     target_before = data["target"]["Test_ERA5"][var].clone()
 
-    scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
+    scaler = BridgeScalerTransform(scaler_path=path, variables=list(variables), method="transform")
     result = scaler(data)
 
     assert not torch.allclose(result["input"]["Test_ERA5"][var].float(), input_before.float()), (
