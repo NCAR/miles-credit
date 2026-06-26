@@ -55,7 +55,7 @@ def mean_std_nc(tmp_path):
 
 @skip_bs
 def test_convert_writes_postblocks(tmp_path, mean_std_nc):
-    """credit convert on a flat v1 config produces reconstruct + bridgescaler postblocks."""
+    """credit convert on a v1 config produces reconstruct + bridgescaler postblocks."""
     import credit.cli as cli
 
     mean_path, std_path, *_ = mean_std_nc
