@@ -69,13 +69,28 @@ class BridgeScalerTransformer(BasePreblock):
     """Scaling preblock using a dictionary of bridgescaler scalers to fit and transform CREDIT state dictionaries.
 
     Applies per-variable z-score scaling (or its inverse) to tensors in a
-    nested batch dict of the form `batch[data_type][source][var_key]`.
+    nested batch dict of the form ``batch[data_type][source][var_key]``.
 
-    The scaler dict must have been fit with `bridgescaler.scale_var_dict`
-    using the same nested structure and saved with `bridgescaler.save_scaler_dict`.
+    The scaler dict mirrors the batch structure — it is organized as
+    ``{data_type: {source: {var_key: scaler}}}``. Variables that only exist in
+    one data type (e.g. statics and dynamic forcings are ``"input"`` only) are
+    therefore only scaled in that data type; no special configuration is needed.
+    The scaler dict is produced by running ``credit preprocess``.
 
-    Example config::
+    ``variables`` accepts full variable keys (e.g. ``"era5/prognostic/3d/T"``),
+    partial paths (e.g. ``"era5/prognostic"`` — expands to all variables whose
+    key starts with that prefix), or an empty list (expands to all variables).
+    The expansion is resolved lazily against the actual batch on the first
+    forward call.
 
+    ``data_types`` scopes which data types this scaler instance processes. Its
+    main use case is multi-step rollout training, where the input is already
+    scaled from the previous step and only the target needs to be scaled. Omit
+    it (or pass ``["input", "target"]``) to scale both sides as usual.
+
+    Config examples::
+
+        # Scale specific variables in both input and target (default behaviour)
         type: "bridgescaler_transform"
         args:
             scaler_path: "/path/to/scaler.json"
@@ -83,6 +98,30 @@ class BridgeScalerTransformer(BasePreblock):
                 - "era5/prognostic/3d/T"
                 - "era5/prognostic/3d/U"
             method: "transform"
+
+        # Scale all variables (input and target) by leaving variables empty
+        type: "bridgescaler_transform"
+        args:
+            scaler_path: "/path/to/scaler.json"
+            variables: []
+            method: "transform"
+
+        # Scale all prognostic variables using a partial path
+        type: "bridgescaler_transform"
+        args:
+            scaler_path: "/path/to/scaler.json"
+            variables:
+                - "era5/prognostic"
+            method: "transform"
+
+        # Multi-step rollout: scale only the target (input already scaled)
+        type: "bridgescaler_transform"
+        args:
+            scaler_path: "/path/to/scaler.json"
+            variables: []
+            method: "transform"
+            data_types:
+                - "target"
     """
 
     def __init__(
@@ -92,12 +131,14 @@ class BridgeScalerTransformer(BasePreblock):
         method: str = "transform",
         scaler_type: str = "standard",
         scaler_params=None,
+        data_types: list[str] = None,
     ):
         super().__init__()
         self.variables = variables
         self.variables_expanded = False
         self.method = method
         self.scaler_path = expandvars(scaler_path)
+        self.data_types = data_types
         if scaler_params is None:
             scaler_params = {}
         self.scaler_params = scaler_params
@@ -115,9 +156,16 @@ class BridgeScalerTransformer(BasePreblock):
 
     def forward(self, batch: dict) -> dict:
         if not self.variables_expanded:
-            self.variables = _parse_variable_selection(self.variables, batch)
+            self.variables = _parse_variable_selection(self.variables, batch, self.data_types)
             self.variables_expanded = True
-        batch = self._copy_batch(batch)
+        batch = self._copy_batch(batch)  # shallow copy — avoids mutating the caller's dict
+        if self.data_types is not None:
+            # Slice to the requested data types — useful in multi-step training where
+            # the input is already scaled but the target still needs to be scaled.
+            sub_batch = {dt: batch[dt] for dt in self.data_types if dt in batch}
+            scaled = scale_var_dict(sub_batch, self.scaler, self.method, self.variables)
+            batch.update(scaled)  # write the scaled data types back into the full batch
+            return batch
         return scale_var_dict(batch, self.scaler, self.method, self.variables)
 
     def fit_scaler_batch(self, batch: dict) -> dict:
@@ -138,9 +186,11 @@ class BridgeScalerTransformer(BasePreblock):
                 f"Cannot fit: a scaler already exists at '{self.scaler_path}'. Remove it to refit from scratch."
             )
         if not self.variables_expanded:
-            self.variables = _parse_variable_selection(self.variables, batch)
+            self.variables = _parse_variable_selection(self.variables, batch, self.data_types)
             self.variables_expanded = True
-        fitted = scale_var_dict(batch, self.scaler_template, "fit", self.variables)
+        # Fit only the requested data types; if data_types is None, fit the full batch.
+        fit_batch = {dt: batch[dt] for dt in self.data_types if dt in batch} if self.data_types is not None else batch
+        fitted = scale_var_dict(fit_batch, self.scaler_template, "fit", self.variables)
         # Merge this batch's fit into the running accumulation (running average of
         # the scaler statistics across batches).
         self.scaler = fitted if self.scaler is None else _combine_scaler_dicts(self.scaler, fitted)
