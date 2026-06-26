@@ -187,13 +187,12 @@ postblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_post.json'
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
                     'ERA5/prognostic/2d/VAR_10V']
         method: inverse_transform
-        scaler_data_type: null    # existing campaign scaler is flat {source: {var: scaler}} — no data_type level
 
 
 # ---- Architecture (pre-filled for 1-degree ERA5, 181×360) ---- #

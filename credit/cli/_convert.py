@@ -74,8 +74,7 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
     pre_keys = []
 
     # --- postblock dict: {"target": {source: {full_key: scaler}}}
-    # Wraps in "target" so BridgeScalerTransform's scaler_data_type="target" default
-    # slices correctly — same structure as the preblock scaler, one level per data type.
+    # BridgeScalerTransform always slices ["target"] — match that structure here.
     post_dict = {"target": {}}
 
     for (field_type, dim), varnames in var_groups.items():
