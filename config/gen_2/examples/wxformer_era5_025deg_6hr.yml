@@ -155,6 +155,17 @@ trainer:
   prefetch_factor: 4
 
 
+preblocks:
+  per_step:
+    norm:
+      type: era5_normalizer
+      args:
+        mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/mean_6h_1979_2019_13lev_0.25deg.nc'
+        std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/std_6h_1979_2019_13lev_0.25deg.nc'
+    concat:
+      type: concat
+
+
 model:
   type: "crossformer"
   frames: 1                         # number of input states
