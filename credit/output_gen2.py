@@ -3,15 +3,20 @@ output_gen2.py
 --------------
 ForecastWriter: stateful output writer for Gen2 rollout.
 
-Accepts one forecast step at a time via __call__, buffers steps according to
-group_by, and flushes NetCDF files asynchronously via a multiprocessing pool.
+Accepts one forecast step at a time via __call__, groups output by calendar
+period, and writes to NetCDF (buffered) or Zarr (appended live).
 
-Supports:
-  - output_freq:  temporal subsampling (write only every Nh)
-  - group_by:     file chunking (one file per step | per Nh window | per forecast)
-  - variables:    variable + level subsetting
-  - encoding:     per-variable NetCDF compression
-  - metadata:     CF attribute injection from a YAML file
+group_by values (case-insensitive, several aliases accepted):
+  null              one file per forecast step
+  "1d" / "day"     one file per calendar day     → YYYY-MM-DD.nc/.zarr
+  "1m" / "month"   one file per calendar month   → YYYY-MM.nc/.zarr
+  "1y" / "year"    one file per calendar year    → YYYY.nc/.zarr
+  "full"            one file per forecast         → full.nc/.zarr
+
+Output always lands under  save_dir/YYYYMMDD_HHMMZ/  (init-time directory).
+
+Zarr stores are appended step-by-step (no in-memory buffer required).
+NetCDF is buffered per period and written in bulk at each calendar boundary.
 """
 
 import logging
@@ -29,12 +34,38 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Async write worker (must be module-level to be picklable)
+# Group-by constants and alias table
+# ---------------------------------------------------------------------------
+
+_GROUP_STEP = "step"
+_GROUP_DAILY = "daily"
+_GROUP_MONTHLY = "monthly"
+_GROUP_YEARLY = "yearly"
+_GROUP_FULL = "full"
+
+_VALID_GROUP_BY: dict[str, str] = {
+    "1d": _GROUP_DAILY,
+    "d": _GROUP_DAILY,
+    "day": _GROUP_DAILY,
+    "daily": _GROUP_DAILY,
+    "1m": _GROUP_MONTHLY,
+    "m": _GROUP_MONTHLY,
+    "month": _GROUP_MONTHLY,
+    "monthly": _GROUP_MONTHLY,
+    "1y": _GROUP_YEARLY,
+    "y": _GROUP_YEARLY,
+    "year": _GROUP_YEARLY,
+    "yearly": _GROUP_YEARLY,
+    "full": _GROUP_FULL,
+}
+
+
+# ---------------------------------------------------------------------------
+# Module-level workers (must be picklable for multiprocessing pool)
 # ---------------------------------------------------------------------------
 
 
 def _write_netcdf_worker(ds: xr.Dataset, path: str, encoding: dict) -> None:
-    """Write a Dataset to NetCDF; intended for pool.apply_async."""
     try:
         ds.to_netcdf(path, mode="w", encoding=encoding)
         logger.info("Saved: %s", path)
@@ -42,68 +73,92 @@ def _write_netcdf_worker(ds: xr.Dataset, path: str, encoding: dict) -> None:
         logger.error("Failed to write %s:\n%s", path, traceback.format_exc())
 
 
+def _write_zarr_worker(ds: xr.Dataset, path: str, append: bool) -> None:
+    try:
+        if append:
+            ds.to_zarr(path, mode="a", append_dim="time")
+        else:
+            ds.to_zarr(path, mode="w")
+        logger.info("Zarr %s: %s", "appended" if append else "created", path)
+    except Exception:
+        logger.error("Failed to write zarr %s:\n%s", path, traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Timestamp formatters
+# ---------------------------------------------------------------------------
+
+
+def _fmt_init(dt: pd.Timestamp) -> str:
+    """Init-time directory name: YYYYMMDD_HHMMZ"""
+    return dt.strftime("%Y%m%d_%H%MZ")
+
+
+def _fmt_step(dt: pd.Timestamp) -> str:
+    """Sub-daily / per-step filename stem: YYYY-MM-DD_THHMMZ"""
+    return dt.strftime("%Y-%m-%d_T%H%MZ")
+
+
 # ---------------------------------------------------------------------------
 # ForecastWriter
 # ---------------------------------------------------------------------------
 
 
-def _fmt_ts(dt: pd.Timestamp) -> str:
-    return dt.strftime("%Y%m%d_%H%MZ")
-
-
 class ForecastWriter:
-    """Stateful writer that buffers forecast steps and flushes to disk.
-
-    Instantiated once before the rollout loop. Pass as ``save_output_fn`` to
-    ``run_forecast`` — the call signature matches the protocol exactly so no
-    changes to ``run_forecast`` are needed.
+    """Stateful writer that groups and writes forecast steps to NetCDF or Zarr.
 
     Args:
         output_conf: the ``inference.output`` config block.
-        conf: full model config dict (used to read grid dimensions and levels).
+        conf: full model config (used to read grid dimensions and levels).
         n_steps: total forecast steps — needed so ``group_by="full"`` knows
-            when to flush without requiring an external flush() call.
+            when to flush without an external flush() call.
     """
 
     def __init__(self, output_conf: dict, conf: dict, n_steps: int) -> None:
         self._n_steps = n_steps
         self._conf = conf
 
-        self._fmt = output_conf.get("format", "netcdf")
+        # output format
+        fmt = (output_conf.get("format") or "netcdf").lower().strip()
+        if fmt not in ("netcdf", "zarr"):
+            raise ValueError(f"Invalid format: {fmt!r}. Must be 'netcdf' or 'zarr'.")
+        self._fmt = fmt
+        self._ext = ".nc" if fmt == "netcdf" else ".zarr"
 
-        # output_freq: only write steps whose fhr is a multiple of this value
+        # output_freq: write only steps where fhr is a multiple of this
         ofreq = output_conf.get("output_freq")
-        self._output_freq_hrs: Optional[int] = int(pd.Timedelta(ofreq).total_seconds() / 3600) if ofreq else None
+        try:
+            self._output_freq_hrs: Optional[int] = int(pd.Timedelta(ofreq).total_seconds() / 3600) if ofreq else None
+        except Exception:
+            raise ValueError(f"Cannot parse output_freq: {ofreq!r}. Use a string like '6h', '24h', etc.")
 
-        # group_by: controls file chunking
-        gb = output_conf.get("group_by")
-        if gb is None:
-            self._group_mode = "step"  # one file per step
-            self._group_hrs: Optional[int] = None
-        elif gb == "full":
-            self._group_mode = "full"  # one file per forecast
-            self._group_hrs = None
-        else:
-            self._group_mode = "period"  # one file per Nh window
-            self._group_hrs = int(pd.Timedelta(gb).total_seconds() / 3600)
+        # group_by
+        self._group_mode: str = self._parse_group_by(output_conf.get("group_by"))
 
-        # Variable filter: None = save everything
+        # variable + level filter
         self._var_filter: Optional[dict] = self._parse_var_filter(output_conf.get("variables"))
 
-        # CF metadata
+        # CF attribute metadata
         self._meta: dict = self._load_metadata(output_conf.get("metadata"))
 
-        # NetCDF encoding config
+        # NetCDF encoding config block (ignored for zarr data variables)
         self._encoding_conf: dict = output_conf.get("encoding") or {}
 
-        # Coordinates: lazy-initialized from first y_processed received
+        # Coordinates: lazy-initialised on first __call__
         self._coords: Optional[dict] = None
 
-        # Step buffer: list of (valid_time, xr.Dataset)
+        # NetCDF buffer: list of (valid_time, xr.Dataset)
         self._buffer: list = []
+        self._buffer_period: object = None  # period key of current buffer
+
+        # Zarr: remember which store paths are already initialised (mode w vs a)
+        self._zarr_initialized: set = set()
+
+        # One-time validation runs on first __call__ when fhr_per_step is known
+        self._validated: bool = False
 
     # ------------------------------------------------------------------
-    # Public interface (matches save_output_fn protocol)
+    # Public interface
     # ------------------------------------------------------------------
 
     def __call__(
@@ -115,68 +170,150 @@ class ForecastWriter:
         save_dir: str,
         pool,
     ) -> None:
-        """Accept one forecast step. Buffers or writes depending on group_by.
+        """Accept one forecast step; buffer or write depending on group_by.
 
-        Steps excluded by output_freq are silently dropped. A group is flushed
-        when its time boundary is crossed or when the final step is reached.
+        Steps excluded by output_freq are silently dropped.  Calendar-period
+        groups flush automatically when the period rolls over or the forecast ends.
         """
         fhr = step * fhr_per_step
 
-        # -- output_freq filter --
+        # output_freq filter
         if self._output_freq_hrs is not None and fhr % self._output_freq_hrs != 0:
             return
 
-        # -- lazy coordinate init --
+        # lazy coordinate init + one-time cross-parameter validation
         if self._coords is None:
             self._coords = self._init_coords(y_processed)
+        if not self._validated:
+            self._validate(fhr_per_step)
+            self._validated = True
 
         valid_time = init_time + pd.Timedelta(hours=fhr)
         ds = self._to_dataset(y_processed, valid_time)
         is_last = step == self._n_steps
 
-        if self._group_mode == "step":
-            self._submit(ds, init_time, valid_time, valid_time, save_dir, pool)
+        if self._fmt == "zarr":
+            self._submit_zarr(ds, init_time, valid_time, save_dir)
+        else:
+            self._submit_netcdf(ds, init_time, valid_time, save_dir, pool, is_last)
 
-        elif self._group_mode == "full":
+    # ------------------------------------------------------------------
+    # NetCDF: buffer by calendar period, flush at boundary or forecast end
+    # ------------------------------------------------------------------
+
+    def _submit_netcdf(self, ds, init_time, valid_time, save_dir, pool, is_last):
+        period = self._period_key(valid_time)
+
+        if self._group_mode == _GROUP_STEP:
+            path = self._make_path(init_time, valid_time, save_dir)
+            self._write_nc(ds, path, pool)
+            return
+
+        if self._group_mode == _GROUP_FULL:
             self._buffer.append((valid_time, ds))
             if is_last:
-                self._flush(init_time, save_dir, pool)
+                self._flush_nc(init_time, save_dir, pool)
+            return
 
-        else:  # "period"
-            self._buffer.append((valid_time, ds))
-            at_boundary = fhr % self._group_hrs == 0
-            if at_boundary or is_last:
-                self._flush(init_time, save_dir, pool)
+        # calendar modes (daily / monthly / yearly)
+        if self._buffer and period != self._buffer_period:
+            # period rolled over — flush the completed group first
+            self._flush_nc(init_time, save_dir, pool)
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+        if not self._buffer:
+            self._buffer_period = period
+        self._buffer.append((valid_time, ds))
 
-    def _flush(self, init_time: pd.Timestamp, save_dir: str, pool) -> None:
+        if is_last:
+            self._flush_nc(init_time, save_dir, pool)
+
+    def _flush_nc(self, init_time, save_dir, pool):
         if not self._buffer:
             return
         times, datasets = zip(*self._buffer)
         combined = xr.concat(datasets, dim="time") if len(datasets) > 1 else datasets[0]
-        self._submit(combined, init_time, times[0], times[-1], save_dir, pool)
+        path = self._make_path(init_time, times[0], save_dir)
+        self._write_nc(combined, path, pool)
         self._buffer.clear()
+        self._buffer_period = None
+
+    def _write_nc(self, ds, path, pool):
+        self._apply_metadata(ds)
+        encoding = self._make_encoding(ds)
+        self._submit(ds, path, pool=pool, encoding=encoding, append=False)
+
+    # ------------------------------------------------------------------
+    # Zarr: append each step directly — no in-memory buffer needed.
+    # Zarr writes must be sequential (time ordering), so pool is not used.
+    # ------------------------------------------------------------------
+
+    def _submit_zarr(self, ds, init_time, valid_time, save_dir):
+        path = self._make_path(init_time, valid_time, save_dir)
+        self._apply_metadata(ds)
+        append = path in self._zarr_initialized
+        if not append:
+            self._zarr_initialized.add(path)
+        self._submit(ds, path, pool=None, encoding={}, append=append)
 
     def _submit(
         self,
         ds: xr.Dataset,
-        init_time: pd.Timestamp,
-        valid_start: pd.Timestamp,
-        valid_end: pd.Timestamp,
-        save_dir: str,
-        pool,
+        path: str,
+        pool=None,
+        encoding: dict = None,
+        append: bool = False,
     ) -> None:
-        path = self._make_path(init_time, valid_start, valid_end, save_dir)
+        """Dispatch to the writer backend.  Mockable hook for unit tests."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        self._apply_metadata(ds)
-        encoding = self._make_encoding(ds)
-        if pool is not None:
-            pool.apply_async(_write_netcdf_worker, args=(ds, path, encoding))
+        if self._fmt == "zarr":
+            _write_zarr_worker(ds, path, append)
         else:
-            _write_netcdf_worker(ds, path, encoding)
+            enc = encoding or {}
+            if pool is not None:
+                pool.apply_async(_write_netcdf_worker, args=(ds, path, enc))
+            else:
+                _write_netcdf_worker(ds, path, enc)
+
+    # ------------------------------------------------------------------
+    # Path construction
+    # ------------------------------------------------------------------
+
+    def _make_path(self, init_time: pd.Timestamp, valid_time: pd.Timestamp, save_dir: str) -> str:
+        """Build the output path for a step.
+
+        Directory: save_dir/YYYYMMDD_HHMMZ/
+        Filename:  determined by group_mode and valid_time.
+        """
+        return os.path.join(save_dir, _fmt_init(init_time), self._period_fname(valid_time))
+
+    def _period_fname(self, dt: pd.Timestamp) -> str:
+        """Filename (including extension) derived from the calendar period."""
+        if self._group_mode == _GROUP_YEARLY:
+            return f"{dt.year:04d}{self._ext}"
+        if self._group_mode == _GROUP_MONTHLY:
+            return f"{dt.year:04d}-{dt.month:02d}{self._ext}"
+        if self._group_mode == _GROUP_DAILY:
+            return f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}{self._ext}"
+        if self._group_mode == _GROUP_FULL:
+            return f"full{self._ext}"
+        # step / per-step
+        return f"{_fmt_step(dt)}{self._ext}"
+
+    def _period_key(self, dt: pd.Timestamp) -> object:
+        """Return the grouping bucket for a timestamp (used to detect boundary crossings)."""
+        if self._group_mode == _GROUP_YEARLY:
+            return dt.year
+        if self._group_mode == _GROUP_MONTHLY:
+            return (dt.year, dt.month)
+        if self._group_mode == _GROUP_DAILY:
+            return dt.date()
+        if self._group_mode == _GROUP_FULL:
+            return 0  # constant — all steps share one bucket
+        return dt  # step mode — each timestamp is its own bucket
+
+    # ------------------------------------------------------------------
+    # Dataset construction
+    # ------------------------------------------------------------------
 
     def _to_dataset(self, y_processed: dict, valid_time: pd.Timestamp) -> xr.Dataset:
         """Convert one step of y_processed to an xr.Dataset."""
@@ -190,8 +327,7 @@ class ForecastWriter:
                 if self._var_filter is not None and var_key not in self._var_filter:
                     continue
 
-                # tensor shape: (B, n_levels, n_time, H, W)
-                # slice batch=0, time=0 → (n_levels, H, W)
+                # tensor: (B, n_levels, n_time, H, W) → slice batch=0, time=0
                 t = tensor[0, :, 0, :, :] if tensor.ndim == 5 else tensor[0]
                 arr = t.cpu().numpy() if hasattr(t, "cpu") else np.asarray(t)
 
@@ -219,7 +355,7 @@ class ForecastWriter:
                         },
                     )
 
-                else:  # 2D — arr shape (1, H, W); squeeze level dim
+                else:  # 2D — arr shape (1, H, W); squeeze the level dim
                     data_vars[var_name] = xr.DataArray(
                         arr[0][np.newaxis],  # (H, W) → (1, H, W)
                         dims=["time", "latitude", "longitude"],
@@ -235,11 +371,7 @@ class ForecastWriter:
         return ds
 
     def _init_coords(self, y_processed: dict) -> dict:
-        """Build coordinate arrays from model config + first tensor shape.
-
-        Placeholder until static_metadata carries actual grid coordinates.
-        Assumes a uniform lat/lon grid (standard for ERA5).
-        """
+        """Build lat/lon/level arrays from model config, falling back to tensor shape."""
         model_conf = self._conf.get("model", {})
         H = model_conf.get("image_height")
         W = model_conf.get("image_width")
@@ -252,7 +384,6 @@ class ForecastWriter:
                 if H is not None:
                     break
 
-        # ERA5 1-deg convention: lat S→N, lon 0→359
         lat = np.linspace(-90.0, 90.0, H) if H else np.array([])
         lon = np.linspace(0.0, 360.0 - 360.0 / W, W) if W else np.array([])
 
@@ -263,20 +394,41 @@ class ForecastWriter:
 
         return {"latitude": lat, "longitude": lon, "levels": source_levels}
 
+    # ------------------------------------------------------------------
+    # Encoding and metadata
+    # ------------------------------------------------------------------
+
     def _apply_metadata(self, ds: xr.Dataset) -> None:
+        """Inject CF variable attributes and set time encoding."""
         for var in ds.data_vars:
             if var in self._meta:
                 ds[var].attrs.update(self._meta[var])
-        time_enc = self._meta.get("time") or {"units": "hours since 1900-01-01 00:00:00", "calendar": "gregorian"}
-        for k, v in time_enc.items():
-            ds["time"].encoding[k] = v
+                # _FillValue must live in .encoding, not .attrs — xarray's zarr
+                # encoder raises ValueError if it finds it in attrs.
+                fill = ds[var].attrs.pop("_FillValue", None)
+                if fill is not None:
+                    ds[var].encoding["_FillValue"] = fill
+
+        if self._fmt == "netcdf":
+            # Exact datetime64 round-trip: seconds since epoch, proleptic calendar
+            time_meta = self._meta.get("time") or {}
+            ds["time"].encoding.update(
+                {
+                    "units": time_meta.get("units", "seconds since 1970-01-01"),
+                    "calendar": time_meta.get("calendar", "proleptic_gregorian"),
+                    "dtype": "int64",
+                }
+            )
+        else:
+            # Zarr stores datetime64 natively; just enforce chunk size 1 on time
+            ds["time"].encoding["chunks"] = 1
 
     def _make_encoding(self, ds: xr.Dataset) -> dict:
+        """Build per-variable NetCDF encoding (not used for zarr data variables)."""
         default = dict(self._encoding_conf.get("default") or {})
         encoding = {}
         for var in ds.data_vars:
             enc = dict(default)
-            # Check per-variable overrides keyed by full path or short name
             for key, override in self._encoding_conf.items():
                 if key == "default":
                     continue
@@ -285,21 +437,53 @@ class ForecastWriter:
             encoding[var] = enc
         return encoding
 
-    def _make_path(
-        self,
-        init_time: pd.Timestamp,
-        valid_start: pd.Timestamp,
-        valid_end: pd.Timestamp,
-        save_dir: str,
-    ) -> str:
-        init_str = _fmt_ts(init_time)
-        start_str = _fmt_ts(valid_start)
-        end_str = _fmt_ts(valid_end)
-        if valid_start == valid_end:
-            fname = f"forecast_{init_str}_f{start_str}.nc"
-        else:
-            fname = f"forecast_{init_str}_f{start_str}-{end_str}.nc"
-        return os.path.join(save_dir, init_str, fname)
+    # ------------------------------------------------------------------
+    # Parsing, validation, and static helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_group_by(gb) -> str:
+        if gb is None:
+            return _GROUP_STEP
+        key = str(gb).lower().strip()
+        if key not in _VALID_GROUP_BY:
+            valid_str = ", ".join(f"'{k}'" for k in sorted(_VALID_GROUP_BY))
+            raise ValueError(f"Invalid group_by: {gb!r}. Must be null or one of: {valid_str}")
+        return _VALID_GROUP_BY[key]
+
+    def _validate(self, fhr_per_step: int) -> None:
+        """Cross-parameter checks run once on the first forecast step."""
+        freq = self._output_freq_hrs
+        total_fhr = self._n_steps * fhr_per_step
+
+        if freq is not None and freq > total_fhr:
+            raise ValueError(
+                f"output_freq ({freq}h) exceeds total forecast length ({total_fhr}h) — no steps would ever be written."
+            )
+
+        if freq is not None and freq < fhr_per_step:
+            logger.warning(
+                "output_freq (%dh) is less than the model timestep (%dh) — "
+                "the filter has no effect and every step will be written.",
+                freq,
+                fhr_per_step,
+            )
+
+        if freq is not None and self._group_mode not in (_GROUP_STEP, _GROUP_FULL):
+            # Conservative lower bound on steps per period
+            min_steps_per_period = {
+                _GROUP_DAILY: 24 // fhr_per_step,
+                _GROUP_MONTHLY: (28 * 24) // fhr_per_step,
+                _GROUP_YEARLY: (365 * 24) // fhr_per_step,
+            }[self._group_mode]
+            written_per_period = max(1, (min_steps_per_period * fhr_per_step) // freq)
+            if written_per_period <= 1:
+                logger.warning(
+                    "output_freq (%dh) with group_by=%r will produce files with "
+                    "≤1 timestep each. Consider a coarser group_by or finer output_freq.",
+                    freq,
+                    self._group_mode,
+                )
 
     @staticmethod
     def _load_metadata(path: Optional[str]) -> dict:
@@ -316,7 +500,7 @@ class ForecastWriter:
 
     @staticmethod
     def _parse_var_filter(variables_conf) -> Optional[dict]:
-        """Return {var_key: levels_or_None} or None to save everything."""
+        """Return {var_key: levels_or_None} dict, or None to save everything."""
         if variables_conf is None:
             return None
         result = {}
