@@ -12,7 +12,7 @@ import torch
 import yaml
 import sys
 import shutil
-from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransformer
+from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransform
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
 from credit.trainers.utils import cycle, load_dataset, load_dataloader, effective_mode
 import torch.distributed as dist
@@ -185,11 +185,11 @@ Examples:
     print(preblocks)
     scaler_block_key = None
     for k, v in preblocks.items():
-        if isinstance(v, BridgeScalerTransformer):
+        if isinstance(v, BridgeScalerTransform):
             scaler_block_key = k
             break
     if scaler_block_key is None:
-        raise ValueError("BridgeScalerTransformer not found in preblocks.")
+        raise ValueError("BridgeScalerTransform not found in preblocks.")
     _bpe = trainer_conf.get("batches_per_epoch", 0) or 0
     if hasattr(train_loader.sampler, "batches_per_epoch"):
         dataset_batches = train_loader.sampler.batches_per_epoch()

@@ -442,12 +442,33 @@ def inject_postblock_info(conf: dict) -> None:
 
 
 def load_dataset(conf: dict, is_train: bool) -> MultiSourceDataset:
-    """Build a MultiSourceDataset for train or validation."""
+    """Build a MultiSourceDataset for train or validation.
+
+    For validation, conf["validation_data"] is used as-is if present, with one
+    exception: "source" is inherited from conf["data"] if omitted. If validation_data
+    is absent or empty, conf["data"] is used instead.
+
+    Raises ValueError if validation_data is present but missing keys that conf["data"]
+    has — partial configs are rejected to avoid silent misconfiguration.
+
+    Cases:
+        - No validation_data / empty:       uses conf["data"] entirely
+        - Full validation_data:             uses conf["validation_data"] as-is
+        - validation_data missing "source": inherits source from conf["data"]
+        - validation_data missing other keys: raises ValueError listing missing keys
+    """
     if is_train:
         data_conf = conf["data"]
     else:
-        data_conf = {**conf["data"], **conf.get("validation_data", {})}
-        data_conf["source"] = conf["data"]["source"]
+        data_conf = dict(conf.get("validation_data") or conf["data"])
+        if "source" not in data_conf:
+            data_conf["source"] = conf["data"]["source"]  # inherit source from training if omitted
+        missing = set(conf["data"]) - set(data_conf)
+        if missing:
+            raise ValueError(
+                f"validation_data is missing keys: {missing}. "
+                "Either add them or remove validation_data to use training config."
+            )
 
     return MultiSourceDataset(data_conf, return_target=True)
 

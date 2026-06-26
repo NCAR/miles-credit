@@ -65,7 +65,7 @@ def combine_scaler_dicts(scaler_dicts):
     return combined
 
 
-class BridgeScalerTransformer(BasePreblock):
+class BridgeScalerTransform(BasePreblock):
     """Scaling preblock using a dictionary of bridgescaler scalers to fit and transform CREDIT state dictionaries.
 
     Applies per-variable z-score scaling (or its inverse) to tensors in a
