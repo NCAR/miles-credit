@@ -221,7 +221,7 @@ class ForecastWriter:
 
                 else:  # 2D — arr shape (1, H, W); squeeze level dim
                     data_vars[var_name] = xr.DataArray(
-                        arr[[0]][np.newaxis],  # (1, 1, H, W) → squeeze level below
+                        arr[0][np.newaxis],  # (H, W) → (1, H, W)
                         dims=["time", "latitude", "longitude"],
                         coords={
                             "time": [valid_time],

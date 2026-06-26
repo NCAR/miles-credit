@@ -29,11 +29,9 @@ def _preprocess(args: argparse.Namespace) -> None:
 
 
 def _rollout(args: argparse.Namespace) -> None:
-    from credit.applications.rollout_to_netcdf_gen2 import main
+    from credit.applications.rollout_gen2 import main
 
-    argv = ["credit-rollout", "-c", args.config, "-m", args.mode, "-cpus", str(args.procs)]
-    if getattr(args, "ensemble_size", None) is not None:
-        argv += ["--ensemble-size", str(args.ensemble_size)]
+    argv = ["credit-rollout", "-c", args.config, "-p", str(args.procs)]
     sys.argv = argv
     main()
 
@@ -672,7 +670,7 @@ def _build_rollout_pbs_script(
             echo "GPUs    : ${{NGPUS}}"
 
             {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
-                ${{REPO}}/credit/applications/rollout_to_netcdf_gen2.py \\
+                ${{REPO}}/credit/applications/rollout_gen2.py \\
                 -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
         """)
 
@@ -702,7 +700,7 @@ def _build_rollout_pbs_script(
             echo "Config  : ${{CONFIG}}"
 
             ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
-                ${{REPO}}/credit/applications/rollout_to_netcdf_gen2.py \\
+                ${{REPO}}/credit/applications/rollout_gen2.py \\
                 -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
         """)
 
