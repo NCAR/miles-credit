@@ -226,7 +226,10 @@ Set `trainer.type: era5-gen2` in your config. Key fields:
 ```yaml
 trainer:
     type: era5-gen2
-    mode: ddp               # none | ddp | fsdp
+    parallelism:
+        data: ddp           # none | ddp | fsdp2
+        tensor: 1           # tensor-parallel degree (1 = disabled)
+        domain: 1           # domain-parallel shards (1 = disabled)
     train_batch_size: 8     # per-GPU; total = batch_size × n_gpus
     num_epoch: 5            # epochs per job submission
     epochs: &epochs 70      # total training target
@@ -249,6 +252,168 @@ tensorboard --logdir /glade/derecho/scratch/$USER/my_run/tensorboard
 ```
 
 See [Monitoring with TensorBoard](tensorboard.md) for port-forwarding instructions for Casper and Derecho.
+
+### Gen2 parallelism: FSDP2, tensor parallel, and domain parallel
+
+The gen2 trainer supports three independent parallelism axes, controlled by a
+`parallelism:` block inside `trainer:`.
+
+```yaml
+trainer:
+    type: era5-gen2
+    parallelism:
+        data:   fsdp2   # "fsdp2" | "ddp" | "none"
+        tensor: 1       # tensor-parallel degree (1 = disabled)
+        domain: 1       # domain-parallel degree (1 = disabled)
+```
+
+The three axes compose freely. With `N` total GPUs:
+`dp_size = N / (tensor × domain)`, where `dp_size` is the number of FSDP2 or DDP
+data-parallel replicas.
+
+**Data parallelism (`data:`)** — `fsdp2` shards model parameters and gradients
+across the data-parallel group using PyTorch FSDP2. This is the recommended default
+for large models. Use `ddp` if you need gradient debugging or the model fits
+comfortably in one GPU's memory. With `fsdp2`, `amp: True` enables FSDP2's own
+`MixedPrecisionPolicy` (bf16 by default; override via `trainer.fsdp2_mp_policy`)
+instead of manual autocast — the trainer disables autocast and the GradScaler
+automatically because the policy replaces both. With spectral norm the policy
+is skipped (fp32 compute, sharding only) unless `fsdp2_mp_policy` is set
+explicitly.
+
+**Tensor parallelism (`tensor:`)** — splits each weight matrix column-wise across
+`tensor` GPUs within a node. This reduces per-GPU activation memory at the cost of
+intra-node all-reduce communication.
+
+> **Currently disabled.** `tensor > 1` raises `NotImplementedError`: the legacy
+> hand-rolled sharding slices fused projections (e.g. WXFormer's `to_qkv`)
+> across q/k/v boundaries and lacks the backward all-reduce at the
+> column-parallel input, so it trains mathematically wrong outputs and
+> gradients. Native TP via torch's `parallelize_module` lands with issue #415.
+> The protocol below documents the intended interface and stays in place for
+> that rewrite.
+
+**Adding TP support to a new model** — tensor parallelism uses an opt-in protocol.
+Any `nn.Module` block that wants TP support declares two class attributes pointing
+to its column-parallel and row-parallel projection layers:
+
+```python
+class MyBlock(nn.Module):
+    _tp_col = "proj_up"   # attribute path for the column-parallel layer
+    _tp_row = "proj_out"  # attribute path for the row-parallel layer
+    ...
+```
+
+The path is resolved with `getattr`, so dotted paths work for layers nested
+inside a `Sequential` (e.g. `"layers.1"`). Supported layer types are
+`nn.Conv2d` (1×1 kernels only) and `nn.Linear`.
+
+The column-parallel layer receives the **full** input and produces a
+**sharded** output (no all-reduce). The row-parallel layer receives the
+sharded input and issues an `all_reduce SUM`, so the rest of the graph
+sees the full output. This is the standard Megatron-style col→row pairing.
+
+WXFormer ships with this already wired up. `FeedForward` and `Attention`
+in `credit/models/wxformer/crossformer.py` declare:
+
+```python
+class FeedForward(nn.Module):
+    _tp_col = "layers.1"  # Conv2d(dim → dim*mult)
+    _tp_row = "layers.4"  # Conv2d(dim*mult → dim)
+
+class Attention(nn.Module):
+    _tp_col = "to_qkv"   # Conv2d(dim → inner_dim*3)
+    _tp_row = "to_out"   # Conv2d(inner_dim → dim)
+```
+
+Any model block that does **not** declare `_tp_col`/`_tp_row` is left
+unchanged when `tensor > 1`. If no blocks in the model declare these
+attributes, a warning is logged and TP is a no-op. There is no silent
+wrong-answer failure mode.
+
+**Domain parallelism (`domain:`)** — shards the spatial H dimension across `domain`
+GPUs. Each rank processes a latitude band of height `H_padded / domain`. This is
+useful when a single forward pass at high resolution exceeds GPU memory even with
+FSDP2. First, we pre-pad the full tensor to a window-divisible height, then shard
+before the model forward pass, and finally gather and unpad the outputs.
+
+#### Padding constraint for domain parallel
+
+When `domain > 1`, the padded image height must satisfy:
+
+```
+H_padded % (domain × local_window_size × product_of_strides) == 0
+```
+
+For WXFormer with `local_window_size: 10` and `cross_embed_strides: [2, 2, 2, 2]`
+(product = 16), the constraint is `H_padded % (domain × 160) == 0`. Set `pad_lat`
+in `padding_conf` so that `image_height + sum(pad_lat)` meets this requirement. For
+example, with `domain: 2` and `image_height: 640`, `pad_lat: [160, 160]` gives
+`H_padded = 960`, `960 % 320 = 0`.
+
+#### Data sharding and rank layout (the sampler contract)
+
+The dataset sampler must shard samples over the **data-parallel** dimension
+only, never over the global rank. Ranks that differ only in their tensor- or
+domain-parallel coordinate must receive the **same** batch:
+
+- **TP peers** compute partial outputs of the same activation; the row-parallel
+  `all_reduce` sums them. If TP peers get different samples, the sum mixes
+  partial outputs of different inputs, producing garbage activations. Worse, the
+  replicated (non-TP) parameters then receive different gradients on each TP
+  rank, and since nothing syncs across the tp dimension, the replicas silently
+  drift apart.
+- **Domain peers** hold different latitude bands of the same sample; the halo
+  exchange passes boundary rows between them. Different samples per domain rank
+  corrupt every halo.
+
+`init_device_mesh` arranges ranks row-major over `(dp, tp, domain)` with dp
+outermost and domain innermost (`DomainParallelManager` uses the same layout:
+domain groups are consecutive ranks). For global rank `g`:
+
+```
+dp_rank = g // (tensor × domain)
+dp_size = world_size // (tensor × domain)
+```
+
+`train_gen2.py` computes this via `credit.parallel.mesh.data_parallel_coords`
+and passes `dp_rank` / `dp_size` to the dataloader. Two further rules follow:
+
+1. **The sampler seed must be identical on every rank.** `DistributedSampler`
+   has each rank take its slice of one shared permutation; per-rank seeds make
+   each rank permute differently, silently duplicating and dropping samples.
+   Per-epoch variation comes from `sampler.set_epoch(epoch)` (the gen2 trainer
+   calls this), not from the seed.
+2. **Model RNG (dropout etc.) is seeded by `dp_rank`, not the global rank**, so
+   TP/domain peers generate identical masks while dp replicas still differ.
+
+If you write a new entry point or trainer that supports the `parallelism:`
+block, reuse `data_parallel_coords` — passing the global rank/world_size into a
+dataloader is correct only when `tensor: 1` and `domain: 1`.
+
+#### Common configurations
+
+| Mode | Config | GPUs | When to use |
+|------|--------|------|-------------|
+| FSDP2 only | `data: fsdp2, tensor: 1, domain: 1` | any | Default for large models |
+| DDP | `data: ddp, tensor: 1, domain: 1` | any | Small models, debugging |
+| Domain + DDP | `data: ddp, tensor: 1, domain: 2` | 4+ | Spatial sharding with data parallel |
+| FSDP2 + domain | `data: fsdp2, tensor: 1, domain: 2` | 4+ | Very large spatial resolution |
+| FSDP2 + TP | `data: fsdp2, tensor: 2, domain: 1` | 4+ | Reduce activation memory |
+| TP + domain | `data: none, tensor: 2, domain: 2` | 4 | Maximum memory reduction |
+
+#### Submitting a parallel job
+
+`credit submit` detects the `parallelism:` block and generates a `torchrun` launch
+automatically. No extra flags are needed:
+
+```bash
+credit submit --cluster derecho -c config.yml --gpus 4
+```
+
+The generated script uses `torchrun --standalone --nproc-per-node=4`. For multi-node
+runs, set `nodes: 2` (or more) in the `pbs:` block and `credit submit` handles the
+`--nnodes` and `--rdzv` arguments.
 
 ### Job submission
 

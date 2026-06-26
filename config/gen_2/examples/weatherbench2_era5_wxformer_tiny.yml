@@ -48,7 +48,7 @@ preblocks:
           - 'input'
           - 'target'
     scaler:
-      type: "bridgescaler_transformer"
+      type: "bridgescaler_transform"
       args:
         variables: []
         scaler_path: "/glade/derecho/scratch/$USER/CREDIT/weatherbench2/scaler.json"

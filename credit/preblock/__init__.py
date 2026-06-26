@@ -17,7 +17,7 @@ PREBLOCK_REGISTRY = {
     "concat": ConcatToTensor,
     "era5_normalizer": ERA5Normalizer,
     "fill_values": FillValues,
-    "bridgescaler_transformer": BridgeScalerTransformer,
+    "bridgescaler_transform": BridgeScalerTransformer,
 }
 
 _VALID_SECTIONS = {"ic_only", "per_step"}

@@ -280,7 +280,7 @@ class LocalDataset(BaseDataset):
                 self.levels = ds_t[self.level_coord].values.tolist()
                 self.static_metadata["levels"] = self.levels
         else:
-            arr = ds_t[vname].sel({self.level_coord: self.levels}).values
+            arr = ds_t[vname].sel({self.level_coord: self.levels}, method="nearest").values
         return arr
 
     def _write_field_tensors(
