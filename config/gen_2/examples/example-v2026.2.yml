@@ -63,7 +63,7 @@ data:
 # ---- USER SETTINGS: validation data ---- #
 validation_data:
   source:
-    ERA5_Validation:
+    ERA5:
       dataset_type: "local"
       level_coord: "level"
       levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
@@ -71,17 +71,17 @@ validation_data:
         prognostic:
           vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
           vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         diagnostic:
           vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
                      'surface_latent_heat_flux', 'surface_net_solar_radiation',
                      'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         dynamic_forcing:
           vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         static:
           vars_2D: [ 'z_norm', 'land_sea_mask' ]
@@ -167,7 +167,7 @@ preblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
@@ -187,7 +187,7 @@ postblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_post.json'
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
@@ -248,6 +248,8 @@ loss:
   training_loss: "mse"
 
   use_power_loss: True              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
+  spectral_lambda_reg: 0.1         # weight on power/spectral loss term: total = training_loss + lambda * aux_loss
+  spectral_wavenum_init: 20        # wavenumber above which the power loss is applied
   use_spectral_loss: False
 
   use_latitude_weights: True
