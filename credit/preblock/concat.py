@@ -112,20 +112,27 @@ class ConcatToTensor(BasePreblock):
                         input_channel_map[var_key] = entry
                         input_cursor += n_ch
 
-                        # Also track predictable variables for the output map
-                        # Key format: source/field_type/dim/varname
+            elif data_type == "target":
+                for source, variables in sources.items():
+                    for var_key, tensor in sorted(variables.items(), key=_channel_sort_key):
+                        target_tensors.append(tensor)
+                        # Build the output channel map from the TARGET tensor's
+                        # own shape, not the input's. The model predicts the
+                        # target (single-step under forecast_len=1), so its time
+                        # dim is the output step count — which differs from the
+                        # input time dim whenever history_len > 1. Deriving the
+                        # output map from input channels would record the input's
+                        # T and make Reconstruct unflatten y_pred with the wrong
+                        # shape. tensor shape: (B, n_levels, T_out, H, W).
+                        n_levels, T_out = tensor.shape[1], tensor.shape[2]
+                        n_ch = n_levels * T_out
                         parts = var_key.split("/")
                         if len(parts) >= 2 and parts[1] in _PREDICTABLE_FIELD_TYPES:
                             output_channel_map[var_key] = {
                                 "slice": slice(output_cursor, output_cursor + n_ch),
-                                "orig_shape": (n_levels, T),
+                                "orig_shape": (n_levels, T_out),
                             }
                             output_cursor += n_ch
-
-            elif data_type == "target":
-                for source, variables in sources.items():
-                    for tensor in variables.values():
-                        target_tensors.append(tensor)
 
         if not input_tensors:
             raise ValueError("No 'input' tensors found in batch.")
