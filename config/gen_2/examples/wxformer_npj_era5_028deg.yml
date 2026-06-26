@@ -48,7 +48,7 @@ preblocks:
       std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
 
 trainer:
-  type: era5-gen2
+  type: gen2
 
   parallelism:
     data: fsdp2             # ddp | fsdp2 | none
@@ -152,20 +152,35 @@ loss:
 
   use_variable_weights: False
 
-predict:
-  forecasts:
-    type: "custom"
-    start_year: 2020
-    start_month: 1
-    start_day: 1
-    start_hours: [0, 12]
-    duration: 30
-    days: 2
-
+inference:
+  run_mode: batch
+  mode: none
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_npj_1h'
-  save_vars: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
+  num_save_workers: 4
 
-  use_laplace_filter: False
+  batch_forecast:
+    length: "30d"
+    initialization:
+      start_date: "2020-01-01"
+      end_date: "2020-01-02"
+      date_interval: "1d"
+      times: ["00:00", "12:00"]
+
+  single_forecast:
+    length: "30d"
+    start_datetime: "2020-01-01T00:00Z"
+
+  output:
+    format: netcdf
+    output_freq: null
+    group_by: null
+    variables: null
+    metadata: "era5.yaml"
+    encoding:
+      default:
+        dtype: float32
+        zlib: true
+        complevel: 4
 
 pbs: #derecho
   conda: "credit-derecho"

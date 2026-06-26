@@ -97,7 +97,7 @@ validation_data:
   std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/std_6h_1979_2019_13lev_0.25deg.nc'
 
 trainer:
-  type: era5-gen2
+  type: gen2
 
   parallelism:
     data: ddp               # ddp | fsdp2 | none
@@ -215,23 +215,35 @@ loss:
 
   use_variable_weights: False
 
-predict:
+inference:
+  run_mode: batch
   mode: ddp
-  batch_size: 4
-  ensemble_size: 1
-  forecasts:
-    type: "custom"
-    start_year: 2020
-    start_month: 1
-    start_day: 1
-    start_hours: [ 0, 12 ]
-    duration: 1
-    days: 1
-
-  metadata: 'era5.yaml'
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_025deg_6hr_v2'
+  num_save_workers: 4
 
-  use_laplace_filter: False
+  batch_forecast:
+    length: "1d"
+    initialization:
+      start_date: "2020-01-01"
+      end_date: "2020-01-02"
+      date_interval: "1d"
+      times: ["00:00", "12:00"]
+
+  single_forecast:
+    length: "10d"
+    start_datetime: "2020-01-01T00:00Z"
+
+  output:
+    format: netcdf
+    output_freq: null
+    group_by: null
+    variables: null
+    metadata: "era5.yaml"
+    encoding:
+      default:
+        dtype: float32
+        zlib: true
+        complevel: 4
 
 pbs: #derecho
   conda: "credit-derecho"

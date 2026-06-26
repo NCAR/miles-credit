@@ -129,7 +129,7 @@ loss:
     use_variable_weights: False
 
 trainer:
-    type: era5-gen2
+    type: gen2
 
     parallelism:
         data: none          # single GPU
@@ -181,26 +181,35 @@ trainer:
     valid_thread_workers: 2
     prefetch_factor: 2
 
-predict:
+inference:
+    run_mode: batch
     mode: none
     save_forecast: '/glade/derecho/scratch/$USER/credit_tests/smoke_gen2/rollout'
-    forecasts:
-        type: "custom"
-        start_year: 2017
-        start_month: 1
-        start_day: 1
-        start_hours: [0]
-        duration: 4
-        ic_interval_days: 1
-        days: 2
-    realtime:
-        forecast_start_time: "2024-01-15 0000"
-        forecast_end_time: "2024-01-17 0000"
-        forecast_timestep: "6h"
-        use_gfs_init: true
-        initial_condition_path: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2/GFS_IC/'
-    metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
-    batch_size: 1
+    num_save_workers: 4
+
+    batch_forecast:
+        length: "4d"
+        initialization:
+            start_date: "2017-01-01"
+            end_date: "2017-01-02"
+            date_interval: "1d"
+            times: ["00:00"]
+
+    single_forecast:
+        length: "4d"
+        start_datetime: "2017-01-01T00:00Z"
+
+    output:
+        format: netcdf
+        output_freq: null
+        group_by: null
+        variables: null
+        metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
+        encoding:
+            default:
+                dtype: float32
+                zlib: true
+                complevel: 4
 
 pbs:
     conda: "/glade/u/home/schreck/.conda/envs/credit-casper"  # full path — avoids conda init issues in PBS

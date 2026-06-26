@@ -102,9 +102,13 @@ validation_data:
 
 # ---- USER SETTINGS: training hyperparameters ---- #
 trainer:
-  type: era5-gen2           # use the v2 trainer (new nested data schema)
+  type: gen2                # use the v2 trainer (new nested data schema)
 
-  mode: ddp               # none | ddp | fsdp  (ddp recommended for multi-GPU)
+  parallelism:
+    data: none               # ddp | fsdp2 | none
+    tensor: 1               # tensor-parallel degree  (1 = disabled)
+    domain: 1               # domain-parallel shards  (1 = disabled)
+
   cpu_offload: False
   activation_checkpoint: True
 
@@ -114,7 +118,7 @@ trainer:
   load_scheduler: False
   reload_epoch: False
 
-  skip_validation: False
+  skip_validation: True
   update_learning_rate: False
 
   save_backup_weights: True
@@ -123,15 +127,15 @@ trainer:
   learning_rate: 1.0e-03
   weight_decay: 0
 
-  train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
-  valid_batch_size: 8
+  train_batch_size: 4     # per-GPU batch size; total = batch_size × n_gpus
+  valid_batch_size: 4
 
   batches_per_epoch: 5    # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
   stopping_patience: 999
 
   start_epoch: 0
-  num_epoch: 1            # epochs per qsub job (checkpoint after each)
+  num_epoch: 2            # epochs per qsub job (checkpoint after each)
   epochs: &epochs 70      # total training target
 
   use_tensorboard: True
@@ -165,7 +169,7 @@ preblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        scaler_path: '/glade/derecho/scratch/cbecker/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
@@ -174,6 +178,7 @@ preblocks:
                     'ERA5/diagnostic/2d/top_net_thermal_radiation', 'ERA5/diagnostic/2d/top_net_solar_radiation',
                     'ERA5/diagnostic/2d/surface_latent_heat_flux', 'ERA5/diagnostic/2d/surface_net_solar_radiation',
                     'ERA5/diagnostic/2d/surface_net_thermal_radiation', 'ERA5/diagnostic/2d/surface_sensible_heat_flux']
+        scaler_type: "standard"
         method: transform
     concat:
       type: concat
@@ -182,15 +187,16 @@ postblocks:
   per_step:
     reconstruct:
       type: reconstruct
-    scaler:
-      type: bridgescaler_transform
-      args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_post.json'
-        variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
-                    'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
-                    'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
-                    'ERA5/prognostic/2d/VAR_10V']
-        method: inverse_transform
+#    scaler:
+#      type: bridgescaler_transform
+#      args:
+##        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_post.json'
+#        scaler_path: '/glade/derecho/scratch/cbecker/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+#        variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
+#                    'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
+#                    'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
+#                    'ERA5/prognostic/2d/VAR_10V']
+#        method: inverse_transform
 
 
 # ---- Architecture (pre-filled for 1-degree ERA5, 181×360) ---- #
@@ -245,7 +251,7 @@ model:
 loss:
   training_loss: "mse"
 
-  use_power_loss: True              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
+  use_power_loss: False              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
   use_spectral_loss: False
 
   use_latitude_weights: True
@@ -266,7 +272,7 @@ loss:
 #   --save-dir /path            overrides save_forecast
 #
 inference:
-  run_mode: batch                   # batch | single
+  run_mode: single                   # batch | single
   mode: none                        # none | ddp | fsdp
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/rollout'
   num_save_workers: 4               # CPU workers for async NetCDF save pool
