@@ -56,7 +56,7 @@ data:
 # Validation data block (same schema, different date range)
 validation_data:
   source:
-    ERA5_Validation:
+    ERA5:
       dataset_type: "local"
       level_coord: "level"
       levels: [ 25.5, 75.0, 125.0, 175.0, 225.0, 275.0, 350.0, 450.0, 550.0, 650.0, 775.0, 887.5, 962.5 ]
@@ -64,17 +64,17 @@ validation_data:
         prognostic:
           vars_3D: [ 'U', 'V', 'T', 'specific_total_water' ]
           vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_%Y.zarr'
 
         diagnostic:
           vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
                      'surface_latent_heat_flux', 'surface_net_solar_radiation',
                      'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_%Y*.zarr'
 
         dynamic_forcing:
           vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_%Y*.zarr'
 
         static:
           vars_2D: [ 'z_norm', 'land_sea_mask' ]
