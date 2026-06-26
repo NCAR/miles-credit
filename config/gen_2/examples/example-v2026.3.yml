@@ -303,7 +303,7 @@ inference:
     #   force_download: false
 
   output:
-    format: zarr              # netcdf | zarr
+    format: netcdf              # netcdf | zarr
 
     # Temporal subsampling: only write steps whose forecast hour is a multiple
     # of this value. null = write every step.
@@ -317,7 +317,7 @@ inference:
     # "year"  → one file per year:    2020.nc
     # "full"  → one file per run:     full.nc
 
-    group_by: month           # null | "day" | "month" | "year" | "full"
+    group_by: day           # null | "day" | "month" | "year" | "full"
 
     # Variable filter. null = save all predicted variables.
     # Each entry names a y_processed key (source/type/dim/varname).
