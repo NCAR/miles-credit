@@ -48,7 +48,7 @@ preblocks:
       std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
 
 trainer:
-  type: era5-gen2
+  type: gen2
 
   parallelism:
     data: fsdp2             # ddp | fsdp2 | none
@@ -152,20 +152,36 @@ loss:
 
   use_variable_weights: False
 
-predict:
-  forecasts:
-    type: "custom"
-    start_year: 2020
-    start_month: 1
-    start_day: 1
-    start_hours: [0, 12]
-    duration: 30
-    days: 2
-
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+inference:
+  run_mode: batch                   # batch | single
+  mode: none                        # none | ddp | fsdp2  (distributed inference backend)
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_npj_1h'
-  save_vars: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
+  num_save_workers: 4               # async write pool size (0 = synchronous)
 
-  use_laplace_filter: False
+  batch_forecast:                   # active when run_mode: batch
+    length: "30d"                   # forecast duration per init (e.g. "10d", "1m", "1y")
+    initialization:
+      start_date: "2020-01-01"      # first init date (inclusive), ISO 8601
+      end_date: "2020-01-02"        # last init date (inclusive)
+      date_interval: "1d"           # step between init dates (e.g. "1d", "7d")
+      times: ["00:00", "12:00"]     # UTC init times each day (HH:MM)
+
+  single_forecast:                  # active when run_mode: single
+    length: "30d"                   # forecast duration
+    start_datetime: "2020-01-01T00:00Z"   # init time, ISO 8601
+
+  output:
+    format: netcdf                  # netcdf | zarr
+    output_freq: null               # write every Nth step; null = every step (e.g. "6h", "24h")
+    group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
+    variables: null                 # null = save all; or list of {name:, levels:} to subset
+    metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
+    encoding:
+      default:                      # applies to all variables
+        dtype: float32
+        zlib: true
+        complevel: 4                # 1 (fast) to 9 (small)
 
 pbs: #derecho
   conda: "credit-derecho"

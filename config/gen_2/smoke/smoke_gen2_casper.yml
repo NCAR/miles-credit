@@ -129,7 +129,7 @@ loss:
     use_variable_weights: False
 
 trainer:
-    type: era5-gen2
+    type: gen2
 
     parallelism:
         data: none          # single GPU
@@ -181,26 +181,36 @@ trainer:
     valid_thread_workers: 2
     prefetch_factor: 2
 
-predict:
-    mode: none
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+inference:
+    run_mode: batch               # batch | single
+    mode: none                    # none | ddp | fsdp2  (distributed inference backend)
     save_forecast: '/glade/derecho/scratch/$USER/credit_tests/smoke_gen2/rollout'
-    forecasts:
-        type: "custom"
-        start_year: 2017
-        start_month: 1
-        start_day: 1
-        start_hours: [0]
-        duration: 4
-        ic_interval_days: 1
-        days: 2
-    realtime:
-        forecast_start_time: "2024-01-15 0000"
-        forecast_end_time: "2024-01-17 0000"
-        forecast_timestep: "6h"
-        use_gfs_init: true
-        initial_condition_path: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2/GFS_IC/'
-    metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
-    batch_size: 1
+    num_save_workers: 4           # async write pool size (0 = synchronous)
+
+    batch_forecast:               # active when run_mode: batch
+        length: "4d"              # forecast duration per init (e.g. "10d", "1m", "1y")
+        initialization:
+            start_date: "2017-01-01"      # first init date (inclusive), ISO 8601
+            end_date: "2017-01-02"        # last init date (inclusive)
+            date_interval: "1d"           # step between init dates
+            times: ["00:00"]              # UTC init times each day (HH:MM)
+
+    single_forecast:              # active when run_mode: single
+        length: "4d"              # forecast duration
+        start_datetime: "2017-01-01T00:00Z"   # init time, ISO 8601
+
+    output:
+        format: netcdf            # netcdf | zarr
+        output_freq: null         # write every Nth step; null = every step (e.g. "6h", "24h")
+        group_by: null            # null (per-step) | "day" | "month" | "year" | "full"
+        variables: null           # null = save all; or list of {name:, levels:} to subset
+        metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
+        encoding:
+            default:              # applies to all variables
+                dtype: float32
+                zlib: true
+                complevel: 4      # 1 (fast) to 9 (small)
 
 pbs:
     conda: "/glade/u/home/schreck/.conda/envs/credit-casper"  # full path — avoids conda init issues in PBS
