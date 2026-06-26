@@ -525,6 +525,7 @@ def load_dataloader(
         prefetch_factor=prefetch_factor,
         pin_memory=True,
         persistent_workers=num_workers > 0,
+        multiprocessing_context="spawn" if num_workers > 0 else None,
     )
 
 
