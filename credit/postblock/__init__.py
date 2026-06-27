@@ -7,6 +7,7 @@ from credit.postblock.mslp import MSLPDiagnostic
 
 from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.postblock.geopotential import GeopotentialDiagnostic
+from credit.postblock.advect import SemiLagrangianAdvection
 
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
@@ -18,6 +19,7 @@ POSTBLOCK_REGISTRY = {
     "global_water_fixer": GlobalWaterFixer,
     "global_energy_fixer": GlobalEnergyFixer,
     "geopotential_diagnostic": GeopotentialDiagnostic,
+    "semilagrangian_advection": SemiLagrangianAdvection,
 }
 
 _VALID_SECTIONS = {"per_step", "post_rollout"}
