@@ -184,6 +184,8 @@ preblocks:
                     'ERA5/diagnostic/2d/surface_latent_heat_flux', 'ERA5/diagnostic/2d/surface_net_solar_radiation',
                     'ERA5/diagnostic/2d/surface_net_thermal_radiation', 'ERA5/diagnostic/2d/surface_sensible_heat_flux']
         scaler_type: "standard"
+        scaler_params:
+          channels_last: False
         method: transform
     concat:
       type: concat
