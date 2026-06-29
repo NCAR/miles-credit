@@ -396,15 +396,16 @@ def _fetch_message(
     getter = session.get if session is not None else requests.get
     try:
         resp = getter(https_url, headers={"Range": range_header}, timeout=_HTTP_TIMEOUT)
-    except requests.exceptions.ConnectionError:
+        resp.raise_for_status()
+    except requests.exceptions.ConnectionError or requests.exceptions.HTTPError:
         # AWS S3 closes idle keep-alive connections after ~20 s.  On the next
         # request the session tries to reuse the stale socket and gets
         # RemoteDisconnected.  One retry is enough — the second attempt opens
         # a fresh connection.
         resp = getter(https_url, headers={"Range": range_header}, timeout=_HTTP_TIMEOUT)
-    resp.raise_for_status()
-    return resp.content
+        resp.raise_for_status()
 
+    return resp.content
 
 def _build_prs_entry_map(
     idx_entries: list[dict[str, str | int | None]], idx_name: str
