@@ -137,6 +137,28 @@ class ConcatToTensor(BasePreblock):
         if not input_tensors:
             raise ValueError("No 'input' tensors found in batch.")
 
+        # Fallback: build the output channel map from the input variables when the
+        # batch carries no "target" (e.g. inference-style batches, or unit tests
+        # that pass input only). The output map is normally derived from the
+        # target tensors above, since the model predicts the target and its time
+        # dim is the true output step count. With history_len == 1 the input and
+        # output time dims coincide, so deriving the map from input here is exact;
+        # the target-derived path is what makes history_len > 1 correct, and real
+        # training / rollout batches always carry a target so they take it.
+        if not output_channel_map:
+            fallback_cursor = 0
+            for source, variables in batch.get("input", {}).items():
+                for var_key, tensor in sorted(variables.items(), key=_channel_sort_key):
+                    parts = var_key.split("/")
+                    if len(parts) >= 2 and parts[1] in _PREDICTABLE_FIELD_TYPES:
+                        n_levels, T_out = tensor.shape[1], tensor.shape[2]
+                        n_ch = n_levels * T_out
+                        output_channel_map[var_key] = {
+                            "slice": slice(fallback_cursor, fallback_cursor + n_ch),
+                            "orig_shape": (n_levels, T_out),
+                        }
+                        fallback_cursor += n_ch
+
         metadata["input"]["_channel_map"] = input_channel_map
         metadata["target"]["_channel_map"] = output_channel_map
 
