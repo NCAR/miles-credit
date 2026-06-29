@@ -31,18 +31,25 @@ from credit.postblock.base import BasePostblock
 class Reconstruct(BasePostblock):
     """Splits ``batch_dict["y_pred"]`` into a nested variable dict at ``batch_dict["y_processed"]``.
 
+    This must be the **first postblock** in the chain — all subsequent postblocks
+    (scalers, transforms, physics fixers) read from ``batch_dict["y_processed"]``.
+
     Slices are read from ``batch_dict["metadata"]["target"]["_channel_map"]``, built
     by ``ConcatToTensor`` and covering only prognostic + diagnostic variables.
     Each slice is unflattened from ``(B, n_levels * n_time, H, W)`` back to
-    ``(B, n_levels, n_time, H, W)``. ``y_pred`` is left untouched. All other
-    keys in ``batch_dict`` pass through unchanged.
+    ``(B, n_levels, n_time, H, W)``. ``y_pred`` is left untouched for loss
+    computation. All other keys in ``batch_dict`` pass through unchanged.
+
+    Config example::
+
+        type: "reconstruct"
     """
 
     def forward(self, batch_dict: dict) -> dict:
         y_pred = batch_dict["y_pred"]
         output_map = batch_dict["metadata"]["target"]["_channel_map"]
 
-        # Flatten time dim if y_pred arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
+        # Merge channel and time dims into a single channel dim if y_pred arrived as 5D (B, C, T, H, W)
         if y_pred.dim() == 5:
             y_pred = y_pred.flatten(1, 2)
 
@@ -52,13 +59,17 @@ class Reconstruct(BasePostblock):
             n_levels, n_time = info["orig_shape"]
 
             # Slice the flat channel dim: (B, n_levels*n_time, H, W)
-            var_tensor = y_pred[:, ch_slice, ...].detach()
+            var_tensor = y_pred[
+                :, ch_slice, ...
+            ].detach()  # detach so postblock transforms don't affect gradients on y_pred
 
             # Restore level and time dims: (B, n_levels, n_time, H, W)
             var_tensor = var_tensor.unflatten(1, (n_levels, n_time))
 
-            source = var_key.split("/")[0]
-            y_processed.setdefault(source, {})[var_key] = var_tensor
+            source = var_key.split("/")[0]  # e.g. "era5" from "era5/prognostic/3d/T"
+            y_processed.setdefault(source, {})[var_key] = (
+                var_tensor  # group by source, creating the sub-dict on first encounter
+            )
 
         batch_dict["y_processed"] = y_processed
         return batch_dict

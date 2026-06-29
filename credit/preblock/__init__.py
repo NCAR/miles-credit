@@ -7,7 +7,7 @@ from credit.preblock.regrid import Regridder
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.norm import ERA5Normalizer
 from credit.preblock.fill_values import FillValues
-from credit.preblock.scaler import BridgeScalerTransformer
+from credit.preblock.scaler import BridgeScalerTransform
 
 
 PREBLOCK_REGISTRY = {
@@ -17,7 +17,7 @@ PREBLOCK_REGISTRY = {
     "concat": ConcatToTensor,
     "era5_normalizer": ERA5Normalizer,
     "fill_values": FillValues,
-    "bridgescaler_transform": BridgeScalerTransformer,
+    "bridgescaler_transform": BridgeScalerTransform,
 }
 
 _VALID_SECTIONS = {"ic_only", "per_step"}
@@ -128,7 +128,7 @@ def _move_batch_to_device(batch, device):
 
 def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=None):
     for preblock in preblocks.values():
-        if isinstance(preblock, BridgeScalerTransformer):
+        if isinstance(preblock, BridgeScalerTransform):
             break
         result = preblock(batch)
         if isinstance(result, tuple):
