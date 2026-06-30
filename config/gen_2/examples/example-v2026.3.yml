@@ -64,7 +64,7 @@ data:
 # ---- USER SETTINGS: validation data ---- #
 validation_data:
   source:
-    ERA5_Validation:
+    ERA5:
       dataset_type: "local"
       level_coord: "level"
       levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
@@ -72,17 +72,17 @@ validation_data:
         prognostic:
           vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
           vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         diagnostic:
           vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
                      'surface_latent_heat_flux', 'surface_net_solar_radiation',
                      'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         dynamic_forcing:
           vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         static:
           vars_2D: [ 'z_norm', 'land_sea_mask' ]
@@ -105,7 +105,7 @@ trainer:
   type: gen2                # use the v2 trainer (new nested data schema)
 
   parallelism:
-    data: none               # ddp | fsdp2 | none
+    data: ddp               # ddp | fsdp2 | none
     tensor: 1               # tensor-parallel degree  (1 = disabled)
     domain: 1               # domain-parallel shards  (1 = disabled)
 
@@ -118,7 +118,7 @@ trainer:
   load_scheduler: False
   reload_epoch: False
 
-  skip_validation: True
+  skip_validation: False
   update_learning_rate: False
 
   save_backup_weights: True
@@ -282,8 +282,8 @@ loss:
 #   --save-dir /path            overrides save_forecast
 #
 inference:
-  run_mode: single                   # batch | single
-  mode: none                        # none | ddp | fsdp
+  run_mode: batch                   # batch | single
+  mode: ddp                        # none | ddp | fsdp
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/rollout'
   num_save_workers: 4               # CPU workers for async NetCDF save pool
 
@@ -291,7 +291,7 @@ inference:
     length: "10d"                   # forecast duration; parsed relative to data.timestep
     initialization:
       start_date: "2020-01-01"      # first init time (inclusive); must be within data date range
-      end_date: "2020-12-31"        # last init time (inclusive)
+      end_date: "2020-01-10"        # last init time (inclusive)
       date_interval: "2d"           # interval between init times
       times: ["00:00", "12:00"]     # UTC times (HH:MM) for each date
 
