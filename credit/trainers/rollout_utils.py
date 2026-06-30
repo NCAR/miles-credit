@@ -114,6 +114,7 @@ def run_forecast(
     device: torch.device,
     pool,
     save_output_fn,
+    verbose: bool = True,  # False on non-rank-0 workers in DDP to suppress tqdm and save-path output
 ) -> None:
     """Run one autoregressive forecast, consuming n_steps batches from batch_iter.
 
@@ -162,7 +163,9 @@ def run_forecast(
 
     # ── Autoregressive loop ──────────────────────────────────────────────────
     with torch.no_grad():
-        for step in tqdm(range(1, n_steps + 1), desc=f"Rollout {init_str}"):
+        for step in tqdm(
+            range(1, n_steps + 1), desc=f"Rollout {init_str}", disable=not verbose
+        ):  # one bar on rank 0 only
             full_data_dict["y_pred"] = model(full_data_dict["x"])
 
             # postblocks: Reconstruct → inverse_scaler → physics fixers
@@ -186,6 +189,9 @@ def run_forecast(
     # post_rollout postblocks (e.g. global physics fixers applied once)
     apply_postblocks(rollout_postblocks, full_data_dict)
 
+    # Make sure all output files are fully written before starting the next forecast.
+    if hasattr(save_output_fn, "flush"):
+        save_output_fn.flush()
     logger.info("Done: %s", init_str)
 
 

@@ -48,6 +48,7 @@ from credit.trainers.rollout_utils import (
     parse_length,
     run_forecast,
 )
+from credit.trainers.utils import cleanup
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -98,20 +99,21 @@ Examples:
     parser.add_argument(
         "-p", "--procs", dest="num_cpus", type=int, default=4, help="CPU workers for async output pool."
     )
+    parser.add_argument(
+        "--log-all-ranks",
+        action="store_true",
+        default=False,
+        help="Emit INFO logs from all workers, not just rank 0. Useful for debugging per-worker issues.",
+    )
     args = parser.parse_args()
 
-    # ── Logging ──────────────────────────────────────────────────────────────
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    if not root.handlers:
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
-        ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
-        root.addHandler(ch)
-
     # ── Load config ──────────────────────────────────────────────────────────
-    with open(args.model_config) as f:
-        conf = yaml.load(f, Loader=yaml.FullLoader)
+    try:
+        with open(args.model_config) as f:
+            conf = yaml.load(f, Loader=yaml.FullLoader)
+    except Exception as exc:
+        print(f"ERROR: failed to load config file '{args.model_config}': {exc}", file=sys.stderr)
+        sys.exit(1)
 
     assert "source" in conf["data"], (
         "rollout_gen2.py requires the Gen2 nested data schema (conf['data']['source']). "
@@ -164,6 +166,23 @@ Examples:
     seed_everything(conf["seed"])
     mode = inf_conf.get("mode", "none")
     local_rank, world_rank, world_size = get_rank_info(mode)
+    rank = world_rank  # conventional DDP shorthand; local_rank is only needed for device assignment above
+
+    # ── Logging ──────────────────────────────────────────────────────────────
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    if not root.handlers:
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        root.addHandler(ch)
+    gettrace = getattr(sys, "gettrace", None)
+    level = (
+        (logging.DEBUG if gettrace and gettrace() else logging.INFO)
+        if (rank == 0 or args.log_all_ranks)
+        else logging.WARNING
+    )
+    for h in root.handlers:
+        h.setLevel(level)
 
     if mode in ("ddp", "fsdp"):
         setup(world_rank, world_size, mode)
@@ -203,6 +222,11 @@ Examples:
     }
     dataset = MultiSourceDataset(dataset_conf, return_target=False)
 
+    if world_size > 1 and len(all_init_times) % world_size != 0:
+        raise ValueError(
+            f"Number of init times ({len(all_init_times)}) is not divisible by "
+            f"world_size ({world_size}). Adjust your date range or number of GPUs."
+        )
     sampler = DistributedMultiStepBatchSampler(
         dataset=dataset,
         batch_size=1,
@@ -223,11 +247,14 @@ Examples:
         n_steps,
     )
 
+    verbose = rank == 0 or args.log_all_ranks  # gates tqdm bars and save-path notifications
+
     # ── Output writer ─────────────────────────────────────────────────────────
     writer = ForecastWriter(
         output_conf=inf_conf.get("output", {}),
         conf=conf,
         n_steps=n_steps,
+        verbose=verbose,
     )
 
     # ── Rollout ──────────────────────────────────────────────────────────────
@@ -251,13 +278,17 @@ Examples:
                 device=device,
                 pool=pool,
                 save_output_fn=writer,
+                verbose=verbose,
             )
-
-            if mode in ("ddp", "fsdp"):
-                torch.distributed.barrier()
 
         pool.close()
         pool.join()
+
+    # Ranks work on independent init-time subsets, so no per-forecast barrier is
+    # needed. flush() inside run_forecast drains async writes before each forecast
+    # returns, so all output is on disk before we tear down the process group.
+    if mode in ("ddp", "fsdp"):
+        cleanup()
 
 
 if __name__ == "__main__":
