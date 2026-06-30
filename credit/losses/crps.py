@@ -80,7 +80,7 @@ class RingCRPSLoss(torch.nn.Module):
     prediction second. Returns a scalar, so the trainer's .mean() is a no-op.
 
     The process group is resolved lazily at first forward (the dp group is
-    registered by distributed_model_wrapper_gen2, which runs after load_loss).
+    registered by distributed_model_wrapper_gen2, which runs before load_loss).
     """
 
     def __init__(self, reduction="none", group=None):

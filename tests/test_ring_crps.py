@@ -149,6 +149,63 @@ def test_ring_matches_reference(tmp_path, K):
         )
 
 
+def _ring_crps_loss_worker(rank, K, init_file, value_out, grad_out):
+    """Worker that goes through RingCRPSLoss + register_dp_group, not ring_crps_loss directly.
+
+    This exercises the lazy group-resolution path that the real trainer uses:
+    distributed_model_wrapper_gen2 calls register_dp_group, then RingCRPSLoss
+    resolves the group on its first forward call.
+    """
+    dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=K)
+    try:
+        from credit.parallel.mesh import register_dp_group
+
+        register_dp_group(dist.group.WORLD)
+        members, y = _members(K)
+        pred = members[rank].clone().requires_grad_(True)
+        criterion = RingCRPSLoss()  # _group_resolved=False at construction
+        loss = criterion(y, pred)  # group resolved lazily here
+        loss.backward()
+        value_out[rank] = loss.item()
+        grad_out[rank] = pred.grad.clone()
+        # Second forward must reuse cached group (no re-import).
+        pred2 = members[rank].clone().requires_grad_(True)
+        criterion(y, pred2).backward()
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.parametrize("K", [2, 3])
+def test_ring_crps_loss_lazy_group(tmp_path, K):
+    """RingCRPSLoss resolves its group from register_dp_group on first forward.
+
+    Verifies value and gradient contracts when the class is used end-to-end
+    as the trainer does (register → construct criterion → forward), rather
+    than calling ring_crps_loss with an explicit group.
+    """
+    init_file = str(tmp_path / "ring_lazy_init")
+    manager = mp.Manager()
+    value_out = manager.dict()
+    grad_out = manager.dict()
+
+    mp.spawn(_ring_crps_loss_worker, args=(K, init_file, value_out, grad_out), nprocs=K, join=True)
+
+    members, y = _members(K)
+
+    for r in range(K):
+        skill = (members[r] - y).abs()
+        spread = sum((members[r] - members[j]).abs() for j in range(K) if j != r)
+        expected = (skill - spread / (K - 1)).mean() / K
+        assert abs(value_out[r] - expected.item()) < 1e-6, f"rank {r} loss value"
+
+    ref_members = [m.clone().requires_grad_(True) for m in members]
+    _reference_fair_crps(ref_members, y).backward()
+    for r in range(K):
+        assert torch.allclose(grad_out[r], ref_members[r].grad, atol=1e-6), (
+            f"rank {r} gradient does not match fair-CRPS gradient"
+        )
+
+
 if __name__ == "__main__":
     os.environ.setdefault("MASTER_ADDR", "localhost")
     pytest.main([__file__, "-v"])
