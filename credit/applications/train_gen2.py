@@ -73,7 +73,8 @@ def main_cli():
     gettrace = getattr(sys, "gettrace", None)
     ch.setLevel(logging.DEBUG if gettrace and gettrace() else logging.INFO)
     ch.setFormatter(formatter)
-    root.addHandler(ch)
+    if not root.handlers:
+        root.addHandler(ch)
 
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
@@ -126,15 +127,15 @@ def main_cli():
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
-    if world_size > 1:
-        setup(rank, world_size, "ddp", backend)
-
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
         torch.cuda.set_device(local_rank % torch.cuda.device_count())
         torch.backends.cudnn.benchmark = True
     else:
         device = torch.device("cpu")
+
+    if world_size > 1:
+        setup(rank, world_size, "ddp", backend, device_id=device if torch.cuda.is_available() else None)
 
     # Dataset sharding uses the DATA-PARALLEL coordinate, not the global rank.
     # Ranks that differ only in tensor/domain coordinate must see the same batch

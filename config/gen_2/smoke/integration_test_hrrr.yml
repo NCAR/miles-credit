@@ -82,31 +82,42 @@ validation_data:
 # ---- USER SETTINGS: preblocks/postblocks before/after passed to model ---- #
 
 preblocks:
-
-  pressure_log_transform:
-    type: "log_transform"
-    args:
-      variables:
-        - 'Example_HRRR/prognostic/2d/sp'
-      data_types:
-        - 'input'
-        - 'target'
-
-  q_sqrt_transform:
-      type: "sqrt_transform"
+  per_step:
+    pressure_log_transform:
+      type: "log_transform"
       args:
-          variables:
-                - 'Example_HRRR/prognostic/3d/Q'
-          data_types:
-            - 'input'
-            - 'target'
+        variables:
+          - 'Example_HRRR/prognostic/2d/sp'
+        data_types:
+          - 'input'
+          - 'target'
 
-  vars_concat:
-    type: "concat"
+    q_sqrt_transform:
+        type: "sqrt_transform"
+        args:
+            variables:
+                  - 'Example_HRRR/prognostic/3d/Q'
+            data_types:
+              - 'input'
+              - 'target'
+
+    scaler:
+      # please run `credit preprocess` before `credit train`
+      type: "bridgescaler_transform"
+      args:
+        variables: []
+        scaler_path: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/scaler_quantile.json"
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
+
+    vars_concat:
+      type: "concat"
 
 postblocks:
-  reconstruct:
-    type: "reconstruct"
+  per_step:
+    reconstruct:
+      type: "reconstruct"
 
 # ---- USER SETTINGS: training hyperparameters ---- #
 trainer:

@@ -91,7 +91,7 @@ class TrainerERA5Gen2(BaseTrainer):
         source = next(iter(data_conf["source"].values()))
         vars_conf = source["variables"]
         diag = vars_conf.get("diagnostic") or {}
-        num_levels = len(source.get("levels", []))
+        num_levels = len(source.get("levels") or [])
         self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
 
         self.retain_graph = data_conf.get("retain_graph", False)
@@ -345,8 +345,16 @@ class TrainerERA5Gen2(BaseTrainer):
                     # (Summing the norms themselves and sqrt-ing mixes units.)
                     # Note this still over-counts replicated grads when tp/domain
                     # ranks hold copies; acceptable for a clip threshold.
+                    # FSDP2 grads are DTensors; dist.all_reduce fails on DTensors
+                    # directly, so extract the local shard first with .to_local().
                     local_sq = (
-                        torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
+                        torch.stack(
+                            [
+                                (p.grad.to_local() if hasattr(p.grad, "to_local") else p.grad).detach().norm(2)
+                                for p in self.model.parameters()
+                                if p.grad is not None
+                            ]
+                        )
                         .square()
                         .sum()
                     )

@@ -27,7 +27,7 @@ import functools
 import logging
 
 
-def setup(rank, world_size, mode, backend="nccl"):
+def setup(rank, world_size, mode, backend="nccl", device_id=None):
     """Initializes the distributed process group.
 
     Args:
@@ -35,10 +35,15 @@ def setup(rank, world_size, mode, backend="nccl"):
         world_size (int): The total number of processes in the distributed setup.
         mode (str): The mode of operation (e.g., 'fsdp', 'ddp').
         backend (str, optional): The backend to use for distributed training. Defaults to 'nccl'.
+        device_id (torch.device, optional): Local CUDA device. Passed to init_process_group
+            to suppress the PyTorch 2.3+ barrier() UserWarning about missing device_id.
     """
 
     logging.info(f"Running {mode.upper()} on rank {rank} with world_size {world_size} using {backend}.")
-    dist.init_process_group(backend, rank=rank, world_size=world_size)
+    kwargs = {}
+    if device_id is not None and backend == "nccl":
+        kwargs["device_id"] = device_id
+    dist.init_process_group(backend, rank=rank, world_size=world_size, **kwargs)
 
 
 # torch's conventional default rendezvous port; used as a deterministic
