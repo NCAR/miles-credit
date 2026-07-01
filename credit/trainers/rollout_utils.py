@@ -75,6 +75,12 @@ def load_model_for_inference(conf: dict, device: torch.device) -> torch.nn.Modul
     if mode == "ddp":
         model = load_model(conf).to(device)
         model = distributed_model_wrapper(conf, model, device)
+        # Buffers are static once the checkpoint is loaded below (eval mode, no
+        # training), so there's nothing to sync. DDP's default broadcast_buffers=True
+        # makes every forward() a collective requiring all ranks to call it the same
+        # number of times — but rollout ranks can cover an uneven number of init
+        # times, so disable it to avoid a mid-loop hang.
+        model.broadcast_buffers = False
         # Mirror BaseModel.load_model: prefer model_checkpoint.pt, fall back to checkpoint.pt
         ckpt_path = os.path.join(save_loc, "model_checkpoint.pt")
         if not os.path.isfile(ckpt_path):

@@ -31,6 +31,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 import pandas as pd
 import torch
+import torch.distributed as dist
 import yaml
 from torch.utils.data import DataLoader
 
@@ -40,7 +41,7 @@ from credit.output_gen2 import ForecastWriter
 from credit.pbs import launch_script, launch_script_mpi
 from credit.postblock import build_postblocks
 from credit.preblock import build_preblocks
-from credit.samplers import DistributedMultiStepBatchSampler
+from credit.samplers import MultiStepBatchSamplerSubset
 from credit.seed import seed_everything
 from credit.trainers.rollout_utils import (
     batch_init_times,
@@ -224,19 +225,16 @@ Examples:
     }
     dataset = MultiSourceDataset(dataset_conf, return_target=False)
 
-    if world_size > 1 and len(all_init_times) % world_size != 0:
-        raise ValueError(
-            f"Number of init times ({len(all_init_times)}) is not divisible by "
-            f"world_size ({world_size}). Adjust your date range or number of GPUs."
-        )
-    sampler = DistributedMultiStepBatchSampler(
+    # Plain (non-distributed) subset sampler: each rank takes every world_size-th
+    # init time starting at its own rank, so no DistributedSampler-style padding
+    # (which would repeat init times from the start of the list to make the
+    # count divisible by world_size) ever happens.
+    rank_indices = list(range(world_rank, len(all_init_times), world_size))
+    sampler = MultiStepBatchSamplerSubset(
         dataset=dataset,
         batch_size=1,
+        index_subset=rank_indices,
         num_forecast_steps=n_steps,  # IC + (n_steps-1) forcing batches = n_steps total
-        num_replicas=world_size,
-        rank=world_rank,
-        shuffle=False,
-        seed=conf.get("seed", 0),
     )
 
     loader = DataLoader(dataset, batch_sampler=sampler, num_workers=0, pin_memory=False)
@@ -245,7 +243,7 @@ Examples:
         "Rank %d/%d: %d init time(s), %d steps each",
         world_rank,
         world_size,
-        sampler.num_samples,
+        len(rank_indices),
         n_steps,
     )
 
@@ -266,7 +264,7 @@ Examples:
     with mp.Pool(args.num_cpus) as pool:
         batch_iter = iter(loader)
 
-        for _ in range(sampler.num_samples):
+        for _ in range(len(rank_indices)):
             run_forecast(
                 conf=conf,
                 n_steps=n_steps,
@@ -286,10 +284,12 @@ Examples:
         pool.close()
         pool.join()
 
-    # Ranks work on independent init-time subsets, so no per-forecast barrier is
-    # needed. flush() inside run_forecast drains async writes before each forecast
-    # returns, so all output is on disk before we tear down the process group.
+    # Ranks now cover unequal-size init-time subsets, so they can exit their loop
+    # at different times. Wait for the slowest rank here, before any rank tears
+    # down the process group — otherwise a fast rank calling cleanup() could pull
+    # it out from under a still-running rank mid-collective.
     if mode in ("ddp", "fsdp"):
+        dist.barrier()
         cleanup()
 
 
