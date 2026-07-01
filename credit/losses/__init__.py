@@ -51,6 +51,8 @@ def load_loss(conf, reduction="none", validation=False):
     # downscaling could also use_variable_weights, so it needs to come first
     mode = "validation" if validation else "train"
     if is_downscaling:
+        from credit.losses.downscaling_loss import DownscalingLoss
+
         logger.info("Loaded DownscalingLoss (%s)", mode)
         return DownscalingLoss(conf, validation=validation)
 
@@ -64,6 +66,8 @@ def load_loss(conf, reduction="none", validation=False):
         )
 
     if use_weighted_loss:
+        from credit.losses.weighted_loss import VariableTotalLoss2D
+
         logger.info("Loaded VariableTotalLoss2D (%s)", mode)
         return VariableTotalLoss2D(conf, validation=validation)
 
