@@ -379,7 +379,7 @@ class BaseTrainer(ABC):
         for key in (f"{phase}_loss", f"{phase}_acc", f"{phase}_mae"):
             if results_dict.get(key):
                 parts.append(f"{key}: {np.mean(results_dict[key]):.6f}")
-        if self.ensemble_size > 1 and results_dict.get(f"{phase}_std"):
+        if results_dict.get(f"{phase}_std"):
             parts.append(f"{phase}_std: {np.mean(results_dict[f'{phase}_std']):.6f}")
         if phase == "train":
             parts.append(f"lr: {optimizer.param_groups[0]['lr']:.12f}")
