@@ -90,8 +90,12 @@ loss:
     use_variable_weights: False
 
 trainer:
-    type: era5-gen2
-    mode: none          # single GPU
+    type: gen2
+
+    parallelism:
+        data: none          # single GPU
+        tensor: 1
+        domain: 1
 
     load_weights: False
     load_optimizer: False

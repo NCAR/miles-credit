@@ -19,10 +19,20 @@ _LOSS_REGISTRY = {
     "xsigmoid": ("credit.losses.xsigmoid", "XSigmoidLoss"),
     "KCRPS": ("credit.losses.kcrps", "KCRPSLoss"),
     "almost-fair-crps": ("credit.losses.almost_fair_crps", "AlmostFairKCRPSLoss"),
+    "ring-crps": ("credit.losses.crps", "RingCRPSLoss"),
     "spectral": ("credit.losses.spectral", "SpectralLoss2D"),
     "power": ("credit.losses.power", "PSDLoss"),
     "covmse": ("credit.losses.covariance", "CovarianceWeightedMSELoss"),
 }
+
+# Names of registered losses that are CRPS-family (ensemble) losses, used by
+# the gen2 trainer to decide whether trainer.ensemble_size > 1 is required.
+CRPS_LOSSES = frozenset(name for name in _LOSS_REGISTRY if "crps" in name.casefold())
+
+
+def is_crps_loss(loss_type):
+    return loss_type in CRPS_LOSSES
+
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
 # Enables ``from credit.losses import LogCoshLoss`` without eager imports; kept for backward compatibility.
@@ -45,6 +55,14 @@ _CLASS_SOURCES = {
 # Example: ``from credit.losses import LogCoshLoss`` triggers __getattr__("LogCoshLoss"),
 #          which imports credit.losses.logcosh on the spot and returns the class.
 def __getattr__(name):
+    if name == "VariableTotalLoss2D":
+        from credit.losses.weighted_loss import VariableTotalLoss2D
+
+        return VariableTotalLoss2D
+    if name == "DownscalingLoss":
+        from credit.losses.downscaling_loss import DownscalingLoss
+
+        return DownscalingLoss
     if name in _CLASS_SOURCES:
         module_path, class_name = _CLASS_SOURCES[name]
         try:
@@ -146,7 +164,8 @@ def _instantiate_loss(conf, reduction="mean", validation=False):
     if "reduction" not in loss_params:
         loss_params["reduction"] = reduction
 
-    logger.info(f"Loaded the {loss_type} loss function with parameters: {loss_params}")
+    mode = "validation" if validation else "train"
+    logger.info(f"Loaded the {loss_type} loss function ({mode}) with parameters: {loss_params}")
 
     if loss_type in _LOSS_REGISTRY:
         return _load_loss_entry(loss_type)(**loss_params)
@@ -197,14 +216,26 @@ def load_loss(conf, reduction="none", validation=False):
 
     is_downscaling = "datasets" in conf["data"]
     # downscaling could also use_variable_weights, so it needs to come first
+    mode = "validation" if validation else "train"
     if is_downscaling:
-        logger.info("Loaded DownscalingLoss")
+        from credit.losses.downscaling_loss import DownscalingLoss
+
+        logger.info("Loaded DownscalingLoss (%s)", mode)
         return DownscalingLoss(conf, validation=validation)
 
     use_weighted_loss = loss_conf.get("use_latitude_weights", False) or loss_conf.get("use_variable_weights", False)
 
+    if not validation and loss_conf["training_loss"] == "ring-crps" and use_weighted_loss:
+        raise ValueError(
+            "ring-crps returns a scalar and cannot be combined with "
+            "use_latitude_weights / use_variable_weights (VariableTotalLoss2D "
+            "needs an elementwise loss). Disable the weights for ring-crps training."
+        )
+
     if use_weighted_loss:
-        logger.info("Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights")
+        from credit.losses.weighted_loss import VariableTotalLoss2D
+
+        logger.info("Loaded VariableTotalLoss2D (%s)", mode)
         return VariableTotalLoss2D(conf, validation=validation)
 
     return _instantiate_loss(conf, reduction=reduction, validation=validation)

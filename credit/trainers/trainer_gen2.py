@@ -9,6 +9,17 @@ import tqdm
 
 import optuna
 
+from credit.losses import is_crps_loss
+from credit.parallel.domain import (
+    gather_spatial,
+    get_domain_manager,
+    get_raw_model,
+    shard_spatial,
+    unpad_shard_interp,
+    sync_domain_gradients,
+)
+from credit.parallel.collectives import all_reduce_avg
+from credit.parallel.fsdp2 import fsdp2_is_applied
 from credit.postblock import build_postblocks, apply_postblocks
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.trainers.rollout_utils import assemble_rollout_batch
@@ -39,7 +50,32 @@ class TrainerERA5Gen2(BaseTrainer):
             conf: Full configuration dict.
         """
         super().__init__(model, rank, conf)
-        logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
+
+        # The config can request fsdp2 while the wrapper skips it (dp_size <= 1).
+        # AMP decisions must follow what was actually applied: when FSDP2 is
+        # active its MixedPrecisionPolicy replaces autocast; when it was
+        # skipped, plain autocast (trainer.amp) is all the mixed precision
+        # this run has.
+        self._fsdp2_active = fsdp2_is_applied(model)
+
+        # ---- Domain parallel manager (None when not using domain parallel) ----
+        self.domain_manager = get_domain_manager(model)
+        self._raw_model = get_raw_model(model)
+        raw_m = self._raw_model
+        if (
+            self.domain_manager is not None
+            and self.domain_manager.domain_parallel_size > 1
+            and getattr(raw_m, "use_padding", False)
+        ):
+            self._domain_pre_pad = raw_m.padding_opt
+            self._domain_image_h = raw_m.image_height
+            self._domain_image_w = raw_m.image_width
+            raw_m.use_padding = False
+            raw_m.use_interp = False
+        else:
+            self._domain_pre_pad = None
+            self._domain_image_h = None
+            self._domain_image_w = None
 
         self.ic_preblocks = build_preblocks(conf, phase="ic_only")
         self.step_preblocks = build_preblocks(conf, phase="per_step")
@@ -52,7 +88,7 @@ class TrainerERA5Gen2(BaseTrainer):
         source = next(iter(data_conf["source"].values()))
         vars_conf = source["variables"]
         diag = vars_conf.get("diagnostic") or {}
-        num_levels = len(source.get("levels", []))
+        num_levels = len(source.get("levels") or [])
         self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
 
         self.retain_graph = data_conf.get("retain_graph", False)
@@ -80,6 +116,77 @@ class TrainerERA5Gen2(BaseTrainer):
 
         # If True, log a warning on NaN loss instead of raising TrialPruned.
         self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
+
+        loss_name = conf.get("loss", {}).get("training_loss")
+        if is_crps_loss(loss_name) and self.ensemble_size <= 1:
+            raise ValueError(
+                f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "
+                f"got trainer.ensemble_size={self.ensemble_size}."
+            )
+        self.is_ring_crps = loss_name == "ring-crps"
+        self.is_crps_ensemble = is_crps_loss(loss_name) and self.ensemble_size > 1
+        self.use_batch_axis_ensemble = self.ensemble_size > 1 and not self.is_ring_crps
+
+    # ------------------------------------------------------------------
+    # Domain-parallel forward helpers (shared by train and validate)
+    # ------------------------------------------------------------------
+
+    def _sharded_forward(self, full_data_dict, amp_enabled):
+        """Model forward with domain-parallel pad/shard handling.
+
+        Pads + shards the input over the domain group, runs the model with its
+        internal padding suppressed (the trainer pre-pads the full grid), unpads
+        the prediction back to the shard's target shape, flattens 5D output to
+        4D, and shards y to match y_pred's spatial shard. A no-op passthrough
+        (plus the forward) when domain parallelism is off.
+        """
+        if self._domain_pre_pad is not None:
+            full_data_dict["x"] = self._domain_pre_pad.pad(full_data_dict["x"])
+        full_data_dict["x"] = shard_spatial(full_data_dict["x"], self.domain_manager)
+
+        if self._domain_pre_pad is not None:
+            self._raw_model._skip_internal_padding = True
+        try:
+            with torch.autocast(device_type="cuda", enabled=amp_enabled):
+                full_data_dict["y_pred"] = self.model(full_data_dict["x"])
+        finally:
+            if self._domain_pre_pad is not None:
+                self._raw_model._skip_internal_padding = False
+        if self._domain_pre_pad is not None:
+            full_data_dict["y_pred"] = unpad_shard_interp(
+                full_data_dict["y_pred"],
+                self._domain_pre_pad,
+                self.domain_manager,
+                self._domain_image_h,
+                self._domain_image_w,
+            )
+        if full_data_dict["y_pred"].dim() == 5:
+            full_data_dict["y_pred"] = full_data_dict["y_pred"].flatten(1, 2)
+
+        # domain parallel: shard y to match y_pred's spatial shard
+        if "y" in full_data_dict and full_data_dict["y"] is not None:
+            _y = full_data_dict["y"]
+            if _y.dim() == 5:
+                _y = _y.flatten(1, 2)
+            full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
+
+    def _gather_for_next_step(self, full_data_dict):
+        """Gather domain-sharded y_processed back to full height between rollout steps.
+
+        assemble_rollout_batch concats the previous step's prognostics with
+        full-height forcings/statics, so every domain rank needs the full-grid
+        prediction; shard_spatial re-shards the assembled input at the next
+        forward. No-op without domain parallelism. Gradient-free by design:
+        Reconstruct detaches y_processed.
+        """
+        if self.domain_manager is None or self.domain_manager.domain_parallel_size <= 1:
+            return
+        y_processed = full_data_dict.get("y_processed")
+        if not isinstance(y_processed, dict):
+            return
+        for source_vars in y_processed.values():
+            for var_key, tensor in source_vars.items():
+                source_vars[var_key] = gather_spatial(tensor, self.domain_manager)
 
     # ------------------------------------------------------------------
     # Training loop
@@ -111,7 +218,6 @@ class TrainerERA5Gen2(BaseTrainer):
         """
         if self.ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
-        logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
 
         if self.use_scheduler and self.scheduler_type == "lambda":
             scheduler.step()
@@ -130,7 +236,21 @@ class TrainerERA5Gen2(BaseTrainer):
                 self.batches_per_epoch if 0 < self.batches_per_epoch < dataset_batches else dataset_batches
             )
 
-        batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
+        grad_accum_every = self.conf.get("trainer", {}).get("grad_accum_every", 1)
+
+        # Reseed the shared shuffle permutation each epoch. Without this the
+        # sampler (now seeded identically on all ranks — required for disjoint
+        # sharding) would yield the same order every epoch.
+        _sampler = getattr(trainloader, "batch_sampler", None) or getattr(trainloader, "sampler", None)
+        if hasattr(_sampler, "set_epoch"):
+            _sampler.set_epoch(epoch)
+
+        batch_group_generator = tqdm.tqdm(
+            range(batches_per_epoch),
+            total=batches_per_epoch,
+            leave=True,
+            disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
+        )
         self.model.train()
 
         dl = cycle(trainloader)
@@ -140,6 +260,18 @@ class TrainerERA5Gen2(BaseTrainer):
             logs = {}
             loss = 0
             full_data_dict = {}
+
+            # Suppress gradient sync on non-boundary micro-steps during
+            # gradient accumulation — otherwise DDP all-reduces / FSDP2
+            # reduce-scatters on every backward, multiplying comms by
+            # grad_accum_every. Both wrappers expose a per-iteration flag
+            # (what no_sync() toggles), checked at the next forward/backward.
+            is_accum_boundary = (steps + 1) % grad_accum_every == 0 or steps == batches_per_epoch - 1
+            if grad_accum_every > 1:
+                if self.mode == "fsdp2" and hasattr(self.model, "set_requires_gradient_sync"):
+                    self.model.set_requires_gradient_sync(is_accum_boundary)
+                elif isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                    self.model.require_backward_grad_sync = is_accum_boundary
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
@@ -161,68 +293,105 @@ class TrainerERA5Gen2(BaseTrainer):
                         )
                     )
 
-                if self.ensemble_size > 1:
+                if self.use_batch_axis_ensemble:
                     full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
 
                 if self.flag_clamp:
                     full_data_dict["x"] = torch.clamp(full_data_dict["x"], min=self.clamp_min, max=self.clamp_max)
 
-                with torch.autocast(device_type="cuda", enabled=self.amp):
-                    full_data_dict["y_pred"] = self.model(full_data_dict["x"])
+                # FSDP2's MixedPrecisionPolicy replaces manual autocast (and
+                # conflicts with SpectralNorm power-iteration buffers); when
+                # FSDP2 was skipped (dp_size <= 1), plain autocast applies.
+                _amp = self.amp and not self._fsdp2_active
+                self._sharded_forward(full_data_dict, _amp)
 
                 full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
+                if t < self.forecast_len:
+                    self._gather_for_next_step(full_data_dict)
 
                 if t in self.backprop_on_timestep:
                     if self.flag_clamp:
                         full_data_dict["y"] = torch.clamp(
                             full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
                         )
-                    with torch.autocast(device_type="cuda", enabled=self.amp):
+                    with torch.autocast(device_type="cuda", enabled=_amp):
                         loss = criterion(
                             full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
                             full_data_dict["y_pred"],
                         ).mean()
                     accum_log(logs, {"loss": loss.item()})
-                    scaler.scale(loss).backward(retain_graph=self.retain_graph)
-
-                if self.distributed:
-                    torch.distributed.barrier()
+                    if self.is_crps_ensemble:
+                        # Ensemble spread proxy: std of member errors.
+                        target = full_data_dict["y"]
+                        if full_data_dict["y_pred"].shape[0] == target.shape[0] * self.ensemble_size:
+                            target = torch.repeat_interleave(target, self.ensemble_size, 0)
+                        accum_log(logs, {"std": (full_data_dict["y_pred"] - target).detach().std().item()})
+                    scaler.scale(loss / grad_accum_every).backward(retain_graph=self.retain_graph)
+                # No barrier here: NCCL collectives (grad sync, halo exchange)
+                # already order ranks; a per-timestep barrier only adds latency.
 
             full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
 
-            # optimizer step
-            scaler.unscale_(optimizer)
-            if self.grad_max_norm == "dynamic":
-                local_norm = torch.norm(
-                    torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
-                )
-                if self.distributed:
-                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
-                global_norm = local_norm.sqrt()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
-            elif self.grad_max_norm > 0.0:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
+            # optimizer step at accumulation boundary
+            if is_accum_boundary:
+                sync_domain_gradients(self.model, self.domain_manager)
+                _tp_group = getattr(self._raw_model, "_tp_group", None)
+                if _tp_group is not None:
+                    from credit.parallel.tensor_parallel import sync_replicated_gradients
 
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
+                    sync_replicated_gradients(self.model, _tp_group)
+                scaler.unscale_(optimizer)
+                if self.grad_max_norm == "dynamic":
+                    # Global L2 norm: sum SQUARED norms across ranks, then sqrt.
+                    # (Summing the norms themselves and sqrt-ing mixes units.)
+                    # Note this still over-counts replicated grads when tp/domain
+                    # ranks hold copies; acceptable for a clip threshold.
+                    # FSDP2 grads are DTensors; dist.all_reduce fails on DTensors
+                    # directly, so extract the local shard first with .to_local().
+                    local_sq = (
+                        torch.stack(
+                            [
+                                (p.grad.to_local() if hasattr(p.grad, "to_local") else p.grad).detach().norm(2)
+                                for p in self.model.parameters()
+                                if p.grad is not None
+                            ]
+                        )
+                        .square()
+                        .sum()
+                    )
+                    if self.distributed:
+                        dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
+                    global_norm = local_sq.sqrt()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
+                elif self.grad_max_norm > 0.0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
 
-            if self.ema is not None:
-                self.ema.update(self.model)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+
+                if self.ema is not None:
+                    self.ema.update(self.model)
 
             if full_data_dict.get("y_pred") is not None and full_data_dict.get("y") is not None:
                 metrics_dict = metrics(full_data_dict["y_pred"], full_data_dict["y"])
                 for name, value in metrics_dict.items():
                     value = torch.Tensor([value]).to(self.device, non_blocking=True)
                     if self.distributed:
-                        dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                        all_reduce_avg(value)
                     results_dict[f"train_{name}"].append(value[0].item())
 
             batch_loss = torch.Tensor([logs.get("loss", 0.0)]).to(self.device)
             if self.distributed:
-                dist.all_reduce(batch_loss, dist.ReduceOp.AVG, async_op=False)
+                all_reduce_avg(batch_loss)
             results_dict["train_loss"].append(batch_loss[0].item())
             results_dict["train_forecast_len"].append(self.forecast_len)
+
+            if self.is_crps_ensemble and "std" in logs:
+                batch_std = torch.Tensor([logs["std"]]).to(self.device)
+                if self.distributed:
+                    dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
+                results_dict["train_std"].append(batch_std[0].item())
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(results_dict["train_loss"])
@@ -278,7 +447,12 @@ class TrainerERA5Gen2(BaseTrainer):
             )
 
         results_dict = defaultdict(list)
-        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
+        batch_group_generator = tqdm.tqdm(
+            range(valid_batches_per_epoch),
+            total=valid_batches_per_epoch,
+            leave=True,
+            disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
+        )
 
         dl = cycle(valid_loader)
         with torch.no_grad():
@@ -311,14 +485,18 @@ class TrainerERA5Gen2(BaseTrainer):
                             )
                         )
 
-                    if self.ensemble_size > 1:
+                    if self.use_batch_axis_ensemble:
                         full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
 
                     if self.flag_clamp:
                         full_data_dict["x"] = torch.clamp(full_data_dict["x"], min=self.clamp_min, max=self.clamp_max)
 
-                    full_data_dict["y_pred"] = self.model(full_data_dict["x"])
+                    # Validation runs full precision (no autocast), as before.
+                    self._sharded_forward(full_data_dict, False)
+
                     full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
+                    if t < self.valid_forecast_len:
+                        self._gather_for_next_step(full_data_dict)
 
                     if t == self.valid_forecast_len:
                         if self.flag_clamp:
@@ -333,14 +511,20 @@ class TrainerERA5Gen2(BaseTrainer):
                         for name, value in metrics_dict.items():
                             value = torch.Tensor([value]).to(self.device, non_blocking=True)
                             if self.distributed:
-                                dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                                all_reduce_avg(value)
                             results_dict[f"valid_{name}"].append(value[0].item())
 
                 full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
 
                 batch_loss = torch.Tensor([loss.item() if torch.is_tensor(loss) else loss]).to(self.device)
+                # Average validation loss across ranks (the train loop already
+                # does this). Without it each rank tracks a different local
+                # valid_loss, and fit() makes early-stopping / best-checkpoint
+                # decisions from divergent per-rank histories — ranks can then
+                # break out of training at different epochs and hang in the
+                # next collective.
                 if self.distributed:
-                    torch.distributed.barrier()
+                    all_reduce_avg(batch_loss)
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)

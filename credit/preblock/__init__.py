@@ -16,8 +16,8 @@ _PREBLOCK_REGISTRY = {
     "regrid": ("credit.preblock.regrid", "Regridder"),
     "concat": ("credit.preblock.concat", "ConcatToTensor"),
     "era5_normalizer": ("credit.preblock.norm", "ERA5Normalizer"),
-    "fill_nan": ("credit.preblock.nan", "FillNan"),
-    "bridgescaler_transformer": ("credit.preblock.scaler", "BridgeScalerTransformer"),
+    "fill_values": ("credit.preblock.fill_values", "FillValues"),
+    "bridgescaler_transform": ("credit.preblock.scaler", "BridgeScalerTransform"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -28,8 +28,8 @@ _CLASS_SOURCES = {
     "Regridder": ("credit.preblock.regrid", "Regridder"),
     "ConcatToTensor": ("credit.preblock.concat", "ConcatToTensor"),
     "ERA5Normalizer": ("credit.preblock.norm", "ERA5Normalizer"),
-    "FillNan": ("credit.preblock.nan", "FillNan"),
-    "BridgeScalerTransformer": ("credit.preblock.scaler", "BridgeScalerTransformer"),
+    "FillValues": ("credit.preblock.fill_values", "FillValues"),
+    "BridgeScalerTransform": ("credit.preblock.scaler", "BridgeScalerTransform"),
 }
 
 
@@ -237,10 +237,10 @@ def _move_batch_to_device(batch, device):
 
 
 def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=None):
-    from credit.preblock.scaler import BridgeScalerTransformer  # needed for isinstance check
+    from credit.preblock.scaler import BridgeScalerTransform  # needed for isinstance check
 
     for preblock in preblocks.values():
-        if isinstance(preblock, BridgeScalerTransformer):
+        if isinstance(preblock, BridgeScalerTransform):
             break
         result = preblock(batch)
         if isinstance(result, tuple):

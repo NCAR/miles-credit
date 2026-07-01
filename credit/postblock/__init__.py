@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 #   cls: type                             — externally registered classes
 _POSTBLOCK_REGISTRY = {
     "reconstruct": ("credit.postblock.reconstruct", "Reconstruct"),
-    "bridgescaler_transformer": ("credit.postblock.scaler", "BridgeScalerTransformer"),
+    "bridgescaler_transform": ("credit.postblock.scaler", "BridgeScalerTransform"),
+    "exp_transform": ("credit.postblock.exp", "ExpTransform"),
+    "square_transform": ("credit.postblock.square", "SquareTransform"),
     "wet_mask_samudra": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "mslp_diagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
     "tracer_fixer": ("credit.postblock.gen1", "TracerFixer"),
@@ -25,7 +27,7 @@ _POSTBLOCK_REGISTRY = {
 # Enables ``from credit.postblock import Reconstruct`` without eager imports; kept for backward compatibility.
 _CLASS_SOURCES = {
     "Reconstruct": ("credit.postblock.reconstruct", "Reconstruct"),
-    "BridgeScalerTransformer": ("credit.postblock.scaler", "BridgeScalerTransformer"),
+    "BridgeScalerTransform": ("credit.postblock.scaler", "BridgeScalerTransform"),
     "WetMaskBlock": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "MSLPDiagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
     "TracerFixer": ("credit.postblock.gen1", "TracerFixer"),
@@ -147,7 +149,7 @@ def build_postblocks(conf: dict, phase: str = "per_step") -> nn.ModuleDict:
             reconstruct:
               type: reconstruct
             inverse_scale:
-              type: bridgescaler_transformer
+              type: bridgescaler_transform
               args:
                 method: inverse_transform
                 scaler_path: /path/to/scaler.json

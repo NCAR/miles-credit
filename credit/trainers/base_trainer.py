@@ -19,6 +19,7 @@ from collections import OrderedDict, defaultdict
 from typing import Any, Dict, Optional, Callable
 
 import numpy as np
+from tqdm import tqdm
 import pandas as pd
 import torch
 from torch.amp import GradScaler
@@ -29,7 +30,7 @@ from torch.utils.data import DataLoader
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
 from credit.trainers.preflight import check_dataloader_startup, check_model_gpu_memory
-from credit.trainers.utils import cleanup
+from credit.trainers.utils import cleanup, effective_mode
 
 try:
     from torch.utils.tensorboard import SummaryWriter as _SummaryWriter
@@ -66,13 +67,28 @@ class EMATracker:
     def __init__(self, model: torch.nn.Module, decay: float = 0.9999):
         self.decay = decay
         self.step = 0
+        # Keep a reference for the sharded (FSDP2/DTensor) path: gathering the
+        # full shadow at save time and re-sharding on load need the live
+        # params' mesh/placements.
+        self._model = model
         # shadow lives on CPU to save GPU memory
         self.shadow: OrderedDict = OrderedDict()
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+        # FSDP2 state dicts hold DTensors. EMA is elementwise, so each rank
+        # EMAs its own LOCAL shard — mathematically identical to EMA of the
+        # full weights, with zero extra communication per step. The full
+        # shadow is only materialized at save time (state_dict gathers) and
+        # re-sharded on load.
+        self._sharded = any(hasattr(v, "to_local") for v in state.values())
         for k, v in state.items():
             if self._is_spectral_norm_buffer(k, state):
                 continue  # power-iteration vectors must not be EMA-averaged
-            self.shadow[k] = v.detach().float().cpu().clone()
+            self.shadow[k] = self._local(v).detach().float().cpu().clone()
+
+    @staticmethod
+    def _local(v: torch.Tensor) -> torch.Tensor:
+        """Return the local shard of a DTensor (a view of its storage), else v."""
+        return v.to_local() if hasattr(v, "to_local") else v
 
     @staticmethod
     def _is_spectral_norm_buffer(key: str, state: dict) -> bool:
@@ -92,12 +108,23 @@ class EMATracker:
         for k, v in state.items():
             if k not in self.shadow:
                 continue  # spectral norm buffers are excluded
-            self.shadow[k].mul_(effective_decay).add_(v.detach().float().cpu(), alpha=1.0 - effective_decay)
+            self.shadow[k].mul_(effective_decay).add_(
+                self._local(v).detach().float().cpu(), alpha=1.0 - effective_decay
+            )
 
     @torch.no_grad()
     def swap(self, model: torch.nn.Module):
         """Swap model weights with EMA shadow weights (and vice-versa)."""
         state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+        if self._sharded:
+            # DTensor locals are views of the live param storage — copy in
+            # place per shard; no load_state_dict round trip needed (or valid).
+            for k in self.shadow:
+                live = self._local(state[k])
+                tmp = live.detach().clone()
+                live.copy_(self.shadow[k].to(device=live.device, dtype=live.dtype))
+                self.shadow[k] = tmp.float().cpu()
+            return
         device = next(iter(state.values())).device
         dtype = next(iter(state.values())).dtype
         for k in self.shadow:
@@ -110,12 +137,66 @@ class EMATracker:
             model.load_state_dict(state)
 
     def state_dict(self):
-        return {"shadow": self.shadow, "decay": self.decay, "step": self.step}
+        """Return the EMA state with a FULL (unsharded) shadow.
+
+        In the sharded (FSDP2) case this gathers each shard into the full
+        tensor via the live param's mesh/placements — it is a COLLECTIVE and
+        must be called on every rank (rank 0 then saves). The saved format is
+        identical to the non-sharded one, so rollout/inference and non-FSDP2
+        resume load it unchanged.
+        """
+        if not self._sharded:
+            return {"shadow": self.shadow, "decay": self.decay, "step": self.step}
+
+        from torch.distributed.tensor import DTensor
+
+        model = self._model
+        state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+        full = OrderedDict()
+        for k, shard in self.shadow.items():
+            live = state[k]
+            if isinstance(live, DTensor):
+                # Explicit shape/stride: from_local otherwise INFERS the global
+                # shape as local x world_size, which is wrong for unevenly
+                # sharded params (FSDP2 pads dim-0 shards, so ranks hold
+                # different local sizes) — ranks then disagree on the
+                # all_gather size and deadlock.
+                d = DTensor.from_local(
+                    shard.to(device=live.device, dtype=torch.float32),
+                    device_mesh=live.device_mesh,
+                    placements=live.placements,
+                    shape=live.shape,
+                    stride=live.stride(),
+                )
+                full[k] = d.full_tensor().cpu()
+            else:
+                full[k] = shard
+        return {"shadow": full, "decay": self.decay, "step": self.step}
 
     def load_state_dict(self, d):
         self.decay = d["decay"]
         self.shadow = d["shadow"]
         self.step = d.get("step", 0)
+        if self._sharded:
+            # Checkpoint holds the FULL shadow; slice each tensor back to this
+            # rank's shard using the live param's mesh/placements.
+            from torch.distributed.tensor import DTensor, distribute_tensor
+
+            model = self._model
+            state = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+            resharded = OrderedDict()
+            for k, full in self.shadow.items():
+                live = state.get(k)
+                if isinstance(live, DTensor):
+                    d_t = distribute_tensor(
+                        full.to(device=live.device, dtype=torch.float32),
+                        device_mesh=live.device_mesh,
+                        placements=live.placements,
+                    )
+                    resharded[k] = d_t.to_local().detach().float().cpu().clone()
+                else:
+                    resharded[k] = full
+            self.shadow = resharded
         # Checkpoints saved before the _is_spectral_norm_buffer filter was added
         # (pre-2026-05-15) may have EMA-averaged weight_u / weight_v in the shadow.
         # Averaged unit vectors are not unit vectors, so sigma = u^T W v becomes
@@ -161,8 +242,18 @@ class BaseTrainer(ABC):
         # ---- Extract all trainer settings ----
         trainer_conf = conf["trainer"]
         self.save_loc = os.path.expandvars(conf["save_loc"])
-        self.mode = trainer_conf.get("mode", "none")
-        self.distributed = self.mode in ("fsdp", "ddp")
+        # Gen2: the parallelism block is the sole source of truth (a stale
+        # trainer.mode key is ignored). V1 configs keep using trainer.mode.
+        _p = trainer_conf.get("parallelism", {})
+        self.mode = effective_mode(conf)
+        # is_initialized: single-process runs of a distributed config (no
+        # launcher, world_size 1) have no process group — collectives must be
+        # skipped or they raise.
+        self.distributed = (
+            self.mode in ("fsdp", "ddp", "fsdp2", "domain_parallel", "fsdp+domain_parallel")
+            or int(_p.get("domain", 1)) > 1
+            or int(_p.get("tensor", 1)) > 1
+        ) and (torch.distributed.is_available() and torch.distributed.is_initialized())
         self.start_epoch = trainer_conf.get("start_epoch", 0)
         self.epochs = trainer_conf.get("epochs", 1)
         self.skip_validation = trainer_conf.get("skip_validation", False)
@@ -194,6 +285,9 @@ class BaseTrainer(ABC):
         logger.info(f"Training metric: {self.training_metric} (direction: {'min' if self.direction is min else 'max'})")
 
         # ---- EMA setup ----
+        # FSDP2 is supported: EMATracker detects DTensor state and EMAs each
+        # rank's local shard (elementwise, so identical to full-weight EMA);
+        # the full shadow is gathered only at save and re-sharded on load.
         use_ema = trainer_conf.get("use_ema", False)
         if use_ema:
             ema_decay = trainer_conf.get("ema_decay", 0.9999)
@@ -207,6 +301,7 @@ class BaseTrainer(ABC):
                 logger.info(f"EMA enabled (decay={ema_decay})")
         else:
             self.ema = None
+        logger.info(f"Grad-max-norm: {self.grad_max_norm}")
 
         # ---- TensorBoard setup ----
         use_tb = trainer_conf.get("use_tensorboard", False)
@@ -221,7 +316,7 @@ class BaseTrainer(ABC):
                 tb_dir = os.path.join(self.save_loc, "tensorboard")
                 self.tb_writer = _SummaryWriter(log_dir=tb_dir)
                 logger.info(f"TensorBoard log dir: {tb_dir}")
-                logger.info(f"  View with: tensorboard --logdir {tb_dir}")
+                logger.info(f"View with: tensorboard --logdir {tb_dir}")
         else:
             self.tb_writer = None
 
@@ -281,24 +376,12 @@ class BaseTrainer(ABC):
         pbar,
         phase: str = "train",
     ) -> None:
-        """Update a tqdm progress bar with rolling-mean batch metrics.
-
-        Reads any keys in *results_dict* that start with ``<phase>_`` and
-        formats them as a space-separated description string. Always appends
-        the current learning rate.
-
-        Args:
-            epoch:        Current epoch number.
-            results_dict: Dict mapping metric names to lists of per-batch values.
-            optimizer:    Current optimizer (used to read the learning rate).
-            pbar:         tqdm progress bar to update.
-            phase:        Metric prefix, either ``"train"`` or ``"valid"``.
-        """
+        """Update a tqdm progress bar with rolling-mean batch metrics."""
         parts = [f"Epoch: {epoch}"]
         for key in (f"{phase}_loss", f"{phase}_acc", f"{phase}_mae"):
             if results_dict.get(key):
                 parts.append(f"{key}: {np.mean(results_dict[key]):.6f}")
-        if self.ensemble_size > 1 and results_dict.get(f"{phase}_std"):
+        if results_dict.get(f"{phase}_std"):
             parts.append(f"{phase}_std: {np.mean(results_dict[f'{phase}_std']):.6f}")
         if phase == "train":
             parts.append(f"lr: {optimizer.param_groups[0]['lr']:.12f}")
@@ -318,9 +401,55 @@ class BaseTrainer(ABC):
         scaler: GradScaler,
     ) -> None:
         """Save model, optimizer, scheduler, and scaler state."""
+        _p_save = self.conf.get("trainer", {}).get("parallelism", {})
+        if int(_p_save.get("tensor", 1)) > 1:
+            logger.warning(
+                "Checkpointing with tensor parallelism (tensor > 1) saves only this "
+                "rank's TP shards under rewritten keys — the checkpoint will NOT be "
+                "loadable into an unsharded model, and resume will refuse it. This "
+                "warn-on-save / raise-on-resume asymmetry is deliberate: TP is "
+                "experimental (issue #415) and raising here would kill the run at "
+                "its first checkpoint."
+            )
+        if int(_p_save.get("domain", 1)) > 1:
+            logger.warning(
+                "Checkpointing with domain parallelism saves full weights but under "
+                "rewritten keys (DomainParallelConv2d inserts '.conv'/'.norm' "
+                "segments). Resume under the same domain config works; loading into "
+                "an unwrapped model (rollout/inference, domain=1) will raise on the "
+                "unexpected keys until the checkpoint is remapped."
+            )
         sched_state = scheduler.state_dict() if self.use_scheduler and scheduler is not None else None
 
-        if self.mode != "fsdp":
+        if self.mode == "fsdp2":
+            from credit.parallel.fsdp2 import fsdp2_state_dict, fsdp2_optimizer_state_dict
+
+            # FSDP2: all ranks gather full (unsharded) state dicts, rank 0 saves.
+            # The optimizer state must also be gathered — a raw
+            # optimizer.state_dict() holds only this rank's DTensor shards, so
+            # saving it from rank 0 silently drops every other rank's state.
+            logger.info(f"Saving FSDP2 checkpoint to {self.save_loc}")
+            model_sd = fsdp2_state_dict(self.model)
+            optim_sd = fsdp2_optimizer_state_dict(self.model, optimizer)
+            # EMA state_dict gathers the full shadow — collective, all ranks.
+            ema_sd = self.ema.state_dict() if self.ema is not None else None
+            if self.rank == 0:
+                state_dict = {
+                    "epoch": epoch,
+                    "model_state_dict": model_sd,
+                    "optimizer_state_dict": optim_sd,
+                    "scheduler_state_dict": sched_state,
+                    "scaler_state_dict": scaler.state_dict(),
+                }
+                torch.save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
+                if ema_sd is not None:
+                    torch.save(
+                        {"epoch": epoch, "model_state_dict": ema_sd},
+                        os.path.join(self.save_loc, "checkpoint_ema.pt"),
+                    )
+                if self.save_every_epoch:
+                    copy_checkpoint(os.path.join(self.save_loc, "checkpoint.pt"), epoch)
+        elif self.mode != "fsdp":
             if self.rank == 0:
                 logger.info(f"Saving checkpoint to {self.save_loc}")
                 state_dict = {
@@ -362,7 +491,6 @@ class BaseTrainer(ABC):
                 "scaler_state_dict": scaler.state_dict(),
             }
             torch.save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
-
             if self.save_every_epoch:
                 copy_checkpoint(os.path.join(self.save_loc, "model_checkpoint.pt"), epoch)
 
@@ -431,9 +559,26 @@ class BaseTrainer(ABC):
         # Preflight: check DataLoader memory and first-batch latency (rank-0 only)
         timeout_s = conf.get("trainer", {}).get("dataloader_timeout_s", 300)
         check_dataloader_startup(conf, train_loader, rank=self.rank, timeout_s=timeout_s)
+        if self.distributed and torch.distributed.is_initialized():
+            torch.distributed.barrier()
 
-        # Preflight: synthetic forward/backward/optimizer step to measure peak VRAM
-        check_model_gpu_memory(conf, self.model, optimizer, rank=self.rank)
+        # Preflight: synthetic forward/backward/optimizer step to measure peak VRAM.
+        # Only safe on an unwrapped model. Sharded modes (fsdp/fsdp2/tensor/domain)
+        # would hang on collectives, and a DDP-wrapped model's parameters carry
+        # reducer autograd hooks: a rank-0-only backward advances rank 0's reducer
+        # iteration state out-of-band, which deadlocks the next gradient sync
+        # under static_graph (observed: gen2 ddp smoke hangs at step 2).
+        _p_fit = conf.get("trainer", {}).get("parallelism", {})
+        _wrapped = (
+            self.mode in ("fsdp", "fsdp2")
+            or int(_p_fit.get("tensor", 1)) > 1
+            or int(_p_fit.get("domain", 1)) > 1
+            or isinstance(self.model, torch.nn.parallel.DistributedDataParallel)
+        )
+        if _wrapped:
+            logger.info("Skipping rank-local GPU memory preflight: model is wrapped/sharded for distributed training.")
+        else:
+            check_model_gpu_memory(conf, self.model, optimizer, rank=self.rank)
 
         # Re-sync all ranks after rank-0-only preflight before training begins
         if torch.distributed.is_available() and torch.distributed.is_initialized():
@@ -452,7 +597,8 @@ class BaseTrainer(ABC):
                         if os.path.exists(src):
                             shutil.copyfile(src, os.path.join(self.save_loc, f"backup_{fname}"))
 
-            logger.info(f"Beginning epoch {epoch}")
+            if any(h.level <= logging.INFO for h in logging.getLogger().handlers):
+                tqdm.write(f"INFO:credit.trainers.base_trainer:Beginning epoch {epoch}")
 
             # Set epoch on sampler/dataset for reproducible distributed shuffling
             if hasattr(train_loader, "sampler") and hasattr(train_loader.sampler, "set_epoch"):
@@ -574,6 +720,12 @@ class BaseTrainer(ABC):
 
             if self.stop_after_epoch:
                 break
+
+        # Shut down DataLoader workers to avoid leaked semaphore warnings at exit
+        for _loader in (train_loader, valid_loader):
+            if _loader is not None:
+                _loader._iterator = None
+        del train_loader, valid_loader
 
         # Close TensorBoard writer
         if self.tb_writer is not None:

@@ -1,21 +1,36 @@
-"""test_postblock.py provides I/O size tests.
+"""test_postblock.py — tests for credit.postblock modules.
 
--------------------------------------------------------
-Content:
+Covers: gen1 physics fixers (TracerFixer, GlobalMassFixer, GlobalWaterFixer,
+GlobalEnergyFixer, GlobalEnergyFixerUpDown), Reconstruct, ExpTransform,
+SquareTransform, and BridgeScalerTransform (postblock scaler).
 """
 
 import yaml
 import os
 import logging
 
+import pytest
 import torch
-from credit.postblock.gen1 import GlobalWaterFixer, PostBlock
+from bridgescaler.distributed_tensor import DStandardScalerTensor
+from bridgescaler import save_scaler_dict, scale_var_dict
+from credit.postblock.gen1 import (
+    GlobalWaterFixer,
+    PostBlock,
+    TracerFixer,
+    GlobalMassFixer,
+    GlobalEnergyFixer,
+    GlobalEnergyFixerUpDown,
+)
+from credit.postblock.scaler import BridgeScalerTransform as PostScaler
+from credit.postblock.exp import ExpTransform
+from credit.postblock.reconstruct import Reconstruct
+from credit.postblock.square import SquareTransform
+from credit.preblock.log import LogTransform
+from credit.preblock.sqrt import SqrtTransform
 from credit.skebs import BackscatterFCNN
-from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalEnergyFixer, GlobalEnergyFixerUpDown
 from credit.parser import credit_main_parser
 
 
-TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
 CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
 
 
@@ -72,12 +87,12 @@ def test_TracerFixer_rand():
     postblock = PostBlock(**conf)
 
     # verify that TracerFixer is registered in the postblock
-    assert any([isinstance(module, TracerFixer) for module in postblock.modules()])
+    assert any(isinstance(module, TracerFixer) for module in postblock.modules())
 
     input_dict = {"y_pred": input_tensor}
     output_tensor = postblock(input_dict)
 
-    # verify negative values
+    # verify all values are non-negative after clamping
     assert output_tensor.min() >= 0
 
 
@@ -108,7 +123,7 @@ def test_GlobalMassFixer_rand():
     postblock = PostBlock(**conf)
 
     # verify that GlobalMassFixer is registered in the postblock
-    assert any([isinstance(module, GlobalMassFixer) for module in postblock.modules()])
+    assert any(isinstance(module, GlobalMassFixer) for module in postblock.modules())
 
     # input tensor
     x = torch.randn((1, 7, 2, 10, 18))
@@ -153,7 +168,7 @@ def test_GlobalWaterFixer_rand():
     postblock = PostBlock(**conf)
 
     # verify that GlobalWaterFixer is registered in the postblock
-    assert any([isinstance(module, GlobalWaterFixer) for module in postblock.modules()])
+    assert any(isinstance(module, GlobalWaterFixer) for module in postblock.modules())
 
     # input tensor
     x = torch.randn((1, 7, 2, 10, 18))
@@ -200,7 +215,7 @@ def test_GlobalEnergyFixer_rand():
     postblock = PostBlock(**conf)
 
     # verify that GlobalEnergyFixer is registered in the postblock
-    assert any([isinstance(module, GlobalEnergyFixer) for module in postblock.modules()])
+    assert any(isinstance(module, GlobalEnergyFixer) for module in postblock.modules())
 
     # input tensor
     x = torch.randn((1, 7, 2, 10, 18))
@@ -250,7 +265,7 @@ def test_GlobalEnergyFixerUpDown_rand():
 
     postblock = PostBlock(**conf)
 
-    assert any([isinstance(m, GlobalEnergyFixerUpDown) for m in postblock.modules()])
+    assert any(isinstance(m, GlobalEnergyFixerUpDown) for m in postblock.modules())
 
     N_VARS = 4 * LEV + 9
     x = torch.randn((1, 4 * LEV, 2, 10, 18))
@@ -291,8 +306,6 @@ class TestReconstruct:
 
     def test_nested_dict_structure(self):
         """Output is y_processed[source][var_key] — source then flat 4-part slash key."""
-        from credit.postblock.reconstruct import Reconstruct
-
         result = Reconstruct()(self._batch_dict(torch.randn(2, 5, 8, 8)))
 
         pred = result["y_processed"]
@@ -302,8 +315,6 @@ class TestReconstruct:
 
     def test_tensor_shapes_4d_input(self):
         """3D var → (B, n_levels, 1, H, W), 2D var → (B, 1, 1, H, W)."""
-        from credit.postblock.reconstruct import Reconstruct
-
         B, H, W = 2, 8, 8
         result = Reconstruct()(self._batch_dict(torch.randn(B, 5, H, W)))
 
@@ -313,8 +324,6 @@ class TestReconstruct:
 
     def test_5d_input_no_extra_dim(self):
         """5D y_pred (B, C, 1, H, W) produces the same shape as 4D — no spurious singleton."""
-        from credit.postblock.reconstruct import Reconstruct
-
         B, H, W = 2, 8, 8
         y_pred_4d = torch.randn(B, 5, H, W)
         y_pred_5d = y_pred_4d.unsqueeze(2)  # (B, 5, 1, H, W)
@@ -328,8 +337,6 @@ class TestReconstruct:
 
     def test_values_match_input_channels(self):
         """Reconstructed tensors contain exactly the channels sliced from y_pred."""
-        from credit.postblock.reconstruct import Reconstruct
-
         B, H, W = 1, 4, 4
         y_pred = torch.randn(B, 5, H, W)
         result = Reconstruct()(self._batch_dict(y_pred))
@@ -346,8 +353,6 @@ class TestReconstruct:
 
     def test_other_keys_pass_through(self):
         """Keys other than 'y_pred' are preserved unchanged."""
-        from credit.postblock.reconstruct import Reconstruct
-
         raw = {"Test_ERA5": {"input": {}}}
         batch = self._batch_dict(torch.randn(1, 5, 4, 4), extra={"input": torch.zeros(1), "_raw": raw})
         result = Reconstruct()(batch)
@@ -356,12 +361,216 @@ class TestReconstruct:
 
     def test_metadata_passthrough(self):
         """metadata dict is returned at the same key, unchanged."""
-        from credit.postblock.reconstruct import Reconstruct
-
         batch = self._batch_dict(torch.randn(1, 5, 4, 4))
         original_meta = batch["metadata"]
         result = Reconstruct()(batch)
         assert result["metadata"] is original_meta
+
+
+# ---------------------------------------------------------------------------
+# ExpTransform and SquareTransform — round-trip and edge-case tests
+# ---------------------------------------------------------------------------
+
+_VAR = "era5/prognostic/3d/Q"
+_SOURCE = "era5"
+
+
+def _postblock_batch_dict(tensor, key="y_processed"):
+    return {key: {_SOURCE: {_VAR: tensor}}}
+
+
+def _preblock_batch(tensor):
+    return {"input": {_SOURCE: {_VAR: tensor}}, "target": {_SOURCE: {_VAR: tensor.clone()}}}
+
+
+def test_postblock_scaler_empty_variables_scales_all(tmp_path):
+    """variables=[] in the postblock scaler scales all variables (not none)."""
+
+    var_names = ["Test_ERA5/prognostic/3d/T", "Test_ERA5/prognostic/3d/U"]
+    source = "Test_ERA5"
+    shape = (4, 4, 1, 8, 8)
+    # Fit on the full {data_type: {source: {var_key: tensor}}} structure — same as preblock scaler
+    x_dict = {"target": {source: {v: torch.randn(*shape) for v in var_names}}}
+    scaler_dict = scale_var_dict(x_dict, DStandardScalerTensor(channels_last=False), method="fit")
+    path = str(tmp_path / "scaler.json")
+    save_scaler_dict(scaler_dict, path)
+
+    y = {source: {v: torch.randn(*shape) for v in var_names}}
+    original = y[source][var_names[0]].clone()
+
+    scaler = PostScaler(scaler_path=path, variables=[], method="transform")
+    result = scaler({"y_processed": y})
+    assert not torch.allclose(result["y_processed"][source][var_names[0]].float(), original.float()), (
+        "empty variables list should scale all variables, not none"
+    )
+
+
+def test_postblock_scaler_partial_path_expansion(tmp_path):
+    """A partial path in variables expands to all matching variables."""
+
+    var_names = ["Test_ERA5/prognostic/3d/T", "Test_ERA5/prognostic/3d/U"]
+    source = "Test_ERA5"
+    shape = (4, 4, 1, 8, 8)
+    # Fit on the full {data_type: {source: {var_key: tensor}}} structure — same as preblock scaler
+    x_dict = {"target": {source: {v: torch.randn(*shape) for v in var_names}}}
+    scaler_dict = scale_var_dict(x_dict, DStandardScalerTensor(channels_last=False), method="fit")
+    path = str(tmp_path / "scaler.json")
+    save_scaler_dict(scaler_dict, path)
+
+    y = {source: {v: torch.randn(*shape) for v in var_names}}
+    originals = {v: y[source][v].clone() for v in var_names}
+
+    scaler = PostScaler(scaler_path=path, variables=[source], method="transform")
+    result = scaler({"y_processed": y})
+    for v in var_names:
+        assert not torch.allclose(result["y_processed"][source][v].float(), originals[v].float()), (
+            f"partial path '{source}' should have expanded to include {v}"
+        )
+
+
+def test_exp_transform_round_trip_base_e():
+    """LogTransform → ExpTransform recovers the original tensor (base e)."""
+    x = torch.rand(2, 4, 1, 8, 8) + 1e-6
+    logged = LogTransform(variables=[_VAR], base="e")(_preblock_batch(x))
+    y = logged["input"][_SOURCE][_VAR]
+    result = ExpTransform(variables=[_VAR], base="e")(_postblock_batch_dict(y))["y_processed"][_SOURCE][_VAR]
+    assert torch.allclose(result, x, atol=1e-5)
+
+
+def test_exp_transform_round_trip_base_2():
+    """LogTransform → ExpTransform recovers the original tensor (base 2)."""
+    x = torch.rand(2, 4, 1, 8, 8) + 1e-6
+    logged = LogTransform(variables=[_VAR], base="2")(_preblock_batch(x))
+    y = logged["input"][_SOURCE][_VAR]
+    result = ExpTransform(variables=[_VAR], base="2")(_postblock_batch_dict(y))["y_processed"][_SOURCE][_VAR]
+    assert torch.allclose(result, x, atol=1e-5)
+
+
+def test_exp_transform_round_trip_base_10():
+    """LogTransform → ExpTransform recovers the original tensor (base 10)."""
+    x = torch.rand(2, 4, 1, 8, 8) + 1e-6
+    logged = LogTransform(variables=[_VAR], base="10")(_preblock_batch(x))
+    y = logged["input"][_SOURCE][_VAR]
+    result = ExpTransform(variables=[_VAR], base="10")(_postblock_batch_dict(y))["y_processed"][_SOURCE][_VAR]
+    assert torch.allclose(result, x, atol=1e-5)
+
+
+def test_exp_transform_skips_missing_variable():
+    """ExpTransform silently skips variables absent from the batch."""
+    exp_block = ExpTransform(variables=["era5/prognostic/3d/MISSING"])
+    result = exp_block(_postblock_batch_dict(torch.ones(1, 1, 1, 4, 4)))
+    assert _VAR in result["y_processed"][_SOURCE]
+
+
+def test_exp_transform_invalid_base():
+    """ExpTransform raises ValueError for an unsupported base."""
+    with pytest.raises(ValueError):
+        ExpTransform(variables=[_VAR], base="7")
+
+
+def test_exp_transform_custom_key():
+    """ExpTransform respects a non-default key."""
+    x = torch.rand(1, 1, 1, 4, 4) + 1e-6
+    logged = LogTransform(variables=[_VAR])(_preblock_batch(x))
+    y = logged["input"][_SOURCE][_VAR]
+    result = ExpTransform(variables=[_VAR], key="my_output")({"my_output": {_SOURCE: {_VAR: y}}})
+    assert torch.allclose(result["my_output"][_SOURCE][_VAR], x, atol=1e-5)
+
+
+def test_square_transform_round_trip():
+    """SqrtTransform → SquareTransform recovers the original tensor."""
+    x = torch.rand(2, 4, 1, 8, 8)
+    sqrted = SqrtTransform(variables=[_VAR])(_preblock_batch(x))
+    y = sqrted["input"][_SOURCE][_VAR]
+    result = SquareTransform(variables=[_VAR])(_postblock_batch_dict(y))["y_processed"][_SOURCE][_VAR]
+    assert torch.allclose(result, x, atol=1e-5)
+
+
+def test_square_transform_skips_missing_variable():
+    """SquareTransform silently skips variables absent from the batch."""
+    square_block = SquareTransform(variables=["era5/prognostic/3d/MISSING"])
+    result = square_block(_postblock_batch_dict(torch.ones(1, 1, 1, 4, 4)))
+    assert _VAR in result["y_processed"][_SOURCE]
+
+
+def test_square_transform_negative_input():
+    """Squaring slightly negative values gives non-negative results."""
+    y = torch.tensor([-0.01, 0.0, 0.1, 1.0]).reshape(1, 4, 1, 1, 1)
+    result = SquareTransform(variables=[_VAR])(_postblock_batch_dict(y))["y_processed"][_SOURCE][_VAR]
+    assert (result >= 0).all()
+
+
+# ---------------------------------------------------------------------------
+# ExpTransform and SquareTransform — lazy expansion (variables=[] and partial paths)
+# ---------------------------------------------------------------------------
+
+_LAZY_VARS = ["era5/prognostic/3d/Q", "era5/prognostic/3d/T", "era5/static/2d/Z"]
+_LAZY_SOURCE = "era5"
+_LAZY_SHAPE = (1, 1, 1, 4, 4)
+
+
+def _lazy_postblock_batch(key="y_processed"):
+    return {key: {_LAZY_SOURCE: {v: torch.rand(*_LAZY_SHAPE) + 0.1 for v in _LAZY_VARS}}}
+
+
+def test_exp_transform_empty_variables_transforms_all():
+    """variables=[] expands to all variables and transforms every one."""
+    batch = _lazy_postblock_batch()
+    originals = {v: batch["y_processed"][_LAZY_SOURCE][v].clone() for v in _LAZY_VARS}
+    result = ExpTransform(variables=[])(batch)
+    for v in _LAZY_VARS:
+        assert not torch.allclose(result["y_processed"][_LAZY_SOURCE][v].float(), originals[v].float()), (
+            f"variables=[] should have transformed {v}"
+        )
+
+
+def test_exp_transform_partial_path_expands_to_matching_vars():
+    """A partial path transforms exactly the variables under that hierarchy."""
+    batch = _lazy_postblock_batch()
+    prog_vars = [v for v in _LAZY_VARS if "prognostic" in v]
+    non_prog_vars = [v for v in _LAZY_VARS if "prognostic" not in v]
+    originals = {v: batch["y_processed"][_LAZY_SOURCE][v].clone() for v in _LAZY_VARS}
+
+    result = ExpTransform(variables=[f"{_LAZY_SOURCE}/prognostic"])(batch)
+
+    for v in prog_vars:
+        assert not torch.allclose(result["y_processed"][_LAZY_SOURCE][v].float(), originals[v].float()), (
+            f"partial path should have transformed {v}"
+        )
+    for v in non_prog_vars:
+        assert torch.allclose(result["y_processed"][_LAZY_SOURCE][v].float(), originals[v].float()), (
+            f"partial path should NOT have transformed {v}"
+        )
+
+
+def test_square_transform_empty_variables_transforms_all():
+    """variables=[] expands to all variables and transforms every one."""
+    batch = {"y_processed": {_LAZY_SOURCE: {v: torch.rand(*_LAZY_SHAPE) for v in _LAZY_VARS}}}
+    originals = {v: batch["y_processed"][_LAZY_SOURCE][v].clone() for v in _LAZY_VARS}
+    result = SquareTransform(variables=[])(batch)
+    for v in _LAZY_VARS:
+        assert not torch.allclose(result["y_processed"][_LAZY_SOURCE][v].float(), originals[v].float()), (
+            f"variables=[] should have transformed {v}"
+        )
+
+
+def test_square_transform_partial_path_expands_to_matching_vars():
+    """A partial path transforms exactly the variables under that hierarchy."""
+    batch = {"y_processed": {_LAZY_SOURCE: {v: torch.rand(*_LAZY_SHAPE) for v in _LAZY_VARS}}}
+    prog_vars = [v for v in _LAZY_VARS if "prognostic" in v]
+    non_prog_vars = [v for v in _LAZY_VARS if "prognostic" not in v]
+    originals = {v: batch["y_processed"][_LAZY_SOURCE][v].clone() for v in _LAZY_VARS}
+
+    result = SquareTransform(variables=[f"{_LAZY_SOURCE}/prognostic"])(batch)
+
+    for v in prog_vars:
+        assert not torch.allclose(result["y_processed"][_LAZY_SOURCE][v].float(), originals[v].float()), (
+            f"partial path should have transformed {v}"
+        )
+    for v in non_prog_vars:
+        assert torch.allclose(result["y_processed"][_LAZY_SOURCE][v].float(), originals[v].float()), (
+            f"partial path should NOT have transformed {v}"
+        )
 
 
 if __name__ == "__main__":

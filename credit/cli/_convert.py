@@ -73,9 +73,9 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
     pre_target = {}  # prognostic only (model prediction targets)
     pre_keys = []
 
-    # --- postblock dict: {source: {full_key: scaler}}
-    # Must match y_processed structure written by Reconstruct.
-    post_dict = {}
+    # --- postblock dict: {"target": {source: {full_key: scaler}}}
+    # BridgeScalerTransform always slices ["target"] — match that structure here.
+    post_dict = {"target": {}}
 
     for (field_type, dim), varnames in var_groups.items():
         for varname in varnames:
@@ -88,7 +88,7 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
             pre_keys.append(full_key)
             if field_type in ("prognostic", "diagnostic"):
                 pre_target[full_key] = sc
-                post_dict.setdefault(source_name, {})[full_key] = sc
+                post_dict["target"].setdefault(source_name, {})[full_key] = sc
 
     ds_mean.close()
     ds_std.close()
@@ -214,6 +214,30 @@ def _convert(args: argparse.Namespace) -> None:
     if trainer_type in V1_TYPES:
         conf["trainer"]["type"] = "era5-gen2"
         changes.append(f"trainer.type: '{trainer_type}' → 'era5-gen2'")
+
+    # trainer.parallelism — required by the v2 trainer; replaces legacy trainer.mode
+    if "parallelism" not in conf["trainer"]:
+        mode = conf["trainer"].pop("mode", "none")
+        domain_size = conf["trainer"].pop("domain_parallel_size", 1)
+        _mode_map = {
+            "fsdp": {"data": "fsdp2", "tensor": 1, "domain": 1},
+            "ddp": {"data": "ddp", "tensor": 1, "domain": 1},
+            "domain_parallel": {"data": "none", "tensor": 1, "domain": domain_size},
+            "fsdp+domain_parallel": {"data": "fsdp2", "tensor": 1, "domain": domain_size},
+        }
+        conf["trainer"]["parallelism"] = _mode_map.get(mode, {"data": "none", "tensor": 1, "domain": 1})
+        changes.append(f"trainer.mode: '{mode}' → trainer.parallelism: {conf['trainer']['parallelism']}")
+        if mode in ("fsdp", "fsdp+domain_parallel"):
+            print(
+                "WARNING: fsdp (FSDP1) checkpoints (model_checkpoint.pt / "
+                "optimizer_checkpoint.pt) cannot be resumed under fsdp2, which "
+                "reads checkpoint.pt['model_state_dict']. Existing FSDP1 runs "
+                "must keep their original config to resume; use the converted "
+                "config for new runs."
+            )
+    elif "mode" in conf["trainer"]:
+        conf["trainer"].pop("mode")
+        changes.append("removed legacy trainer.mode (parallelism block already present)")
 
     # data schema: v1 flat → v2 nested source
     _V1_DATA_FLAT_KEYS = {
@@ -360,7 +384,7 @@ def _convert(args: argparse.Namespace) -> None:
             if pre_keys is not None:
                 per_step_pre = conf.setdefault("preblocks", {}).setdefault("per_step", {})
                 per_step_pre["scaler"] = {
-                    "type": "bridgescaler_transformer",
+                    "type": "bridgescaler_transform",
                     "args": {
                         "scaler_path": pre_json,
                         "variables": pre_keys,
@@ -371,15 +395,15 @@ def _convert(args: argparse.Namespace) -> None:
                 per_step_post = conf.setdefault("postblocks", {}).setdefault("per_step", {})
                 per_step_post["reconstruct"] = {"type": "reconstruct"}
                 per_step_post["scaler"] = {
-                    "type": "bridgescaler_transformer",
+                    "type": "bridgescaler_transform",
                     "args": {
                         "scaler_path": post_json,
                         "variables": post_prog_vars,
                         "method": "inverse_transform",
                     },
                 }
-                changes.append(f"preblocks.per_step.scaler: bridgescaler_transformer → {pre_json}")
-                changes.append(f"postblocks.per_step.scaler: bridgescaler_transformer (inverse) → {post_json}")
+                changes.append(f"preblocks.per_step.scaler: bridgescaler_transform → {pre_json}")
+                changes.append(f"postblocks.per_step.scaler: bridgescaler_transform (inverse) → {post_json}")
             else:
                 # Fallback if bridgescaler/torch not available
                 per_step_pre = conf.setdefault("preblocks", {}).setdefault("per_step", {})

@@ -15,10 +15,10 @@ which require an initialised process group):
 
     load_dataset -> load_dataloader -> cycle -> build_preblocks
         -> apply_preblocks_before_scaler (log transform)
-        -> BridgeScalerTransformer.fit_scaler_batch   (repeated, one call per batch)
+        -> BridgeScalerTransform.fit_scaler_batch   (repeated, one call per batch)
 
 The fitted scalers are then combined across rounds (mirroring the cross-rank ``np.sum`` in ``main``), saved, and
-reloaded through ``BridgeScalerTransformer`` to verify the transform path.
+reloaded through ``BridgeScalerTransform`` to verify the transform path.
 
 The data is pulled from the public WeatherBench2 64x32 (~5.6 deg) GCS store. If the store is unreachable the
 network-dependent tests skip rather than fail. ``channels_last=False`` is used so the scalers compute per-level
@@ -35,7 +35,7 @@ import torch
 try:
     from bridgescaler import save_scaler_dict, scale_var_dict  # noqa: F401
     from credit.preblock import build_preblocks, apply_preblocks_before_scaler
-    from credit.preblock.scaler import BridgeScalerTransformer
+    from credit.preblock.scaler import BridgeScalerTransform
     from credit.trainers.utils import load_dataset, load_dataloader, cycle
 
     _DEPS_AVAILABLE = True
@@ -103,7 +103,7 @@ def _make_conf(save_loc: str, scaler_path: str) -> dict:
                 # Placeholder scaler block so apply_preblocks_before_scaler stops here;
                 # the per-test scalers below are built separately.
                 "scaler": {
-                    "type": "bridgescaler_transformer",
+                    "type": "bridgescaler_transform",
                     "args": {
                         "variables": [],
                         "scaler_path": scaler_path,
@@ -122,14 +122,14 @@ def _make_conf(save_loc: str, scaler_path: str) -> dict:
 
 
 def _fit_over_rounds(scaler_type: str, batches: list, scaler_path: str):
-    """Run BridgeScalerTransformer.fit_scaler_batch over every batch.
+    """Run BridgeScalerTransform.fit_scaler_batch over every batch.
 
     fit_scaler_batch accumulates the fit internally (running merge across calls),
     so the final return value is the combined fit over all batches.
 
     Returns ``(transformer, combined_scaler_dict)``.
     """
-    transformer = BridgeScalerTransformer(
+    transformer = BridgeScalerTransform(
         scaler_path=scaler_path,
         variables=[],  # expand to all variables present in the batch
         method="transform",
@@ -288,7 +288,7 @@ def test_fit_standard_temperature_values_reasonable(processed_batches, tmp_path)
 @_skip_no_deps
 @pytest.mark.parametrize("scaler_type", SCALER_TYPES)
 def test_transform_distribution_properties(scaler_type, processed_batches, tmp_path):
-    """Save the fitted scaler, reload it through BridgeScalerTransformer, and check
+    """Save the fitted scaler, reload it through BridgeScalerTransform, and check
     that transforming the data yields the distribution each scaler promises."""
     batches, _ = processed_batches
     _, combined = _fit_over_rounds(scaler_type, batches, str(tmp_path / "fit.json"))
@@ -296,7 +296,7 @@ def test_transform_distribution_properties(scaler_type, processed_batches, tmp_p
     # Persist and reload through the transformer's own load path (method="transform").
     scaler_file = str(tmp_path / "combined.json")
     save_scaler_dict(combined, scaler_file)
-    transformer = BridgeScalerTransformer(
+    transformer = BridgeScalerTransform(
         scaler_path=scaler_file,
         variables=[],
         method="transform",
@@ -330,10 +330,10 @@ def test_transform_inverse_round_trip(processed_batches, tmp_path):
     scaler_file = str(tmp_path / "combined.json")
     save_scaler_dict(combined, scaler_file)
 
-    fwd = BridgeScalerTransformer(
+    fwd = BridgeScalerTransform(
         scaler_path=scaler_file, variables=[], method="transform", scaler_params={"channels_last": False}
     )
-    inv = BridgeScalerTransformer(
+    inv = BridgeScalerTransform(
         scaler_path=scaler_file, variables=[], method="inverse_transform", scaler_params={"channels_last": False}
     )
 
@@ -344,7 +344,7 @@ def test_transform_inverse_round_trip(processed_batches, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# BridgeScalerTransformer unit behavior (credit/preblock/scaler.py)
+# BridgeScalerTransform unit behavior (credit/preblock/scaler.py)
 # ---------------------------------------------------------------------------
 
 
@@ -352,7 +352,7 @@ def test_transform_inverse_round_trip(processed_batches, tmp_path):
 def test_variable_selection_expands_empty_list(processed_batches, tmp_path):
     """An empty ``variables`` list expands to every variable in the batch on first fit."""
     batches, _ = processed_batches
-    transformer = BridgeScalerTransformer(
+    transformer = BridgeScalerTransform(
         scaler_path=str(tmp_path / "scaler.json"),
         variables=[],
         method="transform",
@@ -371,7 +371,7 @@ def test_variable_selection_expands_empty_list(processed_batches, tmp_path):
 def test_fit_scaler_batch_returns_nested_scaler_dict(processed_batches, tmp_path):
     """fit_scaler_batch returns a nested [data_type][source][var] dict of fitted scalers."""
     batches, _ = processed_batches
-    transformer = BridgeScalerTransformer(
+    transformer = BridgeScalerTransform(
         scaler_path=str(tmp_path / "scaler.json"),
         variables=[],
         method="transform",
@@ -390,7 +390,7 @@ def test_fit_scaler_batch_accumulates_across_rounds(processed_batches, tmp_path)
     """Repeated fit_scaler_batch calls accumulate statistics (running merge), they
     do not overwrite the previous fit."""
     batches, _ = processed_batches
-    transformer = BridgeScalerTransformer(
+    transformer = BridgeScalerTransform(
         scaler_path=str(tmp_path / "scaler.json"),
         variables=[],
         method="transform",
@@ -422,7 +422,7 @@ def test_fit_after_existing_scaler_file_raises(processed_batches, tmp_path):
     _, combined = _fit_over_rounds("standard", batches, str(tmp_path / "fit.json"))
     save_scaler_dict(combined, scaler_file)
 
-    loaded = BridgeScalerTransformer(
+    loaded = BridgeScalerTransform(
         scaler_path=scaler_file, variables=[], method="transform", scaler_params={"channels_last": False}
     )
     assert loaded.scaler_template is None
