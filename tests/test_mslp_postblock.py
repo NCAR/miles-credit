@@ -142,18 +142,17 @@ OUTPUT_VAR = f"{SRC}/derived_diagnostic/2d/mean_sea_level_pressure"
 
 
 def _make_batch(B=2, n_time=1, H=8, W=16):
-    """Build a minimal prediction dict as if Reconstruct has already run."""
+    """Build a minimal batch dict as if Reconstruct has already run.
+
+    Prognostic outputs live in ``y_processed``; the static PHIS field lives in
+    ``ic_raw``, mirroring the rollout state dict in trainers/rollout_utils.py.
+    """
     sp = torch.full((B, 1, n_time, H, W), 101_000.0)
     t2m = torch.full((B, 1, n_time, H, W), 285.0)
     phis = torch.full((B, 1, 1, H, W), 9_810.0)  # ~1000 m elevation
     return {
-        "prediction": {
-            SRC: {
-                SP_VAR: sp,
-                T2M_VAR: t2m,
-                PHIS_VAR: phis,
-            }
-        }
+        "y_processed": {SRC: {SP_VAR: sp, T2M_VAR: t2m}},
+        "ic_raw": {SRC: {PHIS_VAR: phis}},
     }
 
 
@@ -161,19 +160,19 @@ def test_mslp_diagnostic_output_shape():
     """Output tensor has shape (B, 1, n_time, H, W)."""
     B, n_time, H, W = 2, 1, 8, 16
     batch = _make_batch(B, n_time, H, W)
-    mod = MSLPDiagnostic(data_keys=["prediction"])
+    mod = MSLPDiagnostic()
     out = mod(batch)
-    assert OUTPUT_VAR in out["prediction"][SRC]
-    assert out["prediction"][SRC][OUTPUT_VAR].shape == (B, 1, n_time, H, W)
+    assert OUTPUT_VAR in out["y_processed"][SRC]
+    assert out["y_processed"][SRC][OUTPUT_VAR].shape == (B, 1, n_time, H, W)
 
 
 def test_mslp_diagnostic_greater_than_sp():
     """MSLP > SP when surface is above sea level."""
     batch = _make_batch()
-    mod = MSLPDiagnostic(data_keys=["prediction"])
+    mod = MSLPDiagnostic()
     out = mod(batch)
-    result = out["prediction"][SRC][OUTPUT_VAR]
-    sp = batch["prediction"][SRC][SP_VAR]
+    result = out["y_processed"][SRC][OUTPUT_VAR]
+    sp = batch["y_processed"][SRC][SP_VAR]
     assert (result > sp).all()
 
 
@@ -183,10 +182,10 @@ def test_mslp_diagnostic_finite():
     sp = torch.rand(B, 1, n_time, H, W) * 20_000 + 85_000
     t2m = torch.rand(B, 1, n_time, H, W) * 40 + 255
     phis = torch.rand(B, 1, 1, H, W) * 2_000 * GRAVITY
-    batch = {"prediction": {SRC: {SP_VAR: sp, T2M_VAR: t2m, PHIS_VAR: phis}}}
-    mod = MSLPDiagnostic(data_keys=["prediction"])
+    batch = {"y_processed": {SRC: {SP_VAR: sp, T2M_VAR: t2m}}, "ic_raw": {SRC: {PHIS_VAR: phis}}}
+    mod = MSLPDiagnostic()
     out = mod(batch)
-    assert torch.isfinite(out["prediction"][SRC][OUTPUT_VAR]).all()
+    assert torch.isfinite(out["y_processed"][SRC][OUTPUT_VAR]).all()
 
 
 def test_mslp_diagnostic_sea_level_identity():
@@ -195,28 +194,36 @@ def test_mslp_diagnostic_sea_level_identity():
     sp = torch.rand(B, 1, 1, H, W) * 5_000 + 98_000
     t2m = torch.rand(B, 1, 1, H, W) * 30 + 265
     phis = torch.zeros(B, 1, 1, H, W)
-    batch = {"prediction": {SRC: {SP_VAR: sp, T2M_VAR: t2m, PHIS_VAR: phis}}}
-    mod = MSLPDiagnostic(data_keys=["prediction"])
+    batch = {"y_processed": {SRC: {SP_VAR: sp, T2M_VAR: t2m}}, "ic_raw": {SRC: {PHIS_VAR: phis}}}
+    mod = MSLPDiagnostic()
     out = mod(batch)
-    assert torch.allclose(out["prediction"][SRC][OUTPUT_VAR], sp, rtol=1e-5)
+    assert torch.allclose(out["y_processed"][SRC][OUTPUT_VAR], sp, rtol=1e-5)
 
 
 def test_mslp_diagnostic_missing_key_raises():
-    """Requesting a data_key absent from batch_dict raises ValueError."""
+    """A batch_dict missing the configured key raises ValueError."""
     batch = _make_batch()
-    mod = MSLPDiagnostic(data_keys=["prediction", "target"])
-    with pytest.raises(ValueError, match="target"):
+    mod = MSLPDiagnostic(key="target_processed")
+    with pytest.raises(ValueError, match="target_processed"):
         mod(batch)
 
 
-def test_mslp_diagnostic_processes_multiple_keys():
-    """Both 'prediction' and 'target' get the output written."""
+def test_mslp_diagnostic_missing_static_key_raises():
+    """A batch_dict missing the static source key raises ValueError."""
     batch = _make_batch()
-    batch["target"] = {SRC: dict(batch["prediction"][SRC])}
-    mod = MSLPDiagnostic(data_keys=["prediction", "target"])
+    del batch["ic_raw"]
+    mod = MSLPDiagnostic()
+    with pytest.raises(ValueError, match="ic_raw"):
+        mod(batch)
+
+
+def test_mslp_diagnostic_custom_key():
+    """The output dict can live under a non-default batch_dict key."""
+    batch = _make_batch()
+    batch["target_processed"] = batch.pop("y_processed")
+    mod = MSLPDiagnostic(key="target_processed")
     out = mod(batch)
-    assert OUTPUT_VAR in out["prediction"][SRC]
-    assert OUTPUT_VAR in out["target"][SRC]
+    assert OUTPUT_VAR in out["target_processed"][SRC]
 
 
 def test_mslp_diagnostic_phis_broadcasts_over_time():
@@ -225,9 +232,9 @@ def test_mslp_diagnostic_phis_broadcasts_over_time():
     sp = torch.full((B, 1, n_time, H, W), 90_000.0)
     t2m = torch.full((B, 1, n_time, H, W), 270.0)
     phis = torch.full((B, 1, 1, H, W), 5_000.0 * GRAVITY)  # static, n_time=1
-    batch = {"prediction": {SRC: {SP_VAR: sp, T2M_VAR: t2m, PHIS_VAR: phis}}}
-    mod = MSLPDiagnostic(data_keys=["prediction"])
+    batch = {"y_processed": {SRC: {SP_VAR: sp, T2M_VAR: t2m}}, "ic_raw": {SRC: {PHIS_VAR: phis}}}
+    mod = MSLPDiagnostic()
     out = mod(batch)
-    result = out["prediction"][SRC][OUTPUT_VAR]
+    result = out["y_processed"][SRC][OUTPUT_VAR]
     assert result.shape == (B, 1, n_time, H, W)
     assert torch.isfinite(result).all()
