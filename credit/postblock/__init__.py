@@ -9,6 +9,8 @@ from credit.postblock.square import SquareTransform
 
 from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.postblock.geopotential import GeopotentialDiagnostic
+from credit.postblock.hybrid_interp import HybridLevelInterp
+from credit.postblock.pressure_interp import PressureInterpDiagnostic
 
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
@@ -22,6 +24,8 @@ POSTBLOCK_REGISTRY = {
     "global_water_fixer": GlobalWaterFixer,
     "global_energy_fixer": GlobalEnergyFixer,
     "geopotential_diagnostic": GeopotentialDiagnostic,
+    "pressure_interp_diagnostic": PressureInterpDiagnostic,
+    "hybrid_level_interp": HybridLevelInterp,
 }
 
 _VALID_SECTIONS = {"per_step", "post_rollout"}
