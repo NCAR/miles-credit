@@ -217,7 +217,7 @@ Examples:
     )
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
-    preblocks = build_preblocks(conf["preblocks"])
+    preblocks = build_preblocks(conf)
     scaler_block_key = None
     for k, v in preblocks.items():
         if isinstance(v, BridgeScalerTransform):

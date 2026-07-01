@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from credit.applications import train_gen2
-from credit.losses.base_losses import CRPS_LOSSES, is_crps_loss
+from credit.losses import CRPS_LOSSES, is_crps_loss
 
 
 def _write_minimal_gen2_config(tmp_path, loss_name, ensemble_size):

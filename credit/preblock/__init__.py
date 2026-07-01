@@ -1,37 +1,139 @@
+import importlib
+import logging
 import torch
 import torch.nn as nn
 
-from credit.preblock.log import LogTransform
-from credit.preblock.sqrt import SqrtTransform
-from credit.preblock.regrid import Regridder
-from credit.preblock.concat import ConcatToTensor
-from credit.preblock.norm import ERA5Normalizer
-from credit.preblock.fill_values import FillValues
-from credit.preblock.scaler import BridgeScalerTransform
+logger = logging.getLogger(__name__)
 
-
-PREBLOCK_REGISTRY = {
-    "log_transform": LogTransform,
-    "sqrt_transform": SqrtTransform,
-    "regrid": Regridder,
-    "concat": ConcatToTensor,
-    "era5_normalizer": ERA5Normalizer,
-    "fill_values": FillValues,
-    "bridgescaler_transform": BridgeScalerTransform,
+# ---------------------------------------------------------------------------
+# Config-driven dispatch: maps config-file keys → class (used by build_preblocks).
+# Registry entries are either:
+#   (module_path: str, class_name: str)  — built-in lazy entries
+#   cls: type                             — externally registered classes
+_PREBLOCK_REGISTRY = {
+    "log_transform": ("credit.preblock.log", "LogTransform"),
+    "sqrt_transform": ("credit.preblock.sqrt", "SqrtTransform"),
+    "regrid": ("credit.preblock.regrid", "Regridder"),
+    "concat": ("credit.preblock.concat", "ConcatToTensor"),
+    "era5_normalizer": ("credit.preblock.norm", "ERA5Normalizer"),
+    "fill_values": ("credit.preblock.fill_values", "FillValues"),
+    "bridgescaler_transform": ("credit.preblock.scaler", "BridgeScalerTransform"),
 }
 
+# Direct-import table: maps Python class names → class for lazy module attribute access.
+# Enables ``from credit.preblock import LogTransform`` without eager imports; kept for backward compatibility.
+_CLASS_SOURCES = {
+    "LogTransform": ("credit.preblock.log", "LogTransform"),
+    "SqrtTransform": ("credit.preblock.sqrt", "SqrtTransform"),
+    "Regridder": ("credit.preblock.regrid", "Regridder"),
+    "ConcatToTensor": ("credit.preblock.concat", "ConcatToTensor"),
+    "ERA5Normalizer": ("credit.preblock.norm", "ERA5Normalizer"),
+    "FillValues": ("credit.preblock.fill_values", "FillValues"),
+    "BridgeScalerTransform": ("credit.preblock.scaler", "BridgeScalerTransform"),
+}
+
+
+# ---------------------------------------------------------------------------
+# Module __getattr__: called when a name is not found via normal attribute lookup.
+# Resolves names listed in _CLASS_SOURCES lazily so submodules are only imported on first access.
+# Example: ``from credit.preblock import LogTransform`` triggers __getattr__("LogTransform"),
+#          which imports credit.preblock.log on the spot and returns the class.
+def __getattr__(name):
+    if name in _CLASS_SOURCES:
+        module_path, class_name = _CLASS_SOURCES[name]
+        try:
+            module = importlib.import_module(module_path)
+            return getattr(module, class_name)
+        except ImportError as exc:
+            raise AttributeError(f"Cannot import {name!r}: optional dependencies missing.") from exc
+    raise AttributeError(f"module 'credit.preblock' has no attribute {name!r}")
+
+
+# ---------------------------------------------------------------------------
+# Registration
+def register_preblock(block_type):
+    """Decorator that adds an external preblock class to the preblock registry.
+
+    The class must inherit from :class:`credit.preblock.base.BasePreblock` so
+    that the correct ``forward(batch: dict) -> dict`` signature is enforced.
+
+    Args:
+        block_type: Key used in the config ``preblocks.<phase>.<block>.type`` field.
+
+    Example::
+
+        from credit.preblock import register_preblock
+        from credit.preblock.base import BasePreblock
+
+        @register_preblock("my_preblock")
+        class MyPreBlock(BasePreblock):
+            def forward(self, batch: dict) -> dict:
+                ...
+    """
+
+    def decorator(cls):
+        from credit.preblock.base import BasePreblock  # imported here to avoid loading it at module import time
+
+        # isinstance(cls, type) guards against passing an instance or function;
+        # issubclass then confirms it inherits the required base class.
+        if not (isinstance(cls, type) and issubclass(cls, BasePreblock)):
+            raise TypeError(f"register_preblock: '{cls.__name__}' must inherit from credit.preblock.base.BasePreblock.")
+        if block_type in _PREBLOCK_REGISTRY:  # warn instead of silently overwriting
+            logger.warning(f"register_preblock: overwriting existing registry entry for '{block_type}'")
+        _PREBLOCK_REGISTRY[block_type] = cls  # store the class under the given key
+        return cls  # must return the class, otherwise it becomes None after decoration
+
+    return decorator
+
+
+def _load_preblock_entry(block_type):
+    """Return the class for a registered preblock type, importing lazily if needed.
+
+    Raises:
+        ValueError: If block_type is not in _PREBLOCK_REGISTRY.
+        ImportError: If the preblock's module cannot be imported (missing optional dependencies).
+    """
+    if block_type not in _PREBLOCK_REGISTRY:
+        raise ValueError(
+            f"Unknown preblock type '{block_type}'. "
+            f"Available types: {sorted(_PREBLOCK_REGISTRY)}. "
+            "Register a custom preblock with @register_preblock or via custom_objects in your config."
+        )
+    entry = _PREBLOCK_REGISTRY[block_type]
+    if isinstance(entry, tuple):
+        module_path, class_name = entry
+        try:
+            module = importlib.import_module(module_path)
+            return getattr(module, class_name)
+        except ImportError as exc:
+            raise ImportError(
+                f"Preblock type '{block_type}' requires optional dependencies that are not installed. "
+                f"Original error: {exc}"
+            ) from exc
+    return entry  # externally registered class stored directly
+
+
+# ---------------------------------------------------------------------------
+# Building & applying
 _VALID_SECTIONS = {"ic_only", "per_step"}
 
 
 def _build_preblock_section(section_cfg: dict) -> nn.ModuleDict:
     modules = {}
     for name, block_cfg in section_cfg.items():
-        modules[name] = PREBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
+        block_type = block_cfg["type"]
+        if block_type not in _PREBLOCK_REGISTRY:
+            raise KeyError(
+                f"Unknown preblock type {block_type!r} (block name: {name!r}). "
+                f"Available types: {sorted(_PREBLOCK_REGISTRY)}. "
+                "Register a custom preblock with @register_preblock or via custom_objects in your config."
+            )
+        modules[name] = _load_preblock_entry(block_type)(**(block_cfg.get("args") or {}))
     return nn.ModuleDict(modules)
 
 
-def build_preblocks(preblock_cfg: dict | None = None, phase: str = "per_step") -> nn.ModuleDict:
-    """Instantiate preblocks for a single phase from a two-section config.
+def build_preblocks(conf: dict, phase: str = "per_step") -> nn.ModuleDict:
+    """Instantiate preblocks for a single phase from the full CREDIT config.
 
     Config format::
 
@@ -48,8 +150,8 @@ def build_preblocks(preblock_cfg: dict | None = None, phase: str = "per_step") -
 
     Typical usage — build once per phase, store separately::
 
-        ic_preblocks   = build_preblocks(cfg, phase="ic_only")
-        step_preblocks = build_preblocks(cfg, phase="per_step")
+        ic_preblocks   = build_preblocks(conf, phase="ic_only")
+        step_preblocks = build_preblocks(conf, phase="per_step")
 
         # t=0: run both in sequence
         ic_preprocessed    = apply_preblocks(ic_preblocks, batch, device=device)
@@ -59,7 +161,7 @@ def build_preblocks(preblock_cfg: dict | None = None, phase: str = "per_step") -
         preprocessed_batch = apply_preblocks(step_preblocks, rollout_batch, device=device)
 
     Args:
-        preblock_cfg: the full ``preblocks`` config dict (both sections).
+        conf: the full CREDIT config dict.
         phase: which section to build — ``"ic_only"`` or ``"per_step"``.
 
     Returns:
@@ -68,8 +170,14 @@ def build_preblocks(preblock_cfg: dict | None = None, phase: str = "per_step") -
     Raises:
         ValueError: if the config contains keys other than ``"ic_only"`` / ``"per_step"``,
             or if ``phase`` is not one of those values.
+        KeyError: if a block's ``type`` value is not in ``_PREBLOCK_REGISTRY``.
     """
-    cfg = preblock_cfg or {}
+    from credit.registry import (
+        load_custom_objects,
+    )  # imported here so that importing credit.preblock does not automatically load credit.registry
+
+    load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
+    cfg = conf.get("preblocks") or {}  # handles both absent key and explicit null in the config
     unknown = set(cfg) - _VALID_SECTIONS
     if unknown:
         raise ValueError(
@@ -84,6 +192,8 @@ def build_preblocks(preblock_cfg: dict | None = None, phase: str = "per_step") -
 
 def _run_preblock_group(group: nn.ModuleDict, batch: dict, device=None):
     """Sequentially applies a group of preblocks, returning the transformed batch."""
+    from credit.preblock.concat import ConcatToTensor  # needed for isinstance check
+
     meta = None
     target = None
     to_device = True
@@ -127,6 +237,8 @@ def _move_batch_to_device(batch, device):
 
 
 def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=None):
+    from credit.preblock.scaler import BridgeScalerTransform  # needed for isinstance check
+
     for preblock in preblocks.values():
         if isinstance(preblock, BridgeScalerTransform):
             break
@@ -156,7 +268,8 @@ def apply_preblocks(
         device: move output tensors here after concat.
 
     Returns:
-        When concat has run: ``{"x": tensor, "y": tensor, "metadata": ...}``.
+        When concat has run: ``{"x": tensor}`` plus optional ``"y"`` (if a target was
+        produced) and ``"metadata"`` (if metadata was produced) keys.
         Otherwise: the transformed nested batch dict (pre-concat).
     """
     return _run_preblock_group(preblocks, batch, device)

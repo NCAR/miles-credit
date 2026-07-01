@@ -224,7 +224,7 @@ def predict(rank, world_size, conf, p):
     forecast_steps = conf["predict"].get("forecast_steps", conf["predict"].get("days", 1) * (24 // lead_time_periods))
 
     # ---- Preblocks ----
-    preblocks = build_preblocks(conf.get("preblocks", {}))
+    preblocks = build_preblocks(conf)
 
     # ---- Inverse normalization ----
     denorm_mean, denorm_std = _build_output_denorm(conf, device)
