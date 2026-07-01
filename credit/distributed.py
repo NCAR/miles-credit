@@ -526,6 +526,10 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
     # ── 3. Data parallelism ───────────────────────────────────────────────
     dp_mesh = submeshes.get("dp")
 
+    from credit.parallel.mesh import register_dp_group
+
+    register_dp_group(dp_mesh.get_group() if dp_mesh is not None else None)
+
     fsdp2_applied = False
     if data_mode == "fsdp2":
         if dp_size <= 1:
