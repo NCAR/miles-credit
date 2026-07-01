@@ -39,14 +39,15 @@ def load_loss(conf, reduction="none", validation=False):
 
     is_downscaling = "datasets" in conf["data"]
     # downscaling could also use_variable_weights, so it needs to come first
+    mode = "validation" if validation else "train"
     if is_downscaling:
-        logger.info("Loaded DownscalingLoss")
+        logger.info("Loaded DownscalingLoss (%s)", mode)
         return DownscalingLoss(conf, validation=validation)
 
     use_weighted_loss = loss_conf.get("use_latitude_weights", False) or loss_conf.get("use_variable_weights", False)
 
     if use_weighted_loss:
-        logger.info("Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights")
+        logger.info("Loaded VariableTotalLoss2D (%s)", mode)
         return VariableTotalLoss2D(conf, validation=validation)
 
     # Select loss type for training or validation

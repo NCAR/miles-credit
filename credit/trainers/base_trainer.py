@@ -19,6 +19,7 @@ from collections import OrderedDict, defaultdict
 from typing import Any, Dict, Optional, Callable
 
 import numpy as np
+from tqdm import tqdm
 import pandas as pd
 import torch
 from torch.amp import GradScaler
@@ -300,6 +301,7 @@ class BaseTrainer(ABC):
                 logger.info(f"EMA enabled (decay={ema_decay})")
         else:
             self.ema = None
+        logger.info(f"Grad-max-norm: {self.grad_max_norm}")
 
         # ---- TensorBoard setup ----
         use_tb = trainer_conf.get("use_tensorboard", False)
@@ -314,7 +316,7 @@ class BaseTrainer(ABC):
                 tb_dir = os.path.join(self.save_loc, "tensorboard")
                 self.tb_writer = _SummaryWriter(log_dir=tb_dir)
                 logger.info(f"TensorBoard log dir: {tb_dir}")
-                logger.info(f"  View with: tensorboard --logdir {tb_dir}")
+                logger.info(f"View with: tensorboard --logdir {tb_dir}")
         else:
             self.tb_writer = None
 
@@ -595,7 +597,8 @@ class BaseTrainer(ABC):
                         if os.path.exists(src):
                             shutil.copyfile(src, os.path.join(self.save_loc, f"backup_{fname}"))
 
-            logger.info(f"Beginning epoch {epoch}")
+            if any(h.level <= logging.INFO for h in logging.getLogger().handlers):
+                tqdm.write(f"INFO:credit.trainers.base_trainer:Beginning epoch {epoch}")
 
             # Set epoch on sampler/dataset for reproducible distributed shuffling
             if hasattr(train_loader, "sampler") and hasattr(train_loader.sampler, "set_epoch"):
@@ -717,6 +720,12 @@ class BaseTrainer(ABC):
 
             if self.stop_after_epoch:
                 break
+
+        # Shut down DataLoader workers to avoid leaked semaphore warnings at exit
+        for _loader in (train_loader, valid_loader):
+            if _loader is not None:
+                _loader._iterator = None
+        del train_loader, valid_loader
 
         # Close TensorBoard writer
         if self.tb_writer is not None:
