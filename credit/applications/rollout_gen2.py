@@ -199,13 +199,11 @@ Examples:
         device = torch.device("cpu")
 
     # ── Preblocks / postblocks ───────────────────────────────────────────────
-    preblock_cfg = conf.get("preblocks", {})
-    ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
-    step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+    ic_preblocks = build_preblocks(conf, phase="ic_only")
+    step_preblocks = build_preblocks(conf, phase="per_step")
 
-    postblock_cfg = conf.get("postblocks", {})
-    step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
-    rollout_postblocks = build_postblocks(postblock_cfg, phase="post_rollout")
+    step_postblocks = build_postblocks(conf, phase="per_step")
+    rollout_postblocks = build_postblocks(conf, phase="post_rollout")
 
     # ── Model ────────────────────────────────────────────────────────────────
     model = load_model_for_inference(conf, device)
