@@ -1,7 +1,21 @@
 """Tensor Parallelism for CREDIT v2 models.
 
-Applies column/row parallelism to transformer blocks that opt in by declaring
-two class attributes:
+Two implementations live here:
+
+1. Native DTensor TP (``apply_native_tensor_parallel``) — torch's
+   ``parallelize_module`` with Colwise/RowwiseParallel. Blocks opt in by
+   declaring a ``_tp_plan`` dict (see wxformer_next). This is the supported
+   path (issue #415): params keep FQNs and logical shapes, checkpointing
+   comes free through the DCP full-state APIs, and ``fully_shard`` composes
+   on top over a 2D (dp, tp) mesh.
+
+2. Legacy hand-rolled module swapping (``apply_tensor_parallel`` and the
+   Tp*Conv2d/Tp*Linear wrappers) — DISABLED: its contiguous column slicing
+   scrambles fused qkv boundaries and the backward all-reduce at the
+   column-parallel input is missing. The entry point raises; the layer
+   classes remain only as reference and for their unit tests.
+
+Legacy opt-in protocol (unused while disabled):
 
     class MyBlock(nn.Module):
         _tp_col = "proj_up"   # attribute path for the column-parallel layer
@@ -257,6 +271,189 @@ def _to_row_parallel(layer: nn.Module, tp_group):
 
 
 # ---------------------------------------------------------------------------
+# Native DTensor tensor parallelism (issue #415)
+# ---------------------------------------------------------------------------
+
+
+def _has_spectral_norm(layer: nn.Module) -> bool:
+    """True if spectral norm wraps the layer's weight.
+
+    Covers both registration styles: the hook-based ``nn.utils.spectral_norm``
+    used by the wxformer family's ``apply_spectral_norm`` (registers
+    ``weight_orig``/``weight_u``/``weight_v``) and the parametrize-based
+    ``nn.utils.parametrizations.spectral_norm`` (registers
+    ``parametrizations.weight``).
+    """
+    if hasattr(layer, "weight_orig"):
+        return True
+    parametrizations = getattr(layer, "parametrizations", None)
+    return parametrizations is not None and "weight" in parametrizations
+
+
+def supports_native_tp(model: nn.Module) -> bool:
+    """True if any submodule declares a native ``_tp_plan``.
+
+    Models opt in per block::
+
+        class MyBlock(nn.Module):
+            _tp_plan = {"to_q": "colwise", "to_out": "rowwise"}
+
+    Currently only wxformer_next's transformer blocks declare plans (and
+    CubeSphereWxFormer by inheritance).
+    """
+    return any(getattr(m, "_tp_plan", None) for m in model.modules())
+
+
+def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
+    """Apply torch-native DTensor TP to all blocks that declare ``_tp_plan``.
+
+    Uses ``parallelize_module`` with ColwiseParallel/RowwiseParallel, so the
+    sharded parameters become DTensors that keep their FQNs and logical
+    shapes — checkpointing, EMA, and optimizer state work through the same
+    DCP full-state APIs as FSDP2, and ``fully_shard`` over the dp submesh
+    composes on top (2D mesh, the torchtitan configuration).
+
+    Block protocol (mirrors the legacy ``_tp_col``/``_tp_row``):
+      - ``_tp_plan``: dict mapping dotted submodule paths (must resolve to
+        nn.Linear) to ``"colwise"`` or ``"rowwise"``.
+      - ``_tp_constraints(instance, tp_size)`` (optional staticmethod):
+        raises on invalid configurations, e.g. heads % tp_size != 0.
+
+    Requirements enforced here with clear errors:
+      - every planned layer is an nn.Linear (the refactored wxformer_next
+        projections; 1x1 convs are NOT supported — that was the legacy path)
+      - colwise out_features / rowwise in_features divisible by the TP degree
+
+    Spectral norm reduces (does not break) TP: the power-iteration hook mixes
+    plain-tensor u/v buffers with DTensor weights, so blocks whose planned
+    layers carry spectral norm are SKIPPED — left fully replicated on every
+    TP rank — with a warning. The skip is per block, never per layer: a
+    colwise layer's sharded output is only valid feeding its rowwise partner,
+    so the whole colwise/rowwise group stays together. Replicated blocks are
+    still correct (TP peers see identical inputs by the dp contract, and the
+    trainer's sync_replicated_gradients pins the replicas), but for full TP
+    set model.use_spectral_norm: false.
+
+    Args:
+        model: The model to convert (modified in place).
+        tp_mesh: 1-D DeviceMesh for the tensor-parallel dimension.
+
+    Returns:
+        model (same object), with ``_tp_group`` stashed for the trainer's
+        replicated-gradient sync.
+    """
+    from torch.distributed.tensor.parallel import (
+        ColwiseParallel,
+        RowwiseParallel,
+        parallelize_module,
+    )
+
+    styles = {"colwise": ColwiseParallel, "rowwise": RowwiseParallel}
+    tp_size = tp_mesh.size()
+    count = 0
+    skipped = 0
+
+    seen = set()
+    for module in model.modules():
+        mid = id(module)
+        if mid in seen:
+            continue
+        seen.add(mid)
+
+        plan_spec = getattr(module, "_tp_plan", None)
+        if not plan_spec:
+            continue
+
+        # Spectral norm on any planned layer disqualifies the WHOLE block:
+        # a colwise layer's sharded output is only consumed correctly by its
+        # rowwise partner, so the colwise/rowwise group must shard (or stay
+        # replicated) as a unit. A replicated block is still correct — TP
+        # peers see identical inputs (dp contract) and a preceding rowwise
+        # all_reduce already restored the full activation.
+        if any(_has_spectral_norm(_rgetattr(module, path)) for path in plan_spec):
+            skipped += 1
+            continue
+
+        check_fn = getattr(type(module), "_tp_constraints", None)
+        if check_fn is not None:
+            check_fn(module, tp_size)
+
+        plan = {}
+        for path, style in plan_spec.items():
+            layer = _rgetattr(module, path)
+            if not isinstance(layer, nn.Linear):
+                raise TypeError(
+                    f"Native TP: {type(module).__name__}._tp_plan[{path!r}] resolves to "
+                    f"{type(layer).__name__}, but parallelize_module requires nn.Linear. "
+                    "Conv projections must be refactored to Linear (issue #415)."
+                )
+            if style == "colwise" and layer.out_features % tp_size != 0:
+                raise ValueError(
+                    f"Native TP: {type(module).__name__}.{path} out_features="
+                    f"{layer.out_features} not divisible by tp_size={tp_size}."
+                )
+            if style == "rowwise" and layer.in_features % tp_size != 0:
+                raise ValueError(
+                    f"Native TP: {type(module).__name__}.{path} in_features="
+                    f"{layer.in_features} not divisible by tp_size={tp_size}."
+                )
+            plan[path] = styles[style]()
+
+        parallelize_module(module, tp_mesh, plan)
+        count += 1
+
+    if count == 0 and skipped == 0:
+        raise ValueError(
+            "apply_native_tensor_parallel: no blocks with _tp_plan found. Check "
+            "supports_native_tp(model) before calling, or use a model that opts in "
+            "(wxformer_next family)."
+        )
+    if skipped and count:
+        logger.warning(
+            f"Native TP is REDUCED: {count} block(s) sharded, {skipped} block(s) skipped "
+            "because their projection layers carry spectral norm (the power-iteration "
+            "hook is incompatible with DTensor sharding). Skipped blocks stay fully "
+            "replicated on every TP rank. For full tensor parallelism set "
+            "model.use_spectral_norm: false."
+        )
+    elif skipped:
+        logger.warning(
+            f"Native TP had NO effect: all {skipped} _tp_plan block(s) carry spectral "
+            f"norm, so nothing was sharded. Every parameter is replicated and the "
+            f"{tp_size} TP ranks repeat identical compute with no memory savings. "
+            "Training remains correct (replicas are kept in sync), but set "
+            "model.use_spectral_norm: false to actually shard the model, or set "
+            "trainer.parallelism.tensor: 1 to reclaim the ranks for data parallelism."
+        )
+    else:
+        logger.info(f"Native tensor parallelism applied to {count} block(s), degree={tp_size}")
+
+    # Stash the group so the trainer can sync replicated-parameter gradients
+    # across the TP dimension at accumulation boundaries. _tp_native marks
+    # the model for the checkpoint paths: native TP params keep their FQNs
+    # and logical shapes, so the DCP full-state APIs save/load them like any
+    # FSDP2 DTensor (the legacy warn-on-save / raise-on-resume guards do not
+    # apply).
+    model._tp_group = _tp_group_from_mesh(tp_mesh)
+    model._tp_native = True
+    return model
+
+
+def _is_tp_sharded_param(p) -> bool:
+    """True if p is a DTensor sharded along a mesh dim named 'tp'.
+
+    Works both before fully_shard (1-D ('tp',) mesh from parallelize_module)
+    and after (2-D ('dp', 'tp') mesh from the FSDP2 composition), and is
+    wrapper-agnostic (no FQN matching, so AC/FSDP2 prefixes don't matter).
+    """
+    placements = getattr(p, "placements", None)
+    if placements is None:
+        return False
+    names = p.device_mesh.mesh_dim_names or ()
+    return any(name == "tp" and placement.is_shard() for name, placement in zip(names, placements))
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -283,12 +480,14 @@ def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
         model (same object, modified in-place).
     """
     raise NotImplementedError(
-        "Tensor parallelism (trainer.parallelism.tensor > 1) is disabled: the "
-        "hand-rolled column sharding slices fused projections (e.g. WXFormer's "
-        "to_qkv) across q/k/v boundaries, and the backward all-reduce at the "
-        "column-parallel input (Megatron's 'f' operator) is missing, so "
-        "tensor > 1 silently trains wrong outputs and gradients. Native TP "
-        "via torch parallelize_module lands with issue #415. Set "
+        "Tensor parallelism (trainer.parallelism.tensor > 1) is disabled for "
+        "this model: the hand-rolled column sharding slices fused projections "
+        "(e.g. WXFormer's to_qkv) across q/k/v boundaries, and the backward "
+        "all-reduce at the column-parallel input (Megatron's 'f' operator) is "
+        "missing, so tensor > 1 silently trains wrong outputs and gradients. "
+        "Native DTensor TP (issue #415) is available for models that declare "
+        "_tp_plan blocks — currently the wxformer_next family (model type "
+        "nextgen_wxformer). Use one of those, or set "
         "trainer.parallelism.tensor: 1."
     )
     tp_group = _tp_group_from_mesh(tp_mesh)
@@ -335,13 +534,14 @@ def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
 def sync_replicated_gradients(model: nn.Module, tp_group) -> None:
     """Average gradients of replicated (non-TP-sharded) params across the TP group.
 
-    The Tp col/row weights are genuinely sharded per rank and must NOT be
-    synced. Everything else (embeddings, norms, non-TP blocks, and the
-    replicated row-parallel biases) holds an identical copy on every TP rank.
-    Their gradients are identical in exact arithmetic given identical inputs,
-    but with data=none nothing enforces that, and nondeterministic kernels
-    drift the replicas apart over a long run. Averaging at the accumulation
-    boundary pins the replicas together.
+    The TP-sharded weights are genuinely different per rank and must NOT be
+    synced: legacy Tp col/row wrapper params, and (native path) DTensors with
+    a Shard placement on the 'tp' mesh dim. Everything else (embeddings,
+    norms, non-TP blocks, and the replicated row-parallel biases) holds an
+    identical copy on every TP rank. Their gradients are identical in exact
+    arithmetic given identical inputs, but with data=none nothing enforces
+    that, and nondeterministic kernels drift the replicas apart over a long
+    run. Averaging at the accumulation boundary pins the replicas together.
 
     See credit.parallel.collectives.allreduce_grads_avg for the bucketing and
     DTensor handling. TP peers share the same dp coordinate, so their DTensor
@@ -357,6 +557,10 @@ def sync_replicated_gradients(model: nn.Module, tp_group) -> None:
             sharded_ids.update(id(p) for p in m.linear.parameters())
 
     allreduce_grads_avg(
-        (p.grad for p in model.parameters() if p.grad is not None and id(p) not in sharded_ids),
+        (
+            p.grad
+            for p in model.parameters()
+            if p.grad is not None and id(p) not in sharded_ids and not _is_tp_sharded_param(p)
+        ),
         tp_group,
     )

@@ -18,7 +18,7 @@ from credit.parallel.domain import (
     unpad_shard_interp,
     sync_domain_gradients,
 )
-from credit.parallel.collectives import all_reduce_avg
+from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.fsdp2 import fsdp2_is_applied
 from credit.postblock import build_postblocks, apply_postblocks
 from credit.preblock import build_preblocks, apply_preblocks
@@ -346,27 +346,30 @@ class TrainerERA5Gen2(BaseTrainer):
                 if self.grad_max_norm == "dynamic":
                     # Global L2 norm: sum SQUARED norms across ranks, then sqrt.
                     # (Summing the norms themselves and sqrt-ing mixes units.)
-                    # Note this still over-counts replicated grads when tp/domain
-                    # ranks hold copies; acceptable for a clip threshold.
-                    # FSDP2 grads are DTensors; dist.all_reduce fails on DTensors
-                    # directly, so extract the local shard first with .to_local().
-                    local_sq = (
-                        torch.stack(
-                            [
-                                (p.grad.to_local() if hasattr(p.grad, "to_local") else p.grad).detach().norm(2)
-                                for p in self.model.parameters()
-                                if p.grad is not None
-                            ]
-                        )
-                        .square()
-                        .sum()
-                    )
-                    if self.distributed:
-                        dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
-                    global_norm = local_sq.sqrt()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
+                    # DTensor grads (FSDP2 / native TP) go through the
+                    # mesh-grouped total_grad_norm, whose full_tensor()
+                    # reduction is already global — no extra all_reduce.
+                    # Plain grads keep the local sq-sum + SUM all_reduce; that
+                    # still over-counts replicated grads when tp/domain ranks
+                    # hold copies; acceptable for a clip threshold.
+                    from torch.distributed.tensor import DTensor
+
+                    plain, sharded = [], []
+                    for p in self.model.parameters():
+                        if p.grad is not None:
+                            (sharded if isinstance(p.grad, DTensor) else plain).append(p.grad.detach())
+                    sq_terms = []
+                    if plain:
+                        local_sq = torch.stack([g.norm(2) for g in plain]).square().sum()
+                        if self.distributed:
+                            dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
+                        sq_terms.append(local_sq)
+                    if sharded:
+                        sq_terms.append(total_grad_norm(sharded, 2.0).square())
+                    global_norm = torch.stack(sq_terms).sum().sqrt()
+                    clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
                 elif self.grad_max_norm > 0.0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
+                    clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
 
                 scaler.step(optimizer)
                 scaler.update()
