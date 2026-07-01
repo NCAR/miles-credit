@@ -9,6 +9,7 @@ import tqdm
 
 import optuna
 
+from credit.losses.base_losses import is_crps_loss
 from credit.parallel.domain import (
     gather_spatial,
     get_domain_manager,
@@ -90,7 +91,7 @@ class TrainerERA5Gen2(BaseTrainer):
         source = next(iter(data_conf["source"].values()))
         vars_conf = source["variables"]
         diag = vars_conf.get("diagnostic") or {}
-        num_levels = len(source.get("levels", []))
+        num_levels = len(source.get("levels") or [])
         self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
 
         self.retain_graph = data_conf.get("retain_graph", False)
@@ -118,6 +119,16 @@ class TrainerERA5Gen2(BaseTrainer):
 
         # If True, log a warning on NaN loss instead of raising TrialPruned.
         self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
+
+        loss_name = conf.get("loss", {}).get("training_loss")
+        if is_crps_loss(loss_name) and self.ensemble_size <= 1:
+            raise ValueError(
+                f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "
+                f"got trainer.ensemble_size={self.ensemble_size}."
+            )
+        self.is_ring_crps = loss_name == "ring-crps"
+        self.is_crps_ensemble = is_crps_loss(loss_name) and self.ensemble_size > 1
+        self.use_batch_axis_ensemble = self.ensemble_size > 1 and not self.is_ring_crps
 
     # ------------------------------------------------------------------
     # Domain-parallel forward helpers (shared by train and validate)
@@ -281,7 +292,7 @@ class TrainerERA5Gen2(BaseTrainer):
                         )
                     )
 
-                if self.ensemble_size > 1:
+                if self.use_batch_axis_ensemble:
                     full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
 
                 if self.flag_clamp:
@@ -308,6 +319,12 @@ class TrainerERA5Gen2(BaseTrainer):
                             full_data_dict["y_pred"],
                         ).mean()
                     accum_log(logs, {"loss": loss.item()})
+                    if self.is_crps_ensemble:
+                        # Ensemble spread proxy: std of member errors.
+                        target = full_data_dict["y"]
+                        if full_data_dict["y_pred"].shape[0] == target.shape[0] * self.ensemble_size:
+                            target = torch.repeat_interleave(target, self.ensemble_size, 0)
+                        accum_log(logs, {"std": (full_data_dict["y_pred"] - target).detach().std().item()})
                     scaler.scale(loss / grad_accum_every).backward(retain_graph=self.retain_graph)
                 # No barrier here: NCCL collectives (grad sync, halo exchange)
                 # already order ranks; a per-timestep barrier only adds latency.
@@ -371,6 +388,12 @@ class TrainerERA5Gen2(BaseTrainer):
                 all_reduce_avg(batch_loss)
             results_dict["train_loss"].append(batch_loss[0].item())
             results_dict["train_forecast_len"].append(self.forecast_len)
+
+            if self.is_crps_ensemble and "std" in logs:
+                batch_std = torch.Tensor([logs["std"]]).to(self.device)
+                if self.distributed:
+                    dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
+                results_dict["train_std"].append(batch_std[0].item())
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(results_dict["train_loss"])
@@ -459,7 +482,7 @@ class TrainerERA5Gen2(BaseTrainer):
                             )
                         )
 
-                    if self.ensemble_size > 1:
+                    if self.use_batch_axis_ensemble:
                         full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
 
                     if self.flag_clamp:

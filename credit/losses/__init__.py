@@ -1,10 +1,20 @@
 import logging
 from credit.losses.base_losses import base_losses
-from credit.losses.weighted_loss import VariableTotalLoss2D
-from credit.losses.downscaling_loss import DownscalingLoss
 
 
 logger = logging.getLogger(__name__)
+
+
+def __getattr__(name):
+    if name == "VariableTotalLoss2D":
+        from credit.losses.weighted_loss import VariableTotalLoss2D
+
+        return VariableTotalLoss2D
+    if name == "DownscalingLoss":
+        from credit.losses.downscaling_loss import DownscalingLoss
+
+        return DownscalingLoss
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def load_loss(conf, reduction="none", validation=False):
@@ -40,12 +50,23 @@ def load_loss(conf, reduction="none", validation=False):
     is_downscaling = "datasets" in conf["data"]
     # downscaling could also use_variable_weights, so it needs to come first
     if is_downscaling:
+        from credit.losses.downscaling_loss import DownscalingLoss
+
         logger.info("Loaded DownscalingLoss")
         return DownscalingLoss(conf, validation=validation)
 
     use_weighted_loss = loss_conf.get("use_latitude_weights", False) or loss_conf.get("use_variable_weights", False)
 
+    if not validation and loss_conf["training_loss"] == "ring-crps" and use_weighted_loss:
+        raise ValueError(
+            "ring-crps returns a scalar and cannot be combined with "
+            "use_latitude_weights / use_variable_weights (VariableTotalLoss2D "
+            "needs an elementwise loss). Disable the weights for ring-crps training."
+        )
+
     if use_weighted_loss:
+        from credit.losses.weighted_loss import VariableTotalLoss2D
+
         logger.info("Loaded the VariableTotalLoss2D loss wrapper class for applying latititude or variable weights")
         return VariableTotalLoss2D(conf, validation=validation)
 
