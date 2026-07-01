@@ -26,20 +26,22 @@ data:
         diagnostic: null
 
   timestep: "6h"
-  forecast_len: 3
+  forecast_len: 1
   start_datetime: "2015-01-01"
   end_datetime: "2016-12-31"
 
 validation_data:
   start_datetime: "2017-01-01"
   end_datetime: "2018-12-31"
+  forecast_len: 1
+  timestep: "6h"
 
 preblocks:
   per_step:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: /glade/derecho/scratch/schreck/credit_tests/convert_025deg/wxformer_025deg_gen2_pre_scaler.json
+        scaler_path: '/glade/derecho/scratch/$USER/credit_tests/smoke_ens_gen2/scaler.json'
         variables:
         - ERA5/prognostic/3d/U
         - ERA5/prognostic/3d/V
@@ -54,6 +56,8 @@ preblocks:
         - ERA5/prognostic/2d/Q500
         - ERA5/dynamic_forcing/2d/tsi
         method: transform
+        scaler_params:
+          channels_last: False
     concat:
       type: concat
 
@@ -64,7 +68,7 @@ postblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: /glade/derecho/scratch/schreck/credit_tests/convert_025deg/wxformer_025deg_gen2_post_scaler.json
+        scaler_path: '/glade/derecho/scratch/$USER/credit_tests/smoke_ens_gen2/scaler.json'
         variables:
         - ERA5/prognostic/3d/U
         - ERA5/prognostic/3d/V
@@ -80,7 +84,7 @@ postblocks:
         method: inverse_transform
 
 model:
-    type: "crossformer"
+    type: "wxformer"
     frames: 1
     image_height: 640
     image_width: 1280
@@ -181,29 +185,83 @@ trainer:
     valid_thread_workers: 2
     prefetch_factor: 2
 
-predict:
-    mode: none
-    save_forecast: '/glade/derecho/scratch/$USER/credit_tests/smoke_gen2/rollout'
-    forecasts:
-        type: "custom"
-        start_year: 2017
-        start_month: 1
-        start_day: 1
-        start_hours: [0]
-        duration: 4
-        ic_interval_days: 1
-        days: 2
-    realtime:
-        forecast_start_time: "2024-01-15 0000"
-        forecast_end_time: "2024-01-17 0000"
-        forecast_timestep: "6h"
-        use_gfs_init: true
-        initial_condition_path: '/glade/derecho/scratch/schreck/credit_tests/smoke_gen2/GFS_IC/'
-    metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
-    batch_size: 1
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+#
+# run_mode selects between batch and single forecast without requiring CLI flags.
+#   batch:  generates forecasts for a range of init times defined under batch_forecast.initialization
+#   single: runs one forecast from a specific init time defined under single_forecast.start_datetime
+#
+# CLI overrides (all optional):
+#   --run-mode batch|single     overrides run_mode
+#   --init-time YYYY-MM-DDTHH  overrides single_forecast.start_datetime
+#   --save-dir /path            overrides save_forecast
+#
+inference:
+  run_mode: batch                   # batch | single
+  mode: ddp                        # none | ddp | fsdp
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/rollout'
+
+  batch_forecast:
+    forecast_length: "10d"             # total forecast duration (total valid lead time)
+    first_init_date: "2020-01-01"      # first init time; must be within data date range
+    last_init_date: "2020-01-10"       # last init time; must be within data date range
+    init_interval: "12h"               # interval between init times
+
+  single_forecast:
+    forecast_length: "10d"
+    start_datetime: "2020-06-01T00:00Z"   # ISO 8601; must be within data date range
+    # init_data block reserved for future GFS/GEFS IC support:
+    # init_data:
+    #   type: "gfs"                 # era5 (default) | gfs | gefs
+    #   cache_path: "/glade/scratch/$USER/ic_cache"
+    #   force_download: false
+
+  output:
+    format: netcdf              # netcdf | zarr
+
+    # Temporal subsampling: only write steps whose forecast hour is a multiple
+    # of this value. null = write every step.
+    output_interval: null           # null | "6h" | "24h" | ...
+
+    # Calendar-period grouping: how many steps to concatenate into one file.
+    # Output lands in  save_forecast/YYYYMMDD_HHMMZ/  (one subdirectory per init time).
+    # null    → one file per step:    2020-06-01_T0600Z.nc
+    # "day"   → one file per day:     2020-06-01.nc
+    # "month" → one file per month:   2020-06.nc
+    # "year"  → one file per year:    2020.nc
+    # "full"  → one file per run:     full.nc
+    group_by: day           # null | "day" | "month" | "year" | "full"
+
+    # Variable filter. null = save all predicted variables.
+    # Each entry names a y_processed key (source/type/dim/varname).
+    # For 3D variables, "levels" subsets by model-level value (matches
+    # data.source.ERA5.levels); null or omitted = all levels.
+    variables: null
+    # variables:
+    #   - name: "ERA5/prognostic/3d/temperature"
+    #     levels: null                              # null = all levels
+    #   - name: "ERA5/prognostic/3d/u_component_of_wind"
+    #     levels: [500, 850, 1000]                  # subset to these model levels
+    #   - name: "ERA5/prognostic/2d/SP"
+    #   - name: "ERA5/diagnostic/2d/total_precipitation"
+
+    # CF attribute metadata. null = no variable attributes added.
+    metadata: "era5.yaml"
+
+    # NetCDF encoding. "default" applies to all variables.
+    # Per-variable overrides use the full y_processed key or the short variable name.
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 4            # 1 (fast) to 9 (small); 4 is a good default
+      # "ERA5/diagnostic/2d/total_precipitation":
+      #   dtype: float64
+      #   zlib: true
+      #   complevel: 6
+
 
 pbs:
-    conda: "/glade/u/home/schreck/.conda/envs/credit-casper"  # full path — avoids conda init issues in PBS
+    conda: "credit-casper"  # full path — avoids conda init issues in PBS
     job_name: "smoke_ens_gen2"
     project: "NAML0001"
     walltime: "01:00:00"
