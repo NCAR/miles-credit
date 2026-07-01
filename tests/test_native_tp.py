@@ -565,9 +565,22 @@ def _gloo_clip_worker(rank, world, port, result_q):
         serial_norm_diff = abs(tp_total.item() - serial_total.item())
         clipped = full_grads()
         clip_err = max((clipped[n] - ref_grads[n]).abs().max().item() for n in ref_grads)
+        # magnitudes the ULP-relative tolerances scale against (ref_grads was
+        # clipped in place through the holders, so this is the clipped scale)
+        grad_scale = max(g.abs().max().item() for g in ref_grads.values())
         if rank == 0:
             result_q.put(
-                ("ok", n_meshes, torch_raises, isinstance(tp_total, DTensor), norm_err, serial_norm_diff, clip_err)
+                (
+                    "ok",
+                    n_meshes,
+                    torch_raises,
+                    isinstance(tp_total, DTensor),
+                    norm_err,
+                    serial_norm_diff,
+                    clip_err,
+                    ref_total.item(),
+                    grad_scale,
+                )
             )
     except Exception as exc:  # surface worker failures to the test process
         if rank == 0:
@@ -585,16 +598,21 @@ class TestGlooClipParity:
     torch's clip on the serial replica."""
 
     def test_mixed_mesh_clip_matches_torch_on_full_grads(self):
-        n_meshes, torch_raises, total_is_dtensor, norm_err, serial_norm_diff, clip_err = _spawn_gloo(
-            _gloo_clip_worker, 29639
+        n_meshes, torch_raises, total_is_dtensor, norm_err, serial_norm_diff, clip_err, ref_total, grad_scale = (
+            _spawn_gloo(_gloo_clip_worker, 29639)
         )
         assert n_meshes == 2, "test setup must produce a DTensor group AND a plain group"
         assert torch_raises, "torch handled the mixed collection; the helper may be obsolete"
         assert not total_is_dtensor, "clip must return a plain tensor, not a DTensor"
-        # vs torch's clip applied to the materialized full grads (same values,
-        # only the norm reduction structure differs)
-        assert norm_err < 1e-6, f"total norm diverges from torch on full grads: {norm_err}"
-        assert clip_err < 1e-7, f"clipped grads diverge from torch on full grads: {clip_err}"
+        # vs torch's clip applied to the materialized full grads: same values,
+        # only the reduction association differs, so agreement is bounded by a
+        # few fp32 ULP at the result's magnitude. The mesh-grouped and flat
+        # reductions legitimately round 1-2 ULP apart (~7.6e-6 per ULP at a
+        # total norm of ~91) depending on the torch build/CPU, so absolute
+        # tolerances below one ULP are unsatisfiable.
+        eps = torch.finfo(torch.float32).eps
+        assert norm_err <= 8 * eps * ref_total, f"total norm diverges from torch on full grads: {norm_err}"
+        assert clip_err <= 8 * eps * grad_scale, f"clipped grads diverge from torch on full grads: {clip_err}"
         # vs the serial replica (includes tp-vs-serial backward fp noise)
         assert serial_norm_diff < 1e-4, f"total norm diverges from serial replica: {serial_norm_diff}"
 
