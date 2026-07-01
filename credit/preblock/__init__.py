@@ -8,6 +8,7 @@ from credit.preblock.concat import ConcatToTensor
 from credit.preblock.norm import ERA5Normalizer
 from credit.preblock.fill_values import FillValues
 from credit.preblock.scaler import BridgeScalerTransform
+from credit.preblock.hybrid_interp import HybridLevelInterp
 
 
 PREBLOCK_REGISTRY = {
@@ -18,6 +19,7 @@ PREBLOCK_REGISTRY = {
     "era5_normalizer": ERA5Normalizer,
     "fill_values": FillValues,
     "bridgescaler_transform": BridgeScalerTransform,
+    "hybrid_level_interp": HybridLevelInterp,
 }
 
 _VALID_SECTIONS = {"ic_only", "per_step"}
