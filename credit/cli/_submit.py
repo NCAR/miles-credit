@@ -671,7 +671,8 @@ def _build_rollout_pbs_script(
 
             {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
                 ${{REPO}}/credit/applications/rollout_gen2.py \\
-                -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
+                -c ${{CONFIG}}
+                # -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}  # rollout_gen2.py does not support these flags yet
         """)
 
     else:  # derecho
@@ -701,14 +702,19 @@ def _build_rollout_pbs_script(
 
             ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
                 ${{REPO}}/credit/applications/rollout_gen2.py \\
-                -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}
+                -c ${{CONFIG}}
+                # -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}  # rollout_gen2.py does not support these flags yet
         """)
 
 
-def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_forecasts: int, ensemble_size: int) -> None:
+def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_forecasts, ensemble_size) -> None:
     """Print a human-readable summary of an ensemble rollout submission."""
-    per_job = -(-n_forecasts // n_jobs)  # ceiling division
-    total_runs = n_forecasts * ensemble_size
+    if isinstance(n_forecasts, int):
+        per_job = -(-n_forecasts // n_jobs)  # ceiling division
+        total_runs = n_forecasts * ensemble_size if isinstance(ensemble_size, int) else "?"
+    else:
+        per_job = "?"
+        total_runs = "?"
 
     sep = "=" * 56
     logger.info(
@@ -779,14 +785,25 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
 
     n_jobs = args.jobs
 
+    conf = {}
     try:
-        from credit.forecast import load_forecasts
-
         with open(args.config) as f:
             conf = yaml.safe_load(f)
-        all_forecasts = load_forecasts(conf)
-        n_forecasts = len(all_forecasts)
-        ensemble_size = conf.get("predict", {}).get("ensemble_size", 1)
+
+        if "inference" in conf:
+            inf_conf = conf["inference"]
+            if inf_conf.get("run_mode", "batch") == "single":
+                n_forecasts = 1
+            else:
+                from credit.trainers.rollout_utils import batch_init_times
+
+                n_forecasts = len(batch_init_times(inf_conf["batch_forecast"]))
+            ensemble_size = inf_conf.get("ensemble_size", 1)
+        else:
+            from credit.forecast import load_forecasts
+
+            n_forecasts = len(load_forecasts(conf))
+            ensemble_size = conf.get("predict", {}).get("ensemble_size", 1)
     except Exception:
         n_forecasts = "?"
         ensemble_size = "?"
@@ -811,7 +828,9 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
         job_ids.append(job_id)
         logger.info("[%2d/%d] %s", i, n_jobs, job_id)
 
-    save_forecast = conf.get("predict", {}).get("save_forecast", "<save_forecast in config>")
+    save_forecast = conf.get("inference", {}).get("save_forecast") or conf.get("predict", {}).get(
+        "save_forecast", "<save_forecast in config>"
+    )
     logger.info(
         "\nSubmitted %d parallel rollout jobs.\nOutput will be written to: %s\nMonitor with:\n  qstat -u $USER",
         n_jobs,

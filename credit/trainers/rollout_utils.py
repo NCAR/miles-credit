@@ -75,6 +75,12 @@ def load_model_for_inference(conf: dict, device: torch.device) -> torch.nn.Modul
     if mode == "ddp":
         model = load_model(conf).to(device)
         model = distributed_model_wrapper(conf, model, device)
+        # Buffers are static once the checkpoint is loaded below (eval mode, no
+        # training), so there's nothing to sync. DDP's default broadcast_buffers=True
+        # makes every forward() a collective requiring all ranks to call it the same
+        # number of times — but rollout ranks can cover an uneven number of init
+        # times, so disable it to avoid a mid-loop hang.
+        model.broadcast_buffers = False
         # Mirror BaseModel.load_model: prefer model_checkpoint.pt, fall back to checkpoint.pt
         ckpt_path = os.path.join(save_loc, "model_checkpoint.pt")
         if not os.path.isfile(ckpt_path):
@@ -110,6 +116,7 @@ def run_forecast(
     device: torch.device,
     pool,
     save_output_fn,
+    verbose: bool = True,  # False on non-rank-0 workers in DDP to suppress tqdm and save-path output
 ) -> None:
     """Run one autoregressive forecast, consuming n_steps batches from batch_iter.
 
@@ -158,7 +165,9 @@ def run_forecast(
 
     # ── Autoregressive loop ──────────────────────────────────────────────────
     with torch.no_grad():
-        for step in tqdm(range(1, n_steps + 1), desc=f"Rollout {init_str}"):
+        for step in tqdm(
+            range(1, n_steps + 1), desc=f"Rollout {init_str}", disable=not verbose
+        ):  # one bar on rank 0 only
             full_data_dict["y_pred"] = model(full_data_dict["x"])
 
             # postblocks: Reconstruct → inverse_scaler → physics fixers
@@ -182,6 +191,9 @@ def run_forecast(
     # post_rollout postblocks (e.g. global physics fixers applied once)
     apply_postblocks(rollout_postblocks, full_data_dict)
 
+    # Make sure all output files are fully written before starting the next forecast.
+    if hasattr(save_output_fn, "flush"):
+        save_output_fn.flush()
     logger.info("Done: %s", init_str)
 
 

@@ -28,7 +28,7 @@ def latitude_weights(conf):
     """
     # Open the dataset and extract latitude and longitude information
     ds = xr.open_dataset(conf["loss"]["latitude_weights"])
-    lat = torch.from_numpy(ds["latitude"].values).float()
+    lat = torch.tensor(ds["latitude"].values, dtype=torch.float32)
     lon_dim = ds["longitude"].shape[0]
 
     # Calculate weights using PyTorch operations
@@ -153,7 +153,8 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         self.lat_weights = None
         if conf["loss"]["use_latitude_weights"]:
-            logger.info("Using latitude weights in loss calculations")
+            mode = "validation" if validation else "train"
+            logger.info("Using latitude weights in loss calculations (%s)", mode)
             self.lat_weights = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
 
         # ------------------------------------------------------------- #

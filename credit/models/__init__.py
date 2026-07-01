@@ -279,7 +279,7 @@ def load_model(conf, load_weights=False, model_name=False):
             if not os.path.isfile(ckpt):
                 raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
 
-            logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
+            logger.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
             checkpoint = torch.load(ckpt)
             if "model_state_dict" in checkpoint.keys():
@@ -355,7 +355,7 @@ def load_model_name(conf, model_name, load_weights=False):
             if not os.path.isfile(ckpt):
                 raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
 
-            logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
+            logger.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
             checkpoint = torch.load(ckpt)
             model.load_state_dict(checkpoint["model_state_dict"])

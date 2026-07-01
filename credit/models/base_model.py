@@ -67,7 +67,7 @@ class BaseModel(nn.Module):
         if not os.path.isfile(ckpt):
             raise ValueError("No saved checkpoint exists. You must train a model first. Exiting.")
 
-        logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
+        logger.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
         checkpoint = torch.load(
             ckpt,
@@ -101,7 +101,7 @@ class BaseModel(nn.Module):
         if not os.path.isfile(ckpt):
             raise ValueError(f"No saved checkpoint {ckpt} exists. You must train a model first. Exiting.")
 
-        logging.info(f"Loading a model with pre-trained weights from path {ckpt}")
+        logger.info(f"Loading a model with pre-trained weights from path {ckpt}")
 
         checkpoint = torch.load(
             ckpt,
