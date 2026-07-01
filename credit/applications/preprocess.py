@@ -14,7 +14,7 @@ import sys
 import shutil
 from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransform
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
-from credit.trainers.utils import cycle, load_dataset, load_dataloader
+from credit.trainers.utils import cycle, load_dataset, load_dataloader, effective_mode
 import torch.distributed as dist
 from torch.distributed import gather_object, barrier
 
@@ -155,7 +155,7 @@ Examples:
     root.info("Loading Config file")
     with open(args.model_config) as config_file:
         conf = yaml.safe_load(config_file)
-    local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    local_rank, world_rank, world_size = get_rank_info(effective_mode(conf))
     rank = world_rank
     save_loc = expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
@@ -173,8 +173,8 @@ Examples:
         torch.backends.cudnn.benchmark = True
 
     backend = args.backend or ("nccl" if device.type == "cuda" else "gloo")
-    if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
-        setup(rank, world_size, conf["trainer"]["mode"], backend)
+    if effective_mode(conf) in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
+        setup(rank, world_size, effective_mode(conf), backend)
 
     trainer_conf = conf["trainer"]
     train_dataset = load_dataset(conf, is_train=True)

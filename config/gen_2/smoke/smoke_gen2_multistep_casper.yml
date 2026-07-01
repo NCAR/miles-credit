@@ -90,7 +90,7 @@ loss:
     use_variable_weights: False
 
 trainer:
-    type: era5-gen2
+    type: gen2
 
     parallelism:
         data: none          # single GPU
