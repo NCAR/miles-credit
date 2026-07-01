@@ -58,7 +58,8 @@ def base_losses(conf, reduction="mean", validation=False):
     if "reduction" not in loss_params:
         loss_params["reduction"] = reduction
 
-    logger.info(f"Loaded the {loss_type} loss function with parameters: {loss_params}")
+    mode = "validation" if validation else "train"
+    logger.info(f"Loaded the {loss_type} loss function ({mode}) with parameters: {loss_params}")
 
     if loss_type in LOSSES:
         return LOSSES[loss_type](**loss_params)

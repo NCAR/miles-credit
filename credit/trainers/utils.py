@@ -470,7 +470,7 @@ def load_dataset(conf: dict, is_train: bool) -> MultiSourceDataset:
                 "Either add them or remove validation_data to use training config."
             )
 
-    return MultiSourceDataset(data_conf, return_target=True)
+    return MultiSourceDataset(data_conf, return_target=True, label="train" if is_train else "valid")
 
 
 def load_dataloader(
@@ -479,6 +479,7 @@ def load_dataloader(
     rank: int,
     world_size: int,
     is_train: bool,
+    persistent_workers: bool | None = None,
 ) -> DataLoader:
     """Build a DataLoader with DistributedMultiStepBatchSampler.
 
@@ -518,13 +519,14 @@ def load_dataloader(
         seed=seed,
     )
 
+    _persistent_workers = (num_workers > 0) if persistent_workers is None else persistent_workers
     return DataLoader(
         dataset,
         batch_sampler=sampler,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
         pin_memory=True,
-        persistent_workers=num_workers > 0,
+        persistent_workers=_persistent_workers,
         multiprocessing_context="spawn" if num_workers > 0 else None,
     )
 

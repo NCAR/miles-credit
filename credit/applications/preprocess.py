@@ -1,22 +1,24 @@
 import argparse
 import logging
+import os
+import shutil
+import sys
 import warnings
+from os.path import expandvars
 
+import torch
+import torch.distributed as dist
+import yaml
 from bridgescaler import save_scaler_dict
+from torch.distributed import barrier, gather_object
 
 from credit.distributed import get_rank_info, setup
-from credit.seed import seed_everything
-from os.path import expandvars
-import os
-import torch
-import yaml
-import sys
-import shutil
-from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransform
+from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
-from credit.trainers.utils import cycle, load_dataset, load_dataloader, effective_mode
-import torch.distributed as dist
-from torch.distributed import gather_object, barrier
+from credit.seed import seed_everything
+from credit.trainers.utils import cycle, effective_mode, load_dataloader, load_dataset
+
+logger = logging.getLogger("preprocess")
 
 
 def _scaler_probe_range(scaler):
@@ -88,7 +90,11 @@ def _log_single_scaler(scaler, name, logger):
             parts.append(f"min={float(vmin[i]):.4g} max={float(vmax[i]):.4g}")
         if inv is not None:
             parts.append(f"inv[{lo:g} -> {hi:g}]=[{float(inv[0, i]):.4g}, {float(inv[1, i]):.4g}]")
-        logger.info("    %s: %s", col, "  ".join(parts) if parts else "(no stats available)")
+        logger.info(
+            "    %s: %s",
+            col + 1 if isinstance(col, int) else col,
+            "  ".join(parts) if parts else "(no stats available)",
+        )
 
 
 def log_fitted_scalers(scaler_dict, logger, path=()):
@@ -106,6 +112,15 @@ def main():
     # teardown (after the scalers have already been fitted and saved). Silence it.
     warnings.filterwarnings("ignore", category=ResourceWarning)
     warnings.filterwarnings("ignore", category=UserWarning, module="bridgescaler")
+    # Suppress the resource_tracker subprocess's "leaked semaphore" warning.
+    # warnings.filterwarnings has no effect on subprocesses; PYTHONWARNINGS is inherited
+    # at subprocess startup so the filter applies before the tracker's final audit runs.
+    # The warning is cosmetic: the tracker still unlinks the semaphores — the unregister
+    # acknowledgment from workers just arrives after the audit due to a timing race.
+    _pw = os.environ.get("PYTHONWARNINGS", "")
+    _addon = "ignore::UserWarning:multiprocessing.resource_tracker"
+    if _addon not in _pw:
+        os.environ["PYTHONWARNINGS"] = (_pw + "," + _addon).lstrip(",")
     parser = argparse.ArgumentParser(
         epilog="""
 Examples:
@@ -134,7 +149,7 @@ Examples:
         type=str,
         default=None,
         choices=["nccl", "gloo", "mpi"],
-        help="Backend for distributed training. Defaults to 'nccl' for GPU, 'gloo' for CPU.",
+        help="Backend for distributed communication. Defaults to 'gloo' (preprocess only needs CPU collectives).",
     )
     parser.add_argument(
         "--device",
@@ -142,25 +157,40 @@ Examples:
         default=None,
         help="Device to use (e.g. 'cpu', 'cuda', 'cuda:0'). Defaults to GPU if available.",
     )
+    parser.add_argument(
+        "--log-all-ranks",
+        action="store_true",
+        default=False,
+        help="Emit INFO logs from all workers, not just rank 0. Useful for debugging per-worker data issues.",
+    )
     args = parser.parse_args()
-    config = args.model_config
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
-    ch = logging.StreamHandler()
-    gettrace = getattr(sys, "gettrace", None)
-    ch.setLevel(logging.DEBUG if gettrace and gettrace() else logging.INFO)
-    ch.setFormatter(formatter)
-    root.addHandler(ch)
-    root.info("Loading Config file")
-    with open(args.model_config) as config_file:
-        conf = yaml.safe_load(config_file)
+    try:
+        with open(args.model_config) as config_file:
+            conf = yaml.safe_load(config_file)
+    except Exception as exc:
+        print(f"ERROR: failed to load config file '{args.model_config}': {exc}", file=sys.stderr)
+        sys.exit(1)
     local_rank, world_rank, world_size = get_rank_info(effective_mode(conf))
     rank = world_rank
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    if not root.handlers:
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        root.addHandler(ch)
+    gettrace = getattr(sys, "gettrace", None)
+    level = (
+        (logging.DEBUG if gettrace and gettrace() else logging.INFO)
+        if (rank == 0 or args.log_all_ranks)
+        else logging.WARNING
+    )
+    for h in root.handlers:
+        h.setLevel(level)
+    logger.info("Loaded config file: %s", args.model_config)
     save_loc = expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
-        shutil.copy(config, os.path.join(save_loc, "model.yml"))
+        shutil.copy(args.model_config, os.path.join(save_loc, "model.yml"))
 
     if args.device is not None:
         device = torch.device(args.device)
@@ -172,17 +202,22 @@ Examples:
         torch.cuda.set_device(device)
         torch.backends.cudnn.benchmark = True
 
-    backend = args.backend or ("nccl" if device.type == "cuda" else "gloo")
+    # Preprocess only gathers CPU scaler objects, so gloo suffices regardless of trainer mode.
+    backend = args.backend or "gloo"
     if effective_mode(conf) in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
         setup(rank, world_size, effective_mode(conf), backend)
 
     trainer_conf = conf["trainer"]
     train_dataset = load_dataset(conf, is_train=True)
-    train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
+    # persistent_workers=False: preprocess is a single pass, so workers are not needed
+    # across epochs. The iterator then lives only in the cycle() frame and is collected
+    # immediately when del dl runs — semaphores are unregistered well before process exit.
+    train_loader = load_dataloader(
+        conf, train_dataset, rank=rank, world_size=world_size, is_train=True, persistent_workers=False
+    )
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
     preblocks = build_preblocks(conf["preblocks"])
-    print(preblocks)
     scaler_block_key = None
     for k, v in preblocks.items():
         if isinstance(v, BridgeScalerTransform):
@@ -200,10 +235,12 @@ Examples:
     batches_per_epoch = _bpe if 0 < _bpe < dataset_batches else dataset_batches
     dl = cycle(train_loader)
     for i in range(batches_per_epoch):
-        root.info(f"Worker {rank}: Processing batch {i} of {batches_per_epoch}.")
+        logger.info(f"Worker {rank}: Processing batch {i + 1} of {batches_per_epoch}.")
         batch = next(dl)
         processed_batch = apply_preblocks_before_scaler(preblocks, batch, device)
         preblocks[scaler_block_key].fit_scaler_batch(processed_batch)
+    del dl  # iterator lives only here; refcount → 0, workers shut down immediately
+    del train_loader
 
     scaler_block = preblocks[scaler_block_key]
     # Gather the per-rank fitted scaler dicts onto rank 0 (or run single-process).
@@ -215,13 +252,15 @@ Examples:
         all_scalers = [scaler_block.scaler]
 
     if rank == 0:
-        root.info("Combining scalers.")
+        logger.info("Combining scalers.")
         combined_scaler = combine_scaler_dicts(all_scalers)
         save_scaler_dict(combined_scaler, scaler_block.scaler_path)
-        root.info("Saved fitted scaler to %s", scaler_block.scaler_path)
-        root.info("Fitted scaler values by variable:")
-        log_fitted_scalers(combined_scaler, root)
-    return
+        logger.info("Saved fitted scaler to %s", scaler_block.scaler_path)
+        logger.info("Fitted scaler values by variable:")
+        log_fitted_scalers(combined_scaler, logger)
+
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

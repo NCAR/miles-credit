@@ -27,6 +27,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+import tqdm
 import xarray as xr
 import yaml
 
@@ -68,7 +69,6 @@ _VALID_GROUP_BY: dict[str, str] = {
 def _write_netcdf_worker(ds: xr.Dataset, path: str, encoding: dict) -> None:
     try:
         ds.to_netcdf(path, mode="w", encoding=encoding)
-        logger.info("Saved: %s", path)
     except Exception:
         logger.error("Failed to write %s:\n%s", path, traceback.format_exc())
 
@@ -79,7 +79,6 @@ def _write_zarr_worker(ds: xr.Dataset, path: str, append: bool) -> None:
             ds.to_zarr(path, mode="a", append_dim="time")
         else:
             ds.to_zarr(path, mode="w")
-        logger.info("Zarr %s: %s", "appended" if append else "created", path)
     except Exception:
         logger.error("Failed to write zarr %s:\n%s", path, traceback.format_exc())
 
@@ -114,7 +113,7 @@ class ForecastWriter:
             when to flush without an external flush() call.
     """
 
-    def __init__(self, output_conf: dict, conf: dict, n_steps: int) -> None:
+    def __init__(self, output_conf: dict, conf: dict, n_steps: int, verbose: bool = True) -> None:
         self._n_steps = n_steps
         self._conf = conf
 
@@ -156,6 +155,11 @@ class ForecastWriter:
 
         # One-time validation runs on first __call__ when fhr_per_step is known
         self._validated: bool = False
+
+        self._verbose = verbose
+
+        # Pending async netcdf writes: list of (AsyncResult, path) in submission order
+        self._pending: list = []
 
     # ------------------------------------------------------------------
     # Public interface
@@ -267,12 +271,28 @@ class ForecastWriter:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         if self._fmt == "zarr":
             _write_zarr_worker(ds, path, append)
+            if self._verbose:
+                tqdm.tqdm.write(f"Zarr {'appended' if append else 'created'}: {path}")
         else:
             enc = encoding or {}
             if pool is not None:
-                pool.apply_async(_write_netcdf_worker, args=(ds, path, enc))
+                result = pool.apply_async(_write_netcdf_worker, args=(ds, path, enc))
+                self._pending.append((result, path))
             else:
                 _write_netcdf_worker(ds, path, enc)
+                if self._verbose:
+                    tqdm.tqdm.write(f"Saved: {path}")
+
+    def flush(self) -> None:
+        """Wait for all pending async writes in submission order and print each path."""
+        for result, path in self._pending:
+            try:
+                result.get()
+                if self._verbose:
+                    tqdm.tqdm.write(f"Saved: {path}")
+            except Exception as exc:
+                tqdm.tqdm.write(f"Failed: {path}: {exc}")
+        self._pending.clear()
 
     # ------------------------------------------------------------------
     # Path construction

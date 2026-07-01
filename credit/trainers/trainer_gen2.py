@@ -50,7 +50,6 @@ class TrainerERA5Gen2(BaseTrainer):
             conf: Full configuration dict.
         """
         super().__init__(model, rank, conf)
-        logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
 
         # The config can request fsdp2 while the wrapper skips it (dp_size <= 1).
         # AMP decisions must follow what was actually applied: when FSDP2 is
@@ -221,7 +220,6 @@ class TrainerERA5Gen2(BaseTrainer):
         """
         if self.ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
-        logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
 
         if self.use_scheduler and self.scheduler_type == "lambda":
             scheduler.step()
@@ -249,7 +247,12 @@ class TrainerERA5Gen2(BaseTrainer):
         if hasattr(_sampler, "set_epoch"):
             _sampler.set_epoch(epoch)
 
-        batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
+        batch_group_generator = tqdm.tqdm(
+            range(batches_per_epoch),
+            total=batches_per_epoch,
+            leave=True,
+            disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
+        )
         self.model.train()
 
         dl = cycle(trainloader)
@@ -446,7 +449,12 @@ class TrainerERA5Gen2(BaseTrainer):
             )
 
         results_dict = defaultdict(list)
-        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
+        batch_group_generator = tqdm.tqdm(
+            range(valid_batches_per_epoch),
+            total=valid_batches_per_epoch,
+            leave=True,
+            disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
+        )
 
         dl = cycle(valid_loader)
         with torch.no_grad():
