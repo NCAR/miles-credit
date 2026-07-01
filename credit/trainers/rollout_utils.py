@@ -33,19 +33,15 @@ def parse_length(length_str: str, timestep: str) -> int:
 
 
 def batch_init_times(batch_conf: dict) -> list[pd.Timestamp]:
-    """Generate the ordered list of init timestamps from inference.batch_forecast.initialization."""
-    init_conf = batch_conf["initialization"]
-    start = pd.Timestamp(init_conf["start_date"])
-    end = pd.Timestamp(init_conf["end_date"])
-    interval = pd.Timedelta(init_conf["date_interval"])
-    times = init_conf.get("times", ["00:00"])
+    """Generate the ordered list of init timestamps from inference.batch_forecast."""
+    start = pd.Timestamp(batch_conf["first_init_date"])
+    end = pd.Timestamp(batch_conf["last_init_date"])
+    interval = pd.Timedelta(batch_conf["init_interval"])
 
     init_times = []
     current = start
     while current <= end:
-        for time_str in times:
-            h, m = (int(x) for x in time_str.split(":"))
-            init_times.append(current + pd.Timedelta(hours=h, minutes=m))
+        init_times.append(current)
         current += interval
 
     return sorted(set(init_times))

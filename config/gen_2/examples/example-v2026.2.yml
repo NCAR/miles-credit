@@ -263,31 +263,26 @@ inference:
   run_mode: batch                   # batch | single
   mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
-  num_save_workers: 4               # async write pool size (0 = synchronous)
-
   batch_forecast:                   # active when run_mode: batch
-    length: "1d"                    # forecast duration per init (e.g. "10d", "1m", "1y")
-    initialization:
-      start_date: "2020-01-01"      # first init date (inclusive), ISO 8601
-      end_date: "2020-01-01"        # last init date (inclusive)
-      date_interval: "1d"           # step between init dates (e.g. "1d", "7d")
-      times: ["00:00", "12:00"]     # UTC init times each day (HH:MM)
+    forecast_length: "1d"           # forecast duration per init (e.g. "10d", "1m", "1y")
+    first_init_date: "2020-01-01"   # first init time (inclusive), ISO 8601
+    last_init_date: "2020-01-01"    # last init time (inclusive)
+    init_interval: "12h"            # interval between init times
 
   single_forecast:                  # active when run_mode: single
-    length: "10d"                   # forecast duration
+    forecast_length: "10d"          # forecast duration
     start_datetime: "2020-01-01T00:00Z"   # init time, ISO 8601
 
   output:
     format: netcdf                  # netcdf | zarr
-    output_freq: null               # write every Nth step; null = every step (e.g. "6h", "24h")
+    output_interval: null           # write every Nth step; null = every step (e.g. "6h", "24h")
     group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
     variables: null                 # null = save all; or list of {name:, levels:} to subset
     metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
     encoding:
-      default:                      # applies to all variables
-        dtype: float32
-        zlib: true
-        complevel: 4                # 1 (fast) to 9 (small)
+      dtype: float32
+      zlib: true
+      complevel: 4                  # 1 (fast) to 9 (small)
 
 pbs: #derecho
   conda: "credit-derecho"

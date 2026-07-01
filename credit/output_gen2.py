@@ -125,12 +125,12 @@ class ForecastWriter:
         self._fmt = fmt
         self._ext = ".nc" if fmt == "netcdf" else ".zarr"
 
-        # output_freq: write only steps where fhr is a multiple of this
-        ofreq = output_conf.get("output_freq")
+        # output_interval: write only steps where fhr is a multiple of this
+        ofreq = output_conf.get("output_interval")
         try:
             self._output_freq_hrs: Optional[int] = int(pd.Timedelta(ofreq).total_seconds() / 3600) if ofreq else None
         except Exception:
-            raise ValueError(f"Cannot parse output_freq: {ofreq!r}. Use a string like '6h', '24h', etc.")
+            raise ValueError(f"Cannot parse output_interval: {ofreq!r}. Use a string like '6h', '24h', etc.")
 
         # group_by
         self._group_mode: str = self._parse_group_by(output_conf.get("group_by"))
@@ -425,13 +425,13 @@ class ForecastWriter:
 
     def _make_encoding(self, ds: xr.Dataset) -> dict:
         """Build per-variable NetCDF encoding (not used for zarr data variables)."""
-        default = dict(self._encoding_conf.get("default") or {})
+        _SCALAR_KEYS = {"dtype", "zlib", "complevel", "shuffle", "chunksizes", "fletcher32", "contiguous"}
+        default = {k: v for k, v in self._encoding_conf.items() if k in _SCALAR_KEYS}
+        overrides = {k: v for k, v in self._encoding_conf.items() if k not in _SCALAR_KEYS}
         encoding = {}
         for var in ds.data_vars:
             enc = dict(default)
-            for key, override in self._encoding_conf.items():
-                if key == "default":
-                    continue
+            for key, override in overrides.items():
                 if key == var or key.split("/")[-1] == var:
                     enc.update(override)
             encoding[var] = enc
@@ -458,12 +458,12 @@ class ForecastWriter:
 
         if freq is not None and freq > total_fhr:
             raise ValueError(
-                f"output_freq ({freq}h) exceeds total forecast length ({total_fhr}h) — no steps would ever be written."
+                f"output_interval ({freq}h) exceeds total forecast length ({total_fhr}h) — no steps would ever be written."
             )
 
         if freq is not None and freq < fhr_per_step:
             logger.warning(
-                "output_freq (%dh) is less than the model timestep (%dh) — "
+                "output_interval (%dh) is less than the model timestep (%dh) — "
                 "the filter has no effect and every step will be written.",
                 freq,
                 fhr_per_step,
@@ -479,8 +479,8 @@ class ForecastWriter:
             written_per_period = max(1, (min_steps_per_period * fhr_per_step) // freq)
             if written_per_period <= 1:
                 logger.warning(
-                    "output_freq (%dh) with group_by=%r will produce files with "
-                    "≤1 timestep each. Consider a coarser group_by or finer output_freq.",
+                    "output_interval (%dh) with group_by=%r will produce files with "
+                    "≤1 timestep each. Consider a coarser group_by or finer output_interval.",
                     freq,
                     self._group_mode,
                 )
