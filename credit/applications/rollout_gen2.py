@@ -13,10 +13,10 @@ CLI override: --run-mode, --init-time, --save-dir
 Usage
 -----
 # Batch hindcast (uses inference.batch_forecast from config):
-    python rollout_gen2.py -c config/example-v2026.3.yml
+    python rollout_gen2.py -c config/example-end-to-end.yml
 
 # Single forecast (overrides inference.single_forecast.start_datetime):
-    python rollout_gen2.py -c config/example-v2026.3.yml --init-time 2020-06-01T00
+    python rollout_gen2.py -c config/example-end-to-end.yml --init-time 2020-06-01T00
 
 # Multi-GPU DDP:
     torchrun --standalone --nproc-per-node=4 rollout_gen2.py -c config.yml
@@ -68,7 +68,7 @@ def main() -> None:
         epilog="""
 Examples:
   # Batch hindcast (run_mode from config):
-      python rollout_gen2.py -c config/example-v2026.3.yml
+      python rollout_gen2.py -c config/example-end-to-end.yml
 
   # Single forecast (overrides start_datetime):
       python rollout_gen2.py -c config.yml --run-mode single --init-time 2020-06-01T00
@@ -119,7 +119,7 @@ Examples:
         "rollout_gen2.py requires the Gen2 nested data schema (conf['data']['source']). "
         "For Gen1 configs use the legacy rollout scripts."
     )
-    assert "inference" in conf, "Config is missing an 'inference:' section. Use example-v2026.3.yml as a template."
+    assert "inference" in conf, "Config is missing an 'inference:' section. Use example-end-to-end.yml as a template."
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
@@ -153,14 +153,16 @@ Examples:
     if run_mode == "batch":
         assert "batch_forecast" in inf_conf, "inference.batch_forecast is required for run_mode=batch."
         all_init_times = batch_init_times(inf_conf["batch_forecast"])
-        n_steps = parse_length(inf_conf["batch_forecast"]["length"], timestep)
+        n_steps = parse_length(inf_conf["batch_forecast"]["forecast_length"], timestep)
     else:
         sf = inf_conf.get("single_forecast", {})
         assert "start_datetime" in sf, (
             "inference.single_forecast.start_datetime is required for run_mode=single (or pass --init-time on the CLI)."
         )
         all_init_times = [pd.Timestamp(sf["start_datetime"])]
-        n_steps = parse_length(sf.get("length", inf_conf.get("batch_forecast", {}).get("length", "10d")), timestep)
+        n_steps = parse_length(
+            sf.get("forecast_length", inf_conf.get("batch_forecast", {}).get("forecast_length", "10d")), timestep
+        )
 
     # ── Distributed setup ────────────────────────────────────────────────────
     seed_everything(conf["seed"])
