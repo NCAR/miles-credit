@@ -38,6 +38,8 @@ from credit.trainers.utils import (
 
 warnings.filterwarnings("ignore")
 
+logger = logging.getLogger("train_gen2")
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 # Suppress the resource_tracker subprocess's "leaked semaphore" warning.
 # warnings.filterwarnings has no effect on subprocesses; PYTHONWARNINGS is inherited
@@ -130,10 +132,10 @@ def main_cli():
     if launch:
         script_path = Path(__file__).absolute()
         if conf["pbs"]["queue"] == "casper":
-            logging.info("Launching to PBS on Casper")
+            logger.info("Launching to PBS on Casper")
             launch_script(config, script_path)
         else:
-            logging.info("Launching to PBS on Derecho")
+            logger.info("Launching to PBS on Derecho")
             launch_script_mpi(config, script_path)
         sys.exit()
 

@@ -1,22 +1,24 @@
 import argparse
 import logging
+import os
+import shutil
+import sys
 import warnings
+from os.path import expandvars
 
+import torch
+import torch.distributed as dist
+import yaml
 from bridgescaler import save_scaler_dict
+from torch.distributed import barrier, gather_object
 
 from credit.distributed import get_rank_info, setup
-from credit.seed import seed_everything
-from os.path import expandvars
-import os
-import torch
-import yaml
-import sys
-import shutil
-from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransform
+from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
-from credit.trainers.utils import cycle, load_dataset, load_dataloader, effective_mode
-import torch.distributed as dist
-from torch.distributed import gather_object, barrier
+from credit.seed import seed_everything
+from credit.trainers.utils import cycle, effective_mode, load_dataloader, load_dataset
+
+logger = logging.getLogger("preprocess")
 
 
 def _scaler_probe_range(scaler):
@@ -184,7 +186,7 @@ Examples:
     )
     for h in root.handlers:
         h.setLevel(level)
-    root.info("Loaded config file: %s", args.model_config)
+    logger.info("Loaded config file: %s", args.model_config)
     save_loc = expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
@@ -233,7 +235,7 @@ Examples:
     batches_per_epoch = _bpe if 0 < _bpe < dataset_batches else dataset_batches
     dl = cycle(train_loader)
     for i in range(batches_per_epoch):
-        root.info(f"Worker {rank}: Processing batch {i + 1} of {batches_per_epoch}.")
+        logger.info(f"Worker {rank}: Processing batch {i + 1} of {batches_per_epoch}.")
         batch = next(dl)
         processed_batch = apply_preblocks_before_scaler(preblocks, batch, device)
         preblocks[scaler_block_key].fit_scaler_batch(processed_batch)
@@ -250,12 +252,12 @@ Examples:
         all_scalers = [scaler_block.scaler]
 
     if rank == 0:
-        root.info("Combining scalers.")
+        logger.info("Combining scalers.")
         combined_scaler = combine_scaler_dicts(all_scalers)
         save_scaler_dict(combined_scaler, scaler_block.scaler_path)
-        root.info("Saved fitted scaler to %s", scaler_block.scaler_path)
-        root.info("Fitted scaler values by variable:")
-        log_fitted_scalers(combined_scaler, root)
+        logger.info("Saved fitted scaler to %s", scaler_block.scaler_path)
+        logger.info("Fitted scaler values by variable:")
+        log_fitted_scalers(combined_scaler, logger)
 
     if dist.is_initialized():
         dist.destroy_process_group()

@@ -50,7 +50,7 @@ from credit.trainers.rollout_utils import (
 )
 from credit.trainers.utils import cleanup
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rollout_gen2")
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
