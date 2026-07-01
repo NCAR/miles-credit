@@ -129,7 +129,7 @@ trainer:
   valid_batch_size: 4
 
   batches_per_epoch: 5    # 0 = use full dataset each epoch
-  valid_batches_per_epoch: 100
+  valid_batches_per_epoch: 5
   stopping_patience: 999
 
   start_epoch: 0
