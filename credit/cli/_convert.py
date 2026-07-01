@@ -73,9 +73,9 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
     pre_target = {}  # prognostic only (model prediction targets)
     pre_keys = []
 
-    # --- postblock dict: {source: {full_key: scaler}}
-    # Must match y_processed structure written by Reconstruct.
-    post_dict = {}
+    # --- postblock dict: {"target": {source: {full_key: scaler}}}
+    # BridgeScalerTransform always slices ["target"] — match that structure here.
+    post_dict = {"target": {}}
 
     for (field_type, dim), varnames in var_groups.items():
         for varname in varnames:
@@ -88,7 +88,7 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
             pre_keys.append(full_key)
             if field_type in ("prognostic", "diagnostic"):
                 pre_target[full_key] = sc
-                post_dict.setdefault(source_name, {})[full_key] = sc
+                post_dict["target"].setdefault(source_name, {})[full_key] = sc
 
     ds_mean.close()
     ds_std.close()

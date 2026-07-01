@@ -16,10 +16,15 @@ _TRAINER_REGISTRY = {
         "TrainerERA5Gen1",
         "Loading a single or multi-step trainer for the ERA5 dataset that uses gradient accumulation on forecast lengths > 1.",
     ),
-    "era5-gen2": (
+    "gen2": (
         "credit.trainers.trainer_gen2",
         "TrainerERA5Gen2",
-        "ERA5 Gen 2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.",
+        "Gen2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.",
+    ),
+    "era5-gen2": (  # backward-compat alias for gen2
+        "credit.trainers.trainer_gen2",
+        "TrainerERA5Gen2",
+        "Gen2 trainer for the new nested data schema with preblock-assembled batches. forecast_len=1 means 1 step.",
     ),
     "era5-diffusion": (
         "credit.trainers.trainerERA5_Diffusion",

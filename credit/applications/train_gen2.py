@@ -24,11 +24,10 @@ import torch
 
 from credit.distributed import distributed_model_wrapper_gen2, setup, get_rank_info
 from credit.seed import seed_everything
-from credit.losses import load_loss
+from credit.losses.base_losses import is_crps_loss
 from credit.trainers import load_trainer
 from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
-from credit.metrics import LatWeightedMetrics
 from credit.trainers.utils import (
     inject_flat_var_keys,
     load_dataset,
@@ -38,7 +37,18 @@ from credit.trainers.utils import (
 
 warnings.filterwarnings("ignore")
 
+logger = logging.getLogger("train_gen2")
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+# Suppress the resource_tracker subprocess's "leaked semaphore" warning.
+# warnings.filterwarnings has no effect on subprocesses; PYTHONWARNINGS is inherited
+# at subprocess startup so the filter applies before the tracker's final audit runs.
+# The warning is cosmetic: the tracker still unlinks the semaphores — the unregister
+# acknowledgment from workers just arrives after the audit due to a timing race.
+_pw = os.environ.get("PYTHONWARNINGS", "")
+_addon = "ignore::UserWarning:multiprocessing.resource_tracker"
+if _addon not in _pw:
+    os.environ["PYTHONWARNINGS"] = (_pw + "," + _addon).lstrip(",")
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -62,49 +72,35 @@ def main_cli():
     parser.add_argument(
         "--backend", type=str, default="nccl", choices=["nccl", "gloo", "mpi"], help="Backend for distributed training."
     )
+    parser.add_argument(
+        "--log-all-ranks",
+        action="store_true",
+        default=False,
+        help="Emit INFO logs from all workers, not just rank 0. Useful for debugging per-worker issues.",
+    )
     args = parser.parse_args()
     config = args.model_config
     launch = int(args.launch)
     backend = args.backend
 
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
-    ch = logging.StreamHandler()
-    gettrace = getattr(sys, "gettrace", None)
-    ch.setLevel(logging.DEBUG if gettrace and gettrace() else logging.INFO)
-    ch.setFormatter(formatter)
-    root.addHandler(ch)
-
-    with open(config) as cf:
-        conf = yaml.load(cf, Loader=yaml.FullLoader)
+    try:
+        with open(config) as cf:
+            conf = yaml.load(cf, Loader=yaml.FullLoader)
+    except Exception as exc:
+        print(f"ERROR: failed to load config file '{config}': {exc}", file=sys.stderr)
+        sys.exit(1)
 
     assert "source" in conf["data"], (
         "train.py requires the Gen2 nested data schema (conf['data']['source']). "
         "For the legacy flat schema, use applications/train.py."
     )
-
-    save_loc = os.path.expandvars(conf["save_loc"])
-    os.makedirs(save_loc, exist_ok=True)
-    if not os.path.exists(os.path.join(save_loc, "model.yml")):
-        shutil.copy(config, os.path.join(save_loc, "model.yml"))
-
-    if launch:
-        script_path = Path(__file__).absolute()
-        if conf["pbs"]["queue"] == "casper":
-            logging.info("Launching to PBS on Casper")
-            launch_script(config, script_path)
-        else:
-            logging.info("Launching to PBS on Derecho")
-            launch_script_mpi(config, script_path)
-        sys.exit()
-
-    _trainer_conf = conf["trainer"]
-    assert "parallelism" in _trainer_conf, (
-        "Gen2 training configs must define trainer.parallelism with data, tensor, "
-        "and domain fields. Configs from before the parallelism block (legacy "
-        "trainer.mode) can be migrated with `credit convert`."
-    )
+    loss_name = conf["loss"]["training_loss"]
+    ensemble_size = int(conf["trainer"].get("ensemble_size", 1))
+    if is_crps_loss(loss_name) and ensemble_size <= 1:
+        raise ValueError(
+            f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "
+            f"got trainer.ensemble_size={ensemble_size}."
+        )
 
     # V2 parallelism configs read rank info from the launcher (torchrun or MPI).
     # Without a launcher (plain `python`/`credit train` on one GPU), run
@@ -116,12 +112,47 @@ def main_cli():
         local_rank, world_rank, world_size = get_rank_info("ddp")
     else:
         local_rank, world_rank, world_size = 0, 0, 1
-    rank = world_rank
+    rank = world_rank  # conventional DDP shorthand; local_rank is only needed for device assignment below
+
+    # ── Logging ──────────────────────────────────────────────────────────────
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    if not root.handlers:
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        root.addHandler(ch)
+    gettrace = getattr(sys, "gettrace", None)
+    level = (
+        (logging.DEBUG if gettrace and gettrace() else logging.INFO)
+        if (rank == 0 or args.log_all_ranks)
+        else logging.WARNING
+    )
+    for h in root.handlers:
+        h.setLevel(level)
+
+    save_loc = os.path.expandvars(conf["save_loc"])
+    os.makedirs(save_loc, exist_ok=True)
+    if not os.path.exists(os.path.join(save_loc, "model.yml")):
+        shutil.copy(config, os.path.join(save_loc, "model.yml"))
+
+    if launch:
+        script_path = Path(__file__).absolute()
+        if conf["pbs"]["queue"] == "casper":
+            logger.info("Launching to PBS on Casper")
+            launch_script(config, script_path)
+        else:
+            logger.info("Launching to PBS on Derecho")
+            launch_script_mpi(config, script_path)
+        sys.exit()
+
+    _trainer_conf = conf["trainer"]
+    assert "parallelism" in _trainer_conf, (
+        "Gen2 training configs must define trainer.parallelism with data, tensor, "
+        "and domain fields. Configs from before the parallelism block (legacy "
+        "trainer.mode) can be migrated with `credit convert`."
+    )
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
-
-    if world_size > 1:
-        setup(rank, world_size, "ddp", backend)
 
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
@@ -130,6 +161,9 @@ def main_cli():
     else:
         device = torch.device("cpu")
 
+    if world_size > 1:
+        setup(rank, world_size, "ddp", backend, device_id=device if torch.cuda.is_available() else None)
+
     # Dataset sharding uses the DATA-PARALLEL coordinate, not the global rank.
     # Ranks that differ only in tensor/domain coordinate must see the same batch
     # (TP all_reduce sums partial outputs; domain halo exchange passes boundary
@@ -137,9 +171,25 @@ def main_cli():
     from credit.parallel.mesh import data_parallel_coords
 
     data_rank, data_world_size = data_parallel_coords(conf)
+    if loss_name == "ring-crps" and ensemble_size != data_world_size:
+        raise ValueError(
+            "ring-crps uses one ensemble member per data-parallel rank, so "
+            f"trainer.ensemble_size must match the data-parallel world size; "
+            f"got trainer.ensemble_size={ensemble_size}, data-parallel world size={data_world_size}."
+        )
+
+    # CRPS ensemble training requires every dp rank to see the SAME training
+    # batches. Member diversity comes from ensemble sampling in the trainer and
+    # per-dp-rank RNG seeds. Validation keeps dp sharding.
+    ensemble_mode = is_crps_loss(loss_name) and ensemble_size > 1
+    train_rank, train_world_size = (0, 1) if ensemble_mode else (data_rank, data_world_size)
+    if ensemble_mode and data_world_size > 1:
+        logging.info(
+            f"CRPS ensemble training: {data_world_size} dp ranks receive shared batches; dp data sharding disabled"
+        )
 
     train_dataset = load_dataset(conf, is_train=True)
-    train_loader = load_dataloader(conf, train_dataset, rank=data_rank, world_size=data_world_size, is_train=True)
+    train_loader = load_dataloader(conf, train_dataset, rank=train_rank, world_size=train_world_size, is_train=True)
 
     skip_validation = conf["trainer"].get("skip_validation", False)
     if skip_validation:
@@ -181,8 +231,12 @@ def main_cli():
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
+    from credit.losses import load_loss
+
     train_criterion = load_loss(conf)
     valid_criterion = load_loss(conf, validation=True)
+    from credit.metrics import LatWeightedMetrics
+
     metrics = LatWeightedMetrics(conf)
 
     trainer_cls = load_trainer(conf)

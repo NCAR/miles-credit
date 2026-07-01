@@ -11,7 +11,7 @@ dynamic = ["version"]
 requires-python = ">=3.11"
 dependencies = [
     "numpy",
-    "pandas",
+    "pandas<3.0.4",
     "matplotlib",
     "cartopy",
     "scikit-learn",
@@ -107,7 +107,7 @@ credit_rollout_les = "credit.applications.rollout_les:main"
 [tool.ruff]
 src = ["credit", "applications", "tests"]
 line-length = 120
-exclude = ["notebooks/**"]
+exclude = ["notebooks/**", ".git"]
 
 [tool.ruff.lint]
 ignore = ["D417", "F841"]
