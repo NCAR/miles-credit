@@ -139,6 +139,7 @@ def _plot(args) -> None:
 
     from credit.datasets.multi_source import MultiSourceDataset
     from credit.preblock import apply_preblocks, build_preblocks
+    from credit.registry import load_custom_objects
 
     # Build the effective validation data config: start from training data, then overlay
     # validation_data overrides (date range, etc.) if present.  This mirrors how the
@@ -148,6 +149,7 @@ def _plot(args) -> None:
     data_conf = copy.deepcopy(conf["data"])
     val_override = conf.get("validation_data") or conf.get("data_valid") or {}
     data_conf.update(val_override)
+    load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     dataset = MultiSourceDataset(data_conf, return_target=True)
 
     if args.sample_date is not None:

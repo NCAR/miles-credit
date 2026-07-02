@@ -90,6 +90,8 @@ def load_custom_objects(conf):
         # ---- Use the registered classes elsewhere in the config ----
 
         # dataset: referenced under data.source.<name>.dataset_type
+        # Must match the custom_objects key exactly (case-sensitive), same as built-in
+        # source types (e.g. "local", "arco_era5").
         data:
           source:
             MySource:

@@ -470,6 +470,9 @@ def load_dataset(conf: dict, is_train: bool) -> MultiSourceDataset:
                 "Either add them or remove validation_data to use training config."
             )
 
+    from credit.registry import load_custom_objects  # imported here to avoid a module-level credit.registry import
+
+    load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     return MultiSourceDataset(data_conf, return_target=True, label="train" if is_train else "valid")
 
 

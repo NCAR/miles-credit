@@ -8,8 +8,11 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Config-driven dispatch: maps config-file keys → class.
-# Currently empty — built-in datasets are not yet registered here (see _load_dataset_entry NOTE).
-# Custom datasets added via @register_dataset will populate this at runtime.
+# Currently empty — built-in Gen2 source types are registered in
+# credit.datasets.multi_source._SOURCE_REGISTRY instead. This registry is populated at
+# runtime by @register_dataset (via custom_objects) and consulted by
+# MultiSourceDataset.route_to_dataset_class as a fallback for dataset_type values that
+# aren't one of the built-in sources.
 # Registry entries are either:
 #   (module_path: str, class_name: str)  — built-in lazy entries
 #   cls: type                             — externally registered classes
@@ -93,10 +96,10 @@ def register_dataset(dataset_type):
 def _load_dataset_entry(dataset_type):
     """Return the class for a registered dataset type, importing lazily if needed.
 
-    NOTE: Not currently used — load_dataset_and_dataloader.py still uses the legacy
-    if/elif dispatch and does not consult _DATASET_REGISTRY. Built-in datasets should
-    be added to _DATASET_REGISTRY and load_dataset_and_dataloader.py updated to call
-    this in a future cleanup PR.
+    Used by ``credit.datasets.multi_source.route_to_dataset_class`` (the Gen2 dispatch
+    path) as a fallback when ``dataset_type`` isn't one of the built-in sources in
+    ``credit.datasets.multi_source._SOURCE_REGISTRY`` — i.e. for datasets registered via
+    ``custom_objects``.
 
     Raises:
         ValueError: If dataset_type is not in _DATASET_REGISTRY.

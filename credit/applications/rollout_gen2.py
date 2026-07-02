@@ -221,6 +221,9 @@ Examples:
         "forecast_len": n_steps,
         "datetimes": all_init_times,
     }
+    from credit.registry import load_custom_objects  # imported here to avoid a module-level credit.registry import
+
+    load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     dataset = MultiSourceDataset(dataset_conf, return_target=False)
 
     # Plain (non-distributed) subset sampler: each rank takes every world_size-th
