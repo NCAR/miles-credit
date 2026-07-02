@@ -26,7 +26,13 @@ _VALID_SECTIONS = {"ic_only", "per_step"}
 def _build_preblock_section(section_cfg: dict) -> nn.ModuleDict:
     modules = {}
     for name, block_cfg in section_cfg.items():
-        modules[name] = PREBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
+        block_type = block_cfg.get("type")
+        if block_type not in PREBLOCK_REGISTRY:
+            raise ValueError(
+                f"build_preblocks: unknown preblock type {block_type!r} for block {name!r}. "
+                f"Valid types: {sorted(PREBLOCK_REGISTRY)}"
+            )
+        modules[name] = PREBLOCK_REGISTRY[block_type](**(block_cfg.get("args") or {}))
     return nn.ModuleDict(modules)
 
 
