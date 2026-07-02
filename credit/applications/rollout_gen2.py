@@ -187,9 +187,6 @@ Examples:
     for h in root.handlers:
         h.setLevel(level)
 
-    if mode in ("ddp", "fsdp"):
-        setup(world_rank, world_size, mode)
-
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
         torch.cuda.set_device(local_rank % torch.cuda.device_count())
@@ -197,6 +194,9 @@ Examples:
         device = torch.device("mps")
     else:
         device = torch.device("cpu")
+
+    if mode in ("ddp", "fsdp"):
+        setup(world_rank, world_size, mode, device_id=device if torch.cuda.is_available() else None)
 
     # ── Preblocks / postblocks ───────────────────────────────────────────────
     ic_preblocks = build_preblocks(conf, phase="ic_only")
@@ -262,7 +262,10 @@ Examples:
     # batch_iter is shared across all forecasts. The sampler groups batches so
     # that each forecast consumes exactly n_steps consecutive batches (1 IC +
     # n_steps-1 forcing), in init-time order.
-    with mp.Pool(args.num_cpus) as pool:
+    # spawn (not the platform-default fork) since this process is multi-threaded by the
+    # time the pool starts (NCCL/CUDA background threads), and forking a multi-threaded
+    # process risks deadlocks in the child.
+    with mp.get_context("spawn").Pool(args.num_cpus) as pool:
         batch_iter = iter(loader)
 
         for _ in range(len(rank_indices)):
