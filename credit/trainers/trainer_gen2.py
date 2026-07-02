@@ -1,5 +1,6 @@
 import gc
 import logging
+import os
 from collections import defaultdict
 
 import numpy as np
@@ -19,8 +20,9 @@ from credit.parallel.domain import (
 )
 from credit.parallel.collectives import all_reduce_avg
 from credit.parallel.fsdp2 import fsdp2_is_applied
+from credit.datasets.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.postblock import build_postblocks, apply_postblocks
-from credit.preblock import build_preblocks, apply_preblocks
+from credit.preblock import attach_channel_schema, build_preblocks, apply_preblocks
 from credit.trainers.rollout_utils import assemble_rollout_batch
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
@@ -92,6 +94,17 @@ class TrainerERA5Gen2(BaseTrainer):
         preblock_cfg = conf.get("preblocks", {})
         self.ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
         self.step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+
+        # Channel schema: the frozen layout contract for the flat input/target
+        # tensors. Attached to concat so the first real target map is validated
+        # against it, and saved to save_loc so inference (which has no targets,
+        # hence no diagnostic tensors to derive a map from) reconstructs the
+        # full y_pred — diagnostics included.
+        self.channel_schema = ChannelSchema.load_or_from_config(conf)
+        attach_channel_schema(self.ic_preblocks, self.channel_schema)
+        attach_channel_schema(self.step_preblocks, self.channel_schema)
+        if self.channel_schema is not None and rank == 0:
+            self.channel_schema.save(os.path.join(os.path.expandvars(conf["save_loc"]), DEFAULT_SCHEMA_FILENAME))
 
         postblock_cfg = conf.get("postblocks", {})
         self.step_postblocks = build_postblocks(postblock_cfg, phase="per_step")

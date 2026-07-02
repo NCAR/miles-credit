@@ -88,6 +88,20 @@ def build_preblocks(preblock_cfg: dict | None = None, phase: str = "per_step") -
     return _build_preblock_section(cfg.get(phase) or {})
 
 
+def attach_channel_schema(preblocks: nn.ModuleDict, schema) -> None:
+    """Attach a ``ChannelSchema`` to every ConcatToTensor block in a preblock group.
+
+    The schema is runtime state (built from config / loaded from save_loc), not a
+    config arg, so it is injected after ``build_preblocks`` rather than through
+    the registry. No-op for groups without a concat block or when schema is None.
+    """
+    if schema is None:
+        return
+    for block in preblocks.values():
+        if isinstance(block, ConcatToTensor):
+            block.set_schema(schema)
+
+
 def _run_preblock_group(group: nn.ModuleDict, batch: dict, device=None):
     """Sequentially applies a group of preblocks, returning the transformed batch."""
     meta = None

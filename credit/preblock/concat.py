@@ -75,6 +75,17 @@ class ConcatToTensor(BasePreblock):
     def __init__(self, to_device: bool = True):
         super().__init__()
         self.to_device = to_device
+        # Optional ChannelSchema (set via set_schema, not config). When present:
+        # target-less batches (inference) get the schema's full target map —
+        # covering diagnostics — instead of the prognostic-only input-derived
+        # fallback; batches WITH a target are validated against the schema once.
+        self._schema = None
+        self._schema_validated = False
+
+    def set_schema(self, schema) -> None:
+        """Attach a ``credit.datasets.schema.ChannelSchema`` to this block."""
+        self._schema = schema
+        self._schema_validated = False
 
     def forward(self, batch: dict | tuple) -> tuple:
         if isinstance(batch, tuple):
@@ -146,9 +157,22 @@ class ConcatToTensor(BasePreblock):
             raise ValueError("No 'input' tensors found in batch.")
 
         metadata["input"]["_channel_map"] = input_channel_map
-        # Prefer the target-derived map (covers diagnostics); fall back to the
-        # input-derived prognostic-only map when no target is present (inference).
-        metadata["target"]["_channel_map"] = target_output_map or output_channel_map
+        # Target map priority:
+        #   1. built from an actual target (training/validation) — exact; checked
+        #      against the schema once so a layout drift fails loudly, not silently;
+        #   2. schema-derived (inference, no target) — covers diagnostics, which
+        #      never appear in the input;
+        #   3. input-derived prognostic-only map — legacy fallback when no schema
+        #      is available; diagnostics will be missing from reconstruction.
+        if target_output_map:
+            if self._schema is not None and not self._schema_validated:
+                self._schema.validate_channel_map(target_output_map, which="target")
+                self._schema_validated = True
+            metadata["target"]["_channel_map"] = target_output_map
+        elif self._schema is not None:
+            metadata["target"]["_channel_map"] = self._schema.target_channel_map()
+        else:
+            metadata["target"]["_channel_map"] = output_channel_map
 
         # Normalize device: rollout batches mix CPU (dataloader) and accelerator
         # (model output) tensors; torch.cat requires a uniform device.

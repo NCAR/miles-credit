@@ -35,11 +35,12 @@ import yaml
 from torch.utils.data import DataLoader
 
 from credit.datasets.multi_source import MultiSourceDataset
+from credit.datasets.schema import ChannelSchema
 from credit.distributed import get_rank_info, setup
 from credit.output_gen2 import ForecastWriter
 from credit.pbs import launch_script, launch_script_mpi
 from credit.postblock import build_postblocks
-from credit.preblock import build_preblocks
+from credit.preblock import attach_channel_schema, build_preblocks
 from credit.samplers import DistributedMultiStepBatchSampler
 from credit.seed import seed_everything
 from credit.trainers.rollout_utils import (
@@ -182,6 +183,14 @@ Examples:
     preblock_cfg = conf.get("preblocks", {})
     ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
     step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+
+    # Channel schema: inference batches carry no target (and diagnostics exist
+    # only in targets), so without a schema the reconstruction map would cover
+    # prognostics only and every diagnostic would be silently dropped from the
+    # output. Prefer the schema saved at training time in save_loc.
+    channel_schema = ChannelSchema.load_or_from_config(conf)
+    attach_channel_schema(ic_preblocks, channel_schema)
+    attach_channel_schema(step_preblocks, channel_schema)
 
     postblock_cfg = conf.get("postblocks", {})
     step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
