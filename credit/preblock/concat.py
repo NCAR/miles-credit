@@ -85,9 +85,11 @@ class ConcatToTensor(BasePreblock):
 
         # Channel-map accumulators
         input_channel_map = {}
-        output_channel_map = {}
+        output_channel_map = {}  # built from input — prognostic only (inference fallback)
+        target_output_map = {}  # built from target — prognostic + diagnostic
         input_cursor = 0
         output_cursor = 0
+        target_cursor = 0
 
         for data_type, sources in batch.items():
             if data_type == "metadata":
@@ -126,14 +128,27 @@ class ConcatToTensor(BasePreblock):
 
             elif data_type == "target":
                 for source, variables in sources.items():
-                    for tensor in variables.values():
+                    # Preserve insertion order so the channel map matches the
+                    # order tensors are concatenated into ``y`` (and thus the
+                    # model's ``y_pred`` channel order). The target includes
+                    # output-only diagnostic variables, which the input does not.
+                    for var_key, tensor in variables.items():
                         target_tensors.append(tensor)
+                        n_levels, T = tensor.shape[1], tensor.shape[2]
+                        n_ch = n_levels * T
+                        target_output_map[var_key] = {
+                            "slice": slice(target_cursor, target_cursor + n_ch),
+                            "orig_shape": (n_levels, T),
+                        }
+                        target_cursor += n_ch
 
         if not input_tensors:
             raise ValueError("No 'input' tensors found in batch.")
 
         metadata["input"]["_channel_map"] = input_channel_map
-        metadata["target"]["_channel_map"] = output_channel_map
+        # Prefer the target-derived map (covers diagnostics); fall back to the
+        # input-derived prognostic-only map when no target is present (inference).
+        metadata["target"]["_channel_map"] = target_output_map or output_channel_map
 
         # Normalize device: rollout batches mix CPU (dataloader) and accelerator
         # (model output) tensors; torch.cat requires a uniform device.
