@@ -141,6 +141,7 @@ def _infer_period_freq(fmt: str) -> str:
 def _map_files(
     file_list: list[str],
     time_fmt: str,
+    path_template: str | None = None,
 ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]]:
     """Build a sorted list of ``(start, end, path)`` intervals.
 
@@ -149,11 +150,20 @@ def _map_files(
     format string) is used to extract the date from each filename's
     basename; ``pd.Period`` then determines the exact coverage window.
 
+    When *path_template* is supplied the regex is anchored to the position of
+    the strftime codes within the full template, preventing false matches when
+    literal digits appear before the date placeholder (e.g.
+    ``branch_1980_%Y_data.zarr`` where a bare ``\\d{4}`` would match ``1980``
+    instead of the actual year).
+
     Args:
         file_list: Sorted list of file paths returned by glob.
         time_fmt: strftime format string extracted from the path template,
-            e.g. ``"%Y"``, ``"%Y/%m"``.  The regex is searched against the
-            full file path so date components in directory names are matched.
+            e.g. ``"%Y"``, ``"%Y/%m"``.
+        path_template: Original path template containing the strftime codes
+            (e.g. ``"/data/run_1980_%Y_output.zarr"``). When provided, the
+            full template is used to build an anchored regex so the date is
+            extracted from the correct position in each filename.
 
     Returns:
         List of ``(start, end, path)`` tuples sorted by start time.
@@ -164,7 +174,20 @@ def _map_files(
     if len(file_list) == 1:
         return [(pd.Timestamp.min, pd.Timestamp.max, file_list[0])]
 
-    pattern = _strftime_to_regex(time_fmt)
+    if path_template is not None:
+        # Build a date-regex string from the time_fmt (without compiling yet)
+        date_pat = re.escape(time_fmt)
+        for code, repl in _STRFTIME_TO_REGEX.items():
+            date_pat = date_pat.replace(re.escape(code), repl)
+        # Escape the full template and splice the date portion in as a named
+        # capture group so the match is anchored to the right field.
+        anchored = re.escape(path_template).replace(re.escape(time_fmt), f"(?P<date>{date_pat})")
+        pattern = re.compile(anchored)
+        group_key: str | int = "date"
+    else:
+        pattern = _strftime_to_regex(time_fmt)
+        group_key = 0
+
     freq = _infer_period_freq(time_fmt)
 
     intervals: list[tuple[pd.Timestamp, pd.Timestamp, str]] = []
@@ -175,7 +198,7 @@ def _map_files(
                 f"Time format '{time_fmt}' did not match path '{f}'. "
                 "Verify that your path contains strftime codes covering the date portion."
             )
-        parsed = dt_cls.strptime(m.group(0), time_fmt)
+        parsed = dt_cls.strptime(m.group(group_key), time_fmt)
         period = pd.Period(parsed, freq)
         intervals.append((period.start_time, period.end_time, f))
 
