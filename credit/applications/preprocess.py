@@ -1,4 +1,5 @@
 import argparse
+import copy
 import logging
 import warnings
 
@@ -177,8 +178,13 @@ Examples:
         setup(rank, world_size, effective_mode(conf), backend)
 
     trainer_conf = conf["trainer"]
-    train_dataset = load_dataset(conf, is_train=True)
-    train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
+    # Force forecast_len=1 so the dataloader only yields IC batches (step i=0).
+    # Using forecast_len > 1 would feed the same timestamps at multiple step
+    # offsets into the scaler fit, duplicating samples and skewing statistics.
+    preprocess_conf = copy.deepcopy(conf)
+    preprocess_conf["data"]["forecast_len"] = 1
+    train_dataset = load_dataset(preprocess_conf, is_train=True)
+    train_loader = load_dataloader(preprocess_conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
     preblocks = build_preblocks(conf["preblocks"])
