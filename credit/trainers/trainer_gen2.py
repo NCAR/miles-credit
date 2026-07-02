@@ -266,20 +266,17 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 if t == 1:
                     full_data_dict["ic_raw"] = batch["input"]
-                    full_data_dict["x_raw"] = batch["input"]
-                    full_data_dict["y_raw"] = batch["target"]
+                    full_data_dict["y_physical"] = batch["target"]
                     full_data_dict["ic_preprocessed"] = apply_preblocks(self.ic_preblocks, batch, device=self.device)
+                    full_data_dict["x_physical"] = full_data_dict["ic_preprocessed"]["input"]
                     full_data_dict.update(
                         apply_preblocks(self.step_preblocks, full_data_dict["ic_preprocessed"], device=self.device)
                     )
                 else:
-                    full_data_dict["x_raw"] = batch["input"]
-                    full_data_dict["y_raw"] = batch["target"]
-                    full_data_dict.update(
-                        apply_preblocks(
-                            self.step_preblocks, assemble_rollout_batch(full_data_dict, batch), device=self.device
-                        )
-                    )
+                    assembled = assemble_rollout_batch(full_data_dict, batch)
+                    full_data_dict["x_physical"] = assembled["input"]
+                    full_data_dict["y_physical"] = batch["target"]
+                    full_data_dict.update(apply_preblocks(self.step_preblocks, assembled, device=self.device))
 
                 if self.ensemble_size > 1:
                     full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
@@ -439,22 +436,19 @@ class TrainerERA5Gen2(BaseTrainer):
 
                     if t == 1:
                         full_data_dict["ic_raw"] = batch["input"]
-                        full_data_dict["x_raw"] = batch["input"]
-                        full_data_dict["y_raw"] = batch["target"]
+                        full_data_dict["y_physical"] = batch["target"]
                         full_data_dict["ic_preprocessed"] = apply_preblocks(
                             self.ic_preblocks, batch, device=self.device
                         )
+                        full_data_dict["x_physical"] = full_data_dict["ic_preprocessed"]["input"]
                         full_data_dict.update(
                             apply_preblocks(self.step_preblocks, full_data_dict["ic_preprocessed"], device=self.device)
                         )
                     else:
-                        full_data_dict["x_raw"] = batch["input"]
-                        full_data_dict["y_raw"] = batch["target"]
-                        full_data_dict.update(
-                            apply_preblocks(
-                                self.step_preblocks, assemble_rollout_batch(full_data_dict, batch), device=self.device
-                            )
-                        )
+                        assembled = assemble_rollout_batch(full_data_dict, batch)
+                        full_data_dict["x_physical"] = assembled["input"]
+                        full_data_dict["y_physical"] = batch["target"]
+                        full_data_dict.update(apply_preblocks(self.step_preblocks, assembled, device=self.device))
 
                     if self.ensemble_size > 1:
                         full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
