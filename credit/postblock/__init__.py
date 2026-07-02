@@ -1,14 +1,13 @@
 import torch.nn as nn
-
 from credit.postblock.reconstruct import Reconstruct
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.postblock.scaler import BridgeScalerTransform
 from credit.postblock.mslp import MSLPDiagnostic
 from credit.postblock.exp import ExpTransform
 from credit.postblock.square import SquareTransform
-
-from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.postblock.geopotential import GeopotentialDiagnostic
+from credit.postblock.conservation import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixerUpDown
+
 
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
@@ -20,7 +19,7 @@ POSTBLOCK_REGISTRY = {
     "tracer_fixer": TracerFixer,
     "global_mass_fixer": GlobalMassFixer,
     "global_water_fixer": GlobalWaterFixer,
-    "global_energy_fixer": GlobalEnergyFixer,
+    "global_energy_fixer": GlobalEnergyFixerUpDown,
     "geopotential_diagnostic": GeopotentialDiagnostic,
 }
 
