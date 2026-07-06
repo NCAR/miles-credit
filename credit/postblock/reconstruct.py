@@ -25,8 +25,8 @@ The same ``batch_dict`` with ``"y_processed"`` added as a nested dict:
 ``"y_pred"`` is left intact (grad-attached) for use in loss computation.
 """
 
+import os
 import torch
-
 from credit.postblock.base import BasePostblock
 
 
@@ -111,15 +111,15 @@ class FlattenToTensor(BasePostblock):
         out_key: str = "y_pred",
     ):
         super().__init__()
-        self.scaler_path = scaler_path
+        self.scaler_path = os.path.expandvars(scaler_path) if scaler_path is not None else None
         self.variables = variables
         self.method = method
         self.key = key
         self.out_key = out_key
-        if scaler_path is not None:
+        if self.scaler_path is not None:
             from bridgescaler import load_scaler_dict
 
-            self.scaler = load_scaler_dict(scaler_path)
+            self.scaler = load_scaler_dict(self.scaler_path)["target"]
         else:
             self.scaler = None
 
