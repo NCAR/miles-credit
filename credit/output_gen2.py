@@ -420,8 +420,23 @@ class ForecastWriter:
                 }
             )
         else:
-            # Zarr stores datetime64 natively; just enforce chunk size 1 on time
-            ds["time"].encoding["chunks"] = 1
+            # Zarr appends re-derive CF time units per write. If left to xarray's
+            # autodetection, the first (mode="w") step pins units relative to the
+            # first timestamp (e.g. "hours since <t0>") while each appended step
+            # re-derives its own units ("days since ...") — the integers written no
+            # longer match the store's units and the time coordinate is silently
+            # corrupted by a days/hours (x24) factor on read-back. Pin an explicit
+            # fixed-epoch encoding (as in the netcdf branch) so every append encodes
+            # consistently and round-trips exactly.
+            time_meta = self._meta.get("time") or {}
+            ds["time"].encoding.update(
+                {
+                    "units": time_meta.get("units", "seconds since 1970-01-01"),
+                    "calendar": time_meta.get("calendar", "proleptic_gregorian"),
+                    "dtype": "int64",
+                    "chunks": 1,
+                }
+            )
 
     def _make_encoding(self, ds: xr.Dataset) -> dict:
         """Build per-variable NetCDF encoding (not used for zarr data variables)."""
