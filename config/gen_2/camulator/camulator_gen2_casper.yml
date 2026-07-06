@@ -10,154 +10,200 @@
 # BridgeScaler JSONs generated from gen1 mean/std NetCDF via `credit convert`:
 #   pre:  /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_pre_scaler.json
 #   post: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_post_scaler.json
+# ===================================================================================================================== #
+# CAMulator INFERENCE config  (6-hourly, 1.0deg, 32-level state-in/state-out atmosphere)
+# Converted to gen2 data schema (v2026.3)
 #
-# -----------------------------------------------------------------------
-# Gen2 channel layout (empirically derived from FIELD_TYPE_RANK ordering):
-#   prognostic < static < dynamic_forcing < diagnostic
+# Key structural changes from the prior gen1 config:
+#   - data.variables / surface_variables / etc. → data.source.CESM.variables.{prognostic,diagnostic,...}
+#   - trainer.type: era5  → trainer.type: gen2  (with new parallelism block)
+#   - preblocks block replaces data.mean_path/std_path + data.scaler_type
+#   - predict block → inference block
 #
-# INPUT tensor (x, 153 channels):
-#   ch   0- 31  U          (prognostic/3d, 32 levels)
-#   ch  32- 63  V          (prognostic/3d, 32 levels)
-#   ch  64- 95  T          (prognostic/3d, 32 levels)
-#   ch  96-127  Qtot       (prognostic/3d, 32 levels)
-#   ch 128      PS         (prognostic/2d)
-#   ch 129      TREFHT     (prognostic/2d)
-#   ch 130      z_norm     (static/2d)
-#   ch 131      LANDM_COSLAT (static/2d)
-#   ch 132      SOLIN      (dynamic_forcing/2d)   ← used by energy fixer
-#   ch 133      SST        (dynamic_forcing/2d)
-#   ch 134      ICEFRAC    (dynamic_forcing/2d)
-#   ch 135      co2vmr_3d  (dynamic_forcing/2d)
-#   ch 136      PRECT      (diagnostic/2d, prev step)
-#   ch 137-152  remaining 16 diagnostics
-#
-# OUTPUT tensor (y_pred, 147 channels):
-#   ch   0- 31  U          (prognostic/3d)
-#   ch  32- 63  V          (prognostic/3d)
-#   ch  64- 95  T          (prognostic/3d)
-#   ch  96-127  Qtot       (prognostic/3d)
-#   ch 128      PS         (prognostic/2d)
-#   ch 129      TREFHT     (prognostic/2d)
-#   ch 130      PRECT      (diagnostic/2d)
-#   ch 131      TS         (diagnostic/2d)
-#   ch 132      CLDHGH     (diagnostic/2d)
-#   ch 133      CLDLOW     (diagnostic/2d)
-#   ch 134      CLDMED     (diagnostic/2d)
-#   ch 135      TAUX       (diagnostic/2d)
-#   ch 136      TAUY       (diagnostic/2d)
-#   ch 137      U10        (diagnostic/2d)
-#   ch 138      QFLX       (diagnostic/2d)
-#   ch 139      FSDS_J     (diagnostic/2d)
-#   ch 140      FLDS_J     (diagnostic/2d)
-#   ch 141      FSUS       (diagnostic/2d)
-#   ch 142      FLUS       (diagnostic/2d)
-#   ch 143      SHFLX      (diagnostic/2d)
-#   ch 144      LHFLX      (diagnostic/2d)
-#   ch 145      FSUTOA     (diagnostic/2d)
-#   ch 146      FLUT       (diagnostic/2d)
-#
-# Gen1 vs Gen2 physics fixer index comparison:
-#   Index         Gen1  Gen2  Notes
-#   q_inds        [96,127] [96,127]  SAME
-#   sp_inds       128   128   SAME
-#   T_inds        [64,95] [64,95]  SAME
-#   U_inds        [0,31]  [0,31]  SAME
-#   V_inds        [32,63] [32,63] SAME
-#   precip_ind    130   130   SAME
-#   evapor_ind    138   138   SAME (QFLX)
-#   TOA_up_solar_ind 145  145  SAME (FSUTOA)
-#   TOA_up_OLR_ind   146  146  SAME (FLUT)
-#   surf_down_solar_ind 141 139  DIFF (FSDS_J: gen1=141, gen2=139)
-#   surf_up_solar_ind   143 141  DIFF (FSUS)
-#   surf_down_LW_ind    142 140  DIFF (FLDS_J)
-#   surf_up_LW_ind      144 142  DIFF (FLUS)
-#   surf_SH_ind         139 143  DIFF (SHFLX)
-#   surf_LH_ind         140 144  DIFF (LHFLX)
-#   TOA_down_solar (SOLIN) input x ch 132 (not in y_pred in gen2)
-# -----------------------------------------------------------------------
+# The physics postblocks below use the gen2 name-based schema: variables are addressed
+# by key (e.g. CESM/prognostic/3d/Qtot) in y_processed / x_physical — no channel indices.
+# ===================================================================================================================== #
 
-save_loc: '/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/'
+# /glade/derecho/scratch/wchapman/CREDIT/top4_6hr_1980_2014/
+# /glade/derecho/scratch/wchapman/CREDIT/top4_6hr_1980_2014/chkpt065/1980-01-01T00Z/
+# /glade/work/wchapman/Roman_Coupling/camulator_ud/climate/monthly_ckpt_sweep/camulator_config_monthly_sweep:yml:
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/camulator_test'
 seed: 1000
 
+
+# ---- Training/validation data ---- #
+# Paths under each variable group are TRAINING-ONLY (ignored by Quick_Climate inference).
+# At inference, the model state comes from inference.camulator.init_cond_fast_climate and
+# dynamic forcing comes from inference.camulator.forcing_file.
 data:
   source:
-    ERA5:
-      dataset_type: local
-      level_coord: level
-      # All 32 hybrid-sigma levels (floating-point hPa values from the zarr)
-      levels: [3.643465757369995, 7.59481954574585, 14.356632232666016, 24.612220764160156,
-               35.923248291015625, 43.193748474121094, 51.67749786376953, 61.5204963684082,
-               73.75096130371094, 87.82122802734375, 103.31712341308594, 121.5472412109375,
-               142.99403381347656, 168.22508239746094, 197.9080810546875, 232.82861328125,
-               273.91082763671875, 322.2419128417969, 379.10089111328125, 445.9925842285156,
-               524.6871948242188, 609.7786865234375, 691.389404296875, 763.4044799804688,
-               820.8583984375, 859.5347900390625, 887.020263671875, 912.64453125,
-               936.1984252929688, 957.4854736328125, 976.3253784179688, 992.5560913085938]
+    CESM:
+      dataset_type: "local"
+      level_coord: "lev"                # CESM hybrid sigma-pressure coordinate
       variables:
         prognostic:
-          vars_3D: [U, V, T, Qtot]
-          vars_2D: [PS, TREFHT]
-          path: "/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/cesm_zarr_links/cesm_%Y.zarr"
-          filename_time_format: '%Y'
-        dynamic_forcing:
-          vars_2D: [SOLIN, SST, ICEFRAC, co2vmr_3d]
-          path: "/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/cesm_zarr_links/cesm_%Y.zarr"
-          filename_time_format: '%Y'
-        static:
-          vars_2D: [z_norm, LANDM_COSLAT]
-          path: "/glade/derecho/scratch/wchapman/b_credit_runs/statics_b_credit_runs_f32_02.nc"
+          vars_3D: ['U', 'V', 'T', 'Qtot']
+          vars_2D: ['PS', 'TREFHT']
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
         diagnostic:
-          vars_2D: [PRECT, TS, CLDHGH, CLDLOW, CLDMED, TAUX, TAUY, U10, QFLX, FSDS_J,
-                    FLDS_J, FSUS, FLUS, SHFLX, LHFLX, FSUTOA, FLUT]
-          path: "/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/cesm_zarr_links/cesm_%Y.zarr"
-          filename_time_format: '%Y'
+          vars_2D: ['PRECT', 'TS', 'CLDHGH', 'CLDLOW', 'CLDMED', 'TAUX', 'TAUY', 'U10',
+                    'QFLX', 'FSDS_J', 'FLDS_J', 'FSUS', 'FLUS', 'SHFLX', 'LHFLX', 'FSUTOA', 'FLUT']
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
 
-  timestep: 6h
-  # forecast_len=1 means single-step in gen2 semantics (gen1 used 0=single-step)
-  forecast_len: 1
-  valid_forecast_len: 1
-  start_datetime: '1980-01-01'
-  end_datetime: '1981-12-31'
+        # At inference, dynamic forcing comes from inference.camulator.forcing_file (SOLIN/SST/ICEFRAC/CO2).
+        dynamic_forcing:
+          vars_2D: ['SOLIN', 'SST', 'ICEFRAC', 'co2vmr_3d']
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
 
+        static:
+          vars_2D: ['z_norm', 'LANDM_COSLAT']
+          path: './climate/assets/statics_b_credit_runs_f32_02.nc'
+
+  start_datetime: "1980-01-01"
+  end_datetime: "2012-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 2
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- Validation data ---- #
 validation_data:
-  start_datetime: '2013-01-01'
-  end_datetime: '2013-12-31'
+  source:
+    CESM:
+      dataset_type: "local"
+      level_coord: "lev"
+      variables:
+        prognostic:
+          vars_3D: ['U', 'V', 'T', 'Qtot']
+          vars_2D: ['PS', 'TREFHT']
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
+        diagnostic:
+          vars_2D: ['PRECT', 'TS', 'CLDHGH', 'CLDLOW', 'CLDMED', 'TAUX', 'TAUY', 'U10',
+                    'QFLX', 'FSDS_J', 'FLDS_J', 'FSUS', 'FLUS', 'SHFLX', 'LHFLX', 'FSUTOA', 'FLUT']
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
+        dynamic_forcing:
+          vars_2D: ['SOLIN', 'SST', 'ICEFRAC', 'co2vmr_3d']
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
+        static:
+          vars_2D: ['z_norm', 'LANDM_COSLAT']
+          path: './climate/assets/statics_b_credit_runs_f32_02.nc'
+
+  start_datetime: "2013-01-01"
+  end_datetime: "2014-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 2
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- Training hyperparameters ---- #
+trainer:
+  type: gen2
+
+  parallelism:
+    data: ddp               # ddp | fsdp2 | none
+    tensor: 1
+    domain: 1
+
+  cpu_offload: False
+  activation_checkpoint: True
+
+  load_weights: True
+  load_optimizer: True
+  load_scaler: True
+  load_scheduler: False
+  reload_epoch: True
+
+  skip_validation: True
+  update_learning_rate: True
+
+  save_backup_weights: True
+  save_best_weights: True
+  save_every_epoch: True
+
+  save_metric_vars: ["PRECT", "TREFHT", "TAUX", "TAUY", "U", "T"]
+
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  train_batch_size: 8
+  valid_batch_size: 8
+
+  batches_per_epoch: 10
+  valid_batches_per_epoch: 10
+  stopping_patience: 5000
+
+  start_epoch: 0
+  num_epoch: 2
+  epochs: &epochs 2
+
+  use_tensorboard: True
+  use_ema: False
+
+  use_scheduler: False
+  scheduler:
+    scheduler_type: cosine-annealing
+    T_max: *epochs
+    last_epoch: -1
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 1.0
+
+  thread_workers: 8
+  valid_thread_workers: 8
+  prefetch_factor: 2
 
 preblocks:
   per_step:
     scaler:
-      type: bridgescaler_transformer
+      type: bridgescaler_transform
       args:
-        scaler_path: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_pre_scaler.json
+        scaler_path: /glade/derecho/scratch/$USER/CREDIT_runs/camulator_test/scaler.json
         variables:
-          - ERA5/prognostic/3d/U
-          - ERA5/prognostic/3d/V
-          - ERA5/prognostic/3d/T
-          - ERA5/prognostic/3d/Qtot
-          - ERA5/prognostic/2d/PS
-          - ERA5/prognostic/2d/TREFHT
-          - ERA5/dynamic_forcing/2d/SOLIN
-          - ERA5/dynamic_forcing/2d/SST
-          - ERA5/dynamic_forcing/2d/ICEFRAC
-          - ERA5/dynamic_forcing/2d/co2vmr_3d
-          - ERA5/diagnostic/2d/PRECT
-          - ERA5/diagnostic/2d/TS
-          - ERA5/diagnostic/2d/CLDHGH
-          - ERA5/diagnostic/2d/CLDLOW
-          - ERA5/diagnostic/2d/CLDMED
-          - ERA5/diagnostic/2d/TAUX
-          - ERA5/diagnostic/2d/TAUY
-          - ERA5/diagnostic/2d/U10
-          - ERA5/diagnostic/2d/QFLX
-          - ERA5/diagnostic/2d/FSDS_J
-          - ERA5/diagnostic/2d/FLDS_J
-          - ERA5/diagnostic/2d/FSUS
-          - ERA5/diagnostic/2d/FLUS
-          - ERA5/diagnostic/2d/SHFLX
-          - ERA5/diagnostic/2d/LHFLX
-          - ERA5/diagnostic/2d/FSUTOA
-          - ERA5/diagnostic/2d/FLUT
+          - CESM/prognostic/3d/U
+          - CESM/prognostic/3d/V
+          - CESM/prognostic/3d/T
+          - CESM/prognostic/3d/Qtot
+          - CESM/prognostic/2d/PS
+          - CESM/prognostic/2d/TREFHT
+          - CESM/dynamic_forcing/2d/SOLIN
+          - CESM/dynamic_forcing/2d/SST
+          - CESM/dynamic_forcing/2d/ICEFRAC
+          - CESM/dynamic_forcing/2d/co2vmr_3d
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/TS
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/TAUX
+          - CESM/diagnostic/2d/TAUY
+          - CESM/diagnostic/2d/U10
+          - CESM/diagnostic/2d/QFLX
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FLDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FLUS
+          - CESM/diagnostic/2d/SHFLX
+          - CESM/diagnostic/2d/LHFLX
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
         method: transform
+        scaler_params:
+          channels_last: False
     concat:
       type: concat
 
@@ -194,53 +240,52 @@ postblocks:
     reconstruct:
       type: reconstruct
       args:
-        detach: false
+        detach: False   # REQUIRED with flatten_to_tensor in training: keeps y_processed
+                        # on the autograd graph so the rebuilt y_pred can backprop
 
     inverse_scale:
       type: bridgescaler_transform
       args:
         method: inverse_transform
-        key: y_processed
-        scaler_path: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_post_scaler.json
+        scaler_path: /glade/derecho/scratch/$USER/CREDIT_runs/camulator_test/scaler.json
         variables:
-          - ERA5/prognostic/3d/U
-          - ERA5/prognostic/3d/V
-          - ERA5/prognostic/3d/T
-          - ERA5/prognostic/3d/Qtot
-          - ERA5/prognostic/2d/PS
-          - ERA5/prognostic/2d/TREFHT
-          - ERA5/diagnostic/2d/PRECT
-          - ERA5/diagnostic/2d/TS
-          - ERA5/diagnostic/2d/CLDHGH
-          - ERA5/diagnostic/2d/CLDLOW
-          - ERA5/diagnostic/2d/CLDMED
-          - ERA5/diagnostic/2d/TAUX
-          - ERA5/diagnostic/2d/TAUY
-          - ERA5/diagnostic/2d/U10
-          - ERA5/diagnostic/2d/QFLX
-          - ERA5/diagnostic/2d/FSDS_J
-          - ERA5/diagnostic/2d/FLDS_J
-          - ERA5/diagnostic/2d/FSUS
-          - ERA5/diagnostic/2d/FLUS
-          - ERA5/diagnostic/2d/SHFLX
-          - ERA5/diagnostic/2d/LHFLX
-          - ERA5/diagnostic/2d/FSUTOA
-          - ERA5/diagnostic/2d/FLUT
-
+          - CESM/prognostic/3d/U
+          - CESM/prognostic/3d/V
+          - CESM/prognostic/3d/T
+          - CESM/prognostic/3d/Qtot
+          - CESM/prognostic/2d/PS
+          - CESM/prognostic/2d/TREFHT
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/TS
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/TAUX
+          - CESM/diagnostic/2d/TAUY
+          - CESM/diagnostic/2d/U10
+          - CESM/diagnostic/2d/QFLX
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FLDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FLUS
+          - CESM/diagnostic/2d/SHFLX
+          - CESM/diagnostic/2d/LHFLX
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
     tracer_fixer:
       type: tracer_fixer
       args:
         tracer_thres: 0.0
         tracer_vars:
-          - ERA5/prognostic/3d/Qtot
-          - ERA5/diagnostic/2d/PRECT
-          - ERA5/diagnostic/2d/CLDHGH
-          - ERA5/diagnostic/2d/CLDLOW
-          - ERA5/diagnostic/2d/CLDMED
-          - ERA5/diagnostic/2d/FSDS_J
-          - ERA5/diagnostic/2d/FSUS
-          - ERA5/diagnostic/2d/FSUTOA
-          - ERA5/diagnostic/2d/FLUT
+          - CESM/prognostic/3d/Qtot
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
 
     mass_fixer:
       type: global_mass_fixer
@@ -250,8 +295,8 @@ postblocks:
         grid_type: sigma
         midpoint: true
         fix_level_num: 14
-        q_var: ERA5/prognostic/3d/Qtot
-        sp_var: ERA5/prognostic/2d/PS
+        q_var: CESM/prognostic/3d/Qtot
+        sp_var: CESM/prognostic/2d/PS
 
     water_fixer:
       type: global_water_fixer
@@ -261,79 +306,81 @@ postblocks:
         grid_type: sigma
         midpoint: true
         lead_time_periods: 6
-        q_var: ERA5/prognostic/3d/Qtot
-        sp_var: ERA5/prognostic/2d/PS
-        precip_var: ERA5/diagnostic/2d/PRECT
-        evapor_var: ERA5/diagnostic/2d/QFLX
+        q_var: CESM/prognostic/3d/Qtot
+        sp_var: CESM/prognostic/2d/PS
+        precip_var: CESM/diagnostic/2d/PRECT
+        evapor_var: CESM/diagnostic/2d/QFLX
 
-    energy_fixer_updown:
-      type: global_energy_fixer_updown
-      args:
-        save_loc_physics: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
-        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
-        grid_type: sigma
-        midpoint: true
-        lead_time_periods: 6
-        surface_geopotential_name: PHIS
-        T_var: ERA5/prognostic/3d/T
-        q_var: ERA5/prognostic/3d/Qtot
-        U_var: ERA5/prognostic/3d/U
-        V_var: ERA5/prognostic/3d/V
-        sp_var: ERA5/prognostic/2d/PS
-        toa_down_solar_input_var: ERA5/dynamic_forcing/2d/SOLIN
-        toa_up_solar_var: ERA5/diagnostic/2d/FSUTOA
-        toa_up_olr_var: ERA5/diagnostic/2d/FLUT
-        surf_down_solar_var: ERA5/diagnostic/2d/FSDS_J
-        surf_up_solar_var: ERA5/diagnostic/2d/FSUS
-        surf_down_lw_var: ERA5/diagnostic/2d/FLDS_J
-        surf_up_lw_var: ERA5/diagnostic/2d/FLUS
-        surf_sh_var: ERA5/diagnostic/2d/SHFLX
-        surf_lh_var: ERA5/diagnostic/2d/LHFLX
+### NOT NEEDED FOR INFERENCE: Uncomment for training
+#    energy_fixer_updown:
+#      type: global_energy_fixer_updown
+#      args:
+#        save_loc_physics: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+#        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+#        grid_type: sigma
+#        midpoint: true
+#        lead_time_periods: 6
+#        surface_geopotential_name: PHIS
+#        T_var: CESM/prognostic/3d/T
+#        q_var: CESM/prognostic/3d/Qtot
+#        U_var: CESM/prognostic/3d/U
+#        V_var: CESM/prognostic/3d/V
+#        sp_var: CESM/prognostic/2d/PS
+#        toa_down_solar_input_var: CESM/dynamic_forcing/2d/SOLIN
+#        toa_up_solar_var: CESM/diagnostic/2d/FSUTOA
+#        toa_up_olr_var: CESM/diagnostic/2d/FLUT
+#        surf_down_solar_var: CESM/diagnostic/2d/FSDS_J
+#        surf_up_solar_var: CESM/diagnostic/2d/FSUS
+#        surf_down_lw_var: CESM/diagnostic/2d/FLDS_J
+#        surf_up_lw_var: CESM/diagnostic/2d/FLUS
+#        surf_sh_var: CESM/diagnostic/2d/SHFLX
+#        surf_lh_var: CESM/diagnostic/2d/LHFLX
 
-    flatten:
-      type: flatten_to_tensor
-      args:
-        method: transform
-        key: y_processed
-        out_key: y_pred
-        scaler_path: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_post_scaler.json
-        variables:
-          - ERA5/prognostic/3d/U
-          - ERA5/prognostic/3d/V
-          - ERA5/prognostic/3d/T
-          - ERA5/prognostic/3d/Qtot
-          - ERA5/prognostic/2d/PS
-          - ERA5/prognostic/2d/TREFHT
-          - ERA5/diagnostic/2d/PRECT
-          - ERA5/diagnostic/2d/TS
-          - ERA5/diagnostic/2d/CLDHGH
-          - ERA5/diagnostic/2d/CLDLOW
-          - ERA5/diagnostic/2d/CLDMED
-          - ERA5/diagnostic/2d/TAUX
-          - ERA5/diagnostic/2d/TAUY
-          - ERA5/diagnostic/2d/U10
-          - ERA5/diagnostic/2d/QFLX
-          - ERA5/diagnostic/2d/FSDS_J
-          - ERA5/diagnostic/2d/FLDS_J
-          - ERA5/diagnostic/2d/FSUS
-          - ERA5/diagnostic/2d/FLUS
-          - ERA5/diagnostic/2d/SHFLX
-          - ERA5/diagnostic/2d/LHFLX
-          - ERA5/diagnostic/2d/FSUTOA
-          - ERA5/diagnostic/2d/FLUT
+#    flatten:
+#      type: flatten_to_tensor
+#      args:
+#        method: transform
+#        key: y_processed
+#        out_key: y_pred
+#        scaler_path: /glade/derecho/scratch/$USER/CREDIT_runs/camulator_test/scaler.json
+#        variables:
+#          - CESM/prognostic/3d/U
+#          - CESM/prognostic/3d/V
+#          - CESM/prognostic/3d/T
+#          - CESM/prognostic/3d/Qtot
+#          - CESM/prognostic/2d/PS
+#          - CESM/prognostic/2d/TREFHT
+#          - CESM/diagnostic/2d/PRECT
+#          - CESM/diagnostic/2d/TS
+#          - CESM/diagnostic/2d/CLDHGH
+#          - CESM/diagnostic/2d/CLDLOW
+#          - CESM/diagnostic/2d/CLDMED
+#          - CESM/diagnostic/2d/TAUX
+#          - CESM/diagnostic/2d/TAUY
+#          - CESM/diagnostic/2d/U10
+#          - CESM/diagnostic/2d/QFLX
+#          - CESM/diagnostic/2d/FSDS_J
+#          - CESM/diagnostic/2d/FLDS_J
+#          - CESM/diagnostic/2d/FSUS
+#          - CESM/diagnostic/2d/FLUS
+#          - CESM/diagnostic/2d/SHFLX
+#          - CESM/diagnostic/2d/LHFLX
+#          - CESM/diagnostic/2d/FSUTOA
+#          - CESM/diagnostic/2d/FLUT
 
+
+# ---- Model architecture ---- #
+# Must match the checkpoint — do not edit for the shipped model.
 model:
-  type: camulator
+  type: "camulator"
   frames: 1
   image_height: 192
   image_width: 288
   levels: 32
-
-  # Channel counts match gen1 config exactly
-  channels: 4               # 3D prognostic: U, V, T, Qtot
-  surface_channels: 2       # 2D prognostic: PS, TREFHT
+  channels: 4               # 3D prognostic: U V T Qtot
+  surface_channels: 2       # 2D prognostic: PS TREFHT
   input_only_channels: 6    # dynamic_forcing (4) + static (2)
-  output_only_channels: 17  # diagnostic: PRECT TS CLDHGH CLDLOW CLDMED TAUX TAUY U10 QFLX FSDS_J FLDS_J FSUS FLUS SHFLX LHFLX FSUTOA FLUT
+  output_only_channels: 17  # diagnostic variables
 
   patch_width: 1
   patch_height: 1
@@ -361,92 +408,111 @@ model:
     pad_lat: [48, 48]
     pad_lon: [48, 48]
 
-  # Physics conservation fixers are now wired through postblocks:, not model.post_conf
-  post_conf:
-    activate: False
 
+# ---- Loss ---- #
 loss:
-  training_loss: mse
-  validation_loss: mse
+  training_loss: "mse"
+
   use_power_loss: False
   use_spectral_loss: False
+  spectral_lambda_reg: 0.1
+  spectral_wavenum_init: 20
+
+  latitude_weights: "./climate/assets/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
   use_latitude_weights: True
-  latitude_weights: "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+
   use_variable_weights: False
 
-trainer:
-  type: era5-gen2
 
-  parallelism:
-    data: none   # single GPU
-    tensor: 1
-    domain: 1
+# ---- Inference ---- #
+# run_mode selects between batch and single forecast.
+#   batch:  generates forecasts for a range of init times defined under batch_forecast.initialization
+#   single: runs one forecast from a specific init time defined under single_forecast.start_datetime
+inference:
+  run_mode: single
+  mode: none                          # none | ddp | fsdp
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/camulator_test/rollout/'
 
-  load_weights: False
-  load_optimizer: False
-  load_scaler: False
-  load_scheduler: False
+  batch_forecast:
+    forecast_length: "365d"                    # 1460 6-hourly steps = 1 no-leap year
+    first_init_date: "1981-01-01"
+    last_init_date: "1981-12-31"
+    init_interval: "1d"
 
-  save_backup_weights: False
-  save_best_weights: True
-  save_metric_vars: [PRECT, TREFHT, TAUX, TAUY, U, T]
+  single_forecast:
+    forecast_length: "365d"                    # 1460 6-hourly steps = 1 no-leap year
+    start_datetime: "2013-01-01T00:00Z"
 
-  update_learning_rate: False
-  learning_rate: 1.0e-04
-  weight_decay: 0
+  output:
+    format: netcdf
+    output_interval: null
+    group_by: month
+    metadata: "camulator_metadata.yaml"
+    variables:
+      - name: "CESM/prognostic/3d/U"
+      - name: "CESM/prognostic/3d/V"
+      - name: "CESM/prognostic/3d/T"
+      - name: "CESM/prognostic/3d/Qtot"
+      - name: "CESM/prognostic/2d/PS"
+      - name: "CESM/prognostic/2d/TREFHT"
+      - name: "CESM/diagnostic/2d/PRECT"
+      - name: "CESM/diagnostic/2d/TS"
+      - name: "CESM/diagnostic/2d/CLDHGH"
+      - name: "CESM/diagnostic/2d/CLDLOW"
+      - name: "CESM/diagnostic/2d/CLDMED"
+      - name: "CESM/diagnostic/2d/TAUX"
+      - name: "CESM/diagnostic/2d/TAUY"
+      - name: "CESM/diagnostic/2d/U10"
+      - name: "CESM/diagnostic/2d/QFLX"
+      - name: "CESM/diagnostic/2d/SHFLX"
+      - name: "CESM/diagnostic/2d/LHFLX"
+      - name: "CESM/diagnostic/2d/FSDS_J"
+      - name: "CESM/diagnostic/2d/FLDS_J"
+      - name: "CESM/diagnostic/2d/FSUS"
+      - name: "CESM/diagnostic/2d/FLUS"
+      - name: "CESM/diagnostic/2d/FSUTOA"
+      - name: "CESM/diagnostic/2d/FLUT"
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 0
 
-  train_batch_size: 1
-  valid_batch_size: 1
-  ensemble_size: 1
+#  # CAMulator-specific inference parameters (not part of the base gen2 schema)
+#  camulator:
+#    climate_rescale_output: True
+#    use_laplace_filter: False
+#    climatology: './assets/ERA5_clim_1990_2019_6h_interp.nc'
+#    forcing_file: './assets/b.e21.CREDIT_climate_cyclic_1yr_f32coords.nc'
+#    run_fast_climate: False
+#    init_cond_fast_climate: './assets/init_camulator_condition_tensor_1981-01-01T00Z.pth'
+#    inds_rmse_fast_climate: ['rmse_PRECT', 'rmse_TREFHT']
+#    seasonal_mean_fast_climate: './assets/truth_be21_tensor_2013-01-01T00Z.pth'
+#    timesteps_fast_climate: 1460     # 1460 × 6h = 1 no-leap year
 
-  batches_per_epoch: 5
-  valid_batches_per_epoch: 2
-  stopping_patience: 50
-  skip_validation: False
 
-  start_epoch: 0
-  reload_epoch: False
-  epochs: 2
+# ---- Inference post-filter ---- #
+# Suppresses a grid-scale wind artifact along the jet. Applied every step.
+postprocessing:
+  wind_artifact_filter:
+    activate: False
+    mask_level: 14
+    target_levels: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    target_vars: ["U", "V", "T", "Qtot"]
+    speed_threshold: 2.8
+    smooth_sigma: 1.2
+    smooth_sigma_zonal: 2.0
+    smooth_sigma_meridional: 0.5
+    dilation_zonal: 15
+    dilation_meridional: 5
+    falloff_sigma: 4.0
+    preserve_amplitude: true
 
-  use_scheduler: True
-  scheduler:
-    scheduler_type: cosine-annealing-restarts
-    first_cycle_steps: 50
-    cycle_mult: 1.0
-    max_lr: 1.0e-04
-    min_lr: 1.0e-07
-    warmup_steps: 5
-    gamma: 1.0
 
-  amp: False
-  grad_accum_every: 1
-  grad_max_norm: 1.0
-
-  use_ema: False
-  use_tensorboard: False
-
-  thread_workers: 4
-  valid_thread_workers: 2
-  prefetch_factor: 2
-
-predict:
-  mode: none
-  save_forecast: '/glade/derecho/scratch/schreck/credit_tests/camulator_gen2/rollout'
-  forecasts:
-    type: custom
-    start_year: 2013
-    start_month: 1
-    start_day: 1
-    start_hours: [0]
-    duration: 4
-    days: 2
-  metadata: '/glade/work/schreck/repos/miles-credit-main/credit/metadata/era5.yaml'
-  batch_size: 1
-
+# ---- PBS (training jobs only) ---- #
 pbs:
-  conda: "/glade/u/home/schreck/.conda/envs/credit-casper"
-  job_name: "camulator_gen2"
+  conda: "camulator"
   project: "NAML0001"
+  job_name: "camulator_gen2"
   walltime: "04:00:00"
   ncpus: 8
   ngpus: 1
