@@ -182,6 +182,10 @@ def _map_files(
         # Escape the full template and splice the date portion in as a named
         # capture group so the match is anchored to the right field.
         anchored = re.escape(path_template).replace(re.escape(time_fmt), f"(?P<date>{date_pat})")
+        # Templates may also contain glob wildcards (e.g. "..._%Y*.zarr");
+        # re.escape made them literal, so translate them to their regex
+        # equivalents (glob * and ? never cross a path separator).
+        anchored = anchored.replace(re.escape("*"), r"[^/]*").replace(re.escape("?"), r"[^/]")
         pattern = re.compile(anchored)
         group_key: str | int = "date"
     else:
