@@ -13,6 +13,7 @@ import torch
 import yaml
 import sys
 import shutil
+from credit.datasets.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransform
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
 from credit.trainers.utils import cycle, load_dataset, load_dataloader, effective_mode
@@ -162,6 +163,18 @@ Examples:
     os.makedirs(save_loc, exist_ok=True)
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
         shutil.copy(config, os.path.join(save_loc, "model.yml"))
+
+    # Write the channel schema alongside the scaler. Always refreshed (unlike
+    # model.yml) so a re-run after a config change never leaves a stale layout;
+    # inference reads this file to reconstruct diagnostics, which never appear
+    # in target-less batches. Training re-derives and re-validates it anyway.
+    if rank == 0:
+        try:
+            ChannelSchema.from_config(conf).save(os.path.join(save_loc, DEFAULT_SCHEMA_FILENAME))
+        except (KeyError, ValueError) as e:
+            root.warning(
+                "Could not derive channel schema from config (%s); %s not written.", e, DEFAULT_SCHEMA_FILENAME
+            )
 
     if args.device is not None:
         device = torch.device(args.device)
