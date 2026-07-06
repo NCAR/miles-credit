@@ -56,7 +56,7 @@ data:
 # Validation data block (same schema, different date range)
 validation_data:
   source:
-    ERA5_Validation:
+    ERA5:
       dataset_type: "local"
       level_coord: "level"
       levels: [ 25.5, 75.0, 125.0, 175.0, 225.0, 275.0, 350.0, 450.0, 550.0, 650.0, 775.0, 887.5, 962.5 ]
@@ -64,17 +64,17 @@ validation_data:
         prognostic:
           vars_3D: [ 'U', 'V', 'T', 'specific_total_water' ]
           vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_%Y.zarr'
 
         diagnostic:
           vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
                      'surface_latent_heat_flux', 'surface_net_solar_radiation',
                      'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_%Y*.zarr'
 
         dynamic_forcing:
           vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_*.zarr'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/all_in_one/ERA5_plevel_6h_%Y*.zarr'
 
         static:
           vars_2D: [ 'z_norm', 'land_sea_mask' ]
@@ -97,7 +97,7 @@ validation_data:
   std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/std_6h_1979_2019_13lev_0.25deg.nc'
 
 trainer:
-  type: era5-gen2
+  type: gen2
 
   parallelism:
     data: ddp               # ddp | fsdp2 | none
@@ -153,6 +153,17 @@ trainer:
   valid_thread_workers: 4
 
   prefetch_factor: 4
+
+
+preblocks:
+  per_step:
+    norm:
+      type: era5_normalizer
+      args:
+        mean_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/mean_6h_1979_2019_13lev_0.25deg.nc'
+        std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_plevel_base/mean_std/std_6h_1979_2019_13lev_0.25deg.nc'
+    concat:
+      type: concat
 
 
 model:
@@ -215,23 +226,31 @@ loss:
 
   use_variable_weights: False
 
-predict:
-  mode: ddp
-  batch_size: 4
-  ensemble_size: 1
-  forecasts:
-    type: "custom"
-    start_year: 2020
-    start_month: 1
-    start_day: 1
-    start_hours: [ 0, 12 ]
-    duration: 1
-    days: 1
-
-  metadata: 'era5.yaml'
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+inference:
+  run_mode: batch                   # batch | single
+  mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_025deg_6hr_v2'
+  batch_forecast:                   # active when run_mode: batch
+    forecast_length: "1d"           # forecast duration per init (e.g. "10d", "1m", "1y")
+    first_init_date: "2020-01-01"   # first init time (inclusive), ISO 8601
+    last_init_date: "2020-01-02"    # last init time (inclusive)
+    init_interval: "12h"            # interval between init times
 
-  use_laplace_filter: False
+  single_forecast:                  # active when run_mode: single
+    forecast_length: "10d"          # forecast duration
+    start_datetime: "2020-01-01T00:00Z"   # init time, ISO 8601
+
+  output:
+    format: netcdf                  # netcdf | zarr
+    output_interval: null           # write every Nth step; null = every step (e.g. "6h", "24h")
+    group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
+    variables: null                 # null = save all; or list of {name:, levels:} to subset
+    metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 4                  # 1 (fast) to 9 (small)
 
 pbs: #derecho
   conda: "credit-derecho"

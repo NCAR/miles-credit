@@ -1,5 +1,6 @@
 import gc
 import logging
+import os
 from collections import defaultdict
 
 import numpy as np
@@ -19,14 +20,27 @@ from credit.parallel.domain import (
 )
 from credit.parallel.collectives import all_reduce_avg
 from credit.parallel.fsdp2 import fsdp2_is_applied
+from credit.datasets.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.postblock import build_postblocks, apply_postblocks
-from credit.preblock import build_preblocks, apply_preblocks
+from credit.preblock import attach_channel_schema, build_preblocks, apply_preblocks
 from credit.trainers.rollout_utils import assemble_rollout_batch
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
 
 logger = logging.getLogger(__name__)
+
+
+def _copy_named_input(input_dict: dict) -> dict:
+    """Shallow-structural copy of a nested ``{source: {var_key: tensor}}`` input.
+
+    New dict objects at the source level, tensors shared (never copied — they
+    must not be mutated in place anyway). This snapshots the physical, named
+    input the model consumed this step so a downstream preblock pass that
+    normalizes the original cannot clobber the t0 state the conservation fixers
+    read from ``x_physical``.
+    """
+    return {src: dict(vars_) for src, vars_ in input_dict.items()}
 
 
 class TrainerERA5Gen2(BaseTrainer):
@@ -80,6 +94,17 @@ class TrainerERA5Gen2(BaseTrainer):
         preblock_cfg = conf.get("preblocks", {})
         self.ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
         self.step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+
+        # Channel schema: the frozen layout contract for the flat input/target
+        # tensors. Attached to concat so the first real target map is validated
+        # against it, and saved to save_loc so inference (which has no targets,
+        # hence no diagnostic tensors to derive a map from) reconstructs the
+        # full y_pred — diagnostics included.
+        self.channel_schema = ChannelSchema.load_or_from_config(conf)
+        attach_channel_schema(self.ic_preblocks, self.channel_schema)
+        attach_channel_schema(self.step_preblocks, self.channel_schema)
+        if self.channel_schema is not None and rank == 0:
+            self.channel_schema.save(os.path.join(os.path.expandvars(conf["save_loc"]), DEFAULT_SCHEMA_FILENAME))
 
         postblock_cfg = conf.get("postblocks", {})
         self.step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
@@ -163,22 +188,31 @@ class TrainerERA5Gen2(BaseTrainer):
             full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
 
     def _gather_for_next_step(self, full_data_dict):
-        """Gather domain-sharded y_processed back to full height between rollout steps.
+        """Prepare y_processed to seed the next rollout step.
 
-        assemble_rollout_batch concats the previous step's prognostics with
-        full-height forcings/statics, so every domain rank needs the full-grid
-        prediction; shard_spatial re-shards the assembled input at the next
-        forward. No-op without domain parallelism. Gradient-free by design:
-        Reconstruct detaches y_processed.
+        Detaches the carried prediction at the rollout boundary so each step's
+        loss backpropagates only through that step's forward + postblocks
+        (truncated per-step BPTT). This matters now that ``Reconstruct`` can run
+        with ``detach=False`` (to keep conservation fixers in the per-step
+        gradient): without this boundary detach, step t's ``backward()`` would
+        free graph buffers that step t+1 still references.
+
+        Under domain parallelism it also gathers each domain-sharded field back
+        to full height, since assemble_rollout_batch concats the previous step's
+        prognostics with full-height forcings/statics and every domain rank
+        needs the full-grid prediction (shard_spatial re-shards at the next
+        forward). No-op-but-detach without domain parallelism.
         """
-        if self.domain_manager is None or self.domain_manager.domain_parallel_size <= 1:
-            return
         y_processed = full_data_dict.get("y_processed")
         if not isinstance(y_processed, dict):
             return
+        domain_active = self.domain_manager is not None and self.domain_manager.domain_parallel_size > 1
         for source_vars in y_processed.values():
             for var_key, tensor in source_vars.items():
-                source_vars[var_key] = gather_spatial(tensor, self.domain_manager)
+                tensor = tensor.detach()
+                if domain_active:
+                    tensor = gather_spatial(tensor, self.domain_manager)
+                source_vars[var_key] = tensor
 
     # ------------------------------------------------------------------
     # Training loop
@@ -269,17 +303,19 @@ class TrainerERA5Gen2(BaseTrainer):
                     full_data_dict["x_raw"] = batch["input"]
                     full_data_dict["y_raw"] = batch["target"]
                     full_data_dict["ic_preprocessed"] = apply_preblocks(self.ic_preblocks, batch, device=self.device)
-                    full_data_dict.update(
-                        apply_preblocks(self.step_preblocks, full_data_dict["ic_preprocessed"], device=self.device)
-                    )
+                    step_input = full_data_dict["ic_preprocessed"]
+                    # t0 physical, named input the model consumes this step (= IC
+                    # for forecast_len=1); the conservation fixers read t0 here.
+                    full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
+                    full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
                 else:
                     full_data_dict["x_raw"] = batch["input"]
                     full_data_dict["y_raw"] = batch["target"]
-                    full_data_dict.update(
-                        apply_preblocks(
-                            self.step_preblocks, assemble_rollout_batch(full_data_dict, batch), device=self.device
-                        )
-                    )
+                    step_input = assemble_rollout_batch(full_data_dict, batch)
+                    # At t>1 the t0 state is the previous step's predicted physical
+                    # state plus this step's forcing, not the original IC.
+                    full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
+                    full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
 
                 if self.ensemble_size > 1:
                     full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
@@ -328,16 +364,8 @@ class TrainerERA5Gen2(BaseTrainer):
                     # (Summing the norms themselves and sqrt-ing mixes units.)
                     # Note this still over-counts replicated grads when tp/domain
                     # ranks hold copies; acceptable for a clip threshold.
-                    # FSDP2 grads are DTensors; dist.all_reduce fails on DTensors
-                    # directly, so extract the local shard first with .to_local().
                     local_sq = (
-                        torch.stack(
-                            [
-                                (p.grad.to_local() if hasattr(p.grad, "to_local") else p.grad).detach().norm(2)
-                                for p in self.model.parameters()
-                                if p.grad is not None
-                            ]
-                        )
+                        torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
                         .square()
                         .sum()
                     )
@@ -444,17 +472,18 @@ class TrainerERA5Gen2(BaseTrainer):
                         full_data_dict["ic_preprocessed"] = apply_preblocks(
                             self.ic_preblocks, batch, device=self.device
                         )
-                        full_data_dict.update(
-                            apply_preblocks(self.step_preblocks, full_data_dict["ic_preprocessed"], device=self.device)
-                        )
+                        step_input = full_data_dict["ic_preprocessed"]
+                        # t0 physical, named input (= IC for forecast_len=1).
+                        full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
+                        full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
                     else:
                         full_data_dict["x_raw"] = batch["input"]
                         full_data_dict["y_raw"] = batch["target"]
-                        full_data_dict.update(
-                            apply_preblocks(
-                                self.step_preblocks, assemble_rollout_batch(full_data_dict, batch), device=self.device
-                            )
-                        )
+                        step_input = assemble_rollout_batch(full_data_dict, batch)
+                        # t0 = previous step's predicted physical state + this
+                        # step's forcing, not the original IC.
+                        full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
+                        full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
 
                     if self.ensemble_size > 1:
                         full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)

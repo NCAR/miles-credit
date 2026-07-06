@@ -44,7 +44,7 @@ preblocks:
           - 'input'
           - 'target'
     scaler:
-      type: "bridgescaler_transformer"
+      type: "bridgescaler_transform"
       args:
         variables: []
         scaler_path: "/glade/derecho/scratch/$USER/CREDIT/weatherbench2/scaler_quantile.json"
@@ -60,7 +60,7 @@ postblocks:
     type: "reconstruct"
 
 trainer:
-  type: era5-gen2           # use the v2 trainer (new nested data schema)
+  type: gen2                # use the v2 trainer (new nested data schema)
 
   mode: ddp
   epochs: 1

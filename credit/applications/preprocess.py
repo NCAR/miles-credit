@@ -1,4 +1,5 @@
 import argparse
+import copy
 import logging
 import warnings
 
@@ -12,9 +13,10 @@ import torch
 import yaml
 import sys
 import shutil
-from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransformer
-from credit.preblock.scaler import combine_scaler_dicts
-from credit.trainers.utils import cycle, load_dataset, load_dataloader
+from credit.datasets.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.preblock import build_preblocks, apply_preblocks_before_scaler, BridgeScalerTransform
+from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
+from credit.trainers.utils import cycle, load_dataset, load_dataloader, effective_mode
 import torch.distributed as dist
 from torch.distributed import gather_object, barrier
 
@@ -106,19 +108,44 @@ def main():
     # teardown (after the scalers have already been fitted and saved). Silence it.
     warnings.filterwarnings("ignore", category=ResourceWarning)
     warnings.filterwarnings("ignore", category=UserWarning, module="bridgescaler")
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        epilog="""
+Examples:
+  # Recommended: submit via PBS using the credit CLI.
+  # Note: torchrun is hardcoded internally; --device and --backend cannot be forwarded.
+  # Device selection is automatic based on hardware detected at runtime (GPU if available, CPU otherwise).
+  credit submit --cluster casper  -c config.yml --mode preprocess
+  credit submit --cluster derecho -c config.yml --mode preprocess
+
+  # For reference only (not the recommended path): run directly with torchrun.
+  # GPU run (auto-selects nccl backend)
+  torchrun --nproc_per_node=4 preprocess.py -c config.yml
+
+  # CPU-only run (auto-selects gloo backend)
+  torchrun --nproc_per_node=4 preprocess.py -c config.yml --device cpu
+
+  # Force a specific device and backend
+  torchrun --nproc_per_node=4 preprocess.py -c config.yml --device cuda:0 --backend nccl
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("-c", "--config", dest="model_config", required=True, type=str, help="Path to config file")
     parser.add_argument(
         "-b",
         "--backend",
         type=str,
-        default="nccl",
+        default=None,
         choices=["nccl", "gloo", "mpi"],
-        help="Backend for distributed training.",
+        help="Backend for distributed training. Defaults to 'nccl' for GPU, 'gloo' for CPU.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device to use (e.g. 'cpu', 'cuda', 'cuda:0'). Defaults to GPU if available.",
     )
     args = parser.parse_args()
     config = args.model_config
-    backend = args.backend
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
@@ -130,37 +157,58 @@ def main():
     root.info("Loading Config file")
     with open(args.model_config) as config_file:
         conf = yaml.safe_load(config_file)
-    local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    local_rank, world_rank, world_size = get_rank_info(effective_mode(conf))
     rank = world_rank
     save_loc = expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
         shutil.copy(config, os.path.join(save_loc, "model.yml"))
 
-    if conf["trainer"]["mode"] in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
-        setup(rank, world_size, conf["trainer"]["mode"], backend)
+    # Write the channel schema alongside the scaler. Always refreshed (unlike
+    # model.yml) so a re-run after a config change never leaves a stale layout;
+    # inference reads this file to reconstruct diagnostics, which never appear
+    # in target-less batches. Training re-derives and re-validates it anyway.
+    if rank == 0:
+        try:
+            ChannelSchema.from_config(conf).save(os.path.join(save_loc, DEFAULT_SCHEMA_FILENAME))
+        except (KeyError, ValueError) as e:
+            root.warning(
+                "Could not derive channel schema from config (%s); %s not written.", e, DEFAULT_SCHEMA_FILENAME
+            )
 
-    if torch.cuda.is_available():
+    if args.device is not None:
+        device = torch.device(args.device)
+    elif torch.cuda.is_available():
         device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(local_rank % torch.cuda.device_count())
-        torch.backends.cudnn.benchmark = True
     else:
         device = torch.device("cpu")
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+        torch.backends.cudnn.benchmark = True
+
+    backend = args.backend or ("nccl" if device.type == "cuda" else "gloo")
+    if effective_mode(conf) in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
+        setup(rank, world_size, effective_mode(conf), backend)
 
     trainer_conf = conf["trainer"]
-    train_dataset = load_dataset(conf, is_train=True)
-    train_loader = load_dataloader(conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
+    # Force forecast_len=1 so the dataloader only yields IC batches (step i=0).
+    # Using forecast_len > 1 would feed the same timestamps at multiple step
+    # offsets into the scaler fit, duplicating samples and skewing statistics.
+    preprocess_conf = copy.deepcopy(conf)
+    preprocess_conf["data"]["forecast_len"] = 1
+    train_dataset = load_dataset(preprocess_conf, is_train=True)
+    train_loader = load_dataloader(preprocess_conf, train_dataset, rank=rank, world_size=world_size, is_train=True)
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
     preblocks = build_preblocks(conf["preblocks"])
     print(preblocks)
     scaler_block_key = None
     for k, v in preblocks.items():
-        if isinstance(v, BridgeScalerTransformer):
+        if isinstance(v, BridgeScalerTransform):
             scaler_block_key = k
             break
     if scaler_block_key is None:
-        raise ValueError("BridgeScalerTransformer not found in preblocks.")
+        raise ValueError("BridgeScalerTransform not found in preblocks.")
     _bpe = trainer_conf.get("batches_per_epoch", 0) or 0
     if hasattr(train_loader.sampler, "batches_per_epoch"):
         dataset_batches = train_loader.sampler.batches_per_epoch()
@@ -181,7 +229,7 @@ def main():
     if dist.is_initialized() and world_size > 1:
         barrier()
         all_scalers = [None] * world_size if rank == 0 else None
-        gather_object(scaler_block.scaler, all_scalers, dst=0)
+        gather_object(move_scaler_dict_to_cpu(scaler_block.scaler), all_scalers, dst=0)
     else:
         all_scalers = [scaler_block.scaler]
 

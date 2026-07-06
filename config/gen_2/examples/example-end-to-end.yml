@@ -1,20 +1,19 @@
 # --------------------------------------------------------------------------------------------------------------------- #
-# CREDIT starter config — gen2 data schema, 1-degree ERA5, 6-hourly CrossFormer
+# CREDIT end-to-end example config — gen2 data schema, 1-degree ERA5, 6-hourly CrossFormer
+# replaces `predict:` with new `inference:` block supporting both batch and single-forecast modes.
 #
 # Quick-start: edit the USER SETTINGS sections below, then:
-#
-#   # Preview the PBS script (no submission)
-#   credit submit --cluster casper -c config/example-v2026.2.yml --gpus 4 --chain 14 --dry-run
-#
-#   # Submit 14 chained jobs (~70 epochs at 5 epochs/job)
-#   credit submit --cluster casper  -c config/example-v2026.2.yml --gpus 4 --chain 14
-#   credit submit --cluster derecho -c config/example-v2026.2.yml --gpus 4 --nodes 1 --chain 14
+#   EXAMPLE RUNNING ON AN INTERCATIVE NODE (sequential)
+
+#   credit preprocess -c config/example-end-to-end.yml
+#   credit train -c config/example-end-to-end.yml
+#   credit rollout -c config/example-end-to-end.yml
 # --------------------------------------------------------------------------------------------------------------------- #
+
 
 # ---- USER SETTINGS: output directory ---- #
 save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2'
 seed: 1000
-
 
 # ---- USER SETTINGS: training data ---- #
 # Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
@@ -87,8 +86,8 @@ validation_data:
           vars_2D: [ 'z_norm', 'land_sea_mask' ]
           path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
 
-  start_datetime: "2018-01-01"
-  end_datetime: "2019-12-31"
+  start_datetime: "2019-01-01"
+  end_datetime: "2020-12-31"
   timestep: "6h"
 
   history_len: 1
@@ -108,6 +107,7 @@ trainer:
     tensor: 1               # tensor-parallel degree  (1 = disabled)
     domain: 1               # domain-parallel shards  (1 = disabled)
 
+  cpu_offload: False
   activation_checkpoint: True
 
   load_weights: False     # set True to resume from checkpoint
@@ -125,15 +125,15 @@ trainer:
   learning_rate: 1.0e-03
   weight_decay: 0
 
-  train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
-  valid_batch_size: 8
+  train_batch_size: 4     # per-GPU batch size; total = batch_size × n_gpus
+  valid_batch_size: 4
 
   batches_per_epoch: 5    # 0 = use full dataset each epoch
-  valid_batches_per_epoch: 100
+  valid_batches_per_epoch: 5
   stopping_patience: 999
 
   start_epoch: 0
-  num_epoch: 1            # epochs per qsub job (checkpoint after each)
+  num_epoch: 2            # epochs per qsub job (checkpoint after each)
   epochs: &epochs 70      # total training target
 
   use_tensorboard: True
@@ -164,10 +164,15 @@ trainer:
 # for forecast_len > 1 rollout.
 preblocks:
   per_step:
+    log_trans:
+      type: "log_transform"
+      args:
+        variables: 'ERA5/diagnostic/2d/total_precipitation'
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        scaler_path: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        data_types: ['input', 'target']
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
@@ -176,6 +181,9 @@ preblocks:
                     'ERA5/diagnostic/2d/top_net_thermal_radiation', 'ERA5/diagnostic/2d/top_net_solar_radiation',
                     'ERA5/diagnostic/2d/surface_latent_heat_flux', 'ERA5/diagnostic/2d/surface_net_solar_radiation',
                     'ERA5/diagnostic/2d/surface_net_thermal_radiation', 'ERA5/diagnostic/2d/surface_sensible_heat_flux']
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
         method: transform
     concat:
       type: concat
@@ -187,12 +195,16 @@ postblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        scaler_path: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
                     'ERA5/prognostic/2d/VAR_10V']
         method: inverse_transform
+    log_trans:
+      type: "exp_transform"
+      args:
+        variables: 'ERA5/diagnostic/2d/total_precipitation'
 
 
 # ---- Architecture (pre-filled for 1-degree ERA5, 181×360) ---- #
@@ -242,14 +254,12 @@ model:
     pad_lat: [ 37, 38 ]
     pad_lon: [ 12, 12 ]
 
-  
+
 # ---- Loss ---- #
 loss:
   training_loss: "mse"
 
-  use_power_loss: True              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
-  spectral_lambda_reg: 0.1         # weight on power/spectral loss term: total = training_loss + lambda * aux_loss
-  spectral_wavenum_init: 20        # wavenumber above which the power loss is applied
+  use_power_loss: False              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
   use_spectral_loss: False
 
   use_latitude_weights: True
@@ -259,31 +269,82 @@ loss:
 
 
 # ---- Inference (used by rollout_gen2.py, not training) ---- #
+#
+# run_mode selects between batch and single forecast without requiring CLI flags.
+#   batch:  generates forecasts for a range of init times defined under batch_forecast.initialization
+#   single: runs one forecast from a specific init time defined under single_forecast.start_datetime
+#
+# CLI overrides (all optional):
+#   --run-mode batch|single     overrides run_mode
+#   --init-time YYYY-MM-DDTHH  overrides single_forecast.start_datetime
+#   --save-dir /path            overrides save_forecast
+#
 inference:
   run_mode: batch                   # batch | single
-  mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
-  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
-  batch_forecast:                   # active when run_mode: batch
-    forecast_length: "1d"           # forecast duration per init (e.g. "10d", "1m", "1y")
-    first_init_date: "2020-01-01"   # first init time (inclusive), ISO 8601
-    last_init_date: "2020-01-01"    # last init time (inclusive)
-    init_interval: "12h"            # interval between init times
+  mode: ddp                        # none | ddp | fsdp
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/rollout'
 
-  single_forecast:                  # active when run_mode: single
-    forecast_length: "10d"          # forecast duration
-    start_datetime: "2020-01-01T00:00Z"   # init time, ISO 8601
+  batch_forecast:
+    forecast_length: "10d"             # total forecast duration (total valid lead time)
+    first_init_date: "2020-01-01"      # first init time; must be within data date range
+    last_init_date: "2020-01-10"       # last init time; must be within data date range
+    init_interval: "12h"               # interval between init times
+
+  single_forecast:
+    forecast_length: "10d"
+    start_datetime: "2020-06-01T00:00Z"   # ISO 8601; must be within data date range
+    # init_data block reserved for future GFS/GEFS IC support:
+    # init_data:
+    #   type: "gfs"                 # era5 (default) | gfs | gefs
+    #   cache_path: "/glade/scratch/$USER/ic_cache"
+    #   force_download: false
 
   output:
-    format: netcdf                  # netcdf | zarr
-    output_interval: null           # write every Nth step; null = every step (e.g. "6h", "24h")
-    group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
-    variables: null                 # null = save all; or list of {name:, levels:} to subset
-    metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
+    format: netcdf              # netcdf | zarr
+
+    # Temporal subsampling: only write steps whose forecast hour is a multiple
+    # of this value. null = write every step.
+    output_interval: null           # null | "6h" | "24h" | ...
+
+    # Calendar-period grouping: how many steps to concatenate into one file.
+    # Output lands in  save_forecast/YYYYMMDD_HHMMZ/  (one subdirectory per init time).
+    # null    → one file per step:    2020-06-01_T0600Z.nc
+    # "day"   → one file per day:     2020-06-01.nc
+    # "month" → one file per month:   2020-06.nc
+    # "year"  → one file per year:    2020.nc
+    # "full"  → one file per run:     full.nc
+    group_by: day           # null | "day" | "month" | "year" | "full"
+
+    # Variable filter. null = save all predicted variables.
+    # Each entry names a y_processed key (source/type/dim/varname).
+    # For 3D variables, "levels" subsets by model-level value (matches
+    # data.source.ERA5.levels); null or omitted = all levels.
+    variables: null
+    # variables:
+    #   - name: "ERA5/prognostic/3d/temperature"
+    #     levels: null                              # null = all levels
+    #   - name: "ERA5/prognostic/3d/u_component_of_wind"
+    #     levels: [500, 850, 1000]                  # subset to these model levels
+    #   - name: "ERA5/prognostic/2d/SP"
+    #   - name: "ERA5/diagnostic/2d/total_precipitation"
+
+    # CF attribute metadata. null = no variable attributes added.
+    metadata: "era5.yaml"
+
+    # NetCDF encoding. "default" applies to all variables.
+    # Per-variable overrides use the full y_processed key or the short variable name.
     encoding:
       dtype: float32
       zlib: true
-      complevel: 4                  # 1 (fast) to 9 (small)
+      complevel: 4            # 1 (fast) to 9 (small); 4 is a good default
+      # "ERA5/diagnostic/2d/total_precipitation":
+      #   dtype: float64
+      #   zlib: true
+      #   complevel: 6
 
+
+
+### ONLY USED WITH CLI "submit": credit submit --mode train --cluster derecho -c example-end-to-end.yml
 pbs: #derecho
   conda: "credit-derecho"
   project: "NAML0001"

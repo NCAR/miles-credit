@@ -6,8 +6,8 @@ from credit.preblock.sqrt import SqrtTransform
 from credit.preblock.regrid import Regridder
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.norm import ERA5Normalizer
-from credit.preblock.nan import FillNan
-from credit.preblock.scaler import BridgeScalerTransformer
+from credit.preblock.fill_values import FillValues
+from credit.preblock.scaler import BridgeScalerTransform
 
 
 PREBLOCK_REGISTRY = {
@@ -16,8 +16,8 @@ PREBLOCK_REGISTRY = {
     "regrid": Regridder,
     "concat": ConcatToTensor,
     "era5_normalizer": ERA5Normalizer,
-    "fill_nan": FillNan,
-    "bridgescaler_transformer": BridgeScalerTransformer,
+    "fill_values": FillValues,
+    "bridgescaler_transform": BridgeScalerTransform,
 }
 
 _VALID_SECTIONS = {"ic_only", "per_step"}
@@ -26,7 +26,13 @@ _VALID_SECTIONS = {"ic_only", "per_step"}
 def _build_preblock_section(section_cfg: dict) -> nn.ModuleDict:
     modules = {}
     for name, block_cfg in section_cfg.items():
-        modules[name] = PREBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
+        block_type = block_cfg.get("type")
+        if block_type not in PREBLOCK_REGISTRY:
+            raise ValueError(
+                f"build_preblocks: unknown preblock type {block_type!r} for block {name!r}. "
+                f"Valid types: {sorted(PREBLOCK_REGISTRY)}"
+            )
+        modules[name] = PREBLOCK_REGISTRY[block_type](**(block_cfg.get("args") or {}))
     return nn.ModuleDict(modules)
 
 
@@ -82,6 +88,20 @@ def build_preblocks(preblock_cfg: dict | None = None, phase: str = "per_step") -
     return _build_preblock_section(cfg.get(phase) or {})
 
 
+def attach_channel_schema(preblocks: nn.ModuleDict, schema) -> None:
+    """Attach a ``ChannelSchema`` to every ConcatToTensor block in a preblock group.
+
+    The schema is runtime state (built from config / loaded from save_loc), not a
+    config arg, so it is injected after ``build_preblocks`` rather than through
+    the registry. No-op for groups without a concat block or when schema is None.
+    """
+    if schema is None:
+        return
+    for block in preblocks.values():
+        if isinstance(block, ConcatToTensor):
+            block.set_schema(schema)
+
+
 def _run_preblock_group(group: nn.ModuleDict, batch: dict, device=None):
     """Sequentially applies a group of preblocks, returning the transformed batch."""
     meta = None
@@ -117,9 +137,18 @@ def _run_preblock_group(group: nn.ModuleDict, batch: dict, device=None):
     return out
 
 
+def _move_batch_to_device(batch, device):
+    """Recursively move all tensors in a nested dict to device."""
+    if isinstance(batch, dict):
+        return {k: _move_batch_to_device(v, device) for k, v in batch.items()}
+    if torch.is_tensor(batch):
+        return batch.to(device)
+    return batch
+
+
 def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=None):
     for preblock in preblocks.values():
-        if isinstance(preblock, BridgeScalerTransformer):
+        if isinstance(preblock, BridgeScalerTransform):
             break
         result = preblock(batch)
         if isinstance(result, tuple):
@@ -129,6 +158,8 @@ def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=
                 batch, meta = result
         else:
             batch = result
+    if device is not None:
+        batch = _move_batch_to_device(batch, device)
     return batch
 
 

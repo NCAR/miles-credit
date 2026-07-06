@@ -69,7 +69,9 @@ def patch_base_dataset_io(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
 
-    def fake_map_files(files: List[str], time_fmt: str) -> List[tuple[pd.Timestamp, pd.Timestamp, str]]:
+    def fake_map_files(
+        files: List[str], time_fmt: str, path_template: str | None = None
+    ) -> List[tuple[pd.Timestamp, pd.Timestamp, str]]:
         return [
             (pd.Timestamp("2022-01-01"), pd.Timestamp("2022-12-31"), "/fake/file1.nc"),
             (pd.Timestamp("2023-01-01"), pd.Timestamp("2023-12-31"), "/fake/file2.nc"),

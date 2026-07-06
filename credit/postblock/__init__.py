@@ -1,22 +1,27 @@
 import torch.nn as nn
-
-from credit.postblock.reconstruct import Reconstruct
+from credit.postblock.reconstruct import Reconstruct, FlattenToTensor
 from credit.postblock.wet_mask_samudra import WetMaskBlock
-from credit.postblock.scaler import BridgeScalerTransformer
+from credit.postblock.scaler import BridgeScalerTransform
 from credit.postblock.mslp import MSLPDiagnostic
-
-from credit.postblock.gen1 import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.exp import ExpTransform
+from credit.postblock.square import SquareTransform
 from credit.postblock.geopotential import GeopotentialDiagnostic
+from credit.postblock.conservation import TracerFixer, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixerUpDown
+
 
 POSTBLOCK_REGISTRY = {
     "reconstruct": Reconstruct,
-    "bridgescaler_transform": BridgeScalerTransformer,
+    "flatten_to_tensor": FlattenToTensor,
+    "bridgescaler_transform": BridgeScalerTransform,
+    "exp_transform": ExpTransform,
+    "square_transform": SquareTransform,
     "wet_mask_samudra": WetMaskBlock,
     "mslp_diagnostic": MSLPDiagnostic,
     "tracer_fixer": TracerFixer,
     "global_mass_fixer": GlobalMassFixer,
     "global_water_fixer": GlobalWaterFixer,
-    "global_energy_fixer": GlobalEnergyFixer,
+    "global_energy_fixer": GlobalEnergyFixerUpDown,
+    "global_energy_fixer_updown": GlobalEnergyFixerUpDown,  # alias
     "geopotential_diagnostic": GeopotentialDiagnostic,
 }
 
@@ -26,7 +31,13 @@ _VALID_SECTIONS = {"per_step", "post_rollout"}
 def _build_postblock_section(section_cfg: dict) -> nn.ModuleDict:
     modules = {}
     for name, block_cfg in section_cfg.items():
-        modules[name] = POSTBLOCK_REGISTRY[block_cfg["type"]](**(block_cfg.get("args") or {}))
+        block_type = block_cfg.get("type")
+        if block_type not in POSTBLOCK_REGISTRY:
+            raise ValueError(
+                f"build_postblocks: unknown postblock type {block_type!r} for block {name!r}. "
+                f"Valid types: {sorted(POSTBLOCK_REGISTRY)}"
+            )
+        modules[name] = POSTBLOCK_REGISTRY[block_type](**(block_cfg.get("args") or {}))
     return nn.ModuleDict(modules)
 
 
