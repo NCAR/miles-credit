@@ -7,7 +7,7 @@ import math
 import pytest
 import torch
 
-from credit.preblock import PREBLOCK_REGISTRY, build_preblocks
+from credit.preblock import _load_preblock_entry, build_preblocks
 from credit.preblock.fill_values import FillValues
 
 
@@ -360,21 +360,23 @@ def test_fill_values_invalid_op_raises():
 
 def test_fill_values_registered():
     """FillValues is registered under the 'fill_values' key."""
-    assert PREBLOCK_REGISTRY["fill_values"] is FillValues
+    assert _load_preblock_entry("fill_values") is FillValues
 
 
 def test_fill_values_built_from_config():
     """build_preblocks instantiates FillValues from a config dict and it works."""
     cfg = {
-        "per_step": {
-            "fill": {
-                "type": "fill_values",
-                "args": {
-                    "rules": [
-                        {"search": "nan", "fill": -1.0},
-                        {"search": 0.0, "op": "==", "fill": 1e-4},
-                    ]
-                },
+        "preblocks": {
+            "per_step": {
+                "fill": {
+                    "type": "fill_values",
+                    "args": {
+                        "rules": [
+                            {"search": "nan", "fill": -1.0},
+                            {"search": 0.0, "op": "==", "fill": 1e-4},
+                        ]
+                    },
+                }
             }
         }
     }

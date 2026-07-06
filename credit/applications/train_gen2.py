@@ -24,7 +24,7 @@ import torch
 
 from credit.distributed import distributed_model_wrapper_gen2, setup, get_rank_info
 from credit.seed import seed_everything
-from credit.losses.base_losses import is_crps_loss
+from credit.losses import is_crps_loss
 from credit.trainers import load_trainer
 from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model

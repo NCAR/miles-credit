@@ -171,7 +171,7 @@ def processed_batches(tmp_path_factory):
     try:
         dataset = load_dataset(conf, is_train=True)
         loader = load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True)
-        preblocks = build_preblocks(conf["preblocks"])
+        preblocks = build_preblocks(conf)
         dl = cycle(loader)
 
         batches = []

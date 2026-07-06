@@ -9,7 +9,7 @@ import tqdm
 
 import optuna
 
-from credit.losses.base_losses import is_crps_loss
+from credit.losses import is_crps_loss
 from credit.parallel.domain import (
     gather_spatial,
     get_domain_manager,
@@ -77,13 +77,11 @@ class TrainerERA5Gen2(BaseTrainer):
             self._domain_image_h = None
             self._domain_image_w = None
 
-        preblock_cfg = conf.get("preblocks", {})
-        self.ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
-        self.step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+        self.ic_preblocks = build_preblocks(conf, phase="ic_only")
+        self.step_preblocks = build_preblocks(conf, phase="per_step")
 
-        postblock_cfg = conf.get("postblocks", {})
-        self.step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
-        self.rollout_postblocks = build_postblocks(postblock_cfg, phase="post_rollout")
+        self.step_postblocks = build_postblocks(conf, phase="per_step")
+        self.rollout_postblocks = build_postblocks(conf, phase="post_rollout")
 
         # ---- Data schema extraction (new nested schema) ----
         data_conf = conf["data"]
