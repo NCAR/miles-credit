@@ -27,9 +27,9 @@ Only the hybrid-sigma + midpoint path used by CAMulator is exercised here; the
 pressure-level branch is supported for parity with gen1.
 """
 
+import os
 import torch
 from torch import nn
-
 from credit.data import get_forward_data
 from credit.physics_core import physics_pressure_level, physics_hybrid_sigma_level
 from credit.physics_constants import (
@@ -50,7 +50,7 @@ def _setup_physics_core(args: dict):
     Returns a tuple ``(core, flag_sigma, midpoint, n_levels, coef_a, coef_b)``
     where ``coef_a`` / ``coef_b`` are ``None`` for the pressure-level grid.
     """
-    ds_physics = get_forward_data(args["save_loc_physics"])
+    ds_physics = get_forward_data(os.path.expandvars(args["save_loc_physics"]))
     lon_lat_level_name = args["lon_lat_level_name"]
     lon2d = torch.from_numpy(ds_physics[lon_lat_level_name[0]].values).float()
     lat2d = torch.from_numpy(ds_physics[lon_lat_level_name[1]].values).float()
@@ -300,7 +300,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
             physics
         )
 
-        ds_physics = get_forward_data(physics["save_loc_physics"])
+        ds_physics = get_forward_data(os.path.expandvars(physics["save_loc_physics"]))
         gph_name = (
             surface_geopotential_name[0]
             if isinstance(surface_geopotential_name, (list, tuple))
