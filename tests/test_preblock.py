@@ -444,6 +444,11 @@ class TestBuildPreblocks:
         with pytest.raises(ValueError, match="phase must be one of"):
             build_preblocks({}, phase="invalid_phase")
 
+    def test_unknown_block_type_raises_with_valid_types(self):
+        """An unregistered block type raises ValueError naming the block and listing valid types."""
+        with pytest.raises(ValueError, match="unknown preblock type 'not_a_block'.*'concat'"):
+            build_preblocks({"per_step": {"bogus": {"type": "not_a_block"}}}, phase="per_step")
+
 
 class TestBuildPostblocks:
     """Tests for build_postblocks() config validation (mirrors build_preblocks)."""
@@ -462,6 +467,34 @@ class TestBuildPostblocks:
     def test_empty_config_returns_empty_module_dict(self):
         postblocks = build_postblocks({}, phase="per_step")
         assert len(postblocks) == 0
+
+    def test_unknown_block_type_raises_with_valid_types(self):
+        """An unregistered block type raises ValueError naming the block and listing valid types."""
+        with pytest.raises(ValueError, match="unknown postblock type 'not_a_block'.*'reconstruct'"):
+            build_postblocks({"per_step": {"bogus": {"type": "not_a_block"}}}, phase="per_step")
+
+    def test_flatten_to_tensor_registered(self):
+        """flatten_to_tensor builds without a scaler (scaler_path omitted)."""
+        postblocks = build_postblocks({"per_step": {"flatten": {"type": "flatten_to_tensor"}}}, phase="per_step")
+        assert "flatten" in postblocks
+
+    def test_flatten_to_tensor_expands_env_vars_in_scaler_path(self, monkeypatch, tmp_path):
+        """$VARS in scaler_path are expanded before the scaler file is opened."""
+        import json
+
+        from credit.postblock.reconstruct import FlattenToTensor
+
+        scaler_file = tmp_path / "scaler.json"
+        scaler_file.write_text(json.dumps({"target": {}}))
+        monkeypatch.setenv("CREDIT_TEST_SCALER_DIR", str(tmp_path))
+        block = FlattenToTensor(scaler_path="$CREDIT_TEST_SCALER_DIR/scaler.json")
+        assert block.scaler_path == str(scaler_file)
+
+    def test_global_energy_fixer_updown_alias(self):
+        """global_energy_fixer_updown resolves to the same class as global_energy_fixer."""
+        from credit.postblock import POSTBLOCK_REGISTRY
+
+        assert POSTBLOCK_REGISTRY["global_energy_fixer_updown"] is POSTBLOCK_REGISTRY["global_energy_fixer"]
 
 
 # ---------------------------------------------------------------------------

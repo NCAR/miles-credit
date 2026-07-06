@@ -175,6 +175,46 @@ def test_reconstruct_detach_true_blocks_grad():
     assert not leaf.requires_grad
 
 
+def test_flatten_to_tensor_scales_with_preprocess_scaler(tmp_path):
+    """FlattenToTensor must consume the nested {input, target} scaler.json that
+    `credit preprocess` writes (slicing the "target" data type), normalize the
+    rebuilt y_pred, and leave the physical y_processed untouched."""
+    from bridgescaler import save_scaler_dict
+    from credit.preblock.scaler import BridgeScalerTransform as PreScalerBlock
+    from credit.postblock.scaler import BridgeScalerTransform as PostScalerBlock
+
+    cmap, n_ch = build_channel_map()
+
+    def rand_super():
+        return {SRC: {k: torch.randn(B, info["orig_shape"][0], 1, H, W) * 3.0 + 5.0 for k, info in cmap.items()}}
+
+    # Fit and save a preprocess-style scaler dict ({data_type: {source: {var: scaler}}}).
+    scaler_path = str(tmp_path / "scaler.json")
+    pre = PreScalerBlock(
+        scaler_path=scaler_path, variables=[], method="transform", scaler_params={"channels_last": False}
+    )
+    pre.fit_scaler_batch({"target": rand_super()})
+    save_scaler_dict(pre.scaler, scaler_path)
+
+    y_processed = rand_super()
+    originals = {k: v.clone() for k, v in y_processed[SRC].items()}
+    batch = {"y_processed": y_processed, "metadata": {"target": {"_channel_map": cmap}}}
+
+    flat = FlattenToTensor(scaler_path=scaler_path, variables=list(cmap), method="transform")
+    batch = flat(batch)
+    assert batch["y_pred"].shape == (B, n_ch, H, W)
+
+    # y_processed stays physical — the scaling happened on a copy
+    for k, v in batch["y_processed"][SRC].items():
+        assert torch.equal(v, originals[k])
+
+    # round trip: Reconstruct + inverse postblock scaler recovers the physical values
+    batch = Reconstruct(detach=True)(batch)
+    batch = PostScalerBlock(scaler_path=scaler_path, variables=[], method="inverse_transform")(batch)
+    for k, v in batch["y_processed"][SRC].items():
+        assert torch.allclose(v, originals[k], atol=1e-4), k
+
+
 # --------------------------------------------------------------------------- #
 # TracerFixer
 # --------------------------------------------------------------------------- #
