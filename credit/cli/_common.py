@@ -35,6 +35,20 @@ _PBS_DEFAULTS = {
     },
 }
 
+# SLURM defaults are cluster-agnostic — SLURM sites vary too much to enumerate,
+# so module loads / partitions come from the config's ``slurm:`` section.
+_SLURM_DEFAULTS = {
+    "cpus": 8,
+    "mem": "128GB",
+    "partition": "gpu",
+    "gpu_type": None,
+    "walltime": "12:00:00",
+    "gpus": 4,
+    "nodes": 1,
+    "account": None,
+    "job_name": "credit_gen2",
+}
+
 
 def _prompt(prompt: str, default=None) -> str:
     """Print a prompt and return stripped input, or *default* if empty."""
