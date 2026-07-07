@@ -7,7 +7,7 @@ MILES-CREDIT Documentation
 ==========================
 
 Welcome to the documentation for **MILES-CREDIT**, 
-the **NSF NCAR Community Research Earth Digital Intelligent Twin** project. 
+the **NSF NCAR Community Research Earth Digital Intelligence Twin** project.
 CREDIT is a machine learning-based research platform for understanding the best practices for training and operating global and regional AI autoregressive models, built as part of the NSF NCAR **Machine Integration and Learning for Earth Systems** (`MILES <https://ncar.github.io/miles>`_) group.
 
 CREDIT enables users to train, run, and evaluate AI-based numerical weather and climate models. This documentation will guide you through installation, configuration, training, inference, evaluation, and extending the system with custom datasets and models.
@@ -32,6 +32,12 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    Quickstart <quickstart.md>
    Getting Started <getting-started.md>
    Installing CREDIT from source <installation.md>
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Generation 2
+
+   Overview <gen2_overview.md>
 
 .. toctree::
    :maxdepth: 2
