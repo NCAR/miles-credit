@@ -105,9 +105,8 @@ class TrainerERA5Gen2(BaseTrainer):
         if self.channel_schema is not None and rank == 0:
             self.channel_schema.save(os.path.join(os.path.expandvars(conf["save_loc"]), DEFAULT_SCHEMA_FILENAME))
 
-        postblock_cfg = conf.get("postblocks", {})
-        self.step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
-        self.rollout_postblocks = build_postblocks(postblock_cfg, phase="post_rollout")
+        self.step_postblocks = build_postblocks(conf, phase="per_step")
+        self.rollout_postblocks = build_postblocks(conf, phase="post_rollout")
 
         # ---- Data schema extraction (new nested schema) ----
         data_conf = conf["data"]

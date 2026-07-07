@@ -211,9 +211,8 @@ Examples:
     attach_channel_schema(ic_preblocks, channel_schema)
     attach_channel_schema(step_preblocks, channel_schema)
 
-    postblock_cfg = conf.get("postblocks", {})
-    step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
-    rollout_postblocks = build_postblocks(postblock_cfg, phase="post_rollout")
+    step_postblocks = build_postblocks(conf, phase="per_step")
+    rollout_postblocks = build_postblocks(conf, phase="post_rollout")
 
     # ── Model ────────────────────────────────────────────────────────────────
     model = load_model_for_inference(conf, device)

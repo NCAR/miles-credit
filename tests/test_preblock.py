@@ -449,7 +449,7 @@ class TestBuildPreblocks:
     def test_unknown_block_type_raises_with_valid_types(self):
         """An unregistered block type raises ValueError naming the block and listing valid types."""
         with pytest.raises(ValueError, match="unknown preblock type 'not_a_block'.*'concat'"):
-            build_preblocks({"per_step": {"bogus": {"type": "not_a_block"}}}, phase="per_step")
+            build_preblocks({"preblocks": {"per_step": {"bogus": {"type": "not_a_block"}}}}, phase="per_step")
 
 
 class TestBuildPostblocks:
@@ -476,11 +476,13 @@ class TestBuildPostblocks:
     def test_unknown_block_type_raises_with_valid_types(self):
         """An unregistered block type raises ValueError naming the block and listing valid types."""
         with pytest.raises(ValueError, match="unknown postblock type 'not_a_block'.*'reconstruct'"):
-            build_postblocks({"per_step": {"bogus": {"type": "not_a_block"}}}, phase="per_step")
+            build_postblocks({"postblocks": {"per_step": {"bogus": {"type": "not_a_block"}}}}, phase="per_step")
 
     def test_flatten_to_tensor_registered(self):
         """flatten_to_tensor builds without a scaler (scaler_path omitted)."""
-        postblocks = build_postblocks({"per_step": {"flatten": {"type": "flatten_to_tensor"}}}, phase="per_step")
+        postblocks = build_postblocks(
+            {"postblocks": {"per_step": {"flatten": {"type": "flatten_to_tensor"}}}}, phase="per_step"
+        )
         assert "flatten" in postblocks
 
     def test_flatten_to_tensor_expands_env_vars_in_scaler_path(self, monkeypatch, tmp_path):
@@ -497,9 +499,9 @@ class TestBuildPostblocks:
 
     def test_global_energy_fixer_updown_alias(self):
         """global_energy_fixer_updown resolves to the same class as global_energy_fixer."""
-        from credit.postblock import POSTBLOCK_REGISTRY
+        from credit.postblock import _POSTBLOCK_REGISTRY
 
-        assert POSTBLOCK_REGISTRY["global_energy_fixer_updown"] is POSTBLOCK_REGISTRY["global_energy_fixer"]
+        assert _POSTBLOCK_REGISTRY["global_energy_fixer_updown"] is _POSTBLOCK_REGISTRY["global_energy_fixer"]
 
 
 # ---------------------------------------------------------------------------

@@ -105,7 +105,7 @@ def _load_postblock_entry(block_type):
     """
     if block_type not in _POSTBLOCK_REGISTRY:
         raise ValueError(
-            f"Unknown postblock type '{block_type}'. "
+            f"unknown postblock type '{block_type}'. "
             f"Available types: {sorted(_POSTBLOCK_REGISTRY)}. "
             "Register a custom postblock with @register_postblock or via custom_objects in your config."
         )
@@ -132,12 +132,6 @@ def _build_postblock_section(section_cfg: dict) -> nn.ModuleDict:
     modules = {}
     for name, block_cfg in section_cfg.items():
         block_type = block_cfg["type"]
-        if block_type not in _POSTBLOCK_REGISTRY:
-            raise KeyError(
-                f"Unknown postblock type {block_type!r} (block name: {name!r}). "
-                f"Available types: {sorted(_POSTBLOCK_REGISTRY)}. "
-                "Register a custom postblock with @register_postblock or via custom_objects in your config."
-            )
         modules[name] = _load_postblock_entry(block_type)(**(block_cfg.get("args") or {}))
     return nn.ModuleDict(modules)
 
@@ -181,8 +175,8 @@ def build_postblocks(conf: dict, phase: str = "per_step") -> nn.ModuleDict:
 
     Raises:
         ValueError: if the config contains keys other than ``"per_step"`` / ``"post_rollout"``,
-            or if ``phase`` is not one of those values.
-        KeyError: if a block's ``type`` value is not in ``_POSTBLOCK_REGISTRY``.
+            if ``phase`` is not one of those values, or if a block's ``type`` value
+            is not in ``_POSTBLOCK_REGISTRY``.
     """
     from credit.registry import (
         load_custom_objects,
