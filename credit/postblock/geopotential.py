@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import xarray as xr
 from credit.metadata import get_meta_file_path
-from typing import Iterable
+from credit.postblock.base import BasePostblock
 from functools import partial
 
 
@@ -83,25 +83,32 @@ def geopotential(
     return geopotential_centers
 
 
-class GeopotentialDiagnostic(torch.nn.Module):
+class GeopotentialDiagnostic(BasePostblock):
     """
     GeopotentialDiagnostic is a neural network module used for computing geopotential
     diagnostics using multi-dimensional input data.
 
     This class processes geophysical variables such as surface geopotential, surface
     pressure, temperature, and specific humidity to calculate geopotential fields.
-    The input data is expected to conform to a specific format, and the class makes
-    use of auxiliary metadata files that describe model-specific level information.
+    The class makes use of auxiliary metadata files that describe model-specific
+    level information.
+
+    Follows the same batch-dict protocol as ``Reconstruct`` and
+    ``BridgeScalerTransform``: it operates on the nested output dict at
+    ``batch_dict[key]`` (default ``"y_processed"``), which has the form
+    ``{source: {var_key: tensor}}`` where ``var_key`` is
+    ``"source/field_type/dim/varname"``. The source for each variable is
+    derived from the first path component of its ``var_key``. The static
+    surface geopotential is read from ``batch_dict[static_source_key]``
+    (default ``"ic_raw"``), which has the same nested form, since static
+    fields are not part of the reconstructed model output. The result is
+    written back into ``batch_dict[key]`` under ``output_name``.
 
     Attributes:
-        output_name (str): The key used in the dataset to store the computed
-            geopotential diagnostic output.
-        dataset_name (str): The name of the dataset from which input variables
-            will be retrieved.
+        output_name (str): The var_key used to store the computed
+            geopotential diagnostic output in ``batch_dict[key]``.
         chunk_size (int): The chunk size used for vectorized computations
             to optimize memory usage during processing.
-        data_keys (Iterable[str]): The keys in the input data dictionary that
-            will be processed (e.g., "prediction", "target").
         surface_geopotential_var (str): The key for the surface geopotential variable
             in the dataset.
         surface_pressure_var (str): The key for the surface pressure variable
@@ -116,14 +123,16 @@ class GeopotentialDiagnostic(torch.nn.Module):
             the level information file.
         model_b_half_var (str): The variable name for the `b` (sigma) hybrid sigma-pressure coefficient parameter in
             the level information file.
+        key (str): entry in ``batch_dict`` holding the nested output dict written
+            by ``Reconstruct`` (default: ``"y_processed"``).
+        static_source_key (str): entry in ``batch_dict`` holding the nested raw IC
+            dict that provides static fields (default: ``"ic_raw"``).
     """
 
     def __init__(
         self,
         output_name: str = "ARCO_ERA5/derived_diagnostic/3d/geopotential",
-        dataset_name: str = "ARCO_ERA5",
         chunk_size: int = 1000,
-        data_keys: Iterable[str] = ("prediction", "target"),
         surface_geopotential_var: str = "ARCO_ERA5/static/2d/geopotential_at_surface",
         surface_pressure_var: str = "ARCO_ERA5/prognostic/2d/surface_pressure",
         temperature_var: str = "ARCO_ERA5/prognostic/3d/temperature",
@@ -132,14 +141,14 @@ class GeopotentialDiagnostic(torch.nn.Module):
         level_info_file: str = "ERA5_Lev_Info.nc",
         model_a_half_var: str = "a_half",
         model_b_half_var: str = "b_half",
+        key: str = "y_processed",
         static_source_key: str = "ic_raw",
         levels: list[int] | None = None,
     ):
         super().__init__()
         self.output_name = output_name
-        self.dataset_name = dataset_name
         self.chunk_size = chunk_size
-        self.data_keys = data_keys
+        self.key = key
         self.surface_geopotential_var = surface_geopotential_var
         self.surface_pressure_var = surface_pressure_var
         self.temperature_var = temperature_var
@@ -162,57 +171,58 @@ class GeopotentialDiagnostic(torch.nn.Module):
             self.model_b_half = b_all
         return
 
-    def forward(self, data_dict: dict):
+    def forward(self, batch_dict: dict):
         """
-        Processes a dictionary of input data, rearranges dimensions, computes derived quantities
-        using a custom function `geopotential`, and updates the data dictionary with the results.
+        Computes geopotential from the nested output dict and writes it back into the batch dict.
 
         Args:
-            data_dict (dict): Input dictionary containing data corresponding to various
-                data types. The data for each type is expected to be organized into specified
-                attributes (e.g., temperature, specific humidity).
+            batch_dict (dict): batch dict containing ``key`` and ``static_source_key``
+                entries, each of the form ``{source: {var_key: tensor}}`` with tensors
+                of shape ``(B, n_levels, n_time, H, W)``.
 
         Returns:
-            dict: Updated data dictionary, where new computed fields are added to the
-            relevant dataset, preserving the original structure.
+            dict: The same ``batch_dict`` with ``output_name`` added under
+            ``batch_dict[key][source]``.
 
         Raises:
-            ValueError: If any required data type is not found in the input `data_dict`.
+            ValueError: If ``key`` or ``static_source_key`` is not found in ``batch_dict``.
         """
-        for data_type in self.data_keys:
-            if data_type not in data_dict:
-                raise ValueError(f"Data key {data_type} not found in data_dict.")
-            data = data_dict[data_type]
-            pred_shape = list(data[self.dataset_name][self.temperature_var].shape)  # (B, n_levels, n_time, H, W)
-            pred_flat = {}
-            dsn = self.dataset_name
-            static_data = data_dict[self.static_source_key]
-            for input_var in [
-                self.surface_geopotential_var,
-                self.surface_pressure_var,
-                self.temperature_var,
-                self.specific_humidity_var,
-            ]:
-                src = static_data[dsn] if input_var == self.surface_geopotential_var else data[dsn]
-                new_dim_order = tuple([0] + list(range(2, len(src[input_var].shape))) + [1])
-                pred_per = torch.permute(src[input_var], new_dim_order)  # (B, n_time, H, W, n_levels)
-                total_shape = int(np.prod(pred_per.shape[:-1]))
-                pred_flat[input_var] = pred_per.reshape(total_shape, pred_per.shape[-1])
-            device = pred_flat[self.surface_pressure_var].device
-            pred_flat = {k: v.to(device) for k, v in pred_flat.items()}
-            vgeo = torch.vmap(
-                partial(geopotential, flip_vertical=self.flip_vertical),
-                (0, 0, 0, 0, None, None),
-                chunk_size=self.chunk_size,
-            )
-            geo_out = vgeo(
-                pred_flat[self.surface_geopotential_var],
-                pred_flat[self.surface_pressure_var],
-                pred_flat[self.temperature_var],
-                pred_flat[self.specific_humidity_var],
-                self.model_a_half.to(device),
-                self.model_b_half.to(device),
-            ).reshape(*[pred_shape[0]] + pred_shape[2:] + [pred_shape[1]])  # (B, n_time, H, W, n_levels)
-            final_dim_order = tuple([0] + [len(pred_shape) - 1] + list(range(1, len(pred_shape) - 1)))
-            data[dsn][self.output_name] = torch.permute(geo_out, final_dim_order)
-        return data_dict
+        for required_key in (self.key, self.static_source_key):
+            if required_key not in batch_dict:
+                raise ValueError(f"Key {required_key!r} not found in batch_dict.")
+        nested = batch_dict[self.key]  # {source: {var_key: tensor}}
+        static_nested = batch_dict[self.static_source_key]
+        temp_source = self.temperature_var.split("/")[0]
+        pred_shape = list(nested[temp_source][self.temperature_var].shape)  # (B, n_levels, n_time, H, W)
+        pred_flat = {}
+        for input_var in [
+            self.surface_geopotential_var,
+            self.surface_pressure_var,
+            self.temperature_var,
+            self.specific_humidity_var,
+        ]:
+            source = input_var.split("/")[0]
+            src = static_nested[source] if input_var == self.surface_geopotential_var else nested[source]
+            new_dim_order = tuple([0] + list(range(2, len(src[input_var].shape))) + [1])
+            pred_per = torch.permute(src[input_var], new_dim_order)  # (B, n_time, H, W, n_levels)
+            total_shape = int(np.prod(pred_per.shape[:-1]))
+            pred_flat[input_var] = pred_per.reshape(total_shape, pred_per.shape[-1])
+        device = pred_flat[self.surface_pressure_var].device
+        pred_flat = {k: v.to(device) for k, v in pred_flat.items()}
+        vgeo = torch.vmap(
+            partial(geopotential, flip_vertical=self.flip_vertical),
+            (0, 0, 0, 0, None, None),
+            chunk_size=self.chunk_size,
+        )
+        geo_out = vgeo(
+            pred_flat[self.surface_geopotential_var],
+            pred_flat[self.surface_pressure_var],
+            pred_flat[self.temperature_var],
+            pred_flat[self.specific_humidity_var],
+            self.model_a_half.to(device),
+            self.model_b_half.to(device),
+        ).reshape(*[pred_shape[0]] + pred_shape[2:] + [pred_shape[1]])  # (B, n_time, H, W, n_levels)
+        final_dim_order = tuple([0] + [len(pred_shape) - 1] + list(range(1, len(pred_shape) - 1)))
+        out_source = self.output_name.split("/")[0]
+        nested.setdefault(out_source, {})[self.output_name] = torch.permute(geo_out, final_dim_order)
+        return batch_dict
