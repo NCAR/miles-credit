@@ -49,10 +49,10 @@ class TestSingleProcess:
         assert torch.allclose(pred.grad, expected)
 
     def test_registry(self):
-        from credit.losses.base_losses import base_losses
+        from credit.losses import _instantiate_loss
 
         conf = {"loss": {"training_loss": "ring-crps"}}
-        assert isinstance(base_losses(conf), RingCRPSLoss)
+        assert isinstance(_instantiate_loss(conf), RingCRPSLoss)
 
     def test_load_loss_rejects_weighted(self):
         from credit.losses import load_loss

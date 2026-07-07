@@ -187,9 +187,6 @@ Examples:
     for h in root.handlers:
         h.setLevel(level)
 
-    if mode in ("ddp", "fsdp"):
-        setup(world_rank, world_size, mode)
-
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
         torch.cuda.set_device(local_rank % torch.cuda.device_count())
@@ -198,14 +195,15 @@ Examples:
     else:
         device = torch.device("cpu")
 
-    # ── Preblocks / postblocks ───────────────────────────────────────────────
-    preblock_cfg = conf.get("preblocks", {})
-    ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
-    step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+    if mode in ("ddp", "fsdp"):
+        setup(world_rank, world_size, mode, device_id=device if torch.cuda.is_available() else None)
 
-    postblock_cfg = conf.get("postblocks", {})
-    step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
-    rollout_postblocks = build_postblocks(postblock_cfg, phase="post_rollout")
+    # ── Preblocks / postblocks ───────────────────────────────────────────────
+    ic_preblocks = build_preblocks(conf, phase="ic_only")
+    step_preblocks = build_preblocks(conf, phase="per_step")
+
+    step_postblocks = build_postblocks(conf, phase="per_step")
+    rollout_postblocks = build_postblocks(conf, phase="post_rollout")
 
     # ── Model ────────────────────────────────────────────────────────────────
     model = load_model_for_inference(conf, device)
@@ -223,6 +221,9 @@ Examples:
         "forecast_len": n_steps,
         "datetimes": all_init_times,
     }
+    from credit.registry import load_custom_objects  # imported here to avoid a module-level credit.registry import
+
+    load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     dataset = MultiSourceDataset(dataset_conf, return_target=False)
 
     # Plain (non-distributed) subset sampler: each rank takes every world_size-th
@@ -261,7 +262,10 @@ Examples:
     # batch_iter is shared across all forecasts. The sampler groups batches so
     # that each forecast consumes exactly n_steps consecutive batches (1 IC +
     # n_steps-1 forcing), in init-time order.
-    with mp.Pool(args.num_cpus) as pool:
+    # spawn (not the platform-default fork) since this process is multi-threaded by the
+    # time the pool starts (NCCL/CUDA background threads), and forking a multi-threaded
+    # process risks deadlocks in the child.
+    with mp.get_context("spawn").Pool(args.num_cpus) as pool:
         batch_iter = iter(loader)
 
         for _ in range(len(rank_indices)):
