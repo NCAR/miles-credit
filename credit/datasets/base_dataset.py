@@ -92,8 +92,14 @@ class AbstractBaseDataset(Dataset[Any]):
         field_type: VALID_FIELD_TYPES,
         t: pd.Timestamp,
         sample: dict[str, Any],
-        *,
-        t_history: pd.DatetimeIndex | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    def _extract_field_window(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t_history: pd.DatetimeIndex,
+        sample: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
@@ -356,23 +362,23 @@ class BaseDataset(AbstractBaseDataset):
 
         # History window ending at t (inclusive). Used only at i == 0 for
         # fields that need a multi-step history. Always length history_len.
-        # When history_len == 1 we never pass the t_history keyword, so dataset
-        # subclasses that have not opted in to multi-step reading keep their
-        # original single-step _extract_field signature and behaviour.
+        # When history_len > 1 the window is loaded via _extract_field_window,
+        # whose default implementation simply calls the subclass's single-step
+        # _extract_field once per timestamp and stacks along the time dim, so
+        # datasets get multi-step reading for free without changing their
+        # single-step _extract_field. Subclasses may override
+        # _extract_field_window to batch file reads (see LocalDataset).
         multistep = self.history_len > 1
         if multistep:
             t_history = pd.date_range(t - (self.history_len - 1) * self.dt, t, freq=self.dt)
-            history_kw = {"t_history": t_history}
-        else:
-            history_kw = {}
 
         # Dynamic forcing is loaded at every step.
         # At i == 0 we need the full history window so the trainer's x has H
         # time steps; at i > 0 we only need the newest step (the trainer slides
         # the previous history forward during rollout).
         if "dynamic_forcing" in self.var_dict:
-            if i == 0:
-                self._extract_field("dynamic_forcing", t, input_data, **history_kw)
+            if i == 0 and multistep:
+                self._extract_field_window("dynamic_forcing", t_history, input_data)
             else:
                 self._extract_field("dynamic_forcing", t, input_data)
 
@@ -380,9 +386,15 @@ class BaseDataset(AbstractBaseDataset):
         # Both are loaded over the full history window so x starts with H steps.
         if i == 0:
             if "static" in self.var_dict:
-                self._extract_field("static", t, input_data, **history_kw)
+                if multistep:
+                    self._extract_field_window("static", t_history, input_data)
+                else:
+                    self._extract_field("static", t, input_data)
             if "prognostic" in self.var_dict:
-                self._extract_field("prognostic", t, input_data, **history_kw)
+                if multistep:
+                    self._extract_field_window("prognostic", t_history, input_data)
+                else:
+                    self._extract_field("prognostic", t, input_data)
 
         sample: dict[str, Any] = {
             "input": input_data,
@@ -752,13 +764,52 @@ class BaseDataset(AbstractBaseDataset):
         else:
             raise ValueError(f"Unknown mode '{self.mode}'. Expected 'local' or 'remote'.")
 
+    def _extract_field_window(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t_history: pd.DatetimeIndex,
+        sample: dict[str, Any],
+    ) -> None:
+        """Extract *field_type* over a multi-step history window and stack in time.
+
+        This is the generic multi-step reader used when ``history_len > 1``. It
+        calls the subclass's single-step :meth:`_extract_field` once per
+        timestamp in *t_history* (chronological, ending at the current step) and
+        concatenates each resulting variable tensor along the time dimension
+        (``dim=1``). Because it only relies on the single-step contract
+        (3D → ``(n_levels, 1, lat, lon)``, 2D → ``(1, 1, lat, lon)``), every
+        dataset gets multi-step reading without changing its ``_extract_field``.
+
+        Subclasses whose backend can load several timestamps from a single
+        open file/store more cheaply (e.g. :class:`~credit.datasets.local.LocalDataset`)
+        may override this method to batch those reads. The stacked output must be
+        identical either way: 3D → ``(n_levels, len(t_history), lat, lon)``,
+        2D → ``(1, len(t_history), lat, lon)``.
+
+        Args:
+            field_type: One of VALID_FIELD_TYPES.
+            t_history: Chronological timestamps of the history window (ending at
+                the current step); length ``history_len``.
+            sample: Dict to write the stacked variable tensors into (modified in place).
+        """
+        per_step: list[dict[str, Any]] = []
+        for tk in t_history:
+            step_sample: dict[str, Any] = {}
+            self._extract_field(field_type, pd.Timestamp(tk), step_sample)
+            per_step.append(step_sample)
+
+        if not per_step:
+            return
+
+        # Every step writes the same keys (single-step contract); stack in time.
+        for key in per_step[0]:
+            sample[key] = torch.cat([step[key] for step in per_step], dim=1)
+
     def _extract_field(
         self,
         field_type: VALID_FIELD_TYPES,
         t: pd.Timestamp,
         sample: dict[str, Any],
-        *,
-        t_history: pd.DatetimeIndex | None = None,
     ) -> None:
         """Base extract field method, which should be overridden in the inherited dataset class to extract the data for
         each field type. The method should populate data_dict with the extracted data for the given field type and
@@ -766,16 +817,14 @@ class BaseDataset(AbstractBaseDataset):
 
         The entries are added as tensors to the sample["input"] or sample["target"] dict in __getitem__.
 
+        Multi-step history (history_len > 1) is handled by _extract_field_window,
+        which calls this single-step method once per timestamp and stacks the
+        results, so subclasses only need to implement single-step reading here.
+
         Args:
             field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
             t (pd.Timestamp): Query timestamp for which to extract the field data.
             sample (dict[str, Any]): The sample dict being built in __getitem__
-            t_history (pd.DatetimeIndex | None, optional): When not None, the
-                field should be extracted as a stack along the time dimension
-                over this index of timestamps (ending at ``t``). Used by
-                multi-step history (history_len > 1) at the initial step.
-                When None, a single time step at ``t`` is extracted (legacy
-                history_len == 1 behaviour).
         """
         logging.error(
             "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "
@@ -783,20 +832,18 @@ class BaseDataset(AbstractBaseDataset):
             "class is of type: " + self.__class__.__name__ + ". "
         )
 
-        # A 3D variable should have dimensions (n_levels, T, n_lat, n_lon).
-        # A 2D variable should have dimensions (1, T, n_lat, n_lon), where
-        # T == 1 in the single-step path and T == len(t_history) otherwise.
+        # A 3D variable should have dimensions (n_levels, 1, n_lat, n_lon).
+        # A 2D variable should have dimensions (1, 1, n_lat, n_lon).
         # We select prime numbers to ensure that there is no accidental shape
         # matches when testing the dataset.
         n_lat = 17
         n_lon = 23
         n_levels = 7
-        n_t = 1 if t_history is None else len(t_history)
 
         if field_type in self.var_dict:
             for var_2d in self.var_dict[field_type].get("vars_2D", []):
                 key = self._get_field_name(field_type, "2d", var_2d)
-                sample[key] = torch.ones(1, n_t, n_lat, n_lon)
+                sample[key] = torch.ones(1, 1, n_lat, n_lon)
             for var_3d in self.var_dict[field_type].get("vars_3D", []):
                 key = self._get_field_name(field_type, "3d", var_3d)
-                sample[key] = torch.ones(n_levels, n_t, n_lat, n_lon)
+                sample[key] = torch.ones(n_levels, 1, n_lat, n_lon)

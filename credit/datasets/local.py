@@ -141,40 +141,25 @@ class LocalDataset(BaseDataset):
         field_type: str,
         t: pd.Timestamp,
         sample: dict[str, Any],
-        *,
-        t_history: pd.DatetimeIndex | None = None,
     ) -> None:
         """Open the dataset for *field_type* at time *t* and populate *sample*.
 
         Keys written are ``"{source_name}/{field_type}/3d/{varname}"`` for 3D variables
         and ``"{source_name}/{field_type}/2d/{varname}"`` for 2D variables.
 
-        When ``t_history`` is provided (history_len > 1 path), the field is
-        loaded as a window of ``len(t_history)`` time steps stacked along the
-        time dimension. Timestamps in ``t_history`` may span multiple data
-        files (e.g. yearly zarrs around a year boundary); the function groups
-        timestamps by their resolved file and opens each file once.
-
-        For fields without a time dimension in the source dataset (typical
-        ``"static"``), the single available slice is replicated along the
-        time axis ``len(t_history)`` times.
+        This is the single-step reader (one timestamp). Multi-step history
+        (history_len > 1) is handled by :meth:`_extract_field_window`, which
+        opens each file at most once across the window.
 
         Args:
             field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
                 ``"static"``, ``"diagnostic"``.
-            t: Timestamp to select (single-step path) or end timestamp of the
-                history window (history path; equals ``t_history[-1]``).
+            t: Timestamp to select.
             sample: Dict to write variable tensors into (modified in place).
                 Tensor shapes (no batch dimension):
 
-                - 3D variable: ``(n_levels, T, lat, lon)``
-                - 2D variable: ``(1, T, lat, lon)``
-
-                where ``T == 1`` in the single-step path and
-                ``T == len(t_history)`` in the history path.
-            t_history: When provided, the time stamps (in chronological order,
-                ending at ``t``) to load and stack. When None, only ``t`` is
-                loaded.
+                - 3D variable: ``(n_levels, 1, lat, lon)``
+                - 2D variable: ``(1, 1, lat, lon)``
         """
         file_intervals = self.file_dict.get(field_type)
         if not file_intervals or field_type not in self.var_dict:
@@ -184,12 +169,44 @@ class LocalDataset(BaseDataset):
         vars_3D: list[str] = vd["vars_3D"]
         vars_2D: list[str] = vd["vars_2D"]
 
-        # Single-step path (legacy history_len == 1).
-        if t_history is None:
-            with xr.open_dataset(_find_file(file_intervals, t)) as ds:
-                ds_t = self._select_at_time(ds, t)
-                self._write_field_tensors(ds_t, vars_3D, vars_2D, field_type, sample)
+        with xr.open_dataset(_find_file(file_intervals, t)) as ds:
+            ds_t = self._select_at_time(ds, t)
+            self._write_field_tensors(ds_t, vars_3D, vars_2D, field_type, sample)
+
+    def _extract_field_window(
+        self,
+        field_type: str,
+        t_history: pd.DatetimeIndex,
+        sample: dict[str, Any],
+    ) -> None:
+        """Load *field_type* over the history window and stack along time.
+
+        Overrides the generic per-step reader in
+        :meth:`BaseDataset._extract_field_window` to open each underlying file at
+        most once. Timestamps in ``t_history`` may span multiple data files (e.g.
+        yearly zarrs around a year boundary), so they are grouped by their
+        resolved file and each file is opened a single time.
+
+        For fields without a time dimension in the source dataset (typical
+        ``"static"``), the single available slice is replicated along the time
+        axis ``len(t_history)`` times.
+
+        Produces the same output as the generic reader: 3D →
+        ``(n_levels, len(t_history), lat, lon)``, 2D → ``(1, len(t_history), lat, lon)``.
+
+        Args:
+            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            t_history: Chronological timestamps of the history window.
+            sample: Dict to write the stacked variable tensors into (modified in place).
+        """
+        file_intervals = self.file_dict.get(field_type)
+        if not file_intervals or field_type not in self.var_dict:
             return
+
+        vd = self.var_dict[field_type]
+        vars_3D: list[str] = vd["vars_3D"]
+        vars_2D: list[str] = vd["vars_2D"]
 
         # History path: load each timestamp in t_history, stack along time.
         # Group by file so each file is opened at most once.
