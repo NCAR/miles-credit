@@ -408,22 +408,24 @@ class TestBuildPreblocks:
     def test_flat_format_raises_value_error(self):
         """Old flat format (no ic_only/per_step sections) raises ValueError."""
         with pytest.raises(ValueError, match="unexpected top-level keys"):
-            build_preblocks({"concat": {"type": "concat"}})
+            build_preblocks({"preblocks": {"concat": {"type": "concat"}}})
 
     def test_unknown_section_key_raises(self):
         """A key that is neither ic_only nor per_step raises ValueError."""
         with pytest.raises(ValueError, match="unexpected top-level keys"):
-            build_preblocks({"per_step": {}, "bad_section": {}})
+            build_preblocks({"preblocks": {"per_step": {}, "bad_section": {}}})
 
     def test_valid_two_section_per_step_builds(self):
         """per_step section builds an nn.ModuleDict with the named block."""
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         assert isinstance(preblocks, nn.ModuleDict)
         assert "concat" in preblocks
 
     def test_valid_two_section_ic_only_builds(self):
         """ic_only section builds an nn.ModuleDict with the named block."""
-        preblocks = build_preblocks({"ic_only": {"concat": {"type": "concat"}}}, phase="ic_only")
+
+        preblocks = build_preblocks({"preblocks": {"ic_only": {"concat": {"type": "concat"}}}}, phase="ic_only")
         assert isinstance(preblocks, nn.ModuleDict)
         assert "concat" in preblocks
 
@@ -436,7 +438,7 @@ class TestBuildPreblocks:
     def test_missing_phase_returns_empty_module_dict(self):
         """Requesting a phase absent from the config returns an empty ModuleDict."""
         # ic_only is configured but per_step is requested
-        preblocks = build_preblocks({"ic_only": {"concat": {"type": "concat"}}}, phase="per_step")
+        preblocks = build_preblocks({"preblocks": {"ic_only": {"concat": {"type": "concat"}}}}, phase="per_step")
         assert len(preblocks) == 0
 
     def test_invalid_phase_raises(self):
@@ -451,11 +453,14 @@ class TestBuildPostblocks:
     def test_flat_format_raises_value_error(self):
         """Old flat postblock format raises ValueError."""
         with pytest.raises(ValueError, match="unexpected top-level keys"):
-            build_postblocks({"reconstruct": {"type": "reconstruct"}})
+            build_postblocks({"postblocks": {"reconstruct": {"type": "reconstruct"}}})
 
     def test_valid_two_section_per_step_builds(self):
         """per_step section builds a ModuleDict with the named block."""
-        postblocks = build_postblocks({"per_step": {"reconstruct": {"type": "reconstruct"}}}, phase="per_step")
+
+        postblocks = build_postblocks(
+            {"postblocks": {"per_step": {"reconstruct": {"type": "reconstruct"}}}}, phase="per_step"
+        )
         assert isinstance(postblocks, nn.ModuleDict)
         assert "reconstruct" in postblocks
 
@@ -563,7 +568,8 @@ class TestApplyPreblocks:
 
     def test_return_format_with_concat_has_x_y_metadata(self):
         """apply_preblocks returns {"x", "y", "metadata"} when ConcatToTensor is the final block."""
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         batch = {
             "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
@@ -577,7 +583,8 @@ class TestApplyPreblocks:
 
     def test_metadata_contains_input_and_target_channel_maps(self):
         """Metadata from apply_preblocks contains populated _channel_map for input and target."""
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         var_key = "era5/prognostic/2d/T"
         batch = {
@@ -594,7 +601,8 @@ class TestApplyPreblocks:
 
     def test_does_not_mutate_input_tensor_values(self):
         """apply_preblocks does not modify the caller's batch tensors in-place."""
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         original_tensor = torch.ones(B, 1, 1, H, W)
         batch = {
@@ -609,7 +617,8 @@ class TestApplyPreblocks:
 
     def test_does_not_add_keys_to_caller_batch(self):
         """apply_preblocks does not add or remove keys from the caller's batch dict."""
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         batch = {
             "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
@@ -634,14 +643,9 @@ class TestApplyPreblocks:
         assert "era5/prognostic/2d/T" in result["input"]["era5"]
 
     def test_concat_result_exposes_input_tensor_under_x(self):
-        """The concat result is a dict keyed by "x"; the rollout apps read result["x"].
+        """The concat result is a dict keyed by "x"; the rollout apps read result["x"]."""
 
-        rollout_to_netcdf_gen2 previously unpacked this as ``x, _ = apply_preblocks(...)``,
-        which iterates the dict keys (strings) instead of returning the tensor, so the
-        following ``x.to(device)`` raised AttributeError/ValueError. Reading result["x"]
-        is the contract the apps must use.
-        """
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat"}}}, phase="per_step")
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         B, H, W = 1, 4, 4
         batch = {
             "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
@@ -651,7 +655,6 @@ class TestApplyPreblocks:
 
         assert "x" in result
         assert isinstance(result["x"], torch.Tensor)
-        # the tensor is usable as a tensor (what the rollout app does next)
         assert result["x"].float().shape[0] == B
 
 

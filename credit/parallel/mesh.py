@@ -23,6 +23,22 @@ import torch.distributed as dist
 
 logger = logging.getLogger(__name__)
 
+# Data-parallel process group, registered by distributed_model_wrapper_gen2.
+# Consumers (e.g. RingCRPSLoss) resolve it lazily so construction order
+# relative to model wrapping doesn't matter.
+_DP_GROUP = None
+
+
+def register_dp_group(group):
+    """Record the dp process group for later lookup via get_dp_group()."""
+    global _DP_GROUP
+    _DP_GROUP = group
+
+
+def get_dp_group():
+    """Return the registered dp group, or None (callers fall back to WORLD)."""
+    return _DP_GROUP
+
 
 def dp_world_size(parallelism_conf: dict, world_size: int) -> int:
     """Number of data-parallel replicas for a given world size.

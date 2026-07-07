@@ -14,7 +14,10 @@ Total GPUs = dp_size × tensor × domain
 Usage (called from distributed_model_wrapper_gen2):
     mesh, submeshes = build_device_mesh(conf["trainer"]["parallelism"])
     if submeshes.get("tp"):
-        model = apply_tensor_parallel(model, submeshes["tp"])
+        if supports_native_tp(model):
+            model = apply_native_tensor_parallel(model, submeshes["tp"])
+        else:
+            model = apply_tensor_parallel(model, submeshes["tp"])  # raises (#415)
     if submeshes.get("domain"):
         model = apply_domain_parallel(model, submeshes["domain"])
     if conf["trainer"]["parallelism"]["data"] == "fsdp2":
@@ -25,13 +28,15 @@ Usage (called from distributed_model_wrapper_gen2):
 
 from .mesh import build_device_mesh
 from .fsdp2 import apply_fsdp2
-from .tensor_parallel import apply_tensor_parallel
+from .tensor_parallel import apply_native_tensor_parallel, apply_tensor_parallel, supports_native_tp
 from .domain import get_domain_manager, get_raw_model, shard_spatial, unpad_shard_interp, sync_domain_gradients
 
 __all__ = [
     "build_device_mesh",
     "apply_fsdp2",
+    "apply_native_tensor_parallel",
     "apply_tensor_parallel",
+    "supports_native_tp",
     "get_domain_manager",
     "get_raw_model",
     "shard_spatial",

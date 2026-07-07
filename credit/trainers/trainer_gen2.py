@@ -9,6 +9,7 @@ import tqdm
 
 import optuna
 
+from credit.losses import is_crps_loss
 from credit.parallel.domain import (
     gather_spatial,
     get_domain_manager,
@@ -17,7 +18,7 @@ from credit.parallel.domain import (
     unpad_shard_interp,
     sync_domain_gradients,
 )
-from credit.parallel.collectives import all_reduce_avg
+from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.fsdp2 import fsdp2_is_applied
 from credit.postblock import build_postblocks, apply_postblocks
 from credit.preblock import build_preblocks, apply_preblocks
@@ -49,7 +50,6 @@ class TrainerERA5Gen2(BaseTrainer):
             conf: Full configuration dict.
         """
         super().__init__(model, rank, conf)
-        logger.info("Loading ERA5 Gen 2 trainer (new nested data schema, preblock-assembled batches)")
 
         # The config can request fsdp2 while the wrapper skips it (dp_size <= 1).
         # AMP decisions must follow what was actually applied: when FSDP2 is
@@ -77,13 +77,11 @@ class TrainerERA5Gen2(BaseTrainer):
             self._domain_image_h = None
             self._domain_image_w = None
 
-        preblock_cfg = conf.get("preblocks", {})
-        self.ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
-        self.step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+        self.ic_preblocks = build_preblocks(conf, phase="ic_only")
+        self.step_preblocks = build_preblocks(conf, phase="per_step")
 
-        postblock_cfg = conf.get("postblocks", {})
-        self.step_postblocks = build_postblocks(postblock_cfg, phase="per_step")
-        self.rollout_postblocks = build_postblocks(postblock_cfg, phase="post_rollout")
+        self.step_postblocks = build_postblocks(conf, phase="per_step")
+        self.rollout_postblocks = build_postblocks(conf, phase="post_rollout")
 
         # ---- Data schema extraction (new nested schema) ----
         data_conf = conf["data"]
@@ -123,6 +121,16 @@ class TrainerERA5Gen2(BaseTrainer):
 
         # If True, log a warning on NaN loss instead of raising TrialPruned.
         self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
+
+        loss_name = conf.get("loss", {}).get("training_loss")
+        if is_crps_loss(loss_name) and self.ensemble_size <= 1:
+            raise ValueError(
+                f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "
+                f"got trainer.ensemble_size={self.ensemble_size}."
+            )
+        self.is_ring_crps = loss_name == "ring-crps"
+        self.is_crps_ensemble = is_crps_loss(loss_name) and self.ensemble_size > 1
+        self.use_batch_axis_ensemble = self.ensemble_size > 1 and not self.is_ring_crps
 
     # ------------------------------------------------------------------
     # Multi-step history helper
@@ -245,7 +253,6 @@ class TrainerERA5Gen2(BaseTrainer):
         """
         if self.ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
-        logger.info(f"Using grad-max-norm value: {self.grad_max_norm}")
 
         if self.use_scheduler and self.scheduler_type == "lambda":
             scheduler.step()
@@ -273,7 +280,12 @@ class TrainerERA5Gen2(BaseTrainer):
         if hasattr(_sampler, "set_epoch"):
             _sampler.set_epoch(epoch)
 
-        batch_group_generator = tqdm.tqdm(range(batches_per_epoch), total=batches_per_epoch, leave=True)
+        batch_group_generator = tqdm.tqdm(
+            range(batches_per_epoch),
+            total=batches_per_epoch,
+            leave=True,
+            disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
+        )
         self.model.train()
 
         dl = cycle(trainloader)
@@ -328,7 +340,7 @@ class TrainerERA5Gen2(BaseTrainer):
                         history_x = self._slide_history_window(history_x, full_data_dict["x"])
                         full_data_dict["x"] = history_x
 
-                if self.ensemble_size > 1:
+                if self.use_batch_axis_ensemble:
                     full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
 
                 if self.flag_clamp:
@@ -355,6 +367,12 @@ class TrainerERA5Gen2(BaseTrainer):
                             full_data_dict["y_pred"],
                         ).mean()
                     accum_log(logs, {"loss": loss.item()})
+                    if self.is_crps_ensemble:
+                        # Ensemble spread proxy: std of member errors.
+                        target = full_data_dict["y"]
+                        if full_data_dict["y_pred"].shape[0] == target.shape[0] * self.ensemble_size:
+                            target = torch.repeat_interleave(target, self.ensemble_size, 0)
+                        accum_log(logs, {"std": (full_data_dict["y_pred"] - target).detach().std().item()})
                     scaler.scale(loss / grad_accum_every).backward(retain_graph=self.retain_graph)
                 # No barrier here: NCCL collectives (grad sync, halo exchange)
                 # already order ranks; a per-timestep barrier only adds latency.
@@ -373,27 +391,30 @@ class TrainerERA5Gen2(BaseTrainer):
                 if self.grad_max_norm == "dynamic":
                     # Global L2 norm: sum SQUARED norms across ranks, then sqrt.
                     # (Summing the norms themselves and sqrt-ing mixes units.)
-                    # Note this still over-counts replicated grads when tp/domain
-                    # ranks hold copies; acceptable for a clip threshold.
-                    # FSDP2 grads are DTensors; dist.all_reduce fails on DTensors
-                    # directly, so extract the local shard first with .to_local().
-                    local_sq = (
-                        torch.stack(
-                            [
-                                (p.grad.to_local() if hasattr(p.grad, "to_local") else p.grad).detach().norm(2)
-                                for p in self.model.parameters()
-                                if p.grad is not None
-                            ]
-                        )
-                        .square()
-                        .sum()
-                    )
-                    if self.distributed:
-                        dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
-                    global_norm = local_sq.sqrt()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
+                    # DTensor grads (FSDP2 / native TP) go through the
+                    # mesh-grouped total_grad_norm, whose full_tensor()
+                    # reduction is already global — no extra all_reduce.
+                    # Plain grads keep the local sq-sum + SUM all_reduce; that
+                    # still over-counts replicated grads when tp/domain ranks
+                    # hold copies; acceptable for a clip threshold.
+                    from torch.distributed.tensor import DTensor
+
+                    plain, sharded = [], []
+                    for p in self.model.parameters():
+                        if p.grad is not None:
+                            (sharded if isinstance(p.grad, DTensor) else plain).append(p.grad.detach())
+                    sq_terms = []
+                    if plain:
+                        local_sq = torch.stack([g.norm(2) for g in plain]).square().sum()
+                        if self.distributed:
+                            dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
+                        sq_terms.append(local_sq)
+                    if sharded:
+                        sq_terms.append(total_grad_norm(sharded, 2.0).square())
+                    global_norm = torch.stack(sq_terms).sum().sqrt()
+                    clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
                 elif self.grad_max_norm > 0.0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
+                    clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
 
                 scaler.step(optimizer)
                 scaler.update()
@@ -415,6 +436,12 @@ class TrainerERA5Gen2(BaseTrainer):
                 all_reduce_avg(batch_loss)
             results_dict["train_loss"].append(batch_loss[0].item())
             results_dict["train_forecast_len"].append(self.forecast_len)
+
+            if self.is_crps_ensemble and "std" in logs:
+                batch_std = torch.Tensor([logs["std"]]).to(self.device)
+                if self.distributed:
+                    dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
+                results_dict["train_std"].append(batch_std[0].item())
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(results_dict["train_loss"])
@@ -470,7 +497,12 @@ class TrainerERA5Gen2(BaseTrainer):
             )
 
         results_dict = defaultdict(list)
-        batch_group_generator = tqdm.tqdm(range(valid_batches_per_epoch), total=valid_batches_per_epoch, leave=True)
+        batch_group_generator = tqdm.tqdm(
+            range(valid_batches_per_epoch),
+            total=valid_batches_per_epoch,
+            leave=True,
+            disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
+        )
 
         dl = cycle(valid_loader)
         with torch.no_grad():
@@ -510,7 +542,7 @@ class TrainerERA5Gen2(BaseTrainer):
                             history_x = self._slide_history_window(history_x, full_data_dict["x"])
                             full_data_dict["x"] = history_x
 
-                    if self.ensemble_size > 1:
+                    if self.use_batch_axis_ensemble:
                         full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
 
                     if self.flag_clamp:

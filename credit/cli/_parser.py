@@ -78,16 +78,19 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- rollout-ensemble ----
     p = sub.add_parser(
         "rollout-ensemble",
-        help="Submit N parallel PBS rollout jobs covering all ensemble init times",
+        help="[deprecated] Submit N parallel PBS rollout jobs (see 'credit submit --mode rollout')",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent("""\
-            Split an ensemble rollout across N parallel PBS jobs — one job per
-            subset of init times.  All jobs start at once (no afterok chain).
+            Deprecated — use 'credit submit --mode rollout --jobs N' instead.
+
+            NOTE: per-job init-time subsetting is not yet implemented for gen2
+            configs, so with --jobs N > 1 each job currently runs the FULL set
+            of init times — N redundant copies, not a work split. Use --jobs 1
+            until subsetting lands.
 
             Examples:
-              credit rollout-ensemble --cluster casper -c config.yml --jobs 10 --dry-run
-              credit rollout-ensemble --cluster casper -c config.yml --jobs 10
-              credit rollout-ensemble --cluster derecho -c config.yml --jobs 20 --gpus 1
+              credit rollout-ensemble --cluster casper -c config.yml --jobs 1 --dry-run
+              credit rollout-ensemble --cluster casper -c config.yml --jobs 1
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to v2 YAML config")
@@ -126,8 +129,11 @@ def _build_parser() -> argparse.ArgumentParser:
               train      (default) Submit a training job.  Use --reload / --chain for
                          resuming and chaining multiple epochs across jobs.
               preprocess Submit a single job to fit preprocessing scalers.
-              rollout    Submit N parallel PBS rollout jobs covering all init times.
-                         Use --jobs N to set parallelism.  No afterok chain.
+              rollout    Submit N parallel PBS rollout jobs.  No afterok chain.
+                         NOTE: per-job init-time subsetting is not yet
+                         implemented for gen2 configs, so --jobs N > 1
+                         currently submits N redundant full-range jobs
+                         rather than splitting the work — use --jobs 1.
               realtime   Submit a single realtime forecast job.
                          Requires --init-time and --steps.
 
@@ -137,7 +143,7 @@ def _build_parser() -> argparse.ArgumentParser:
               credit submit --cluster casper  -c config.yml --mode train --reload
               credit submit --cluster derecho -c config.yml --mode train --chain 10
               credit submit --cluster casper  -c config.yml --mode preprocess
-              credit submit --cluster casper  -c config.yml --mode rollout --jobs 10
+              credit submit --cluster casper  -c config.yml --mode rollout --jobs 1
               credit submit --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00 --steps 40
         """),
     )
@@ -162,7 +168,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")
     p.add_argument("--dry-run", action="store_true", help="Print the PBS script without submitting")
     p.add_argument(
-        "--jobs", type=int, default=1, metavar="N", help="Parallel PBS rollout jobs for --mode rollout (default: 1)"
+        "--jobs",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Parallel PBS rollout jobs for --mode rollout (default: 1). "
+        "N>1 currently submits N redundant full-range jobs — per-job subsetting isn't implemented yet.",
     )
     p.add_argument(
         "--init-time", dest="init_time", default=None, metavar="YYYY-MM-DDTHH", help="Init time for --mode realtime"
