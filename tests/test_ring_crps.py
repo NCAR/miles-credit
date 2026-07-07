@@ -116,7 +116,7 @@ def _ring_worker(rank, K, init_file, value_out, grad_out):
         loss = ring_crps_loss(pred, y)
         loss.backward()
         value_out[rank] = loss.item()
-        grad_out[rank] = pred.grad.clone()
+        grad_out[rank] = pred.grad.numpy()
     finally:
         dist.destroy_process_group()
 
@@ -144,7 +144,7 @@ def test_ring_matches_reference(tmp_path, K):
     ref_members = [m.clone().requires_grad_(True) for m in members]
     _reference_fair_crps(ref_members, y).backward()
     for r in range(K):
-        assert torch.allclose(grad_out[r], ref_members[r].grad, atol=1e-6), (
+        assert torch.allclose(torch.from_numpy(grad_out[r]), ref_members[r].grad, atol=1e-6), (
             f"rank {r} gradient does not match fair-CRPS gradient"
         )
 
@@ -167,7 +167,7 @@ def _ring_crps_loss_worker(rank, K, init_file, value_out, grad_out):
         loss = criterion(y, pred)  # group resolved lazily here
         loss.backward()
         value_out[rank] = loss.item()
-        grad_out[rank] = pred.grad.clone()
+        grad_out[rank] = pred.grad.numpy()
         # Second forward must reuse cached group (no re-import).
         pred2 = members[rank].clone().requires_grad_(True)
         criterion(y, pred2).backward()
@@ -201,7 +201,7 @@ def test_ring_crps_loss_lazy_group(tmp_path, K):
     ref_members = [m.clone().requires_grad_(True) for m in members]
     _reference_fair_crps(ref_members, y).backward()
     for r in range(K):
-        assert torch.allclose(grad_out[r], ref_members[r].grad, atol=1e-6), (
+        assert torch.allclose(torch.from_numpy(grad_out[r]), ref_members[r].grad, atol=1e-6), (
             f"rank {r} gradient does not match fair-CRPS gradient"
         )
 

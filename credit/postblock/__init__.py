@@ -11,15 +11,17 @@ logger = logging.getLogger(__name__)
 #   cls: type                             — externally registered classes
 _POSTBLOCK_REGISTRY = {
     "reconstruct": ("credit.postblock.reconstruct", "Reconstruct"),
+    "flatten_to_tensor": ("credit.postblock.reconstruct", "FlattenToTensor"),
     "bridgescaler_transform": ("credit.postblock.scaler", "BridgeScalerTransform"),
     "exp_transform": ("credit.postblock.exp", "ExpTransform"),
     "square_transform": ("credit.postblock.square", "SquareTransform"),
     "wet_mask_samudra": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "mslp_diagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
     "tracer_fixer": ("credit.postblock.gen1", "TracerFixer"),
-    "global_mass_fixer": ("credit.postblock.gen1", "GlobalMassFixer"),
-    "global_water_fixer": ("credit.postblock.gen1", "GlobalWaterFixer"),
-    "global_energy_fixer": ("credit.postblock.gen1", "GlobalEnergyFixer"),
+    "global_mass_fixer": ("credit.postblock.conservation", "GlobalMassFixer"),
+    "global_water_fixer": ("credit.postblock.conservation", "GlobalWaterFixer"),
+    "global_energy_fixer": ("credit.postblock.conservation", "GlobalEnergyFixerUpDown"),
+    "global_energy_fixer_updown": ("credit.postblock.conservation", "GlobalEnergyFixerUpDown"),
     "geopotential_diagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
 }
 
@@ -27,13 +29,14 @@ _POSTBLOCK_REGISTRY = {
 # Enables ``from credit.postblock import Reconstruct`` without eager imports; kept for backward compatibility.
 _CLASS_SOURCES = {
     "Reconstruct": ("credit.postblock.reconstruct", "Reconstruct"),
+    "FlattenToTensor": ("credit.postblock.reconstruct", "FlattenToTensor"),
     "BridgeScalerTransform": ("credit.postblock.scaler", "BridgeScalerTransform"),
     "WetMaskBlock": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "MSLPDiagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
     "TracerFixer": ("credit.postblock.gen1", "TracerFixer"),
-    "GlobalMassFixer": ("credit.postblock.gen1", "GlobalMassFixer"),
-    "GlobalWaterFixer": ("credit.postblock.gen1", "GlobalWaterFixer"),
-    "GlobalEnergyFixer": ("credit.postblock.gen1", "GlobalEnergyFixer"),
+    "GlobalMassFixer": ("credit.postblock.conservation", "GlobalMassFixer"),
+    "GlobalWaterFixer": ("credit.postblock.conservation", "GlobalWaterFixer"),
+    "GlobalEnergyFixerUpDown": ("credit.postblock.conservation", "GlobalEnergyFixerUpDown"),
     "GeopotentialDiagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
 }
 
@@ -102,7 +105,7 @@ def _load_postblock_entry(block_type):
     """
     if block_type not in _POSTBLOCK_REGISTRY:
         raise ValueError(
-            f"Unknown postblock type '{block_type}'. "
+            f"unknown postblock type '{block_type}'. "
             f"Available types: {sorted(_POSTBLOCK_REGISTRY)}. "
             "Register a custom postblock with @register_postblock or via custom_objects in your config."
         )
@@ -129,12 +132,6 @@ def _build_postblock_section(section_cfg: dict) -> nn.ModuleDict:
     modules = {}
     for name, block_cfg in section_cfg.items():
         block_type = block_cfg["type"]
-        if block_type not in _POSTBLOCK_REGISTRY:
-            raise KeyError(
-                f"Unknown postblock type {block_type!r} (block name: {name!r}). "
-                f"Available types: {sorted(_POSTBLOCK_REGISTRY)}. "
-                "Register a custom postblock with @register_postblock or via custom_objects in your config."
-            )
         modules[name] = _load_postblock_entry(block_type)(**(block_cfg.get("args") or {}))
     return nn.ModuleDict(modules)
 
@@ -178,8 +175,8 @@ def build_postblocks(conf: dict, phase: str = "per_step") -> nn.ModuleDict:
 
     Raises:
         ValueError: if the config contains keys other than ``"per_step"`` / ``"post_rollout"``,
-            or if ``phase`` is not one of those values.
-        KeyError: if a block's ``type`` value is not in ``_POSTBLOCK_REGISTRY``.
+            if ``phase`` is not one of those values, or if a block's ``type`` value
+            is not in ``_POSTBLOCK_REGISTRY``.
     """
     from credit.registry import (
         load_custom_objects,

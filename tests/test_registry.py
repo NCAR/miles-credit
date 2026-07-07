@@ -381,11 +381,11 @@ class TestRegisterPreblock:
         assert isinstance(modules["my_block"], UTPBBuild)
 
     def test_unknown_preblock_type_friendly_error(self):
-        """build_preblocks raises KeyError with a helpful message for unknown types."""
+        """build_preblocks raises ValueError with a helpful message for unknown types."""
         from credit.preblock import build_preblocks
 
         conf = {"preblocks": {"per_step": {"bad_block": {"type": "this_type_does_not_exist"}}}}
-        with pytest.raises(KeyError, match="this_type_does_not_exist"):
+        with pytest.raises(ValueError, match="this_type_does_not_exist"):
             build_preblocks(conf, phase="per_step")
 
 
@@ -482,11 +482,11 @@ class TestRegisterPostblock:
         assert isinstance(modules["my_block"], UTPoBBuild)
 
     def test_unknown_postblock_type_friendly_error(self):
-        """build_postblocks raises KeyError with a helpful message for unknown types."""
+        """build_postblocks raises ValueError with a helpful message for unknown types."""
         from credit.postblock import build_postblocks
 
         conf = {"postblocks": {"per_step": {"bad_block": {"type": "this_type_does_not_exist"}}}}
-        with pytest.raises(KeyError, match="this_type_does_not_exist"):
+        with pytest.raises(ValueError, match="this_type_does_not_exist"):
             build_postblocks(conf, phase="per_step")
 
 
