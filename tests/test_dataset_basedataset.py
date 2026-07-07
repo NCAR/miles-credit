@@ -425,9 +425,7 @@ def test_history_len_input_window_stacks_in_time(
     assert tgt["TestSource_Base/diagnostic/2d/tp"].shape[1] == 1
 
 
-def test_history_len_rollout_step_is_single_step(
-    minimal_config: Dict[str, Any], patch_base_dataset_io: None
-) -> None:
+def test_history_len_rollout_step_is_single_step(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """At rollout steps (i > 0) only the newest dynamic_forcing step is loaded, single-step."""
     config = minimal_config.copy()
     config["history_len"] = 3
@@ -440,9 +438,7 @@ def test_history_len_rollout_step_is_single_step(
     assert inp["TestSource_Base/dynamic_forcing/2d/msl"].shape[1] == 1
 
 
-def test_history_len_shifts_timestamps_forward(
-    minimal_config: Dict[str, Any], patch_base_dataset_io: None
-) -> None:
+def test_history_len_shifts_timestamps_forward(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
     """The sampling clock starts (history_len-1)*dt later so every sample has full history."""
     config = minimal_config.copy()
     config["history_len"] = 2
@@ -468,9 +464,7 @@ def test_extract_field_window_matches_repeated_single_step(
     import torch
 
     ds = BaseDataset(minimal_config)
-    t_history = pd.date_range(
-        ds.datetimes[0] - ds.dt, ds.datetimes[0], freq=ds.dt
-    )  # length 2
+    t_history = pd.date_range(ds.datetimes[0] - ds.dt, ds.datetimes[0], freq=ds.dt)  # length 2
 
     windowed: Dict[str, Any] = {}
     ds._extract_field_window("prognostic", t_history, windowed)  # pyright: ignore[reportPrivateUsage]
