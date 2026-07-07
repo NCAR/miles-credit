@@ -26,7 +26,49 @@ from credit.mixed_precision import parse_dtype
 import functools
 import logging
 
+import datetime
 
+def setup(rank, world_size, mode, backend="nccl"):
+    """Initializes the distributed process group with an extended timeout.
+
+    Args:
+        rank (int): The rank of the process within the distributed setup.
+        world_size (int): The total number of processes in the distributed setup.
+        mode (str): The mode of operation (e.g., 'fsdp', 'ddp').
+        backend (str, optional): The backend to use for distributed training. Defaults to 'nccl'.
+    """
+
+    # Use a longer timeout to allow rank 0 sufficient time to complete
+    # slow one-time operations (e.g., generating valid_init_times cache files
+    # for high-resolution 10-minute datasets) before the first barrier.
+    # The default PyTorch timeout is 1800s, which is insufficient for this workload.
+    timeout = datetime.timedelta(hours=2)
+
+    logging.info(
+        f"Running {mode.upper()} on rank {rank} with world_size {world_size} using {backend} "
+        f"with timeout {timeout}."
+    )
+
+    # Pass device_id so NCCL knows which GPU this rank owns, suppressing the
+    # "device is currently unknown" warning and preventing potential hangs.
+    if torch.cuda.is_available():
+        device_id = torch.device(f"cuda:{torch.cuda.current_device()}")
+        dist.init_process_group(
+            backend,
+            rank=rank,
+            world_size=world_size,
+            device_id=device_id,
+            timeout=timeout,
+        )
+    else:
+        dist.init_process_group(
+            backend,
+            rank=rank,
+            world_size=world_size,
+            timeout=timeout,
+        )
+
+'''
 def setup(rank, world_size, mode, backend="nccl"):
     """Initializes the distributed process group.
 
@@ -40,8 +82,14 @@ def setup(rank, world_size, mode, backend="nccl"):
     logging.info(
         f"Running {mode.upper()} on rank {rank} with world_size {world_size} using {backend}."
     )
-    dist.init_process_group(backend, rank=rank, world_size=world_size)
-
+    # Pass device_id so NCCL knows which GPU this rank owns, suppressing the
+    # "device is currently unknown" warning and preventing potential hangs.
+    if torch.cuda.is_available():
+        device_id = torch.device(f"cuda:{torch.cuda.current_device()}")
+        dist.init_process_group(backend, rank=rank, world_size=world_size, device_id=device_id)
+    else:
+        dist.init_process_group(backend, rank=rank, world_size=world_size)
+'''
 
 def get_rank_info(trainer_mode):
     """Gets rank and size information for distributed training.
@@ -243,7 +291,9 @@ def distributed_model_wrapper(conf, neural_network, device):
         )
 
     elif conf["trainer"]["mode"] == "ddp":
-        model = DDP(neural_network, device_ids=[device], find_unused_parameters=True)
+        # spectral norm u/v vectors must stay rank-local
+        # model = DDP(neural_network, device_ids=[device], find_unused_parameters=True, broadcast_buffers=False)
+        model = DDP(neural_network, device_ids=[device], find_unused_parameters=True, broadcast_buffers=False, bucket_cap_mb=256, gradient_as_bucket_view=True)
 
     else:
         model = neural_network

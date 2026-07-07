@@ -62,7 +62,8 @@ def reset_model(
 
     # Move the model to the correct device and wrap it with DDP for distributed training
     rank = dist.get_rank()  # Get current rank
-    ddp_model = DDP(nonwrapped_model.to(rank), device_ids=[rank])
+    # ddp_model = DDP(nonwrapped_model.to(rank), device_ids=[rank])
+    ddp_model = DDP(nonwrapped_model.to(rank), device_ids=[rank], bucket_cap_mb=256, gradient_as_bucket_view=True)
 
     return ddp_model
 

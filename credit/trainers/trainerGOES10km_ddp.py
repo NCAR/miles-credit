@@ -10,16 +10,13 @@ import torch.fft
 import tqdm
 from torch.utils.data import IterableDataset
 from credit.scheduler import update_on_batch
-from credit.trainers.utils import cycle, accum_log, apply_gradient_checkpointing
+from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
 
-# Import John's ring-reduce loss
-from credit.losses.crps import ring_crps_loss
-
 import optuna
+import torch
 
 logger = logging.getLogger(__name__)
-
 
 class Trainer(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int):
@@ -51,17 +48,18 @@ class Trainer(BaseTrainer):
         super().__init__(model, rank)
         # Add any additional initialization if needed
         logger.info("Loading a multi-step trainer class")
-        self._gc_applied = False  # Track if gradient checkpointing has been applied
 
     def _compute_distributed_ensemble_loss(self, y, y_pred, criterion, ensemble_size, is_training=True):
         """
         Computes the CRPS loss and spread for a distributed ensemble.
-        Training uses memory-efficient ring-reduce (O(1) memory).
-        Validation uses chunked all_gather for exact spread metrics and precise latitude weighting.
+        Training uses John's memory-efficient ring-reduce (O(1) memory).
+        Validation uses chunked all_gather for exact spread metrics and exact latitude weighting.
         """
         if is_training:
-            # --- RING-REDUCE OPTIMIZATION (TRAINING ONLY) ---
-            # Compute loss iteratively via P2P ring shifts (bypasses O(M) memory explosion)
+            # --- JOHN'S RING-REDUCE OPTIMIZATION ---
+            from credit.losses.crps import ring_crps_loss
+            
+            # Compute loss iteratively via P2P ring shifts (no autograd explosion)
             total_loss = ring_crps_loss(y_pred.to(y.dtype), y, self.rank, dist.get_world_size())
             
             # Proxy spread (local error std) since true global spread requires an all_gather
@@ -69,7 +67,7 @@ class Trainer(BaseTrainer):
             
             return total_loss, total_std
 
-        # --- EXACT GATHER & LATITUDE WEIGHTING (VALIDATION ONLY) ---
+        # --- VALIDATION ONLY: EXACT GATHER FOR ACCURATE SPREAD METRICS ---
         lat_size = y.shape[3]
         batch_size = y.shape[0] // ensemble_size
         world_size = dist.get_world_size()
@@ -149,20 +147,20 @@ class Trainer(BaseTrainer):
     ):
         """
         Trains the model for one epoch.
-        ... (docstring unchanged)
-        """
-        # --- DYNAMIC GRADIENT CHECKPOINTING INJECTION ---
-        if not self._gc_applied:
-            gc_conf = conf.get("trainer", {}).get("gradient_checkpointing", False)
-            if gc_conf is not False and gc_conf is not None:
-                block_names = gc_conf if isinstance(gc_conf, list) else None
-                n_wrapped = apply_gradient_checkpointing(self.model, block_names)
-                logger.info(
-                    f"Gradient checkpointing enabled: {n_wrapped} blocks wrapped"
-                    f" (patterns={block_names or ['Block', 'Layer', 'Encoder', 'Decoder', 'Attention']})"
-                )
-            self._gc_applied = True
 
+        Args:
+            epoch (int): Current epoch number.
+            conf (dict): Configuration dictionary containing training settings.
+            trainloader (DataLoader): DataLoader for the training dataset.
+            optimizer (torch.optim.Optimizer): Optimizer used for training.
+            criterion (callable): Loss function used for training.
+            scaler (torch.cuda.amp.GradScaler): Gradient scaler for mixed precision training.
+            scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler.
+            metrics (callable): Function to compute metrics for evaluation.
+
+        Returns:
+            dict: Dictionary containing training metrics and loss for the epoch.
+        """
         profile_training = conf["trainer"].get("profile_training", False)
 
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
@@ -170,8 +168,6 @@ class Trainer(BaseTrainer):
         amp = conf["trainer"]["amp"]
         distributed = True if conf["trainer"]["mode"] in ["fsdp", "ddp"] else False
         forecast_length = conf["data"]["forecast_len"]
-        # Number of GOES output channels — model predicts only these, not static/temporal
-        n_goes = len(conf["data"]["surface_variables"])  # = 16
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
         if ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {ensemble_size}")
@@ -183,6 +179,16 @@ class Trainer(BaseTrainer):
         # in distributed ensemble mode, the effective ensemble size computed by the loss is ensemble_size * num_gpus
 
         logger.info(f"Using grad-max-norm value: {grad_max_norm}")
+
+        # number of diagnostic variables
+        # varnum_diag = len(conf["data"]["diagnostic_variables"])
+
+        # # number of dynamic forcing + forcing + static
+        # static_dim_size = (
+        #     len(conf["data"]["dynamic_forcing_variables"])
+        #     + len(conf["data"]["forcing_variables"])
+        #     + len(conf["data"]["static_variables"])
+        # )
 
         # [Optional] retain graph for multiple backward passes
         retain_graph = conf["data"].get("retain_graph", False)
@@ -236,20 +242,10 @@ class Trainer(BaseTrainer):
             stop_forecast = False
             y_pred = None  # Place holder that gets updated after first roll-out
 
-            torch.cuda.synchronize()   # flush trailing GPU work from the PREVIOUS step
             start = time.time()
-
             batch = next(dl)
             logger.debug(batch["datetime"])
             mode = batch["mode"][0]
-
-            # ── Issue 7: per-phase timing variables ───────────────────────────────────
-            # Overwritten each while-loop iteration. For single-step forecasts (the
-            # common case here) this is exact. For multi-step rollouts the logged values
-            # reflect the *last* rollout step; use accumulators if per-step breakdowns
-            # are needed.
-            t_after_fwd = t_after_stop_load = t_after_bwd = None
-
             while not stop_forecast:
                 logger.debug(f"current mode: {mode}")
                 logger.debug(batch.keys())
@@ -269,90 +265,41 @@ class Trainer(BaseTrainer):
                     # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
 
                     if "era5" in batch.keys():
-                        era5_static = batch_era5.get("static", None)
-                        if era5_static is not None and era5_static.numel() > 0:
-                            era5_static = era5_static.to(self.device)
-                        else:
-                            era5_static = None
+                        era5_static = batch_era5["static"].to(self.device)
 
                 if flag_clamp:
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
-                
                 # load era5 forcing
+                # concat order is prognostic, static, forcing
                 if "era5" in batch.keys():
-                    # Read padding crop amounts directly from config so this never goes out of sync.
-                    pad_conf = conf["model"].get("padding_conf", {})
-                    pad_lat  = pad_conf.get("pad_lat", [0, 0])   # [11, 10]
-                    pad_lon  = pad_conf.get("pad_lon", [0, 0])   # [19, 18]
+                    x_era5 = torch.concat(
+                        [
+                            batch_era5["prognostic"].to(self.device),
+                            era5_static,
+                            batch_era5["dynamic_forcing"].to(self.device),
+                        ],
+                        dim=1,
+                    ).float()
+                    forcing_t_delta = (
+                        batch_era5["timedelta_seconds"].to(self.device).float()
+                    )
 
-                    # 1. Build the main model input (x) by concatenating GOES with the
-                    #    bypass-FiLM variables (static + 10-min temporal).
-                    #
-                    #    Static and temporal are on the larger ERA5 grid (1024×960).
-                    #    We crop them back to the native GOES grid (1003×923) here so
-                    #    that padding_conf.activate=True can pad the ENTIRE tensor once,
-                    #    cleanly, inside the model.  No pre-padding in the trainer.
-                    concat_x_list = [x]   # x is still 1003×923 — DO NOT pad it here
+                    if ensemble_size > 1:
+                        x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
+                        forcing_t_delta = torch.repeat_interleave(
+                            forcing_t_delta, ensemble_size, 0
+                        )
+                    if flag_clamp:
+                        x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
 
-                    if era5_static is not None:
-                        h_end = era5_static.shape[-2] - pad_lat[1]   # 1024 - 10 = 1014
-                        w_end = era5_static.shape[-1] - pad_lon[1]   #  960 - 18 = 942
-                        era5_static_cropped = era5_static[
-                            :, :, :, pad_lat[0]:h_end, pad_lon[0]:w_end
-                        ]   # → [..., 1003, 923]
-                        concat_x_list.append(era5_static_cropped)
-
-                    if "temporal_forcing_10m" in batch_era5:
-                        tf = batch_era5["temporal_forcing_10m"].to(self.device)
-                        concat_x_list.append(tf)  # already native GOES resolution, no crop needed
-
-                    # x is now 35 channels at native GOES resolution (1003×923).
-                    # The model will pad it to 1024×960 via padding_conf.
-                    x = torch.concat(concat_x_list, dim=1).float()
-
-                    # 2. Build x_era5: variables that go through the FiLM layer (1-hourly ERA5).
-                    #    These are already on the 1024×960 ERA5 grid — no cropping needed.
-                    concat_era5_list = []
-                    prog = batch_era5.get("prognostic", None)
-                    if prog is not None and prog.numel() > 0:
-                        concat_era5_list.append(prog.to(self.device))
-                    dyn = batch_era5.get("dynamic_forcing", None)
-                    if dyn is not None and dyn.numel() > 0:
-                        concat_era5_list.append(dyn.to(self.device))
-
-                    if concat_era5_list:
-                        x_era5 = torch.concat(concat_era5_list, dim=1).float()
-                        forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device).float()
-                        if ensemble_size > 1:
-                            x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
-                            forcing_t_delta = torch.repeat_interleave(forcing_t_delta, ensemble_size, 0)
-                        if flag_clamp:
-                            x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
-                    else:
-                        x_era5 = None
-
-                # NEW: SQUASH OCEAN NANS BEFORE FORWARD PASS
-                x = torch.nan_to_num(x, nan=0.0)
-                if "era5" in batch.keys() and x_era5 is not None:
-                    x_era5 = torch.nan_to_num(x_era5, nan=0.0)
-
-                torch.cuda.synchronize()   # wait for all H2D transfers to complete
                 xload_time = time.time()
 
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=amp):
+                with torch.autocast(device_type="cuda", enabled=amp):
                     y_pred = (
                         self.model(x, x_era5=x_era5, forcing_t_delta=forcing_t_delta)
-                        if "era5" in batch.keys() and x_era5 is not None
+                        if "era5" in batch.keys()
                         else self.model(x)
                     )
-                    # One-time verification on rank 0, step 0
-                    if self.rank == 0 and steps == 0:
-                        logger.info(f"[AMP CHECK] y_pred dtype: {y_pred.dtype}")  # should be torch.bfloat16
-
-                # ── Issue 7 Phase 2: capture end of forward-only pass ─────────────────
-                if profile_training:
-                    torch.cuda.synchronize()
-                    t_after_fwd = time.time()
 
                 batch = next(dl)
                 mode = batch["mode"][0]
@@ -367,23 +314,14 @@ class Trainer(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    # NEW: SQUASH TARGET NANS
-                    y = torch.nan_to_num(y, nan=0.0)
-
-                    # ── Issue 7 Phase 3: stop-batch DataLoader pull + H2D complete ─────
-                    if profile_training:
-                        torch.cuda.synchronize()
-                        t_after_stop_load = time.time()
-
                     # compute loss
-                    with torch.autocast(enabled=amp, device_type="cuda", dtype=torch.bfloat16):
+                    with torch.autocast(enabled=amp, device_type="cuda"):
                         y = y.to(y_pred.dtype)
                         if not distributed_ensemble_mode:
-                            total_loss = criterion(y, y_pred[:, :n_goes]).mean()
+                            total_loss = criterion(y, y_pred).mean()
                         else:  # distributed ensemble mode
-                            # TRAIN PASS: Trigger Ring-Reduce Loss
                             total_loss, total_std = self._compute_distributed_ensemble_loss(
-                                y, y_pred[:, :n_goes], criterion, ensemble_size, is_training=True
+                                y, y_pred, criterion, ensemble_size, is_training=True
                             )
                             accum_log(logs, {"std": total_std.item()})
                         
@@ -392,14 +330,9 @@ class Trainer(BaseTrainer):
 
                     # compute gradients
                     scaler.scale(total_loss).backward(retain_graph=retain_graph)
-
-                    # ── Issue 7 Phase 4: backward pass complete ───────────────────────
-                    if profile_training:
-                        torch.cuda.synchronize()
-                        t_after_bwd = time.time()
-
-                # if distributed:
-                #     torch.distributed.barrier()
+                    
+                if distributed:
+                    torch.distributed.barrier()
 
                 # Discard current computational graph, which still
                 # exists (through y_pred reference) if `forecast_step` not in `backprop_on_timestep`
@@ -411,10 +344,10 @@ class Trainer(BaseTrainer):
                     stop_forecast = True
                     break
                 else:
-                    x = y_pred[:, :n_goes]  # strip static/temporal; trainer will re-add them next step
+                    x = y_pred
 
-            # if distributed:
-            #     torch.distributed.barrier()
+            if distributed:
+                torch.distributed.barrier()
 
             # Grad norm clipping
             scaler.unscale_(optimizer)
@@ -445,43 +378,26 @@ class Trainer(BaseTrainer):
             scaler.update()
             optimizer.zero_grad()
 
-            torch.cuda.synchronize()   # wait for optimizer step to fully complete on GPU
             if profile_training and self.rank == 0:
                 end_time = time.time()
-                # ── Issue 7: accurate per-phase breakdown ─────────────────────────────
-                init_load_time = xload_time - start
-                if t_after_fwd is not None and t_after_stop_load is not None and t_after_bwd is not None:
-                    fwd_only_time  = t_after_fwd       - xload_time
-                    stop_load_time = t_after_stop_load - t_after_fwd
-                    bwd_time       = t_after_bwd       - t_after_stop_load
-                    opt_time       = end_time          - t_after_bwd
-                    logger.info(
-                        f"Step {steps:>4d} | "
-                        f"init_load={init_load_time:>6.2f}s  "
-                        f"fwd={fwd_only_time:>6.2f}s  "
-                        f"stop_load={stop_load_time:>6.2f}s  "
-                        f"bwd={bwd_time:>6.2f}s  "
-                        f"opt={opt_time:>6.2f}s  "
-                        f"total={end_time - start:>6.2f}s"
-                    )
-                else:
-                    # Fallback: backward was not triggered this step (e.g. pure init-only)
-                    logger.info(
-                        f"Step {steps:>4d} | "
-                        f"init_load={init_load_time:>6.2f}s  "
-                        f"fwd+rest={end_time - xload_time:>6.2f}s  "
-                        f"total={end_time - start:>6.2f}s"
-                    )
-                # Also log peak memory for this step (reset after each log)
-                allocated_mem = torch.cuda.max_memory_allocated(self.device) / 1024**3
-                reserved_mem  = torch.cuda.max_memory_reserved(self.device) / 1024**3
-                logger.info(f"Memory allocated: {allocated_mem:.3f} GB")
-                logger.info(f"Memory reserved:  {reserved_mem:.3f} GB")
-                torch.cuda.reset_peak_memory_stats(self.device)  # reset so next step is clean
+                load_time = xload_time - start
+                fwd_time = end_time - xload_time
+                logger.info(
+                    f"""load/fwd time: {load_time:.2f}s/{fwd_time:.2f}s = {load_time/fwd_time:.1}"""
+                )
+
+                allocated_mem = (
+                    torch.cuda.memory.max_memory_allocated(self.device) / 1024**3
+                )
+                reserved_mem = (
+                    torch.cuda.memory.max_memory_reserved(self.device) / 1024**3
+                )
+                logger.info(f"""Memory allocated: {allocated_mem} GB""")
+                logger.info(f"""Memory reserved: {reserved_mem} GB""")
 
             # Metrics
             # if distributed_ensemble_mode=False ensemble metrics computed by metrics here
-            metrics_dict = metrics(y_pred[:, :n_goes].float(), y.float())
+            metrics_dict = metrics(y_pred, y)
             for name, value in metrics_dict.items():
                 if name in ["std", "loss"] and distributed_ensemble_mode:
                     pass
@@ -499,15 +415,16 @@ class Trainer(BaseTrainer):
 
             # TODO: get per channel std and loss for the entire distributed ensemble
             if distributed_ensemble_mode:
-                batch_std = torch.tensor([logs["std"]], device=self.device)
+                batch_std = torch.Tensor([logs["std"]]).to(self.device)
                 dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
                 results_dict["train_std"].append(batch_std[0].item())
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
                 print(
-                    f"Non-finite loss detected! Loss: {results_dict['train_loss']}",
-                    f"Target shape: {batch['y'].shape if 'y' in batch else 'No Y'}",
-                    f"Batch index: {batch['index'] if 'index' in batch else 'No Index'}"
+                    results_dict["train_loss"],
+                    batch["x"].shape,
+                    batch["y"].shape,
+                    batch["index"],
                 )
                 try:
                     raise optuna.TrialPruned()
@@ -588,7 +505,6 @@ class Trainer(BaseTrainer):
             if "valid_forecast_len" in conf["data"]
             else conf["forecast_len"]
         )
-        n_goes = len(conf["data"]["surface_variables"])  # = 16
         ensemble_size = conf["trainer"].get("ensemble_size", 1)
         distributed_ensemble_mode = (
             conf["trainer"]["type"] == "goes10km-distributed-ensemble"
@@ -662,79 +578,40 @@ class Trainer(BaseTrainer):
                         # WARNING: needs to be used with a loss that can handle x with b * ensemble_size samples and y with b samples
 
                         if "era5" in batch.keys():
-                            era5_static = batch_era5.get("static", None)
-                            if era5_static is not None and era5_static.numel() > 0:
-                                era5_static = era5_static.to(self.device)
-                            else:
-                                era5_static = None
+                            era5_static = batch_era5["static"].to(self.device)
 
                     # add era5 forcing to the tensor
+                    # concat order is prognostic, static, forcing
                     if "era5" in batch.keys():
-                        # Read padding crop amounts directly from config so this never goes out of sync.
-                        pad_conf = conf["model"].get("padding_conf", {})
-                        pad_lat  = pad_conf.get("pad_lat", [0, 0])   # [11, 10]
-                        pad_lon  = pad_conf.get("pad_lon", [0, 0])   # [19, 18]
+                        x_era5 = torch.concat(
+                            [
+                                batch_era5["prognostic"].to(self.device),
+                                era5_static,
+                                batch_era5["dynamic_forcing"].to(self.device),
+                            ],
+                            dim=1,
+                        ).float()
+                        forcing_t_delta = (
+                            batch_era5["timedelta_seconds"].to(self.device).float()
+                        )
 
-                        # 1. Build the main model input (x) by concatenating GOES with the
-                        #    bypass-FiLM variables (static + 10-min temporal).
-                        #
-                        #    Static and temporal are on the larger ERA5 grid (1024×960).
-                        #    We crop them back to the native GOES grid (1003×923) here so
-                        #    that padding_conf.activate=True can pad the ENTIRE tensor once,
-                        #    cleanly, inside the model.  No pre-padding in the trainer.
-                        concat_x_list = [x]   # x is still 1003×923 — DO NOT pad it here
+                        if ensemble_size > 1:
+                            x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
+                            forcing_t_delta = torch.repeat_interleave(
+                                forcing_t_delta, ensemble_size, 0
+                            )
 
-                        if era5_static is not None:
-                            h_end = era5_static.shape[-2] - pad_lat[1]   # 1024 - 10 = 1014
-                            w_end = era5_static.shape[-1] - pad_lon[1]   #  960 - 18 = 942
-                            era5_static_cropped = era5_static[
-                                :, :, :, pad_lat[0]:h_end, pad_lon[0]:w_end
-                            ]   # → [..., 1003, 923]
-                            concat_x_list.append(era5_static_cropped)
-
-                        if "temporal_forcing_10m" in batch_era5:
-                            tf = batch_era5["temporal_forcing_10m"].to(self.device)
-                            concat_x_list.append(tf)  # already native GOES resolution, no crop needed
-
-                        # x is now 35 channels at native GOES resolution (1003×923).
-                        # The model will pad it to 1024×960 via padding_conf.
-                        x = torch.concat(concat_x_list, dim=1).float()
-
-                        # 2. Build x_era5: variables that go through the FiLM layer (1-hourly ERA5).
-                        #    These are already on the 1024×960 ERA5 grid — no cropping needed.
-                        concat_era5_list = []
-                        prog = batch_era5.get("prognostic", None)
-                        if prog is not None and prog.numel() > 0:
-                            concat_era5_list.append(prog.to(self.device))
-                        dyn = batch_era5.get("dynamic_forcing", None)
-                        if dyn is not None and dyn.numel() > 0:
-                            concat_era5_list.append(dyn.to(self.device))
-
-                        if concat_era5_list:
-                            x_era5 = torch.concat(concat_era5_list, dim=1).float()
-                            forcing_t_delta = batch_era5["timedelta_seconds"].to(self.device).float()
-                            if ensemble_size > 1:
-                                x_era5 = torch.repeat_interleave(x_era5, ensemble_size, 0)
-                                forcing_t_delta = torch.repeat_interleave(forcing_t_delta, ensemble_size, 0)
-                            if flag_clamp:
-                                x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
-                        else:
-                            x_era5 = None
                     # --------------------------------------------- #
                     # clamp
                     if flag_clamp:
                         x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
-                    # NEW: SQUASH OCEAN NANS BEFORE FORWARD PASS
-                    x = torch.nan_to_num(x, nan=0.0)
-
-                    if "era5" in batch.keys() and x_era5 is not None:
-                        x_era5 = torch.nan_to_num(x_era5, nan=0.0)
-
-                    with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=amp):
+                    with torch.autocast(device_type="cuda", enabled=amp):
                         y_pred = (
-                            self.model(x, x_era5=x_era5, forcing_t_delta=forcing_t_delta)
-                            if "era5" in batch.keys() and x_era5 is not None
+                            self.model(
+                                x, x_era5=x_era5, forcing_t_delta=forcing_t_delta
+                            )
+                            if "era5" in batch.keys()
                             else self.model(x)
                         )
 
@@ -756,21 +633,18 @@ class Trainer(BaseTrainer):
                         if flag_clamp:
                             y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                        # NEW: SQUASH TARGET NANS
-                        y = torch.nan_to_num(y, nan=0.0)
                         # ----------------------------------------------------------------------- #
                         # calculate rolling loss
-                        with torch.autocast(enabled=amp, device_type="cuda", dtype=torch.bfloat16):
+                        with torch.autocast(enabled=amp, device_type="cuda"):
                             if not distributed_ensemble_mode:
-                                total_loss = criterion(y, y_pred[:, :n_goes]).mean()
+                                total_loss = criterion(y, y_pred).mean()
                             else:  # distributed ensemble mode
-                                # VALID PASS: Trigger Chunked All-Gather Loss
                                 total_loss, total_std = self._compute_distributed_ensemble_loss(
-                                    y, y_pred[:, :n_goes], criterion, ensemble_size, is_training=False
+                                    y, y_pred, criterion, ensemble_size, is_training=False
                                 )
 
                         # Metrics
-                        metrics_dict = metrics(y_pred[:, :n_goes].float(), y.float())
+                        metrics_dict = metrics(y_pred.float(), y.float())
 
                         for name, value in metrics_dict.items():
                             if name in ["std", "loss"] and distributed_ensemble_mode:
@@ -790,14 +664,17 @@ class Trainer(BaseTrainer):
                         assert mode == "stop"
                         break  # stop after X steps
                     else:
-                        x = y_pred[:, :n_goes].detach()  # strip static/temporal; trainer will re-add them
+                        x = y_pred.detach()
                         
                 if profile_training and self.rank == 0:
-                    allocated_mem = torch.cuda.max_memory_allocated(self.device) / 1024**3
-                    reserved_mem  = torch.cuda.max_memory_reserved(self.device) / 1024**3
-                    logger.info(f"Memory allocated: {allocated_mem:.3f} GB")
-                    logger.info(f"Memory reserved:  {reserved_mem:.3f} GB")
-                    torch.cuda.reset_peak_memory_stats(self.device)
+                    allocated_mem = (
+                        torch.cuda.memory.max_memory_allocated(self.device) / 1024**3
+                    )
+                    reserved_mem = (
+                        torch.cuda.memory.max_memory_reserved(self.device) / 1024**3
+                    )
+                    logger.info(f"""Memory allocated: {allocated_mem} GB""")
+                    logger.info(f"""Memory reserved: {reserved_mem} GB""")
 
                 # --- 4. RECORD LOSS AND STD GLOBALLY ---
                 batch_loss = torch.Tensor([total_loss.item()]).to(self.device)

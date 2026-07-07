@@ -16,6 +16,7 @@ from credit.models.crossformer_regional import RegionalCrossFormer
 from credit.models.crossformer_regionalv2 import RegionalCrossFormer2
 from credit.models.crossformer_regional_invertable import RegionalCrossFormerInvertable
 from credit.models.crossformer_regional_ensemble import RegionalCrossFormerWithNoise
+from credit.models.conditional_crossformer_regional_ensemble import RegionalCrossFormerWithConditionalNoise
 from credit.models.unet_downscaling import DownscalingSegmentationModel
 from credit.models.crossformer_diffusion import CrossFormerDiffusion
 from credit.models.unet_diffusion import UnetDiffusion
@@ -63,7 +64,11 @@ model_types = {
     ),
     "crossformer_regional_ensemble": (
         RegionalCrossFormerWithNoise,
-        "Loading regional crossformer ensemble model",
+        "Loading regional crossformer ensemble model",       
+    ),
+    "conditional_crossformer_regional_ensemble": (
+        RegionalCrossFormerWithConditionalNoise,
+        "Loading conditional regional crossformer ensemble model",
     ),
     "unet_downscaling": (DownscalingSegmentationModel, "Loading downscaling U-net"),
 }

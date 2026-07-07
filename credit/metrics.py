@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from datetime import datetime
 from credit.losses.weighted_loss import latitude_weights
+# from credit.domain_parallel.sharding import shard_tensor as _shard_lat
 
 
 class LatWeightedMetrics:
@@ -47,6 +48,11 @@ class LatWeightedMetrics:
             if self.w_lat is not None
             else 1.0
         )
+        
+        # # --- JOHN'S FSDP SHARDING FIX ---
+        # if self.w_lat is not None:
+        #     w_lat = _shard_lat(w_lat, dim=1)
+
         w_var = (
             self.w_var.to(dtype=pred.dtype, device=pred.device)
             if self.w_var is not None
@@ -78,13 +84,11 @@ class LatWeightedMetrics:
                 y_prime = y[:, i] - torch.mean(y[:, i])
 
                 # Add epsilon to avoid division by zero
-                epsilon = 1e-7
+                epsilon = 1e-6
 
-                denominator = (
-                    torch.sqrt(
-                        torch.sum(w_var * w_lat * pred_prime**2)
-                        * torch.sum(w_var * w_lat * y_prime**2)
-                    )
+                denominator = torch.sqrt(
+                    torch.sum(w_var * w_lat * pred_prime**2)
+                    * torch.sum(w_var * w_lat * y_prime**2)
                     + epsilon
                 )
 
@@ -190,6 +194,11 @@ class LatWeightedMetricsClimatology:
             if self.w_lat is not None
             else 1.0
         )
+        
+        # # --- JOHN'S FSDP SHARDING FIX ---
+        # if self.w_lat is not None:
+        #     w_lat = _shard_lat(w_lat, dim=1)
+            
         w_var = (
             self.w_var.to(dtype=pred.dtype, device=pred.device)
             if self.w_var is not None
@@ -351,6 +360,11 @@ class LatWeightedMetricsEnsemble:
             if self.w_lat is not None
             else 1.0
         )
+        
+        # # --- JOHN'S FSDP SHARDING FIX ---
+        # if self.w_lat is not None:
+        #      w_lat = _shard_lat(w_lat, dim=1)
+             
         w_var = (
             self.w_var.to(dtype=pred.dtype, device=pred.device)
             if self.w_var is not None

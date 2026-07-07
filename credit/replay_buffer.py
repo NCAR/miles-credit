@@ -513,26 +513,24 @@ class Trainer(BaseTrainer):
                 y_pred = y_pred.to(self.device)
                 loss = criterion(y, y_pred)
 
-                # Metrics
+                # Metrics - compute only, no all_reduce yet
                 metrics_dict = metrics(y_pred.float(), y.float())
-                for name, value in metrics_dict.items():
-                    value = torch.Tensor([value]).to(self.device, non_blocking=True)
-                    if distributed:
-                        dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
-                    results_dict[f"train_{name}"].append(value[0].item())
 
                 loss = loss.mean() + commit_loss
-
                 scaler.scale(loss / grad_accum_every).backward()
 
             accum_log(logs, {"loss": loss.item() / grad_accum_every})
 
-            if distributed:
-                torch.distributed.barrier()
-
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+
+            # All all_reduces grouped here, after optimizer step
+            for name, value in metrics_dict.items():
+                value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                if distributed:
+                    dist.all_reduce(value, dist.ReduceOp.AVG, async_op=False)
+                results_dict[f"train_{name}"].append(value[0].item())
 
             batch_loss = torch.Tensor([logs["loss"]]).to(self.device)
             if distributed:

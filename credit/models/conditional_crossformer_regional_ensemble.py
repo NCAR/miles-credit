@@ -3,10 +3,10 @@ import torch.nn.functional as F
 import torch.nn as nn
 import logging
 import torch
-from credit.models.stochastic_decomposition_layer import StochasticDecompositionLayer
+from credit.models.conditional_stochastic_decomposition_layer import ConditionalStochasticDecompositionLayer
 
 
-class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
+class RegionalCrossFormerWithConditionalNoise(RegionalCrossFormerInvertable):
     """
     CrossFormer variant with pixel-wise noise injection in both encoder and decoder stages.
 
@@ -14,7 +14,7 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
         noise_latent_dim (int): Dimensionality of the noise vector.
         encoder_noise_factor (float): Initial scaling factor for encoder noise injection.
         decoder_noise_factor (float): Initial scaling factor for decoder noise injection.
-        bottleneck_noise_factor (float): Initial scaling factor for the bottleneck noise injection.
+        bottleneck_noise_factor (float): Initial scaling factor for bottleneck noise injection.
         encoder_noise (bool): Whether to apply noise injection in the encoder.
         freeze (bool): Whether to freeze pre-trained model weights.
         correlated (bool): Whether to use the same latent vector for all injection layers.
@@ -25,10 +25,10 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
         noise_latent_dim=128,
         encoder_noise_factor=0.235, # <-- Now accepts a list
         decoder_noise_factor=0.235, # <-- Now accepts a list
-        bottleneck_noise_factor=0.235, # <-- Added Bottleneck argument
+        bottleneck_noise_factor=1.5, # <-- ADDED THIS ARGUMENT
         encoder_noise=False,  # Set False by default to match paper's decoder-only focus
         freeze=False,  # False for joint fine-tuning transfer learning
-        correlated=False,  # Added correlated toggle
+        correlated=True,  # Added correlated toggle
         enable_sdl=True,
         **kwargs,
     ):
@@ -79,38 +79,33 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
 
         # --- BUILD ENCODER NOISE LAYERS ---
         if encoder_noise:
-            # Encoder noise injection layers
             self.encoder_noise_layers = nn.ModuleList(
                 [
-                    # dims[0] is the shallowest/finest resolution
-                    StochasticDecompositionLayer(
+                    ConditionalStochasticDecompositionLayer(
                         self.noise_latent_dim, dims[0], encoder_noise_factors[0]
                     ),
-                    # dims[1] is the intermediate resolution
-                    StochasticDecompositionLayer(
+                    ConditionalStochasticDecompositionLayer(
                         self.noise_latent_dim, dims[1], encoder_noise_factors[1]
                     ),
-                    # dims[2] is the deepest/coarsest resolution
-                    StochasticDecompositionLayer(
+                    ConditionalStochasticDecompositionLayer(
                         self.noise_latent_dim, dims[2], encoder_noise_factors[2]
                     ),
                 ]
             )
 
-        # Decoder noise injection layers (reverse order: 2, 1, 0)
         # --- BUILD DECODER NOISE LAYERS ---
-        self.noise_inject1 = StochasticDecompositionLayer(
+        self.noise_inject1 = ConditionalStochasticDecompositionLayer(
             self.noise_latent_dim, dims[2], decoder_noise_factors[0]
         )
-        self.noise_inject2 = StochasticDecompositionLayer(
+        self.noise_inject2 = ConditionalStochasticDecompositionLayer(
             self.noise_latent_dim, dims[1], decoder_noise_factors[1]
         )
-        self.noise_inject3 = StochasticDecompositionLayer(
+        self.noise_inject3 = ConditionalStochasticDecompositionLayer(
             self.noise_latent_dim, dims[0], decoder_noise_factors[2]
         )
         
         # --- BUILD BOTTLENECK LAYER ---
-        self.bottleneck_noise_layer = StochasticDecompositionLayer(
+        self.bottleneck_noise_layer = ConditionalStochasticDecompositionLayer(
             self.noise_latent_dim, dims[3], bottleneck_noise_factor
         )
 
@@ -183,14 +178,14 @@ class RegionalCrossFormerWithNoise(RegionalCrossFormerInvertable):
                 x = self.encoder_noise_layers[k](x, current_noise)
             encodings.append(x)
 
-        # --- BOTTLENECK NOISE INJECTION ---
+        
         current_noise = (
             shared_noise
             if self.correlated
             else torch.randn(batch_size, self.noise_latent_dim, device=x.device)
         )
         x = self.bottleneck_noise_layer(x, current_noise)
-
+        
         x = self.up_block1(x)
         # Use shared_noise if correlated, else sample fresh
         current_noise = (
@@ -289,14 +284,14 @@ if __name__ == "__main__":
     crossformer_config["noise_latent_dim"] = 128
     crossformer_config["encoder_noise_factor"] = [0.235, 0.10, 0.05]
     crossformer_config["decoder_noise_factor"] = [0.05, 0.10, 0.235]
-    crossformer_config["bottleneck_noise_factor"] = 1.5 # Added for __main__ block
+    crossformer_config["bottleneck_noise_factor"] = 1.5 # <--- ADDED TO CONFIG
     crossformer_config["encoder_noise"] = False  # Defaulting to paper implementation
     crossformer_config["freeze"] = False
     crossformer_config["correlated"] = False  # Added flag to test block
 
     logger.info("Testing the regional ensemble model with noise injection")
 
-    ensemble_model = RegionalCrossFormerWithNoise(**crossformer_config).to("cuda")
+    ensemble_model = RegionalCrossFormerWithConditionalNoise(**crossformer_config).to("cuda")
 
     x = torch.randn(5, 71, 1, 192, 288).to("cuda")
     x_era5 = torch.randn(5, 3, 1, 192, 288).to("cuda")

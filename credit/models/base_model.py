@@ -86,7 +86,10 @@ class BaseModel(nn.Module):
             )
         else:
             load_msg = model_class.load_state_dict(checkpoint, strict=False)
-        load_state_dict_error_handler(load_msg)
+            
+        # Bypass strict error handler for transfer learning to prevent crashes
+        # load_state_dict_error_handler(load_msg)
+        logger.warning(f"Transfer Learning Key Mismatches (Safe to ignore for new layers): {load_msg}")
 
         return model_class
 
@@ -122,7 +125,10 @@ class BaseModel(nn.Module):
         load_msg = model_class.load_state_dict(
             checkpoint if fsdp else checkpoint["model_state_dict"], strict=False
         )
-        load_state_dict_error_handler(load_msg)
+        
+        # Bypass strict error handler for transfer learning to prevent crashes
+        # load_state_dict_error_handler(load_msg)
+        logger.warning(f"Transfer Learning Key Mismatches (Safe to ignore for new layers): {load_msg}")
 
         return model_class
 

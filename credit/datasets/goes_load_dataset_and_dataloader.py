@@ -10,14 +10,13 @@ from credit.samplers import DistributedMultiStepBatchSampler
 
 import logging
 
-from credit.transform import load_transform
+from credit.transform import load_era5_transforms
 
 logger = logging.getLogger(__name__)
 
-
-def load_era5_forcing(conf, start_datetime, end_datetime, transform=None):
-    if not transform:
-        logger.warning("NOT loading ERA5 transform")
+def load_era5_forcing(conf, start_datetime, end_datetime, transforms=None):
+    if not transforms:
+        logger.warning("NOT loading ERA5 transforms")
 
     time_config = {
         "timestep": pd.Timedelta("1h"),
@@ -25,8 +24,7 @@ def load_era5_forcing(conf, start_datetime, end_datetime, transform=None):
         "start_datetime": start_datetime,
         "end_datetime": end_datetime,
     }
-    return ERA5Dataset(conf, time_config, "ERA5", transform=transform)
-
+    return ERA5Dataset(conf, time_config, "ERA5", transforms=transforms)
 
 def load_dataset(conf, rank, world_size, device, is_train=True):
     logger.info("loading a GOES 10km dataset")
@@ -34,11 +32,13 @@ def load_dataset(conf, rank, world_size, device, is_train=True):
     data_config = conf["data"]
     padding_conf = conf["model"].get("padding_conf", {})
     if padding_conf:
-        padding = not padding_conf["activate"]  # opposite of what the model does
+        padding = not padding_conf["activate"]
     else:
         padding = True
 
-    zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
+    # FIX: Do NOT open zarr here. Pass the raw path string so GOES10kmDataset
+    # can open its own lazy per-worker handle (the refactored lazy-open design).
+    zarr_path = data_config["save_loc"]
 
     mode = "train" if is_train else "valid"
 
@@ -48,25 +48,22 @@ def load_dataset(conf, rank, world_size, device, is_train=True):
         "start_datetime": pd.Timestamp(data_config[mode]["start_datetime"]),
         "end_datetime": pd.Timestamp(data_config[mode]["end_datetime"]),
     }
-    # give it a era5dataset
+
     if "ERA5" in data_config.get("source", {}).keys():
         logger.info("loading an era5 dataset for forcing")
-
-        era5_transform = load_transform(conf, "ERA5", device=device)
         era5dataset = load_era5_forcing(
             conf,
-            time_config["start_datetime"],
-            time_config["end_datetime"] + pd.Timedelta("1D"),
-            transform=era5_transform,
+            time_config["start_datetime"].values if hasattr(time_config["start_datetime"], "values") else time_config["start_datetime"],
+            time_config["end_datetime"].values if hasattr(time_config["end_datetime"], "values") else time_config["end_datetime"] + pd.Timedelta("1D"),
+            transforms=load_era5_transforms(conf, device)
         )
     else:
         era5dataset = None
+
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
-        if (
-            rank == 0
-        ):  # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
+        if rank == 0: # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
             dataset = GOES10kmDataset(
-                zarr_ds,
+                zarr_path,   # <-- path string, not Dataset
                 data_config,
                 time_config,
                 padding=padding,
@@ -76,7 +73,7 @@ def load_dataset(conf, rank, world_size, device, is_train=True):
         else:
             torch.distributed.barrier()
             dataset = GOES10kmDataset(
-                zarr_ds,
+                zarr_path,   # <-- path string, not Dataset
                 data_config,
                 time_config,
                 padding=padding,
@@ -84,11 +81,13 @@ def load_dataset(conf, rank, world_size, device, is_train=True):
             )
     else:
         dataset = GOES10kmDataset(
-            zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset
+            zarr_path, data_config, time_config, padding=padding, era5dataset=era5dataset
         )
 
+    # NEW: final sync — wait for every rank to finish creating its dataset
+    # before any rank races ahead to model loading or DDP init
+    torch.distributed.barrier()
     return dataset
-
 
 def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
     logger.info("loading a GOES 10km dataset for rollout")
@@ -96,12 +95,25 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
     data_config = conf["data"]
     padding_conf = conf["model"].get("padding_conf", {})
     if padding_conf:
-        padding = not padding_conf["activate"]  # opposite of what the model does
+        padding = not padding_conf["activate"]
     else:
         padding = True
 
-    zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
-    # years = [data_config["train_years"][0], data_config["valid_years"][1]] #all years
+    zarr_path = data_config["save_loc"]
+
+    # FIX: Open a lightweight metadata-only dataset solely to read the time
+    # coordinate bounds (t.min / t.max). Use chunks=None so no Dask pool is
+    # created. Discard immediately after — GOES10kmDataset will do its own open.
+    try:
+        _bounds_ds = xr.open_zarr(zarr_path, consolidated=True, chunks=None)
+        logger.info("Successfully loaded GOES Zarr bounds with consolidated metadata.")
+    except Exception as e:
+        logger.warning(f"Consolidated metadata failed for bounds. Falling back: {e}")
+        _bounds_ds = xr.open_zarr(zarr_path, consolidated=False, chunks=None)
+
+    t_min = _bounds_ds.t.min()
+    t_max = _bounds_ds.t.max()
+    del _bounds_ds   # discard — we only needed t.min/t.max
 
     # set default forecast steps
     num_forecast_steps = conf["predict"]["forecasts"].get("num_forecast_steps", None)
@@ -124,31 +136,27 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
     time_config = {
         "timestep": timestep,
         "num_forecast_steps": num_forecast_steps,
-        "start_datetime": zarr_ds.t.min(),
-        "end_datetime": zarr_ds.t.max(),
+        "start_datetime": t_min,
+        "end_datetime": t_max,
         "rollout_init_times": rollout_init_times,
         "time_tol": time_tol,
     }
 
     if "ERA5" in data_config.get("source", {}).keys():
         logger.info("loading an era5 dataset for forcing")
-        era5_transform = load_transform(conf, "ERA5", device=device)
-
         era5dataset = load_era5_forcing(
             conf,
-            time_config["start_datetime"].values,
-            time_config["end_datetime"].values,
-            transform=era5_transform,
+            time_config["start_datetime"].values if hasattr(time_config["start_datetime"], "values") else time_config["start_datetime"],
+            time_config["end_datetime"].values if hasattr(time_config["end_datetime"], "values") else time_config["end_datetime"] + pd.Timedelta("1D"),
+            transforms=load_era5_transforms(conf, device),
         )
     else:
         era5dataset = None
 
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
-        if (
-            rank == 0
-        ):  # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
+        if rank == 0: # make sure init times are setup first by rank 0, otherwise will try to concurrent write to same netcdf
             dataset = GOES10kmDataset(
-                zarr_ds,
+                zarr_path,   # <-- path string, not Dataset
                 data_config,
                 time_config,
                 padding=padding,
@@ -158,7 +166,7 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
         else:
             torch.distributed.barrier()
             dataset = GOES10kmDataset(
-                zarr_ds,
+                zarr_path,   # <-- path string, not Dataset
                 data_config,
                 time_config,
                 padding=padding,
@@ -166,11 +174,10 @@ def load_predict_dataset(conf, rank, world_size, rollout_init_times, device):
             )
     else:
         dataset = GOES10kmDataset(
-            zarr_ds, data_config, time_config, padding=padding, era5dataset=era5dataset
+            zarr_path, data_config, time_config, padding=padding, era5dataset=era5dataset
         )
 
     return dataset
-
 
 def load_dataloader(
     conf, train_dataset, rank, world_size, is_train=True, is_predict=False
@@ -261,22 +268,21 @@ def generate_rollout_sampling_modes(dataset, compute_metrics=False):
     return ["init"] + ["forcing"] * (num_forecast_steps - 1) + ["stop"]
 
 
-def load_verification_dataset(
-    conf,
-):
+def load_verification_dataset(conf):
     logger.info("loading a GOES 10km dataset for evaluation")
 
     data_config = conf["data"]
     padding_conf = conf["model"].get("padding_conf", {})
     if padding_conf:
-        padding = not padding_conf["activate"]  # opposite of what the model does
+        padding = not padding_conf["activate"] # opposite of what the model does
     else:
         padding = True
 
-    zarr_ds = xr.open_dataset(data_config["save_loc"], consolidated=False)
+    # FIX: pass the path string directly
+    zarr_path = data_config["save_loc"]
 
     dataset = GOES10kmDataset(
-        zarr_ds,
+        zarr_path,   # <-- path string, not Dataset
         data_config,
         time_config={},
         padding=padding,

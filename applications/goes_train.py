@@ -48,7 +48,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 # https://stackoverflow.com/questions/59129812/how-to-avoid-cuda-out-of-memory-in-pytorch
-os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 # os.environ["NCCL_P2P_DISABLE"] = "1"
 # os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
@@ -133,9 +133,9 @@ def load_model_states_and_optimizer(conf, model, device):
             optimizer = FSDPOptimizerWrapper(optimizer, model)
         scheduler = load_scheduler(optimizer, conf)
         scaler = (
-            ShardedGradScaler(enabled=amp)
+            ShardedGradScaler(enabled=amp)          # keep FSDP as-is (uses float16)
             if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
+            else GradScaler(enabled=False)           # bfloat16 does not need loss scaling
         )
 
     # Multi-step training case -- when starting, only load the model weights (then after load all states)
@@ -182,10 +182,11 @@ def load_model_states_and_optimizer(conf, model, device):
         # Load the learning rate scheduler and mixed precision grad scaler
         scheduler = load_scheduler(optimizer, conf)
         scaler = (
-            ShardedGradScaler(enabled=amp)
+            ShardedGradScaler(enabled=amp)          # keep FSDP as-is (uses float16)
             if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
+            else GradScaler(enabled=False)           # bfloat16 does not need loss scaling
         )
+
         # Update the config file to the current epoch based on the checkpoint
         if (
             "reload_epoch" in conf["trainer"]
@@ -256,9 +257,9 @@ def load_model_states_and_optimizer(conf, model, device):
 
         scheduler = load_scheduler(optimizer, conf)
         scaler = (
-            ShardedGradScaler(enabled=amp)
+            ShardedGradScaler(enabled=amp)          # keep FSDP as-is (uses float16)
             if conf["trainer"]["mode"] == "fsdp"
-            else GradScaler(enabled=amp)
+            else GradScaler(enabled=False)           # bfloat16 does not need loss scaling
         )
 
         # Update the config file to the current epoch
@@ -284,7 +285,6 @@ def load_model_states_and_optimizer(conf, model, device):
 
     return conf, model, optimizer, scheduler, scaler
 
-
 def main(rank, world_size, conf, backend=None, trial=False):
     """
     Main function to set up training and validation processes.
@@ -305,17 +305,27 @@ def main(rank, world_size, conf, backend=None, trial=False):
     # convert $USER to the actual user name
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
+    # =========================================================================
+    # FIX: SET DEVICE BEFORE NCCL SETUP
+    # We must explicitly set the GPU device before initializing the process group.
+    # This prevents the "device is currently unknown" hang when using mpiexec.
+    # =========================================================================
+    if torch.cuda.is_available():
+        # Safely grab the local rank from Cray-MPICH (PALS), standard MPI, or fallback to math
+        local_rank = os.environ.get("PALS_LOCAL_RANKID", 
+                     os.environ.get("MPI_LOCALRANKID", 
+                     os.environ.get("OMPI_COMM_WORLD_LOCAL_RANK", rank % torch.cuda.device_count())))
+        
+        local_rank = int(local_rank)
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        device = torch.device("cpu")
+    # =========================================================================
+
+    # Now NCCL will know exactly which GPU to bind to!
     if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["trainer"]["mode"], backend)
-
-    # infer device id from rank
-    device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        if torch.cuda.is_available()
-        else torch.device("cpu")
-    )
-    if torch.cuda.is_available():
-        torch.cuda.set_device(rank % torch.cuda.device_count())
 
     # Load the dataset using the provided dataset_type
     train_dataset = load_dataset(
@@ -324,6 +334,13 @@ def main(rank, world_size, conf, backend=None, trial=False):
     valid_dataset = load_dataset(
         conf, rank=rank, world_size=world_size, device=device, is_train=False
     )
+
+    # Ensure ALL ranks have finished ALL dataset initialization before
+    # any rank touches model creation or the DDP collective broadcast.
+    if conf["trainer"]["mode"] in ["fsdp", "ddp"]:
+        logging.info(f"Rank {rank}: all datasets loaded, waiting at sync barrier")
+        torch.distributed.barrier()
+        logging.info(f"Rank {rank}: barrier passed, proceeding to model loading")
 
     # Load the dataloader
     train_loader = load_dataloader(
