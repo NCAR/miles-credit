@@ -2,6 +2,7 @@ import importlib
 import logging
 import torch
 import torch.nn as nn
+from credit.preblock.concat import ConcatToTensor
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ def _load_preblock_entry(block_type):
     """
     if block_type not in _PREBLOCK_REGISTRY:
         raise ValueError(
-            f"Unknown preblock type '{block_type}'. "
+            f"unknown preblock type '{block_type}'. "
             f"Available types: {sorted(_PREBLOCK_REGISTRY)}. "
             "Register a custom preblock with @register_preblock or via custom_objects in your config."
         )
@@ -124,12 +125,6 @@ def _build_preblock_section(section_cfg: dict) -> nn.ModuleDict:
     modules = {}
     for name, block_cfg in section_cfg.items():
         block_type = block_cfg["type"]
-        if block_type not in _PREBLOCK_REGISTRY:
-            raise KeyError(
-                f"Unknown preblock type {block_type!r} (block name: {name!r}). "
-                f"Available types: {sorted(_PREBLOCK_REGISTRY)}. "
-                "Register a custom preblock with @register_preblock or via custom_objects in your config."
-            )
         modules[name] = _load_preblock_entry(block_type)(**(block_cfg.get("args") or {}))
     return nn.ModuleDict(modules)
 
@@ -171,8 +166,8 @@ def build_preblocks(conf: dict, phase: str = "per_step") -> nn.ModuleDict:
 
     Raises:
         ValueError: if the config contains keys other than ``"ic_only"`` / ``"per_step"``,
-            or if ``phase`` is not one of those values.
-        KeyError: if a block's ``type`` value is not in ``_PREBLOCK_REGISTRY``.
+            if ``phase`` is not one of those values, or if a block's ``type`` value
+            is not in ``_PREBLOCK_REGISTRY``.
     """
     from credit.registry import (
         load_custom_objects,
@@ -190,6 +185,20 @@ def build_preblocks(conf: dict, phase: str = "per_step") -> nn.ModuleDict:
     if phase not in _VALID_SECTIONS:
         raise ValueError(f"build_preblocks: phase must be one of {sorted(_VALID_SECTIONS)}, got {phase!r}.")
     return _build_preblock_section(cfg.get(phase) or {})
+
+
+def attach_channel_schema(preblocks: nn.ModuleDict, schema) -> None:
+    """Attach a ``ChannelSchema`` to every ConcatToTensor block in a preblock group.
+
+    The schema is runtime state (built from config / loaded from save_loc), not a
+    config arg, so it is injected after ``build_preblocks`` rather than through
+    the registry. No-op for groups without a concat block or when schema is None.
+    """
+    if schema is None:
+        return
+    for block in preblocks.values():
+        if isinstance(block, ConcatToTensor):
+            block.set_schema(schema)
 
 
 def _run_preblock_group(group: nn.ModuleDict, batch: dict, device=None):
