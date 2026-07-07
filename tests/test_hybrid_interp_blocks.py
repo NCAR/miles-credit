@@ -12,12 +12,12 @@ import torch
 import xarray as xr
 
 from credit.interp import create_pressure_grid, interp_hybrid_to_hybrid_levels
-from credit.postblock import POSTBLOCK_REGISTRY
+from credit.postblock import _load_postblock_entry
 from credit.postblock._interp_utils import load_hybrid_level_coefficients
-from credit.postblock.hybrid_interp import HybridLevelInterp as HybridLevelInterpPostblock
+from credit.postblock.hybrid_interp import HybridLevelInterpPost
 from credit.postblock.hybrid_interp import interp_column_hybrid_to_hybrid
-from credit.preblock import PREBLOCK_REGISTRY
-from credit.preblock.hybrid_interp import HybridLevelInterp as HybridLevelInterpPreblock
+from credit.preblock import _load_preblock_entry
+from credit.preblock.hybrid_interp import HybridLevelInterpPre
 
 # Two distinct, monotonic hybrid level sets (interface coefficients, top → surface)
 N_SRC_HALF = 25  # 24 midpoint levels
@@ -156,7 +156,7 @@ def _nested_state(B=2, n_time=1, H=4, W=6, n_levels=N_SRC_MID):
 def test_postblock_output_shapes(level_files):
     """Interpolated variables land on the destination level count, in place."""
     batch = {"y_processed": _nested_state()}
-    mod = HybridLevelInterpPostblock(**_engine_args(level_files))
+    mod = HybridLevelInterpPost(**_engine_args(level_files))
     out = mod(batch)
     for var in (T_VAR, Q_VAR):
         assert out["y_processed"][SRC][var].shape == (2, N_DST_MID, 1, 4, 6)
@@ -168,7 +168,7 @@ def test_postblock_identity_when_levels_match(level_files):
     """Interpolating onto the same level set returns the input values."""
     batch = {"y_processed": _nested_state()}
     original = batch["y_processed"][SRC][T_VAR].clone()
-    mod = HybridLevelInterpPostblock(**_engine_args(level_files, dest_level_info_file=level_files["source"]))
+    mod = HybridLevelInterpPost(**_engine_args(level_files, dest_level_info_file=level_files["source"]))
     out = mod(batch)
     assert torch.allclose(out["y_processed"][SRC][T_VAR], original, rtol=1e-6)
 
@@ -180,7 +180,7 @@ def test_postblock_monotone_profile_stays_in_range(level_files):
     batch["y_processed"][SRC][T_VAR] = (
         torch.linspace(t_min, t_max, N_SRC_MID).view(1, -1, 1, 1, 1).expand(2, -1, 1, 4, 6).clone()
     )
-    mod = HybridLevelInterpPostblock(**_engine_args(level_files))
+    mod = HybridLevelInterpPost(**_engine_args(level_files))
     out = mod(batch)
     t_out = out["y_processed"][SRC][T_VAR]
     assert (t_out >= t_min).all() and (t_out <= t_max).all()
@@ -189,7 +189,7 @@ def test_postblock_monotone_profile_stays_in_range(level_files):
 def test_postblock_missing_variables_skipped_and_level_mismatch_raises(level_files):
     """Absent variables are skipped silently; wrong level counts raise ValueError."""
     batch = {"y_processed": {SRC: {SP_VAR: torch.full((1, 1, 1, 4, 6), 95_000.0)}}}
-    mod = HybridLevelInterpPostblock(**_engine_args(level_files))
+    mod = HybridLevelInterpPost(**_engine_args(level_files))
     mod(batch)  # no interp variables present — no-op
 
     bad = {"y_processed": _nested_state(n_levels=N_SRC_MID + 3)}
@@ -201,7 +201,7 @@ def test_preblock_transforms_requested_data_types(level_files):
     """The preblock interpolates input and target without mutating the caller's batch."""
     batch = {"input": _nested_state(), "target": _nested_state()}
     original_input_t = batch["input"][SRC][T_VAR]
-    mod = HybridLevelInterpPreblock(**_engine_args(level_files))
+    mod = HybridLevelInterpPre(**_engine_args(level_files))
     out = mod(batch)
     assert out["input"][SRC][T_VAR].shape == (2, N_DST_MID, 1, 4, 6)
     assert out["target"][SRC][Q_VAR].shape == (2, N_DST_MID, 1, 4, 6)
@@ -213,16 +213,16 @@ def test_preblock_transforms_requested_data_types(level_files):
 def test_preblock_data_type_selection(level_files):
     """data_types=["input"] leaves target untouched; invalid types raise."""
     batch = {"input": _nested_state(), "target": _nested_state()}
-    mod = HybridLevelInterpPreblock(data_types=["input"], **_engine_args(level_files))
+    mod = HybridLevelInterpPre(data_types=["input"], **_engine_args(level_files))
     out = mod(batch)
     assert out["input"][SRC][T_VAR].shape[1] == N_DST_MID
     assert out["target"][SRC][T_VAR].shape[1] == N_SRC_MID
 
     with pytest.raises(ValueError, match="data_types"):
-        HybridLevelInterpPreblock(data_types=["metadata"], **_engine_args(level_files))
+        HybridLevelInterpPre(data_types=["metadata"], **_engine_args(level_files))
 
 
 def test_registered_in_both_registries():
     """The block is reachable from both factory registries."""
-    assert POSTBLOCK_REGISTRY["hybrid_level_interp"] is HybridLevelInterpPostblock
-    assert PREBLOCK_REGISTRY["hybrid_level_interp"] is HybridLevelInterpPreblock
+    assert _load_postblock_entry("hybrid_level_interp") is HybridLevelInterpPost
+    assert _load_preblock_entry("hybrid_level_interp") is HybridLevelInterpPre

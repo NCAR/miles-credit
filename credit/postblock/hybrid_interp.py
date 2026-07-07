@@ -161,7 +161,7 @@ class _HybridLevelInterpEngine(nn.Module):
             nested[var_key.split("/")[0]][var_key] = torch.permute(interped[..., k, :], (0, 4, 1, 2, 3))
 
 
-class HybridLevelInterp(BasePostblock):
+class HybridLevelInterpPost(BasePostblock):
     """Postblock that interpolates 3D variables between hybrid sigma-pressure level sets.
 
     Follows the same batch-dict protocol as ``Reconstruct`` and

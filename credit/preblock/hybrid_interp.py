@@ -4,7 +4,7 @@ from credit.postblock.hybrid_interp import (
 from credit.preblock.base import BasePreblock
 
 
-class HybridLevelInterp(BasePreblock):
+class HybridLevelInterpPre(BasePreblock):
     """Preblock that interpolates 3D variables between hybrid sigma-pressure level sets.
 
     Wraps the same engine as ``credit.postblock.hybrid_interp.HybridLevelInterp``:

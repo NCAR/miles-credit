@@ -22,7 +22,7 @@ _POSTBLOCK_REGISTRY = {
     "global_energy_fixer": ("credit.postblock.gen1", "GlobalEnergyFixer"),
     "geopotential_diagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
     "pressure_interp_diagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
-    "hybrid_level_interp": ("credit.postblock.hybrid_interp", "HybridLevelInterp"),
+    "hybrid_level_interp": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -38,7 +38,7 @@ _CLASS_SOURCES = {
     "GlobalEnergyFixer": ("credit.postblock.gen1", "GlobalEnergyFixer"),
     "GeopotentialDiagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
     "PressureInterpDiagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
-    "HybridLevelInterp": ("credit.postblock.hybrid_interp", "HybridLevelInterp"),
+    "HybridLevelInterpPost": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
 }
 
 
