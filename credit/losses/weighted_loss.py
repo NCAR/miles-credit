@@ -3,7 +3,7 @@ import xarray as xr
 import numpy as np
 import logging
 
-from credit.losses.base_losses import base_losses
+from credit.losses import _instantiate_loss
 from credit.losses.spectral import SpectralLoss2D
 from credit.losses.power import PSDLoss
 
@@ -28,7 +28,7 @@ def latitude_weights(conf):
     """
     # Open the dataset and extract latitude and longitude information
     ds = xr.open_dataset(conf["loss"]["latitude_weights"])
-    lat = torch.from_numpy(ds["latitude"].values).float()
+    lat = torch.tensor(ds["latitude"].values, dtype=torch.float32)
     lon_dim = ds["longitude"].shape[0]
 
     # Calculate weights using PyTorch operations
@@ -153,7 +153,8 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         self.lat_weights = None
         if conf["loss"]["use_latitude_weights"]:
-            logger.info("Using latitude weights in loss calculations")
+            mode = "validation" if validation else "train"
+            logger.info("Using latitude weights in loss calculations (%s)", mode)
             self.lat_weights = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
 
         # ------------------------------------------------------------- #
@@ -186,14 +187,14 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         self.validation = validation
         if conf["loss"]["training_loss"] == "KCRPS":  # for ensembles, load same loss for train and valid
-            self.loss_fn = base_losses(conf, reduction="none", validation=False)
+            self.loss_fn = _instantiate_loss(conf, reduction="none", validation=False)
         elif self.validation:
             if "validation_loss" in conf["loss"]:
-                self.loss_fn = base_losses(conf, reduction="none", validation=True)
+                self.loss_fn = _instantiate_loss(conf, reduction="none", validation=True)
             else:
                 self.loss_fn = torch.nn.L1Loss(reduction="none")
         else:
-            self.loss_fn = base_losses(conf, reduction="none", validation=False)
+            self.loss_fn = _instantiate_loss(conf, reduction="none", validation=False)
 
     def _lat_weights_for_target(self, target):
         """Sharded, device-resident latitude weights, cached per (H, device).

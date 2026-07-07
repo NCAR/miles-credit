@@ -267,7 +267,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     n_prog = slices["prognostic"].stop - slices["prognostic"].start
 
     # ---- Preblocks ----
-    preblocks = build_preblocks(conf.get("preblocks", {}))
+    preblocks = build_preblocks(conf)
 
     # ---- Inverse normalizer ----
     denorm_mean, denorm_std = _build_output_denorm(conf, device)

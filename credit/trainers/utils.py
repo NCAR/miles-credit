@@ -470,7 +470,10 @@ def load_dataset(conf: dict, is_train: bool) -> MultiSourceDataset:
                 "Either add them or remove validation_data to use training config."
             )
 
-    return MultiSourceDataset(data_conf, return_target=True)
+    from credit.registry import load_custom_objects  # imported here to avoid a module-level credit.registry import
+
+    load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
+    return MultiSourceDataset(data_conf, return_target=True, label="train" if is_train else "valid")
 
 
 def load_dataloader(
@@ -479,6 +482,7 @@ def load_dataloader(
     rank: int,
     world_size: int,
     is_train: bool,
+    persistent_workers: bool | None = None,
 ) -> DataLoader:
     """Build a DataLoader with DistributedMultiStepBatchSampler.
 
@@ -518,13 +522,14 @@ def load_dataloader(
         seed=seed,
     )
 
+    _persistent_workers = (num_workers > 0) if persistent_workers is None else persistent_workers
     return DataLoader(
         dataset,
         batch_sampler=sampler,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
         pin_memory=True,
-        persistent_workers=num_workers > 0,
+        persistent_workers=_persistent_workers,
         multiprocessing_context="spawn" if num_workers > 0 else None,
     )
 
@@ -567,12 +572,21 @@ def load_model_states_and_optimizer(conf, model, device):
     mode = effective_mode(conf)
 
     if load_weights and int(_p.get("tensor", 1)) > 1:
-        raise NotImplementedError(
-            "Resuming with tensor parallelism (tensor > 1) is not supported: "
-            "checkpoints save only rank 0's TP shards under rewritten keys. "
-            "Train TP runs from scratch or restructure to checkpoint before "
-            "applying TP."
-        )
+        # Native DTensor TP (wxformer_next, issue #415) keeps param FQNs and
+        # logical shapes, so the fsdp2/DCP full-state path below resumes it
+        # like any FSDP2 model. Only the legacy module-swapping TP (and native
+        # TP outside the DCP path) cannot be resumed.
+        from credit.parallel.domain import get_raw_model
+
+        _tp_native = getattr(get_raw_model(model), "_tp_native", False)
+        if not (_tp_native and mode == "fsdp2"):
+            raise NotImplementedError(
+                "Resuming with tensor parallelism (tensor > 1) is only supported "
+                "for natively-TP models (wxformer_next family) with data: fsdp2, "
+                "which resume through the DCP full-state APIs. Legacy hand-rolled "
+                "TP checkpoints save only rank 0's TP shards under rewritten keys "
+                "and cannot be resumed."
+            )
 
     def _make_optimizer(model):
         opt = torch.optim.AdamW(

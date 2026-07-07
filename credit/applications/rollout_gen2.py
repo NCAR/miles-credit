@@ -31,6 +31,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 import pandas as pd
 import torch
+import torch.distributed as dist
 import yaml
 from torch.utils.data import DataLoader
 
@@ -41,7 +42,6 @@ from credit.output_gen2 import ForecastWriter
 from credit.pbs import launch_script, launch_script_mpi
 from credit.postblock import build_postblocks
 from credit.preblock import attach_channel_schema, build_preblocks
-from credit.samplers import DistributedMultiStepBatchSampler
 from credit.seed import seed_everything
 from credit.trainers.rollout_utils import (
     batch_init_times,
@@ -49,8 +49,10 @@ from credit.trainers.rollout_utils import (
     parse_length,
     run_forecast,
 )
+from credit.trainers.utils import cleanup
+from credit.samplers import MultiStepBatchSamplerSubset
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rollout_gen2")
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -99,20 +101,21 @@ Examples:
     parser.add_argument(
         "-p", "--procs", dest="num_cpus", type=int, default=4, help="CPU workers for async output pool."
     )
+    parser.add_argument(
+        "--log-all-ranks",
+        action="store_true",
+        default=False,
+        help="Emit INFO logs from all workers, not just rank 0. Useful for debugging per-worker issues.",
+    )
     args = parser.parse_args()
 
-    # ── Logging ──────────────────────────────────────────────────────────────
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    if not root.handlers:
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
-        ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
-        root.addHandler(ch)
-
     # ── Load config ──────────────────────────────────────────────────────────
-    with open(args.model_config) as f:
-        conf = yaml.load(f, Loader=yaml.FullLoader)
+    try:
+        with open(args.model_config) as f:
+            conf = yaml.load(f, Loader=yaml.FullLoader)
+    except Exception as exc:
+        print(f"ERROR: failed to load config file '{args.model_config}': {exc}", file=sys.stderr)
+        sys.exit(1)
 
     assert "source" in conf["data"], (
         "rollout_gen2.py requires the Gen2 nested data schema (conf['data']['source']). "
@@ -167,9 +170,23 @@ Examples:
     seed_everything(conf["seed"])
     mode = inf_conf.get("mode", "none")
     local_rank, world_rank, world_size = get_rank_info(mode)
+    rank = world_rank  # conventional DDP shorthand; local_rank is only needed for device assignment above
 
-    if mode in ("ddp", "fsdp"):
-        setup(world_rank, world_size, mode)
+    # ── Logging ──────────────────────────────────────────────────────────────
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    if not root.handlers:
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        root.addHandler(ch)
+    gettrace = getattr(sys, "gettrace", None)
+    level = (
+        (logging.DEBUG if gettrace and gettrace() else logging.INFO)
+        if (rank == 0 or args.log_all_ranks)
+        else logging.WARNING
+    )
+    for h in root.handlers:
+        h.setLevel(level)
 
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
@@ -179,10 +196,12 @@ Examples:
     else:
         device = torch.device("cpu")
 
+    if mode in ("ddp", "fsdp"):
+        setup(world_rank, world_size, mode, device_id=device if torch.cuda.is_available() else None)
+
     # ── Preblocks / postblocks ───────────────────────────────────────────────
-    preblock_cfg = conf.get("preblocks", {})
-    ic_preblocks = build_preblocks(preblock_cfg, phase="ic_only")
-    step_preblocks = build_preblocks(preblock_cfg, phase="per_step")
+    ic_preblocks = build_preblocks(conf, phase="ic_only")
+    step_preblocks = build_preblocks(conf, phase="per_step")
 
     # Channel schema: inference batches carry no target (and diagnostics exist
     # only in targets), so without a schema the reconstruction map would cover
@@ -212,16 +231,21 @@ Examples:
         "forecast_len": n_steps,
         "datetimes": all_init_times,
     }
+    from credit.registry import load_custom_objects  # imported here to avoid a module-level credit.registry import
+
+    load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     dataset = MultiSourceDataset(dataset_conf, return_target=False)
 
-    sampler = DistributedMultiStepBatchSampler(
+    # Plain (non-distributed) subset sampler: each rank takes every world_size-th
+    # init time starting at its own rank, so no DistributedSampler-style padding
+    # (which would repeat init times from the start of the list to make the
+    # count divisible by world_size) ever happens.
+    rank_indices = list(range(world_rank, len(all_init_times), world_size))
+    sampler = MultiStepBatchSamplerSubset(
         dataset=dataset,
         batch_size=1,
+        index_subset=rank_indices,
         num_forecast_steps=n_steps,  # IC + (n_steps-1) forcing batches = n_steps total
-        num_replicas=world_size,
-        rank=world_rank,
-        shuffle=False,
-        seed=conf.get("seed", 0),
     )
 
     loader = DataLoader(dataset, batch_sampler=sampler, num_workers=0, pin_memory=False)
@@ -230,25 +254,31 @@ Examples:
         "Rank %d/%d: %d init time(s), %d steps each",
         world_rank,
         world_size,
-        sampler.num_samples,
+        len(rank_indices),
         n_steps,
     )
+
+    verbose = rank == 0 or args.log_all_ranks  # gates tqdm bars and save-path notifications
 
     # ── Output writer ─────────────────────────────────────────────────────────
     writer = ForecastWriter(
         output_conf=inf_conf.get("output", {}),
         conf=conf,
         n_steps=n_steps,
+        verbose=verbose,
     )
 
     # ── Rollout ──────────────────────────────────────────────────────────────
     # batch_iter is shared across all forecasts. The sampler groups batches so
     # that each forecast consumes exactly n_steps consecutive batches (1 IC +
     # n_steps-1 forcing), in init-time order.
-    with mp.Pool(args.num_cpus) as pool:
+    # spawn (not the platform-default fork) since this process is multi-threaded by the
+    # time the pool starts (NCCL/CUDA background threads), and forking a multi-threaded
+    # process risks deadlocks in the child.
+    with mp.get_context("spawn").Pool(args.num_cpus) as pool:
         batch_iter = iter(loader)
 
-        for _ in range(sampler.num_samples):
+        for _ in range(len(rank_indices)):
             run_forecast(
                 conf=conf,
                 n_steps=n_steps,
@@ -262,13 +292,19 @@ Examples:
                 device=device,
                 pool=pool,
                 save_output_fn=writer,
+                verbose=verbose,
             )
-
-            if mode in ("ddp", "fsdp"):
-                torch.distributed.barrier()
 
         pool.close()
         pool.join()
+
+    # Ranks now cover unequal-size init-time subsets, so they can exit their loop
+    # at different times. Wait for the slowest rank here, before any rank tears
+    # down the process group — otherwise a fast rank calling cleanup() could pull
+    # it out from under a still-running rank mid-collective.
+    if mode in ("ddp", "fsdp"):
+        dist.barrier()
+        cleanup()
 
 
 if __name__ == "__main__":

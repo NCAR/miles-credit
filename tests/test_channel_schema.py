@@ -265,7 +265,10 @@ class TestConcatIntegration:
 
     def test_attach_channel_schema_helper(self):
         """attach_channel_schema reaches ConcatToTensor blocks inside a built group."""
-        preblocks = build_preblocks({"per_step": {"concat": {"type": "concat", "args": {"to_device": False}}}})
+        preblocks = build_preblocks(
+            {"preblocks": {"per_step": {"concat": {"type": "concat", "args": {"to_device": False}}}}}, "per_step"
+        )
+        print(preblocks)
         attach_channel_schema(preblocks, ChannelSchema.from_config(CONF))
         assert preblocks["concat"]._schema is not None
         attach_channel_schema(preblocks, None)  # no-op, must not raise

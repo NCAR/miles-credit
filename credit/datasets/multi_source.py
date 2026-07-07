@@ -29,7 +29,7 @@ Usage::
 Extending with a new source::
 
     # In _SOURCE_REGISTRY, add:
-    "NEW_SOURCE": ("credit.datasets.new_source", "NewSourceDataset"),
+    "new_source": ("credit.datasets.new_source", "NewSourceDataset"),
 
     # The dataset class must accept (config, return_target) and expose
     # a ``datetimes`` attribute (pd.DatetimeIndex).
@@ -50,18 +50,20 @@ logger = logging.getLogger(__name__)
 # Maps config["source"] dataset_type keys to (module_path, class_name) pairs.
 # Modules are imported on first use so optional heavy dependencies (gcsfs,
 # herbie, s3fs, …) are never loaded unless that source type is actually
-# requested.  Add entries here to register new data sources.
+# requested.  Add entries here to register new built-in data sources; custom
+# datasets should instead be registered via custom_objects (see credit.registry),
+# which populates credit.datasets._DATASET_REGISTRY.
 _SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
-    "BASE": ("credit.datasets.base_dataset", "BaseDataset"),  # placeholders / testing
-    "LOCAL": ("credit.datasets.local", "LocalDataset"),
-    "ARCO_ERA5": ("credit.datasets.era5", "ARCOERA5Dataset"),
-    "WEATHERBENCH2_ERA5": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
-    "MRMS": ("credit.datasets.mrms", "MRMSDataset"),
-    "GOES": ("credit.datasets.goes", "GOESDataset"),
-    "HRRR": ("credit.datasets.hrrr", "HRRRDataset"),
-    "HRRR_NAT": ("credit.datasets.hrrr", "HRRRDataset"),
-    "HRRR_SUBH": ("credit.datasets.hrrr", "HRRRDataset"),
-    "TISR": ("credit.datasets.tisr", "TISRDataset"),
+    "base": ("credit.datasets.base_dataset", "BaseDataset"),  # placeholders / testing
+    "local": ("credit.datasets.local", "LocalDataset"),
+    "arco_era5": ("credit.datasets.era5", "ARCOERA5Dataset"),
+    "weatherbench2_era5": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
+    "mrms": ("credit.datasets.mrms", "MRMSDataset"),
+    "goes": ("credit.datasets.goes", "GOESDataset"),
+    "hrrr": ("credit.datasets.hrrr", "HRRRDataset"),
+    "hrrr_nat": ("credit.datasets.hrrr", "HRRRDataset"),
+    "hrrr_subh": ("credit.datasets.hrrr", "HRRRDataset"),
+    "tisr": ("credit.datasets.tisr", "TISRDataset"),
 }
 
 
@@ -93,6 +95,12 @@ def route_to_dataset_class(source_cfg: dict[str, Any]) -> type:
     The module containing the class is imported lazily on first call so that
     optional heavy dependencies are not loaded unless this source type is used.
 
+    Built-in source types (e.g. "local", "arco_era5") are matched against
+    ``_SOURCE_REGISTRY``. If no built-in matches, falls back to
+    ``credit.datasets._DATASET_REGISTRY`` so that datasets registered via
+    ``custom_objects`` in the config can be used as a source's ``dataset_type``.
+    Both registries are matched case-sensitively.
+
     Args:
         source_cfg: Config dict for a single source (e.g. config["source"]["Example_ERA5"]).
 
@@ -102,16 +110,25 @@ def route_to_dataset_class(source_cfg: dict[str, Any]) -> type:
     Raises:
         ValueError: If the "dataset_type" field is missing or does not correspond to a registered dataset.
     """
-    dataset_type = source_cfg.get("dataset_type", "").upper()
+    dataset_type = source_cfg.get("dataset_type", "")
     if not dataset_type:
         raise ValueError("Source config must contain a 'dataset_type' field.")
+
     entry = _SOURCE_REGISTRY.get(dataset_type)
-    if not entry:
-        raise ValueError(
-            f"Unrecognized dataset_type '{dataset_type}' in source config. Must be one of: {list(_SOURCE_REGISTRY.keys())}"
-        )
-    module_path, class_name = entry
-    return getattr(importlib.import_module(module_path), class_name)
+    if entry is not None:
+        module_path, class_name = entry
+        return getattr(importlib.import_module(module_path), class_name)
+
+    from credit.datasets import _DATASET_REGISTRY, _load_dataset_entry  # avoid loading credit.datasets eagerly
+
+    if dataset_type in _DATASET_REGISTRY:
+        return _load_dataset_entry(dataset_type)
+
+    raise ValueError(
+        f"Unrecognized dataset_type '{dataset_type}' in source config. "
+        f"Must be one of the built-in sources {list(_SOURCE_REGISTRY.keys())} "
+        "or a dataset registered via custom_objects."
+    )
 
 
 class MultiSourceDataset(AbstractBaseDataset):
@@ -134,7 +151,7 @@ class MultiSourceDataset(AbstractBaseDataset):
             sub-dataset's ``static_metadata`` attribute.
     """
 
-    def __init__(self, config: dict[str, Any], return_target: bool = False) -> None:
+    def __init__(self, config: dict[str, Any], return_target: bool = False, label: str | None = None) -> None:
         super().__init__(config, return_target)
         self.datasets: dict[str, BaseDataset] = {}
         source_cfg = config.get("source", {})
@@ -148,7 +165,8 @@ class MultiSourceDataset(AbstractBaseDataset):
             # Route to the appropriate dataset class based on the "dataset_name" field in the sub-config
             cls = route_to_dataset_class(sub_config["source"][user_dataset_name])
             self.datasets[user_dataset_name] = cls(sub_config, return_target=return_target)
-            logger.info(f"MultiSourceDataset: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
+            prefix = f"MultiSourceDataset ({label})" if label else "MultiSourceDataset"
+            logger.info(f"{prefix}: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
 
         self.dt: pd.Timedelta = pd.Timedelta(config["timestep"])
         self.datetimes: pd.DatetimeIndex = self._build_master_clock(config)

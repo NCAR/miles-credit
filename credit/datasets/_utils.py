@@ -15,7 +15,6 @@ import re
 from datetime import datetime as dt_cls
 
 import pandas as pd
-import s3fs
 
 
 # Set of all recognised strftime codes — used for path-template detection
@@ -254,7 +253,7 @@ def _to_cftime(ts: pd.Timestamp, calendar: str) -> cftime.datetime:
     )
 
 
-def _start_s3_fs() -> s3fs.S3FileSystem:
+def _start_s3_fs():
     """Lazily initialize an anonymous ``s3fs.S3FileSystem`` instance.
 
     Called automatically on the first ``__extract_field__`` (called within ``__getitem__``)
@@ -263,6 +262,10 @@ def _start_s3_fs() -> s3fs.S3FileSystem:
 
     """
 
+    try:
+        import s3fs
+    except ImportError as exc:
+        raise ImportError("s3fs is required for remote dataset access. Install it with: pip install s3fs") from exc
     fs_config = {
         "anon": True,
         "token": "anon",
