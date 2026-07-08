@@ -251,6 +251,7 @@ VALID_PRODUCTS = Literal["wrfprs", "wrfnat", "wrfsubh"]
 # Path helpers
 # ---------------------------------------------------------------------------
 
+
 def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
     """Construct the local filesystem path for a HRRR grib2 file.
 
@@ -271,7 +272,9 @@ def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, produc
     return os.path.join(base_path, f"hrrr.{date_str}", fname)
 
 
-def _hrrr_s3_entry_name(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs", region: str = "conus") -> str:
+def _hrrr_s3_entry_name(
+    t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs", region: str = "conus"
+) -> str:
     """Construct the S3 URI for a HRRR grib2 file.
 
     Args:
@@ -297,6 +300,7 @@ def _hrrr_s3_entry_name(t: pd.Timestamp, forecast_hour: int, product: VALID_PROD
 ########################################
 # HTTPS VERSION (TO BE DEPRECATED)
 ########################################
+
 
 def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
     """Construct the S3 URI for a HRRR grib2 file.
@@ -435,7 +439,7 @@ def _parse_idx(text: str) -> list[dict[str, str | int | None]]:
     return entries
 
 
-def _fetch_obstore_idx(store: obstore.store.S3Store, s3_entry_name: str) -> list[dict[str, str | int | None]]:
+def _fetch_obstore_idx(store, s3_entry_name: str) -> list[dict[str, str | int | None]]:
     """Fetch and parse the ``.idx`` sidecar for a HRRR grib2 file via HTTPS.
 
     Args:
@@ -445,6 +449,7 @@ def _fetch_obstore_idx(store: obstore.store.S3Store, s3_entry_name: str) -> list
     Returns:
         list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
     """
+
     if len(s3_entry_name) < 4:
         raise ValueError(f"Invalid s3_entry_name passed (too short). Entry: {s3_entry_name}")
 
@@ -454,17 +459,12 @@ def _fetch_obstore_idx(store: obstore.store.S3Store, s3_entry_name: str) -> list
     idx_data = store.get(idx_entry_name)
     idx_data_bytes = idx_data.bytes()
     idx_data_text = str(idx_data_bytes, "utf-8")
-    
+
     return _parse_idx(idx_data_text)
 
 
-def _fetch_obstore_message(
-    store: obstore.store.S3Store,
-    s3_entry_name: str,
-    byte_start: int,
-    byte_end: int | None
-) -> bytes:
-    """Fetch a single GRIB message via an HTTP Range request.
+def _fetch_obstore_message(store, s3_entry_name: str, byte_start: int, byte_end: int | None) -> bytes:
+    """Fetch a single GRIB message via obstore.
 
     Args:
         store (obstore.store.S3Store): the obstore store object that houses the s3_entry of interest
@@ -482,6 +482,7 @@ def _fetch_obstore_message(
     data_retreived = store.get_range(s3_entry_name, start=byte_start, end=byte_end + 1)
 
     return data_retreived.to_bytes()
+
 
 def _build_prs_entry_map(
     idx_entries: list[dict[str, str | int | None]], idx_name: str
@@ -976,7 +977,6 @@ class HRRRDataset(BaseDataset):
             file_t = t
 
         if self.mode == "remote":
-
             # Initialize Obstore if not done yet
             if self._obstore is None:
                 self._obstore = _start_s3_obstore(_S3_BUCKET)

@@ -54,7 +54,11 @@ print("Taking sample...")
 sample_timer_start = time.perf_counter()
 sample = next(iter(ms_loader))
 sample_timer_end = time.perf_counter()
-print(f"Sample taken in {sample_timer_end - sample_timer_start:.2f} seconds")
+print(f"First sample taken in {sample_timer_end - sample_timer_start:.2f} seconds")
+# sample_timer_start = time.perf_counter()
+# sample = next(iter(ms_loader))
+# sample_timer_end = time.perf_counter()
+# print(f"Second sample taken in {sample_timer_end - sample_timer_start:.2f} seconds")
 
 inspection_timer_start = time.perf_counter()
 print(sample.keys())
@@ -64,12 +68,18 @@ print("Input keys:", input_keys)
 for source_name, source_data in sample["input"].items():
     print(f"Source: {source_name}, Keys: {source_data.keys()}")
 
-preblocks = build_preblocks(config["preblocks"])
+preblocks = build_preblocks(config)
+print(f"Preblocks of instance {type(preblocks)} of length {len(preblocks)} with items:\n{preblocks.items()}")
+for k, v in preblocks.items():
+    print(f"    {k:24} -> {v}")
 batch = apply_preblocks(preblocks, sample)
-print("BATCH KEYS:", batch.keys())
+print("BATCH KEYS: ", batch.keys())
 
 input_key = "x" if "x" in batch else "input"
-target_key = "y" if "y" in batch else "target"
+target_key = "y" if "y" in batch else "input"
+
+# print(f"Input of key {input_key}: {batch[input_key]}")
+# print(f"Target of key {target_key}: {batch[target_key]}")
 
 print(f"Input shape ({input_key}):", batch[input_key].shape)
 print(f"Target shape ({target_key}):", batch[target_key].shape)
@@ -97,13 +107,14 @@ for source_name, source_target_channel_map in batch["metadata"]["target"]["_chan
     print(f"METADATA CHANNEL_MAP KEYS: Source: {source_name}, Slice: {source_target_channel_map['slice']}")
 
 # prediction key for gen2 trainer
-batch["y_pred"] = torch.tensor(np.random.normal(0, 1, target_shape), dtype=torch.float32)
+predicted_key = "y_pred"
+batch[predicted_key] = torch.tensor(np.random.normal(0, 1, target_shape), dtype=torch.float32)
 
 postblocks = build_postblocks(config["postblocks"])
 postbatch = apply_postblocks(postblocks, batch)
 print("POSTBATCH KEYS:", postbatch.keys())
 
-for source_name, postbatch_data in postbatch["y_processed"].items():
+for source_name, postbatch_data in postbatch[predicted_key].items():
     print(f"POSTBATCH KEYS: Source: {source_name}, Keys: {postbatch_data.keys()}")
 
 inspection_timer_end = time.perf_counter()
