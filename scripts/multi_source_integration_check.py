@@ -114,8 +114,10 @@ postblocks = build_postblocks(config["postblocks"])
 postbatch = apply_postblocks(postblocks, batch)
 print("POSTBATCH KEYS:", postbatch.keys())
 
-for source_name, postbatch_data in postbatch[predicted_key].items():
-    print(f"POSTBATCH KEYS: Source: {source_name}, Keys: {postbatch_data.keys()}")
+print(f"POSTBARCH Prediction (key = {predicted_key}) of type: ", type(postbatch[predicted_key]))
+print("Has shape: ", postbatch[predicted_key].shape)
+# for source_name, postbatch_data in postbatch[predicted_key].items():
+#     print(f"POSTBATCH KEYS: Source: {source_name}, Keys: {postbatch_data.keys()}")
 
 inspection_timer_end = time.perf_counter()
 print(f"Inspection completed in {inspection_timer_end - inspection_timer_start:.2f} seconds")
