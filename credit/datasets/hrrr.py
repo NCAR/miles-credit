@@ -453,7 +453,7 @@ def _fetch_obstore_idx(store: obstore.store.S3Store, s3_entry_name: str) -> list
     # LIKELY NEEDS A TRY EXCEPT
     idx_data = store.get(idx_entry_name)
     idx_data_bytes = idx_data.bytes()
-    idx_data_text = idx_data_bytes.decode("utf-8")
+    idx_data_text = str(idx_data_bytes, "utf-8")
     
     return _parse_idx(idx_data_text)
 
@@ -477,9 +477,11 @@ def _fetch_obstore_message(
     """
 
     # LIKELY NEEDS A TRY EXCEPT
-    data_retreived = store.get_range(s3_entry_name, start=byte_start, end=byte_end)
 
-    return data_retreived.bytes()
+    # Obstore is exclusive bytes
+    data_retreived = store.get_range(s3_entry_name, start=byte_start, end=byte_end + 1)
+
+    return data_retreived.to_bytes()
 
 def _build_prs_entry_map(
     idx_entries: list[dict[str, str | int | None]], idx_name: str
@@ -975,19 +977,20 @@ class HRRRDataset(BaseDataset):
 
         if self.mode == "remote":
 
-            ## OBSTORE HERE
+            # Initialize Obstore if not done yet
+            if self._obstore is None:
+                self._obstore = _start_s3_obstore(_S3_BUCKET)
 
             s3_entry_name = _hrrr_s3_entry_name(file_t, ff, self.product)
             if s3_entry_name not in self._idx_cache:
-                self._idx_cache[s3_uri] = _fetch_obstore_idx(self._obstore, s3_entry_name)
-            idx_entries = self._idx_cache[s3_uri]
-            https_url = _s3_uri_to_https(s3_uri)
-            session = self._get_session()
+                self._idx_cache[s3_entry_name] = _fetch_obstore_idx(self._obstore, s3_entry_name)
+            idx_entries = self._idx_cache[s3_entry_name]
 
             def _fetcher(entry: dict[str, str | int | None]) -> bytes:
                 assert isinstance(entry["byte_start"], int)
                 assert isinstance(entry["byte_end"], int) or entry["byte_end"] is None
-                return _fetch_message(https_url, entry["byte_start"], entry["byte_end"], session)
+                return _fetch_obstore_message(self._obstore, s3_entry_name, entry["byte_start"], entry["byte_end"])
+
         else:
             assert self.base_path is not None
             path = _hrrr_local_path(self.base_path, file_t, ff, self.product)

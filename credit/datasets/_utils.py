@@ -288,5 +288,6 @@ def _start_s3_obstore(s3_bucket_name: str):
     except ImportError as exc:
         raise ImportError("s3fs is required for remote dataset access. Install it with: pip install obstore") from exc
     
+    # Skip signature is important to create an anonymous client!
     return obstore.store.S3Store(s3_bucket_name, skip_signature=True)
 
