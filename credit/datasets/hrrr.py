@@ -135,6 +135,7 @@ import pandas as pd
 import torch
 
 from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets._utils import _start_s3_obstore
 
 logger = logging.getLogger(__name__)
 
@@ -250,25 +251,6 @@ VALID_PRODUCTS = Literal["wrfprs", "wrfnat", "wrfsubh"]
 # Path helpers
 # ---------------------------------------------------------------------------
 
-
-def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
-    """Construct the S3 URI for a HRRR grib2 file.
-
-    Args:
-        t (pd.Timestamp): Initialisation timestamp (UTC).
-        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
-        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
-
-    Returns:
-        str: S3 URI.
-    """
-    date_str = t.strftime("%Y%m%d")
-    hour_str = t.strftime("%H")
-    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
-    subdir = "conus/" if t >= _HRRR_V3_CUTOFF else ""
-    return f"s3://{_S3_BUCKET}/hrrr.{date_str}/{subdir}{fname}"
-
-
 def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
     """Construct the local filesystem path for a HRRR grib2 file.
 
@@ -289,6 +271,51 @@ def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, produc
     return os.path.join(base_path, f"hrrr.{date_str}", fname)
 
 
+def _hrrr_s3_entry_name(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs", region: str = "conus") -> str:
+    """Construct the S3 URI for a HRRR grib2 file.
+
+    Args:
+        t (pd.Timestamp): Initialisation timestamp (UTC).
+        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
+
+    Returns:
+        str: S3 URI.
+    """
+    date_str = t.strftime("%Y%m%d")
+    hour_str = t.strftime("%H")
+    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
+
+    if t >= _HRRR_V3_CUTOFF:
+        assert region in ["conus", "alaska"]
+        subdir = f"{region}/"
+    else:
+        subdir = ""
+    return f"hrrr.{date_str}/{subdir}{fname}"
+
+
+########################################
+# HTTPS VERSION (TO BE DEPRECATED)
+########################################
+
+def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
+    """Construct the S3 URI for a HRRR grib2 file.
+
+    Args:
+        t (pd.Timestamp): Initialisation timestamp (UTC).
+        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
+
+    Returns:
+        str: S3 URI.
+    """
+    date_str = t.strftime("%Y%m%d")
+    hour_str = t.strftime("%H")
+    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
+    subdir = "conus/" if t >= _HRRR_V3_CUTOFF else ""
+    return f"s3://{_S3_BUCKET}/hrrr.{date_str}/{subdir}{fname}"
+
+
 def _s3_uri_to_https(s3_uri: str) -> str:
     """Convert an ``s3://noaa-hrrr-bdp-pds/...`` URI to a public HTTPS URL.
 
@@ -300,47 +327,6 @@ def _s3_uri_to_https(s3_uri: str) -> str:
     """
     key = s3_uri[len(f"s3://{_S3_BUCKET}/") :]
     return f"{_HRRR_HTTPS_BASE}/{key}"
-
-
-# ---------------------------------------------------------------------------
-# Remote reading: .idx parsing + parallel HTTPS range fetching
-# ---------------------------------------------------------------------------
-
-
-def _parse_idx(text: str) -> list[dict[str, str | int | None]]:
-    """Parse a HRRR ``.idx`` inventory file into a list of message entries.
-
-    Each entry dict has keys: ``var``, ``level``, ``byte_start``, ``byte_end``
-    (``None`` for the last entry, meaning read to EOF).
-
-    Args:
-        text (str): The content of the .idx file.
-
-    Returns:
-        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
-    """
-    entries: list[dict[str, str | int | None]] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split(":")
-        if len(parts) < 6:
-            continue
-        entries.append(
-            {
-                "var": parts[3].strip(),
-                "level": parts[4].strip(),
-                "step": parts[5].strip() if len(parts) > 5 else "",
-                "byte_start": int(parts[1]),
-                "byte_end": None,
-            }
-        )
-    for i in range(len(entries) - 1):
-        assert isinstance(entries[i]["byte_start"], int) and isinstance(entries[i + 1]["byte_start"], int)
-        entries[i]["byte_end"] = entries[i + 1]["byte_start"] - 1  # pyright: ignore[reportOperatorIssue]
-
-    return entries
 
 
 def _fetch_idx(s3_uri: str) -> list[dict[str, str | int | None]]:
@@ -406,6 +392,94 @@ def _fetch_message(
         resp.raise_for_status()
 
     return resp.content
+
+
+# ---------------------------------------------------------------------------
+# Remote reading: .idx parsing + parallel HTTPS range fetching
+# ---------------------------------------------------------------------------
+
+
+def _parse_idx(text: str) -> list[dict[str, str | int | None]]:
+    """Parse a HRRR ``.idx`` inventory file into a list of message entries.
+
+    Each entry dict has keys: ``var``, ``level``, ``byte_start``, ``byte_end``
+    (``None`` for the last entry, meaning read to EOF).
+
+    Args:
+        text (str): The content of the .idx file.
+
+    Returns:
+        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
+    """
+    entries: list[dict[str, str | int | None]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(":")
+        if len(parts) < 6:
+            continue
+        entries.append(
+            {
+                "var": parts[3].strip(),
+                "level": parts[4].strip(),
+                "step": parts[5].strip() if len(parts) > 5 else "",
+                "byte_start": int(parts[1]),
+                "byte_end": None,
+            }
+        )
+    for i in range(len(entries) - 1):
+        assert isinstance(entries[i]["byte_start"], int) and isinstance(entries[i + 1]["byte_start"], int)
+        entries[i]["byte_end"] = entries[i + 1]["byte_start"] - 1  # pyright: ignore[reportOperatorIssue]
+
+    return entries
+
+
+def _fetch_obstore_idx(store: obstore.store.S3Store, s3_entry_name: str) -> list[dict[str, str | int | None]]:
+    """Fetch and parse the ``.idx`` sidecar for a HRRR grib2 file via HTTPS.
+
+    Args:
+        store (obstore.store.S3Store): the obstore store object that houses the s3_entry of interest
+        s3_entry_name (str): S3 entry in the obstore
+
+    Returns:
+        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
+    """
+    if len(s3_entry_name) < 4:
+        raise ValueError(f"Invalid s3_entry_name passed (too short). Entry: {s3_entry_name}")
+
+    idx_entry_name = s3_entry_name + ".idx" if s3_entry_name[:-3] != ".idx" else s3_entry_name
+
+    # LIKELY NEEDS A TRY EXCEPT
+    idx_data = store.get(idx_entry_name)
+    idx_data_bytes = idx_data.bytes()
+    idx_data_text = idx_data_bytes.decode("utf-8")
+    
+    return _parse_idx(idx_data_text)
+
+
+def _fetch_obstore_message(
+    store: obstore.store.S3Store,
+    s3_entry_name: str,
+    byte_start: int,
+    byte_end: int | None
+) -> bytes:
+    """Fetch a single GRIB message via an HTTP Range request.
+
+    Args:
+        store (obstore.store.S3Store): the obstore store object that houses the s3_entry of interest
+        s3_entry_name (str): S3 entry in the obstore
+        byte_start (int): First byte of the message (inclusive).
+        byte_end (int | None): Last byte of the message (inclusive), or ``None`` for EOF.
+
+    Returns:
+        bytes: The raw bytes of the GRIB message for that byte range.
+    """
+
+    # LIKELY NEEDS A TRY EXCEPT
+    data_retreived = store.get_range(s3_entry_name, start=byte_start, end=byte_end)
+
+    return data_retreived.bytes()
 
 def _build_prs_entry_map(
     idx_entries: list[dict[str, str | int | None]], idx_name: str
@@ -744,29 +818,29 @@ class HRRRDataset(BaseDataset):
         # Caches — all created lazily so they are fork-safe when DataLoader
         # spins up worker processes after __init__.
         self._idx_cache: dict[str, list[dict[str, str | int | None]]] = {}
-        self._http_session = None  # requests.Session; built on first remote call
+        self._obstore = None
         self._spatial_slice: tuple[slice, slice] | None = None  # extent → (row, col) slices
 
     # ------------------------------------------------------------------
     # Dataset interface
     # ------------------------------------------------------------------
 
-    def _get_session(self):
-        """Return the shared ``requests.Session``, creating it on first call.
+    # def _get_session(self):
+    #     """Return the shared ``requests.Session``, creating it on first call.
 
-        Created lazily so the session is never open before a DataLoader worker
-        forks — each worker ends up with its own independent connection pool.
-        """
-        import requests  # noqa: PLC0415
+    #     Created lazily so the session is never open before a DataLoader worker
+    #     forks — each worker ends up with its own independent connection pool.
+    #     """
+    #     import requests  # noqa: PLC0415
 
-        if self._http_session is None:
-            self._http_session = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=_MAX_REMOTE_WORKERS,
-                pool_maxsize=_MAX_REMOTE_WORKERS,
-            )
-            self._http_session.mount("https://", adapter)
-        return self._http_session
+    #     if self._http_session is None:
+    #         self._http_session = requests.Session()
+    #         adapter = requests.adapters.HTTPAdapter(
+    #             pool_connections=_MAX_REMOTE_WORKERS,
+    #             pool_maxsize=_MAX_REMOTE_WORKERS,
+    #         )
+    #         self._http_session.mount("https://", adapter)
+    #     return self._http_session
 
     def _get_spatial_slice(self, lats: np.ndarray, lons: np.ndarray) -> tuple[slice, slice]:
         """Return ``(row_slice, col_slice)`` for ``self.extent``, computed once.
@@ -900,9 +974,12 @@ class HRRRDataset(BaseDataset):
             file_t = t
 
         if self.mode == "remote":
-            s3_uri = _hrrr_s3_uri(file_t, ff, self.product)
-            if s3_uri not in self._idx_cache:
-                self._idx_cache[s3_uri] = _fetch_idx(s3_uri)
+
+            ## OBSTORE HERE
+
+            s3_entry_name = _hrrr_s3_entry_name(file_t, ff, self.product)
+            if s3_entry_name not in self._idx_cache:
+                self._idx_cache[s3_uri] = _fetch_obstore_idx(self._obstore, s3_entry_name)
             idx_entries = self._idx_cache[s3_uri]
             https_url = _s3_uri_to_https(s3_uri)
             session = self._get_session()
