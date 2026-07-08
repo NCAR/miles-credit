@@ -55,7 +55,7 @@ def mean_std_nc(tmp_path):
 
 @skip_bs
 def test_convert_writes_postblocks(tmp_path, mean_std_nc):
-    """credit convert on a flat v1 config produces reconstruct + bridgescaler postblocks."""
+    """credit convert on a v1 config produces reconstruct + bridgescaler postblocks."""
     import credit.cli as cli
 
     mean_path, std_path, *_ = mean_std_nc
@@ -97,7 +97,7 @@ def test_convert_writes_postblocks(tmp_path, mean_std_nc):
     assert "key" not in per_step["scaler"]["args"], "key should not be set; default y_processed is correct"
 
     # The generated JSON must load into working postblocks
-    postblocks = build_postblocks(pb)
+    postblocks = build_postblocks({"postblocks": pb})
     assert "reconstruct" in postblocks
     assert "scaler" in postblocks
 
@@ -129,7 +129,7 @@ def test_convert_postblocks_inverse_transform(tmp_path, mean_std_nc):
             },
         }
     }
-    postblocks = build_postblocks(postblocks_cfg)
+    postblocks = build_postblocks({"postblocks": postblocks_cfg})
 
     # Synthetic normalized prediction: (B=1, C_out, T=1, H=4, W=4)
     # All-zeros normalized → inverse should recover the mean values.

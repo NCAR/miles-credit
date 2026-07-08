@@ -37,15 +37,18 @@ preblocks:
         data_types:
           - 'input'
           - 'target'
-    fill_nan:
-      type: "fill_nan"
+    fill_values:
+      type: "fill_values"
       args:
+        rules:
+          - search: nan
+            fill: 0.0
         variables: []
         data_types:
           - 'input'
           - 'target'
     scaler:
-      type: "bridgescaler_transformer"
+      type: "bridgescaler_transform"
       args:
         variables: []
         scaler_path: "/glade/derecho/scratch/$USER/CREDIT/weatherbench2/scaler.json"

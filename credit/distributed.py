@@ -26,8 +26,10 @@ from credit.mixed_precision import parse_dtype
 import functools
 import logging
 
+logger = logging.getLogger(__name__)
 
-def setup(rank, world_size, mode, backend="nccl"):
+
+def setup(rank, world_size, mode, backend="nccl", device_id=None):
     """Initializes the distributed process group.
 
     Args:
@@ -35,10 +37,15 @@ def setup(rank, world_size, mode, backend="nccl"):
         world_size (int): The total number of processes in the distributed setup.
         mode (str): The mode of operation (e.g., 'fsdp', 'ddp').
         backend (str, optional): The backend to use for distributed training. Defaults to 'nccl'.
+        device_id (torch.device, optional): Local CUDA device. Passed to init_process_group
+            to suppress the PyTorch 2.3+ barrier() UserWarning about missing device_id.
     """
 
-    logging.info(f"Running {mode.upper()} on rank {rank} with world_size {world_size} using {backend}.")
-    dist.init_process_group(backend, rank=rank, world_size=world_size)
+    logger.info(f"Running {mode.upper()} on rank {rank} with world_size {world_size} using {backend}.")
+    kwargs = {}
+    if device_id is not None and backend == "nccl":
+        kwargs["device_id"] = device_id
+    dist.init_process_group(backend, rank=rank, world_size=world_size, **kwargs)
 
 
 # torch's conventional default rendezvous port; used as a deterministic
@@ -122,7 +129,7 @@ def configure_gloo_ifname():
     ifname = resolve_socket_ifname()
     if ifname is not None:
         os.environ["GLOO_SOCKET_IFNAME"] = ifname
-        logging.info("Set GLOO_SOCKET_IFNAME=%s for Gloo CPU collectives", ifname)
+        logger.info("Set GLOO_SOCKET_IFNAME=%s for Gloo CPU collectives", ifname)
 
 
 def get_rank_info(trainer_mode):
@@ -142,7 +149,7 @@ def get_rank_info(trainer_mode):
                 WORLD_SIZE = int(os.environ["WORLD_SIZE"])
                 WORLD_RANK = int(os.environ["RANK"])
             else:
-                logging.info("Using MPI for distributed training.")
+                logger.info("Using MPI for distributed training.")
                 from mpi4py import MPI
 
                 comm = MPI.COMM_WORLD
@@ -166,14 +173,14 @@ def get_rank_info(trainer_mode):
                 os.environ["MASTER_PORT"] = comm.bcast(master_port, root=0)
                 comm.barrier()
                 print("MASTER_ADDR: ", os.environ.get("MASTER_ADDR", "Still Not set"))
-                logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
-                logging.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
+                logger.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
+                logger.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
                 if 0 == WORLD_RANK:
-                    logging.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
-                    logging.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
+                    logger.info("Using MASTER_ADDR={}".format(os.environ["MASTER_ADDR"]))
+                    logger.info("Using MASTER_PORT={}".format(os.environ["MASTER_PORT"]))
 
         except Exception as e:
-            logging.info(e)
+            logger.info(e)
 
             if "LOCAL_RANK" in os.environ:
                 # Environment variables set by torch.distributed.launch or torchrun
@@ -202,7 +209,7 @@ def get_rank_info(trainer_mode):
             # jobs must export MASTER_ADDR/MASTER_PORT explicitly to be safe.
             if "MASTER_ADDR" not in os.environ:
                 os.environ["MASTER_ADDR"] = resolve_master_addr()
-                logging.warning(
+                logger.warning(
                     "MASTER_ADDR was not set and could not be broadcast via MPI; "
                     "defaulting to %s. For multi-node jobs, export MASTER_ADDR "
                     "explicitly so all nodes agree on the rendezvous address.",
@@ -210,7 +217,7 @@ def get_rank_info(trainer_mode):
                 )
             if "MASTER_PORT" not in os.environ:
                 os.environ["MASTER_PORT"] = str(DEFAULT_MASTER_PORT)
-                logging.warning(
+                logger.warning(
                     "MASTER_PORT was not set; defaulting to %s.",
                     os.environ["MASTER_PORT"],
                 )
@@ -320,7 +327,7 @@ def distributed_model_wrapper(conf, neural_network, device):
         # Store manager on the model for access by trainer
         neural_network._domain_parallel_manager = domain_manager
 
-        logging.info(
+        logger.info(
             f"Domain parallelism enabled: {domain_parallel_size} domain shards, "
             f"{world_size // domain_parallel_size} data-parallel replicas"
         )
@@ -334,12 +341,12 @@ def distributed_model_wrapper(conf, neural_network, device):
 
     # logger announcement
     if activation_checkpoint:
-        logging.info(f"Activation checkpointing on {mode}: {activation_checkpoint}")
+        logger.info(f"Activation checkpointing on {mode}: {activation_checkpoint}")
         if checkpoint_all_layers:
-            logging.info("Checkpointing all available layers in your model")
-            logging.warning("This may cause performance degredation -- consider supplying a list to checkpoint")
+            logger.info("Checkpointing all available layers in your model")
+            logger.warning("This may cause performance degredation -- consider supplying a list to checkpoint")
         else:
-            logging.info(f"Checkpointing custom layers {transformer_layers_cls}")
+            logger.info(f"Checkpointing custom layers {transformer_layers_cls}")
 
     # FSDP policies
     if fsdp_mode:
@@ -362,7 +369,7 @@ def distributed_model_wrapper(conf, neural_network, device):
             conf["trainer"]["use_mixed_precision"] if "use_mixed_precision" in conf["trainer"] else False
         )
 
-        logging.info(f"Using mixed_precision: {use_mixed_precision}")
+        logger.info(f"Using mixed_precision: {use_mixed_precision}")
 
         if use_mixed_precision:
             for key, val in conf["trainer"]["mixed_precision"].items():
@@ -375,7 +382,7 @@ def distributed_model_wrapper(conf, neural_network, device):
 
         cpu_offload = conf["trainer"]["cpu_offload"] if "cpu_offload" in conf["trainer"] else False
 
-        logging.info(f"Using CPU offloading: {cpu_offload}")
+        logger.info(f"Using CPU offloading: {cpu_offload}")
 
         # FSDP module — for fsdp+domain_parallel, use data-parallel process group
         fsdp_kwargs = dict(
@@ -436,3 +443,159 @@ def distributed_model_wrapper(conf, neural_network, device):
     torch.distributed.barrier()
 
     return model
+
+
+# ===========================================================================
+# V2 distributed wrapper — FSDP2 + Tensor Parallel + Domain Parallel
+# ===========================================================================
+
+
+def distributed_model_wrapper_gen2(conf: dict, model, device):
+    """Wrap a model for V2 distributed training.
+
+    Reads trainer.parallelism and applies, in order:
+      1. Domain parallelism (spatial H-shard, Negin's layer swap)
+      2. Tensor parallelism (Col/Row linear split across TP group)
+      3. FSDP2 or DDP over the data-parallel group
+
+    V1 trainer code still calls distributed_model_wrapper — this is V2 only.
+
+    Args:
+        conf: Full training config.
+        model: Raw nn.Module.
+        device: torch.device for this rank.
+
+    Returns:
+        Wrapped model (and stores domain_manager on it if domain > 1).
+    """
+    from credit.parallel.mesh import build_device_mesh, dp_world_size, parse_parallelism_conf
+
+    conf["save_loc"] = os.path.expandvars(conf["save_loc"])
+    p = parse_parallelism_conf(conf)
+    data_mode = p["data"]
+    tp_size = int(p.get("tensor", 1))
+    domain_size = int(p.get("domain", 1))
+    _world_size = dist.get_world_size() if dist.is_initialized() else 1
+    dp_size = dp_world_size(p, _world_size)
+
+    # Validation: with data=none and more than one data-parallel replica, the
+    # replicated parameters' gradients never sync across dp — regardless of
+    # whether the extra ranks come from domain or tensor parallelism.
+    if data_mode == "none" and dp_size > 1:
+        logger.warning(
+            f"data=none with dp_size={dp_size} (world={_world_size}, tensor={tp_size}, "
+            f"domain={domain_size}): gradients will NOT sync across data-parallel "
+            "replicas. Wrap with data=ddp or data=fsdp2."
+        )
+
+    # Build DeviceMesh
+    mesh, submeshes = build_device_mesh(p, device="cuda" if torch.cuda.is_available() else "cpu")
+
+    # ── 1. Domain parallelism ─────────────────────────────────────────────
+    domain_manager = None
+    if domain_size > 1:
+        from credit.domain_parallel import initialize_domain_parallel, convert_to_domain_parallel
+
+        world_size = dist.get_world_size()
+        domain_manager = initialize_domain_parallel(
+            world_size=world_size,
+            domain_parallel_size=domain_size,
+            shard_dim=-2,
+        )
+        model = convert_to_domain_parallel(model, domain_manager)
+        model._domain_parallel_manager = domain_manager
+        logger.info(
+            f"[V2] Domain parallelism: {domain_size} shards, {world_size // domain_size} data-parallel replicas"
+        )
+
+    # ── 2. Tensor parallelism ─────────────────────────────────────────────
+    if tp_size > 1:
+        from credit.parallel import apply_native_tensor_parallel, apply_tensor_parallel, supports_native_tp
+
+        tp_mesh = submeshes.get("tp")
+        if tp_mesh is None:
+            raise ValueError("TP mesh not found — check tensor > 1 and world_size")
+        if supports_native_tp(model):
+            # TP must convert params to DTensors on the target device before
+            # fully_shard; move first so distribute_tensor doesn't shard CPU
+            # params onto a cuda mesh.
+            model.to(device)
+            model = apply_native_tensor_parallel(model, tp_mesh)
+            logger.info(f"[V2] Native tensor parallelism (DTensor): degree={tp_size}")
+        else:
+            # Legacy hand-rolled TP — disabled, raises NotImplementedError
+            # citing issue #415 (models without a _tp_plan are unsupported).
+            model = apply_tensor_parallel(model, tp_mesh)
+            logger.info(f"[V2] Tensor parallelism: degree={tp_size}")
+
+    # Ensure all parameters/buffers are on the target device after domain/TP
+    # transforms (which may create new modules via wrapping). Must happen before
+    # FSDP2, which converts params to DTensors and can't be moved afterwards.
+    model.to(device)
+
+    # ── 3. Data parallelism ───────────────────────────────────────────────
+    dp_mesh = submeshes.get("dp")
+
+    from credit.parallel.mesh import register_dp_group
+
+    register_dp_group(dp_mesh.get_group() if dp_mesh is not None else None)
+
+    fsdp2_applied = False
+    if data_mode == "fsdp2":
+        if dp_size <= 1:
+            # FSDP2 with dp=1 is a no-op for gradient sync and converts params to
+            # DTensors, which breaks sync_domain_gradients when domain > 1.
+            logger.warning(
+                f"[V2] FSDP2 requested but dp_size={dp_size} (world={dist.get_world_size()}, "
+                f"tensor={tp_size}, domain={domain_size}). Skipping FSDP2 — use data=none or "
+                "increase GPUs so dp_size > 1. Mixed precision falls back to plain autocast "
+                "(trainer.amp); fsdp2_mp_policy does not apply."
+            )
+        else:
+            from credit.parallel import apply_fsdp2
+
+            model = apply_fsdp2(model, dp_mesh, conf)
+            fsdp2_applied = True
+            logger.info("[V2] FSDP2 applied over dp_mesh")
+
+    elif data_mode == "ddp":
+        if not dist.is_initialized():
+            # Single-process run of a ddp config (plain `python`/`credit train`
+            # with no launcher): there is no process group, and DDP would raise.
+            logger.warning("[V2] DDP requested but no process group is initialized — running unwrapped.")
+        else:
+            dp_group = dp_mesh.get_group() if dp_mesh is not None else None
+            # static_graph caches the reducer plan from the first iteration, which
+            # is incompatible with toggling require_backward_grad_sync for
+            # gradient accumulation. Only enable it when not accumulating — and
+            # when it's off, DDP needs find_unused_parameters for models with
+            # allocated-but-unused modules (e.g. WXFormer's cube_embedding when
+            # patch sizes are 1), which static_graph otherwise tolerated.
+            _grad_accum = int(conf.get("trainer", {}).get("grad_accum_every", 1))
+            ddp_kwargs = dict(device_ids=[device], static_graph=_grad_accum == 1)
+            if _grad_accum > 1:
+                ddp_kwargs["find_unused_parameters"] = True
+            if dp_group is not None:
+                ddp_kwargs["process_group"] = dp_group
+            model = torch.nn.parallel.DistributedDataParallel(model, **ddp_kwargs)
+            logger.info("[V2] DDP applied")
+
+    if domain_manager is not None:
+        model._domain_parallel_manager = domain_manager
+
+    # Apply activation checkpointing if requested and FSDP2 didn't already do
+    # it (apply_fsdp2 wraps before sharding; when FSDP2 is skipped at
+    # dp_size <= 1 the request must still be honored here).
+    if conf.get("trainer", {}).get("activation_checkpoint", False) and not fsdp2_applied:
+        _apply_activation_checkpointing_gen2(model, conf)
+
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+    return model
+
+
+def _apply_activation_checkpointing_gen2(model, conf):
+    """Apply no-reentrant AC to blocks that opt in via _fsdp2_shard = True (non-FSDP2 path)."""
+    from credit.parallel.fsdp2 import _apply_activation_checkpointing
+
+    _apply_activation_checkpointing(model)
