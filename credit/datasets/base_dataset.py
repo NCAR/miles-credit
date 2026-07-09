@@ -758,7 +758,7 @@ class BaseDataset(AbstractBaseDataset):
         if self.mode == "local":
             path_template: str = field_config.get("path", "")
             files = sorted(glob(_path_template_to_glob(path_template)))
-            return _map_files(files, _extract_time_fmt(path_template)) if files else None
+            return _map_files(files, _extract_time_fmt(path_template), path_template) if files else None
         elif self.mode == "remote":
             return True
         else:
