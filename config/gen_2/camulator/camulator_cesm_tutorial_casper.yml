@@ -156,8 +156,8 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 1.0
 
-  thread_workers: 8
-  valid_thread_workers: 8
+  thread_workers: 4
+  valid_thread_workers: 4
   prefetch_factor: 2
 
 preblocks:
@@ -450,15 +450,15 @@ inference:
       - name: "CESM/prognostic/2d/TREFHT"
       - name: "CESM/diagnostic/2d/PRECT"
 #      - name: "CESM/diagnostic/2d/TS"
-#      - name: "CESM/diagnostic/2d/CLDHGH"
+      - name: "CESM/diagnostic/2d/CLDHGH"
 #      - name: "CESM/diagnostic/2d/CLDLOW"
 #      - name: "CESM/diagnostic/2d/CLDMED"
-#      - name: "CESM/diagnostic/2d/TAUX"
+      - name: "CESM/diagnostic/2d/TAUX"
 #      - name: "CESM/diagnostic/2d/TAUY"
 #      - name: "CESM/diagnostic/2d/U10"
 #      - name: "CESM/diagnostic/2d/QFLX"
-#      - name: "CESM/diagnostic/2d/SHFLX"
-#      - name: "CESM/diagnostic/2d/LHFLX"
+      - name: "CESM/diagnostic/2d/SHFLX"
+      - name: "CESM/diagnostic/2d/LHFLX"
 #      - name: "CESM/diagnostic/2d/FSDS_J"
 #      - name: "CESM/diagnostic/2d/FLDS_J"
 #      - name: "CESM/diagnostic/2d/FSUS"
