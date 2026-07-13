@@ -199,9 +199,7 @@ def run_forecast(
                     # previous history_len-step window forward by one step: drop
                     # the oldest time step and append this newest one (dim=2 is
                     # time). Same free-running slide the trainer uses in rollout.
-                    history_x = torch.cat(
-                        [history_x[:, :, 1:, ...], full_data_dict["x"][:, :, -1:, ...]], dim=2
-                    )
+                    history_x = torch.cat([history_x[:, :, 1:, ...], full_data_dict["x"][:, :, -1:, ...]], dim=2)
                     full_data_dict["x"] = history_x
 
     # post_rollout postblocks (e.g. global physics fixers applied once)
