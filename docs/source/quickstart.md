@@ -283,5 +283,5 @@ See the full [AI Assistant documentation](agent.md) for all examples, options, a
 | Serve forecasts over HTTP | [Forecast API Server](serve.md) |
 | Set up TensorBoard on HPC | [TensorBoard](tensorboard.md) |
 | Evaluate your model against baselines | [Evaluation](Evaluation.md) |
-| Use a custom dataset | [Dataset structure](DataSets.md) |
+| Use a custom dataset | [Dataset structure](Datasets.md) |
 | Add a new model architecture | [Model architectures](Model_Architectures.md) |

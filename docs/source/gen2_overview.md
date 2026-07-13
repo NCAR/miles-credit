@@ -21,6 +21,28 @@ constraints at any point in the data and modeling pipeline. Not even the sky is 
 this framework!
 
 ## Datasets
+CREDIT Gen 2 has simplified the process for adding new Datasets and created
+new Datasets for both local and cloud-based Datasets. We have also created
+a new data schema that can support multiple data sources, 3D and 2D variables,
+and a mix of prognostic, diagnostic, dynamic forcing, and static variables.
 
+New Gen 2 Datasets include:
+* **LocalDataset**: Supports any locally stored set of netCDF or Zarr files
+with a regular directory structure and file format.
+* **GOESDataset**: Supports cloud-based GOES 16, 17, 18, and 19 geostationary satellite
+data stored on AWS.
+* **ARCOERA5Dataset**: Provides direct cloud streaming from the Analysis-Ready Cloud-Optimized ERA5 dataset 
+on Google Cloud.
+* **WeatherBench2ERA5Dataset**: Direct cloud streaming from the WeatherBench2 ERA5 archive. Supports multiple resolutions.
+* **HRRRDataset**: NOAA High-Resolution Rapid Refresh on AWS.
+* **MRMSDataset**: NOAA Multi-Radar Multi-Sensor 3D radar mosaic over the US.
+
+## Preblocks
+
+## Models
+
+## Postblocks
+
+## Interfaces
 
 
