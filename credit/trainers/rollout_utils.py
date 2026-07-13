@@ -158,8 +158,14 @@ def run_forecast(
 
     full_data_dict["ic_raw"] = ic_batch.get("input", {})
     full_data_dict["ic_preprocessed"] = apply_preblocks(ic_preblocks, ic_batch, device=device)
-    full_data_dict["x_physical"] = full_data_dict["ic_preprocessed"]["input"]
     full_data_dict.update(apply_preblocks(step_preblocks, full_data_dict["ic_preprocessed"], device=device))
+
+    # Multi-step history window fed to the model. At the IC it comes straight
+    # from the dataset (history_len steps stacked on the time dim). At each
+    # rollout step below we slide it forward (drop oldest, append the newest
+    # assembled step) so the model keeps seeing history_len steps, mirroring the
+    # trainer's rollout. With history_len == 1 there is nothing to carry.
+    history_x = full_data_dict["x"] if history_len > 1 else None
 
     logger.info("Forecast init: %s  steps: %d  fhr_max: %dh", init_str, n_steps, n_steps * fhr_per_step)
 
@@ -186,10 +192,17 @@ def run_forecast(
                 # drop None target so ConcatToTensor doesn't trip over it
                 next_batch = {k: v for k, v in next_batch.items() if v is not None}
 
-                # save physical-unit assembled input before preblocks normalize and flatten it
-                full_data_dict["x_physical"] = next_batch["input"]
-
                 full_data_dict.update(apply_preblocks(step_preblocks, next_batch, device=device))
+
+                if history_len > 1:
+                    # assemble_rollout_batch produced a single-step x; slide the
+                    # previous history_len-step window forward by one step: drop
+                    # the oldest time step and append this newest one (dim=2 is
+                    # time). Same free-running slide the trainer uses in rollout.
+                    history_x = torch.cat(
+                        [history_x[:, :, 1:, ...], full_data_dict["x"][:, :, -1:, ...]], dim=2
+                    )
+                    full_data_dict["x"] = history_x
 
     # post_rollout postblocks (e.g. global physics fixers applied once)
     apply_postblocks(rollout_postblocks, full_data_dict)
