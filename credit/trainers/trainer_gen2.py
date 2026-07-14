@@ -158,7 +158,7 @@ class TrainerERA5Gen2(BaseTrainer):
         self.use_batch_axis_ensemble = self.ensemble_size > 1 and not self.is_ring_crps
 
     # ------------------------------------------------------------------
-    # Multi-step history helper
+    # Rollout history-window helper
     # ------------------------------------------------------------------
 
     @staticmethod
