@@ -90,7 +90,9 @@ def _download_one(task: _DownloadTask) -> str:
     """
     import s3fs  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
 
-    if os.path.exists(task.local_path) and not task.overwrite:
+    idx_local_path = task.local_path + ".idx"
+
+    if os.path.exists(task.local_path) and os.path.exists(idx_local_path) and not task.overwrite:
         return f"skip  {task.local_path}"
 
     os.makedirs(os.path.dirname(task.local_path), exist_ok=True)
@@ -159,7 +161,7 @@ def download_hrrr(
     except ImportError as exc:
         raise ImportError("s3fs is required for downloading: pip install s3fs") from exc
 
-    base_path: str = source_cfg["base_path"]
+    base_path: str = os.path.expanduser(os.path.expandvars(source_cfg["base_path"]))
     forecast_hour: int = int(source_cfg.get("forecast_hour", 0))
 
     dt = pd.Timedelta(data_config["timestep"])
@@ -241,7 +243,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config file.")
     parser.add_argument("--source_name", default=None, help="Name of the source in the data config to download.")
     parser.add_argument(
-        "--num_workers",
+        "--num-workers",
         type=int,
         default=4,
         help="Number of parallel download workers (default: 4).",
