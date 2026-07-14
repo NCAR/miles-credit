@@ -17,7 +17,7 @@ _POSTBLOCK_REGISTRY = {
     "square_transform": ("credit.postblock.square", "SquareTransform"),
     "wet_mask_samudra": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "mslp_diagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
-    "tracer_fixer": ("credit.postblock.gen1", "TracerFixer"),
+    "tracer_fixer": ("credit.postblock.conservation", "TracerFixer"),
     "global_mass_fixer": ("credit.postblock.conservation", "GlobalMassFixer"),
     "global_water_fixer": ("credit.postblock.conservation", "GlobalWaterFixer"),
     "global_energy_fixer": ("credit.postblock.conservation", "GlobalEnergyFixerUpDown"),
