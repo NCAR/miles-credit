@@ -61,14 +61,25 @@ File naming:
 from __future__ import annotations
 
 import cftime
+import logging
+from glob import glob
 from typing import Any
 
 import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _find_file, _to_cftime  # pyright: ignore[reportPrivateUsage]
+from credit.datasets._utils import (  # pyright: ignore[reportPrivateUsage]
+    _find_file,
+    _path_template_to_glob,
+    _to_cftime,
+    is_standard_calendar,
+    normalize_calendar,
+    to_calendar,
+)
 from credit.datasets.base_dataset import BaseDataset
+
+logger = logging.getLogger(__name__)
 
 
 class LocalDataset(BaseDataset):
@@ -130,11 +141,63 @@ class LocalDataset(BaseDataset):
         self.levels: list | None = self.curr_source_cfg.get("levels")
         self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
-            "datetime_fmt": "unix_ns",
+            "calendar": self.calendar,
+            "datetime_fmt": "unix_ns" if is_standard_calendar(self.calendar) else f"cf_ns:{self.calendar}",
         }
         self.mode = "local"
         self.time_coord = self.curr_source_cfg.get("time_coord", "time")
         self.init_register_all_fields()
+
+    def _resolve_calendar(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> str | None:
+        """Resolve the calendar from config, falling back to sniffing the data.
+
+        Config (source-level then data-level ``calendar:`` key) wins; otherwise
+        the first time-bearing data file's time coordinate is inspected once at
+        init. Returns None (→ "standard") when neither yields an answer.
+        """
+        cal = super()._resolve_calendar(data_config, curr_source_config)
+        if cal:
+            return cal
+        return self._sniff_calendar(curr_source_config)
+
+    def _sniff_calendar(self, source_cfg: dict[str, Any]) -> str | None:
+        """Read the CF calendar from the first available time-bearing file.
+
+        xarray decodes non-standard-calendar time coordinates to cftime objects
+        automatically, so the coordinate's element type is the discriminator.
+        Failures are non-fatal: warn and fall back to the standard default.
+        """
+        time_coord = source_cfg.get("time_coord", "time")
+        engine = source_cfg.get("engine")
+        variables = source_cfg.get("variables") or {}
+        for field_type in ("prognostic", "dynamic_forcing", "diagnostic"):
+            field_cfg = variables.get(field_type)
+            if not isinstance(field_cfg, dict) or not field_cfg.get("path"):
+                continue
+            files = sorted(glob(_path_template_to_glob(field_cfg["path"])))
+            if not files:
+                continue
+            try:
+                with xr.open_dataset(files[0], engine=engine) as ds:
+                    if time_coord not in ds:
+                        continue
+                    t0 = ds[time_coord].values.ravel()[0]
+            except Exception as exc:
+                logger.warning(
+                    "LocalDataset '%s': could not sniff calendar from %s (%s); assuming 'standard'. "
+                    "Set an explicit `calendar:` key in the source config to silence this.",
+                    self.curr_source_name,
+                    files[0],
+                    exc,
+                )
+                return None
+            calendar = normalize_calendar(t0.calendar) if isinstance(t0, cftime.datetime) else "standard"
+            if not is_standard_calendar(calendar):
+                logger.info(
+                    "LocalDataset '%s': sniffed calendar '%s' from %s", self.curr_source_name, calendar, files[0]
+                )
+            return calendar
+        return None
 
     def _extract_field(
         self,
@@ -166,13 +229,19 @@ class LocalDataset(BaseDataset):
         vars_2D: list[str] = vd["vars_2D"]
 
         with xr.open_dataset(_find_file(file_intervals, t)) as ds:
-            # Select the time step; static fields have no time dim
+            # Select the time step; static fields have no time dim.
+            # The master-clock timestamp may be pd.Timestamp or cftime; convert
+            # by date fields into the file's native time type either way.
             if self.time_coord in ds.dims:
-                if isinstance(ds[self.time_coord].values[0], cftime.datetime):
-                    calendar = ds[self.time_coord].values[0].calendar
-                    t_sel = _to_cftime(t, calendar)
+                file_time0 = ds[self.time_coord].values[0]
+                if isinstance(file_time0, cftime.datetime):
+                    t_sel = to_calendar(t, file_time0.calendar)
+                    if not isinstance(t_sel, cftime.datetime):
+                        # standard-named calendar stored as cftime objects:
+                        # selection still needs a cftime key
+                        t_sel = _to_cftime(t_sel, file_time0.calendar)
                 else:
-                    t_sel = t
+                    t_sel = to_calendar(t, "standard")
                 ds_t = ds.sel({self.time_coord: t_sel})
             else:
                 ds_t = ds

@@ -13,12 +13,22 @@ from glob import glob
 import logging
 from typing import Any, Literal, get_args
 
+import cftime
 import pandas as pd
 
 from torch.utils.data import Dataset
 import torch
 
-from credit.datasets._utils import _map_files, _path_template_to_glob, _extract_time_fmt  # pyright: ignore[reportPrivateUsage]
+from credit.datasets._utils import (  # pyright: ignore[reportPrivateUsage]
+    _extract_time_fmt,
+    _map_files,
+    _path_template_to_glob,
+    build_time_index,
+    encode_time,
+    is_standard_calendar,
+    normalize_calendar,
+    to_calendar,
+)
 
 # Expected types of fields
 # * ``prognostic``      — input at step 0 and target (autoregressive rollout)
@@ -52,7 +62,10 @@ class AbstractBaseDataset(Dataset[Any]):
         self.num_forecast_steps: int
         self.start_datetime: pd.Timestamp
         self.end_datetime: pd.Timestamp
-        self.datetimes: pd.DatetimeIndex
+        # CF calendar of the clock; timestamps in `datetimes` are pd.Timestamps
+        # for standard-family calendars, cftime.datetime otherwise (CFTimeIndex)
+        self.calendar: str
+        self.datetimes: pd.Index  # pd.DatetimeIndex or xr.CFTimeIndex
 
         # Getting the data
         self.return_target: bool
@@ -215,7 +228,14 @@ class BaseDataset(AbstractBaseDataset):
 
         self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
         self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
-        self.datetimes: pd.DatetimeIndex = self._build_timestamps()
+
+        # CF calendar of this source's clock. Resolved from config (source-level
+        # `calendar:` key, then data-level) with a subclass hook for sniffing the
+        # data files (see LocalDataset). Standard-family calendars keep the plain
+        # pandas path; non-standard calendars build a CFTimeIndex clock.
+        self.calendar: str = self._resolve_calendar(data_config, self.curr_source_cfg) or "standard"
+
+        self.datetimes: pd.Index = self._build_timestamps()
 
         # Set the return target flag based on the argument passed to init.
         self.return_target: bool = return_target
@@ -230,8 +250,13 @@ class BaseDataset(AbstractBaseDataset):
         self.temporal_mode: str = self.curr_source_cfg.get("temporal_mode", "exact")
         self._persist_cache: dict = {}
 
-        # Placeholder for static metadata
-        self.static_metadata: dict[str, Any] = {}
+        # Placeholder for static metadata. `datetime_fmt` tells metadata consumers
+        # how to decode the input/target_datetime ints (see _utils.decode_time):
+        # plain unix ns for standard calendars, ns-in-calendar otherwise.
+        self.static_metadata: dict[str, Any] = {
+            "calendar": self.calendar,
+            "datetime_fmt": "unix_ns" if is_standard_calendar(self.calendar) else f"cf_ns:{self.calendar}",
+        }
 
         # If the engine argument for xr.open_dataset needs to be specified, add the engine option to your data source config
         if "engine" in self.curr_source_cfg:
@@ -284,7 +309,10 @@ class BaseDataset(AbstractBaseDataset):
             ``"{source}/{field_type}/{dim}/{varname}"``.
         """
         t, i = args
-        t = pd.Timestamp(t)
+        # Calendar-native timestamps pass through untouched; everything else
+        # (datetime64, int ns, str) is normalized to pd.Timestamp as before.
+        if not isinstance(t, cftime.datetime):
+            t = pd.Timestamp(t)
 
         if self.temporal_mode == "persist":
             t_resolved = self._resolve_persist_timestamp(t)
@@ -351,7 +379,7 @@ class BaseDataset(AbstractBaseDataset):
 
         sample: dict[str, Any] = {
             "input": input_data,
-            "metadata": {"input_datetime": int(t.value)},
+            "metadata": {"input_datetime": encode_time(t)},
         }
 
         # Optionally load t+1 as the supervised target
@@ -362,7 +390,7 @@ class BaseDataset(AbstractBaseDataset):
                     self._extract_field(field_type, t_target, target_data)
 
             sample["target"] = target_data
-            sample["metadata"]["target_datetime"] = int(t_target.value)
+            sample["metadata"]["target_datetime"] = encode_time(t_target)
 
         return sample
 
@@ -547,11 +575,39 @@ class BaseDataset(AbstractBaseDataset):
 
         return end_datetime_in_data
 
-    def _build_timestamps(self) -> pd.DatetimeIndex:
+    def _resolve_calendar(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> str | None:
+        """Resolve this source's CF calendar from config, or None when unset.
+
+        Only the *source-level* ``calendar`` key is read here: it describes the
+        source's data files. The *data-level* ``calendar`` key configures the
+        master clock and is handled by MultiSourceDataset — letting it override
+        per-source calendars would mislabel a source's data and defeat the
+        mixed-calendar validation. Subclasses that can inspect their data files
+        should override this and fall back to sniffing the time coordinate when
+        config gives no answer (see LocalDataset); ``__init__`` applies the
+        final ``"standard"`` default.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+
+        Returns:
+            Normalized calendar name, or None when the config does not specify one.
+        """
+        cal = curr_source_config.get("calendar")
+        return normalize_calendar(cal) if cal else None
+
+    def _build_timestamps(self) -> pd.Index:
         """Return timestamps for the dataset using the class parameters.
         The timestamps should ensure that there are enough future timesteps to
         rollout based on num_forecast_steps and the dt timestep length, and
         should be at the configured timestep frequency.
+
+        The clock is built on ``self.calendar``: standard-family calendars give
+        exactly ``pd.date_range`` (unchanged behavior); non-standard CF calendars
+        give an ``xr.CFTimeIndex``. The forecast-horizon subtraction happens
+        *after* converting the bounds to the target calendar so the arithmetic
+        is calendar-correct (e.g. never lands on a nonexistent Feb 29).
 
         Note: Please override this method if you would like to apply Quality Control
         checks that limit the datetimes from which to sample from, or if you would
@@ -559,14 +615,13 @@ class BaseDataset(AbstractBaseDataset):
         super() to have base functionality in these cases.
 
         Returns:
-            pd.DatetimeIndex: DatetimeIndex from ``start_datetime`` to ``end_datetime`` minus
-                the forecast horizon, at the configured timestep frequency.
+            pd.DatetimeIndex or xr.CFTimeIndex from ``start_datetime`` to
+                ``end_datetime`` minus the forecast horizon, at the configured
+                timestep frequency.
         """
-        return pd.date_range(
-            self.start_datetime,
-            self.end_datetime - self.num_forecast_steps * self.dt,
-            freq=self.dt,
-        )
+        start = to_calendar(self.start_datetime, self.calendar)
+        end = to_calendar(self.end_datetime, self.calendar) - self.num_forecast_steps * self.dt
+        return build_time_index(start, end, self.dt, self.calendar)
 
     # ---------------
     # 2. Registering fields
