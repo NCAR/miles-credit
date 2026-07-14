@@ -633,7 +633,7 @@ class BaseTrainer(ABC):
             # ---- Collect results ----
             results_dict["epoch"].append(epoch)
 
-            required_metrics = ["loss", "acc", "mae", "forecast_len"]
+            required_metrics = ["loss", "acc", "mae", "forecast_len", "history_len"]
             if isinstance(self.save_metric_vars, list) and len(self.save_metric_vars) > 0:
                 names = [
                     key.replace("train_", "")
@@ -644,7 +644,7 @@ class BaseTrainer(ABC):
                 names = [key.replace("train_", "") for key in train_results.keys()]
             else:
                 names = []
-            names = list(set(names + required_metrics))
+            names = list(dict.fromkeys(names + required_metrics))  # preserves order; set() randomizes column order
 
             for name in names:
                 if f"train_{name}" in train_results:
@@ -664,6 +664,21 @@ class BaseTrainer(ABC):
             max_len = max(len(lst) for lst in results_dict.values())
             padded = OrderedDict((k, [np.nan] * (max_len - len(v)) + v) for k, v in results_dict.items())
             df = pd.DataFrame.from_dict(padded).reset_index()
+            column_order = [
+                "index",
+                "epoch",
+                "train_history_len",
+                "train_forecast_len",
+                "valid_history_len",
+                "valid_forecast_len",
+                "train_loss",
+                "valid_loss",
+                "train_acc",
+                "valid_acc",
+                "train_mae",
+                "valid_mae",
+            ]
+            df = df[[c for c in column_order if c in df.columns] + [c for c in df.columns if c not in column_order]]
             if trial:
                 trial_dir = os.path.join(self.save_loc, "trial_results")
                 os.makedirs(trial_dir, exist_ok=True)

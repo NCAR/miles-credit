@@ -147,6 +147,10 @@ class LocalDataset(BaseDataset):
         Keys written are ``"{source_name}/{field_type}/3d/{varname}"`` for 3D variables
         and ``"{source_name}/{field_type}/2d/{varname}"`` for 2D variables.
 
+        This is the single-step reader (one timestamp). Multi-step history
+        (history_len > 1) is handled by :meth:`_extract_field_window`, which
+        opens each file at most once across the window.
+
         Args:
             field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
                 ``"static"``, ``"diagnostic"``.
@@ -166,33 +170,165 @@ class LocalDataset(BaseDataset):
         vars_2D: list[str] = vd["vars_2D"]
 
         with xr.open_dataset(_find_file(file_intervals, t)) as ds:
-            # Select the time step; static fields have no time dim
-            if self.time_coord in ds.dims:
-                if isinstance(ds[self.time_coord].values[0], cftime.datetime):
-                    calendar = ds[self.time_coord].values[0].calendar
-                    t_sel = _to_cftime(t, calendar)
-                else:
-                    t_sel = t
-                ds_t = ds.sel({self.time_coord: t_sel})
-            else:
-                ds_t = ds
+            ds_t = self._select_at_time(ds, t)
+            self._write_field_tensors(ds_t, vars_3D, vars_2D, field_type, sample)
 
-            # 3D variables: (n_levels, lat, lon) → (n_levels, 1, lat, lon)
-            for vname in vars_3D:
-                if self.levels is None:
-                    arr = ds_t[vname].values
-                    if self.level_coord in ds_t.coords:
-                        self.levels = ds_t[self.level_coord].values.tolist()
-                        self.static_metadata["levels"] = self.levels
-                else:
-                    arr = ds_t[vname].sel({self.level_coord: self.levels}, method="nearest").values
-                tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                key = self._get_field_name(field_type, "3d", vname)
-                sample[key] = tensor
+    def _extract_field_window(
+        self,
+        field_type: str,
+        t_history: pd.DatetimeIndex,
+        sample: dict[str, Any],
+    ) -> None:
+        """Load *field_type* over the history window and stack along time.
 
-            # 2D variables: (lat, lon) → (1, 1, lat, lon)
-            for vname in vars_2D:
-                arr = ds_t[vname].values
-                tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                key = self._get_field_name(field_type, "2d", vname)
-                sample[key] = tensor
+        Overrides the generic per-step reader in
+        :meth:`BaseDataset._extract_field_window` to open each underlying file at
+        most once. Timestamps in ``t_history`` may span multiple data files (e.g.
+        yearly zarrs around a year boundary), so they are grouped by their
+        resolved file and each file is opened a single time.
+
+        For fields without a time dimension in the source dataset (typical
+        ``"static"``), the single available slice is replicated along the time
+        axis ``len(t_history)`` times.
+
+        Produces the same output as the generic reader: 3D →
+        ``(n_levels, len(t_history), lat, lon)``, 2D → ``(1, len(t_history), lat, lon)``.
+
+        Args:
+            field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            t_history: Chronological timestamps of the history window.
+            sample: Dict to write the stacked variable tensors into (modified in place).
+        """
+        file_intervals = self.file_dict.get(field_type)
+        if not file_intervals or field_type not in self.var_dict:
+            return
+
+        vd = self.var_dict[field_type]
+        vars_3D: list[str] = vd["vars_3D"]
+        vars_2D: list[str] = vd["vars_2D"]
+
+        # History path: load each timestamp in t_history, stack along time.
+        # Group by file so each file is opened at most once.
+        n_t = len(t_history)
+        per_var_3D: dict[str, list[Any]] = {v: [None] * n_t for v in vars_3D}
+        per_var_2D: dict[str, list[Any]] = {v: [None] * n_t for v in vars_2D}
+
+        # Resolve each timestamp to a file path and group indices by file.
+        groups: dict[str, list[int]] = {}
+        for k, tk in enumerate(t_history):
+            path = _find_file(file_intervals, pd.Timestamp(tk))
+            groups.setdefault(path, []).append(k)
+
+        for path, indices in groups.items():
+            with xr.open_dataset(path) as ds:
+                has_time = self.time_coord in ds.dims
+                if not has_time:
+                    # Static-style field: load once, replicate at each index.
+                    for k in indices:
+                        for v in vars_3D:
+                            arr = self._read_3d_array(ds, v)
+                            per_var_3D[v][k] = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
+                        for v in vars_2D:
+                            arr = ds[v].values
+                            per_var_2D[v][k] = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+                else:
+                    # Time-indexed field: select each timestamp in this file.
+                    for k in indices:
+                        ds_t = self._select_at_time(ds, pd.Timestamp(t_history[k]))
+                        for v in vars_3D:
+                            arr = self._read_3d_array(ds_t, v)
+                            per_var_3D[v][k] = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
+                        for v in vars_2D:
+                            arr = ds_t[v].values
+                            per_var_2D[v][k] = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+
+        # Concatenate along time dim (dim=1): list of (n_lev, 1, lat, lon)
+        # -> (n_lev, n_t, lat, lon); 2D analogously.
+        for v in vars_3D:
+            key = self._get_field_name(field_type, "3d", v)
+            sample[key] = torch.cat(per_var_3D[v], dim=1)
+        for v in vars_2D:
+            key = self._get_field_name(field_type, "2d", v)
+            sample[key] = torch.cat(per_var_2D[v], dim=1)
+
+    # ------------------------------------------------------------------
+    # Internal helpers for _extract_field
+    # ------------------------------------------------------------------
+
+    def _select_at_time(self, ds: xr.Dataset, t: pd.Timestamp) -> xr.Dataset:
+        """Select a single time slice from *ds* at timestamp *t*.
+
+        Handles both numpy datetime64 and cftime calendars. If the dataset
+        has no time dimension (e.g. static fields), returns the dataset
+        unchanged.
+
+        Args:
+            ds: The open dataset (or a per-time slice of it).
+            t: Timestamp to select.
+
+        Returns:
+            The dataset selected at *t*, or unchanged if it has no time dim.
+        """
+        if self.time_coord not in ds.dims:
+            return ds
+        if isinstance(ds[self.time_coord].values[0], cftime.datetime):
+            calendar = ds[self.time_coord].values[0].calendar
+            t_sel = _to_cftime(t, calendar)
+        else:
+            t_sel = t
+        return ds.sel({self.time_coord: t_sel})
+
+    def _read_3d_array(self, ds_t: xr.Dataset, vname: str):
+        """Read a 3D variable from a per-time-slice dataset, applying level
+        selection if configured. Lazily caches ``self.levels`` on first use,
+        matching the original single-step logic.
+
+        Args:
+            ds_t: A single-time-slice dataset.
+            vname: 3D variable name.
+
+        Returns:
+            numpy array of the 3D variable, level-selected if configured.
+        """
+        if self.levels is None:
+            arr = ds_t[vname].values
+            if self.level_coord in ds_t.coords:
+                self.levels = ds_t[self.level_coord].values.tolist()
+                self.static_metadata["levels"] = self.levels
+        else:
+            arr = ds_t[vname].sel({self.level_coord: self.levels}, method="nearest").values
+        return arr
+
+    def _write_field_tensors(
+        self,
+        ds_t: xr.Dataset,
+        vars_3D: list[str],
+        vars_2D: list[str],
+        field_type: str,
+        sample: dict[str, Any],
+    ) -> None:
+        """Write single-time-slice tensors for vars_3D/vars_2D into sample.
+
+        Used by the legacy single-step path (history_len == 1).
+
+        Args:
+            ds_t: A single-time-slice dataset.
+            vars_3D: 3D variable names.
+            vars_2D: 2D variable names.
+            field_type: The field type being written.
+            sample: Dict to write tensors into (modified in place).
+        """
+        # 3D variables: (n_levels, lat, lon) → (n_levels, 1, lat, lon)
+        for vname in vars_3D:
+            arr = self._read_3d_array(ds_t, vname)
+            tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
+            key = self._get_field_name(field_type, "3d", vname)
+            sample[key] = tensor
+
+        # 2D variables: (lat, lon) → (1, 1, lat, lon)
+        for vname in vars_2D:
+            arr = ds_t[vname].values
+            tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+            key = self._get_field_name(field_type, "2d", vname)
+            sample[key] = tensor

@@ -229,11 +229,16 @@ class MultiSourceDataset(AbstractBaseDataset):
             return pd.DatetimeIndex([])
 
         master_dt = pd.Timedelta(config["timestep"])
-        num_steps = config.get("forecast_len", 1)
+        num_history_steps = config.get("history_len", 1)
+        num_forecast_steps = config.get("forecast_len", 1)
         master_start = pd.Timestamp(config["start_datetime"])
         master_end = pd.Timestamp(config["end_datetime"])
 
-        master = pd.date_range(master_start, master_end - num_steps * master_dt, freq=master_dt)
+        master = pd.date_range(
+            master_start + (num_history_steps - 1) * master_dt,
+            master_end - num_forecast_steps * master_dt,
+            freq=master_dt,
+        )
 
         source_cfg = config.get("source", {})
         for name, ds in self.datasets.items():
