@@ -368,8 +368,8 @@ class BaseDataset(AbstractBaseDataset):
         # datasets get multi-step reading for free without changing their
         # single-step _extract_field. Subclasses may override
         # _extract_field_window to batch file reads (see LocalDataset).
-        multistep = self.history_len > 1
-        if multistep:
+        use_history_window = self.history_len > 1
+        if use_history_window:
             t_history = pd.date_range(t - (self.history_len - 1) * self.dt, t, freq=self.dt)
 
         # Dynamic forcing is loaded at every step.
@@ -377,7 +377,7 @@ class BaseDataset(AbstractBaseDataset):
         # time steps; at i > 0 we only need the newest step (the trainer slides
         # the previous history forward during rollout).
         if "dynamic_forcing" in self.var_dict:
-            if i == 0 and multistep:
+            if i == 0 and use_history_window:
                 self._extract_field_window("dynamic_forcing", t_history, input_data)
             else:
                 self._extract_field("dynamic_forcing", t, input_data)
@@ -386,12 +386,12 @@ class BaseDataset(AbstractBaseDataset):
         # Both are loaded over the full history window so x starts with H steps.
         if i == 0:
             if "static" in self.var_dict:
-                if multistep:
+                if use_history_window:
                     self._extract_field_window("static", t_history, input_data)
                 else:
                     self._extract_field("static", t, input_data)
             if "prognostic" in self.var_dict:
-                if multistep:
+                if use_history_window:
                     self._extract_field_window("prognostic", t_history, input_data)
                 else:
                     self._extract_field("prognostic", t, input_data)
@@ -792,6 +792,17 @@ class BaseDataset(AbstractBaseDataset):
                 the current step); length ``history_len``.
             sample: Dict to write the stacked variable tensors into (modified in place).
         """
+        if field_type == "static":
+            # Static fields never vary in time: read once and replicate in
+            # memory instead of re-reading the same value per timestamp.
+            step_sample: dict[str, Any] = {}
+            self._extract_field(field_type, pd.Timestamp(t_history[-1]), step_sample)
+            n_t = len(t_history)
+            for key, val in step_sample.items():
+                # val is (n_levels_or_1, 1, lat, lon); repeat dim=1 (time) to n_t.
+                sample[key] = val.repeat(1, n_t, 1, 1)
+            return
+
         per_step: list[dict[str, Any]] = []
         for tk in t_history:
             step_sample: dict[str, Any] = {}
