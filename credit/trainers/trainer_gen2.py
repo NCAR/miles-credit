@@ -470,6 +470,7 @@ class TrainerERA5Gen2(BaseTrainer):
                 all_reduce_avg(batch_loss)
             results_dict["train_loss"].append(batch_loss[0].item())
             results_dict["train_forecast_len"].append(self.forecast_len)
+            results_dict["train_history_len"].append(self.history_len)
 
             if self.is_crps_ensemble and "std" in logs:
                 batch_std = torch.Tensor([logs["std"]]).to(self.device)
@@ -618,6 +619,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)
+                results_dict["valid_history_len"].append(self.valid_history_len)
 
                 self._log_batch_progress(epoch, results_dict, optimizer=None, pbar=batch_group_generator, phase="valid")
 
