@@ -21,7 +21,7 @@ All GOES variables are 2D. Tensor shape (no batch dimension):
     — level is singleton since GOES has no vertical levels; time is singleton
     since each sample covers a single timestep. Consistent with CREDIT Gen2
     convention, where 3D variables instead have shape (n_levels, time, lat, lon)
-    (see e.g. ``credit/datasets/era5.py``).
+    (see e.g. ``credit/datasets/gen_2/era5.py``).
 
 After DataLoader collation the batch dimension is prepended:
     (batch, level, time, lat, lon) = (batch, 1, 1, lat, lon)
@@ -68,8 +68,8 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _infer_period_freq, _find_file, _start_s3_fs
-from credit.datasets.base_dataset import BaseDataset
+from credit.datasets.gen_2._utils import _infer_period_freq, _find_file, _start_s3_fs
+from credit.datasets.gen_2.base_dataset import BaseDataset
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 import torch
 
-from credit.datasets._utils import _map_files, _path_template_to_glob, _extract_time_fmt  # pyright: ignore[reportPrivateUsage]
+from credit.datasets.gen_2._utils import _map_files, _path_template_to_glob, _extract_time_fmt  # pyright: ignore[reportPrivateUsage]
 
 # Expected types of fields
 # * ``prognostic``      — input at step 0 and target (autoregressive rollout)
@@ -781,7 +781,7 @@ class BaseDataset(AbstractBaseDataset):
         dataset gets multi-step reading without changing its ``_extract_field``.
 
         Subclasses whose backend can load several timestamps from a single
-        open file/store more cheaply (e.g. :class:`~credit.datasets.local.LocalDataset`)
+        open file/store more cheaply (e.g. :class:`~credit.datasets.gen_2.local.LocalDataset`)
         may override this method to batch those reads. The stacked output must be
         identical either way: 3D → ``(n_levels, len(t_history), lat, lon)``,
         2D → ``(1, len(t_history), lat, lon)``.

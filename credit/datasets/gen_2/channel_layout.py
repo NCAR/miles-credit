@@ -12,7 +12,7 @@ correspond to the actual channel positions in the model input tensor.
 
 Usage
 -----
-    from credit.datasets.channel_layout import build_channel_layout, update_x
+    from credit.datasets.gen_2.channel_layout import build_channel_layout, update_x
 
     # once at trainer / rollout init
     slices, n_pred = build_channel_layout(conf)

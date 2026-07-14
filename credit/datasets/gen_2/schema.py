@@ -39,7 +39,7 @@ import os
 
 import yaml
 
-from credit.datasets.channel_layout import FIELD_TYPE_RANK
+from credit.datasets.gen_2.channel_layout import FIELD_TYPE_RANK
 
 logger = logging.getLogger(__name__)
 

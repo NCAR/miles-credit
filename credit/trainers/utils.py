@@ -9,7 +9,7 @@ import torch.distributed as dist
 
 from credit.scheduler import load_scheduler
 from credit.samplers import DistributedMultiStepBatchSampler
-from credit.datasets.multi_source import MultiSourceDataset
+from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.models.checkpoint import (
     FSDPOptimizerWrapper,
     TorchFSDPCheckpointIO,

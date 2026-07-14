@@ -1,7 +1,7 @@
 """
 goes_dataset_test.py
 --------------------
-Tests for GOESDataset (credit.datasets.goes).
+Tests for GOESDataset (credit.datasets.gen_2.goes).
 
 """
 
@@ -15,7 +15,7 @@ import torch
 import xarray as xr
 from torch.utils.data import DataLoader
 
-from credit.datasets.goes import (
+from credit.datasets.gen_2.goes import (
     GOESDataset,
     _FILE_NOT_FOUND,
     _FILE_QC_MASKED,
@@ -1085,7 +1085,7 @@ def test_goes_remote_scan_reuses_cached_fs(monkeypatch):
         start_fs_calls.append(1)
         return fake_fs
 
-    monkeypatch.setattr("credit.datasets.goes._start_s3_fs", fake_start_s3_fs)
+    monkeypatch.setattr("credit.datasets.gen_2.goes._start_s3_fs", fake_start_s3_fs)
 
     ds = GOESDataset.__new__(GOESDataset)
     ds._fs = None
@@ -1125,7 +1125,7 @@ def test_goes_remote_mode_full_getitem(minimal_config, monkeypatch, goes_xr_data
     monkeypatch.setattr(GOESDataset, "_collect_GOES_file_path", fake_collect)
 
     fake_fs = _FakeS3FileSystem()
-    monkeypatch.setattr("credit.datasets.goes._start_s3_fs", lambda: fake_fs)
+    monkeypatch.setattr("credit.datasets.gen_2.goes._start_s3_fs", lambda: fake_fs)
 
     def fake_open_dataset(path_or_obj, **kwargs):
         if isinstance(path_or_obj, str) and "lat_lon" in path_or_obj:
