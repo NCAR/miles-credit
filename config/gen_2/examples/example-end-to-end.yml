@@ -51,12 +51,8 @@ data:
   end_datetime: "2018-12-31"
   timestep: "6h"
 
-  history_len: 1            # number of past states fed as input
+  history_len: 1            # number of past steps fed as input (e.g. history_len: 2 feeds in t-1 and t)
   forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
-
-  one_shot: True
-  lead_time_periods: 6
-  skip_periods: null
 
 
 # ---- USER SETTINGS: validation data ---- #
@@ -90,12 +86,8 @@ validation_data:
   end_datetime: "2020-12-31"
   timestep: "6h"
 
-  history_len: 1
+  history_len: 1            # must match the training data block's history_len
   forecast_len: 1
-
-  one_shot: True
-  lead_time_periods: 6
-  skip_periods: null
 
 
 # ---- USER SETTINGS: training hyperparameters ---- #
@@ -107,7 +99,6 @@ trainer:
     tensor: 1               # tensor-parallel degree  (1 = disabled)
     domain: 1               # domain-parallel shards  (1 = disabled)
 
-  cpu_offload: False
   activation_checkpoint: True
 
   load_weights: False     # set True to resume from checkpoint
@@ -213,7 +204,7 @@ postblocks:
 # surface_channels to match your data.
 model:
   type: "wxformer"
-  frames: 1
+  frames: 1               # number of input time frames the model expects; must match history_len
   image_height: 181       # 1-degree ERA5 latitude grid
   image_width: 360        # 1-degree ERA5 longitude grid
   levels: 18              # number of ERA5 model levels (matches data.levels above)
@@ -224,7 +215,6 @@ model:
 
   patch_width: 1
   patch_height: 1
-  frame_patch_size: 1
 
   # Model capacity: increase dim/depth for a larger model
   dim: [32, 64, 128, 256]

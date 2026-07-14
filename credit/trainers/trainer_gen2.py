@@ -120,6 +120,11 @@ class TrainerERA5Gen2(BaseTrainer):
 
         # forecast_len: 1 = 1 step (new semantics, unlike v1 where 0 = 1 step)
         self.forecast_len = data_conf["forecast_len"]
+        # history_len: 1 = single-step input (gen2 default). > 1 feeds the model a
+        # history_len-step input window; during multi-step rollout the trainer
+        # slides that window forward one step at a time (drop oldest, append
+        # newest) instead of replacing it wholesale.
+        self.history_len = data_conf.get("history_len", 1)
         trainer_conf = conf.get("trainer", {})
         bpt = trainer_conf.get("backprop_on_timestep") or data_conf.get("backprop_on_timestep")
         self.backprop_on_timestep = bpt if bpt is not None else list(range(1, self.forecast_len + 1))
@@ -151,6 +156,36 @@ class TrainerERA5Gen2(BaseTrainer):
         self.is_ring_crps = loss_name == "ring-crps"
         self.is_crps_ensemble = is_crps_loss(loss_name) and self.ensemble_size > 1
         self.use_batch_axis_ensemble = self.ensemble_size > 1 and not self.is_ring_crps
+
+    # ------------------------------------------------------------------
+    # Rollout history-window helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _slide_history_window(x_prev: torch.Tensor, x_new: torch.Tensor) -> torch.Tensor:
+        """Advance a ``history_len``-step input window by one step (free-running).
+
+        Drops the oldest time step of ``x_prev`` and appends the newest step from
+        ``x_new`` along the time dimension (dim=2), so the model keeps seeing a
+        window of ``history_len`` steps during multi-step rollout.
+
+        This is the autoregressive (free-running) slide: the carried-over steps
+        are whatever was in ``x_prev`` (model predictions from earlier rollout
+        steps, except at the initial condition), never re-fetched ground truth.
+        That is the point of rollout training — the model must learn from its own
+        accumulated forecast drift.
+
+        Args:
+            x_prev: Previous input window, shape ``(B, C, H, lat, lon)`` with
+                ``H == history_len``.
+            x_new: Newly assembled single-step input, shape ``(B, C, 1, lat, lon)``
+                (same channel layout as ``x_prev``).
+
+        Returns:
+            torch.Tensor: Updated window ``(B, C, H, lat, lon)``.
+        """
+        # Keep the newest H-1 steps, append the new step at the end.
+        return torch.cat([x_prev[:, :, 1:, ...], x_new[:, :, -1:, ...]], dim=2)
 
     # ------------------------------------------------------------------
     # Domain-parallel forward helpers (shared by train and validate)
@@ -320,14 +355,24 @@ class TrainerERA5Gen2(BaseTrainer):
                     # for forecast_len=1); the conservation fixers read t0 here.
                     full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
                     full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
+                    if self.history_len > 1:
+                        # Keep the (un-ensembled) history window separate from the
+                        # tensor fed to the model, so the per-step ensemble
+                        # repeat_interleave below does not accumulate into the slide.
+                        history_x = full_data_dict["x"]
                 else:
                     full_data_dict["x_raw"] = batch["input"]
                     full_data_dict["y_raw"] = batch["target"]
-                    step_input = assemble_rollout_batch(full_data_dict, batch)
+                    step_input = assemble_rollout_batch(full_data_dict, batch, history_len=self.history_len)
                     # At t>1 the t0 state is the previous step's predicted physical
                     # state plus this step's forcing, not the original IC.
                     full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
                     full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
+                    if self.history_len > 1:
+                        # assemble_rollout_batch produced a single-step x; slide the
+                        # previous history_len-step window forward by one step.
+                        history_x = self._slide_history_window(history_x, full_data_dict["x"])
+                        full_data_dict["x"] = history_x
 
                 if self.use_batch_axis_ensemble:
                     full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
@@ -425,6 +470,7 @@ class TrainerERA5Gen2(BaseTrainer):
                 all_reduce_avg(batch_loss)
             results_dict["train_loss"].append(batch_loss[0].item())
             results_dict["train_forecast_len"].append(self.forecast_len)
+            results_dict["train_history_len"].append(self.history_len)
 
             if self.is_crps_ensemble and "std" in logs:
                 batch_std = torch.Tensor([logs["std"]]).to(self.device)
@@ -516,14 +562,19 @@ class TrainerERA5Gen2(BaseTrainer):
                         # t0 physical, named input (= IC for forecast_len=1).
                         full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
                         full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
+                        if self.valid_history_len > 1:
+                            history_x = full_data_dict["x"]
                     else:
                         full_data_dict["x_raw"] = batch["input"]
                         full_data_dict["y_raw"] = batch["target"]
-                        step_input = assemble_rollout_batch(full_data_dict, batch)
+                        step_input = assemble_rollout_batch(full_data_dict, batch, history_len=self.valid_history_len)
                         # t0 = previous step's predicted physical state + this
                         # step's forcing, not the original IC.
                         full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
                         full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
+                        if self.valid_history_len > 1:
+                            history_x = self._slide_history_window(history_x, full_data_dict["x"])
+                            full_data_dict["x"] = history_x
 
                     if self.use_batch_axis_ensemble:
                         full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
@@ -568,6 +619,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)
+                results_dict["valid_history_len"].append(self.valid_history_len)
 
                 self._log_batch_progress(epoch, results_dict, optimizer=None, pbar=batch_group_generator, phase="valid")
 

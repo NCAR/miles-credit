@@ -129,13 +129,21 @@ class ConcatToTensor(BasePreblock):
                         # only. Its cursor starts at 0 because y_pred from the model contains
                         # only these predictable outputs — statics and dynamic forcings are
                         # inputs only and are absent from y_pred.
+                        #
+                        # This map is the fallback for the target channel map when the batch
+                        # carries no target (e.g. rollout with return_target=False). The model
+                        # predicts a single step (forecast_len == 1), so the output width is one
+                        # per level regardless of the input's time dim. Using the input's T here
+                        # would inflate the width by history_len and make Reconstruct unflatten
+                        # the single-step y_pred with the wrong shape (crash when history_len > 1).
                         parts = var_key.split("/")
                         if len(parts) >= 2 and parts[1] in _PREDICTABLE_FIELD_TYPES:
+                            out_ch = n_levels  # n_levels * 1 output step
                             output_channel_map[var_key] = {
-                                "slice": slice(output_cursor, output_cursor + n_ch),
-                                "orig_shape": (n_levels, T),
+                                "slice": slice(output_cursor, output_cursor + out_ch),
+                                "orig_shape": (n_levels, 1),
                             }
-                            output_cursor += n_ch
+                            output_cursor += out_ch
 
             elif data_type == "target":
                 for source, variables in sources.items():
