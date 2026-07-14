@@ -158,6 +158,7 @@ def run_forecast(
 
     full_data_dict["ic_raw"] = ic_batch.get("input", {})
     full_data_dict["ic_preprocessed"] = apply_preblocks(ic_preblocks, ic_batch, device=device)
+    full_data_dict["x_physical"] = full_data_dict["ic_preprocessed"]["input"]
     full_data_dict.update(apply_preblocks(step_preblocks, full_data_dict["ic_preprocessed"], device=device))
 
     # Multi-step history window fed to the model. At the IC it comes straight
@@ -191,6 +192,9 @@ def run_forecast(
 
                 # drop None target so ConcatToTensor doesn't trip over it
                 next_batch = {k: v for k, v in next_batch.items() if v is not None}
+
+                # save physical-unit assembled input before preblocks normalize and flatten it
+                full_data_dict["x_physical"] = next_batch["input"]
 
                 full_data_dict.update(apply_preblocks(step_preblocks, next_batch, device=device))
 
