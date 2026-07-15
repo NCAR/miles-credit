@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import hashlib
 import logging
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -42,20 +43,41 @@ def get_hrrr_source(config: dict) -> tuple[str, dict]:
     )
 
 
-def generate_profiling_dates(start_date: pd.Timestamp, timestep_str: str, count: int) -> list[pd.Timestamp]:
-    """Generate list of datetimes starting from start_date, incremented by timestep."""
+def generate_profiling_dates(
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    timestep_str: str,
+    count: int,
+    sample_random: bool = False,
+    seed: int = 42,
+) -> list[pd.Timestamp]:
+    """Generate list of datetimes starting from start_date, incremented by timestep or sampled randomly."""
     freq = timestep_str
     if freq == "15min":
         freq = "15T"
     try:
-        dates = pd.date_range(start=start_date, periods=count, freq=freq)
-        return list(dates)
+        # Generate the full range of datetimes
+        full_range = pd.date_range(start=start_date, end=end_date, freq=freq)
     except Exception as e:
         print(
             f"[NOTIFICATION] Fallback logic: Failed to generate date range with frequency '{timestep_str}'. Defaulting to '1H'. Error: {e}"
         )
-        dates = pd.date_range(start=start_date, periods=count, freq="1H")
-        return list(dates)
+        full_range = pd.date_range(start=start_date, end=end_date, freq="1H")
+
+    if sample_random:
+        if len(full_range) < count:
+            print(
+                f"[NOTIFICATION] Fallback logic: Requested count {count} is larger than the total available dates in the range ({len(full_range)}). Defaulting to returning all available dates sequentially."
+            )
+            return list(full_range)
+        # Set seed for reproducibility
+        random.seed(seed)
+        # sampled = sorted(random.sample(list(full_range), count))
+        sampled = random.sample(list(full_range), count)
+        return sampled
+    else:
+        # Sequential from start_date
+        return list(full_range[:count])
 
 
 def get_byte_ranges_for_source(
@@ -317,11 +339,11 @@ def run_benchmarks(
         # Compact print format: one line per trial
         log_line = (
             f"Trial {i:2d}/{trials} (Date: {date.strftime('%Y-%m-%d %H:%M:%SZ')}) - {len(br)} ranges: "
-            f"seq={trial_results['get_range (Sequential)']:5.3f}s | "
-            f"pool={trial_results['get_range (Parallel, ThreadPool)']:5.3f}s | "
-            f"gather={trial_results['get_range_async (asyncio.gather)']:5.3f}s | "
-            f"sync_ranges={trial_results['get_ranges (Sync)']:5.3f}s | "
-            f"async_ranges={trial_results['get_ranges_async (Async)']:5.3f}s"
+            f"seq={trial_results['get_range (Sequential)']:6.3f}s | "
+            f"pool={trial_results['get_range (Parallel, ThreadPool)']:6.3f}s | "
+            f"gather={trial_results['get_range_async (asyncio.gather)']:6.3f}s | "
+            f"sync_ranges={trial_results['get_ranges (Sync)']:6.3f}s | "
+            f"async_ranges={trial_results['get_ranges_async (Async)']:6.3f}s"
         )
         print(log_line)
 
@@ -341,6 +363,17 @@ def main():
         type=str,
         default=None,
         help="Initialization date for profiling (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS).",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default=None,
+        help="End datetime limit for random sampling (defaults to end_datetime in config).",
+    )
+    parser.add_argument(
+        "--sample-random",
+        action="store_true",
+        help="Sample random datetimes between start and end date instead of sequential.",
     )
     parser.add_argument(
         "--trials",
@@ -379,8 +412,23 @@ def main():
     start_date = pd.Timestamp(date_str)
     timestep = config["data"].get("timestep", "1h")
 
+    if args.end_date is None:
+        end_date_val = config["data"].get("end_datetime")
+        if end_date_val is None:
+            default_end = (start_date + pd.Timedelta(days=30)).strftime("%Y-%m-%d")
+            print(
+                f"[NOTIFICATION] Fallback logic: No end datetime found in config or args. Defaulting to 30 days after start date: {default_end}"
+            )
+            end_date = start_date + pd.Timedelta(days=30)
+        else:
+            end_date = pd.Timestamp(end_date_val)
+    else:
+        end_date = pd.Timestamp(args.end_date)
+
     # Generate dates list: 1 for warm-up + trials
-    dates = generate_profiling_dates(start_date, timestep, count=args.trials + 1)
+    dates = generate_profiling_dates(
+        start_date, end_date, timestep, count=args.trials + 1, sample_random=args.sample_random
+    )
 
     # 3. Source config and S3 initialization
     source_name, source_cfg = get_hrrr_source(config)
@@ -406,6 +454,7 @@ def main():
     print(f"  3D Variables: {vars_3d} (Levels: {levels})")
     print(f"  2D Variables: {vars_2d}")
     print(f"  Timestep:     {timestep}")
+    print(f"  Sampling:     {'Random' if args.sample_random else 'Sequential'}")
     print(f"  Total Dates:  {len(dates)} (1 warm-up + {args.trials} trials)")
 
     # Construct file path on S3 and initialize
@@ -414,28 +463,30 @@ def main():
     store = _start_s3_obstore(s3_bucket)
 
     # 4. Run benchmarks
-    timings, total_mb = run_benchmarks(
-        store, dates, source_cfg, forecast_hour, product, args.trials, args.workers
-    )
+    timings, total_mb = run_benchmarks(store, dates, source_cfg, forecast_hour, product, args.trials, args.workers)
 
     # 5. Report results
-    print("\n" + "=" * 80)
-    print(f"{'PROFILING CONFIGURATION SUMMARY':^80}")
-    print("=" * 80)
+    print("\n" + "=" * 90)
+    print(f"{'PROFILING CONFIGURATION SUMMARY':^90}")
+    print("=" * 90)
     print(f"  Configuration File:   {config_path}")
     print(f"  HRRR Product:         {product}")
     print(f"  3D Variables:         {vars_3d}")
     print(f"  2D Variables:         {vars_2d}")
     print(f"  Levels:               {levels}")
     print(f"  Total Timed Trials:   {args.trials}")
+    print(f"  Sampling Strategy:    {'Random' if args.sample_random else 'Sequential'}")
     print(f"  ThreadPool Workers:   {args.workers}")
     print(f"  Avg Data Size/Trial:  {total_mb:.4f} MB")
-    print("=" * 80)
-    print(f"{'Method Comparison (Timed Trials)':^80}")
-    print("=" * 80)
-    header = f"{'Method':<35} | {'Mean Time':<10} | {'Std Dev':<10} | {'Throughput':<15}"
+    print("=" * 90)
+    print(f"{'Method Comparison (Timed Trials)':^90}")
+    print("=" * 90)
+    header = f"{'Method':<35} | {'Mean Time':<10} | {'Std Dev':<10} | {'Throughput':<14} | {'Speedup':<8}"
     print(header)
-    print("-" * 80)
+    print("-" * 90)
+
+    # Baseline for speedup comparison is "get_range (Sequential)"
+    seq_mean_time = np.mean(timings.get("get_range (Sequential)", [1.0]))
 
     for name, times in timings.items():
         if not times:
@@ -443,8 +494,9 @@ def main():
         mean_time = np.mean(times)
         std_time = np.std(times)
         throughput = total_mb / mean_time
-        print(f"{name:<35} | {mean_time:8.4f} s | {std_time:8.4f} s | {throughput:8.4f} MB/s")
-    print("=" * 80)
+        speedup = seq_mean_time / mean_time
+        print(f"{name:<35} | {mean_time:8.4f} s | {std_time:8.4f} s | {throughput:9.4f} MB/s | {speedup:7.2f}x")
+    print("=" * 90)
 
 
 if __name__ == "__main__":
