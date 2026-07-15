@@ -129,8 +129,8 @@ trainer:
   learning_rate: 1.0e-03
   weight_decay: 0
 
-  train_batch_size: 16     # per-GPU batch size; total = batch_size × n_gpus
-  valid_batch_size: 16
+  train_batch_size: 1     # per-GPU batch size; total = batch_size × n_gpus
+  valid_batch_size: 1
 
   batches_per_epoch: 0    # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
@@ -155,9 +155,9 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 32
-  valid_thread_workers: 32
-  prefetch_factor: 1
+  thread_workers: 0
+  valid_thread_workers: 0
+  prefetch_factor: none
 
 
 # ---- Architecture (based on HRRR Extent, A×B) ---- #
