@@ -42,22 +42,43 @@ def get_hrrr_source(config: dict) -> tuple[str, dict]:
     )
 
 
-def get_byte_ranges_for_source(store: obs.store.S3Store, s3_entry_name: str, source_cfg: dict) -> list[tuple[int, int]]:
+def generate_profiling_dates(start_date: pd.Timestamp, timestep_str: str, count: int) -> list[pd.Timestamp]:
+    """Generate list of datetimes starting from start_date, incremented by timestep."""
+    freq = timestep_str
+    if freq == "15min":
+        freq = "15T"
+    try:
+        dates = pd.date_range(start=start_date, periods=count, freq=freq)
+        return list(dates)
+    except Exception as e:
+        print(
+            f"[NOTIFICATION] Fallback logic: Failed to generate date range with frequency '{timestep_str}'. Defaulting to '1H'. Error: {e}"
+        )
+        dates = pd.date_range(start=start_date, periods=count, freq="1H")
+        return list(dates)
+
+
+def get_byte_ranges_for_source(
+    store: obs.store.S3Store, s3_entry_name: str, source_cfg: dict, verbose: bool = False
+) -> list[tuple[int, int]]:
     """Retrieve the idx sidecar, parse the variable configuration, and return exclusive byte ranges."""
-    print(f"Fetching and parsing idx sidecar for S3 entry: {s3_entry_name}")
+    if verbose:
+        print(f"Fetching and parsing idx sidecar for S3 entry: {s3_entry_name}")
     idx_entries = _fetch_obstore_idx(store, s3_entry_name)
 
     levels = source_cfg.get("levels")
     if levels is None:
-        print(
-            "[NOTIFICATION] Default value employed: source config does not specify 'levels'. Defaulting to all available levels."
-        )
+        if verbose:
+            print(
+                "[NOTIFICATION] Default value employed: source config does not specify 'levels'. Defaulting to all available levels."
+            )
 
     product = source_cfg.get("product", "wrfprs")
     if "product" not in source_cfg:
-        print(
-            "[NOTIFICATION] Default value employed: source config does not specify 'product'. Defaulting to 'wrfprs'."
-        )
+        if verbose:
+            print(
+                "[NOTIFICATION] Default value employed: source config does not specify 'product'. Defaulting to 'wrfprs'."
+            )
 
     variables_block = source_cfg.get("variables", {})
 
@@ -74,7 +95,8 @@ def get_byte_ranges_for_source(store: obs.store.S3Store, s3_entry_name: str, sou
         # 3D Variables
         for vname in vars_3d:
             if vname not in VAR_REGISTRY:
-                print(f"[NOTIFICATION] Warning: Variable {vname} not found in VAR_REGISTRY.")
+                if verbose:
+                    print(f"[NOTIFICATION] Warning: Variable {vname} not found in VAR_REGISTRY.")
                 continue
             reg = VAR_REGISTRY[vname]
             if product == "wrfnat":
@@ -91,12 +113,13 @@ def get_byte_ranges_for_source(store: obs.store.S3Store, s3_entry_name: str, sou
         # 2D Variables
         for vname in vars_2d:
             if vname not in VAR_REGISTRY:
-                print(f"[NOTIFICATION] Warning: Variable {vname} not found in VAR_REGISTRY.")
+                if verbose:
+                    print(f"[NOTIFICATION] Warning: Variable {vname} not found in VAR_REGISTRY.")
                 continue
             reg = VAR_REGISTRY[vname]
             if product == "wrfsubh":
-                # wrfsubh requires step_min
-                print("[NOTIFICATION] Default value employed: step_min for wrfsubh defaults to 15.")
+                if verbose:
+                    print("[NOTIFICATION] Default value employed: step_min for wrfsubh defaults to 15.")
                 step_min = 15
                 from credit.datasets.hrrr import _find_subhf_entry
 
@@ -123,9 +146,9 @@ def get_byte_ranges_for_source(store: obs.store.S3Store, s3_entry_name: str, sou
             end = end + 1  # end parameter in obstore is exclusive
         byte_ranges.append((start, end))
 
-    if has_none_end:
+    if has_none_end and verbose:
         print(
-            "[NOTIFICATION] Fallback logic: One or more GRIB messages had byte_end as None (EOF). Used obstore.head metadata to resolve the file size."
+            "[NOTIFICATION] Fallback logic: One or more GRIB messages had byte_end as None (EOF). Used obstore.head to resolve file size."
         )
 
     return byte_ranges
@@ -226,50 +249,83 @@ def profile_get_ranges_async(
 
 def run_benchmarks(
     store: obs.store.S3Store,
-    path: str,
-    byte_ranges: list[tuple[int, int]],
+    dates: list[pd.Timestamp],
+    source_cfg: dict,
+    forecast_hour: int,
+    product: str,
     trials: int,
     workers: int,
-) -> dict[str, list[float]]:
-    """Run warm-ups followed by multiple trials for all retrieval strategies."""
+) -> tuple[dict[str, list[float]], float]:
+    """Run warm-up followed by timed trials over unique dates."""
     strategies = {
-        "get_range (Sequential)": lambda: profile_get_range_sequential(store, path, byte_ranges),
-        "get_range (Parallel, ThreadPool)": lambda: profile_get_range_parallel(
-            store, path, byte_ranges, max_workers=workers
+        "get_range (Sequential)": lambda br, path: profile_get_range_sequential(store, path, br),
+        "get_range (Parallel, ThreadPool)": lambda br, path: profile_get_range_parallel(
+            store, path, br, max_workers=workers
         ),
-        "get_range_async (asyncio.gather)": lambda: profile_get_range_async(store, path, byte_ranges),
-        "get_ranges (Sync)": lambda: profile_get_ranges(store, path, byte_ranges),
-        "get_ranges_async (Async)": lambda: profile_get_ranges_async(store, path, byte_ranges),
+        "get_range_async (asyncio.gather)": lambda br, path: profile_get_range_async(store, path, br),
+        "get_ranges (Sync)": lambda br, path: profile_get_ranges(store, path, br),
+        "get_ranges_async (Async)": lambda br, path: profile_get_ranges_async(store, path, br),
     }
 
-    raw_data = b"".join(obs.get_range(store, path, start=r[0], end=r[1]).to_bytes() for r in byte_ranges)
-    expected_hash = hashlib.sha256(raw_data).hexdigest()
+    # 1. Warm-up Trial
+    warmup_date = dates[0]
+    print(f"Running warm-up on date: {warmup_date.strftime('%Y-%m-%d %H:%M:%SZ')}")
+    s3_entry_name = _hrrr_s3_entry_name(warmup_date, forecast_hour, product)
+    byte_ranges = get_byte_ranges_for_source(store, s3_entry_name, source_cfg, verbose=True)
 
+    total_bytes = sum(end - start for start, end in byte_ranges)
+    total_mb = total_bytes / (1024 * 1024)
+
+    print("Executing warm-up for all strategies...")
+    warmup_hashes = {}
+    for name, func in strategies.items():
+        try:
+            t_el, res = func(byte_ranges, s3_entry_name)
+            warmup_hashes[name] = hashlib.sha256(b"".join(res)).hexdigest()
+            print(f"  - {name}: {t_el:.4f}s")
+        except Exception as e:
+            print(f"  - {name} FAILED: {e}")
+            raise e
+
+    # Verify identical bytes across all strategies
+    if len(set(warmup_hashes.values())) > 1:
+        raise ValueError(f"Hash mismatch during warm-up! Retrieval is inconsistent: {warmup_hashes}")
+    print("Warm-up completed successfully. All strategies verified identical bytes.\n")
+
+    # 2. Timed Trials
+    print(f"Starting {trials} timed trials over unique datetimes...")
     timings = {name: [] for name in strategies}
 
-    for name, func in strategies.items():
-        print(f"\n--- Method: {name} ---")
-        print("Running warm-up trial...")
-        try:
-            warm_time, warm_res = func()
-            warm_hash = hashlib.sha256(b"".join(warm_res)).hexdigest()
-            if warm_hash != expected_hash:
-                print(f"Warning: Hash mismatch in warm-up for {name}!")
-            else:
-                print(f"Warm-up trial took {warm_time:.4f} seconds (verified)")
-        except Exception as e:
-            print(f"Error during warm-up for {name}: {e}")
-            continue
+    for i in range(1, trials + 1):
+        date = dates[i]
+        s3_path = _hrrr_s3_entry_name(date, forecast_hour, product)
+        br = get_byte_ranges_for_source(store, s3_path, source_cfg, verbose=False)
 
-        for i in range(trials):
-            print(f"Running timed trial {i + 1}/{trials}...")
-            trial_time, trial_res = func()
-            trial_hash = hashlib.sha256(b"".join(trial_res)).hexdigest()
-            if trial_hash != expected_hash:
-                print(f"Warning: Hash mismatch in trial {i + 1}!")
-            timings[name].append(trial_time)
+        trial_results = {}
+        trial_hashes = {}
 
-    return timings
+        for name, func in strategies.items():
+            t_el, res = func(br, s3_path)
+            timings[name].append(t_el)
+            trial_results[name] = t_el
+            trial_hashes[name] = hashlib.sha256(b"".join(res)).hexdigest()
+
+        # Check for consistency within trial
+        if len(set(trial_hashes.values())) > 1:
+            print(f"[WARNING] Trial {i} hash mismatch! Hashes: {trial_hashes}")
+
+        # Compact print format: one line per trial
+        log_line = (
+            f"Trial {i:2d}/{trials} (Date: {date.strftime('%Y-%m-%d %H:%M:%SZ')}) - {len(br)} ranges: "
+            f"seq={trial_results['get_range (Sequential)']:5.3f}s | "
+            f"pool={trial_results['get_range (Parallel, ThreadPool)']:5.3f}s | "
+            f"gather={trial_results['get_range_async (asyncio.gather)']:5.3f}s | "
+            f"sync_ranges={trial_results['get_ranges (Sync)']:5.3f}s | "
+            f"async_ranges={trial_results['get_ranges_async (Async)']:5.3f}s"
+        )
+        print(log_line)
+
+    return timings, total_mb
 
 
 def main():
@@ -300,7 +356,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # 1. Config loading with fallbacks
+    # 1. Config loading
     if args.config is None:
         default_config = "config/hrrr_emulator/sf_hrrr_emulator_test_small_workers.yml"
         print(f"[NOTIFICATION] Fallback logic: No config path provided. Defaulting to: {default_config}")
@@ -310,7 +366,7 @@ def main():
 
     config = load_config(config_path)
 
-    # 2. Date loading with fallbacks
+    # 2. Date loading
     if args.date is None:
         default_date = config["data"].get("start_datetime", "2024-01-01")
         print(
@@ -320,7 +376,11 @@ def main():
     else:
         date_str = args.date
 
-    t = pd.Timestamp(date_str)
+    start_date = pd.Timestamp(date_str)
+    timestep = config["data"].get("timestep", "1h")
+
+    # Generate dates list: 1 for warm-up + trials
+    dates = generate_profiling_dates(start_date, timestep, count=args.trials + 1)
 
     # 3. Source config and S3 initialization
     source_name, source_cfg = get_hrrr_source(config)
@@ -337,31 +397,43 @@ def main():
 
     product = source_cfg.get("product", "wrfprs")
 
-    # Construct file path on S3
-    s3_bucket = "noaa-hrrr-bdp-pds"
-    s3_entry_name = _hrrr_s3_entry_name(t, forecast_hour, product)
+    # Extract target variables for print summary
+    vars_3d = source_cfg.get("variables", {}).get("prognostic", {}).get("vars_3D") or []
+    vars_2d = source_cfg.get("variables", {}).get("prognostic", {}).get("vars_2D") or []
+    levels = source_cfg.get("levels") or []
 
+    print("\nProfiling Target Setup:")
+    print(f"  3D Variables: {vars_3d} (Levels: {levels})")
+    print(f"  2D Variables: {vars_2d}")
+    print(f"  Timestep:     {timestep}")
+    print(f"  Total Dates:  {len(dates)} (1 warm-up + {args.trials} trials)")
+
+    # Construct file path on S3 and initialize
+    s3_bucket = "noaa-hrrr-bdp-pds"
     print(f"Initializing obstore connection to S3 bucket: {s3_bucket}")
     store = _start_s3_obstore(s3_bucket)
 
-    # 4. Extract byte ranges
-    byte_ranges = get_byte_ranges_for_source(store, s3_entry_name, source_cfg)
-    total_bytes = sum(end - start for start, end in byte_ranges)
-    total_mb = total_bytes / (1024 * 1024)
+    # 4. Run benchmarks
+    timings, total_mb = run_benchmarks(
+        store, dates, source_cfg, forecast_hour, product, args.trials, args.workers
+    )
 
-    print("\nConfiguration summary:")
-    print(f"  GRIB2 Key:   {s3_entry_name}")
-    print(f"  Messages:    {len(byte_ranges)}")
-    print(f"  Total Size:  {total_mb:.4f} MB")
-
-    # 5. Run benchmarks
-    timings = run_benchmarks(store, s3_entry_name, byte_ranges, args.trials, args.workers)
-
-    # 6. Report results
+    # 5. Report results
     print("\n" + "=" * 80)
+    print(f"{'PROFILING CONFIGURATION SUMMARY':^80}")
+    print("=" * 80)
+    print(f"  Configuration File:   {config_path}")
+    print(f"  HRRR Product:         {product}")
+    print(f"  3D Variables:         {vars_3d}")
+    print(f"  2D Variables:         {vars_2d}")
+    print(f"  Levels:               {levels}")
+    print(f"  Total Timed Trials:   {args.trials}")
+    print(f"  ThreadPool Workers:   {args.workers}")
+    print(f"  Avg Data Size/Trial:  {total_mb:.4f} MB")
+    print("=" * 80)
     print(f"{'Method Comparison (Timed Trials)':^80}")
     print("=" * 80)
-    header = f"{'Method':<35} | {'Mean Time':<11} | {'Std Dev':<10} | {'Throughput':<15}"
+    header = f"{'Method':<35} | {'Mean Time':<10} | {'Std Dev':<10} | {'Throughput':<15}"
     print(header)
     print("-" * 80)
 
@@ -377,5 +449,6 @@ def main():
 
 if __name__ == "__main__":
     print()
+    print("Starting obstore profiling...")
     main()
     print()
