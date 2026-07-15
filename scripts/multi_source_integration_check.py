@@ -18,12 +18,22 @@ import numpy as np
 setup_timer_start = time.perf_counter()
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
-config_path = BASE_DIR.parent / "config" / "hrrr_emulator" / "sf_hrrr_emulator.yml"
+config_path = BASE_DIR.parent / "config" / "hrrr_emulator" / "sf_hrrr_emulator_test_small_workers.yml"
 # config_path = BASE_DIR.parent / "config" / "gen_2" / "smoke" / "integration_test_hrrr.yml"
 # config_path = BASE_DIR.parent / "config" / "multi_source_data_local.yml"
 
+print(f"Using config: {config_path}")
+
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)
+
+# Show the networking relevant parameters
+print("Requesting the following resources:")
+print("train_batch_size:      ", config["trainer"]["train_batch_size"])
+print("valid_batch_size:      ", config["trainer"]["valid_batch_size"])
+print("thread_workers:        ", config["trainer"]["thread_workers"])
+print("valid_thread_workers:  ", config["trainer"]["valid_thread_workers"])
+print("prefetch_factor:       ", config["trainer"]["prefetch_factor"])
 
 nfs = config["data"]["forecast_len"]
 ms_dataset = MultiSourceDataset(config["data"], return_target=True)
@@ -55,10 +65,25 @@ sample_timer_start = time.perf_counter()
 sample = next(iter(ms_loader))
 sample_timer_end = time.perf_counter()
 print(f"First sample taken in {sample_timer_end - sample_timer_start:.2f} seconds")
-# sample_timer_start = time.perf_counter()
-# sample = next(iter(ms_loader))
-# sample_timer_end = time.perf_counter()
-# print(f"Second sample taken in {sample_timer_end - sample_timer_start:.2f} seconds")
+sample_timer_start = time.perf_counter()
+sample = next(iter(ms_loader))
+sample_timer_end = time.perf_counter()
+print(f"Second sample taken in {sample_timer_end - sample_timer_start:.2f} seconds")
+
+# Now with n samples serially
+N_SAMPLES = 10
+time_values = []
+for _ in range(N_SAMPLES):
+    sample_timer_start = time.perf_counter()
+    sample = next(iter(ms_loader))
+    sample_timer_end = time.perf_counter()
+    time_values.append(sample_timer_end - sample_timer_start)
+
+time_values = np.array(time_values)
+tot_samples_time = np.sum(time_values)
+mean_per_sample_time = np.mean(time_values)
+print(f"Ran for {N_SAMPLES}, which took {np.sum(time_values):.2f} seconds or ")
+print(f"{np.mean(time_values):.2f} per sample (std of {np.std(time_values):.2f})")
 
 inspection_timer_start = time.perf_counter()
 print(sample.keys())
