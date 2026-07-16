@@ -1129,13 +1129,13 @@ class HRRRDataset(BaseDataset):
         # Compute the spatial slice once from the first message's lat/lon grid.
         # The HRRR grid is fixed, so this result is cached for subsequent calls.
         # ------------------------------------------------------------------
-        t_start_latlons = time.perf_counter()
-        lats, lons = decoded[0].latlons()
-        t_end_latlons = time.perf_counter()
-
-        t_start_get_slice = time.perf_counter()
-        row_sl, col_sl = self._get_spatial_slice(lats, lons)
-        t_end_get_slice = time.perf_counter()
+        t_start_slice = time.perf_counter()
+        if self._spatial_slice is None:
+            lats, lons = decoded[0].latlons()
+            row_sl, col_sl = self._get_spatial_slice(lats, lons)
+        else:
+            row_sl, col_sl = self._spatial_slice
+        t_end_slice = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Group decoded arrays by variable name and build tensors
@@ -1171,8 +1171,7 @@ class HRRRDataset(BaseDataset):
             f"plan={t_start_fetch - t_start_idx:.3f}s | "
             f"fetch={t_end_fetch - t_start_fetch:.3f}s | "
             f"decode={t_end_decode - t_start_decode:.3f}s | "
-            f"latlons={t_end_latlons - t_start_latlons:.3f}s | "
-            f"get_slice={t_end_get_slice - t_start_get_slice:.3f}s | "
+            f"slice={t_end_slice - t_start_slice:.3f}s | "
             f"decompress={t_end_decompress - t_start_decompress:.3f}s | "
             f"tensor={t_end_tensor - t_start_tensor:.3f}s | "
             f"total={t_end_idx - t_start_idx:.3f}s"
