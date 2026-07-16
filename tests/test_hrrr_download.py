@@ -1,7 +1,7 @@
 """
 tests/test_hrrr_download.py
 ------------------
-Unit tests for credit/datasets/hrrr_download.py.
+Unit tests for credit/datasets/gen_2/hrrr_download.py.
 
 Remote/dataset integration tests are run unless the environment variable
 ``SKIP_REMOTE=1`` is set (they hit real AWS endpoints).
@@ -15,9 +15,9 @@ import time
 
 import pytest
 
-from credit.datasets.hrrr_download import download_hrrr
-from credit.datasets.hrrr import VALID_PRODUCTS
-from credit.datasets.multi_source import make_single_source_subconfig
+from credit.datasets.gen_2.hrrr_download import download_hrrr
+from credit.datasets.gen_2.hrrr import VALID_PRODUCTS
+from credit.datasets.gen_2.multi_source import make_single_source_subconfig
 
 # ---------------------------------------------------------------------------
 # Parsing tests

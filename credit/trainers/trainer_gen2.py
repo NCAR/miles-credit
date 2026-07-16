@@ -21,7 +21,7 @@ from credit.parallel.domain import (
 )
 from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.fsdp2 import fsdp2_is_applied
-from credit.datasets.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.datasets.gen_2.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.postblock import build_postblocks, apply_postblocks
 from credit.preblock import attach_channel_schema, build_preblocks, apply_preblocks
 from credit.trainers.rollout_utils import assemble_rollout_batch

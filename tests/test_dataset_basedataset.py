@@ -1,7 +1,7 @@
 """
 tests/test_dataset_basedataset.py
 -------------------------------
-Unit tests for the BaseDataset class in credit.datasets.base_dataset.py.
+Unit tests for the BaseDataset class in credit.datasets.gen_2.base_dataset.py.
 
 """
 
@@ -9,7 +9,7 @@ import pytest
 import pandas as pd
 from typing import Any, Dict, List
 
-from credit.datasets.base_dataset import AbstractBaseDataset, BaseDataset
+from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
 
 # ---------------------------------------------------------------------------
 # Test Fixtures
@@ -67,7 +67,7 @@ def patch_base_dataset_io(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_glob(pattern: str) -> List[str]:
         return ["/fake/file1.nc", "/fake/file2.nc"]
 
-    monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
+    monkeypatch.setattr("credit.datasets.gen_2.base_dataset.glob", fake_glob)
 
     def fake_map_files(
         files: List[str], time_fmt: str, path_template: str | None = None
@@ -77,7 +77,7 @@ def patch_base_dataset_io(monkeypatch: pytest.MonkeyPatch) -> None:
             (pd.Timestamp("2023-01-01"), pd.Timestamp("2023-12-31"), "/fake/file2.nc"),
         ]
 
-    monkeypatch.setattr("credit.datasets.base_dataset._map_files", fake_map_files)
+    monkeypatch.setattr("credit.datasets.gen_2.base_dataset._map_files", fake_map_files)
 
 
 # ---------------------------------------------------------------------------

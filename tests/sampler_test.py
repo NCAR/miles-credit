@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import pytest
-from credit.datasets.local import LocalDataset
+from credit.datasets.gen_2.local import LocalDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
 
@@ -57,7 +57,7 @@ def patch_era5_io_multiyear(monkeypatch: pytest.MonkeyPatch, annual_xr_dataset: 
     Patch glob + xarray open so ERA5Dataset sees
     multiple yearly files and routes correctly.
     """
-    BASE_DATASET_MODULE = "credit.datasets.base_dataset"
+    BASE_DATASET_MODULE = "credit.datasets.gen_2.base_dataset"
 
     # 1) glob returns two "files", one per year
     monkeypatch.setattr(f"{BASE_DATASET_MODULE}.glob", lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"])

@@ -35,9 +35,9 @@ import torch.distributed as dist
 import yaml
 from torch.utils.data import DataLoader
 
-from credit.datasets._utils import to_calendar  # pyright: ignore[reportPrivateUsage]
-from credit.datasets.multi_source import MultiSourceDataset
-from credit.datasets.schema import ChannelSchema
+from credit.datasets.gen_2.multi_source import MultiSourceDataset
+from credit.datasets.gen_2.schema import ChannelSchema
+from credit.datasets.gen_2._utils import to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.distributed import get_rank_info, setup
 from credit.output_gen2 import ForecastWriter
 from credit.pbs import launch_script, launch_script_mpi

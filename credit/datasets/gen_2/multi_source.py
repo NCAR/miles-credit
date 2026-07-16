@@ -17,7 +17,7 @@ Sample structure returned by __getitem__::
 
 Usage::
 
-    from credit.datasets.multi_source import MultiSourceDataset
+    from credit.datasets.gen_2.multi_source import MultiSourceDataset
     from credit.samplers import DistributedMultiStepBatchSampler
     from torch.utils.data import DataLoader
 
@@ -43,7 +43,8 @@ from typing import Any
 
 import pandas as pd
 
-from credit.datasets._utils import (  # pyright: ignore[reportPrivateUsage]
+from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
+from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
     build_time_index,
     filter_index_by_labels,
     is_standard_calendar,
@@ -51,7 +52,6 @@ from credit.datasets._utils import (  # pyright: ignore[reportPrivateUsage]
     normalize_calendar,
     to_calendar,
 )
-from credit.datasets.base_dataset import AbstractBaseDataset, BaseDataset
 
 logger = logging.getLogger(__name__)
 
@@ -62,16 +62,16 @@ logger = logging.getLogger(__name__)
 # datasets should instead be registered via custom_objects (see credit.registry),
 # which populates credit.datasets._DATASET_REGISTRY.
 _SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
-    "base": ("credit.datasets.base_dataset", "BaseDataset"),  # placeholders / testing
-    "local": ("credit.datasets.local", "LocalDataset"),
-    "arco_era5": ("credit.datasets.era5", "ARCOERA5Dataset"),
-    "weatherbench2_era5": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
-    "mrms": ("credit.datasets.mrms", "MRMSDataset"),
-    "goes": ("credit.datasets.goes", "GOESDataset"),
-    "hrrr": ("credit.datasets.hrrr", "HRRRDataset"),
-    "hrrr_nat": ("credit.datasets.hrrr", "HRRRDataset"),
-    "hrrr_subh": ("credit.datasets.hrrr", "HRRRDataset"),
-    "tisr": ("credit.datasets.tisr", "TISRDataset"),
+    "base": ("credit.datasets.gen_2.base_dataset", "BaseDataset"),  # placeholders / testing
+    "local": ("credit.datasets.gen_2.local", "LocalDataset"),
+    "arco_era5": ("credit.datasets.gen_2.era5", "ARCOERA5Dataset"),
+    "weatherbench2_era5": ("credit.datasets.gen_2.era5", "WeatherBench2ERA5Dataset"),
+    "mrms": ("credit.datasets.gen_2.mrms", "MRMSDataset"),
+    "goes": ("credit.datasets.gen_2.goes", "GOESDataset"),
+    "hrrr": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "hrrr_nat": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "hrrr_subh": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "tisr": ("credit.datasets.gen_2.tisr", "TISRDataset"),
 }
 
 

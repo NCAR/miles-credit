@@ -18,11 +18,11 @@ After downloading, switch ``mode`` to ``"local"`` in the config.
 
 Usage::
 
-    python -m credit.datasets.hrrr_download -c config/my_conf.yaml --num-workers 8
+    python -m credit.datasets.gen_2.hrrr_download -c config/my_conf.yaml --num-workers 8
 
 Or programmatically::
 
-    from credit.datasets.hrrr_download import download_hrrr
+    from credit.datasets.gen_2.hrrr_download import download_hrrr
     download_hrrr(config['data'], num_workers=8, overwrite=False)
 
 Config section used (``data.source``)::
@@ -50,8 +50,8 @@ from typing import NamedTuple, Any
 
 import pandas as pd
 
-from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request  # pyright: ignore[reportPrivateUsage]
-from credit.datasets.multi_source import make_single_source_subconfig
+from credit.datasets.gen_2.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request  # pyright: ignore[reportPrivateUsage]
+from credit.datasets.gen_2.multi_source import make_single_source_subconfig
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,9 @@ def _download_one(task: _DownloadTask) -> str:
     """
     import s3fs  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
 
-    if os.path.exists(task.local_path) and not task.overwrite:
+    idx_local_path = task.local_path + ".idx"
+
+    if os.path.exists(task.local_path) and os.path.exists(idx_local_path) and not task.overwrite:
         return f"skip  {task.local_path}"
 
     os.makedirs(os.path.dirname(task.local_path), exist_ok=True)
@@ -159,7 +161,7 @@ def download_hrrr(
     except ImportError as exc:
         raise ImportError("s3fs is required for downloading: pip install s3fs") from exc
 
-    base_path: str = source_cfg["base_path"]
+    base_path: str = os.path.expanduser(os.path.expandvars(source_cfg["base_path"]))
     forecast_hour: int = int(source_cfg.get("forecast_hour", 0))
 
     dt = pd.Timedelta(data_config["timestep"])
@@ -241,7 +243,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config file.")
     parser.add_argument("--source_name", default=None, help="Name of the source in the data config to download.")
     parser.add_argument(
-        "--num_workers",
+        "--num-workers",
         type=int,
         default=4,
         help="Number of parallel download workers (default: 4).",

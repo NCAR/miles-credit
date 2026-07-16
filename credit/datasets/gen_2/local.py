@@ -69,7 +69,7 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import (  # pyright: ignore[reportPrivateUsage]
+from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
     _find_file,
     _path_template_to_glob,
     _to_cftime,
