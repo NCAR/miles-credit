@@ -179,3 +179,7 @@ wb2_figs/
 
 # MAC DS_Store files
 .DS_Store
+
+# local-only camulator tutorial artifacts (kept on disk, not tracked)
+config/gen_2/camulator/camulator_cesm_tutorial_casper.yml
+notebooks/camulator_tutorial_experiments.ipynb
