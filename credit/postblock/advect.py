@@ -1,12 +1,17 @@
 """
 advect.py
 ---------
-``SemiLagrangianAdvection``: a postblock that performs one explicit
-semi-Lagrangian 3D advection step on one or more scalar tracer fields, in place,
-on the reconstructed prediction dict (``batch_dict["y_processed"]``).
+Shared engine plus the ``SemiLagrangianAdvection`` postblock: one explicit
+semi-Lagrangian 3D advection step on one or more scalar tracer fields, applied
+in place to a nested ``{source: {var_key: tensor}}`` dict. A preblock wrapping
+the same engine is available as
+:class:`credit.preblock.advect.SemiLagrangianAdvectionPre`, for advecting
+initial-condition tracers before the model runs; this module holds the shared
+engine and the postblock, mirroring ``credit.postblock.hybrid_interp``.
 
-It is designed to run **after** ``Reconstruct`` (and after any inverse-scaling
-block, so that fields are in physical units). For each rollout step it:
+The postblock is designed to run **after** ``Reconstruct`` (and after any
+inverse-scaling block, so that fields are in physical units). For each rollout
+step it:
 
 1. reads the predicted horizontal winds (``u``, ``v``) and surface pressure from
    ``y_processed``;
@@ -198,6 +203,226 @@ def _sample(
     return F.grid_sample(vol_padded, grid, mode="bilinear", padding_mode="border", align_corners=True)
 
 
+class _SemiLagrangianAdvectionEngine(torch.nn.Module):
+    """Shared engine for the semi-Lagrangian advection pre- and postblocks.
+
+    Holds the hybrid-level coefficients and lat/lon grid buffers, and applies
+    one semi-Lagrangian advection step to a nested ``{source: {var_key: tensor}}``
+    dict, overwriting each configured tracer in place. See
+    :class:`SemiLagrangianAdvection` for the full argument list, grid/coordinate
+    assumptions, and numerics.
+    """
+
+    def __init__(
+        self,
+        tracer_vars: list[str] | None = None,
+        u_var: str = "ERA5/prognostic/3d/u_component_of_wind",
+        v_var: str = "ERA5/prognostic/3d/v_component_of_wind",
+        surface_pressure_var: str = "ERA5/prognostic/2d/surface_pressure",
+        timestep_seconds: float = 21600.0,
+        n_iterations: int = 2,
+        omega_var: str | None = None,
+        level_info_file: str = "ERA5_Lev_Info.nc",
+        model_a_half_var: str = "a_half",
+        model_b_half_var: str = "b_half",
+        levels: list[int] | None = None,
+        level_order: str = "top_to_surface",
+        grid_info_file: str | None = None,
+        latitude_var: str = "latitude",
+        longitude_var: str = "longitude",
+        coslat_floor: float = 1e-4,
+        dp_dlevel_floor: float = 1.0,
+        lon_halo: int = 1,
+    ):
+        super().__init__()
+        if level_order not in ("top_to_surface", "surface_to_top"):
+            raise ValueError(f"level_order must be 'top_to_surface' or 'surface_to_top', got {level_order!r}.")
+        if n_iterations < 1:
+            raise ValueError(f"n_iterations must be >= 1, got {n_iterations}.")
+
+        self.tracer_vars = list(tracer_vars) if tracer_vars else ["ERA5/prognostic/3d/specific_humidity"]
+        self.u_var = u_var
+        self.v_var = v_var
+        self.surface_pressure_var = surface_pressure_var
+        self.timestep_seconds = float(timestep_seconds)
+        self.n_iterations = int(n_iterations)
+        self.omega_var = omega_var
+        self.levels = levels
+        self.level_order = level_order
+        self.latitude_var = latitude_var
+        self.longitude_var = longitude_var
+        self.coslat_floor = float(coslat_floor)
+        self.dp_dlevel_floor = float(dp_dlevel_floor)
+        self.lon_halo = int(lon_halo)
+
+        # Hybrid sigma-pressure half-level coefficients (mirrors GeopotentialDiagnostic).
+        with xr.open_dataset(get_meta_file_path(level_info_file)) as level_info:
+            a_all = torch.as_tensor(level_info[model_a_half_var].values, dtype=torch.float32)
+            b_all = torch.as_tensor(level_info[model_b_half_var].values, dtype=torch.float32)
+        if levels is not None:
+            half_idx = [lv - 1 for lv in levels] + [levels[-1]]
+            a_half, b_half = a_all[half_idx], b_all[half_idx]
+        else:
+            a_half, b_half = a_all, b_all
+        self.register_buffer("a_half", a_half, persistent=False)
+        self.register_buffer("b_half", b_half, persistent=False)
+
+        # Latitude/longitude grid (used to build the spherical metric terms).
+        with xr.open_dataset(get_meta_file_path(grid_info_file or level_info_file)) as grid_info:
+            lat_deg = torch.as_tensor(grid_info[latitude_var].values, dtype=torch.float32)
+            lon_deg = torch.as_tensor(grid_info[longitude_var].values, dtype=torch.float32)
+        self.register_buffer("lat_deg", lat_deg, persistent=False)
+        self.register_buffer("lon_deg", lon_deg, persistent=False)
+
+    # ------------------------------------------------------------------ #
+    # nested-dict accessors
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _get(nested: dict, var_key: str) -> torch.Tensor:
+        source = var_key.split("/")[0]
+        try:
+            return nested[source][var_key]
+        except KeyError as exc:
+            raise KeyError(f"SemiLagrangianAdvection: '{var_key}' not found in nested[{source!r}].") from exc
+
+    @staticmethod
+    def _set(nested: dict, var_key: str, value: torch.Tensor) -> None:
+        nested[var_key.split("/")[0]][var_key] = value
+
+    # ------------------------------------------------------------------ #
+    # grid construction
+    # ------------------------------------------------------------------ #
+    def _grid_coords(self, n_lat: int, n_lon: int, device, dtype):
+        """Return ``(lat_rad (H,), dlat_rad_row (H,), dlon_rad scalar)`` for the data grid.
+
+        Uses the latitude/longitude buffers when their lengths match the data
+        grid; otherwise constructs a uniform global grid and warns.
+        """
+        if self.lat_deg.numel() == n_lat and self.lon_deg.numel() == n_lon:
+            lat_deg = self.lat_deg.to(device=device, dtype=dtype)
+            lon_deg = self.lon_deg.to(device=device, dtype=dtype)
+        else:
+            logger.warning(
+                "SemiLagrangianAdvection: grid-info coords (%d lat, %d lon) do not match data grid "
+                "(%d lat, %d lon); falling back to a uniform global lat/lon grid.",
+                self.lat_deg.numel(),
+                self.lon_deg.numel(),
+                n_lat,
+                n_lon,
+            )
+            lat_deg = torch.linspace(90.0, -90.0, n_lat, device=device, dtype=dtype)
+            lon_deg = torch.arange(n_lon, device=device, dtype=dtype) * (360.0 / n_lon)
+
+        lat_rad = torch.deg2rad(lat_deg)
+        # per-row latitude spacing (signed) handles non-uniform / N->S-ordered grids
+        dlat_rad_row = torch.gradient(lat_rad, edge_order=1)[0]
+        dlon_rad = torch.deg2rad(lon_deg[1] - lon_deg[0])
+        return lat_rad, dlat_rad_row, dlon_rad
+
+    # ------------------------------------------------------------------ #
+    # forward
+    # ------------------------------------------------------------------ #
+    def advect_nested(self, nested: dict) -> None:
+        """Advect every configured tracer in ``nested`` one step, in place.
+
+        Args:
+            nested: ``{source: {var_key: tensor}}`` dict holding the winds,
+                surface pressure, and tracers, each with shape
+                ``(B, n_levels, n_time, H, W)`` (surface pressure: 1 level).
+        """
+        u5 = self._get(nested, self.u_var)  # (B, L, T, H, W)
+        v5 = self._get(nested, self.v_var)
+        sp5 = self._get(nested, self.surface_pressure_var)  # (B, 1, T, H, W)
+        like_shape = u5.shape
+        b, n_lev, t, n_lat, n_lon = like_shape
+        device, dtype = u5.device, u5.dtype
+
+        flip = self.level_order == "surface_to_top"
+
+        def _prep(field5: torch.Tensor) -> torch.Tensor:
+            """(B, L, T, H, W) -> (B*T, L, H, W), oriented top->surface."""
+            f = _to_nlhw(field5)
+            return torch.flip(f, dims=(1,)) if flip else f
+
+        u = _prep(u5)
+        v = _prep(v5)
+        sp = _to_nlhw(sp5).squeeze(1)  # (B*T, H, W); surface field is orientation-independent
+
+        lat_rad, dlat_rad_row, dlon_rad = self._grid_coords(n_lat, n_lon, device, dtype)
+        radius = float(RAD_EARTH)
+
+        # ---- interface / centre pressure (Pa), top -> surface ---------------
+        a_half = self.a_half.to(device=device, dtype=dtype).view(1, -1, 1, 1)
+        b_half = self.b_half.to(device=device, dtype=dtype).view(1, -1, 1, 1)
+        p_half = a_half + b_half * sp.unsqueeze(1)  # (N, L+1, H, W)
+        if p_half.shape[1] != n_lev + 1:
+            raise ValueError(
+                f"SemiLagrangianAdvection: built {p_half.shape[1]} interface pressures for {n_lev} levels; "
+                f"expected {n_lev + 1}. Set `levels` to the model levels present in the data."
+            )
+        p_center = 0.5 * (p_half[:, :-1] + p_half[:, 1:])  # (N, L, H, W)
+
+        # ---- omega (Pa/s): read precomputed, or derive from continuity ------
+        if n_lev == 1:
+            omega = torch.zeros_like(u)  # no vertical advection for a single level
+        elif self.omega_var is not None:
+            omega = _prep(self._get(nested, self.omega_var))
+        else:
+            omega = omega_from_continuity(u, v, p_half, lat_rad, dlon_rad, radius, self.coslat_floor)
+
+        # ---- index-space velocities (grid indices per second) ---------------
+        coslat_safe = torch.cos(lat_rad).clamp(min=self.coslat_floor).view(1, 1, -1, 1)
+        vel_col = u / (radius * coslat_safe) / dlon_rad  # columns / s
+        vel_row = v / radius / dlat_rad_row.view(1, 1, -1, 1)  # rows / s
+
+        dp_dlevel = torch.gradient(p_center, dim=1)[0]  # Pa per level index (> 0 top->surface)
+        dp_dlevel = dp_dlevel.clamp(min=self.dp_dlevel_floor)
+        vel_lev = omega / dp_dlevel  # levels / s
+
+        # ---- back-trajectory in index space (iterative midpoint) ------------
+        n = b * t
+        dt = self.timestep_seconds
+        pad = self.lon_halo
+        vel_padded = _circular_pad_lon(torch.stack([vel_col, vel_row, vel_lev], dim=1), pad)  # (N, 3, L, H, W)
+
+        col0 = torch.arange(n_lon, device=device, dtype=dtype).view(1, 1, 1, n_lon).expand(n, n_lev, n_lat, n_lon)
+        row0 = torch.arange(n_lat, device=device, dtype=dtype).view(1, 1, n_lat, 1).expand(n, n_lev, n_lat, n_lon)
+        lev0 = torch.arange(n_lev, device=device, dtype=dtype).view(1, n_lev, 1, 1).expand(n, n_lev, n_lat, n_lon)
+
+        disp_col = torch.zeros_like(col0)
+        disp_row = torch.zeros_like(row0)
+        disp_lev = torch.zeros_like(lev0)
+        for _ in range(self.n_iterations):
+            mid_vel = _sample(
+                vel_padded,
+                col0 - 0.5 * disp_col,
+                row0 - 0.5 * disp_row,
+                lev0 - 0.5 * disp_lev,
+                n_lon,
+                n_lat,
+                n_lev,
+                pad,
+            )  # (N, 3, L, H, W)
+            disp_col = dt * mid_vel[:, 0]
+            disp_row = dt * mid_vel[:, 1]
+            disp_lev = dt * mid_vel[:, 2]
+
+        dep_col = col0 - disp_col
+        dep_row = row0 - disp_row
+        dep_lev = lev0 - disp_lev
+
+        # ---- advect each tracer by sampling at the departure point ----------
+        for tracer_var in self.tracer_vars:
+            tracer5 = self._get(nested, tracer_var)
+            tracer = _prep(tracer5)  # (N, L, H, W), top->surface
+            tracer_padded = _circular_pad_lon(tracer.unsqueeze(1), pad)  # (N, 1, L, H, W)
+            advected = _sample(tracer_padded, dep_col, dep_row, dep_lev, n_lon, n_lat, n_lev, pad).squeeze(1)
+
+            if flip:
+                advected = torch.flip(advected, dims=(1,))
+            self._set(nested, tracer_var, _from_nlhw(advected, like_shape))
+
+
 class SemiLagrangianAdvection(BasePostblock):
     """Semi-Lagrangian 3D tracer advection postblock (operates on ``y_processed``).
 
@@ -206,7 +431,9 @@ class SemiLagrangianAdvection(BasePostblock):
     vertical component driven by a continuity-derived ``omega``. All fields are
     read from, and written back to, the nested ``{source: {var_key: tensor}}``
     dict produced by ``Reconstruct``; the ``source`` for each variable is taken
-    from the leading segment of its ``var_key``.
+    from the leading segment of its ``var_key``. A preblock wrapping the same
+    engine is available as ``credit.preblock.advect.SemiLagrangianAdvectionPre``,
+    for advecting initial-condition tracers before the model runs.
 
     Example config::
 
@@ -257,211 +484,13 @@ class SemiLagrangianAdvection(BasePostblock):
         lon_halo: circular longitude halo width for periodic interpolation.
     """
 
-    def __init__(
-        self,
-        tracer_vars: list[str] | None = None,
-        u_var: str = "ERA5/prognostic/3d/u_component_of_wind",
-        v_var: str = "ERA5/prognostic/3d/v_component_of_wind",
-        surface_pressure_var: str = "ERA5/prognostic/2d/surface_pressure",
-        timestep_seconds: float = 21600.0,
-        n_iterations: int = 2,
-        omega_var: str | None = None,
-        level_info_file: str = "ERA5_Lev_Info.nc",
-        model_a_half_var: str = "a_half",
-        model_b_half_var: str = "b_half",
-        levels: list[int] | None = None,
-        level_order: str = "top_to_surface",
-        grid_info_file: str | None = None,
-        latitude_var: str = "latitude",
-        longitude_var: str = "longitude",
-        key: str = "y_processed",
-        coslat_floor: float = 1e-4,
-        dp_dlevel_floor: float = 1.0,
-        lon_halo: int = 1,
-    ):
+    def __init__(self, key: str = "y_processed", **engine_kwargs):
         super().__init__()
-        if level_order not in ("top_to_surface", "surface_to_top"):
-            raise ValueError(f"level_order must be 'top_to_surface' or 'surface_to_top', got {level_order!r}.")
-        if n_iterations < 1:
-            raise ValueError(f"n_iterations must be >= 1, got {n_iterations}.")
-
-        self.tracer_vars = list(tracer_vars) if tracer_vars else ["ERA5/prognostic/3d/specific_humidity"]
-        self.u_var = u_var
-        self.v_var = v_var
-        self.surface_pressure_var = surface_pressure_var
-        self.timestep_seconds = float(timestep_seconds)
-        self.n_iterations = int(n_iterations)
-        self.omega_var = omega_var
-        self.levels = levels
-        self.level_order = level_order
-        self.latitude_var = latitude_var
-        self.longitude_var = longitude_var
         self.key = key
-        self.coslat_floor = float(coslat_floor)
-        self.dp_dlevel_floor = float(dp_dlevel_floor)
-        self.lon_halo = int(lon_halo)
+        self.engine = _SemiLagrangianAdvectionEngine(**engine_kwargs)
 
-        # Hybrid sigma-pressure half-level coefficients (mirrors GeopotentialDiagnostic).
-        with xr.open_dataset(get_meta_file_path(level_info_file)) as level_info:
-            a_all = torch.as_tensor(level_info[model_a_half_var].values, dtype=torch.float32)
-            b_all = torch.as_tensor(level_info[model_b_half_var].values, dtype=torch.float32)
-        if levels is not None:
-            half_idx = [lv - 1 for lv in levels] + [levels[-1]]
-            a_half, b_half = a_all[half_idx], b_all[half_idx]
-        else:
-            a_half, b_half = a_all, b_all
-        self.register_buffer("a_half", a_half, persistent=False)
-        self.register_buffer("b_half", b_half, persistent=False)
-
-        # Latitude/longitude grid (used to build the spherical metric terms).
-        with xr.open_dataset(get_meta_file_path(grid_info_file or level_info_file)) as grid_info:
-            lat_deg = torch.as_tensor(grid_info[latitude_var].values, dtype=torch.float32)
-            lon_deg = torch.as_tensor(grid_info[longitude_var].values, dtype=torch.float32)
-        self.register_buffer("lat_deg", lat_deg, persistent=False)
-        self.register_buffer("lon_deg", lon_deg, persistent=False)
-
-    # ------------------------------------------------------------------ #
-    # nested-dict accessors
-    # ------------------------------------------------------------------ #
-    @staticmethod
-    def _get(y_processed: dict, var_key: str) -> torch.Tensor:
-        source = var_key.split("/")[0]
-        try:
-            return y_processed[source][var_key]
-        except KeyError as exc:
-            raise KeyError(f"SemiLagrangianAdvection: '{var_key}' not found in y_processed[{source!r}].") from exc
-
-    @staticmethod
-    def _set(y_processed: dict, var_key: str, value: torch.Tensor) -> None:
-        y_processed[var_key.split("/")[0]][var_key] = value
-
-    # ------------------------------------------------------------------ #
-    # grid construction
-    # ------------------------------------------------------------------ #
-    def _grid_coords(self, n_lat: int, n_lon: int, device, dtype):
-        """Return ``(lat_rad (H,), dlat_rad_row (H,), dlon_rad scalar)`` for the data grid.
-
-        Uses the latitude/longitude buffers when their lengths match the data
-        grid; otherwise constructs a uniform global grid and warns.
-        """
-        if self.lat_deg.numel() == n_lat and self.lon_deg.numel() == n_lon:
-            lat_deg = self.lat_deg.to(device=device, dtype=dtype)
-            lon_deg = self.lon_deg.to(device=device, dtype=dtype)
-        else:
-            logger.warning(
-                "SemiLagrangianAdvection: grid-info coords (%d lat, %d lon) do not match data grid "
-                "(%d lat, %d lon); falling back to a uniform global lat/lon grid.",
-                self.lat_deg.numel(),
-                self.lon_deg.numel(),
-                n_lat,
-                n_lon,
-            )
-            lat_deg = torch.linspace(90.0, -90.0, n_lat, device=device, dtype=dtype)
-            lon_deg = torch.arange(n_lon, device=device, dtype=dtype) * (360.0 / n_lon)
-
-        lat_rad = torch.deg2rad(lat_deg)
-        # per-row latitude spacing (signed) handles non-uniform / N->S-ordered grids
-        dlat_rad_row = torch.gradient(lat_rad, edge_order=1)[0]
-        dlon_rad = torch.deg2rad(lon_deg[1] - lon_deg[0])
-        return lat_rad, dlat_rad_row, dlon_rad
-
-    # ------------------------------------------------------------------ #
-    # forward
-    # ------------------------------------------------------------------ #
     def forward(self, batch_dict: dict) -> dict:
-        y_processed = batch_dict[self.key]
-
-        u5 = self._get(y_processed, self.u_var)  # (B, L, T, H, W)
-        v5 = self._get(y_processed, self.v_var)
-        sp5 = self._get(y_processed, self.surface_pressure_var)  # (B, 1, T, H, W)
-        like_shape = u5.shape
-        b, n_lev, t, n_lat, n_lon = like_shape
-        device, dtype = u5.device, u5.dtype
-
-        flip = self.level_order == "surface_to_top"
-
-        def _prep(field5: torch.Tensor) -> torch.Tensor:
-            """(B, L, T, H, W) -> (B*T, L, H, W), oriented top->surface."""
-            f = _to_nlhw(field5)
-            return torch.flip(f, dims=(1,)) if flip else f
-
-        u = _prep(u5)
-        v = _prep(v5)
-        sp = _to_nlhw(sp5).squeeze(1)  # (B*T, H, W); surface field is orientation-independent
-
-        lat_rad, dlat_rad_row, dlon_rad = self._grid_coords(n_lat, n_lon, device, dtype)
-        radius = float(RAD_EARTH)
-
-        # ---- interface / centre pressure (Pa), top -> surface ---------------
-        a_half = self.a_half.to(device=device, dtype=dtype).view(1, -1, 1, 1)
-        b_half = self.b_half.to(device=device, dtype=dtype).view(1, -1, 1, 1)
-        p_half = a_half + b_half * sp.unsqueeze(1)  # (N, L+1, H, W)
-        if p_half.shape[1] != n_lev + 1:
-            raise ValueError(
-                f"SemiLagrangianAdvection: built {p_half.shape[1]} interface pressures for {n_lev} levels; "
-                f"expected {n_lev + 1}. Set `levels` to the model levels present in the data."
-            )
-        p_center = 0.5 * (p_half[:, :-1] + p_half[:, 1:])  # (N, L, H, W)
-
-        # ---- omega (Pa/s): read precomputed, or derive from continuity ------
-        if n_lev == 1:
-            omega = torch.zeros_like(u)  # no vertical advection for a single level
-        elif self.omega_var is not None:
-            omega = _prep(self._get(y_processed, self.omega_var))
-        else:
-            omega = omega_from_continuity(u, v, p_half, lat_rad, dlon_rad, radius, self.coslat_floor)
-
-        # ---- index-space velocities (grid indices per second) ---------------
-        coslat_safe = torch.cos(lat_rad).clamp(min=self.coslat_floor).view(1, 1, -1, 1)
-        vel_col = u / (radius * coslat_safe) / dlon_rad  # columns / s
-        vel_row = v / radius / dlat_rad_row.view(1, 1, -1, 1)  # rows / s
-
-        dp_dlevel = torch.gradient(p_center, dim=1)[0]  # Pa per level index (> 0 top->surface)
-        dp_dlevel = dp_dlevel.clamp(min=self.dp_dlevel_floor)
-        vel_lev = omega / dp_dlevel  # levels / s
-
-        # ---- back-trajectory in index space (iterative midpoint) ------------
-        n = b * t
-        dt = self.timestep_seconds
-        pad = self.lon_halo
-        vel_padded = _circular_pad_lon(torch.stack([vel_col, vel_row, vel_lev], dim=1), pad)  # (N, 3, L, H, W)
-
-        col0 = torch.arange(n_lon, device=device, dtype=dtype).view(1, 1, 1, n_lon).expand(n, n_lev, n_lat, n_lon)
-        row0 = torch.arange(n_lat, device=device, dtype=dtype).view(1, 1, n_lat, 1).expand(n, n_lev, n_lat, n_lon)
-        lev0 = torch.arange(n_lev, device=device, dtype=dtype).view(1, n_lev, 1, 1).expand(n, n_lev, n_lat, n_lon)
-
-        disp_col = torch.zeros_like(col0)
-        disp_row = torch.zeros_like(row0)
-        disp_lev = torch.zeros_like(lev0)
-        for _ in range(self.n_iterations):
-            mid_vel = _sample(
-                vel_padded,
-                col0 - 0.5 * disp_col,
-                row0 - 0.5 * disp_row,
-                lev0 - 0.5 * disp_lev,
-                n_lon,
-                n_lat,
-                n_lev,
-                pad,
-            )  # (N, 3, L, H, W)
-            disp_col = dt * mid_vel[:, 0]
-            disp_row = dt * mid_vel[:, 1]
-            disp_lev = dt * mid_vel[:, 2]
-
-        dep_col = col0 - disp_col
-        dep_row = row0 - disp_row
-        dep_lev = lev0 - disp_lev
-
-        # ---- advect each tracer by sampling at the departure point ----------
-        for tracer_var in self.tracer_vars:
-            tracer5 = self._get(y_processed, tracer_var)
-            tracer = _prep(tracer5)  # (N, L, H, W), top->surface
-            tracer_padded = _circular_pad_lon(tracer.unsqueeze(1), pad)  # (N, 1, L, H, W)
-            advected = _sample(tracer_padded, dep_col, dep_row, dep_lev, n_lon, n_lat, n_lev, pad).squeeze(1)
-
-            if flip:
-                advected = torch.flip(advected, dims=(1,))
-            self._set(y_processed, tracer_var, _from_nlhw(advected, like_shape))
-
-        batch_dict[self.key] = y_processed
+        if self.key not in batch_dict:
+            raise ValueError(f"Key {self.key!r} not found in batch_dict.")
+        self.engine.advect_nested(batch_dict[self.key])
         return batch_dict
