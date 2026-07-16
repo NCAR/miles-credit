@@ -130,7 +130,7 @@ import os
 import time
 from collections import defaultdict
 
-# from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -238,6 +238,9 @@ VAR_REGISTRY: dict[str, dict[str, str | None]] = {
 
 # Maximum parallel workers for remote fetching
 _MAX_REMOTE_WORKERS = 8
+
+# Maximum parallel threads for CPU-bound GRIB decompression
+_MAX_DECOMPRESS_WORKERS = 8
 
 # Timeout (seconds) for HTTPS requests to AWS S3.
 # Passed as (connect_timeout, read_timeout) — requests treats them independently.
@@ -852,6 +855,9 @@ class HRRRDataset(BaseDataset):
         self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
         self.global_levels: list[int] | None = self.curr_source_cfg.get("levels", None)
         self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
+        self.num_decompress_workers: int = int(
+            self.curr_source_cfg.get("num_decompress_workers", _MAX_DECOMPRESS_WORKERS)
+        )
 
         if self.mode == "local" and self.base_path is None:
             raise ValueError(
@@ -1169,8 +1175,16 @@ class HRRRDataset(BaseDataset):
         lvls_3d: dict[str, list] = defaultdict(list)
         arr_2d: dict[str, np.ndarray] = {}
 
-        for (vname, is_3d, lv, _), msg in zip(fetch_plan, decoded):
-            arr = _to_float32(msg.values)[row_sl, col_sl]
+        def _decompress_one_variable(plan_data_pair):
+            (vname, is_3d, lv, _), msg = plan_data_pair
+            arr = _to_float32(msg.values[row_sl, col_sl])
+            return vname, is_3d, lv, arr
+
+        n_workers = min(len(fetch_plan), self.num_decompress_workers)
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            results = list(executor.map(_decompress_one_variable, zip(fetch_plan, decoded)))
+
+        for vname, is_3d, lv, arr in results:
             if is_3d:
                 arrs_3d[vname].append(arr)
                 lvls_3d[vname].append(lv)
@@ -1190,7 +1204,7 @@ class HRRRDataset(BaseDataset):
         t_end_tensor = time.perf_counter()
 
         t_end_idx = time.perf_counter()
-        print(
+        logger.debug(
             f"[PROFILE] _extract_from_idx for {vname_key} ({field_type}, mode={self.mode}):\n        "
             f"plan={t_start_fetch - t_start_idx:.3f}s | "
             f"fetch={t_end_fetch - t_start_fetch:.3f}s | "

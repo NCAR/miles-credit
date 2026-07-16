@@ -1,16 +1,24 @@
 import time
+import logging
 
 # import_timer_start = time.perf_counter()
 
 import yaml
 import pathlib
+import torch
+import numpy as np
+
 from credit.datasets.multi_source import MultiSourceDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.postblock import build_postblocks, apply_postblocks
-import torch
-import numpy as np
+
+# Configure logging: set level to logging.DEBUG to show GRIB profiling timers
+logging.basicConfig(level=logging.INFO)
+
+# To show GRIB profiling timers specifically without changing other loggers, set:
+# logging.getLogger("credit.datasets.hrrr").setLevel(logging.DEBUG)
 
 # import_timer_end = time.perf_counter()
 # print(f"Imports completed in {import_timer_end - import_timer_start:.2f} seconds")
@@ -27,20 +35,31 @@ print(f"Using config: {config_path}")
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)
 
+# Parse settings from config["trainer"]
+batch_size = config["trainer"]["train_batch_size"]
+num_workers = config["trainer"]["thread_workers"]
+prefetch_factor = config["trainer"].get("prefetch_factor")
+if isinstance(prefetch_factor, str) and prefetch_factor.lower() == "none":
+    prefetch_factor = None
+
 # Show the networking relevant parameters
 print("Requesting the following resources:")
-print("train_batch_size:      ", config["trainer"]["train_batch_size"])
-print("valid_batch_size:      ", config["trainer"]["valid_batch_size"])
-print("thread_workers:        ", config["trainer"]["thread_workers"])
-print("valid_thread_workers:  ", config["trainer"]["valid_thread_workers"])
-print("prefetch_factor:       ", config["trainer"]["prefetch_factor"])
+print("train_batch_size:       ", batch_size)
+print("* valid_batch_size:     ", config["trainer"]["valid_batch_size"])
+print("thread_workers:         ", num_workers)
+print("* valid_thread_workers: ", config["trainer"]["valid_thread_workers"])
+print("prefetch_factor:        ", prefetch_factor)
+print("  * not used in this script\n")
 
 nfs = config["data"]["forecast_len"]
 ms_dataset = MultiSourceDataset(config["data"], return_target=True)
+
 ms_sampler = DistributedMultiStepBatchSampler(
-    ms_dataset, batch_size=8, num_forecast_steps=nfs, shuffle=True, num_replicas=1, rank=0
+    ms_dataset, batch_size=batch_size, num_forecast_steps=nfs, shuffle=True, num_replicas=1, rank=0
 )
-ms_loader = DataLoader(ms_dataset, batch_sampler=ms_sampler, num_workers=4, pin_memory=False, prefetch_factor=None)
+ms_loader = DataLoader(
+    ms_dataset, batch_sampler=ms_sampler, num_workers=num_workers, pin_memory=False, prefetch_factor=prefetch_factor
+)
 
 setup_timer_end = time.perf_counter()
 print(f"Dataset, Sampler, and Loader setup completed in {setup_timer_end - setup_timer_start:.2f} seconds")
@@ -60,20 +79,26 @@ for dataset_name, dataset in ms_dataset.datasets.items():
     else:
         print("  Extent: Not specified")
 
+iterator_setup_start = time.perf_counter()
+ms_loader_iterator = iter(ms_loader)
+iterator_setup_end = time.perf_counter()
+print(
+    f"DataLoader iterator initialized (workers spawned & connected) in {iterator_setup_end - iterator_setup_start:.2f} seconds"
+)
+
 print("Taking sample...")
 sample_timer_start = time.perf_counter()
-sample = next(iter(ms_loader))
+sample = next(ms_loader_iterator)
 sample_timer_end = time.perf_counter()
 print(f"First sample taken in {sample_timer_end - sample_timer_start:.2f} seconds")
 sample_timer_start = time.perf_counter()
-sample = next(iter(ms_loader))
+sample = next(ms_loader_iterator)
 sample_timer_end = time.perf_counter()
 print(f"Second sample taken in {sample_timer_end - sample_timer_start:.2f} seconds")
 
 # Now with n samples serially
 N_SAMPLES = 10
 time_values = []
-ms_loader_iterator = iter(ms_loader)
 
 for _ in range(N_SAMPLES):
     sample_timer_start = time.perf_counter()
@@ -86,6 +111,7 @@ tot_samples_time = np.sum(time_values)
 mean_per_sample_time = np.mean(time_values)
 print(f"Ran for {N_SAMPLES}, which took {np.sum(time_values):.2f} seconds or ")
 print(f"{np.mean(time_values):.2f} per sample (std of {np.std(time_values):.2f})")
+print(f"Time values: \n{time_values}")
 
 inspection_timer_start = time.perf_counter()
 print(sample.keys())
