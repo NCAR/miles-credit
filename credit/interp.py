@@ -539,7 +539,7 @@ def interp_pressure_to_hybrid_levels(pressure_var, pressure_levels, model_pressu
             log_interp_pressures[air_levels],
             pressure_var[air_levels, i, j],
         )
-    return pressure_var
+    return model_var
 
 
 @njit(cache=True)
