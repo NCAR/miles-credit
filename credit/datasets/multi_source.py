@@ -277,13 +277,16 @@ class MultiSourceDataset(AbstractBaseDataset):
             return pd.DatetimeIndex([])
 
         master_dt = pd.Timedelta(config["timestep"])
-        num_steps = config.get("forecast_len", 1)
-        # Convert bounds to the master calendar *before* the horizon arithmetic
-        # so the subtraction is calendar-correct near leap days.
-        master_start = to_calendar(pd.Timestamp(config["start_datetime"]), self.calendar)
+        num_history_steps = config.get("history_len", 1)
+        num_forecast_steps = config.get("forecast_len", 1)
+        # Convert bounds to the master calendar *before* the horizon/history
+        # arithmetic so it is calendar-correct near leap days.
+        master_start = (
+            to_calendar(pd.Timestamp(config["start_datetime"]), self.calendar) + (num_history_steps - 1) * master_dt
+        )
         master_end = to_calendar(pd.Timestamp(config["end_datetime"]), self.calendar)
 
-        master = build_time_index(master_start, master_end - num_steps * master_dt, master_dt, self.calendar)
+        master = build_time_index(master_start, master_end - num_forecast_steps * master_dt, master_dt, self.calendar)
 
         source_cfg = config.get("source", {})
         for name, ds in self.datasets.items():
