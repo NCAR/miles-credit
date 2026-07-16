@@ -40,7 +40,7 @@ ms_dataset = MultiSourceDataset(config["data"], return_target=True)
 ms_sampler = DistributedMultiStepBatchSampler(
     ms_dataset, batch_size=8, num_forecast_steps=nfs, shuffle=True, num_replicas=1, rank=0
 )
-ms_loader = DataLoader(ms_dataset, batch_sampler=ms_sampler, num_workers=0, pin_memory=False, prefetch_factor=None)
+ms_loader = DataLoader(ms_dataset, batch_sampler=ms_sampler, num_workers=4, pin_memory=False, prefetch_factor=None)
 
 setup_timer_end = time.perf_counter()
 print(f"Dataset, Sampler, and Loader setup completed in {setup_timer_end - setup_timer_start:.2f} seconds")
@@ -73,9 +73,11 @@ print(f"Second sample taken in {sample_timer_end - sample_timer_start:.2f} secon
 # Now with n samples serially
 N_SAMPLES = 10
 time_values = []
+ms_loader_iterator = iter(ms_loader)
+
 for _ in range(N_SAMPLES):
     sample_timer_start = time.perf_counter()
-    sample = next(iter(ms_loader))
+    sample = next(ms_loader_iterator)
     sample_timer_end = time.perf_counter()
     time_values.append(sample_timer_end - sample_timer_start)
 
