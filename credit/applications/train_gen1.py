@@ -26,7 +26,7 @@ from credit.losses import load_loss
 from credit.scheduler import load_scheduler
 from credit.trainers import load_trainer
 from credit.parser import credit_main_parser, training_data_check
-from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
+from credit.datasets.gen_1.load_dataset_and_dataloader import load_dataset, load_dataloader
 
 from credit.metrics import LatWeightedMetrics
 from credit.metrics_downscaling import UnWeightedMetrics

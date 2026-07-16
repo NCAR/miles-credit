@@ -10,7 +10,7 @@ from os.path import expandvars
 import torch
 import torch.distributed as dist
 import yaml
-from credit.datasets.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.datasets.gen_2.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from bridgescaler import save_scaler_dict
 from torch.distributed import barrier, gather_object
 

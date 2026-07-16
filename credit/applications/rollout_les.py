@@ -32,7 +32,7 @@ from credit.data import (
     get_forward_data,
 )
 
-from credit.datasets.les_singlestep import LESPredict
+from credit.datasets.gen_1.les_singlestep import LESPredict
 
 from credit.transforms.transforms_les import NormalizeLES, ToTensorLES
 from credit.pbs import launch_script, launch_script_mpi

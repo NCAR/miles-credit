@@ -1,7 +1,8 @@
 """
-_file_utils.py
---------------
-Shared file-mapping helpers for ERA5 and MRMS dataset classes.
+_utils.py
+---------
+Shared file-mapping helpers for the Gen2 dataset classes (era5.py, local.py,
+goes.py, mrms.py, base_dataset.py).
 
 Provides strftime-based filename parsing and binary-search timestamp-to-file
 lookup, supporting any temporal file granularity (annual, monthly, daily, etc.).

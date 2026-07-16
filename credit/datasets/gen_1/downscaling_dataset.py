@@ -13,7 +13,7 @@ import pandas as pd
 import torch
 import torch.utils.data
 
-from credit.datasets.datamap import DataMap
+from credit.datasets.gen_1.datamap import DataMap
 from credit.transforms_downscaling import DataTransforms, Identity
 
 Array = Union[np.ndarray, xr.DataArray]

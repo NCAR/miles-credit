@@ -18,11 +18,11 @@ After downloading, switch ``mode`` to ``"local"`` in the config.
 
 Usage::
 
-    python -m credit.datasets.hrrr_download -c config/my_conf.yaml --num-workers 8
+    python -m credit.datasets.gen_2.hrrr_download -c config/my_conf.yaml --num-workers 8
 
 Or programmatically::
 
-    from credit.datasets.hrrr_download import download_hrrr
+    from credit.datasets.gen_2.hrrr_download import download_hrrr
     download_hrrr(config['data'], num_workers=8, overwrite=False)
 
 Config section used (``data.source``)::
@@ -50,8 +50,8 @@ from typing import NamedTuple, Any
 
 import pandas as pd
 
-from credit.datasets.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request  # pyright: ignore[reportPrivateUsage]
-from credit.datasets.multi_source import make_single_source_subconfig
+from credit.datasets.gen_2.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request  # pyright: ignore[reportPrivateUsage]
+from credit.datasets.gen_2.multi_source import make_single_source_subconfig
 
 logger = logging.getLogger(__name__)
 
