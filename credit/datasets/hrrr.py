@@ -125,10 +125,12 @@ from __future__ import annotations
 
 from typing import Any, Callable, Literal, get_args
 
+import asyncio
 import logging
 import os
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+
+# from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -463,7 +465,7 @@ def _fetch_obstore_idx(store, s3_entry_name: str) -> list[dict[str, str | int | 
     return _parse_idx(idx_data_text)
 
 
-def _fetch_obstore_message(store, s3_entry_name: str, byte_start: int, byte_end: int | None) -> bytes:
+async def _fetch_obstore_message(store, s3_entry_name: str, byte_start: int, byte_end: int | None) -> bytes:
     """Fetch a single GRIB message via obstore.
 
     Args:
@@ -476,12 +478,16 @@ def _fetch_obstore_message(store, s3_entry_name: str, byte_start: int, byte_end:
         bytes: The raw bytes of the GRIB message for that byte range.
     """
 
-    # LIKELY NEEDS A TRY EXCEPT
+    import obstore as obs
 
     # Obstore is exclusive bytes
-    data_retreived = store.get_range(s3_entry_name, start=byte_start, end=byte_end + 1)
+    if byte_end is None:
+        meta = await obs.head_async(store, s3_entry_name)
+        byte_end = meta.size - 1
 
-    return data_retreived.to_bytes()
+    data_retrieved = await obs.get_range_async(store, s3_entry_name, start=byte_start, end=byte_end + 1)
+
+    return data_retrieved.to_bytes()
 
 
 def _build_prs_entry_map(
@@ -986,10 +992,12 @@ class HRRRDataset(BaseDataset):
                 self._idx_cache[s3_entry_name] = _fetch_obstore_idx(self._obstore, s3_entry_name)
             idx_entries = self._idx_cache[s3_entry_name]
 
-            def _fetcher(entry: dict[str, str | int | None]) -> bytes:
+            async def _fetcher(entry: dict[str, str | int | None]) -> bytes:
                 assert isinstance(entry["byte_start"], int)
                 assert isinstance(entry["byte_end"], int) or entry["byte_end"] is None
-                return _fetch_obstore_message(self._obstore, s3_entry_name, entry["byte_start"], entry["byte_end"])
+                return await _fetch_obstore_message(
+                    self._obstore, s3_entry_name, entry["byte_start"], entry["byte_end"]
+                )
 
         else:
             assert self.base_path is not None
@@ -1095,9 +1103,16 @@ class HRRRDataset(BaseDataset):
         #   process-level parallelism across samples in local mode.
         # ------------------------------------------------------------------
         if self.mode == "remote":
-            n_workers = min(len(fetch_plan), self.num_fetch_workers)
-            with ThreadPoolExecutor(max_workers=n_workers) as pool:
-                raw_messages = list(pool.map(lambda task: fetcher(task[3]), fetch_plan))
+
+            async def _run_gather():
+                tasks = [fetcher(task[3]) for task in fetch_plan]
+                return await asyncio.gather(*tasks)
+
+            raw_messages = asyncio.run(_run_gather())
+
+            # n_workers = min(len(fetch_plan), self.num_fetch_workers)
+            # with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            #     raw_messages = list(pool.map(lambda task: fetcher(task[3]), fetch_plan))
         else:
             raw_messages = [fetcher(task[3]) for task in fetch_plan]
 
