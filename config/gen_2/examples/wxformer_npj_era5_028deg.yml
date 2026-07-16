@@ -48,10 +48,13 @@ preblocks:
       std_path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/std_residual_1h_1979_2018_16lev_0.25deg.nc'
 
 trainer:
-  type: era5-gen2
+  type: gen2
 
-  mode: fsdp
-  cpu_offload: False
+  parallelism:
+    data: fsdp2             # ddp | fsdp2 | none
+    tensor: 1               # tensor-parallel degree  (1 = disabled)
+    domain: 1               # domain-parallel shards  (1 = disabled)
+
   activation_checkpoint: True
 
   load_weights: True
@@ -149,20 +152,31 @@ loss:
 
   use_variable_weights: False
 
-predict:
-  forecasts:
-    type: "custom"
-    start_year: 2020
-    start_month: 1
-    start_day: 1
-    start_hours: [0, 12]
-    duration: 30
-    days: 2
-
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+inference:
+  run_mode: batch                   # batch | single
+  mode: none                        # none | ddp | fsdp2  (distributed inference backend)
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_npj_1h'
-  save_vars: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
+  batch_forecast:                   # active when run_mode: batch
+    forecast_length: "30d"          # forecast duration per init (e.g. "10d", "1m", "1y")
+    first_init_date: "2020-01-01"   # first init time (inclusive), ISO 8601
+    last_init_date: "2020-01-02"    # last init time (inclusive)
+    init_interval: "12h"            # interval between init times
 
-  use_laplace_filter: False
+  single_forecast:                  # active when run_mode: single
+    forecast_length: "30d"          # forecast duration
+    start_datetime: "2020-01-01T00:00Z"   # init time, ISO 8601
+
+  output:
+    format: netcdf                  # netcdf | zarr
+    output_interval: null           # write every Nth step; null = every step (e.g. "6h", "24h")
+    group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
+    variables: null                 # null = save all; or list of {name:, levels:} to subset
+    metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 4                  # 1 (fast) to 9 (small)
 
 pbs: #derecho
   conda: "credit-derecho"

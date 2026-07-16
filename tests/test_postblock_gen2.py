@@ -144,7 +144,7 @@ def test_geopotential():
     output_var_name = "ARCO_ERA5/derived_diagnostic/3d/geopotential"
     geopotential_layer = GeopotentialDiagnostic(
         output_name=output_var_name,
-        data_keys=["y_processed"],
+        key="y_processed",
         surface_geopotential_var="ARCO_ERA5/static/2d/geopotential_at_surface",
         surface_pressure_var="ARCO_ERA5/prognostic/2d/surface_pressure",
         temperature_var="ARCO_ERA5/prognostic/3d/temperature",

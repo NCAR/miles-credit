@@ -69,7 +69,9 @@ def patch_base_dataset_io(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
 
-    def fake_map_files(files: List[str], time_fmt: str) -> List[tuple[pd.Timestamp, pd.Timestamp, str]]:
+    def fake_map_files(
+        files: List[str], time_fmt: str, path_template: str | None = None
+    ) -> List[tuple[pd.Timestamp, pd.Timestamp, str]]:
         return [
             (pd.Timestamp("2022-01-01"), pd.Timestamp("2022-12-31"), "/fake/file1.nc"),
             (pd.Timestamp("2023-01-01"), pd.Timestamp("2023-12-31"), "/fake/file2.nc"),
@@ -373,6 +375,111 @@ def test_getitem_return_target_false(minimal_config: Dict[str, Any], patch_base_
     sample = ds[(ds.datetimes[0], 0)]
     assert "target" not in sample
     assert "target_datetime" not in sample["metadata"]
+
+
+# ---------------------------------------------------------------------------
+# history_len > 1 (multi-step input window) tests
+# ---------------------------------------------------------------------------
+#
+# The generic multi-step reader BaseDataset._extract_field_window calls the
+# single-step _extract_field once per history timestamp and stacks along the
+# time dimension (dim=1). Using the BaseDataset placeholder _extract_field
+# (which emits (n_levels, 1, lat, lon) / (1, 1, lat, lon)) the time dim of the
+# stacked result must equal history_len. The target is always single-step.
+
+
+def test_history_len_defaults_to_one(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """With no history_len key, history_len defaults to 1 and input is single-step."""
+    ds = BaseDataset(minimal_config)
+    assert ds.history_len == 1
+    inp = ds[(ds.datetimes[0], 0)]["input"]
+    # Time dim (axis 1) is 1 on every input field — identical to legacy behaviour.
+    assert inp["TestSource_Base/prognostic/3d/T"].shape[1] == 1
+    assert inp["TestSource_Base/prognostic/2d/t2m"].shape[1] == 1
+    assert inp["TestSource_Base/static/2d/lsm"].shape[1] == 1
+    assert inp["TestSource_Base/dynamic_forcing/2d/msl"].shape[1] == 1
+
+
+@pytest.mark.parametrize("history_len", [2, 3])
+def test_history_len_input_window_stacks_in_time(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None, history_len: int
+) -> None:
+    """history_len > 1 stacks prognostic/static/dynamic_forcing over the window at i=0."""
+    config = minimal_config.copy()
+    config["history_len"] = history_len
+    ds = BaseDataset(config, return_target=True)
+    assert ds.history_len == history_len
+
+    sample = ds[(ds.datetimes[0], 0)]
+    inp = sample["input"]
+    # Every history-carrying input field has time dim == history_len.
+    assert inp["TestSource_Base/prognostic/3d/T"].shape[1] == history_len
+    assert inp["TestSource_Base/prognostic/2d/t2m"].shape[1] == history_len
+    assert inp["TestSource_Base/static/2d/lsm"].shape[1] == history_len
+    assert inp["TestSource_Base/dynamic_forcing/2d/msl"].shape[1] == history_len
+    # Non-time dims are untouched (3D keeps n_levels, 2D keeps singleton level).
+    assert inp["TestSource_Base/prognostic/3d/T"].shape[0] == 7
+    assert inp["TestSource_Base/prognostic/2d/t2m"].shape[0] == 1
+
+    # The target is always a single step, regardless of history_len.
+    tgt = sample["target"]
+    assert tgt["TestSource_Base/prognostic/3d/T"].shape[1] == 1
+    assert tgt["TestSource_Base/diagnostic/2d/tp"].shape[1] == 1
+
+
+def test_history_len_rollout_step_is_single_step(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """At rollout steps (i > 0) only the newest dynamic_forcing step is loaded, single-step."""
+    config = minimal_config.copy()
+    config["history_len"] = 3
+    ds = BaseDataset(config)
+
+    inp = ds[(ds.datetimes[0], 1)]["input"]
+    # Prognostic/static are not loaded at i > 0; dynamic_forcing is single-step.
+    assert "TestSource_Base/prognostic/3d/T" not in inp
+    assert "TestSource_Base/static/2d/lsm" not in inp
+    assert inp["TestSource_Base/dynamic_forcing/2d/msl"].shape[1] == 1
+
+
+def test_history_len_shifts_timestamps_forward(minimal_config: Dict[str, Any], patch_base_dataset_io: None) -> None:
+    """The sampling clock starts (history_len-1)*dt later so every sample has full history."""
+    config = minimal_config.copy()
+    config["history_len"] = 2
+    ds = BaseDataset(config)
+    ds1 = BaseDataset(minimal_config)  # history_len == 1
+    # With H=2 the first valid timestamp is one dt later than with H=1.
+    assert ds.datetimes[0] == ds1.datetimes[0] + ds.dt
+
+
+@pytest.mark.parametrize("bad_value", [0, -1, 2.0, "2"])
+def test_history_len_invalid_raises(minimal_config: Dict[str, Any], bad_value: Any) -> None:
+    """history_len must be a positive int."""
+    config = minimal_config.copy()
+    config["history_len"] = bad_value
+    with pytest.raises(ValueError, match="history_len must be a positive int"):
+        BaseDataset(config)
+
+
+def test_extract_field_window_matches_repeated_single_step(
+    minimal_config: Dict[str, Any], patch_base_dataset_io: None
+) -> None:
+    """_extract_field_window equals stacking independent single-step reads along time."""
+    import torch
+
+    ds = BaseDataset(minimal_config)
+    t_history = pd.date_range(ds.datetimes[0] - ds.dt, ds.datetimes[0], freq=ds.dt)  # length 2
+
+    windowed: Dict[str, Any] = {}
+    ds._extract_field_window("prognostic", t_history, windowed)  # pyright: ignore[reportPrivateUsage]
+
+    # Build the expected result by hand: single-step read per timestamp, cat in time.
+    per_step = []
+    for tk in t_history:
+        s: Dict[str, Any] = {}
+        ds._extract_field("prognostic", pd.Timestamp(tk), s)  # pyright: ignore[reportPrivateUsage]
+        per_step.append(s)
+    for key in per_step[0]:
+        expected = torch.cat([step[key] for step in per_step], dim=1)
+        assert torch.equal(windowed[key], expected)
 
 
 # ---------------------------------------------------------------------------

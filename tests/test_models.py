@@ -142,9 +142,10 @@ def test_fuxi():
 
 def test_register_model():
     """Test that register_model decorator adds a custom model to the registry."""
+    from credit.models.base_model import BaseModel
 
     @register_model("test_custom_model", "Loading test custom model ...")
-    class CustomModel(torch.nn.Module):
+    class CustomModel(BaseModel):
         def __init__(self, hidden_dim=32):
             super().__init__()
             self.fc = torch.nn.Linear(hidden_dim, hidden_dim)
@@ -165,9 +166,10 @@ def test_load_custom_model_modules(tmp_path):
     module_file.write_text(
         "import torch.nn as nn\n"
         "from credit.models import register_model\n"
+        "from credit.models.base_model import BaseModel\n"
         "\n"
         "@register_model('file_registered_model')\n"
-        "class FileRegisteredModel(nn.Module):\n"
+        "class FileRegisteredModel(BaseModel):\n"
         "    def __init__(self, size=8):\n"
         "        super().__init__()\n"
         "        self.fc = nn.Linear(size, size)\n"
@@ -189,15 +191,16 @@ def test_load_custom_model_modules_missing_file():
 def test_register_model_overwrite(caplog):
     """Test that registering a duplicate key logs a warning and overwrites."""
     import logging
+    from credit.models.base_model import BaseModel
 
     @register_model("test_overwrite_model")
-    class ModelV1(torch.nn.Module):
+    class ModelV1(BaseModel):
         pass
 
     with caplog.at_level(logging.WARNING, logger="credit.models"):
 
         @register_model("test_overwrite_model")
-        class ModelV2(torch.nn.Module):
+        class ModelV2(BaseModel):
             pass
 
     assert any("test_overwrite_model" in msg for msg in caplog.messages)

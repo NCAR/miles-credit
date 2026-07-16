@@ -63,7 +63,7 @@ data:
 # ---- USER SETTINGS: validation data ---- #
 validation_data:
   source:
-    ERA5_Validation:
+    ERA5:
       dataset_type: "local"
       level_coord: "level"
       levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
@@ -71,17 +71,17 @@ validation_data:
         prognostic:
           vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
           vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         diagnostic:
           vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
                      'surface_latent_heat_flux', 'surface_net_solar_radiation',
                      'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         dynamic_forcing:
           vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h*'
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
 
         static:
           vars_2D: [ 'z_norm', 'land_sea_mask' ]
@@ -101,10 +101,13 @@ validation_data:
 
 # ---- USER SETTINGS: training hyperparameters ---- #
 trainer:
-  type: era5-gen2           # use the v2 trainer (new nested data schema)
+  type: gen2                # use the v2 trainer (new nested data schema)
 
-  mode: ddp               # none | ddp | fsdp  (ddp recommended for multi-GPU)
-  cpu_offload: False
+  parallelism:
+    data: ddp               # ddp | fsdp2 | none
+    tensor: 1               # tensor-parallel degree  (1 = disabled)
+    domain: 1               # domain-parallel shards  (1 = disabled)
+
   activation_checkpoint: True
 
   load_weights: False     # set True to resume from checkpoint
@@ -162,9 +165,9 @@ trainer:
 preblocks:
   per_step:
     scaler:
-      type: bridgescaler_transform
+      type: bridgescaler_transformer
       args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
@@ -182,9 +185,9 @@ postblocks:
     reconstruct:
       type: reconstruct
     scaler:
-      type: bridgescaler_transform
+      type: bridgescaler_transformer
       args:
-        scaler_path: '/glade/campaign/cisl/aiml/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_post.json'
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
         variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
@@ -245,7 +248,11 @@ loss:
   training_loss: "mse"
 
   use_power_loss: True              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
+  spectral_lambda_reg: 0.1         # weight on power/spectral loss term: total = training_loss + lambda * aux_loss
+  spectral_wavenum_init: 20        # wavenumber above which the power loss is applied
   use_spectral_loss: False
+  spectral_lambda_reg: 0.1         # weight for power/spectral loss: total_loss = training_loss + spectral_lambda_reg * power_loss
+  spectral_wavenum_init: 20        # wavenumber above which the spectral/power loss is applied
 
   use_latitude_weights: True
   latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
@@ -253,21 +260,31 @@ loss:
   use_variable_weights: False
 
 
-# ---- Inference / predict (used by predict scripts, not training) ---- #
-predict:
-  mode: ddp
-  batch_size: 8
-  ensemble_size: 1
-  forecasts:
-    type: "custom"
-    start_year: 2020
-    start_month: 1
-    start_day: 1
-    start_hours: [ 0, 12 ]
-    duration: 1
-    days: 1
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+inference:
+  run_mode: batch                   # batch | single
+  mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
-  use_laplace_filter: False
+  batch_forecast:                   # active when run_mode: batch
+    forecast_length: "1d"           # forecast duration per init (e.g. "10d", "1m", "1y")
+    first_init_date: "2020-01-01"   # first init time (inclusive), ISO 8601
+    last_init_date: "2020-01-01"    # last init time (inclusive)
+    init_interval: "12h"            # interval between init times
+
+  single_forecast:                  # active when run_mode: single
+    forecast_length: "10d"          # forecast duration
+    start_datetime: "2020-01-01T00:00Z"   # init time, ISO 8601
+
+  output:
+    format: netcdf                  # netcdf | zarr
+    output_interval: null           # write every Nth step; null = every step (e.g. "6h", "24h")
+    group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
+    variables: null                 # null = save all; or list of {name:, levels:} to subset
+    metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 4                  # 1 (fast) to 9 (small)
 
 pbs: #derecho
   conda: "credit-derecho"
