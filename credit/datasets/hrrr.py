@@ -125,7 +125,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Literal, get_args
 
-import asyncio
 import logging
 import os
 import time
@@ -491,6 +490,35 @@ async def _fetch_obstore_message(store, s3_entry_name: str, byte_start: int, byt
     return data_retrieved.to_bytes()
 
 
+def _fetch_obstore_messages(store, s3_entry_name: str, entries: list[dict[str, str | int | None]]) -> list[bytes]:
+    """Fetch multiple GRIB messages via store.get_ranges in a single batch request.
+
+    Args:
+        store: The obstore S3Store object.
+        s3_entry_name (str): S3 entry name in the obstore.
+        entries (list[dict]): List of entries containing byte_start and byte_end keys.
+
+    Returns:
+        list[bytes]: List of raw bytes for each message.
+    """
+    starts = []
+    ends = []
+    for entry in entries:
+        start = entry["byte_start"]
+        end = entry["byte_end"]
+        if end is None:
+            # Resolve EOF range using a HEAD request to get file size
+            meta = store.head(s3_entry_name)
+            end = meta.size
+        else:
+            end = end + 1  # end parameter in obstore is exclusive
+        starts.append(start)
+        ends.append(end)
+
+    results = store.get_ranges(s3_entry_name, starts=starts, ends=ends)
+    return [res.to_bytes() for res in results]
+
+
 def _build_prs_entry_map(
     idx_entries: list[dict[str, str | int | None]], idx_name: str
 ) -> dict[float, dict[str, str | None]]:
@@ -681,6 +709,19 @@ def _fetch_bytes_local(path: str, byte_start: int, byte_end: int | None) -> byte
         if byte_end is not None:
             return f.read(byte_end - byte_start + 1)
         return f.read()
+
+
+def _fetch_bytes_local_batch(path: str, entries: list[dict[str, str | int | None]]) -> list[bytes]:
+    """Read multiple byte ranges directly from a local GRIB2 file.
+
+    Args:
+        path (str): Absolute path to the local grib2 file.
+        entries (list[dict]): List of entries containing byte_start and byte_end keys.
+
+    Returns:
+        list[bytes]: List of raw bytes for each message.
+    """
+    return [_fetch_bytes_local(path, entry["byte_start"], entry["byte_end"]) for entry in entries]
 
 
 def _load_idx_local(grib2_path: str) -> list[dict[str, str | int | None]]:
@@ -993,12 +1034,8 @@ class HRRRDataset(BaseDataset):
                 self._idx_cache[s3_entry_name] = _fetch_obstore_idx(self._obstore, s3_entry_name)
             idx_entries = self._idx_cache[s3_entry_name]
 
-            async def _fetcher(entry: dict[str, str | int | None]) -> bytes:
-                assert isinstance(entry["byte_start"], int)
-                assert isinstance(entry["byte_end"], int) or entry["byte_end"] is None
-                return await _fetch_obstore_message(
-                    self._obstore, s3_entry_name, entry["byte_start"], entry["byte_end"]
-                )
+            def _batch_fetcher(entries: list[dict[str, str | int | None]]) -> list[bytes]:
+                return _fetch_obstore_messages(self._obstore, s3_entry_name, entries)
 
         else:
             assert self.base_path is not None
@@ -1007,18 +1044,16 @@ class HRRRDataset(BaseDataset):
                 self._idx_cache[path] = _load_idx_local(path)
             idx_entries = self._idx_cache[path]
 
-            def _fetcher(entry: dict[str, str | int | None]) -> bytes:
-                assert isinstance(entry["byte_start"], int)
-                assert isinstance(entry["byte_end"], int) or entry["byte_end"] is None
-                return _fetch_bytes_local(path, entry["byte_start"], entry["byte_end"])
+            def _batch_fetcher(entries: list[dict[str, str | int | None]]) -> list[bytes]:
+                return _fetch_bytes_local_batch(path, entries)
 
-        self._extract_from_idx(field_type, idx_entries, _fetcher, vd, sample, step_min=step_min)
+        self._extract_from_idx(field_type, idx_entries, _batch_fetcher, vd, sample, step_min=step_min)
 
     def _extract_from_idx(
         self,
         field_type: VALID_FIELD_TYPES,
         idx_entries: list[dict[str, str | int | None]],
-        fetcher: Callable[[dict[str, str | int | None]], bytes],
+        fetcher: Callable[[list[dict[str, str | int | None]]], list[bytes]],
         vd: dict[str, list[str | int]],
         sample: dict[str, Any],
         step_min: int | None = None,
@@ -1106,19 +1141,8 @@ class HRRRDataset(BaseDataset):
         #   process-level parallelism across samples in local mode.
         # ------------------------------------------------------------------
         t_start_fetch = time.perf_counter()
-        if self.mode == "remote":
-
-            async def _run_gather():
-                tasks = [fetcher(task[3]) for task in fetch_plan]
-                return await asyncio.gather(*tasks)
-
-            raw_messages = asyncio.run(_run_gather())
-
-            # n_workers = min(len(fetch_plan), self.num_fetch_workers)
-            # with ThreadPoolExecutor(max_workers=n_workers) as pool:
-            #     raw_messages = list(pool.map(lambda task: fetcher(task[3]), fetch_plan))
-        else:
-            raw_messages = [fetcher(task[3]) for task in fetch_plan]
+        entries = [task[3] for task in fetch_plan]
+        raw_messages = fetcher(entries)
         t_end_fetch = time.perf_counter()
 
         t_start_decode = time.perf_counter()
