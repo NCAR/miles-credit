@@ -116,6 +116,8 @@ def _ring_worker(rank, K, init_file, value_out, grad_out):
         loss = ring_crps_loss(pred, y)
         loss.backward()
         value_out[rank] = loss.item()
+        # Store as numpy: putting a torch.Tensor into a manager.dict moves it to
+        # shared memory and deadlocks the child at exit under mp.spawn on macOS.
         grad_out[rank] = pred.grad.numpy()
     finally:
         dist.destroy_process_group()
@@ -167,6 +169,8 @@ def _ring_crps_loss_worker(rank, K, init_file, value_out, grad_out):
         loss = criterion(y, pred)  # group resolved lazily here
         loss.backward()
         value_out[rank] = loss.item()
+        # Store as numpy: putting a torch.Tensor into a manager.dict moves it to
+        # shared memory and deadlocks the child at exit under mp.spawn on macOS.
         grad_out[rank] = pred.grad.numpy()
         # Second forward must reuse cached group (no re-import).
         pred2 = members[rank].clone().requires_grad_(True)

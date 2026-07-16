@@ -1,5 +1,3 @@
-"""rollout_utils.py — utilities for autoregressive multi-step rollout."""
-
 import logging
 
 import pandas as pd
@@ -156,6 +154,7 @@ def run_forecast(
     """
     dt = pd.Timedelta(conf["data"]["timestep"])
     fhr_per_step = int(dt.total_seconds() / 3600)
+    history_len = int(conf["data"].get("history_len", 1))
 
     full_data_dict: dict = {}
 
@@ -172,6 +171,13 @@ def run_forecast(
     full_data_dict["ic_preprocessed"] = apply_preblocks(ic_preblocks, ic_batch, device=device)
     full_data_dict["x_physical"] = full_data_dict["ic_preprocessed"]["input"]
     full_data_dict.update(apply_preblocks(step_preblocks, full_data_dict["ic_preprocessed"], device=device))
+
+    # Multi-step history window fed to the model. At the IC it comes straight
+    # from the dataset (history_len steps stacked on the time dim). At each
+    # rollout step below we slide it forward (drop oldest, append the newest
+    # assembled step) so the model keeps seeing history_len steps, mirroring the
+    # trainer's rollout. With history_len == 1 there is nothing to carry.
+    history_x = full_data_dict["x"] if history_len > 1 else None
 
     logger.info("Forecast init: %s  steps: %d  fhr_max: %dh", init_str, n_steps, n_steps * fhr_per_step)
 
@@ -193,7 +199,7 @@ def run_forecast(
 
                 # route predictions → prognostic/diagnostic, new forcing → dynamic_forcing,
                 # IC statics → static
-                next_batch = assemble_rollout_batch(full_data_dict, frc_batch)
+                next_batch = assemble_rollout_batch(full_data_dict, frc_batch, history_len)
 
                 # drop None target so ConcatToTensor doesn't trip over it
                 next_batch = {k: v for k, v in next_batch.items() if v is not None}
@@ -202,6 +208,14 @@ def run_forecast(
                 full_data_dict["x_physical"] = next_batch["input"]
 
                 full_data_dict.update(apply_preblocks(step_preblocks, next_batch, device=device))
+
+                if history_len > 1:
+                    # assemble_rollout_batch produced a single-step x; slide the
+                    # previous history_len-step window forward by one step: drop
+                    # the oldest time step and append this newest one (dim=2 is
+                    # time). Same free-running slide the trainer uses in rollout.
+                    history_x = torch.cat([history_x[:, :, 1:, ...], full_data_dict["x"][:, :, -1:, ...]], dim=2)
+                    full_data_dict["x"] = history_x
 
     # post_rollout postblocks (e.g. global physics fixers applied once)
     apply_postblocks(rollout_postblocks, full_data_dict)
@@ -212,7 +226,7 @@ def run_forecast(
     logger.info("Done: %s", init_str)
 
 
-def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
+def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict, history_len: int = 1) -> dict:
     """Assemble a batch dict for the rollout preblock pass at autoregressive step t > 0.
 
     Constructs a dataset-schema batch by routing each variable from the
@@ -231,6 +245,15 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
     ``curr_batch["target"]`` is forwarded so preblocks normalize the training
     target in the same pass.
 
+    When ``history_len > 1`` the carried-forward (static / non-predicted) tensors
+    taken from ``ic_preprocessed`` still carry the t=0 history window along the
+    time dimension (dim=2). The newly-routed prognostic and dynamic_forcing
+    tensors are single-step, so this function slices the carried-forward tensors
+    to their newest step (``[..., -1:, ...]``) to keep every variable single-step.
+    The trainer then slides the full ``history_len``-step input window itself
+    (drop oldest, append this newest step). With ``history_len == 1`` no slicing
+    happens and behaviour is identical to the original.
+
     Args:
         full_data_dict: the rollout state dict.  Must contain:
             ``"y_processed"`` — nested ``{source: {var_key: tensor}}`` from the
@@ -239,6 +262,9 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
             providing the authoritative variable key list and static tensors.
         curr_batch: current step's raw batch from the dataset.  Provides
             dynamic forcing fields and the training target.
+        history_len: length of the model's input time window. When > 1, static /
+            non-predicted tensors are sliced to their newest time step so the
+            assembled batch is single-step along the time dimension.
 
     Returns:
         dict with keys ``"input"`` (nested source→var dict) and ``"target"``
@@ -259,6 +285,14 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
             f"Got {type(corrected_pred).__name__}."
         )
 
+    def _newest_step(tensor):
+        # Slice the time dimension (dim=2) to its newest step when running a
+        # multi-step history, so carried-forward statics line up single-step
+        # with the freshly-routed prognostic / dynamic_forcing tensors.
+        if history_len > 1 and tensor.dim() >= 3 and tensor.shape[2] > 1:
+            return tensor[:, :, -1:, ...]
+        return tensor
+
     assembled_input: dict = {}
 
     for source, source_vars in ic_preprocessed["input"].items():
@@ -278,7 +312,7 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
                         "assemble_rollout_batch: '%s' not in y_processed; carrying forward from ic_preprocessed.",
                         var_key,
                     )
-                    assembled_input[source][var_key] = ic_tensor
+                    assembled_input[source][var_key] = _newest_step(ic_tensor)
 
             elif field_type == "dynamic_forcing":
                 if var_key in curr_source:
@@ -289,11 +323,11 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict) -> dict:
                         "carrying forward from ic_preprocessed.",
                         var_key,
                     )
-                    assembled_input[source][var_key] = ic_tensor
+                    assembled_input[source][var_key] = _newest_step(ic_tensor)
 
             else:
                 # static and any other non-predicted field: carry forward from ic_preprocessed
-                assembled_input[source][var_key] = ic_tensor
+                assembled_input[source][var_key] = _newest_step(ic_tensor)
 
     return {
         "input": assembled_input,
