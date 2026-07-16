@@ -128,6 +128,7 @@ from typing import Any, Callable, Literal, get_args
 import asyncio
 import logging
 import os
+import time
 from collections import defaultdict
 
 # from concurrent.futures import ThreadPoolExecutor
@@ -1044,6 +1045,8 @@ class HRRRDataset(BaseDataset):
         except ImportError as exc:
             raise ImportError("pygrib is required: pip install pygrib") from exc
 
+        t_start_idx = time.perf_counter()
+
         levels = vd["levels"]
 
         # ------------------------------------------------------------------
@@ -1102,6 +1105,7 @@ class HRRRDataset(BaseDataset):
         #   sequentially.  Note that DataLoader num_workers already provides
         #   process-level parallelism across samples in local mode.
         # ------------------------------------------------------------------
+        t_start_fetch = time.perf_counter()
         if self.mode == "remote":
 
             async def _run_gather():
@@ -1115,19 +1119,28 @@ class HRRRDataset(BaseDataset):
             #     raw_messages = list(pool.map(lambda task: fetcher(task[3]), fetch_plan))
         else:
             raw_messages = [fetcher(task[3]) for task in fetch_plan]
+        t_end_fetch = time.perf_counter()
 
+        t_start_decode = time.perf_counter()
         decoded = [pygrib.fromstring(raw) for raw in raw_messages]
+        t_end_decode = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Compute the spatial slice once from the first message's lat/lon grid.
         # The HRRR grid is fixed, so this result is cached for subsequent calls.
         # ------------------------------------------------------------------
+        t_start_latlons = time.perf_counter()
         lats, lons = decoded[0].latlons()
+        t_end_latlons = time.perf_counter()
+
+        t_start_get_slice = time.perf_counter()
         row_sl, col_sl = self._get_spatial_slice(lats, lons)
+        t_end_get_slice = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Group decoded arrays by variable name and build tensors
         # ------------------------------------------------------------------
+        t_start_decompress = time.perf_counter()
         arrs_3d: dict[str, list[np.ndarray]] = defaultdict(list)
         lvls_3d: dict[str, list] = defaultdict(list)
         arr_2d: dict[str, np.ndarray] = {}
@@ -1139,7 +1152,9 @@ class HRRRDataset(BaseDataset):
                 lvls_3d[vname].append(lv)
             else:
                 arr_2d[vname] = arr
+        t_end_decompress = time.perf_counter()
 
+        t_start_tensor = time.perf_counter()
         for vname in vd["vars_3D"]:
             stacked = np.stack(arrs_3d[vname])  # (n_levels, y, x)
             vname_key = self._get_field_name(field_type, "3d", vname)
@@ -1148,3 +1163,17 @@ class HRRRDataset(BaseDataset):
         for vname in vd["vars_2D"]:
             vname_key = self._get_field_name(field_type, "2d", vname)
             sample[vname_key] = torch.tensor(arr_2d[vname], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        t_end_tensor = time.perf_counter()
+
+        t_end_idx = time.perf_counter()
+        print(
+            f"[PROFILE] _extract_from_idx for {vname_key} ({field_type}, mode={self.mode}):\n        "
+            f"plan={t_start_fetch - t_start_idx:.3f}s | "
+            f"fetch={t_end_fetch - t_start_fetch:.3f}s | "
+            f"decode={t_end_decode - t_start_decode:.3f}s | "
+            f"latlons={t_end_latlons - t_start_latlons:.3f}s | "
+            f"get_slice={t_end_get_slice - t_start_get_slice:.3f}s | "
+            f"decompress={t_end_decompress - t_start_decompress:.3f}s | "
+            f"tensor={t_end_tensor - t_start_tensor:.3f}s | "
+            f"total={t_end_idx - t_start_idx:.3f}s"
+        )
