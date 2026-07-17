@@ -24,7 +24,7 @@
 # by key (e.g. CESM/prognostic/3d/Qtot) in y_processed / x_physical — no channel indices.
 # ===================================================================================================================== #
 
-save_loc: '/glade/campaign/cisl/aiml/credit/cesm_exercise/'
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/camulator_gen2'
 seed: 1000
 
 # ---- Training/validation data ---- #
@@ -113,11 +113,11 @@ trainer:
   cpu_offload: False
   activation_checkpoint: True
 
-  load_weights: True
-  load_optimizer: True
-  load_scaler: True
+  load_weights: False
+  load_optimizer: False
+  load_scaler: False
   load_scheduler: False
-  reload_epoch: True
+  reload_epoch: False
 
   skip_validation: True
   update_learning_rate: True
@@ -164,7 +164,7 @@ preblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler.json
+        scaler_path: /glade/derecho/scratch/$USER/CREDIT_runs/camulator_gen2/scaler.json
         variables:
           - CESM/prognostic/3d/U
           - CESM/prognostic/3d/V
@@ -262,7 +262,7 @@ postblocks:
       type: bridgescaler_transform
       args:
         method: inverse_transform
-        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler.json
+        scaler_path: /glade/derecho/scratch/$USER/CREDIT_runs/camulator_gen2/scaler.json
         variables:
           - CESM/prognostic/3d/U
           - CESM/prognostic/3d/V
@@ -434,7 +434,7 @@ loss:
   spectral_lambda_reg: 0.1
   spectral_wavenum_init: 20
 
-  latitude_weights: "./climate/assets/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+  latitude_weights: "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
   use_latitude_weights: True
 
   use_variable_weights: False
@@ -447,7 +447,7 @@ loss:
 inference:
   run_mode: single
   mode: none                          # none | ddp | fsdp
-  save_forecast: '/glade/derecho/scratch/$USER/camulator_test/rollout/'
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/camulator_gen2/rollout'
 
   batch_forecast:
     forecast_length: "180d"                    # 1460 6-hourly steps = 1 no-leap year
