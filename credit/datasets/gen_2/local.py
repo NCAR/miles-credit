@@ -77,7 +77,7 @@ from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage
     normalize_calendar,
     to_calendar,
 )
-from credit.datasets.base_dataset import BaseDataset
+from credit.datasets.gen_2.base_dataset import BaseDataset
 
 logger = logging.getLogger(__name__)
 

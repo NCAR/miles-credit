@@ -4,7 +4,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 import os
-from credit.datasets._utils import decode_time, to_calendar  # pyright: ignore[reportPrivateUsage]
+from credit.datasets.gen_2._utils import decode_time, to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock import apply_postblocks
