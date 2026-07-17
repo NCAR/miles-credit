@@ -1,7 +1,7 @@
 """
 advect.py
 ---------
-Shared engine plus the ``SemiLagrangianAdvection`` postblock: one explicit
+Shared engine plus the ``SemiLagrangianAdvectionPost`` postblock: one explicit
 semi-Lagrangian 3D advection step on one or more scalar tracer fields, applied
 in place to a nested ``{source: {var_key: tensor}}`` dict. A preblock wrapping
 the same engine is available as
@@ -423,7 +423,7 @@ class _SemiLagrangianAdvectionEngine(torch.nn.Module):
             self._set(nested, tracer_var, _from_nlhw(advected, like_shape))
 
 
-class SemiLagrangianAdvection(BasePostblock):
+class SemiLagrangianAdvectionPost(BasePostblock):
     """Semi-Lagrangian 3D tracer advection postblock (operates on ``y_processed``).
 
     Overwrites each tracer in ``batch_dict[self.key]`` with its value advected one
