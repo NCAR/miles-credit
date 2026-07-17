@@ -1,5 +1,5 @@
 from credit.postblock.geopotential import GeopotentialDiagnostic
-from credit.postblock.advect import SemiLagrangianAdvection
+from credit.postblock.advect import SemiLagrangianAdvectionPost
 from credit.trainers.utils import load_dataloader
 from credit.preblock import ConcatToTensor
 from credit.postblock import Reconstruct
@@ -185,7 +185,7 @@ def test_semilagrangian_advection():
     tracer_var = f"{src}/prognostic/3d/specific_humidity"
     q_before = full_data_dict["y_processed"][src][tracer_var].clone()
 
-    advect = SemiLagrangianAdvection(
+    advect = SemiLagrangianAdvectionPost(
         tracer_vars=[tracer_var],
         u_var=f"{src}/prognostic/3d/u_component_of_wind",
         v_var=f"{src}/prognostic/3d/v_component_of_wind",
@@ -222,7 +222,7 @@ def test_semilagrangian_advection_uniform_flow():
     blob = torch.exp(-((lon - 20.0) ** 2) / (2 * 3.0**2))
     q = blob.view(1, 1, 1, 1, W).expand(B, L, T, H, W).clone()
 
-    block = SemiLagrangianAdvection(
+    block = SemiLagrangianAdvectionPost(
         tracer_vars=[q_var],
         u_var=u_var,
         v_var=v_var,
