@@ -20,6 +20,7 @@ _PREBLOCK_REGISTRY = {
     "fill_values": ("credit.preblock.fill_values", "FillValues"),
     "bridgescaler_transform": ("credit.preblock.scaler", "BridgeScalerTransform"),
     "hybrid_level_interp": ("credit.preblock.hybrid_interp", "HybridLevelInterpPre"),
+    "semilagrangian_advection": ("credit.preblock.advect", "SemiLagrangianAdvectionPre"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -33,6 +34,7 @@ _CLASS_SOURCES = {
     "FillValues": ("credit.preblock.fill_values", "FillValues"),
     "BridgeScalerTransform": ("credit.preblock.scaler", "BridgeScalerTransform"),
     "HybridLevelInterpPre": ("credit.preblock.hybrid_interp", "HybridLevelInterpPre"),
+    "SemiLagrangianAdvectionPre": ("credit.preblock.advect", "SemiLagrangianAdvectionPre"),
 }
 
 

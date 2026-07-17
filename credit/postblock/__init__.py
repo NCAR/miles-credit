@@ -26,6 +26,7 @@ _POSTBLOCK_REGISTRY = {
     "pressure_interp_diagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
     "hybrid_level_interp": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
     "wind_artifact_filter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
+    "semilagrangian_advection": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -44,6 +45,7 @@ _CLASS_SOURCES = {
     "PressureInterpDiagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
     "HybridLevelInterpPost": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
     "WindArtifactFilter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
+    "SemiLagrangianAdvectionPost": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
 }
 
 
