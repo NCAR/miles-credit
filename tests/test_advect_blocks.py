@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from credit.postblock import _load_postblock_entry
-from credit.postblock.advect import SemiLagrangianAdvection
+from credit.postblock.advect import SemiLagrangianAdvectionPost
 from credit.preblock import _load_preblock_entry
 from credit.preblock.advect import SemiLagrangianAdvectionPre
 
@@ -86,5 +86,5 @@ def test_preblock_missing_data_type_skipped():
 
 def test_registered_in_both_registries():
     """The block is reachable from both factory registries under the same type key."""
-    assert _load_postblock_entry("semilagrangian_advection") is SemiLagrangianAdvection
+    assert _load_postblock_entry("semilagrangian_advection") is SemiLagrangianAdvectionPost
     assert _load_preblock_entry("semilagrangian_advection") is SemiLagrangianAdvectionPre
