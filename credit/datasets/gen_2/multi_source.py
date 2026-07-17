@@ -44,6 +44,14 @@ from typing import Any
 import pandas as pd
 
 from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
+from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
+    build_time_index,
+    filter_index_by_labels,
+    is_standard_calendar,
+    most_restrictive_calendar,
+    normalize_calendar,
+    to_calendar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +177,7 @@ class MultiSourceDataset(AbstractBaseDataset):
             logger.info(f"{prefix}: registered dataset '{user_dataset_name}' with class '{cls.__name__}'")
 
         self.dt: pd.Timedelta = pd.Timedelta(config["timestep"])
-        self.datetimes: pd.DatetimeIndex = self._build_master_clock(config)
+        self.datetimes: pd.Index = self._build_master_clock(config)  # also sets self.calendar
 
         self.static_metadata: dict[str, dict[str, Any]] = {
             name: ds.static_metadata for name, ds in self.datasets.items()
@@ -207,11 +215,41 @@ class MultiSourceDataset(AbstractBaseDataset):
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_master_clock(self, config: dict[str, Any]) -> pd.DatetimeIndex:
+    def _resolve_master_calendar(self, config: dict[str, Any]) -> str:
+        """Resolve the master-clock calendar and validate it against the sources.
+
+        An explicit data-level ``calendar:`` key wins; otherwise the most
+        restrictive calendar across sources is used (a non-standard calendar's
+        dates are a strict subset of the standard dates we support, so every
+        source can serve the master clock's labels). A non-standard source
+        under a less restrictive master clock is an init-time error — the
+        sampler's step arithmetic would generate ticks (e.g. Feb 29) that the
+        source cannot represent, and intersection cannot prevent that.
+        """
+        source_calendars = {name: getattr(ds, "calendar", "standard") for name, ds in self.datasets.items()}
+        explicit = config.get("calendar")
+        master_calendar = (
+            normalize_calendar(explicit) if explicit else most_restrictive_calendar(source_calendars.values())
+        )
+
+        for name, cal in source_calendars.items():
+            if not is_standard_calendar(cal) and normalize_calendar(cal) != master_calendar:
+                raise ValueError(
+                    f"MultiSourceDataset: source '{name}' uses calendar '{cal}' but the master clock "
+                    f"calendar is '{master_calendar}'. The master clock must use the most restrictive "
+                    "source calendar; remove or fix the data-level `calendar:` override, or align the sources."
+                )
+        if not is_standard_calendar(master_calendar):
+            logger.info("MultiSourceDataset: master clock calendar is '%s'", master_calendar)
+        return master_calendar
+
+    def _build_master_clock(self, config: dict[str, Any]) -> pd.Index:
         """Build the master sampling clock from the global config.
 
         The clock is anchored to the global ``start_datetime``, ``end_datetime``,
-        and ``timestep``.  For each source:
+        and ``timestep``, and built on the master calendar (see
+        ``_resolve_master_calendar``): a ``pd.DatetimeIndex`` for the standard
+        family, an ``xr.CFTimeIndex`` otherwise.  For each source:
 
         - **Normal sources** (no ``temporal_mode``): the clock is filtered to
           timestamps that exist exactly in that source's native datetimes.  A
@@ -222,8 +260,18 @@ class MultiSourceDataset(AbstractBaseDataset):
           ticks are snapped to the last native timestamp inside
           ``BaseDataset.__getitem__``.
         """
+        self.calendar: str = self._resolve_master_calendar(config)
+
         if "datetimes" in config:
-            return pd.DatetimeIndex(config["datetimes"])
+            # Injected init times (e.g. rollout_gen2 inference): treat as date
+            # labels and convert into the master calendar. A label that does not
+            # exist there (e.g. Feb 29 init for noleap sources) raises loudly.
+            converted = [to_calendar(t, self.calendar) for t in config["datetimes"]]
+            if is_standard_calendar(self.calendar):
+                return pd.DatetimeIndex(converted)
+            import xarray as xr  # deferred: standard path never needs it
+
+            return xr.CFTimeIndex(converted)
 
         if not self.datasets:
             return pd.DatetimeIndex([])
@@ -231,14 +279,14 @@ class MultiSourceDataset(AbstractBaseDataset):
         master_dt = pd.Timedelta(config["timestep"])
         num_history_steps = config.get("history_len", 1)
         num_forecast_steps = config.get("forecast_len", 1)
-        master_start = pd.Timestamp(config["start_datetime"])
-        master_end = pd.Timestamp(config["end_datetime"])
-
-        master = pd.date_range(
-            master_start + (num_history_steps - 1) * master_dt,
-            master_end - num_forecast_steps * master_dt,
-            freq=master_dt,
+        # Convert bounds to the master calendar *before* the horizon/history
+        # arithmetic so it is calendar-correct near leap days.
+        master_start = (
+            to_calendar(pd.Timestamp(config["start_datetime"]), self.calendar) + (num_history_steps - 1) * master_dt
         )
+        master_end = to_calendar(pd.Timestamp(config["end_datetime"]), self.calendar)
+
+        master = build_time_index(master_start, master_end - num_forecast_steps * master_dt, master_dt, self.calendar)
 
         source_cfg = config.get("source", {})
         for name, ds in self.datasets.items():
@@ -247,9 +295,11 @@ class MultiSourceDataset(AbstractBaseDataset):
             temporal_mode = source_cfg.get(name, {}).get("temporal_mode")
 
             if temporal_mode == "persist":
-                # Clip master clock to the source's coverage window only
-                ds_start = ds.datetimes[0]
-                ds_end = ds.datetimes[-1]
+                # Clip master clock to the source's coverage window only.
+                # Bounds are converted to the master calendar so the comparison
+                # is same-type (mixed pd/cftime comparisons raise TypeError).
+                ds_start = to_calendar(ds.datetimes[0], self.calendar)
+                ds_end = to_calendar(ds.datetimes[-1], self.calendar)
                 master = master[(master >= ds_start) & (master <= ds_end + ds.dt)]
             else:
                 # Exact match required — warn if resolutions differ
@@ -260,7 +310,13 @@ class MultiSourceDataset(AbstractBaseDataset):
                         "Consider setting temporal_mode: persist in the source config if this source "
                         "should persist its last sample between master-clock ticks."
                     )
-                master = master[master.isin(ds.datetimes)]
+                if isinstance(master, pd.DatetimeIndex) and isinstance(ds.datetimes, pd.DatetimeIndex):
+                    master = master[master.isin(ds.datetimes)]
+                else:
+                    # Mixed or cftime index types: isin compares element-wise
+                    # across types and would silently empty the clock, so
+                    # intersect by calendar-agnostic date labels instead.
+                    master = filter_index_by_labels(master, ds.datetimes)
 
         if not len(master):
             logger.warning(

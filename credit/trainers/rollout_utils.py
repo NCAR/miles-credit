@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 import os
+from credit.datasets.gen_2._utils import decode_time, to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock import apply_postblocks
@@ -30,10 +31,18 @@ def parse_length(length_str: str, timestep: str) -> int:
     return n
 
 
-def batch_init_times(batch_conf: dict) -> list[pd.Timestamp]:
-    """Generate the ordered list of init timestamps from inference.batch_forecast."""
-    start = pd.Timestamp(batch_conf["first_init_date"])
-    end = pd.Timestamp(batch_conf["last_init_date"])
+def batch_init_times(batch_conf: dict, calendar: str = "standard") -> list:
+    """Generate the ordered list of init timestamps from inference.batch_forecast.
+
+    For non-standard CF calendars (e.g. ``"noleap"``) the schedule is stepped in
+    cftime arithmetic, so intervals cross leap-day boundaries calendar-correctly
+    and never produce an init time the data cannot represent.
+
+    Returns:
+        Sorted list of ``pd.Timestamp`` (standard calendar) or ``cftime.datetime``.
+    """
+    start = to_calendar(pd.Timestamp(batch_conf["first_init_date"]), calendar)
+    end = to_calendar(pd.Timestamp(batch_conf["last_init_date"]), calendar)
     interval = pd.Timedelta(batch_conf["init_interval"])
 
     init_times = []
@@ -115,6 +124,7 @@ def run_forecast(
     pool,
     save_output_fn,
     verbose: bool = True,  # False on non-rank-0 workers in DDP to suppress tqdm and save-path output
+    calendar: str = "standard",  # CF calendar for decoding batch metadata datetimes (dataset.calendar)
 ) -> None:
     """Run one autoregressive forecast, consuming n_steps batches from batch_iter.
 
@@ -151,9 +161,10 @@ def run_forecast(
     # ── Step 0 (IC): load initial condition, run preblocks ──────────────────
     ic_batch = next(batch_iter)
 
-    # Extract init_time from the IC batch metadata (stored as nanoseconds since epoch).
+    # Extract init_time from the IC batch metadata (stored as int nanoseconds
+    # since epoch *in the dataset's calendar* — see _utils.encode_time).
     source_name = next(iter(ic_batch["metadata"]))
-    init_time = pd.Timestamp(ic_batch["metadata"][source_name]["input_datetime"][0].item())
+    init_time = decode_time(ic_batch["metadata"][source_name]["input_datetime"][0].item(), calendar)
     init_str = init_time.strftime("%Y-%m-%dT%HZ")
 
     full_data_dict["ic_raw"] = ic_batch.get("input", {})
