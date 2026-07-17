@@ -12,8 +12,7 @@
 # --------------------------------------------------------------------------------------------------------------------- #
 
 # ---- USER SETTINGS: output directory ---- #
-save_loc: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr_biggerbatch"
-# save_loc: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr_ddp"
+save_loc: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr_full_domain"
 seed: 1000
 
 
@@ -43,8 +42,8 @@ data:
         static:
           vars_2D: [ 'orog' ]
       # [lon_min, lon_max, lat_min, lat_max]
-      extent: [-124.358202, -120.477473, 36.527802, 38.797260]
-      # should be from 38.797260, -124.358202 to 36.527802, -120.477473
+      # extent: None # Full domain
+
 
   start_datetime: "2024-01-01"
   end_datetime: "2025-01-01"
@@ -129,8 +128,8 @@ trainer:
   learning_rate: 1.0e-03
   weight_decay: 0
 
-  train_batch_size: 32     # per-GPU batch size; total = batch_size × n_gpus
-  valid_batch_size: 32
+  train_batch_size: 4     # per-GPU batch size; total = batch_size × n_gpus
+  valid_batch_size: 4
 
   batches_per_epoch: 0    # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
@@ -155,9 +154,9 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 16
-  valid_thread_workers: 16
-  prefetch_factor: 3
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 2
 
 
 # ---- Architecture (based on HRRR Extent, A×B) ---- #
@@ -167,8 +166,8 @@ trainer:
 model:
   type: "wxformer"
   frames: 1
-  image_height: 111       # Updated for new HRRR extent
-  image_width: 132        # Updated for new HRRR extent
+  image_height: 1059      # Updated for full HRRR domain (1059 x 1799)
+  image_width: 1799       # Updated for full HRRR domain (1059 x 1799)
   levels: 6               # Bottom 6 odd levels (1, 3, 5, 7, 9, 11)
   channels: 6             # 3D prognostic variables (T, U, V, Q, P, GH)
   surface_channels: 3     # 2D prognostic variables (sp, t2m, d2m)
@@ -204,8 +203,8 @@ model:
   padding_conf:
     activate: True
     mode: mirror          # switch to mirror since it is a local extent
-    pad_lat: [ 9, 8 ]     # Produce dimensions of 111+9+8=128 ...
-    pad_lon: [ 30, 30 ]   # and 132+30+30=192, divisible by 64 (local window size 4 at stage 4)
+    pad_lat: [ 14, 15 ]   # Produce dimensions of 1059+14+15=1088 ...
+    pad_lon: [ 28, 29 ]   # and 1799+28+29=1856, divisible by 64 (local window size 4 at stage 4)
 
   
 # ---- Loss ---- #
