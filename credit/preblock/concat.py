@@ -16,7 +16,7 @@ Channel concat order is fully determined by the variable key structure
 import pandas as pd
 import torch
 from credit.preblock.base import BasePreblock
-from credit.datasets.channel_layout import FIELD_TYPE_RANK as _FIELD_TYPE_RANK
+from credit.datasets.gen_2.channel_layout import FIELD_TYPE_RANK as _FIELD_TYPE_RANK
 
 # Field types the model predicts (used to build the "output" channel map).
 _PREDICTABLE_FIELD_TYPES = {"prognostic", "diagnostic"}
@@ -75,6 +75,17 @@ class ConcatToTensor(BasePreblock):
     def __init__(self, to_device: bool = True):
         super().__init__()
         self.to_device = to_device
+        # Optional ChannelSchema (set via set_schema, not config). When present:
+        # target-less batches (inference) get the schema's full target map —
+        # covering diagnostics — instead of the prognostic-only input-derived
+        # fallback; batches WITH a target are validated against the schema once.
+        self._schema = None
+        self._schema_validated = False
+
+    def set_schema(self, schema) -> None:
+        """Attach a ``credit.datasets.gen_2.schema.ChannelSchema`` to this block."""
+        self._schema = schema
+        self._schema_validated = False
 
     def forward(self, batch: dict | tuple) -> tuple:
         if isinstance(batch, tuple):
@@ -85,9 +96,11 @@ class ConcatToTensor(BasePreblock):
 
         # Channel-map accumulators
         input_channel_map = {}
-        output_channel_map = {}
+        output_channel_map = {}  # built from input — prognostic only (inference fallback)
+        target_output_map = {}  # built from target — prognostic + diagnostic
         input_cursor = 0
         output_cursor = 0
+        target_cursor = 0
 
         for data_type, sources in batch.items():
             if data_type == "metadata":
@@ -116,24 +129,58 @@ class ConcatToTensor(BasePreblock):
                         # only. Its cursor starts at 0 because y_pred from the model contains
                         # only these predictable outputs — statics and dynamic forcings are
                         # inputs only and are absent from y_pred.
+                        #
+                        # This map is the fallback for the target channel map when the batch
+                        # carries no target (e.g. rollout with return_target=False). The model
+                        # predicts a single step (forecast_len == 1), so the output width is one
+                        # per level regardless of the input's time dim. Using the input's T here
+                        # would inflate the width by history_len and make Reconstruct unflatten
+                        # the single-step y_pred with the wrong shape (crash when history_len > 1).
                         parts = var_key.split("/")
                         if len(parts) >= 2 and parts[1] in _PREDICTABLE_FIELD_TYPES:
+                            out_ch = n_levels  # n_levels * 1 output step
                             output_channel_map[var_key] = {
-                                "slice": slice(output_cursor, output_cursor + n_ch),
-                                "orig_shape": (n_levels, T),
+                                "slice": slice(output_cursor, output_cursor + out_ch),
+                                "orig_shape": (n_levels, 1),
                             }
-                            output_cursor += n_ch
+                            output_cursor += out_ch
 
             elif data_type == "target":
                 for source, variables in sources.items():
-                    for tensor in variables.values():
+                    # Preserve insertion order so the channel map matches the
+                    # order tensors are concatenated into ``y`` (and thus the
+                    # model's ``y_pred`` channel order). The target includes
+                    # output-only diagnostic variables, which the input does not.
+                    for var_key, tensor in variables.items():
                         target_tensors.append(tensor)
+                        n_levels, T = tensor.shape[1], tensor.shape[2]
+                        n_ch = n_levels * T
+                        target_output_map[var_key] = {
+                            "slice": slice(target_cursor, target_cursor + n_ch),
+                            "orig_shape": (n_levels, T),
+                        }
+                        target_cursor += n_ch
 
         if not input_tensors:
             raise ValueError("No 'input' tensors found in batch.")
 
         metadata["input"]["_channel_map"] = input_channel_map
-        metadata["target"]["_channel_map"] = output_channel_map
+        # Target map priority:
+        #   1. built from an actual target (training/validation) — exact; checked
+        #      against the schema once so a layout drift fails loudly, not silently;
+        #   2. schema-derived (inference, no target) — covers diagnostics, which
+        #      never appear in the input;
+        #   3. input-derived prognostic-only map — legacy fallback when no schema
+        #      is available; diagnostics will be missing from reconstruction.
+        if target_output_map:
+            if self._schema is not None and not self._schema_validated:
+                self._schema.validate_channel_map(target_output_map, which="target")
+                self._schema_validated = True
+            metadata["target"]["_channel_map"] = target_output_map
+        elif self._schema is not None:
+            metadata["target"]["_channel_map"] = self._schema.target_channel_map()
+        else:
+            metadata["target"]["_channel_map"] = output_channel_map
 
         # Normalize device: rollout batches mix CPU (dataloader) and accelerator
         # (model output) tensors; torch.cat requires a uniform device.

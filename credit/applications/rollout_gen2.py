@@ -35,13 +35,14 @@ import torch.distributed as dist
 import yaml
 from torch.utils.data import DataLoader
 
-from credit.datasets.multi_source import MultiSourceDataset
+from credit.datasets.gen_2.multi_source import MultiSourceDataset
+from credit.datasets.gen_2.schema import ChannelSchema
+from credit.datasets.gen_2._utils import to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.distributed import get_rank_info, setup
 from credit.output_gen2 import ForecastWriter
 from credit.pbs import launch_script, launch_script_mpi
 from credit.postblock import build_postblocks
-from credit.preblock import build_preblocks
-from credit.samplers import MultiStepBatchSamplerSubset
+from credit.preblock import attach_channel_schema, build_preblocks
 from credit.seed import seed_everything
 from credit.trainers.rollout_utils import (
     batch_init_times,
@@ -50,6 +51,7 @@ from credit.trainers.rollout_utils import (
     run_forecast,
 )
 from credit.trainers.utils import cleanup
+from credit.samplers import MultiStepBatchSamplerSubset
 
 logger = logging.getLogger("rollout_gen2")
 warnings.filterwarnings("ignore")
@@ -151,16 +153,21 @@ Examples:
 
     # ── Init times ───────────────────────────────────────────────────────────
     timestep = conf["data"]["timestep"]
+    # CF calendar for the init schedule. Config-declared here; if the config is
+    # silent and the data is non-standard, MultiSourceDataset sniffs it below and
+    # converts these init times into the master calendar (invalid labels such as
+    # a Feb 29 init against noleap data raise at dataset construction).
+    calendar = conf["data"].get("calendar", "standard")
     if run_mode == "batch":
         assert "batch_forecast" in inf_conf, "inference.batch_forecast is required for run_mode=batch."
-        all_init_times = batch_init_times(inf_conf["batch_forecast"])
+        all_init_times = batch_init_times(inf_conf["batch_forecast"], calendar=calendar)
         n_steps = parse_length(inf_conf["batch_forecast"]["forecast_length"], timestep)
     else:
         sf = inf_conf.get("single_forecast", {})
         assert "start_datetime" in sf, (
             "inference.single_forecast.start_datetime is required for run_mode=single (or pass --init-time on the CLI)."
         )
-        all_init_times = [pd.Timestamp(sf["start_datetime"])]
+        all_init_times = [to_calendar(pd.Timestamp(sf["start_datetime"]), calendar)]
         n_steps = parse_length(
             sf.get("forecast_length", inf_conf.get("batch_forecast", {}).get("forecast_length", "10d")), timestep
         )
@@ -202,6 +209,14 @@ Examples:
     ic_preblocks = build_preblocks(conf, phase="ic_only")
     step_preblocks = build_preblocks(conf, phase="per_step")
 
+    # Channel schema: inference batches carry no target (and diagnostics exist
+    # only in targets), so without a schema the reconstruction map would cover
+    # prognostics only and every diagnostic would be silently dropped from the
+    # output. Prefer the schema saved at training time in save_loc.
+    channel_schema = ChannelSchema.load_or_from_config(conf)
+    attach_channel_schema(ic_preblocks, channel_schema)
+    attach_channel_schema(step_preblocks, channel_schema)
+
     step_postblocks = build_postblocks(conf, phase="per_step")
     rollout_postblocks = build_postblocks(conf, phase="post_rollout")
 
@@ -225,6 +240,10 @@ Examples:
 
     load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     dataset = MultiSourceDataset(dataset_conf, return_target=False)
+    # Adopt the master-clock calendar the dataset resolved (it may have been
+    # sniffed from the data files rather than declared in config); run_forecast
+    # needs it to decode the batch-metadata datetimes.
+    calendar = getattr(dataset, "calendar", calendar)
 
     # Plain (non-distributed) subset sampler: each rank takes every world_size-th
     # init time starting at its own rank, so no DistributedSampler-style padding
@@ -283,6 +302,7 @@ Examples:
                 pool=pool,
                 save_output_fn=writer,
                 verbose=verbose,
+                calendar=calendar,
             )
 
         pool.close()

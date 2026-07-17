@@ -1,4 +1,5 @@
 import argparse
+import copy
 import logging
 import os
 import shutil
@@ -9,6 +10,7 @@ from os.path import expandvars
 import torch
 import torch.distributed as dist
 import yaml
+from credit.datasets.gen_2.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from bridgescaler import save_scaler_dict
 from torch.distributed import barrier, gather_object
 
@@ -192,6 +194,18 @@ Examples:
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
         shutil.copy(args.model_config, os.path.join(save_loc, "model.yml"))
 
+    # Write the channel schema alongside the scaler. Always refreshed (unlike
+    # model.yml) so a re-run after a config change never leaves a stale layout;
+    # inference reads this file to reconstruct diagnostics, which never appear
+    # in target-less batches. Training re-derives and re-validates it anyway.
+    if rank == 0:
+        try:
+            ChannelSchema.from_config(conf).save(os.path.join(save_loc, DEFAULT_SCHEMA_FILENAME))
+        except (KeyError, ValueError) as e:
+            root.warning(
+                "Could not derive channel schema from config (%s); %s not written.", e, DEFAULT_SCHEMA_FILENAME
+            )
+
     if args.device is not None:
         device = torch.device(args.device)
     elif torch.cuda.is_available():
@@ -208,12 +222,17 @@ Examples:
         setup(rank, world_size, effective_mode(conf), backend)
 
     trainer_conf = conf["trainer"]
-    train_dataset = load_dataset(conf, is_train=True)
+    # Force forecast_len=1 so the dataloader only yields IC batches (step i=0).
+    # Using forecast_len > 1 would feed the same timestamps at multiple step
+    # offsets into the scaler fit, duplicating samples and skewing statistics.
+    preprocess_conf = copy.deepcopy(conf)
+    preprocess_conf["data"]["forecast_len"] = 1
+    train_dataset = load_dataset(preprocess_conf, is_train=True)
     # persistent_workers=False: preprocess is a single pass, so workers are not needed
     # across epochs. The iterator then lives only in the cycle() frame and is collected
     # immediately when del dl runs — semaphores are unregistered well before process exit.
     train_loader = load_dataloader(
-        conf, train_dataset, rank=rank, world_size=world_size, is_train=True, persistent_workers=False
+        preprocess_conf, train_dataset, rank=rank, world_size=world_size, is_train=True, persistent_workers=False
     )
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)

@@ -15,12 +15,14 @@ import torch
 import xarray as xr
 import yaml
 
+from credit.cli._convert import _build_bridgescaler_jsons
+from credit.postblock import build_postblocks, apply_postblocks
+
 try:
-    from credit.cli._convert import _build_bridgescaler_jsons
-    from credit.postblock import build_postblocks, apply_postblocks
+    import bridgescaler  # noqa: F401
 
     _BS_AVAILABLE = True
-except (ImportError, Exception):
+except ImportError:
     _BS_AVAILABLE = False
 
 skip_bs = pytest.mark.skipif(not _BS_AVAILABLE, reason="bridgescaler not available")

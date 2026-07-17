@@ -1,7 +1,7 @@
 """
 mrms_dataset_test.py
 --------------------
-Tests for MRMSDataset (credit.datasets.mrms).
+Tests for MRMSDataset (credit.datasets.gen_2.mrms).
 
 Output format
 -------------
@@ -29,7 +29,7 @@ import torch
 import xarray as xr
 from torch.utils.data import DataLoader
 
-from credit.datasets.mrms import MRMSDataset
+from credit.datasets.gen_2.mrms import MRMSDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 
 QPE_1H = "MultiSensor_QPE_01H_Pass2_00.00"
@@ -67,7 +67,7 @@ def mrms_xr_dataset():
 def patch_mrms_io(monkeypatch, mrms_xr_dataset):
     """Patch glob + xr.open_dataset so MRMSDataset loads from the fake dataset."""
     monkeypatch.setattr(
-        "credit.datasets.base_dataset.glob",
+        "credit.datasets.gen_2.base_dataset.glob",
         lambda pattern: ["/fake/MRMS_20240601-000000.nc"],
     )
     monkeypatch.setattr(xr, "open_dataset", lambda path, **kw: mrms_xr_dataset)
