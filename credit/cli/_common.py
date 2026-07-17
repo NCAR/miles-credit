@@ -36,17 +36,40 @@ _PBS_DEFAULTS = {
 }
 
 # SLURM defaults are cluster-agnostic — SLURM sites vary too much to enumerate,
-# so module loads / partitions come from the config's ``slurm:`` section.
+# so module loads / partitions come from the config's ``slurm:`` section.  A
+# generic site requests GPUs with ``--gres=gpu:N`` and needs an explicit
+# partition; ``constraint``/``qos`` stay unset.
 _SLURM_DEFAULTS = {
     "cpus": 8,
     "mem": "128GB",
     "partition": "gpu",
+    "qos": None,
+    "constraint": None,
     "gpu_type": None,
     "walltime": "12:00:00",
     "gpus": 4,
     "nodes": 1,
     "account": None,
     "job_name": "credit_gen2",
+}
+
+# Per-cluster SLURM overrides layered on top of ``_SLURM_DEFAULTS``.  Perlmutter
+# (NERSC) rejects ``--gres=gpu:N`` ("Job request does not match any supported
+# policy") and selects GPU nodes via ``--constraint=gpu`` + ``--qos`` +
+# ``--gpus-per-node``; it needs no ``--partition`` or ``--mem`` line, and GPU
+# allocations require the ``_g`` account suffix.
+_SLURM_CLUSTER_DEFAULTS = {
+    "perlmutter": {
+        "cpus": 64,
+        "mem": None,
+        "partition": None,
+        "qos": "regular",
+        "constraint": "gpu",
+        "walltime": "12:00:00",
+        "gpus": 4,
+        "nodes": 1,
+        "job_name": "credit_gen2",
+    },
 }
 
 
@@ -92,6 +115,23 @@ def _find_torchrun() -> str:
     if os.path.isfile(fallback):
         return fallback
     return "torchrun"
+
+
+def _resolve_torchrun(conda_env) -> str:
+    """Return a torchrun path for a conda env given as a name or a prefix path.
+
+    A value containing a path separator is treated as a full environment prefix
+    (``<prefix>/bin/torchrun``).  A bare environment *name* resolves at run time
+    via ``conda info --base`` so it is never mistaken for a same-named directory
+    in the current working directory (e.g. the repo's ``credit/`` package dir,
+    which made a ``conda: credit`` config yield a bogus ``credit/bin/torchrun``).
+    Falls back to :func:`_find_torchrun` when no env is configured.
+    """
+    if not conda_env:
+        return _find_torchrun()
+    if "/" in conda_env:
+        return f"{conda_env}/bin/torchrun"
+    return f"$(conda info --base)/envs/{conda_env}/bin/torchrun"
 
 
 def _is_ncar_system() -> bool:

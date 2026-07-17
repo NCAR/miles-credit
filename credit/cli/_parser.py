@@ -186,7 +186,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mem", default=None, help="Memory per node")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime")
     p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
-    p.add_argument("--queue", metavar="QUEUE", help="PBS queue")
+    p.add_argument("--queue", metavar="QUEUE", help="PBS queue (SLURM partition)")
+    p.add_argument(
+        "--constraint",
+        metavar="LIST",
+        default=None,
+        help="SLURM node constraint (-C), e.g. 'gpu' on Perlmutter. Switches GPU requests to --gpus-per-node.",
+    )
+    p.add_argument("--qos", metavar="QOS", default=None, help="SLURM quality of service (-q), e.g. 'regular'/'debug'")
     p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type")
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")

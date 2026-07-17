@@ -9,7 +9,13 @@ import sys
 import textwrap
 import yaml
 
-from ._common import _PBS_DEFAULTS, _SLURM_DEFAULTS, _find_torchrun, _repo_root
+from ._common import (
+    _PBS_DEFAULTS,
+    _SLURM_CLUSTER_DEFAULTS,
+    _SLURM_DEFAULTS,
+    _repo_root,
+    _resolve_torchrun,
+)
 from ._convert import _write_reload_config
 
 logger = __import__("logging").getLogger(__name__)
@@ -158,7 +164,8 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
                 return v
         return None
 
-    d = _SLURM_DEFAULTS
+    # Layer any per-cluster overrides (e.g. Perlmutter) on top of the generic defaults.
+    d = {**_SLURM_DEFAULTS, **_SLURM_CLUSTER_DEFAULTS.get(getattr(args, "cluster", ""), {})}
     r.account = _first(
         args.account,
         slurm_cfg.get("project") or slurm_cfg.get("account"),
@@ -173,11 +180,18 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     # --queue doubles as the SLURM partition selector.
     r.partition = _first(args.queue, slurm_cfg.get("partition") or slurm_cfg.get("queue"), d["partition"])
     r.queue = r.partition
+    r.constraint = _first(getattr(args, "constraint", None), slurm_cfg.get("constraint"), d["constraint"])
+    r.qos = _first(getattr(args, "qos", None), slurm_cfg.get("qos"), d["qos"])
     r.gpu_type = _first(args.gpu_type, slurm_cfg.get("gpu_type"), d["gpu_type"])
     r.conda_env = _first(args.conda_env, slurm_cfg.get("conda") or slurm_cfg.get("conda_env"))
     r.job_name = slurm_cfg.get("job_name", d["job_name"])
     r.modules = slurm_cfg.get("modules")
     r.env_setup = slurm_cfg.get("env_setup")
+
+    # Perlmutter (NERSC) GPU allocations must charge a ``_g`` account.
+    if getattr(args, "cluster", "") == "perlmutter" and r.account and not r.account.endswith("_g"):
+        logger.info("Perlmutter GPU jobs require a *_g account; charging %s_g", r.account)
+        r.account = f"{r.account}_g"
     return r
 
 
@@ -188,20 +202,43 @@ def _slurm_gres(args: argparse.Namespace) -> str:
     return f"gpu:{args.gpus}"
 
 
+def _slurm_gpu_lines(args: argparse.Namespace) -> list:
+    """Return the ``#SBATCH`` lines that request GPUs and any constraint/qos.
+
+    Sites that set a ``constraint`` (e.g. Perlmutter's ``-C gpu``) reject
+    ``--gres=gpu:N`` and must request GPUs with ``--gpus-per-node``; generic
+    SLURM sites fall back to the portable ``--gres`` form.
+    """
+    lines = []
+    constraint = getattr(args, "constraint", None)
+    if constraint:
+        lines.append(f"#SBATCH --constraint={constraint}")
+    qos = getattr(args, "qos", None)
+    if qos:
+        lines.append(f"#SBATCH --qos={qos}")
+    if constraint:
+        lines.append(f"#SBATCH --gpus-per-node={args.gpus}")
+    else:
+        lines.append(f"#SBATCH --gres={_slurm_gres(args)}")
+    return lines
+
+
 def _slurm_directives(args: argparse.Namespace, job_name: str, save_loc: str = None, depend_on: str = None) -> str:
     """Return the ``#SBATCH`` header block for a job."""
     lines = ["#!/bin/bash -l", f"#SBATCH --job-name={job_name}"]
     if getattr(args, "account", None):
         lines.append(f"#SBATCH --account={args.account}")
+    if getattr(args, "partition", None):
+        lines.append(f"#SBATCH --partition={args.partition}")
     lines += [
-        f"#SBATCH --partition={args.partition}",
         f"#SBATCH --nodes={args.nodes}",
         "#SBATCH --ntasks-per-node=1",
-        f"#SBATCH --gres={_slurm_gres(args)}",
-        f"#SBATCH --cpus-per-task={args.cpus}",
-        f"#SBATCH --mem={args.mem}",
-        f"#SBATCH --time={args.walltime}",
     ]
+    lines += _slurm_gpu_lines(args)
+    lines.append(f"#SBATCH --cpus-per-task={args.cpus}")
+    if getattr(args, "mem", None):
+        lines.append(f"#SBATCH --mem={args.mem}")
+    lines.append(f"#SBATCH --time={args.walltime}")
     if save_loc:
         logs_dir = os.path.join(os.path.expandvars(save_loc), "logs")
         os.makedirs(logs_dir, exist_ok=True)
@@ -231,10 +268,7 @@ def _slurm_env(args: argparse.Namespace) -> str:
 
 def _slurm_torchrun(args: argparse.Namespace) -> str:
     """Return the torchrun path, preferring the configured conda env."""
-    conda_env = getattr(args, "conda_env", None)
-    if conda_env and os.path.isdir(conda_env):
-        return f"{conda_env}/bin/torchrun"
-    return _find_torchrun()
+    return _resolve_torchrun(getattr(args, "conda_env", None))
 
 
 def _slurm_launch(args: argparse.Namespace, torchrun: str, app: str, app_args: str = "") -> str:
@@ -515,7 +549,7 @@ def _build_pbs_script(
         """)
 
         conda_env = args.conda_env
-        torchrun = f"{conda_env}/bin/torchrun" if (conda_env and os.path.isdir(conda_env)) else _find_torchrun()
+        torchrun = _resolve_torchrun(conda_env)
         cuda_devices = ",".join(str(i) for i in range(args.gpus))
 
         if nodes == 1:
@@ -710,7 +744,7 @@ def _build_realtime_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
+            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Realtime forecast — init: {init_time}  steps: {steps}"
             echo "Config  : ${{CONFIG}}"
@@ -787,7 +821,7 @@ def _build_preprocess_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
+            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Preprocessing — scaler fitting"
             echo "Config  : ${{CONFIG}}"
@@ -968,7 +1002,7 @@ def _build_rollout_pbs_script(
         output_line = ""
 
     if args.cluster == "casper":
-        torchrun = args.torchrun or _find_torchrun()
+        torchrun = args.torchrun or _resolve_torchrun(args.conda_env)
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {job_name}
@@ -1019,7 +1053,7 @@ def _build_rollout_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
+            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Ensemble rollout — subset {subset} of {n_subsets}"
             echo "Config  : ${{CONFIG}}"

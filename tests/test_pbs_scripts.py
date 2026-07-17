@@ -206,7 +206,7 @@ def _slurm_args(nodes=1, gpus=4, **kw):
     from credit.cli import _resolve_slurm_opts
 
     defaults = dict(
-        cluster="perlmutter",
+        cluster="genericslurm",
         scheduler="slurm",
         nodes=nodes,
         gpus=gpus,
@@ -215,6 +215,8 @@ def _slurm_args(nodes=1, gpus=4, **kw):
         walltime=None,
         queue=None,
         gpu_type=None,
+        constraint=None,
+        qos=None,
         torchrun=None,
         conda_env=None,
         account=None,
@@ -316,7 +318,7 @@ class TestSlurmRealtimeAndPreprocess:
 class TestResolveSlurmOpts:
     def _base(self, **kw):
         defaults = dict(
-            cluster="perlmutter",
+            cluster="genericslurm",
             gpus=None,
             nodes=None,
             cpus=None,
@@ -324,6 +326,8 @@ class TestResolveSlurmOpts:
             walltime=None,
             queue=None,
             gpu_type=None,
+            constraint=None,
+            qos=None,
             torchrun=None,
             conda_env=None,
             account=None,
@@ -359,6 +363,58 @@ class TestResolveSlurmOpts:
         args = _resolve_slurm_opts(self._base(gpus=8, queue="fast"), {"ngpus": 2, "partition": "slow"})
         assert args.gpus == 8
         assert args.partition == "fast"
+
+
+class TestSlurmPerlmutter:
+    """Perlmutter (NERSC) needs -C gpu / -q / --gpus-per-node instead of --gres."""
+
+    def _pm_args(self, **kw):
+        from credit.cli import _resolve_slurm_opts
+
+        defaults = dict(
+            cluster="perlmutter",
+            gpus=None,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            walltime=None,
+            queue=None,
+            gpu_type=None,
+            constraint=None,
+            qos=None,
+            torchrun=None,
+            conda_env=None,
+            account="m1234",
+        )
+        slurm_cfg = kw.pop("slurm_cfg", {"conda": "/my/env"})
+        defaults.update(kw)
+        return _resolve_slurm_opts(argparse.Namespace(**defaults), slurm_cfg)
+
+    def test_defaults_are_perlmutter_specific(self):
+        args = self._pm_args()
+        assert args.constraint == "gpu"
+        assert args.qos == "regular"
+        assert args.partition is None
+        assert args.mem is None
+        assert args.cpus == 64
+
+    def test_account_gets_g_suffix(self):
+        assert self._pm_args(account="m1234").account == "m1234_g"
+
+    def test_account_g_suffix_not_doubled(self):
+        assert self._pm_args(account="m1234_g").account == "m1234_g"
+
+    def test_script_uses_gpus_per_node_not_gres(self):
+        from credit.cli import _build_slurm_script
+
+        script = _build_slurm_script(self._pm_args(gpus=4), FAKE_CONFIG, FAKE_REPO)
+        assert "#SBATCH --constraint=gpu" in script
+        assert "#SBATCH --qos=regular" in script
+        assert "#SBATCH --gpus-per-node=4" in script
+        assert "#SBATCH --gres=" not in script
+        assert "#SBATCH --partition=" not in script
+        assert "#SBATCH --mem=" not in script
+        assert "#SBATCH --account=m1234_g" in script
 
 
 class TestLoadSlurmConfig:

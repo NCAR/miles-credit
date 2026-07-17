@@ -16,8 +16,17 @@ Config is read from a ``slurm:`` section if present, otherwise the ``pbs:``
 section is reused (SLURM keys map as ``project``/``account`` -> --account,
 ``queue``/``partition`` -> --partition, ``ngpus`` -> GPUs per node, ``ncpus`` ->
 --cpus-per-task, ``mem`` -> --mem, ``walltime`` -> --time).  Optional keys:
-``gpu_type`` (adds ``--gres=gpu:<type>:<n>``), ``modules`` (str or list, passed
-to ``module load``), and ``env_setup`` (str or list of extra shell lines).
+``gpu_type`` (adds ``--gres=gpu:<type>:<n>``), ``constraint`` (``--constraint``),
+``qos`` (``--qos``), ``modules`` (str or list, passed to ``module load``), and
+``env_setup`` (str or list of extra shell lines).
+
+GPU request style differs by site: generic SLURM clusters request GPUs with
+``--gres=gpu:N``, but Perlmutter (NERSC) rejects that ("Job request does not
+match any supported policy") and instead selects GPU nodes via
+``--constraint=gpu`` + ``--qos`` + ``--gpus-per-node``, needs no ``--partition``
+or ``--mem`` line, and requires a ``_g`` account suffix.  Perlmutter is detected
+from ``NERSC_HOST``, a ``constraint`` config key, or ``cluster: perlmutter``, and
+the correct directives are emitted automatically.
 """
 
 import re
@@ -40,6 +49,67 @@ def _gres(num_gpus, gpu_type=None):
     if gpu_type:
         return f"gpu:{gpu_type}:{num_gpus}"
     return f"gpu:{num_gpus}"
+
+
+def _is_perlmutter(options):
+    """Return True if the job targets Perlmutter (NERSC) GPU nodes."""
+    return (
+        os.environ.get("NERSC_HOST") == "perlmutter"
+        or bool(options.get("constraint"))
+        or options.get("cluster") == "perlmutter"
+    )
+
+
+def _sbatch_directives(options, num_nodes, num_gpus, default_cpus=8, default_mem="128GB", default_job="credit"):
+    """Return the ``#SBATCH`` resource directive block (no shebang).
+
+    Emits Perlmutter-style GPU directives (``--constraint``/``--qos``/
+    ``--gpus-per-node``, no partition/mem, ``_g`` account) when the job targets
+    Perlmutter, and the portable ``--gres=gpu:N`` form otherwise.
+    """
+    perlmutter = _is_perlmutter(options)
+
+    account = options.get("project", options.get("account", "default"))
+    if perlmutter and account and not str(account).endswith("_g"):
+        account = f"{account}_g"
+
+    lines = [
+        f"#SBATCH --job-name={options.get('job_name', default_job)}",
+        f"#SBATCH --account={account}",
+    ]
+
+    # Constraint / QOS (Perlmutter defaults: -C gpu, -q regular).
+    constraint = options.get("constraint") or ("gpu" if perlmutter else None)
+    if constraint:
+        lines.append(f"#SBATCH --constraint={constraint}")
+    qos = options.get("qos") or ("regular" if perlmutter else None)
+    if qos:
+        lines.append(f"#SBATCH --qos={qos}")
+
+    # Partition: required on generic sites, omitted on Perlmutter unless set.
+    partition = options.get("partition", options.get("queue")) or (None if perlmutter else "gpu")
+    if partition:
+        lines.append(f"#SBATCH --partition={partition}")
+
+    lines += [
+        f"#SBATCH --nodes={num_nodes}",
+        "#SBATCH --ntasks-per-node=1",
+    ]
+
+    # GPU request: --gpus-per-node when a constraint is used, else --gres.
+    if constraint:
+        lines.append(f"#SBATCH --gpus-per-node={num_gpus}")
+    else:
+        lines.append(f"#SBATCH --gres={_gres(num_gpus, options.get('gpu_type'))}")
+
+    lines.append(f"#SBATCH --cpus-per-task={options.get('ncpus', default_cpus)}")
+
+    mem = options.get("mem", None if perlmutter else default_mem)
+    if mem:
+        lines.append(f"#SBATCH --mem={mem}")
+
+    lines.append(f"#SBATCH --time={options.get('walltime', '12:00:00')}")
+    return "\n".join(lines)
 
 
 def _module_lines(options):
@@ -123,16 +193,10 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     torchrun = _resolve_torchrun(conda)
     modules = _module_lines(options)
 
+    directives = _sbatch_directives(options, 1, num_gpus, default_cpus=8, default_mem="128GB", default_job="credit")
+
     script = f"""#!/bin/bash -l
-    #SBATCH --job-name={options.get("job_name", "credit")}
-    #SBATCH --account={options.get("project", options.get("account", "default"))}
-    #SBATCH --partition={options.get("partition", options.get("queue", "gpu"))}
-    #SBATCH --nodes=1
-    #SBATCH --ntasks-per-node=1
-    #SBATCH --gres={_gres(num_gpus, options.get("gpu_type"))}
-    #SBATCH --cpus-per-task={options.get("ncpus", 8)}
-    #SBATCH --mem={options.get("mem", "128GB")}
-    #SBATCH --time={options.get("walltime", "12:00:00")}
+    {directives}
 
     source ~/.bashrc
     {modules}
@@ -185,16 +249,12 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     torchrun = _resolve_torchrun(conda)
     modules = _module_lines(options)
 
+    directives = _sbatch_directives(
+        options, num_nodes, num_gpus, default_cpus=8, default_mem="128GB", default_job="credit"
+    )
+
     script = f"""#!/bin/bash -l
-    #SBATCH --job-name={options.get("job_name", "credit")}
-    #SBATCH --account={options.get("project", options.get("account", "default"))}
-    #SBATCH --partition={options.get("partition", options.get("queue", "gpu"))}
-    #SBATCH --nodes={num_nodes}
-    #SBATCH --ntasks-per-node=1
-    #SBATCH --gres={_gres(num_gpus, options.get("gpu_type"))}
-    #SBATCH --cpus-per-task={options.get("ncpus", 8)}
-    #SBATCH --mem={options.get("mem", "128GB")}
-    #SBATCH --time={options.get("walltime", "12:00:00")}
+    {directives}
 
     source ~/.bashrc
     {modules}
@@ -282,16 +342,12 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
             f"        -c {config_save_path}"
         )
 
+    directives = _sbatch_directives(
+        options, num_nodes, num_gpus, default_cpus=64, default_mem="480GB", default_job="credit_v2"
+    )
+
     script = f"""#!/bin/bash -l
-#SBATCH --job-name={options.get("job_name", "credit_v2")}
-#SBATCH --account={options.get("project", options.get("account", "NAML0001"))}
-#SBATCH --partition={options.get("partition", options.get("queue", "gpu"))}
-#SBATCH --nodes={num_nodes}
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres={_gres(num_gpus, options.get("gpu_type"))}
-#SBATCH --cpus-per-task={options.get("ncpus", 64)}
-#SBATCH --mem={options.get("mem", "480GB")}
-#SBATCH --time={options.get("walltime", "01:00:00")}
+{directives}
 
 source ~/.bashrc
 {modules}
