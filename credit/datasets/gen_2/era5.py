@@ -45,8 +45,8 @@ import torch
 import xarray as xr
 import zarr
 
-from credit.datasets._utils import _to_cftime  # pyright: ignore[reportPrivateUsage]
-from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets.gen_2._utils import _to_cftime  # pyright: ignore[reportPrivateUsage]
+from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
 
 
 class ARCOERA5Dataset(BaseDataset):

@@ -61,14 +61,25 @@ File naming:
 from __future__ import annotations
 
 import cftime
+import logging
+from glob import glob
 from typing import Any
 
 import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets._utils import _find_file, _to_cftime  # pyright: ignore[reportPrivateUsage]
-from credit.datasets.base_dataset import BaseDataset
+from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
+    _find_file,
+    _path_template_to_glob,
+    _to_cftime,
+    is_standard_calendar,
+    normalize_calendar,
+    to_calendar,
+)
+from credit.datasets.gen_2.base_dataset import BaseDataset
+
+logger = logging.getLogger(__name__)
 
 
 class LocalDataset(BaseDataset):
@@ -130,11 +141,63 @@ class LocalDataset(BaseDataset):
         self.levels: list | None = self.curr_source_cfg.get("levels")
         self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
-            "datetime_fmt": "unix_ns",
+            "calendar": self.calendar,
+            "datetime_fmt": "unix_ns" if is_standard_calendar(self.calendar) else f"cf_ns:{self.calendar}",
         }
         self.mode = "local"
         self.time_coord = self.curr_source_cfg.get("time_coord", "time")
         self.init_register_all_fields()
+
+    def _resolve_calendar(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> str | None:
+        """Resolve the calendar from config, falling back to sniffing the data.
+
+        Config (source-level then data-level ``calendar:`` key) wins; otherwise
+        the first time-bearing data file's time coordinate is inspected once at
+        init. Returns None (→ "standard") when neither yields an answer.
+        """
+        cal = super()._resolve_calendar(data_config, curr_source_config)
+        if cal:
+            return cal
+        return self._sniff_calendar(curr_source_config)
+
+    def _sniff_calendar(self, source_cfg: dict[str, Any]) -> str | None:
+        """Read the CF calendar from the first available time-bearing file.
+
+        xarray decodes non-standard-calendar time coordinates to cftime objects
+        automatically, so the coordinate's element type is the discriminator.
+        Failures are non-fatal: warn and fall back to the standard default.
+        """
+        time_coord = source_cfg.get("time_coord", "time")
+        engine = source_cfg.get("engine")
+        variables = source_cfg.get("variables") or {}
+        for field_type in ("prognostic", "dynamic_forcing", "diagnostic"):
+            field_cfg = variables.get(field_type)
+            if not isinstance(field_cfg, dict) or not field_cfg.get("path"):
+                continue
+            files = sorted(glob(_path_template_to_glob(field_cfg["path"])))
+            if not files:
+                continue
+            try:
+                with xr.open_dataset(files[0], engine=engine) as ds:
+                    if time_coord not in ds:
+                        continue
+                    t0 = ds[time_coord].values.ravel()[0]
+            except Exception as exc:
+                logger.warning(
+                    "LocalDataset '%s': could not sniff calendar from %s (%s); assuming 'standard'. "
+                    "Set an explicit `calendar:` key in the source config to silence this.",
+                    self.curr_source_name,
+                    files[0],
+                    exc,
+                )
+                return None
+            calendar = normalize_calendar(t0.calendar) if isinstance(t0, cftime.datetime) else "standard"
+            if not is_standard_calendar(calendar):
+                logger.info(
+                    "LocalDataset '%s': sniffed calendar '%s' from %s", self.curr_source_name, calendar, files[0]
+                )
+            return calendar
+        return None
 
     def _extract_field(
         self,
@@ -217,7 +280,10 @@ class LocalDataset(BaseDataset):
         # Resolve each timestamp to a file path and group indices by file.
         groups: dict[str, list[int]] = {}
         for k, tk in enumerate(t_history):
-            path = _find_file(file_intervals, pd.Timestamp(tk))
+            # No pd.Timestamp(...) wrap: tk may be cftime.datetime (non-standard
+            # calendar), which pd.Timestamp cannot consume; _find_file handles
+            # both natively.
+            path = _find_file(file_intervals, tk)
             groups.setdefault(path, []).append(k)
 
         for path, indices in groups.items():
@@ -235,7 +301,7 @@ class LocalDataset(BaseDataset):
                 else:
                     # Time-indexed field: select each timestamp in this file.
                     for k in indices:
-                        ds_t = self._select_at_time(ds, pd.Timestamp(t_history[k]))
+                        ds_t = self._select_at_time(ds, t_history[k])
                         for v in vars_3D:
                             arr = self._read_3d_array(ds_t, v)
                             per_var_3D[v][k] = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
@@ -259,7 +325,10 @@ class LocalDataset(BaseDataset):
     def _select_at_time(self, ds: xr.Dataset, t: pd.Timestamp) -> xr.Dataset:
         """Select a single time slice from *ds* at timestamp *t*.
 
-        Handles both numpy datetime64 and cftime calendars. If the dataset
+        Handles both numpy datetime64 and cftime calendars, in both directions:
+        *t* may be a plain ``pd.Timestamp`` or a ``cftime.datetime`` (e.g. this
+        source's own calendar differs from the master clock's, or a mixed-source
+        run pairs a noleap source with a standard-calendar one). If the dataset
         has no time dimension (e.g. static fields), returns the dataset
         unchanged.
 
@@ -272,11 +341,16 @@ class LocalDataset(BaseDataset):
         """
         if self.time_coord not in ds.dims:
             return ds
-        if isinstance(ds[self.time_coord].values[0], cftime.datetime):
-            calendar = ds[self.time_coord].values[0].calendar
-            t_sel = _to_cftime(t, calendar)
+        file_time0 = ds[self.time_coord].values[0]
+        if isinstance(file_time0, cftime.datetime):
+            t_sel = to_calendar(t, file_time0.calendar)
+            if not isinstance(t_sel, cftime.datetime):
+                # standard-named calendar stored as cftime objects (e.g. dates
+                # outside pandas' nanosecond range): selection still needs a
+                # cftime key.
+                t_sel = _to_cftime(t_sel, file_time0.calendar)
         else:
-            t_sel = t
+            t_sel = to_calendar(t, "standard")
         return ds.sel({self.time_coord: t_sel})
 
     def _read_3d_array(self, ds_t: xr.Dataset, vname: str):

@@ -1,7 +1,7 @@
 """
 tests/test_hrrr.py
 ------------------
-Unit tests for credit/datasets/hrrr.py covering path helpers, .idx parsers,
+Unit tests for credit/datasets/gen_2/hrrr.py covering path helpers, .idx parsers,
 and product-specific entry-map functions.
 
 Remote/dataset integration tests are run unless the environment variable
@@ -18,7 +18,7 @@ import numpy as np
 
 import pytest
 
-from credit.datasets.hrrr import (
+from credit.datasets.gen_2.hrrr import (
     VALID_PRODUCTS,
     _HRRR_HTTPS_BASE,  # pyright: ignore[reportPrivateUsage]
     _build_nat_entry_map,  # pyright: ignore[reportPrivateUsage]

@@ -25,6 +25,7 @@ _POSTBLOCK_REGISTRY = {
     "geopotential_diagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
     "pressure_interp_diagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
     "hybrid_level_interp": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
+    "wind_artifact_filter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "semilagrangian_advection": ("credit.postblock.advect", "SemiLagrangianAdvection"),
 }
 
@@ -43,6 +44,7 @@ _CLASS_SOURCES = {
     "GeopotentialDiagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
     "PressureInterpDiagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
     "HybridLevelInterpPost": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
+    "WindArtifactFilter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "SemiLagrangianAdvection": ("credit.postblock.advect", "SemiLagrangianAdvection"),
 }
 

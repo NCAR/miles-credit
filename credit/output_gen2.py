@@ -160,6 +160,12 @@ class ForecastWriter:
 
         # Pending async netcdf writes: list of (AsyncResult, path) in submission order
         self._pending: list = []
+        # Cap on in-flight async writes. Without a bound, writes are submitted every
+        # step/period and only awaited in flush() at the end of the forecast, so slow
+        # (e.g. Lustre) writes let pickled payloads and worker processes pile up, which
+        # progressively starves the rollout loop of host memory, CPU, and I/O bandwidth.
+        # None => auto (2 * pool worker count), resolved per-submit in _drain_pending.
+        self._max_pending: Optional[int] = output_conf.get("max_pending")
 
     # ------------------------------------------------------------------
     # Public interface
@@ -278,10 +284,30 @@ class ForecastWriter:
             if pool is not None:
                 result = pool.apply_async(_write_netcdf_worker, args=(ds, path, enc))
                 self._pending.append((result, path))
+                self._drain_pending(pool)
             else:
                 _write_netcdf_worker(ds, path, enc)
                 if self._verbose:
                     tqdm.tqdm.write(f"Saved: {path}")
+
+    def _drain_pending(self, pool) -> None:
+        """Bound in-flight async writes: block on the oldest until under the cap.
+
+        Keeps host memory and the write queue from growing unbounded during long
+        rollouts. Drained writes are removed from _pending so flush() only awaits the
+        remainder; logging mirrors flush() so early-drained paths still report.
+        """
+        cap = self._max_pending
+        if cap is None:
+            cap = 2 * getattr(pool, "_processes", 4)
+        while len(self._pending) > cap:
+            result, path = self._pending.pop(0)
+            try:
+                result.get()
+                if self._verbose:
+                    tqdm.tqdm.write(f"Saved: {path}")
+            except Exception as exc:
+                tqdm.tqdm.write(f"Failed: {path}: {exc}")
 
     def flush(self) -> None:
         """Wait for all pending async writes in submission order and print each path."""

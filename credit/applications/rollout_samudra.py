@@ -22,8 +22,8 @@ import torch
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info
-from credit.datasets.om4_multistep_batcher import Predict_Ocean_Batcher
-from credit.datasets.load_dataset_and_dataloader import BatchForecastLenSamplerSamudra, collate_fn
+from credit.datasets.gen_1.om4_multistep_batcher import Predict_Ocean_Batcher
+from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenSamplerSamudra, collate_fn
 from torch.utils.data import DataLoader
 from credit.postblock.wet_mask_samudra import WetMaskBlock
 from credit.pbs import launch_script, launch_script_mpi
