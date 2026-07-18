@@ -154,6 +154,15 @@ def _load_slurm_config(config_path: str) -> dict:
     return slurm
 
 
+def _as_list(val) -> list:
+    """Normalize a str / list / None env-setup value to a list of shell lines."""
+    if not val:
+        return []
+    if isinstance(val, str):
+        return [val]
+    return list(val)
+
+
 def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.Namespace:
     """Return a copy of *args* with None fields filled from *slurm_cfg* then defaults."""
     r = copy.copy(args)
@@ -185,8 +194,12 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     r.gpu_type = _first(args.gpu_type, slurm_cfg.get("gpu_type"), d["gpu_type"])
     r.conda_env = _first(args.conda_env, slurm_cfg.get("conda") or slurm_cfg.get("conda_env"))
     r.job_name = slurm_cfg.get("job_name", d["job_name"])
-    r.modules = slurm_cfg.get("modules")
-    r.env_setup = slurm_cfg.get("env_setup")
+    # ``modules`` falls back to the per-cluster default (e.g. Perlmutter's NCCL
+    # module) when the config does not set it.  ``env_setup`` *extends* the
+    # per-cluster default (e.g. Perlmutter's NCCL/libfabric exports) so a config
+    # can add its own lines (NCCL_DEBUG, etc.) without dropping the defaults.
+    r.modules = _first(slurm_cfg.get("modules"), d.get("modules"))
+    r.env_setup = _as_list(d.get("env_setup")) + _as_list(slurm_cfg.get("env_setup")) or None
 
     # Perlmutter (NERSC) GPU allocations must charge a ``_g`` account.
     if getattr(args, "cluster", "") == "perlmutter" and r.account and not r.account.endswith("_g"):

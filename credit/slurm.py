@@ -36,7 +36,13 @@ import shutil
 import logging
 import subprocess
 
+from credit.cli._common import _PERLMUTTER_ENV_SETUP
+
 logger = logging.getLogger(__name__)
+
+# ``module load`` argument for Perlmutter's NCCL build (paired with the explicit
+# env vars in ``_PERLMUTTER_ENV_SETUP``).
+_PERLMUTTER_MODULES = "nccl/2.24.3"
 
 
 def _slurm_options(config):
@@ -113,18 +119,29 @@ def _sbatch_directives(options, num_nodes, num_gpus, default_cpus=8, default_mem
 
 
 def _module_lines(options):
-    """Return shell lines for optional ``module load`` / extra env setup."""
+    """Return shell lines for optional ``module load`` / extra env setup.
+
+    On Perlmutter, falls back to the NCCL/libfabric module and env vars that
+    route torch's bundled NCCL over the Slingshot fabric when the config does
+    not override ``modules`` / ``env_setup``.
+    """
+    perlmutter = _is_perlmutter(options)
+
     lines = []
     modules = options.get("modules")
+    if not modules and perlmutter:
+        modules = _PERLMUTTER_MODULES
     if modules:
         if isinstance(modules, (list, tuple)):
             modules = " ".join(str(m) for m in modules)
         lines.append(f"module load {modules}")
-    env_setup = options.get("env_setup")
-    if env_setup:
-        if isinstance(env_setup, str):
-            env_setup = [env_setup]
-        lines.extend(str(line) for line in env_setup)
+    # On Perlmutter, prepend the NCCL/libfabric exports, then any config lines
+    # (so a config can add NCCL_DEBUG etc. without dropping the defaults).
+    env_setup = list(_PERLMUTTER_ENV_SETUP) if perlmutter else []
+    cfg_env = options.get("env_setup")
+    if cfg_env:
+        env_setup += [cfg_env] if isinstance(cfg_env, str) else list(cfg_env)
+    lines.extend(str(line) for line in env_setup)
     return "\n".join(lines)
 
 

@@ -53,6 +53,25 @@ _SLURM_DEFAULTS = {
     "job_name": "credit_gen2",
 }
 
+# Perlmutter (NERSC) runtime environment for NCCL over the Slingshot 11 fabric.
+# torch's bundled NCCL only reaches the high-speed network through the
+# system-provided AWS-OFI plugin (``libnccl-net.so``), which must be on
+# ``LD_LIBRARY_PATH``; the ``NCCL_*`` / ``FI_CXI_*`` vars select the ``hsn``
+# interface and the ``cxi`` libfabric provider and apply NERSC's recommended
+# tuning.  ``module load nccl`` alone is unreliable (it does not always export
+# these or add the plugin dir), so we set them explicitly.
+_PERLMUTTER_NCCL_PLUGIN_DIR = "/global/common/software/nersc9/nccl/2.24.3/plugin/lib"
+_PERLMUTTER_ENV_SETUP = [
+    f"export LD_LIBRARY_PATH={_PERLMUTTER_NCCL_PLUGIN_DIR}:$LD_LIBRARY_PATH",
+    'export NCCL_NET="AWS Libfabric"',
+    "export NCCL_NET_GDR_LEVEL=PHB",
+    "export NCCL_SOCKET_IFNAME=hsn",
+    "export NCCL_CROSS_NIC=1",
+    "export FI_CXI_DISABLE_HOST_REGISTER=1",
+    "export FI_MR_CACHE_MONITOR=userfaultfd",
+    "export MPICH_GPU_SUPPORT_ENABLED=1",
+]
+
 # Per-cluster SLURM overrides layered on top of ``_SLURM_DEFAULTS``.  Perlmutter
 # (NERSC) rejects ``--gres=gpu:N`` ("Job request does not match any supported
 # policy") and selects GPU nodes via ``--constraint=gpu`` + ``--qos`` +
@@ -69,6 +88,8 @@ _SLURM_CLUSTER_DEFAULTS = {
         "gpus": 4,
         "nodes": 1,
         "job_name": "credit_gen2",
+        "modules": "nccl/2.24.3",
+        "env_setup": _PERLMUTTER_ENV_SETUP,
     },
 }
 
