@@ -106,7 +106,7 @@ trainer:
   type: gen2           # use the v2 trainer (new nested data schema)
 
   parallelism:
-    data: none              # ddp | fsdp2 | none
+    data: ddp               # ddp | fsdp2 | none
     tensor: 1               # tensor-parallel degree  (1 = disabled)
     domain: 1               # domain-parallel shards  (1 = disabled)
 
@@ -293,23 +293,23 @@ inference:
       #   complevel: 6
 
 
-# pbs: #derecho
-#   conda: "credit-derecho"
-#   project: "NAML0001"
-#   job_name: "credit_hrrr_gen2_derecho"
-#   walltime: "08:00:00"
-#   nodes: 4
-#   ngpus: 4
-#   mem: '480GB'
-#   queue: 'main'
-
-pbs: #casper
-  conda: "credit"
+pbs: #derecho
+  conda: "credit-derecho"
   project: "NAML0001"
-  job_name: "credit_hrrr_gen2"
+  job_name: "credit_hrrr_gen2_derecho"
   walltime: "08:00:00"
-  nodes: 1
-  ngpus: 1
-  ncpus: 32
-  mem: '120GB'
+  nodes: 4
+  ngpus: 4
+  mem: '480GB'
   queue: 'main'
+
+# pbs: #casper
+#   conda: "credit"
+#   project: "NAML0001"
+#   job_name: "credit_hrrr_gen2"
+#   walltime: "08:00:00"
+#   nodes: 1
+#   ngpus: 1
+#   ncpus: 32
+#   mem: '120GB'
+#   queue: 'main'
