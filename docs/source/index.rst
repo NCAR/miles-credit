@@ -57,7 +57,7 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    :maxdepth: 2
    :caption: Contributing
 
-   Contributing <contrib.rst>
+   Contributing <contrib.md>
 
 .. toctree::
    :maxdepth: 1
