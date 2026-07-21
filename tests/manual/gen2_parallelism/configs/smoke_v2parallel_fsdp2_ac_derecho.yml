@@ -49,12 +49,16 @@ data:
           path: /glade/campaign/cisl/aiml/credit/static_scalers/static_norm_old.nc
         diagnostic: null
   timestep: 6h
+  history_len: 1
   forecast_len: 2
   start_datetime: '2015-01-01'
   end_datetime: '2016-12-31'
 validation_data:
   start_datetime: '2017-01-01'
   end_datetime: '2018-12-31'
+  timestep: 6h
+  history_len: 1
+  forecast_len: 2
 preblocks:
   per_step:
     scaler:
@@ -207,7 +211,7 @@ postblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: /glade/campaign/cisl/aiml/credit/bridgescaler/wxformer_025deg_gen2_post_scaler.json
+        scaler_path: /glade/campaign/cisl/aiml/credit/bridgescaler/wxformer_025deg_gen2_pre_scaler.json
         variables:
         - ERA5/prognostic/3d/U
         - ERA5/prognostic/3d/V
