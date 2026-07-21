@@ -26,7 +26,7 @@ To increase the helpfulness of the bug report, please include the following info
 * Compute platform (e.g., Casper, Derecho, Macbook Pro, AWS VM, etc.)  
 * Whether issue is on CPU or GPU and what kind of GPU is being used.  
 * Version of PyTorch, CUDA toolkit, NCCL (if applicable), other relevant libraries.  
-*  What stage of ML process (processing, training, inference).
+* What stage of ML process (processing, training, inference).
 
 ## Requesting new features
 
