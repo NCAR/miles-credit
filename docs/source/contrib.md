@@ -69,7 +69,7 @@ CREDIT developers at NCAR and close collaborators (e.g., interns, visitors, part
 
 ### External contributors: Fork and clone the repository
 
-Get started by forking the `NCAR/miles-credit` repository on GitHub. To do this, find the "Fork" button near the top of the page and click it. This will create a copy of the project under your personal github account.
+Get started by forking the `NCAR/miles-credit` repository on GitHub. To do this, find the "Fork" button near the top of the page and click it. This will create a copy of the project under your personal GitHub account.
 
 Next, clone your forked copy to your local machine.
 
