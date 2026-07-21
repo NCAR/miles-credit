@@ -4,7 +4,8 @@ Builds a logical process mesh from a trainer.parallelism config block.
 Supports up to 3 parallel dimensions: data (FSDP2/DDP), tensor (TP),
 and domain (spatial sharding).
 
-Example configs:
+Example configs::
+
     # FSDP2 only, 8 GPUs
     parallelism: {data: fsdp2, tensor: 1, domain: 1}
     # mesh: (8,) named ["dp"]
@@ -59,16 +60,19 @@ def build_device_mesh(parallelism_conf: dict, device: str = "cuda"):
     """Build a DeviceMesh from a parallelism config block.
 
     Args:
-        parallelism_conf: dict with keys:
-            data   (str): "fsdp2" | "ddp" | "none"
-            tensor (int): TP degree, >= 1
-            domain (int): domain parallel degree, >= 1
+        parallelism_conf: dict with keys::
+
+                data   (str): "fsdp2" | "ddp" | "none"
+                tensor (int): TP degree, >= 1
+                domain (int): domain parallel degree, >= 1
+
         device: "cuda" (default) or "cpu" for tests
 
     Returns:
         mesh: DeviceMesh (or None if no parallelism)
-        submeshes: dict mapping dim name -> submesh (or None if single-dim)
-            Keys present: "dp" if dp > 1, "tp" if tp > 1, "domain" if domain > 1
+        submeshes: dict mapping dim name -> submesh (or None if single-dim)::
+
+                Keys present: "dp" if dp > 1, "tp" if tp > 1, "domain" if domain > 1
 
     Raises:
         ValueError: if world_size is not divisible by tensor * domain.
@@ -138,7 +142,7 @@ def data_parallel_coords(conf: dict):
     -----------
     ``init_device_mesh`` arranges ranks row-major over (dp, tp, domain), with
     dp outermost and domain innermost. ``DomainParallelManager`` builds the same
-    layout (domain groups are consecutive ranks). Hence for global rank g:
+    layout (domain groups are consecutive ranks). Hence for global rank g::
 
         domain_coord = g % domain
         tp_coord     = (g // domain) % tp

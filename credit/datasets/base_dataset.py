@@ -96,9 +96,8 @@ class BaseDataset(AbstractBaseDataset):
     2. Scaffolding the development of future datasets
     3. Provide a minimal implementation of a Dataset for testing
 
-    Minimal YAML config for a dataset will have the following stucture:
+    Minimal YAML config for a dataset will have the following stucture::
 
-    ```yaml
         data:
           source:
             Example_Base:  # User-provided name (arbitrary key)
@@ -128,7 +127,6 @@ class BaseDataset(AbstractBaseDataset):
           end_datetime: "2020-12-31T23:00:00Z" # The latest datetime across datasets
           timestep: "12h" # The smallest time interval for the clock
           forecast_len: 1 # The number of timesteps forward that need to be rolled out per sample
-    ```
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:

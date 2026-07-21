@@ -120,15 +120,15 @@ def total_grad_norm(grads, norm_type=2.0):
 
 @torch.no_grad()
 def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
-    """Mixed-mesh-safe drop-in for torch.nn.utils.clip_grad_norm_.
+    """Mixed-mesh-safe drop-in for ``torch.nn.utils.clip_grad_norm_``.
 
     The total norm comes from total_grad_norm (mesh-grouped, see above);
-    the scaling reuses torch.nn.utils.clip_grads_with_norm_ per mesh group,
+    the scaling reuses ``torch.nn.utils.clip_grads_with_norm_`` per mesh group,
     because torch's foreach multiply also rejects mixed plain/DTensor
     lists. The clip coefficient depends only on the already-global total
     norm, so per-group scaling is exact. For a homogeneous parameter set
     (plain DDP tensors, or all DTensors on one mesh under FSDP2/domain)
-    both steps reduce to exactly torch's clip_grad_norm_ computation.
+    both steps reduce to exactly torch's ``clip_grad_norm_`` computation.
 
     Args:
         parameters: tensor or iterable of tensors whose .grad gets clipped
@@ -138,7 +138,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
 
     Returns:
         The total norm of the gradients (before clipping) as a plain scalar
-        tensor, matching torch.nn.utils.clip_grad_norm_'s contract.
+        tensor, matching the ``torch.nn.utils.clip_grad_norm_`` contract.
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]

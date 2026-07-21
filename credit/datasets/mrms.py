@@ -3,7 +3,7 @@ mrms.py
 -------------------------------------------------------
 MRMSDataset: PyTorch Dataset for MRMS data with nested input/target structure.
 
-Sample structure returned by __getitem__:
+Sample structure returned by __getitem__::
 
     {
         "input":    {<user_provided_name>: {"<user_provided_name>/prognostic/2d/MultiSensor_QPE_01H_Pass2_00.00": tensor,
@@ -13,10 +13,12 @@ Sample structure returned by __getitem__:
         "metadata": {<user_provided_name>: {"input_datetime": int, "target_datetime": int}},
     }
 
-All MRMS variables are 2D. Tensor shape (no batch dimension):
+All MRMS variables are 2D. Tensor shape (no batch dimension)::
+
     (1, 1, lat, lon)   — singleton level dim, consistent with ERA5 2D convention
 
-After DataLoader collation the batch dimension is prepended:
+After DataLoader collation the batch dimension is prepended::
+
     (batch, 1, 1, lat, lon)
 
 Modes:

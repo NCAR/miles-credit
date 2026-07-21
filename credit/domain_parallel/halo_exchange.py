@@ -5,6 +5,7 @@ point-to-point communication (isend/irecv). The backward pass performs the
 reverse exchange so gradients flow correctly across domain boundaries.
 
 For latitude sharding of weather data:
+
 - The "previous" neighbor is the rank holding the region just north.
 - The "next" neighbor is the rank holding the region just south.
 - Edge ranks (poles) get zero-padded halos on their outer boundary,
@@ -26,6 +27,7 @@ class _HaloExchangeFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, halo_width, dim, manager):
+        """Exchange halo rows with neighboring domain ranks and return the padded tensor."""
         ctx.halo_width = halo_width
         ctx.dim = dim
         ctx.manager = manager
@@ -78,6 +80,7 @@ class _HaloExchangeFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        """Send gradient halos back to contributing ranks and return the local gradient."""
         halo_width = ctx.halo_width
         dim = ctx.dim
         manager = ctx.manager

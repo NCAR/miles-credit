@@ -4,49 +4,51 @@ on xarray.Datasets. The original version of this script is available at WeatherB
 
 Note: only rectalinear grids (one dimensional lat/lon coordinates) are supported.
 
-Reference
+Reference::
+
  - WeatherBench2 regridding:
      https://github.com/google-research/weatherbench2/blob/main/weatherbench2/regridding.py
 
-Example usage
-# ================================================================================== #
-import credit.regrid as regrid
+Example usage::
 
-# --------------------- #
-# prepare grids
+    # ================================================================================== #
+    import credit.regrid as regrid
 
-# target grid
-lon_1deg = np.arange(0, 360, 1)
-lat_1deg = np.arange(-90, 91, 1)
-target_grid = regrid.Grid.from_degrees(lon_1deg, lat_1deg)
+    # --------------------- #
+    # prepare grids
 
-# input grid (flip 90 --> -90 to -90 --> 90)
-lon_025deg = ds_static['longitude'].values
-lat_025deg = ds_static['latitude'].values[::-1]
-source_grid = regrid.Grid.from_degrees(lon_025deg, lat_025deg)
+    # target grid
+    lon_1deg = np.arange(0, 360, 1)
+    lat_1deg = np.arange(-90, 91, 1)
+    target_grid = regrid.Grid.from_degrees(lon_1deg, lat_1deg)
 
-# --------------------- #
-# define regridder
-regridder = regrid.ConservativeRegridder(source=source_grid, target=target_grid)
+    # input grid (flip 90 --> -90 to -90 --> 90)
+    lon_025deg = ds_static['longitude'].values
+    lat_025deg = ds_static['latitude'].values[::-1]
+    source_grid = regrid.Grid.from_degrees(lon_025deg, lat_025deg)
 
-# --------------------- #
-# clear old chunking and interpolate data
-ds_static = ds_static.chunk({'longitude': -1, 'latitude': -1})
-ds_static_1deg = regridder.regrid_dataset(ds_static)
+    # --------------------- #
+    # define regridder
+    regridder = regrid.ConservativeRegridder(source=source_grid, target=target_grid)
 
-# --------------------- #
-# ... some xarray operations to preserve the order of dims ... #
+    # --------------------- #
+    # clear old chunking and interpolate data
+    ds_static = ds_static.chunk({'longitude': -1, 'latitude': -1})
+    ds_static_1deg = regridder.regrid_dataset(ds_static)
 
-# assign coordinates
-lon_1deg = np.arange(0, 360, 1)
-lat_1deg = np.arange(-90, 91, 1)
-ds_static_1deg = ds_static_1deg.assign_coords({
-    'latitude': lat_1deg,
-    'longitude': lon_1deg
-})
+    # --------------------- #
+    # ... some xarray operations to preserve the order of dims ... #
 
-# flip latitude from -90 --> 90 to 90 --> -90
-ds_static_1deg = ds_static_1deg.isel(latitude=slice(None, None, -1))
+    # assign coordinates
+    lon_1deg = np.arange(0, 360, 1)
+    lat_1deg = np.arange(-90, 91, 1)
+    ds_static_1deg = ds_static_1deg.assign_coords({
+        'latitude': lat_1deg,
+        'longitude': lon_1deg
+    })
+
+    # flip latitude from -90 --> 90 to 90 --> -90
+    ds_static_1deg = ds_static_1deg.isel(latitude=slice(None, None, -1))
 
 
 """

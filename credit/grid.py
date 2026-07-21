@@ -3,7 +3,8 @@ scrip_generator.py
 ==================
 Generate SCRIP-format NetCDF files for use with ESMFRegridWeightGen.
 
-Supports two grid types:
+Supports two grid types::
+
     - Rectilinear  : 1D lon + 1D lat arrays (uniform, regional, or Gaussian spacing)
     - Curvilinear  : 2D lon + 2D lat arrays (HRRR, GOES, ocean tripolar, etc.)
 
@@ -11,8 +12,8 @@ All functions produce SCRIP files containing both cell centers and cell corners,
 making them compatible with all ESMFRegridWeightGen methods (bilinear, patch,
 nearest-neighbor, 1st- and 2nd-order conservative).
 
-Entry points
-------------
+Entry points::
+
     scrip_from_netcdf(nc_file, scrip_file, grid_name=None, mask_var=None)
         Auto-detects grid type from file; preferred entry point.
 
@@ -20,8 +21,8 @@ Entry points
     scrip_from_curvilinear(lon_2d, lat_2d, grid_name, grid_file, mask=None)
         Direct API for when coordinates are already in hand.
 
-Dependencies
-------------
+Dependencies::
+
     numpy, xarray
 """
 

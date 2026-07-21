@@ -18,16 +18,19 @@ def ring_crps_loss(y_pred, y, group=None):
     """Fair CRPS via ring communication — O(1) extra memory, no all_gather.
 
     Each dp rank holds 1 ensemble member of the same sample. K-1 ring shifts
-    pass one member buffer at a time so rank r accumulates |x_r - x_j| for
+    pass one member buffer at a time so rank r accumulates ``|x_r - x_j|`` for
     every j != r without ever materialising the full K-member ensemble on a
     single device.
 
-    Gradient correctness (no cross-rank backward needed):
+    Gradient correctness (no cross-rank backward needed)::
+
         d(CRPS)/d(x_r) = sign(x_r-y)/K  -  sum_{j!=r} sign(x_r-x_j) / (K*(K-1))
+
     Both terms are computed entirely from rank r's local graph. DDP averaging
     (1/K) then gives the correct model-parameter gradient.
 
-    Local loss (scaled so DDP avg = d(CRPS)/d(params)):
+    Local loss (scaled so DDP avg = d(CRPS)/d(params))::
+
         loss_r = |y_pred_r - y|  -  sum_{j!=r} |y_pred_r - x_j| / (K-1)
 
     Args:

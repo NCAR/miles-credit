@@ -27,7 +27,7 @@ from credit.models import load_custom_model_modules
 
 def validate_args(function, argdict, context, ignore=[]):
     """
-    For calling 'function(**argdict)'.  Checks that all arguments
+    For calling ``function(**argdict)``.  Checks that all arguments
     required by function exist in argdict and throws an error if they
     don't.  Checks that arguments in argdict appear in the sigature of
     function and deletes any that don't (with a warning).  'context'

@@ -1,6 +1,6 @@
 """
 rollout_realtime_gen2.py
-----------------------
+------------------------
 Operational/realtime forecast rollout for CREDIT v2 models.
 
 Designed to be run with a single command — no pre-editing of config files:

@@ -1,6 +1,6 @@
 """
 rollout_to_netcdf_gen2.py
------------------------
+-------------------------
 Rollout entry point for the v2 data schema (conf["data"]["source"]).
 
 Key differences from rollout_to_netcdf.py (v1):

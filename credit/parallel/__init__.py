@@ -3,15 +3,18 @@
 Provides FSDP2, Tensor Parallelism (TP), and integration with Negin's
 domain parallelism — all composed via PyTorch DeviceMesh.
 
-Config block (trainer.parallelism):
+Config block (trainer.parallelism)::
+
     data:   fsdp2 | ddp | none   — data-parallel mode
     tensor: int >= 1             — TP degree (1 = disabled)
     domain: int >= 1             — spatial domain shards (1 = disabled)
 
-Total GPUs = dp_size × tensor × domain
+Total GPUs = dp_size × tensor × domain::
+
   where dp_size = world_size // (tensor × domain)
 
-Usage (called from distributed_model_wrapper_gen2):
+Usage (called from distributed_model_wrapper_gen2)::
+
     mesh, submeshes = build_device_mesh(conf["trainer"]["parallelism"])
     if submeshes.get("tp"):
         if supports_native_tp(model):

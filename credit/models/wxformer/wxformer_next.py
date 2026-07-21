@@ -295,13 +295,16 @@ def remap_conv_state_dict(state_dict: dict) -> dict:
     """Convert a pre-Linear-refactor NextGenWXFormer state dict to the new format.
 
     Old checkpoints store the transformer projections as 1x1 Conv2d weights:
+
       - ``*.to_qkv.weight``        (3*inner, dim, 1, 1)  fused q/k/v
       - ``*.to_out.weight``        (dim, inner, 1, 1)
       - ``*.layers.1.weight`` / ``*.layers.4.weight``  FFN up/down (O, I, 1, 1)
+
     plus the ``weight_orig``/``weight_u``/``weight_v`` variants when spectral
     norm was active. The Linear refactor keeps every other key unchanged.
 
     Remap rules:
+
       - fused ``to_qkv`` tensors are split into ``to_q``/``to_k``/``to_v``
         (``weight_v`` is copied to all three: the input-side power-iteration
         vector has the same shape for each split, and u/v re-converge within

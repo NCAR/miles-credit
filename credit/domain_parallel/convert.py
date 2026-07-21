@@ -77,6 +77,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
     """Convert a model to use domain-parallel layers.
 
     Walks the module tree and replaces:
+
     - nn.Conv2d (kernel>1 in H) -> DomainParallelConv2d
     - nn.Conv3d (kernel>1 in H) -> DomainParallelConv3d
     - nn.ConvTranspose2d (kernel>stride in H) -> DomainParallelConvTranspose2d
@@ -84,6 +85,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
     - nn.GroupNorm -> DomainParallelGroupNorm
 
     Leaves unchanged:
+
     - 1x1 Conv2d (FeedForward, projections)
     - Custom LayerNorm (channel-wise, no spatial reduction)
     - Attention modules (windowed, local within shard)
@@ -91,7 +93,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
 
     For custom module types that wrap a Conv2d internally (e.g. PeriodicConv2d),
     pass a custom_converters dict so the whole wrapper is replaced at once and
-    its inner Conv2d children are not double-processed:
+    its inner Conv2d children are not double-processed::
 
         from credit.models.unet_diffusion import PeriodicConv2d
         from credit.domain_parallel.layers import DomainParallelPeriodicConv2d

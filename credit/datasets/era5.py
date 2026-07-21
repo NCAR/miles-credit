@@ -25,7 +25,8 @@ Sample structure returned by __getitem__::
         },
     }
 
-Output key format (flat, slash-delimited):
+Output key format (flat, slash-delimited)::
+
     "{source_name}/{field_type}/{dim}/{varname}"
 
     field_type: "prognostic" | "dynamic_forcing" | "static" | "diagnostic"
@@ -318,19 +319,19 @@ class WeatherBench2ERA5Dataset(BaseDataset):
     benchmark at multiple resolutions. All data is read lazily from public
     Google Cloud Storage zarr stores (anonymous access, no credentials required).
 
-    Available resolutions:
+    Available resolutions::
 
-    +--------------+-------------------+------------+------------------+
-    | ``resolution`` | Grid              | Approx deg | Timestep         |
-    +==============+===================+============+==================+
-    | ``"1440x721"`` | 1440 × 721 global | 0.25°      | 6-hourly, 13 lev |
-    +--------------+-------------------+------------+------------------+
-    | ``"240x121"``  | 240 × 121 global  | 1.5°       | 6-hourly, 13 lev |
-    +--------------+-------------------+------------+------------------+
-    | ``"64x32"``    | 64 × 32 global    | ~5.6°      | 6-hourly, 13 lev |
-    +--------------+-------------------+------------+------------------+
-    | ``"full"``     | 1440 × 721 global | 0.25°      | hourly, 37 lev   |
-    +--------------+-------------------+------------+------------------+
+        +----------------+-------------------+------------+------------------+
+        | ``resolution`` | Grid              | Approx deg | Timestep         |
+        +================+===================+============+==================+
+        | ``"1440x721"`` | 1440 × 721 global | 0.25°      | 6-hourly, 13 lev |
+        +----------------+-------------------+------------+------------------+
+        | ``"240x121"``  | 240 × 121 global  | 1.5°       | 6-hourly, 13 lev |
+        +----------------+-------------------+------------+------------------+
+        | ``"64x32"``    | 64 × 32 global    | ~5.6°      | 6-hourly, 13 lev |
+        +----------------+-------------------+------------+------------------+
+        | ``"full"``     | 1440 × 721 global | 0.25°      | hourly, 37 lev   |
+        +----------------+-------------------+------------+------------------+
 
     See ``_WB2_ERA5_DEFAULT_LEVELS`` for default pressure levels per resolution.
 

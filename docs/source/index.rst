@@ -71,10 +71,11 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
 
    Supported Model Architectures <Model_Architectures.md>
    Post Blocks <postblock.md>
-   Dataset Structure <DataSets.md>
+   Dataset Structure <Datasets.md>
    Data Pipeline for Downscaling <downscaling-pipeline.md>
    Prepare New Dataset <prepare_new_dataset.md>
-   RAL GWC regional model <RAL-GWC-model.md> 
+   RAL GWC regional model <RAL-GWC-model.md>
+
 ----
 
 Indices and Tables

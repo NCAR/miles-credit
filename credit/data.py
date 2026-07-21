@@ -1,29 +1,32 @@
 """Data.py contains modules for processing training data.
 
 Helper functions:
-    - generate_datetime(start_time, end_time, interval_hr)
-    - hour_to_nanoseconds(input_hr)
-    - nanoseconds_to_year(nanoseconds_value)
-    - extract_month_day_hour(dates)
-    - find_common_indices(list1, list2)
-    - concat_and_reshape(x1, x2)
-    - reshape_only(x1)
-    - get_forward_data(filename)
-    - drop_var_from_dataset()
-    - previous_hourly_steps()
-    - next_n_hour()
-    - encode_datetime64()
+
+- generate_datetime(start_time, end_time, interval_hr)
+- hour_to_nanoseconds(input_hr)
+- nanoseconds_to_year(nanoseconds_value)
+- extract_month_day_hour(dates)
+- find_common_indices(list1, list2)
+- concat_and_reshape(x1, x2)
+- reshape_only(x1)
+- get_forward_data(filename)
+- drop_var_from_dataset()
+- previous_hourly_steps()
+- next_n_hour()
+- encode_datetime64()
 
 Sample class:
-    - Sample
-    - Sample_WRF
-    - Sample_dscale
-    - Sample_diag
-    - Sample_LES
 
-Deprecated
-    - ERA5_and_Forcing_Dataset(torch.utils.data.Dataset)
-    - Predict_Dataset(torch.utils.data.IterableDataset)
+- Sample
+- Sample_WRF
+- Sample_dscale
+- Sample_diag
+- Sample_LES
+
+Deprecated:
+
+- ERA5_and_Forcing_Dataset(torch.utils.data.Dataset)
+- Predict_Dataset(torch.utils.data.IterableDataset)
 """
 
 # system tools
@@ -368,6 +371,8 @@ class Sample(TypedDict):
 
 
 class Sample_WRF(TypedDict):
+    """Structured WRF training sample (see :class:`Sample`)."""
+
     # Shape: batch_size, seq_length, lat, lon, lev
     WRF_input: Array
     WRF_target: Array
@@ -377,6 +382,8 @@ class Sample_WRF(TypedDict):
 
 
 class Sample_dscale(TypedDict):
+    """Structured downscaling training sample (see :class:`Sample`)."""
+
     # Shape: batch_size, seq_length, lat, lon, lev
     LR_input: Array
     HR_input: Array
@@ -386,6 +393,8 @@ class Sample_dscale(TypedDict):
 
 
 class Sample_diag(TypedDict):
+    """Structured WRF diagnostic sample (see :class:`Sample`)."""
+
     # Shape: batch_size, seq_length, lat, lon, lev
     WRF_input: Array
     WRF_target: Array
@@ -394,6 +403,8 @@ class Sample_diag(TypedDict):
 
 
 class Sample_LES(TypedDict):
+    """Structured LES training sample (see :class:`Sample`)."""
+
     # Shape: batch_size, seq_length, lat, lon, lev
     LES_input: Array
     LES_target: Array
@@ -401,9 +412,9 @@ class Sample_LES(TypedDict):
 
 
 class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
-    """
+    """A Pytorch Dataset class that works on the following kinds of variables.
+
     **Deprecated**
-    A Pytorch Dataset class that works on the following kinds of variables.
 
     * upper-air variables (time, level, lat, lon)
     * surface variables (time, lat, lon)
@@ -436,8 +447,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
         max_forecast_len=None,
         sst_forcing=None,
     ):
-        """I
-        nitialize the ERA5_and_Forcing_Dataset.
+        """Initialize the ERA5_and_Forcing_Dataset.
 
         Args:
             varname_upper_air (list): List of upper air variable names.
@@ -862,9 +872,9 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
         max_forecast_len=None,
         sst_forcing=None,
     ):
-        """
+        """Initialize the ERA5_and_Forcing_Dataset.
+
         **Deprecated**
-        Initialize the ERA5_and_Forcing_Dataset.
 
         Args:
             varname_upper_air (list): List of upper air variable names.
