@@ -10,7 +10,7 @@ If you have any questions, please feel free to reach out to us on [GitHub Issues
 
 If you are interested in contributing to the core CREDIT repository, first reach out to the MILES team at [miles@ucar.edu](mailto:miles@ucar.edu) to set up an introductory meeting and discuss your interests and what would be a good focus area. 
 
-Once we have agreed on a focus area, please start issues on the [CREDIT Issues](https://github.com/NCAR/miles-credit/issues) page so that we can track progress on our internal project board and version Milestone tracker. 
+Once we have agreed on a focus area, please start issues on the [CREDIT Issues](https://github.com/NCAR/miles-credit/issues) page so that we can track progress on our internal project board and [version milestone tracker](https://github.com/NCAR/miles-credit/milestones). 
 
 If you are interested in working on an existing issue, please comment on the issue to let us know you are working on it. This will help us avoid duplicate work.
 
