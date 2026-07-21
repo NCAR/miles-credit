@@ -166,6 +166,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type")
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")
+    p.add_argument(
+        "--launcher",
+        choices=["mpiexec", "pbsdsh"],
+        default="mpiexec",
+        help="Multi-node launcher, derecho only (default: mpiexec). "
+        "'pbsdsh' spawns one torchrun per node via PBS Pro's task launcher and runs NCCL "
+        "over the libfabric module; single-node jobs always use torchrun --standalone.",
+    )
     p.add_argument("--dry-run", action="store_true", help="Print the PBS script without submitting")
     p.add_argument(
         "--jobs",

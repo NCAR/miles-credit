@@ -115,6 +115,60 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     return r
 
 
+def _derecho_pbsdsh_script(
+    args: argparse.Namespace,
+    config: str,
+    repo: str,
+    app_relpath: str,
+    output_line: str,
+    depend_line: str,
+    save_loc: str = None,
+) -> str:
+    """Return a full derecho PBS script launching *app_relpath* via pbsdsh + torchrun.
+
+    Multi-node alternative to the mpiexec launch, selected by ``credit submit --launcher
+    pbsdsh``. One pbsdsh task per node, each running ``torchrun --nproc-per-node``; NCCL
+    runs over the libfabric module. The launch logic and its rationale live in
+    :func:`credit.pbs._pbsdsh_launch_block`, shared with the standalone launcher in
+    ``credit/pbs.py`` so the two stay in lockstep.
+    """
+    from credit.pbs import PBSDSH_DERECHO_MODULES, _pbsdsh_launch_block
+
+    logs_dir = os.path.join(os.path.expandvars(save_loc), "logs") if save_loc else "."
+    conda_env = args.conda_env
+    torchrun = f"{conda_env}/bin/torchrun" if (conda_env and os.path.isdir(conda_env)) else _find_torchrun()
+
+    header = textwrap.dedent(f"""\
+        #!/bin/bash -l
+        #PBS -A {args.account}
+        #PBS -N {args.job_name}
+        #PBS -l walltime={args.walltime}
+        #PBS -l select={args.nodes}:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
+        #PBS -q {args.queue}
+        #PBS -j oe
+        #PBS -k eod
+        #PBS -r n
+        {output_line}
+        {depend_line}
+        module --force purge
+        module load {PBSDSH_DERECHO_MODULES}
+
+        conda activate {args.conda_env}
+
+        echo "Nodes     : {args.nodes}"
+        echo "GPUs/node : {args.gpus}"
+        echo "Config    : {config}"
+    """)
+    block = _pbsdsh_launch_block(
+        torchrun=torchrun,
+        script_path=f"{repo}/credit/applications/{app_relpath}",
+        config_path=config,
+        num_gpus=args.gpus,
+        logdir_parent=logs_dir,
+    )
+    return header + block
+
+
 def _build_pbs_script(
     args: argparse.Namespace,
     config: str,
@@ -171,6 +225,9 @@ def _build_pbs_script(
 
     else:  # derecho
         nodes = args.nodes
+        launcher = getattr(args, "launcher", "mpiexec") or "mpiexec"
+        if nodes > 1 and launcher == "pbsdsh":
+            return _derecho_pbsdsh_script(args, config, repo, "train_gen2.py", output_line, depend_line, save_loc)
         header = textwrap.dedent(f"""\
             #!/bin/bash
             #PBS -A {args.account}
@@ -453,6 +510,12 @@ def _build_preprocess_pbs_script(
         """)
 
     else:  # derecho
+        nodes = getattr(args, "nodes", 1) or 1
+        launcher = getattr(args, "launcher", "mpiexec") or "mpiexec"
+        if nodes > 1 and launcher == "pbsdsh":
+            # Preprocess has no chaining, so no depend line.
+            args.job_name = job_name
+            return _derecho_pbsdsh_script(args, config, repo, "preprocess.py", output_line, "", save_loc)
         return textwrap.dedent(f"""\
             #!/bin/bash
             #PBS -A {args.account}

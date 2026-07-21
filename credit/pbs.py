@@ -301,88 +301,173 @@ echo "Done at $(date)"
     return
 
 
+# Module set for the pbsdsh path. Identical to `credit submit`'s derecho module line
+# PLUS the libfabric module. NCCL's data plane runs over libfabric/CXI via the
+# aws-ofi-nccl plugin (libnccl-net.so, bundled in the conda env); libfabric.so itself
+# comes from this module (version-matched to the plugin's build). cray-mpich stays
+# loaded even though we no longer launch via mpiexec, because libtorch links Cray's
+# libmpi_gnu_123.so at runtime -- dropping it breaks `import torch`, not just MPI launch.
+PBSDSH_DERECHO_MODULES = (
+    "ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 "
+    "cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1 libfabric/1.15.2.0"
+)
+
+
+def _pbsdsh_launch_block(torchrun, script_path, config_path, num_gpus, logdir_parent):
+    r"""Return the bash block that launches *script_path* across all job nodes via pbsdsh.
+
+    This is the launcher-specific tail of a PBS script; the caller supplies the ``#PBS``
+    header, ``module load``, and ``conda activate`` lines before appending this block. It
+    is shared by ``credit/pbs.py``'s legacy full-script builder and ``credit submit``'s
+    integrated derecho path so the two stay in lockstep.
+
+    Design:
+
+    * **One pbsdsh task per node**, each running ``torchrun --nproc-per-node`` to fan out
+      to that node's GPUs -- NOT torchrun *under* mpiexec, which double-spawns N^2 ranks
+      and collides on GPUs (see ``tests/manual/gen2_parallelism/run_smoke_2node.pbs``).
+      torchrun sets ``LOCAL_RANK``/``RANK``/``WORLD_SIZE``, which ``get_rank_info()`` reads.
+    * **Static rendezvous** (``--rdzv-backend=static`` + ``--master-addr``/``--master-port``),
+      not elastic c10d: each node's torchrun is spawned independently, so ranks are handed
+      out explicitly via ``--node-rank`` rather than negotiated by arrival order (which
+      would race across independently-spawned tasks).
+    * **Baked environment.** pbsdsh's spawned per-node shell does not inherit this job's
+      module/conda environment (and may lack the ``module``/``conda`` commands entirely),
+      so the fully-resolved ``PATH``/``LD_LIBRARY_PATH`` from the mother-superior shell --
+      where ``module load`` + ``conda activate`` have already run -- are baked verbatim
+      into each per-node script. All nodes are identical hardware/software, so those paths
+      are valid everywhere. They carry the conda env's ``bin``, the aws-ofi-nccl plugin
+      NCCL uses to talk over libfabric, libfabric itself, and Cray's ``libmpi`` that
+      libtorch links against. (Validated in a bare ``env -i`` shell: with only these two
+      variables set, ``import torch``/``torchrun``/``import credit`` all resolve.)
+    * **PBS Pro node indexing.** ``pbsdsh -n <i>`` targets the (i+1)-th vnode in job order;
+      index 0 is the mother superior -- the host running this script -- so ``MASTER_ADDR``
+      is resolved locally with ``hostname -i`` rather than via ``ssh`` to a nodefile entry.
+      This guarantees rank 0's rendezvous store binds on the node rank 0 actually runs on
+      (a sorted nodefile could put a different host first, breaking the bind). The node
+      count comes from the deduplicated ``$PBS_NODEFILE``.
+
+    Empirical history that produced this shape (Derecho, 2 nodes, develop queue):
+
+    1. An inline ``bash -l -c "<multi-line string>"`` handed to pbsdsh exited status 0 with
+       zero output on every node -- pbsdsh's ``tm_spawn`` does not reliably preserve a
+       single quoted argument containing literal newlines, so only the first line ran.
+       Fix: write each node's command to its own script file and run that by path.
+    2. That surfaced ``conda: command not found``, then ``module: command not found`` --
+       pbsdsh's spawned login shell has neither. Fix: stop depending on them there; bake
+       the mother-superior's resolved ``PATH``/``LD_LIBRARY_PATH`` (this function).
+    3. With the environment baked, both nodes launched torchrun, rendezvoused, and split
+       into the expected local-ranks x nodes total ranks with correct rank/host assignment.
+
+    Args:
+        torchrun (str): torchrun invocation baked into each per-node script. A bare
+            ``"torchrun"`` works because PATH is set from the resolved env; a full path
+            is equally fine.
+        script_path (str): Application entrypoint (e.g. ``credit/applications/train_gen2.py``).
+        config_path (str): Config the entrypoint reads via ``-c``.
+        num_gpus (int): GPUs -- and torchrun processes -- per node.
+        logdir_parent (str): Directory under which a ``pbsdsh_logs/`` dir is created for
+            per-node logs, written to disk independently of the job's own stdout so a
+            job killed abruptly still leaves diagnostics behind.
+
+    Returns:
+        str: The bash launch block (no ``#PBS`` header, no ``module``/``conda`` lines).
+            Intentionally NOT run through a leading-whitespace strip -- the per-node
+            heredoc terminator must stay at column 0.
+    """
+    cuda_devices = ",".join(str(i) for i in range(int(num_gpus)))
+    template = r"""
+# --- pbsdsh + torchrun multi-node launch -----------------------------------
+# Bake the mother-superior's fully-resolved environment into each per-node script,
+# because pbsdsh's spawned shell inherits neither modules nor conda. See _pbsdsh_launch_block.
+RESOLVED_PATH="$PATH"
+RESOLVED_LD="${LD_LIBRARY_PATH:-}"
+
+# One physical node per chunk on Derecho GPU nodes; pbsdsh indexes them in job order and
+# index 0 is this (mother-superior) host, so resolve MASTER_ADDR here on the local host.
+NUM_NODES=$(sort -u "$PBS_NODEFILE" | wc -l)
+MASTER_ADDR=$(hostname -i | awk '{print $1}')
+MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
+
+LOGDIR="@@LOGDIR@@/pbsdsh_logs"
+mkdir -p "$LOGDIR"
+echo "Launcher     : pbsdsh + torchrun (static rendezvous)"
+echo "Nodes        : ${NUM_NODES}   GPUs/node: @@NGPUS@@"
+echo "Master       : ${MASTER_ADDR}:${MASTER_PORT}"
+echo "Per-node logs: ${LOGDIR}"
+
+pids=()
+for (( i=0; i<NUM_NODES; i++ )); do
+    node_script="${LOGDIR}/node_${i}.sh"
+    # Unquoted heredoc: $RESOLVED_PATH / $MASTER_ADDR / $NUM_NODES / $i expand NOW (this
+    # shell), so each per-node script is fully self-contained with literal values -- pbsdsh
+    # does not propagate shell state to the spawned task.
+    cat > "${node_script}" <<EOF
+#!/bin/bash
+export PATH="${RESOLVED_PATH}"
+export LD_LIBRARY_PATH="${RESOLVED_LD}"
+export CUDA_VISIBLE_DEVICES=@@CUDA@@
+export LOGLEVEL=INFO
+# NCCL_DEBUG=INFO prints the selected transport (expect NET/OFI over libfabric) so a run
+# can be confirmed to use libfabric rather than silently falling back to TCP sockets.
+export NCCL_DEBUG=INFO
+# Redirect torchrun's output to a per-node file on the (shared) LOGDIR from inside the
+# per-node script, i.e. written by the remote node itself. PBS routes a pbsdsh task's
+# stdout to the *job's* aggregate stream, not to the launching pbsdsh's redirected stdout,
+# so capturing it here is the only way to keep clean, un-interleaved per-node logs on disk.
+@@TORCHRUN@@ \
+    --nnodes=${NUM_NODES} \
+    --node-rank=${i} \
+    --nproc-per-node=@@NGPUS@@ \
+    --rdzv-backend=static \
+    --master-addr=${MASTER_ADDR} \
+    --master-port=${MASTER_PORT} \
+    @@APP@@ -c @@CONFIG@@ > "${LOGDIR}/node_${i}.out" 2>&1
+EOF
+    chmod +x "${node_script}"
+    # -v: pbsdsh reports each task's exit status to node_<i>.pbsdsh; torchrun's own output
+    # goes to node_<i>.out (written by the remote node above). Backgrounded so all nodes
+    # run concurrently.
+    pbsdsh -v -n "$i" -- bash "${node_script}" > "${LOGDIR}/node_${i}.pbsdsh" 2>&1 &
+    pids+=($!)
+done
+
+# Wait on every task; fail the job if any node's task fails. (A hung -- not crashed --
+# rank is not caught by this.)
+status=0
+for pid in "${pids[@]}"; do
+    wait "$pid" || status=1
+done
+
+for (( i=0; i<NUM_NODES; i++ )); do
+    echo "--- node ${i} (torchrun) ---"
+    cat "${LOGDIR}/node_${i}.out" 2>/dev/null
+    echo "--- node ${i} (pbsdsh status) ---"
+    cat "${LOGDIR}/node_${i}.pbsdsh" 2>/dev/null
+done
+exit $status
+"""
+    return (
+        template.replace("@@LOGDIR@@", str(logdir_parent))
+        .replace("@@NGPUS@@", str(int(num_gpus)))
+        .replace("@@CUDA@@", cuda_devices)
+        .replace("@@TORCHRUN@@", str(torchrun))
+        .replace("@@APP@@", str(script_path))
+        .replace("@@CONFIG@@", str(config_path))
+    )
+
+
 def _build_pbsdsh_script(pbs_options, script_path, config_save_path):
-    """Return a multi-node PBS script that launches torchrun via pbsdsh instead of mpiexec.
+    """Return a full multi-node PBS script that launches torchrun via pbsdsh, not mpiexec.
 
-    pbsdsh is PBS's own task-manager launcher (no MPI involved). This removes the last
-    dependency on cray-mpich from the *launch* path: NCCL communication on Derecho already
-    goes over libfabric/CXI (Slingshot-11) via the OFI plugin regardless of what spawned the
-    processes, and PyTorch does not need an MPI-aware build unless torch.distributed's
-    separate 'mpi' backend is used (CREDIT always uses 'nccl').
-
-    Rank assignment is static, not the elastic c10d rendezvous: each node's torchrun is
-    launched independently via its own ``pbsdsh -n <i>`` call, so ranks are handed out with
-    explicit ``--node-rank`` rather than negotiated by arrival order (arrival order would
-    race across independently-spawned tasks).
-
-    PROTOTYPE — five live attempts on Derecho (2 nodes, develop@desched1):
-      1. First attempt: MASTER_ADDR/node discovery resolved, then the job vanished from the
-         queue with zero torchrun/Python output and no error text — consistent with an abrupt
-         kill before anything downstream could flush output. Root cause not confirmed, but
-         added ``pbsdsh -v`` (verbose error/exit-status reporting, per ``man pbsdsh``) and
-         per-node log files written to disk independently of the job's own stdout stream, so
-         a repeat leaves diagnostics behind either way.
-      2. Second attempt (with the above diagnostics): every node's pbsdsh task reported
-         **exit status 0 with zero output** — no torchrun banner, no Python error, nothing.
-         That combination (clean exit, no output at all) is the signature of the original
-         inline ``bash -l -c "<multi-line string>"`` command silently running only its first
-         line: PBS's ``tm_spawn`` does not reliably preserve a single quoted argument
-         containing literal newlines, so everything after ``conda activate ...;`` became
-         inert, never-executed positional parameters. Fixed by writing each node's full
-         command to its own plain script file (via an unquoted heredoc, so MASTER_ADDR /
-         TORCHRUN / node-rank / etc. are baked in as literal values at write time) and having
-         pbsdsh execute that file by path instead.
-      3. Third attempt (with the script-file fix): real output at last — ``conda: command
-         not found`` on both nodes, then an ``OSError: libmkl_intel_lp64.so.2`` from torchrun.
-         pbsdsh spawns a fresh login shell on a (possibly different) node that does not
-         inherit the outer script's already-loaded modules, so ``conda activate`` had no
-         ``conda`` command to run, the env was never actually activated, and torch's MKL
-         dependency (normally resolved via the activated env's lib path) couldn't be found.
-         "Fixed" by repeating ``module load ncarenv/24.12 nvhpc cuda/12.3.2 conda`` inside
-         each per-node script before ``conda activate`` — but see attempt 4.
-      4. Fourth attempt (with the module-load fix): ``module: command not found`` AND
-         ``conda: command not found`` — pbsdsh's spawned login shell has *neither* available,
-         so nothing that depends on the module system can work there, no matter what the
-         outer script or the per-node script itself does. Fixed by bypassing both entirely:
-         when ``pbs.conda`` is an absolute path, PATH and LD_LIBRARY_PATH are pointed straight
-         at that env's ``bin``/``lib`` dirs (which is what ``conda activate`` would have set
-         up anyway).
-      5. Fifth attempt (with the PATH/LD_LIBRARY_PATH fix) — **this is the mechanism working**:
-         both nodes correctly launched torchrun, rendezvoused, and split into the expected 8
-         total ranks (4 local ranks × 2 nodes) with correct rank/local-rank/host assignment.
-         The run then failed with ``ImportError: cannot import name
-         'distributed_model_wrapper_gen2' from 'credit.distributed'`` — but that's the
-         *shared conda env's own pip-installed* ``credit`` package (stale, predates this
-         branch), not a pbsdsh/rendezvous problem: nothing pointed ``PYTHONPATH`` at the dev
-         checkout being tested, so Python resolved the import from site-packages instead. The
-         launcher itself (node discovery, MASTER_ADDR resolution, per-node script generation,
-         env setup, torchrun rendezvous across 2 nodes) is validated; getting a fully clean
-         training run would need ``PYTHONPATH`` pointed at the checkout under test (not
-         attempted here, since it wasn't needed to answer the actual question: does pbsdsh
-         work as a launcher).
-
-    Confirm on an actual Derecho allocation before using this in place of launch_script_torchrun:
-      - A full end-to-end training run (not just rendezvous) — attempt 5 above validated the
-        launch mechanism but never got past import time due to the unrelated stale-package
-        issue, so actual gradient/NCCL-communication behavior during training is unverified.
-      - Name-based ``pbs.conda`` values still fall back to module+activate, which attempt 4
-        showed does NOT work in pbsdsh's spawned shell (neither ``module`` nor ``conda`` are
-        available there) — use an absolute conda path in ``pbs.conda`` until that path is
-        fixed too (e.g. by resolving the same PATH/LD_LIBRARY_PATH bypass for a conda name via
-        a config-supplied base path, rather than relying on ``conda info --base``).
-      - That ``pbsdsh -n <i>`` targets nodes in the same order as ``$PBS_NODEFILE`` (node 0
-        here MUST be the same host as MASTER_ADDR, or rank 0's torchrun will try to bind a
-        c10d store on an IP it doesn't own). Attempt 5's correct rank-to-host assignment is
-        consistent with this holding on this system, but wasn't verified with node counts > 2.
-      - GPU/CPU affinity: mpiexec's ``--cpu-bind none`` currently leaves binding to the
-        scheduler; pbsdsh does no such binding, so CUDA_VISIBLE_DEVICES is set explicitly
-        per node below, but NUMA/CPU affinity is not — watch for perf regressions.
-      - Failure handling: the loop below waits on every pbsdsh task and fails the job if any
-        one of them fails, but a genuinely hung (not crashed) rank won't be caught by this.
+    Thin wrapper: builds the ``#PBS`` header + module/conda lines from ``pbs_options`` and
+    appends :func:`_pbsdsh_launch_block` (which holds the launch logic and its rationale).
+    ``credit submit --launcher pbsdsh`` builds the equivalent script through the same block
+    helper; this function is the standalone/legacy entry point used by ``launch_script_pbsdsh``.
 
     Args:
         pbs_options (dict): The ``pbs:`` block from the config.
-        script_path (str): Path to the training script (e.g., credit/applications/train_gen2.py).
+        script_path (str): Path to the training script (e.g. credit/applications/train_gen2.py).
         config_save_path (str): Path to the config copy the training script should read.
 
     Returns:
@@ -391,28 +476,11 @@ def _build_pbsdsh_script(pbs_options, script_path, config_save_path):
     num_nodes = pbs_options.get("nodes", 1)
     num_gpus = pbs_options.get("ngpus", 4)
     conda = pbs_options.get("conda", "credit")
-    cuda_devices = ",".join(str(i) for i in range(num_gpus))
 
-    if "/" in conda:
-        torchrun = f"{conda}/bin/torchrun"
-        # A live attempt found that pbsdsh's spawned login shell has neither 'module' nor
-        # 'conda' available ("command not found" for both, twice, on this system), so
-        # 'module load ...; conda activate' cannot work here regardless of what the outer
-        # script does. Point PATH/LD_LIBRARY_PATH straight at the env's own bin/lib dirs
-        # instead — this is what 'conda activate' would have set up anyway, and fixed the
-        # OSError: libmkl_intel_lp64.so.2 load failure without needing 'conda'/'module' at all.
-        per_node_env_setup = f'export PATH="{conda}/bin:$PATH"\nexport LD_LIBRARY_PATH="{conda}/lib:$LD_LIBRARY_PATH"'
-    else:
-        torchrun = f"$(conda info --base)/envs/{conda}/bin/torchrun"
-        # Name-based conda envs have no known bin/lib path to export directly, so this falls
-        # back to module+activate — NOT confirmed to work, since the one live test so far
-        # showed 'module'/'conda' both missing in pbsdsh's spawned shell. Prefer an absolute
-        # conda path in pbs.conda until this is verified.
-        per_node_env_setup = (
-            f"module --force purge\nmodule load ncarenv/24.12 nvhpc cuda/12.3.2 conda\nconda activate {conda}"
-        )
+    # torchrun resolves from PATH once the env is activated; a full path also works.
+    torchrun = f"{conda}/bin/torchrun" if "/" in str(conda) else "torchrun"
 
-    script = f"""#!/bin/bash -l
+    header = f"""#!/bin/bash -l
 #PBS -A {pbs_options.get("project", "NAML0001")}
 #PBS -N {pbs_options.get("job_name", "credit_v2_pbsdsh")}
 #PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
@@ -420,84 +488,20 @@ def _build_pbsdsh_script(pbs_options, script_path, config_save_path):
 #PBS -q {pbs_options.get("queue", "develop@desched1")}
 #PBS -j oe
 #PBS -k eod
+#PBS -r n
 
 module --force purge
-module load ncarenv/24.12 nvhpc cuda/12.3.2 conda
+module load {PBSDSH_DERECHO_MODULES}
 conda activate {conda}
-
-export LOGLEVEL=INFO
-export NCCL_DEBUG=WARN
-# NCCL talks over libfabric/CXI on Derecho's Slingshot-11 fabric regardless of launcher —
-# this does not depend on cray-mpich being loaded.
-export NCCL_NET=OFI
-
-TORCHRUN={torchrun}
-CONFIG={config_save_path}
-NUM_NODES={num_nodes}
-NUM_GPUS={num_gpus}
-MASTER_PORT=29500
-
-# Per-node logs are written to disk as each pbsdsh task runs, independently of whatever
-# happens to the job's own stdout/stderr stream — kept even if the job is killed abruptly.
-LOGDIR=$(dirname "${{CONFIG}}")/pbsdsh_logs
-mkdir -p "${{LOGDIR}}"
-
-# nodes[0] is used both to resolve MASTER_ADDR and as the target of `pbsdsh -n 0` below —
-# this assumes pbsdsh's node indexing matches $PBS_NODEFILE order (see caveats above).
-nodes=( $( cat $PBS_NODEFILE ) )
-MASTER_ADDR=$(ssh "${{nodes[0]}}" hostname -i | awk '{{print $1}}')
-echo "Master : ${{MASTER_ADDR}}:${{MASTER_PORT}}"
-echo "Nodes  : ${{nodes[@]}}"
-echo "Logs   : ${{LOGDIR}}"
-
-pids=()
-for i in "${{!nodes[@]}}"; do
-    # A plain script file, not an inline multi-line -c string: pbsdsh's tm_spawn does not
-    # reliably preserve a single quoted argument containing literal newlines (a first live
-    # attempt with an inline `bash -l -c "<multi-line>"` string exited status 0 with zero
-    # output on every node — consistent with everything after the first line being silently
-    # dropped as inert positional params rather than executed).
-    # Heredoc delimiter is unquoted on purpose: the outer (already-running) script expands
-    # ${{TORCHRUN}}/${{MASTER_ADDR}}/etc. immediately, baking a fully-resolved, self-contained
-    # script per node rather than depending on whether pbsdsh propagates shell variables
-    # (as opposed to exported env vars) to the remote task at all.
-    node_script="${{LOGDIR}}/node_${{i}}.sh"
-    cat > "${{node_script}}" <<EOF
-#!/bin/bash -l
-# pbsdsh spawns this on a fresh login shell on a (possibly different) node — a live attempt
-# found it has neither 'module' nor 'conda' available at all, so it cannot inherit the outer
-# script's environment setup no matter how that's done there. See per_node_env_setup above.
-{per_node_env_setup}
-export CUDA_VISIBLE_DEVICES={cuda_devices}
-export NCCL_NET=OFI
-${{TORCHRUN}} \\
-    --nnodes=${{NUM_NODES}} \\
-    --node-rank=$i \\
-    --nproc-per-node=${{NUM_GPUS}} \\
-    --rdzv-backend=static \\
-    --master-addr=${{MASTER_ADDR}} \\
-    --master-port=${{MASTER_PORT}} \\
-    {script_path} -c ${{CONFIG}}
-EOF
-    chmod +x "${{node_script}}"
-    pbsdsh -v -n "$i" -- bash "${{node_script}}" > "${{LOGDIR}}/node_${{i}}.log" 2>&1 &
-    pids+=($!)
-done
-
-# Fail the job if any node's pbsdsh task fails, instead of hanging waiting on the others.
-status=0
-for pid in "${{pids[@]}}"; do
-    wait "$pid" || status=1
-done
-
-for i in "${{!nodes[@]}}"; do
-    echo "--- node ${{i}} (${{nodes[$i]}}) log ---"
-    cat "${{LOGDIR}}/node_${{i}}.log"
-done
-
-exit $status
 """
-    return re.sub(r"^[ \t]+", "", script, flags=re.MULTILINE)
+    block = _pbsdsh_launch_block(
+        torchrun=torchrun,
+        script_path=script_path,
+        config_path=config_save_path,
+        num_gpus=num_gpus,
+        logdir_parent=os.path.dirname(str(config_save_path)) or ".",
+    )
+    return header + block
 
 
 def launch_script_pbsdsh(config_file, script_path, launch=True, backend="nccl"):
