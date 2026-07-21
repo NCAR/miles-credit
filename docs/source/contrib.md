@@ -236,7 +236,7 @@ See the [pytest documentation](https://docs.pytest.org/en/stable/) for more info
 
 ## Documentation
 
-`miles-credit` uses [sphinx](https://www.sphinx-doc.org/en/master/) and [ReadTheDocs](https://docs.readthedocs.io/en/stable/) to build and host the documentation.
+`miles-credit` uses [Sphinx](https://www.sphinx-doc.org/en/master/) and [Read the Docs](https://docs.readthedocs.io/en/stable/) to build and host the documentation.
 
 ### Docstrings
 
