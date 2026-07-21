@@ -65,7 +65,7 @@ This is a brief overview of the development workflow we use for CREDIT. A more d
 
 ### Internal developers and close collaborators: Clone and create a branch
 
-CREDIT developers at NCAR and close collaborators (e.g., interns, visitors, partners on funded research projects) should manage their code contributions through branches in the `NCAR/miles-credit` Github repository. 
+CREDIT developers at NCAR and close collaborators (e.g., interns, visitors, partners on funded research projects) should manage their code contributions through branches in the `NCAR/miles-credit` GitHub repository. 
 
 ### External contributors: Fork and clone the repository
 
