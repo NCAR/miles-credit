@@ -271,7 +271,7 @@ To generate the documentation locally, follow the steps below.
 
 ### Check the documentation
 
-As well as checking local documentation generation, you should also check the preview documentation generated as part of a PR. To do this, scroll down to the "checks" section of the PR and click on the "Details" link next to the "docs/readthedocs.org:miles-credit" check. This will take you to the corresponding build on ReadTheDocs, where you can view the documentation built from your PR and see any warnings or errors on your build. ReadTheDocs will highlight tracked changes. 
+As well as checking local documentation generation, you should also check the preview documentation generated as part of a PR. To do this, scroll down to the "checks" section of the PR and click on the "Details" link next to the "docs/readthedocs.org:miles-credit" check. This will take you to the corresponding build on Read the Docs, where you can view the documentation built from your PR and see any warnings or errors on your build. Read the Docs will highlight tracked changes. 
 
 ## Contribute your code
 
