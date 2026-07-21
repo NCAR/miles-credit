@@ -20,7 +20,7 @@ The code for CREDIT is hosted on GitHub. If you do not have one, you will need t
 
 Something not working as expected? We would love to hear about it! Please report any bugs you find by opening an issue on GitHub. 
 
-When reporting a bug, please include as much information as possible. This will help us reproduce the bug and fix it efficiently. For more information on how to write a good bug report, see this stackoverflow post on [how to make a good bug report](https://stackoverflow.com/help/minimal-reproducible-example).  
+When reporting a bug, please include as much information as possible. This will help us reproduce the bug and fix it efficiently. For more information on how to write a good bug report, see this Stack Overflow post on [how to make a good bug report](https://stackoverflow.com/help/minimal-reproducible-example).  
 To increase the helpfulness of the bug report, please include the following information:
 
 * Compute platform (e.g., Casper, Derecho, Macbook Pro, AWS VM, etc.)  
