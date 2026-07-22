@@ -4,7 +4,9 @@ from bridgescaler import load_scaler_dict, scale_var_dict
 from credit.postblock.base import BasePostblock
 from credit.preblock._utils import (
     _parse_variable_selection,
-)  # shared utility — lives in preblock but used by both pre and postblocks
+    _flatten_spatial_tensors,
+    _unflatten_spatial_tensors,
+)  # shared utilities — live in preblock but used by both pre and postblocks
 
 
 class BridgeScalerTransform(BasePostblock):
@@ -34,6 +36,11 @@ class BridgeScalerTransform(BasePostblock):
     all variables under that hierarchy. Expansion happens lazily on the first
     forward call.
 
+    ``spatial_variables`` scales the listed variables per gridpoint (one
+    mean/variance per lat/lon cell) instead of per level — see the preblock's
+    docstring for the full explanation. Entries must also be covered by
+    ``variables``.
+
     Example config::
 
         # Inverse-transform specific variables
@@ -49,6 +56,14 @@ class BridgeScalerTransform(BasePostblock):
         args:
             scaler_path: "/path/to/scaler.json"
             variables: []
+
+        # Inverse-transform with a grid-wise variable
+        type: "bridgescaler_transform"
+        args:
+            scaler_path: "/path/to/scaler.json"
+            variables: []
+            spatial_variables:
+                - "cesm/prognostic/2d/some_var"
     """
 
     def __init__(
@@ -57,6 +72,7 @@ class BridgeScalerTransform(BasePostblock):
         variables: list[str],
         method: str = "inverse_transform",
         key: str = "y_processed",
+        spatial_variables: list[str] = None,
     ):
         super().__init__()
         self.variables = variables
@@ -64,6 +80,9 @@ class BridgeScalerTransform(BasePostblock):
         self.method = method
         self.scaler_path = expandvars(scaler_path)
         self.key = key  # key in batch_dict where Reconstruct writes the split output (default: "y_processed")
+        # Full keys or partial paths of variables that use grid-wise (per-gridpoint)
+        # scaling instead of per-level scaling. Must also be selected by `variables`.
+        self.spatial_variables = spatial_variables or []
         full_scaler = load_scaler_dict(self.scaler_path)
         self.scaler = full_scaler["target"]
 
@@ -75,8 +94,14 @@ class BridgeScalerTransform(BasePostblock):
             # standard logic.
             wrapped = {"_": batch_dict[self.key]}
             self.variables = _parse_variable_selection(self.variables, wrapped, data_types=["_"])
+            if self.spatial_variables:
+                self.spatial_variables = _parse_variable_selection(self.spatial_variables, wrapped, data_types=["_"])
+                missing = set(self.spatial_variables) - set(self.variables)
+                assert not missing, f"spatial_variables must also be selected by `variables` (missing: {missing})."
             self.variables_expanded = True
-        batch_dict[self.key] = scale_var_dict(
-            batch_dict[self.key], self.scaler, self.method, self.variables
+        flattened, spatial_shapes = _flatten_spatial_tensors(batch_dict[self.key], self.spatial_variables)
+        scaled = scale_var_dict(flattened, self.scaler, self.method, self.variables)
+        batch_dict[self.key] = _unflatten_spatial_tensors(
+            scaled, spatial_shapes
         )  # returns a new dict; reassign back into batch_dict
         return batch_dict

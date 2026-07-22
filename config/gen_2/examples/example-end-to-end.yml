@@ -172,6 +172,7 @@ preblocks:
                     'ERA5/diagnostic/2d/top_net_thermal_radiation', 'ERA5/diagnostic/2d/top_net_solar_radiation',
                     'ERA5/diagnostic/2d/surface_latent_heat_flux', 'ERA5/diagnostic/2d/surface_net_solar_radiation',
                     'ERA5/diagnostic/2d/surface_net_thermal_radiation', 'ERA5/diagnostic/2d/surface_sensible_heat_flux']
+        spatial_variables: ['ERA5/prognostic/2d/SP']
         scaler_type: "standard"
         scaler_params:
           channels_last: False
@@ -191,6 +192,7 @@ postblocks:
                     'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
                     'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
                     'ERA5/prognostic/2d/VAR_10V']
+        spatial_variables: ['ERA5/prognostic/2d/SP']
         method: inverse_transform
     log_trans:
       type: "exp_transform"
