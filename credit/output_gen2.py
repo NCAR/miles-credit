@@ -31,6 +31,8 @@ import tqdm
 import xarray as xr
 import yaml
 
+from credit.datasets.gen_2.grid_utils import GridSchema
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,14 +110,45 @@ class ForecastWriter:
 
     Args:
         output_conf: the ``inference.output`` config block.
-        conf: full model config (used to read grid dimensions and levels).
+        conf: full model config (used to read levels, ``save_loc`` for a saved
+            grid schema, and as a legacy fallback for grid dimensions).
         n_steps: total forecast steps — needed so ``group_by="full"`` knows
             when to flush without an external flush() call.
+        grid_schema: resolved output grid (real lat/lon + rectilinear/curvilinear
+            type), if already known. Takes priority over *dataset* below.
+        dataset: live dataset (e.g. ``MultiSourceDataset``) to resolve the grid
+            from when *grid_schema* is not given and no ``grid_schema.nc`` exists
+            in ``conf["save_loc"]``. Resolution is deferred to the first
+            forecast step (not ``__init__``) so lazily-populated native grids
+            (e.g. HRRR, remote ERA5 — known only after the first real read) are
+            already available by the time this runs.
+        ic_preblocks, step_preblocks: preblock groups to check for an active
+            ``Regridder`` when resolving from *dataset* (see ``GridSchema.resolve``).
+            When neither *grid_schema* nor *dataset* is given (nor a saved
+            ``grid_schema.nc``), falls back to a fabricated global rectilinear
+            grid derived from ``model.image_height``/``image_width`` (legacy
+            behavior, wrong for regional or curvilinear domains — a loud
+            warning is logged).
+        verbose: gate tqdm progress bars and save-path notifications.
     """
 
-    def __init__(self, output_conf: dict, conf: dict, n_steps: int, verbose: bool = True) -> None:
+    def __init__(
+        self,
+        output_conf: dict,
+        conf: dict,
+        n_steps: int,
+        grid_schema: Optional[GridSchema] = None,
+        dataset=None,
+        ic_preblocks=None,
+        step_preblocks=None,
+        verbose: bool = True,
+    ) -> None:
         self._n_steps = n_steps
         self._conf = conf
+        self._grid_schema = grid_schema
+        self._grid_dataset = dataset
+        self._grid_ic_preblocks = ic_preblocks
+        self._grid_step_preblocks = step_preblocks
 
         # output format
         fmt = (output_conf.get("format") or "netcdf").lower().strip()
@@ -362,8 +395,17 @@ class ForecastWriter:
     # ------------------------------------------------------------------
 
     def _to_dataset(self, y_processed: dict, valid_time: pd.Timestamp) -> xr.Dataset:
-        """Convert one step of y_processed to an xr.Dataset."""
+        """Convert one step of y_processed to an xr.Dataset.
+
+        Rectilinear grids keep ``latitude``/``longitude`` as 1D dimension
+        coordinates. Curvilinear grids use generic ``y``/``x`` dims (the
+        convention this codebase already uses for HRRR, see
+        ``credit/datasets/gen_2/hrrr.py``) with ``latitude``/``longitude`` as
+        2D non-dimension coordinates, per CF conventions.
+        """
         coords = self._coords
+        curvilinear = coords["grid_type"] == "curvilinear"
+        xy_dims = ["y", "x"] if curvilinear else ["latitude", "longitude"]
         data_vars = {}
 
         for source_name, source_dict in y_processed.items():
@@ -390,34 +432,80 @@ class ForecastWriter:
                     else:
                         level_coord = source_levels if len(source_levels) else np.arange(arr.shape[0])
 
+                    da_coords = {"time": [valid_time], "level": level_coord}
+                    if not curvilinear:
+                        da_coords["latitude"] = coords["latitude"]
+                        da_coords["longitude"] = coords["longitude"]
                     data_vars[var_name] = xr.DataArray(
                         arr[np.newaxis],  # (1, L, H, W)
-                        dims=["time", "level", "latitude", "longitude"],
-                        coords={
-                            "time": [valid_time],
-                            "level": level_coord,
-                            "latitude": coords["latitude"],
-                            "longitude": coords["longitude"],
-                        },
+                        dims=["time", "level"] + xy_dims,
+                        coords=da_coords,
                     )
 
                 else:  # 2D — arr shape (1, H, W); squeeze the level dim
+                    da_coords = {"time": [valid_time]}
+                    if not curvilinear:
+                        da_coords["latitude"] = coords["latitude"]
+                        da_coords["longitude"] = coords["longitude"]
                     data_vars[var_name] = xr.DataArray(
                         arr[0][np.newaxis],  # (H, W) → (1, H, W)
-                        dims=["time", "latitude", "longitude"],
-                        coords={
-                            "time": [valid_time],
-                            "latitude": coords["latitude"],
-                            "longitude": coords["longitude"],
-                        },
+                        dims=["time"] + xy_dims,
+                        coords=da_coords,
                     )
 
         ds = xr.Dataset(data_vars)
         ds.attrs["Conventions"] = "CF-1.11"
+
+        if curvilinear:
+            ds = ds.assign_coords(
+                latitude=(("y", "x"), coords["latitude"]),
+                longitude=(("y", "x"), coords["longitude"]),
+            )
+            for var in ds.data_vars:
+                ds[var].attrs["coordinates"] = "latitude longitude"
+
         return ds
 
     def _init_coords(self, y_processed: dict) -> dict:
-        """Build lat/lon/level arrays from model config, falling back to tensor shape."""
+        """Build lat/lon/level arrays from the resolved grid schema.
+
+        Falls back to a fabricated global rectilinear grid derived from
+        model config / tensor shape when no ``grid_schema`` was provided —
+        legacy behavior, kept only as an emergency default.
+
+        Called once (first forecast step) and cached by the caller — resolving
+        here rather than in ``__init__`` matters when a live *dataset* was
+        passed in: lazily-populated native grids (HRRR, remote ERA5) are only
+        known after the first real read, which has already happened by the
+        time the first step's output reaches this writer.
+        """
+        source_levels = {}
+        for src_name, src_conf in self._conf["data"]["source"].items():
+            lvs = src_conf.get("levels")
+            source_levels[src_name] = np.array(lvs) if lvs else np.array([])
+
+        if self._grid_schema is None and self._grid_dataset is not None:
+            self._grid_schema = GridSchema.load_or_resolve(
+                self._grid_dataset,
+                self._grid_ic_preblocks,
+                self._grid_step_preblocks,
+                save_loc=self._conf.get("save_loc"),
+            )
+
+        if self._grid_schema is not None:
+            return {
+                "grid_type": self._grid_schema.grid_type,
+                "latitude": self._grid_schema.lat,
+                "longitude": self._grid_schema.lon,
+                "levels": source_levels,
+            }
+
+        logger.warning(
+            "ForecastWriter: no grid_schema provided — falling back to a fabricated global "
+            "rectilinear grid derived from model.image_height/image_width. This is almost "
+            "certainly wrong for regional or curvilinear domains; pass a GridSchema instead "
+            "(see credit.datasets.gen_2.grid_utils.GridSchema.load_or_resolve)."
+        )
         model_conf = self._conf.get("model", {})
         H = model_conf.get("image_height")
         W = model_conf.get("image_width")
@@ -433,12 +521,7 @@ class ForecastWriter:
         lat = np.linspace(-90.0, 90.0, H) if H else np.array([])
         lon = np.linspace(0.0, 360.0 - 360.0 / W, W) if W else np.array([])
 
-        source_levels = {}
-        for src_name, src_conf in self._conf["data"]["source"].items():
-            lvs = src_conf.get("levels")
-            source_levels[src_name] = np.array(lvs) if lvs else np.array([])
-
-        return {"latitude": lat, "longitude": lon, "levels": source_levels}
+        return {"grid_type": "rectilinear", "latitude": lat, "longitude": lon, "levels": source_levels}
 
     # ------------------------------------------------------------------
     # Encoding and metadata

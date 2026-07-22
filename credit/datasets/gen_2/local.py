@@ -78,6 +78,7 @@ from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage
     to_calendar,
 )
 from credit.datasets.gen_2.base_dataset import BaseDataset
+from credit.datasets.gen_2.grid_utils import find_coord_pair, infer_grid_type
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,7 @@ class LocalDataset(BaseDataset):
             "levels": self.levels,
             "calendar": self.calendar,
             "datetime_fmt": "unix_ns" if is_standard_calendar(self.calendar) else f"cf_ns:{self.calendar}",
+            "grid": self._sniff_grid(self.curr_source_cfg),
         }
         self.mode = "local"
         self.time_coord = self.curr_source_cfg.get("time_coord", "time")
@@ -197,6 +199,38 @@ class LocalDataset(BaseDataset):
                     "LocalDataset '%s': sniffed calendar '%s' from %s", self.curr_source_name, calendar, files[0]
                 )
             return calendar
+        return None
+
+    def _sniff_grid(self, source_cfg: dict[str, Any]) -> dict[str, Any] | None:
+        """Read the real lat/lon coordinates from the first available data file, once.
+
+        This is a debugging aid (``self.static_metadata["grid"]``) reflecting this
+        source's *native* grid. It is not necessarily the grid actually written to
+        output — a regridding preblock downstream may change that; see
+        ``credit.datasets.gen_2.grid_utils.GridSchema``. Failures are non-fatal:
+        warn and return None.
+        """
+        engine = source_cfg.get("engine")
+        variables = source_cfg.get("variables") or {}
+        for field_type in ("prognostic", "dynamic_forcing", "diagnostic", "static"):
+            field_cfg = variables.get(field_type)
+            if not isinstance(field_cfg, dict) or not field_cfg.get("path"):
+                continue
+            files = sorted(glob(_path_template_to_glob(field_cfg["path"])))
+            if not files:
+                continue
+            try:
+                with xr.open_dataset(files[0], engine=engine) as ds:
+                    lon, lat, _, _ = find_coord_pair(ds)
+                    return {"grid_type": infer_grid_type(lat, lon), "lat": lat, "lon": lon}
+            except Exception as exc:
+                logger.warning(
+                    "LocalDataset '%s': could not sniff grid from %s (%s).",
+                    self.curr_source_name,
+                    files[0],
+                    exc,
+                )
+                return None
         return None
 
     def _extract_field(

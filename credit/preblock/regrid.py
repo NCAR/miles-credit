@@ -43,6 +43,9 @@ class Regridder(BasePreblock):
         flip_axis: list[int] = None,
     ):
         super().__init__()
+        dst_lat = None
+        dst_lon = None
+        grid_type = None
         with xr.open_dataset(expandvars(weight_file)) as grid_weights:
             rows = grid_weights["row"].values - 1  # ESMF indices are 1-based
             cols = grid_weights["col"].values - 1  # ESMF indices are 1-based
@@ -62,10 +65,35 @@ class Regridder(BasePreblock):
                 # Irregular unstructured: output stays flat, no 2D shape needed
                 dst_shape = None
 
+            # Real destination-grid coordinates, for GridSchema/output purposes — the
+            # writer needs the *actual* post-regrid grid, not just its shape. ESMF
+            # always stores centers flat, so a genuinely rectilinear destination grid
+            # still reshapes to a 2D array; collapse it back to 1D lat/lon when the
+            # rows/columns are constant (separable), else keep it as a true 2D
+            # curvilinear grid (e.g. regridding onto HRRR's native Lambert grid).
+            if dst_shape is not None and "xc_b" in grid_weights and "yc_b" in grid_weights:
+                lat2d = grid_weights["yc_b"].values.reshape(dst_shape)
+                lon2d = grid_weights["xc_b"].values.reshape(dst_shape)
+                if np.allclose(lat2d, lat2d[:, :1]) and np.allclose(lon2d, lon2d[:1, :]):
+                    grid_type = "rectilinear"
+                    dst_lat = lat2d[:, 0]
+                    dst_lon = lon2d[0, :]
+                else:
+                    grid_type = "curvilinear"
+                    dst_lat = lat2d
+                    dst_lon = lon2d
+
         self.variables = variables
         self.data_types = data_types or ["input", "target"]
         self.reshape_to_xy = reshape_to_xy
         self.flip_axis = flip_axis
+        # Real destination-grid coordinates (None when reshape_to_xy=False or the
+        # weight file lacks xc_b/yc_b) — consumed by GridSchema.resolve to determine
+        # the actual output grid when this preblock is active. Not a torch buffer:
+        # plain numpy, only used at grid-resolution time, not in forward().
+        self.dst_grid_type = grid_type
+        self.dst_lat = dst_lat
+        self.dst_lon = dst_lon
 
         invalid = set(self.data_types) - set(self.VALID_DATA_TYPES)
         if invalid:

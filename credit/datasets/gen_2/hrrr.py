@@ -790,31 +790,40 @@ class HRRRDataset(BaseDataset):
 
         if self.extent is None:
             self._spatial_slice = (slice(None), slice(None))
-            return self._spatial_slice
+        else:
+            if len(lats.shape) != 2 or len(lons.shape) != 2:
+                raise ValueError(f"Expected 2D lat/lon arrays, got shapes {lats.shape} and {lons.shape}")
 
-        if len(lats.shape) != 2 or len(lons.shape) != 2:
-            raise ValueError(f"Expected 2D lat/lon arrays, got shapes {lats.shape} and {lons.shape}")
+            if lats.shape != lons.shape:
+                raise ValueError(f"Latitude and longitude arrays have different shapes: {lats.shape} vs {lons.shape}")
 
-        if lats.shape != lons.shape:
-            raise ValueError(f"Latitude and longitude arrays have different shapes: {lats.shape} vs {lons.shape}")
+            min_lon, max_lon, min_lat, max_lat = self.extent
+            min_lon = (min_lon + 180.0) % 360.0 - 180.0
+            max_lon = (max_lon + 180.0) % 360.0 - 180.0
+            lon_norm = (lons + 180.0) % 360.0 - 180.0
 
-        min_lon, max_lon, min_lat, max_lat = self.extent
-        min_lon = (min_lon + 180.0) % 360.0 - 180.0
-        max_lon = (max_lon + 180.0) % 360.0 - 180.0
-        lon_norm = (lons + 180.0) % 360.0 - 180.0
+            mask = (lats >= min_lat) & (lats <= max_lat) & (lon_norm >= min_lon) & (lon_norm <= max_lon)
 
-        mask = (lats >= min_lat) & (lats <= max_lat) & (lon_norm >= min_lon) & (lon_norm <= max_lon)
+            rows = np.where(mask.any(axis=1))[0]
+            cols = np.where(mask.any(axis=0))[0]
 
-        rows = np.where(mask.any(axis=1))[0]
-        cols = np.where(mask.any(axis=0))[0]
+            if rows.size == 0 or cols.size == 0:
+                raise ValueError(f"extent {self.extent} does not intersect the HRRR CONUS domain.")
 
-        if rows.size == 0 or cols.size == 0:
-            raise ValueError(f"extent {self.extent} does not intersect the HRRR CONUS domain.")
+            self._spatial_slice = (
+                slice(int(rows[0]), int(rows[-1]) + 1),
+                slice(int(cols[0]), int(cols[-1]) + 1),
+            )
 
-        self._spatial_slice = (
-            slice(int(rows[0]), int(rows[-1]) + 1),
-            slice(int(cols[0]), int(cols[-1]) + 1),
-        )
+        # Reached exactly once per instance (the guard above short-circuits every
+        # later call) — debugging aid, not necessarily the grid actually written
+        # to output; a regridding preblock downstream may change that, see
+        # credit.datasets.gen_2.grid_utils.
+        self.static_metadata["grid"] = {
+            "grid_type": "curvilinear",
+            "lat": lats[self._spatial_slice],
+            "lon": lons[self._spatial_slice],
+        }
         return self._spatial_slice
 
     # ------------------------------------------------------------------

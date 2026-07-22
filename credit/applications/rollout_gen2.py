@@ -36,7 +36,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
-from credit.datasets.gen_2.schema import ChannelSchema
+from credit.datasets.gen_2.channel_utils import ChannelSchema
 from credit.datasets.gen_2._utils import to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.distributed import get_rank_info, setup
 from credit.output_gen2 import ForecastWriter
@@ -270,10 +270,17 @@ Examples:
     verbose = rank == 0 or args.log_all_ranks  # gates tqdm bars and save-path notifications
 
     # ── Output writer ─────────────────────────────────────────────────────────
+    # grid_schema resolution (real lat/lon, rectilinear vs curvilinear) is deferred
+    # to the writer's first forecast step, not done here — some sources (HRRR,
+    # remote ERA5) only know their native grid after the first real read, and this
+    # loader runs with num_workers=0 so that read happens in this process either way.
     writer = ForecastWriter(
         output_conf=inf_conf.get("output", {}),
         conf=conf,
         n_steps=n_steps,
+        dataset=dataset,
+        ic_preblocks=ic_preblocks,
+        step_preblocks=step_preblocks,
         verbose=verbose,
     )
 
