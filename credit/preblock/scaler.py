@@ -175,7 +175,8 @@ class BridgeScalerTransform(BasePreblock):
         if self.spatial_variables:
             self.spatial_variables = _parse_variable_selection(self.spatial_variables, batch, self.data_types)
             missing = set(self.spatial_variables) - set(self.variables)
-            assert not missing, f"spatial_variables must also be selected by `variables` (missing: {missing})."
+            if missing:
+                raise ValueError(f"spatial_variables must also be selected by `variables` (missing: {missing}).")
         self.variables_expanded = True
 
     def forward(self, batch: dict) -> dict:

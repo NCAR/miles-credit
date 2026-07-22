@@ -97,7 +97,8 @@ class BridgeScalerTransform(BasePostblock):
             if self.spatial_variables:
                 self.spatial_variables = _parse_variable_selection(self.spatial_variables, wrapped, data_types=["_"])
                 missing = set(self.spatial_variables) - set(self.variables)
-                assert not missing, f"spatial_variables must also be selected by `variables` (missing: {missing})."
+                if missing:
+                    raise ValueError(f"spatial_variables must also be selected by `variables` (missing: {missing}).")
             self.variables_expanded = True
         flattened, spatial_shapes = _flatten_spatial_tensors(batch_dict[self.key], self.spatial_variables)
         scaled = scale_var_dict(flattened, self.scaler, self.method, self.variables)
