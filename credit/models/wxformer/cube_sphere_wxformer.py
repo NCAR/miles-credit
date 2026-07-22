@@ -30,9 +30,10 @@ four stages downsample 384 → 192 → 96 → 48 → 24. The padded size is the
 smallest multiple of ``prod(strides) · lcm(windows)`` at or above the
 (halo-expanded) face, so every stage stays divisible by its attention windows.
 
-Decoder mirrors the encoder: four ×2 UpBlocks return to the padded size, a
-Conv2d head projects to the output channels, and the face is then CROPPED back
-to E (the exact inverse of the input pad — no interpolation).
+Decoder mirrors the encoder: four ×2 UpBlockPS stages (sub-pixel conv +
+PixelShuffle, ICNR-initialized to avoid checkerboard artifacts) return to the
+padded size, a Conv2d head projects to the output channels, and the face is
+then CROPPED back to E (the exact inverse of the input pad — no interpolation).
 
 Cross-face attention design
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -258,6 +259,13 @@ class CubeSphereWxFormer(nn.Module):
     tile_attn_heads : int
         Attention heads for CrossFaceTileAttention (Approach 3).  Default 4.
         Requires adjacency file; silently disabled if absent.
+    use_cube_rope : bool
+        Opt-in equiangular-corrected rotary position embedding for within-face
+        attention (short + long window Attention), replacing the default
+        translation-invariant DynamicPositionBias's implicit assumption that a
+        given index offset means the same thing everywhere on the face. See
+        credit.models.wxformer.cube_rope.GnomonicRoPE. Default False (no change
+        to existing behavior).
     """
 
     def __init__(
@@ -287,6 +295,7 @@ class CubeSphereWxFormer(nn.Module):
         global_attn_heads: int = 8,
         tile_attn_heads: int = 4,
         use_global_attn: bool = False,
+        use_cube_rope: bool = False,
     ) -> None:
         super().__init__()
 
@@ -326,10 +335,11 @@ class CubeSphereWxFormer(nn.Module):
         from credit.models.wxformer.crossformer import (
             CrossEmbedLayer,
             Transformer,
-            UpBlock,
+            UpBlockPS,
         )
 
         self._use_global_attn = use_global_attn
+        self._use_cube_rope = use_cube_rope
 
         # ── Encoder ──────────────────────────────────────────────────────
         # With patch_height=patch_width=1 CrossFormer skips CubeEmbedding;
@@ -377,6 +387,7 @@ class CubeSphereWxFormer(nn.Module):
                 dim_head=dim_head,
                 attn_dropout=attn_dropout,
                 ff_dropout=ff_dropout,
+                use_rope=use_cube_rope,
             )
             # Stage 3 (bottleneck): optionally replace FaceAttention with global
             # attention over all 6*h*w tokens.  Only when use_global_attn=True;
@@ -457,15 +468,18 @@ class CubeSphereWxFormer(nn.Module):
             self.cross_face_tile_attn = None
 
         # ── Decoder ──────────────────────────────────────────────────────
-        # Four ×2 UpBlocks mirror the four encoder stages, returning to the
-        # padded face size; a final Conv2d head projects to the output channels.
+        # Four ×2 UpBlockPS (sub-pixel conv + PixelShuffle, ICNR init) mirror the
+        # four encoder stages, returning to the padded face size; a final Conv2d
+        # head projects to the output channels. UpBlockPS replaces the plain
+        # ConvTranspose2d UpBlock, which produces checkerboard/blob artifacts at
+        # initialization that compound over long autoregressive rollouts.
         d0, d1, d2, d3 = dim[0], dim[1], dim[2], dim[3]
         # num_groups for GroupNorm: d0 divides d3//2, d3//4, d3//8 for geometric dims
         _ng = max(1, d0)
-        self.up1 = UpBlock(d3, d3 // 2, _ng)  # cat: d3 → d3//2
-        self.up2 = UpBlock(d3 // 2 + d2, d3 // 4, _ng)  # cat(d3//2, d2) → d3//4
-        self.up3 = UpBlock(d3 // 4 + d1, d3 // 8, _ng)  # cat(d3//4, d1) → d3//8
-        self.up4 = UpBlock(d3 // 8 + d0, d0, _ng)  # cat(d3//8, d0) → d0
+        self.up1 = UpBlockPS(d3, d3 // 2, _ng)  # cat: d3 → d3//2
+        self.up2 = UpBlockPS(d3 // 2 + d2, d3 // 4, _ng)  # cat(d3//2, d2) → d3//4
+        self.up3 = UpBlockPS(d3 // 4 + d1, d3 // 8, _ng)  # cat(d3//4, d1) → d3//8
+        self.up4 = UpBlockPS(d3 // 8 + d0, d0, _ng)  # cat(d3//8, d0) → d0
         self.head = nn.Conv2d(d0, self.output_channels, 3, padding=1)
         # Zero-init the head: delta ≈ 0 at init, so the model starts from
         # persistence (output ≈ x_res from the residual connection), which

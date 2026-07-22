@@ -2,6 +2,7 @@ import torch
 import logging
 import torch.nn.functional as F
 
+from typing import Optional
 from torch import nn, einsum
 from einops import rearrange
 from einops.layers.torch import Rearrange
@@ -66,6 +67,29 @@ class CubeEmbedding(nn.Module):
         return x
 
 
+def icnr_init_(weight, scale, init=nn.init.kaiming_normal_):
+    """ICNR init for a sub-pixel conv feeding nn.PixelShuffle (Aitken et al. 2017).
+
+    Initializes the conv weight so that, immediately after PixelShuffle(scale), the
+    output equals a nearest-neighbor upsample of a single initialized sub-kernel.
+    All scale**2 sub-pixel channels start identical, which removes the checkerboard
+    grid pattern present at initialization with default init.
+
+    Args:
+        weight: conv weight of shape (out_ch * scale**2, in_ch, kh, kw).
+        scale: PixelShuffle upscale factor.
+        init: in-place initializer applied to the sub-kernel.
+    """
+    out_ch = weight.shape[0] // (scale**2)
+    sub = torch.zeros(out_ch, *weight.shape[1:], device=weight.device, dtype=weight.dtype)
+    init(sub)
+    # PixelShuffle consumes channels in contiguous (r**2) blocks per output channel,
+    # so each sub-kernel must be repeated contiguously along the channel dim.
+    sub = sub.repeat_interleave(scale**2, dim=0)
+    with torch.no_grad():
+        weight.copy_(sub)
+
+
 class UpBlock(nn.Module):
     def __init__(
         self,
@@ -110,8 +134,10 @@ class UpBlock(nn.Module):
 class UpBlockPS(nn.Module):
     def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2):
         super().__init__()
-        # sub-pixel conv at low res
+        # sub-pixel conv at low res (ICNR init removes checkerboard at initialization)
         self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
+        icnr_init_(self.conv.weight, scale)
+        nn.init.zeros_(self.conv.bias)
         self.ps = nn.PixelShuffle(scale)
         # sharpening branch (identity init)
         self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
@@ -231,7 +257,7 @@ class Attention(nn.Module):
         dropout (float, optional): Dropout rate. Defaults to 0.0.
     """
 
-    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0):
+    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0, rope: Optional[nn.Module] = None):
         super().__init__()
         assert attn_type in {
             "short",
@@ -249,6 +275,9 @@ class Attention(nn.Module):
 
         self.attn_type = attn_type
         self.window_size = window_size
+        # Optional rotary position embedding (e.g. GnomonicRoPE), applied to q/k
+        # before windowing. None (default) leaves attention exactly as before.
+        self.rope = rope
 
         self.norm = LayerNorm(dim)
 
@@ -272,6 +301,18 @@ class Attention(nn.Module):
 
         self.register_buffer("rel_pos_indices", rel_pos_indices, persistent=False)
 
+    def _apply_rope(self, q, k, heads):
+        """Rotate q, k (each (b, inner_dim, h, w), full un-windowed grid) via self.rope."""
+
+        def to_rope_shape(t):
+            return rearrange(t, "b (h d) x y -> b h x y d", h=heads)
+
+        def from_rope_shape(t):
+            return rearrange(t, "b h x y d -> b (h d) x y")
+
+        q_r, k_r = self.rope(to_rope_shape(q), to_rope_shape(k))
+        return from_rope_shape(q_r), from_rope_shape(k_r)
+
     def forward(self, x):
         """
         Forward pass of the Attention module.
@@ -293,16 +334,27 @@ class Attention(nn.Module):
 
         x = self.norm(x)
 
+        # queries / keys / values, computed on the FULL (un-windowed) grid.
+        # to_qkv is a pointwise (1x1) conv, so computing it here vs. after the
+        # windowing rearrange below is exactly equivalent -- this ordering only
+        # matters so rope (if enabled) can see each token's absolute position
+        # on the face before windowing splits it into (batch*windows) groups.
+
+        q, k, v = self.to_qkv(x).chunk(3, dim=1)
+
+        if self.rope is not None:
+            q, k = self._apply_rope(q, k, heads)
+
         # rearrange for short or long distance attention
 
         if self.attn_type == "short":
-            x = rearrange(x, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz, s2=wsz)
+            q = rearrange(q, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz, s2=wsz)
+            k = rearrange(k, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz, s2=wsz)
+            v = rearrange(v, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz, s2=wsz)
         elif self.attn_type == "long":
-            x = rearrange(x, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz, l2=wsz)
-
-        # queries / keys / values
-
-        q, k, v = self.to_qkv(x).chunk(3, dim=1)
+            q = rearrange(q, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz, l2=wsz)
+            k = rearrange(k, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz, l2=wsz)
+            v = rearrange(v, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz, l2=wsz)
 
         # split heads
 
@@ -364,9 +416,19 @@ class Transformer(nn.Module):
         dim_head=32,
         attn_dropout=0.0,
         ff_dropout=0.0,
+        use_rope: bool = False,
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
+
+        # One shared GnomonicRoPE per Transformer (dim_head is constant across
+        # its layers); off by default so existing configs/checkpoints are
+        # unaffected. See credit.models.wxformer.cube_rope.
+        rope = None
+        if use_rope:
+            from credit.models.wxformer.cube_rope import GnomonicRoPE
+
+            rope = GnomonicRoPE(dim_head=dim_head)
 
         for _ in range(depth):
             self.layers.append(
@@ -378,6 +440,7 @@ class Transformer(nn.Module):
                             window_size=local_window_size,
                             dim_head=dim_head,
                             dropout=attn_dropout,
+                            rope=rope,
                         ),
                         FeedForward(dim, dropout=ff_dropout),
                         Attention(
@@ -386,6 +449,7 @@ class Transformer(nn.Module):
                             window_size=global_window_size,
                             dim_head=dim_head,
                             dropout=attn_dropout,
+                            rope=rope,
                         ),
                         FeedForward(dim, dropout=ff_dropout),
                     ]
