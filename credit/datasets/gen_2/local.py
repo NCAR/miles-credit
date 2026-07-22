@@ -78,7 +78,7 @@ from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage
     to_calendar,
 )
 from credit.datasets.gen_2.base_dataset import BaseDataset
-from credit.datasets.gen_2.grid_utils import find_coord_pair, infer_grid_type
+from credit.datasets.gen_2.grid_utils import find_coord_pair, infer_grid_type, write_source_grid_schema_if_missing
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +144,14 @@ class LocalDataset(BaseDataset):
             "levels": self.levels,
             "calendar": self.calendar,
             "datetime_fmt": "unix_ns" if is_standard_calendar(self.calendar) else f"cf_ns:{self.calendar}",
-            "grid": self._sniff_grid(self.curr_source_cfg),
+            "grid": self._find_grid(self.curr_source_cfg),
         }
         self.mode = "local"
         self.time_coord = self.curr_source_cfg.get("time_coord", "time")
         self.init_register_all_fields()
 
     def _resolve_calendar(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> str | None:
-        """Resolve the calendar from config, falling back to sniffing the data.
+        """Resolve the calendar from config, falling back to finding it in the data.
 
         Config (source-level then data-level ``calendar:`` key) wins; otherwise
         the first time-bearing data file's time coordinate is inspected once at
@@ -160,9 +160,9 @@ class LocalDataset(BaseDataset):
         cal = super()._resolve_calendar(data_config, curr_source_config)
         if cal:
             return cal
-        return self._sniff_calendar(curr_source_config)
+        return self._find_calendar(curr_source_config)
 
-    def _sniff_calendar(self, source_cfg: dict[str, Any]) -> str | None:
+    def _find_calendar(self, source_cfg: dict[str, Any]) -> str | None:
         """Read the CF calendar from the first available time-bearing file.
 
         xarray decodes non-standard-calendar time coordinates to cftime objects
@@ -186,7 +186,7 @@ class LocalDataset(BaseDataset):
                     t0 = ds[time_coord].values.ravel()[0]
             except Exception as exc:
                 logger.warning(
-                    "LocalDataset '%s': could not sniff calendar from %s (%s); assuming 'standard'. "
+                    "LocalDataset '%s': could not find calendar in %s (%s); assuming 'standard'. "
                     "Set an explicit `calendar:` key in the source config to silence this.",
                     self.curr_source_name,
                     files[0],
@@ -195,20 +195,20 @@ class LocalDataset(BaseDataset):
                 return None
             calendar = normalize_calendar(t0.calendar) if isinstance(t0, cftime.datetime) else "standard"
             if not is_standard_calendar(calendar):
-                logger.info(
-                    "LocalDataset '%s': sniffed calendar '%s' from %s", self.curr_source_name, calendar, files[0]
-                )
+                logger.info("LocalDataset '%s': found calendar '%s' in %s", self.curr_source_name, calendar, files[0])
             return calendar
         return None
 
-    def _sniff_grid(self, source_cfg: dict[str, Any]) -> dict[str, Any] | None:
+    def _find_grid(self, source_cfg: dict[str, Any]) -> dict[str, Any] | None:
         """Read the real lat/lon coordinates from the first available data file, once.
 
         This is a debugging aid (``self.static_metadata["grid"]``) reflecting this
         source's *native* grid. It is not necessarily the grid actually written to
         output — a regridding preblock downstream may change that; see
-        ``credit.datasets.gen_2.grid_utils.GridSchema``. Failures are non-fatal:
-        warn and return None.
+        ``credit.datasets.gen_2.grid_utils.GridSchema``. Also best-effort persisted
+        to ``{save_loc}/{source}_grid_schema.nc`` (see
+        ``write_source_grid_schema_if_missing``). Failures are non-fatal: warn and
+        return None.
         """
         engine = source_cfg.get("engine")
         variables = source_cfg.get("variables") or {}
@@ -222,10 +222,12 @@ class LocalDataset(BaseDataset):
             try:
                 with xr.open_dataset(files[0], engine=engine) as ds:
                     lon, lat, _, _ = find_coord_pair(ds)
-                    return {"grid_type": infer_grid_type(lat, lon), "lat": lat, "lon": lon}
+                    grid = {"grid_type": infer_grid_type(lat, lon), "lat": lat, "lon": lon}
+                    write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
+                    return grid
             except Exception as exc:
                 logger.warning(
-                    "LocalDataset '%s': could not sniff grid from %s (%s).",
+                    "LocalDataset '%s': could not find grid in %s (%s).",
                     self.curr_source_name,
                     files[0],
                     exc,

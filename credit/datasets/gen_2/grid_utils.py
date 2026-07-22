@@ -9,8 +9,8 @@ find_coord_pair / infer_grid_type
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Small, dependency-free helpers for locating a lon/lat coordinate pair in an
 ``xr.Dataset`` (by name) and classifying it as rectilinear (1D) or curvilinear
-(2D). Used by the per-dataset grid sniffing in ``local.py``/``era5.py``, and by
-``credit.grid.scrip_from_netcdf`` (SCRIP-format grid generation for ESMF
+(2D). Used by the per-dataset grid detection in ``local.py``/``era5.py``, and
+by ``credit.grid.scrip_from_netcdf`` (SCRIP-format grid generation for ESMF
 regridding) — this is the shared home for both rather than duplicating the
 logic in each.
 
@@ -19,14 +19,21 @@ GridSchema
 ``ForecastWriter`` previously fabricated output lat/lon from
 ``model.image_height``/``image_width`` via a global ``[-90, 90] x [0, 360)``
 linspace — wrong for regional domains and for curvilinear sources (e.g. HRRR),
-which need a real 2D lat/lon field, not a fabricated 1D one.
+which need a real 2D lat/lon field, not a fabricated 1D one. There is no
+fabricated fallback anywhere in this pipeline anymore: if a real grid can't be
+found or resolved, callers raise rather than guess.
 
 Two distinct grid concepts:
 
 * **Native input grid** — each dataset class (``LocalDataset``, ``era5.py``,
   ``goes.py``, ``hrrr.py``) exposes the real lat/lon it read from its own files
   via ``self.static_metadata["grid"]`` (a debugging aid, inspectable directly
-  on the live dataset — not necessarily what ends up in the output file).
+  on the live dataset — not necessarily what ends up in the output file). The
+  same dataset class also best-effort persists it to
+  ``{save_loc}/{source}_grid_schema.nc`` the moment it's known, via
+  ``write_source_grid_schema_if_missing`` — including from inside a DataLoader
+  worker subprocess, which has filesystem access even though it can't
+  propagate Python object state back to the main training process.
 * **Resolved output grid** — what ``ForecastWriter`` actually writes. The
   model produces one flat tensor at one fixed ``(H, W)``, so there is exactly
   one output grid per run: the (single, in practice) source's native grid,
@@ -37,9 +44,14 @@ Two distinct grid concepts:
 Lifecycle
 ^^^^^^^^^
 Training/rollout setup resolves the schema once — via ``GridSchema.resolve``
-using the live dataset + preblocks — and saves it to
-``{save_loc}/grid_schema.nc``. Later runs (or a re-run without training) load
-that file instead of re-resolving, via ``GridSchema.load_or_resolve``.
+using the live dataset + preblocks (with a disk fallback to each source's
+``{source}_grid_schema.nc`` when the live process never saw the data itself)
+— and, only when an active ``Regridder`` actually changes the grid, saves the
+result to ``{save_loc}/output_grid_schema.nc`` (skipped when no regridder is
+active: the single source's own file already *is* the effective output grid,
+so a second identical copy would be pure duplication). Later runs (or a
+re-run without training) load whichever file is present instead of
+re-resolving, via ``GridSchema.load_or_resolve``.
 
 Scope: rectilinear and curvilinear only (no unstructured). Projection/CRS
 metadata (e.g. HRRR's Lambert Conformal Conic) is deferred to a follow-on —
@@ -127,27 +139,84 @@ def infer_grid_type(lat, lon):
     )
 
 
-DEFAULT_GRID_SCHEMA_FILENAME = "grid_schema.nc"
+# Per-source native grid, written directly by the dataset class that read it.
+SOURCE_GRID_SCHEMA_FILENAME = "{source}_grid_schema.nc"
+# Resolved/effective output grid — only written when a Regridder preblock is
+# actually active (see GridSchema.origin); otherwise the single source's own
+# file above already is the effective output grid.
+OUTPUT_GRID_SCHEMA_FILENAME = "output_grid_schema.nc"
 
 GridType = Literal["rectilinear", "curvilinear"]
 _VALID_GRID_TYPES = ("rectilinear", "curvilinear")
 
 
-def _native_grid(dataset: Any) -> dict[str, Any] | None:
-    """Return the resolved native grid dict from a dataset's ``static_metadata``.
+def write_source_grid_schema_if_missing(source_name: str, grid: dict[str, Any] | None, save_loc: str | None) -> None:
+    """Best-effort persist one source's native grid to ``{save_loc}/{source}_grid_schema.nc``.
+
+    Called from each dataset class right after ``static_metadata["grid"]`` is
+    first populated — including from inside a DataLoader worker subprocess
+    under ``num_workers > 0``, since workers have their own filesystem access
+    even though they can't propagate Python object state back to the main
+    process. Guarded by file existence, so redundant calls (e.g. multiple
+    workers independently resolving the same grid) are cheap after the first
+    successful write. Failures (no ``save_loc``, read-only filesystem, ...)
+    are logged and swallowed — this must never break the data-loading path
+    it's piggybacked onto.
+    """
+    if grid is None or not save_loc:
+        return
+    path = os.path.join(os.path.expandvars(save_loc), SOURCE_GRID_SCHEMA_FILENAME.format(source=source_name))
+    if os.path.isfile(path):
+        return
+    try:
+        GridSchema(grid["grid_type"], grid["lat"], grid["lon"]).save(path)
+    except Exception as exc:
+        logger.warning("Could not write grid schema for source '%s' to %s (%s).", source_name, path, exc)
+
+
+def _load_source_grid_schema(source_name: str, save_loc: str | None) -> dict[str, Any] | None:
+    """Disk fallback for one source's native grid, used when the live process
+    never populated ``static_metadata["grid"]`` itself (e.g. a HRRR/remote-ERA5
+    source read by a different DataLoader worker under ``num_workers > 0``)."""
+    if not save_loc:
+        return None
+    path = os.path.join(os.path.expandvars(save_loc), SOURCE_GRID_SCHEMA_FILENAME.format(source=source_name))
+    if not os.path.isfile(path):
+        return None
+    schema = GridSchema.load(path)
+    return {"grid_type": schema.grid_type, "lat": schema.lat, "lon": schema.lon}
+
+
+def _native_grid(dataset: Any, save_loc: str | None = None) -> dict[str, Any] | None:
+    """Return the resolved native grid dict for *dataset*.
 
     Handles both a single source dataset (``static_metadata`` is that source's
     own dict, with a top-level ``"grid"`` key) and ``MultiSourceDataset``
-    (``static_metadata`` is ``{source_name: {..., "grid": ...}}``).
+    (``static_metadata`` is ``{source_name: {..., "grid": ...}}``). For any
+    source with no live grid, falls back to that source's persisted
+    ``{source}_grid_schema.nc`` in *save_loc* before giving up on it.
 
     Raises:
         ValueError: if more than one source reports a native grid and they disagree.
     """
     static_metadata = getattr(dataset, "static_metadata", None) or {}
-    if "grid" in static_metadata:
-        return static_metadata["grid"]
 
-    grids = {name: meta["grid"] for name, meta in static_metadata.items() if meta and meta.get("grid")}
+    if "grid" in static_metadata:
+        # Single-source dataset: static_metadata is this source's own dict.
+        grid = static_metadata["grid"]
+        if grid is not None:
+            return grid
+        source_name = getattr(dataset, "curr_source_name", None)
+        return _load_source_grid_schema(source_name, save_loc) if source_name else None
+
+    grids: dict[str, dict[str, Any]] = {}
+    for name, meta in static_metadata.items():
+        grid = meta.get("grid") if meta else None
+        if grid is None:
+            grid = _load_source_grid_schema(name, save_loc)
+        if grid is not None:
+            grids[name] = grid
+
     if not grids:
         return None
     if len(grids) == 1:
@@ -206,9 +275,22 @@ class GridSchema:
         grid_type: ``"rectilinear"`` or ``"curvilinear"``.
         lat: 1D (rectilinear) or 2D ``(y, x)`` (curvilinear) latitude array.
         lon: 1D (rectilinear) or 2D ``(y, x)`` (curvilinear) longitude array.
+        origin: ``"native"`` (a source's own grid, unchanged) or
+            ``"regridded"`` (an active ``Regridder`` preblock's destination
+            grid). Set by ``.resolve()``; defaults to ``"native"`` for direct
+            construction. Used by callers (e.g. the trainer) to decide whether
+            this schema needs its own ``output_grid_schema.nc`` — a
+            ``"native"`` schema is already fully covered by the source's own
+            ``{source}_grid_schema.nc``.
     """
 
-    def __init__(self, grid_type: GridType, lat: np.ndarray, lon: np.ndarray):
+    def __init__(
+        self,
+        grid_type: GridType,
+        lat: np.ndarray,
+        lon: np.ndarray,
+        origin: Literal["native", "regridded"] = "native",
+    ):
         if grid_type not in _VALID_GRID_TYPES:
             raise ValueError(f"GridSchema: grid_type must be one of {_VALID_GRID_TYPES}, got {grid_type!r}")
         lat = np.asarray(lat)
@@ -222,36 +304,41 @@ class GridSchema:
         self.grid_type: GridType = grid_type
         self.lat = lat
         self.lon = lon
+        self.origin = origin
 
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
 
     @classmethod
-    def resolve(cls, dataset: Any, ic_preblocks=None, step_preblocks=None) -> "GridSchema":
+    def resolve(cls, dataset: Any, ic_preblocks=None, step_preblocks=None, save_loc: str | None = None) -> "GridSchema":
         """Resolve the effective output grid from a live dataset + preblocks.
 
-        Starts from the dataset's native grid (``static_metadata["grid"]``);
-        if an active ``Regridder`` preblock is found, its real destination grid
-        is used instead. When no regridder is active (the common case), the
-        native grid passes through unchanged.
+        Starts from the dataset's native grid (``static_metadata["grid"]``,
+        falling back to each source's persisted ``{source}_grid_schema.nc`` in
+        *save_loc* when the live process doesn't have it); if an active
+        ``Regridder`` preblock is found, its real destination grid is used
+        instead. When no regridder is active (the common case), the native
+        grid passes through unchanged and the returned schema's ``origin`` is
+        ``"native"``.
 
         Raises:
             ValueError: if no native grid is available, or if grids disagree
                 (see ``_native_grid`` / ``_find_regridder``).
         """
-        native = _native_grid(dataset)
+        native = _native_grid(dataset, save_loc)
         if native is None:
             raise ValueError(
-                "GridSchema.resolve: no native grid available from dataset.static_metadata. "
+                "GridSchema.resolve: no native grid available from dataset.static_metadata "
+                f"or a saved {SOURCE_GRID_SCHEMA_FILENAME.format(source='<source>')} in save_loc. "
                 "Ensure at least one source populates static_metadata['grid']."
             )
 
         regridder = _find_regridder(ic_preblocks, step_preblocks)
         if regridder is None:
-            return cls(native["grid_type"], native["lat"], native["lon"])
+            return cls(native["grid_type"], native["lat"], native["lon"], origin="native")
 
-        return cls(regridder.dst_grid_type, regridder.dst_lat, regridder.dst_lon)
+        return cls(regridder.dst_grid_type, regridder.dst_lat, regridder.dst_lon, origin="regridded")
 
     # ------------------------------------------------------------------
     # Persistence
@@ -290,28 +377,26 @@ class GridSchema:
         step_preblocks=None,
         save_loc: str | None = None,
     ) -> "GridSchema | None":
-        """Load ``grid_schema.nc`` from ``save_loc``, else resolve live from *dataset*.
+        """Load ``output_grid_schema.nc`` from ``save_loc`` (only ever written when
+        regridding was used), else resolve live from *dataset* (native grid,
+        with a disk fallback to each source's own ``{source}_grid_schema.nc``,
+        overridden by an active Regridder).
 
-        Returns ``None`` (with a warning) when neither is possible, so callers
-        can fall back to legacy behavior.
+        Returns ``None`` (with a warning) when neither is possible — callers
+        should treat that as fatal; there is no fabricated fallback.
         """
-        path = os.path.join(os.path.expandvars(save_loc), DEFAULT_GRID_SCHEMA_FILENAME) if save_loc else None
+        path = os.path.join(os.path.expandvars(save_loc), OUTPUT_GRID_SCHEMA_FILENAME) if save_loc else None
         if path and os.path.isfile(path):
             logger.info("Loading grid schema from %s", path)
             return cls.load(path)
         try:
-            schema = cls.resolve(dataset, ic_preblocks, step_preblocks)
+            schema = cls.resolve(dataset, ic_preblocks, step_preblocks, save_loc)
             logger.info(
                 "No %s in %s — grid schema resolved from live dataset.",
-                DEFAULT_GRID_SCHEMA_FILENAME,
+                OUTPUT_GRID_SCHEMA_FILENAME,
                 save_loc,
             )
             return schema
         except (ValueError, AttributeError) as e:
-            logger.warning(
-                "No grid schema available (%s). ForecastWriter will fall back to a fabricated "
-                "global rectilinear grid derived from model.image_height/image_width — this is "
-                "almost certainly wrong for regional or curvilinear domains.",
-                e,
-            )
+            logger.warning("No grid schema available (%s).", e)
             return None

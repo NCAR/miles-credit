@@ -135,6 +135,7 @@ import pandas as pd
 import torch
 
 from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
 
 logger = logging.getLogger(__name__)
 
@@ -819,11 +820,13 @@ class HRRRDataset(BaseDataset):
         # later call) — debugging aid, not necessarily the grid actually written
         # to output; a regridding preblock downstream may change that, see
         # credit.datasets.gen_2.grid_utils.
-        self.static_metadata["grid"] = {
+        grid = {
             "grid_type": "curvilinear",
             "lat": lats[self._spatial_slice],
             "lon": lons[self._spatial_slice],
         }
+        self.static_metadata["grid"] = grid
+        write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
         return self._spatial_slice
 
     # ------------------------------------------------------------------

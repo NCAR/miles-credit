@@ -154,7 +154,7 @@ Examples:
     # ── Init times ───────────────────────────────────────────────────────────
     timestep = conf["data"]["timestep"]
     # CF calendar for the init schedule. Config-declared here; if the config is
-    # silent and the data is non-standard, MultiSourceDataset sniffs it below and
+    # silent and the data is non-standard, MultiSourceDataset finds it below and
     # converts these init times into the master calendar (invalid labels such as
     # a Feb 29 init against noleap data raise at dataset construction).
     calendar = conf["data"].get("calendar", "standard")
@@ -235,13 +235,17 @@ Examples:
         **conf["data"],
         "forecast_len": n_steps,
         "datetimes": all_init_times,
+        # Forwarded into each sub-dataset's own config so dataset classes can
+        # best-effort persist their native grid to {save_loc}/{source}_grid_schema.nc
+        # the moment it's known — see credit.datasets.gen_2.grid_utils.
+        "save_loc": conf.get("save_loc"),
     }
     from credit.registry import load_custom_objects  # imported here to avoid a module-level credit.registry import
 
     load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     dataset = MultiSourceDataset(dataset_conf, return_target=False)
     # Adopt the master-clock calendar the dataset resolved (it may have been
-    # sniffed from the data files rather than declared in config); run_forecast
+    # found in the data files rather than declared in config); run_forecast
     # needs it to decode the batch-metadata datetimes.
     calendar = getattr(dataset, "calendar", calendar)
 
