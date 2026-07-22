@@ -136,7 +136,7 @@ trainer:
   load_scheduler: False
   reload_epoch: False
 
-  skip_validation: False
+  skip_validation: True
   update_learning_rate: False
 
   save_backup_weights: True
@@ -148,7 +148,7 @@ trainer:
   train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
   valid_batch_size: 8
 
-  batches_per_epoch: 0    # 0 = use full dataset each epoch
+  batches_per_epoch: 5    # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
   stopping_patience: 999
 
@@ -237,9 +237,9 @@ loss:
 
 # ---- Inference (used by rollout_gen2.py, not training) ---- #
 inference:
-  run_mode: batch                   # batch | single
+  run_mode: single                   # batch | single
   mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
-  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/rollout/'
   num_save_workers: 4               # async write pool size (0 = synchronous)
 
   batch_forecast:                   # active when run_mode: batch
@@ -251,7 +251,7 @@ inference:
       times: ["00:00", "12:00"]     # UTC init times each day (HH:MM)
 
   single_forecast:                  # active when run_mode: single
-    length: "10d"                   # forecast duration
+    length: "3d"                   # forecast duration
     start_datetime: "2025-01-01T00:00Z"   # init time, ISO 8601
 
   output:
