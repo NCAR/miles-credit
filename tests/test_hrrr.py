@@ -32,6 +32,7 @@ from credit.datasets.gen_2.hrrr import (
     _s3_uri_to_https,  # pyright: ignore[reportPrivateUsage]
     HRRRDataset,
 )
+from credit.datasets.gen_2.grid_utils import GridSchema
 
 # ---------------------------------------------------------------------------
 # Constants / product registry
@@ -784,6 +785,45 @@ def test_hrrr_spatial_slicing_no_extent():
     assert len(curr_slice) == 2
     assert isinstance(curr_slice[0], slice) and isinstance(curr_slice[1], slice)
     assert curr_slice[0] == slice(None) and curr_slice[1] == slice(None)
+
+
+def test_hrrr_spatial_slice_caches_grid_for_static_metadata():
+    """First _get_spatial_slice call should populate static_metadata['grid']
+    (curvilinear, cropped to the resolved extent) — a debugging aid, and the
+    native grid GridSchema.resolve falls back to when no regridder is active."""
+    lat_array, lon_array = make_example_sparse_lat_lon_array()
+    extent = _make_extent_from_dict(_make_small_inner_extent_dict())
+    cfg = _make_config("wrfprs", extent=extent)
+    ds = HRRRDataset(cfg)
+
+    assert ds.static_metadata.get("grid") is None  # not yet resolved
+
+    curr_slice = ds._get_spatial_slice(lat_array, lon_array)
+    grid = ds.static_metadata["grid"]
+
+    assert grid["grid_type"] == "curvilinear"
+    np.testing.assert_array_equal(grid["lat"], lat_array[curr_slice])
+    np.testing.assert_array_equal(grid["lon"], lon_array[curr_slice])
+
+
+def test_hrrr_grid_schema_written_to_save_loc(tmp_path):
+    """HRRRDataset should best-effort persist its native grid to
+    {save_loc}/{source}_grid_schema.nc the moment it's found — this is what
+    makes the file reliably available regardless of DataLoader num_workers."""
+    lat_array, lon_array = make_example_sparse_lat_lon_array()
+    extent = _make_extent_from_dict(_make_small_inner_extent_dict())
+    cfg = _make_config("wrfprs", extent=extent)
+    cfg["save_loc"] = str(tmp_path)
+    ds = HRRRDataset(cfg)
+
+    curr_slice = ds._get_spatial_slice(lat_array, lon_array)
+
+    path = tmp_path / f"{_make_source_key('wrfprs')}_grid_schema.nc"
+    assert path.is_file()
+    schema = GridSchema.load(str(path))
+    assert schema.grid_type == "curvilinear"
+    np.testing.assert_array_equal(schema.lat, lat_array[curr_slice])
+    np.testing.assert_array_equal(schema.lon, lon_array[curr_slice])
 
 
 def test_hrrr_spatial_slicing_extent_out_of_bounds():

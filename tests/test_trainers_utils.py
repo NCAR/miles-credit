@@ -42,22 +42,24 @@ def test_load_dataset_validation_inherits_source():
 
 # Case: no validation_data — falls back to training config entirely
 def test_load_dataset_no_validation_data_uses_training_conf():
-    """Absent validation_data passes conf['data'] to MultiSourceDataset unchanged."""
+    """Absent validation_data passes conf['data'] to MultiSourceDataset, plus the
+    save_loc forwarded for grid-schema writing (see credit.datasets.gen_2.grid_utils)."""
     conf = _make_conf()
     with patch("credit.trainers.utils.MultiSourceDataset") as mock_ds:
         load_dataset(conf, is_train=False)
         called_conf = mock_ds.call_args[0][0]
-        assert called_conf == conf["data"]
+        assert called_conf == {**conf["data"], "save_loc": None}
 
 
 # Case: empty validation_data {} — treated same as absent, falls back to training config
 def test_load_dataset_empty_validation_data_uses_training_conf():
-    """Empty validation_data dict passes conf['data'] to MultiSourceDataset unchanged."""
+    """Empty validation_data dict passes conf['data'] to MultiSourceDataset, plus the
+    save_loc forwarded for grid-schema writing (see credit.datasets.gen_2.grid_utils)."""
     conf = _make_conf(validation_data={})
     with patch("credit.trainers.utils.MultiSourceDataset") as mock_ds:
         load_dataset(conf, is_train=False)
         called_conf = mock_ds.call_args[0][0]
-        assert called_conf == conf["data"]
+        assert called_conf == {**conf["data"], "save_loc": None}
 
 
 # Case: full validation_data — used as-is, training source must not bleed in

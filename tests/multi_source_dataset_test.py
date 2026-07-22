@@ -261,6 +261,19 @@ def test_multi_source_static_metadata(multi_config):
     assert "Base3" in ds.static_metadata
 
 
+def test_multi_source_static_metadata_grid_propagates_lazily(multi_config):
+    """static_metadata is a dict of references, not copies — a source that
+    populates static_metadata['grid'] after __init__ (e.g. HRRRDataset, on
+    first real data access) must still be visible through the parent, with
+    no extra wiring needed in MultiSourceDataset itself."""
+    ds = MultiSourceDataset(multi_config)
+
+    fake_grid = {"grid_type": "rectilinear", "lat": [1.0, 2.0], "lon": [3.0, 4.0]}
+    ds.datasets["Base1"].static_metadata["grid"] = fake_grid
+
+    assert ds.static_metadata["Base1"]["grid"] is fake_grid
+
+
 def test_multi_source_timestamp_intersection_time_subsets(multi_config_time_subsets):
     ds = MultiSourceDataset(multi_config_time_subsets)
 
