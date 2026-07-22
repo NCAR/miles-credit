@@ -10,7 +10,7 @@ If you have any questions, please feel free to reach out to us on [GitHub Issues
 
 If you are interested in contributing to the core CREDIT repository, first reach out to the MILES team at [miles@ucar.edu](mailto:miles@ucar.edu) to set up an introductory meeting and discuss your interests and what would be a good focus area. 
 
-Once we have agreed on a focus area, please start issues on the [CREDIT Issues](https://github.com/NCAR/miles-credit/issues) page so that we can track progress on our internal project board and version Milestone tracker. 
+Once we have agreed on a focus area, please start issues on the [CREDIT Issues](https://github.com/NCAR/miles-credit/issues) page so that we can track progress on our internal project board and [version milestone tracker](https://github.com/NCAR/miles-credit/milestones). 
 
 If you are interested in working on an existing issue, please comment on the issue to let us know you are working on it. This will help us avoid duplicate work.
 
@@ -20,13 +20,13 @@ The code for CREDIT is hosted on GitHub. If you do not have one, you will need t
 
 Something not working as expected? We would love to hear about it! Please report any bugs you find by opening an issue on GitHub. 
 
-When reporting a bug, please include as much information as possible. This will help us reproduce the bug and fix it efficiently. For more information on how to write a good bug report, see this stackoverflow post on [how to make a good bug report](https://stackoverflow.com/help/minimal-reproducible-example).  
+When reporting a bug, please include as much information as possible. This will help us reproduce the bug and fix it efficiently. For more information on how to write a good bug report, see this Stack Overflow post on [how to make a good bug report](https://stackoverflow.com/help/minimal-reproducible-example).  
 To increase the helpfulness of the bug report, please include the following information:
 
 * Compute platform (e.g., Casper, Derecho, Macbook Pro, AWS VM, etc.)  
 * Whether issue is on CPU or GPU and what kind of GPU is being used.  
 * Version of PyTorch, CUDA toolkit, NCCL (if applicable), other relevant libraries.  
-*  What stage of ML process (processing, training, inference).
+* What stage of ML process (processing, training, inference).
 
 ## Requesting new features
 
@@ -65,11 +65,11 @@ This is a brief overview of the development workflow we use for CREDIT. A more d
 
 ### Internal developers and close collaborators: Clone and create a branch
 
-CREDIT developers at NCAR and close collaborators (e.g., interns, visitors, partners on funded research projects) should manage their code contributions through branches in the `NCAR/miles-credit` Github repository. 
+CREDIT developers at NCAR and close collaborators (e.g., interns, visitors, partners on funded research projects) should manage their code contributions through branches in the `NCAR/miles-credit` GitHub repository. 
 
 ### External contributors: Fork and clone the repository
 
-Get started by forking the `NCAR/miles-credit` repository on GitHub. To do this, find the "Fork" button near the top of the page and click it. This will create a copy of the project under your personal github account.
+Get started by forking the `NCAR/miles-credit` repository on GitHub. To do this, find the "Fork" button near the top of the page and click it. This will create a copy of the project under your personal GitHub account.
 
 Next, clone your forked copy to your local machine.
 
@@ -225,7 +225,7 @@ See the [pytest documentation](https://docs.pytest.org/en/stable/) for more info
 
 ## Documentation
 
-`miles-credit` uses [sphinx](https://www.sphinx-doc.org/en/master/) and [ReadTheDocs](https://docs.readthedocs.io/en/stable/) to build and host the documentation.
+`miles-credit` uses [Sphinx](https://www.sphinx-doc.org/en/master/) and [Read the Docs](https://docs.readthedocs.io/en/stable/) to build and host the documentation.
 
 ### Docstrings
 
@@ -260,7 +260,7 @@ To generate the documentation locally, follow the steps below.
 
 ### Check the documentation
 
-As well as checking local documentation generation, you should also check the preview documentation generated as part of a PR. To do this, scroll down to the "checks" section of the PR and click on the "Details" link next to the "docs/readthedocs.org:miles-credit" check. This will take you to the corresponding build on ReadTheDocs, where you can view the documentation built from your PR and see any warnings or errors on your build. ReadTheDocs will highlight tracked changes. 
+As well as checking local documentation generation, you should also check the preview documentation generated as part of a PR. To do this, scroll down to the "checks" section of the PR and click on the "Details" link next to the "docs/readthedocs.org:miles-credit" check. This will take you to the corresponding build on Read the Docs, where you can view the documentation built from your PR and see any warnings or errors on your build. Read the Docs will highlight tracked changes. 
 
 ## Contribute your code
 
