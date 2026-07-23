@@ -141,13 +141,14 @@ from credit.datasets._utils import _start_s3_obstore
 
 logger = logging.getLogger(__name__)
 
-# VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing", "static"}
+##### VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing", "static"}
 
 # V3+ S3 path includes a 'conus/' subdirectory; v1/v2 does not
 _HRRR_V3_CUTOFF = pd.Timestamp("2018-07-12")
 _S3_BUCKET = "noaa-hrrr-bdp-pds"
-# Public HTTPS base — used for Range requests (faster than s3fs seek+read)
-_HRRR_HTTPS_BASE = f"https://{_S3_BUCKET}.s3.amazonaws.com"
+
+##### Public HTTPS base — used for Range requests (faster than s3fs seek+read)
+####_HRRR_HTTPS_BASE = f"https://{_S3_BUCKET}.s3.amazonaws.com"
 
 #: Variable registry mapping user-facing names to HRRR ``.idx`` lookup keys.
 #:
@@ -236,17 +237,19 @@ VAR_REGISTRY: dict[str, dict[str, str | None]] = {
     "goes12bt4": {"idx_name": "SBT124", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES East Chan. 4
 }
 
-# Maximum parallel workers for remote fetching
-_MAX_REMOTE_WORKERS = 8
+##### # Maximum parallel workers for remote fetching
+##### _MAX_REMOTE_WORKERS = 8
 
 # Maximum parallel threads for CPU-bound GRIB decompression
 _MAX_DECOMPRESS_WORKERS = 8
 
+####
 # Timeout (seconds) for HTTPS requests to AWS S3.
 # Passed as (connect_timeout, read_timeout) — requests treats them independently.
 # The read timeout covers waiting for S3 to begin streaming the response body;
 # large GRIB messages (~10 MB) over a slow or loaded connection can exceed 30 s.
-_HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
+# _HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
+####
 
 #: Supported HRRR GRIB2 products.
 VALID_PRODUCTS = Literal["wrfprs", "wrfnat", "wrfsubh"]
@@ -302,105 +305,105 @@ def _hrrr_s3_entry_name(
     return f"hrrr.{date_str}/{subdir}{fname}"
 
 
-########################################
-# HTTPS VERSION (TO BE DEPRECATED)
-########################################
+# ########################################
+# # HTTPS VERSION (TO BE DEPRECATED)
+# ########################################
 
 
-def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
-    """Construct the S3 URI for a HRRR grib2 file.
+# def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
+#     """Construct the S3 URI for a HRRR grib2 file.
 
-    Args:
-        t (pd.Timestamp): Initialisation timestamp (UTC).
-        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
-        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
+#     Args:
+#         t (pd.Timestamp): Initialisation timestamp (UTC).
+#         forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
+#         product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
 
-    Returns:
-        str: S3 URI.
-    """
-    date_str = t.strftime("%Y%m%d")
-    hour_str = t.strftime("%H")
-    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
-    subdir = "conus/" if t >= _HRRR_V3_CUTOFF else ""
-    return f"s3://{_S3_BUCKET}/hrrr.{date_str}/{subdir}{fname}"
-
-
-def _s3_uri_to_https(s3_uri: str) -> str:
-    """Convert an ``s3://noaa-hrrr-bdp-pds/...`` URI to a public HTTPS URL.
-
-    Args:
-        s3_uri (str): SRI URI
-
-    Returns:
-        str: Public HTTPS URL
-    """
-    key = s3_uri[len(f"s3://{_S3_BUCKET}/") :]
-    return f"{_HRRR_HTTPS_BASE}/{key}"
+#     Returns:
+#         str: S3 URI.
+#     """
+#     date_str = t.strftime("%Y%m%d")
+#     hour_str = t.strftime("%H")
+#     fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
+#     subdir = "conus/" if t >= _HRRR_V3_CUTOFF else ""
+#     return f"s3://{_S3_BUCKET}/hrrr.{date_str}/{subdir}{fname}"
 
 
-def _fetch_idx(s3_uri: str) -> list[dict[str, str | int | None]]:
-    """Fetch and parse the ``.idx`` sidecar for a HRRR grib2 file via HTTPS.
+# def _s3_uri_to_https(s3_uri: str) -> str:
+#     """Convert an ``s3://noaa-hrrr-bdp-pds/...`` URI to a public HTTPS URL.
 
-    Args:
-        s3_uri (str): S3 URI
+#     Args:
+#         s3_uri (str): SRI URI
 
-    Raises:
-        FileNotFoundError: If the ``.idx`` file is not found (older v1/v2 files
-            may lack sidecars; pre-download with ``hrrr_download.py`` and use
-            local mode instead).
-
-    Returns:
-        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
-    """
-    import requests  # noqa: PLC0415
-
-    url = _s3_uri_to_https(s3_uri) + ".idx"
-    resp = requests.get(url, timeout=_HTTP_TIMEOUT)
-    if resp.status_code == 404:
-        raise FileNotFoundError(
-            f"HRRR .idx file not found: {url}\n"
-            "Older HRRR files (v1/v2) may lack .idx files. "
-            "Pre-download with hrrr_download.py and use local mode."
-        )
-    resp.raise_for_status()
-    return _parse_idx(resp.text)
+#     Returns:
+#         str: Public HTTPS URL
+#     """
+#     key = s3_uri[len(f"s3://{_S3_BUCKET}/") :]
+#     return f"{_HRRR_HTTPS_BASE}/{key}"
 
 
-def _fetch_message(
-    https_url: str,
-    byte_start: int,
-    byte_end: int | None,
-    session=None,  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType] # We import requests inside
-) -> bytes:
-    """Fetch a single GRIB message via an HTTP Range request.
+# def _fetch_idx(s3_uri: str) -> list[dict[str, str | int | None]]:
+#     """Fetch and parse the ``.idx`` sidecar for a HRRR grib2 file via HTTPS.
 
-    Args:
-        https_url (str): Public HTTPS URL of the grib2 file.
-        byte_start (int): First byte of the message (inclusive).
-        byte_end (int | None): Last byte of the message (inclusive), or ``None`` for EOF.
-        session (_type_, optional): Optional ``requests.Session`` for connection reuse.  Falls
-            back to module-level ``requests.get`` if ``None``. Defaults to None
+#     Args:
+#         s3_uri (str): S3 URI
 
-    Returns:
-        bytes: The raw bytes of the GRIB message for that byte range.
-    """
+#     Raises:
+#         FileNotFoundError: If the ``.idx`` file is not found (older v1/v2 files
+#             may lack sidecars; pre-download with ``hrrr_download.py`` and use
+#             local mode instead).
 
-    import requests  # noqa: PLC0415
+#     Returns:
+#         list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
+#     """
+#     import requests  # noqa: PLC0415
 
-    range_header = f"bytes={byte_start}-{byte_end}" if byte_end is not None else f"bytes={byte_start}-"
-    getter = session.get if session is not None else requests.get
-    try:
-        resp = getter(https_url, headers={"Range": range_header}, timeout=_HTTP_TIMEOUT)
-        resp.raise_for_status()
-    except requests.exceptions.ConnectionError or requests.exceptions.HTTPError:
-        # AWS S3 closes idle keep-alive connections after ~20 s.  On the next
-        # request the session tries to reuse the stale socket and gets
-        # RemoteDisconnected.  One retry is enough — the second attempt opens
-        # a fresh connection.
-        resp = getter(https_url, headers={"Range": range_header}, timeout=_HTTP_TIMEOUT)
-        resp.raise_for_status()
+#     url = _s3_uri_to_https(s3_uri) + ".idx"
+#     resp = requests.get(url, timeout=_HTTP_TIMEOUT)
+#     if resp.status_code == 404:
+#         raise FileNotFoundError(
+#             f"HRRR .idx file not found: {url}\n"
+#             "Older HRRR files (v1/v2) may lack .idx files. "
+#             "Pre-download with hrrr_download.py and use local mode."
+#         )
+#     resp.raise_for_status()
+#     return _parse_idx(resp.text)
 
-    return resp.content
+
+# def _fetch_message(
+#     https_url: str,
+#     byte_start: int,
+#     byte_end: int | None,
+#     session=None,  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType] # We import requests inside
+# ) -> bytes:
+#     """Fetch a single GRIB message via an HTTP Range request.
+
+#     Args:
+#         https_url (str): Public HTTPS URL of the grib2 file.
+#         byte_start (int): First byte of the message (inclusive).
+#         byte_end (int | None): Last byte of the message (inclusive), or ``None`` for EOF.
+#         session (_type_, optional): Optional ``requests.Session`` for connection reuse.  Falls
+#             back to module-level ``requests.get`` if ``None``. Defaults to None
+
+#     Returns:
+#         bytes: The raw bytes of the GRIB message for that byte range.
+#     """
+
+#     import requests  # noqa: PLC0415
+
+#     range_header = f"bytes={byte_start}-{byte_end}" if byte_end is not None else f"bytes={byte_start}-"
+#     getter = session.get if session is not None else requests.get
+#     try:
+#         resp = getter(https_url, headers={"Range": range_header}, timeout=_HTTP_TIMEOUT)
+#         resp.raise_for_status()
+#     except requests.exceptions.ConnectionError or requests.exceptions.HTTPError:
+#         # AWS S3 closes idle keep-alive connections after ~20 s.  On the next
+#         # request the session tries to reuse the stale socket and gets
+#         # RemoteDisconnected.  One retry is enough — the second attempt opens
+#         # a fresh connection.
+#         resp = getter(https_url, headers={"Range": range_header}, timeout=_HTTP_TIMEOUT)
+#         resp.raise_for_status()
+
+#     return resp.content
 
 
 # ---------------------------------------------------------------------------
@@ -460,37 +463,43 @@ def _fetch_obstore_idx(store, s3_entry_name: str) -> list[dict[str, str | int | 
 
     idx_entry_name = s3_entry_name + ".idx" if s3_entry_name[:-3] != ".idx" else s3_entry_name
 
-    # LIKELY NEEDS A TRY EXCEPT
-    idx_data = store.get(idx_entry_name)
-    idx_data_bytes = idx_data.bytes()
-    idx_data_text = str(idx_data_bytes, "utf-8")
+    try:
+        idx_data = store.get(idx_entry_name)
+        idx_data_bytes = idx_data.bytes()
+        idx_data_text = str(idx_data_bytes, "utf-8")
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"HRRR .idx file not found: {idx_entry_name}\n"
+            "Older HRRR files (v1/v2) may lack .idx files. "
+            "Pre-download with hrrr_download.py and use local mode."
+        )
 
     return _parse_idx(idx_data_text)
 
 
-async def _fetch_obstore_message(store, s3_entry_name: str, byte_start: int, byte_end: int | None) -> bytes:
-    """Fetch a single GRIB message via obstore.
+# async def _fetch_obstore_message(store, s3_entry_name: str, byte_start: int, byte_end: int | None) -> bytes:
+#     """Fetch a single GRIB message via obstore.
 
-    Args:
-        store (obstore.store.S3Store): the obstore store object that houses the s3_entry of interest
-        s3_entry_name (str): S3 entry in the obstore
-        byte_start (int): First byte of the message (inclusive).
-        byte_end (int | None): Last byte of the message (inclusive), or ``None`` for EOF.
+#     Args:
+#         store (obstore.store.S3Store): the obstore store object that houses the s3_entry of interest
+#         s3_entry_name (str): S3 entry in the obstore
+#         byte_start (int): First byte of the message (inclusive).
+#         byte_end (int | None): Last byte of the message (inclusive), or ``None`` for EOF.
 
-    Returns:
-        bytes: The raw bytes of the GRIB message for that byte range.
-    """
+#     Returns:
+#         bytes: The raw bytes of the GRIB message for that byte range.
+#     """
 
-    import obstore as obs
+#     import obstore as obs
 
-    # Obstore is exclusive bytes
-    if byte_end is None:
-        meta = await obs.head_async(store, s3_entry_name)
-        byte_end = meta.size - 1
+#     # Obstore is exclusive bytes
+#     if byte_end is None:
+#         meta = await obs.head_async(store, s3_entry_name)
+#         byte_end = meta.size - 1
 
-    data_retrieved = await obs.get_range_async(store, s3_entry_name, start=byte_start, end=byte_end + 1)
+#     data_retrieved = await obs.get_range_async(store, s3_entry_name, start=byte_start, end=byte_end + 1)
 
-    return data_retrieved.to_bytes()
+#     return data_retrieved.to_bytes()
 
 
 def _fetch_obstore_messages(store, s3_entry_name: str, entries: list[dict[str, str | int | None]]) -> list[bytes]:
@@ -854,7 +863,7 @@ class HRRRDataset(BaseDataset):
         self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
         self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
         self.global_levels: list[int] | None = self.curr_source_cfg.get("levels", None)
-        self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
+        # self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
         self.num_decompress_workers: int = int(
             self.curr_source_cfg.get("num_decompress_workers", _MAX_DECOMPRESS_WORKERS)
         )
