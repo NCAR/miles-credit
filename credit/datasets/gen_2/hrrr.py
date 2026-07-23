@@ -136,7 +136,8 @@ import pandas as pd
 import torch
 
 from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
-from credit.datasets.gen_2.grid_utils import _start_s3_obstore, write_source_grid_schema_if_missing
+from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+from credit.datasets.gen_2._utils import _start_s3_obstore
 
 logger = logging.getLogger(__name__)
 
