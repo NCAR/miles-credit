@@ -54,6 +54,7 @@ from credit.datasets.hrrr import (
     _S3_BUCKET,  # pyright: ignore[reportPrivateUsage]
     _hrrr_local_path,  # pyright: ignore[reportPrivateUsage]
     _hrrr_s3_entry_name,  # pyright: ignore[reportPrivateUsage]
+    _resolve_subh_timestamp,  # pyright: ignore[reportPrivateUsage]
     _start_s3_obstore,  # pyright: ignore[reportPrivateUsage]
     _validate_product_request,  # pyright: ignore[reportPrivateUsage]
 )
@@ -93,7 +94,6 @@ def _download_one(task: _DownloadTask, store: Any) -> str:
             - "skip  {local_path}" if the file already exists and overwrite is False.
             - "miss  {s3_entry_name}" if the file was not found on S3
     """
-    # MAKE THIS MORE HELPFUL
     if os.path.exists(task.local_path) and os.path.exists(task.local_path + ".idx") and not task.overwrite:
         return f"skip  {task.local_path}"
 
@@ -189,19 +189,11 @@ def download_hrrr(
     if product == "wrfsubh":
         # For sub-hourly, derive the unique set of (init_hour, ff) file pairs
         # implied by the requested timestamps rather than using forecast_hour directly.
-        seen: set[tuple] = set()
-        file_pairs: list[tuple] = []
+        seen: set[tuple[pd.Timestamp, int]] = set()
+        file_pairs: list[tuple[pd.Timestamp, int]] = []
         for t in timestamps:
-            init = t.floor("1h")
-            mins = int((t - init).total_seconds() / 60)
-            if mins == 0:
-                init = init - pd.Timedelta("1h")
-                mins = 60
-
-            print(f"init = {init}, mins = {mins}")
-            ff = (mins + 59) // 60
-            key = (init, ff)
-            print(f"key = {key}")
+            init_t, ff, mins = _resolve_subh_timestamp(t)
+            key = (init_t, ff)
             if key not in seen:
                 seen.add(key)
                 file_pairs.append(key)

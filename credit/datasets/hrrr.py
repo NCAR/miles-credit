@@ -525,6 +525,34 @@ def _resolve_nat_levels(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_subh_timestamp(t: pd.Timestamp) -> tuple[pd.Timestamp, int, int]:
+    """Derive effective initialization time, forecast hour (ff), and sub-hourly step (in minutes) for wrfsubh.
+
+    For sub-hourly data, a timestamp `t` is mapped to its HRRR run init time and file number:
+    - ``init_hour = t.floor("1h")``
+    - ``step_min  = minutes since init`` (15, 30, 45, 60)
+    - ``ff        = ceil(step_min / 60)`` (forecast lead hour within the run)
+    - If `t` is exactly on the hour (`step_min == 0`), it is treated as the 60-min step of
+      the previous hour's run (`init_hour -= 1h`, `step_min = 60`).
+
+    Note: sub-hourly analysis files also exist, but are not pulled with the current code.
+
+    Args:
+        t (pd.Timestamp): Target timestamp.
+
+    Returns:
+        tuple[pd.Timestamp, int, int]: (init_hour, ff, step_min)
+    """
+    init_hour = t.floor("1h")
+    step_min = int((t - init_hour).total_seconds() / 60)
+    if step_min == 0:
+        # t is on the hour → 60-min step of the previous run
+        init_hour = init_hour - pd.Timedelta("1h")
+        step_min = 60
+    ff = (step_min + 59) // 60  # ceil: 1-60 → 1, 61-120 → 2, …
+    return init_hour, ff, step_min
+
+
 def _find_subhf_entry(
     idx_entries: list[dict[str, str | int | None]],
     idx_name: str,
@@ -871,18 +899,11 @@ class HRRRDataset(BaseDataset):
         # Compute effective init time, FF file number, and sub-step for subhf
         # ------------------------------------------------------------------
         if self.product == "wrfsubh":
-            init_hour = t.floor("1h")
-            step_min = int((t - init_hour).total_seconds() / 60)
-            if step_min == 0:
-                # t is on the hour → 60-min step of the previous run
-                init_hour = init_hour - pd.Timedelta("1h")
-                step_min = 60
-            ff = (step_min + 59) // 60  # ceil: 1-60 → 1, 61-120 → 2, …
-            file_t = init_hour
+            file_t, ff, step_min = _resolve_subh_timestamp(t)
         else:
+            file_t = t
             ff = self.forecast_hour
             step_min = None
-            file_t = t
 
         if self.mode == "remote":
             # Initialize Obstore if not done yet
