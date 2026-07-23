@@ -4,7 +4,7 @@ hrrr_download.py
 Standalone utility for downloading HRRR prs GRIB2 data from AWS S3 to local disk.
 
 Downloads are embarrassingly parallel: each timestamp is an independent task
-dispatched to a ``multiprocessing.Pool``.  Both the grib2 file and its ``.idx``
+dispatched to a ``ThreadPoolExecutor``.  Both the grib2 file and its ``.idx``
 sidecar are downloaded so that ``HRRRDataset`` in local mode can use byte-range
 reads rather than scanning the full file.
 
@@ -33,7 +33,7 @@ Config section used (``data.source``)::
           dataset_type: "hrrr"
           product: "wrfprs" # Options: "wrfprs", "wrfnat", "wrfsubh"
           mode: "local"          # mode to use after download
-          base_path: "/data/hrrr"
+          base_path: "$SCRATCH/data/hrrr"
           forecast_hour: 0
       start_datetime: "2022-01-01"
       end_datetime:   "2022-01-31"
@@ -43,21 +43,28 @@ Config section used (``data.source``)::
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
-import multiprocessing as mp
 import os
 from typing import NamedTuple, Any
 
 import pandas as pd
 
-from credit.datasets.gen_2.hrrr import _hrrr_local_path, _hrrr_s3_uri, _validate_product_request  # pyright: ignore[reportPrivateUsage]
+from credit.datasets.gen_2.hrrr import (
+    _S3_BUCKET,  # pyright: ignore[reportPrivateUsage]
+    _hrrr_local_path,  # pyright: ignore[reportPrivateUsage]
+    _hrrr_s3_entry_name,  # pyright: ignore[reportPrivateUsage]
+    _resolve_subh_timestamp,  # pyright: ignore[reportPrivateUsage]
+    _start_s3_obstore,  # pyright: ignore[reportPrivateUsage]
+    _validate_product_request,  # pyright: ignore[reportPrivateUsage]
+)
 from credit.datasets.gen_2.multi_source import make_single_source_subconfig
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Per-task helper (must be a module-level function for multiprocessing.Pool)
+# Per-task helper
 # ---------------------------------------------------------------------------
 
 
@@ -68,42 +75,43 @@ class _DownloadTask(NamedTuple):
         NamedTuple: Lightweight immutable struct for named parameters.
     """
 
-    s3_uri: str
+    s3_entry_name: str
     local_path: str
     overwrite: bool
 
 
-def _download_one(task: _DownloadTask) -> str:
-    """Download one grib2 + .idx pair.  Returns a status string for logging.
-
-    Runs in a worker process — imports s3fs locally so the pool workers don't
-    need to inherit an open filesystem object from the parent.
+def _download_one(task: _DownloadTask, store: Any) -> str:
+    """Download one grib2 + .idx pair.  Returns a status string for logging. Note that this downloads
+    the entire grib file and not just ranges or spatial extents of interest.
 
     Args:
         task (_DownloadTask): Specifications for HRRR download (see _DownloadTask).
+        store (Any): The obstore S3Store instance.
 
     Returns:
         str: Status string indicating the result of the download attempt, formatted as:
             - "ok    {local_path}" if the file was successfully downloaded.
             - "skip  {local_path}" if the file already exists and overwrite is False.
-            - "miss  {s3_uri}" if the file was not found on S3
+            - "miss  {s3_entry_name}" if the file was not found on S3
     """
-    import s3fs  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
-
-    idx_local_path = task.local_path + ".idx"
-
-    if os.path.exists(task.local_path) and os.path.exists(idx_local_path) and not task.overwrite:
+    if os.path.exists(task.local_path) and os.path.exists(task.local_path + ".idx") and not task.overwrite:
         return f"skip  {task.local_path}"
 
     os.makedirs(os.path.dirname(task.local_path), exist_ok=True)
-    fs = s3fs.S3FileSystem(anon=True)
-    s3_key = task.s3_uri[5:]  # strip "s3://"
+
     try:
-        fs.get(s3_key, task.local_path)
-        fs.get(s3_key + ".idx", task.local_path + ".idx")
+        grib_res = store.get(task.s3_entry_name)
+        with open(task.local_path, "wb") as f:
+            f.write(grib_res.bytes())
+
+        idx_entry_name = task.s3_entry_name + ".idx"
+        idx_res = store.get(idx_entry_name)
+        with open(task.local_path + ".idx", "wb") as f:
+            f.write(idx_res.bytes())
+
         return f"ok    {task.local_path}"
-    except FileNotFoundError:
-        return f"miss  {task.s3_uri}"
+    except (FileNotFoundError, Exception):
+        return f"miss  {task.s3_entry_name}"
 
 
 # ---------------------------------------------------------------------------
@@ -116,9 +124,9 @@ def download_hrrr(
     num_workers: int = 4,
     overwrite: bool = False,
 ) -> None:
-    """Download HRRR grib2 + .idx files from AWS S3 to local disk.
+    """Download HRRR grib2 + .idx files from AWS S3 to local disk using obstore.
 
-    Each timestamp is downloaded in parallel using a ``multiprocessing.Pool``.
+    Each timestamp is downloaded in parallel using a ``ThreadPoolExecutor``.
     Both the grib2 file and its ``.idx`` sidecar are fetched so that
     ``HRRRDataset`` in ``mode: "local"`` can use fast byte-range reads.
 
@@ -126,12 +134,12 @@ def download_hrrr(
         data_config (dict[str, Any]): Top-level ``data`` config dict (same object passed to
             ``HRRRDataset``).
         num_workers (int, optional): Number of parallel download workers.  Each worker opens
-            its own ``s3fs`` connection.  Default ``4``.
+            its own connection.  Default ``4``.
         overwrite (bool, optional): Re-download files that already exist on disk. Default
             ``False`` (skip existing files).
 
     Raises:
-        ImportError: If ``s3fs`` is not installed.
+        ImportError: If ``obstore`` is not installed.
         KeyError: If the config is missing required fields.
         ValueError: If *product* is not a recognised HRRR product.
     """
@@ -155,42 +163,43 @@ def download_hrrr(
     product = _validate_product_request(product_request)
 
     try:
-        import s3fs  # noqa: PLC0415  # pyright: ignore[reportMissingTypeStubs] # local import for s3 bucket access only if needed
+        import obstore  # noqa: PLC0415  # pyright: ignore[reportMissingTypeStubs]
 
-        del s3fs
+        del obstore
     except ImportError as exc:
-        raise ImportError("s3fs is required for downloading: pip install s3fs") from exc
+        raise ImportError("obstore is required for downloading: pip install obstore") from exc
+
+    if "base_path" not in source_cfg:
+        raise ValueError("base_path is not specified in the config, meaning that the save location is unclear")
 
     base_path: str = os.path.expanduser(os.path.expandvars(source_cfg["base_path"]))
     forecast_hour: int = int(source_cfg.get("forecast_hour", 0))
 
     dt = pd.Timedelta(data_config["timestep"])
+    print(f"Timestep is {dt}")
     num_steps: int = data_config.get("forecast_len", 0)
     timestamps = pd.date_range(
         pd.Timestamp(data_config["start_datetime"]),
         pd.Timestamp(data_config["end_datetime"]) - num_steps * dt,
         freq=dt,
     )
+    print("Timestamps:")
+    print(timestamps)
 
     if product == "wrfsubh":
         # For sub-hourly, derive the unique set of (init_hour, ff) file pairs
         # implied by the requested timestamps rather than using forecast_hour directly.
-        seen: set[tuple] = set()
-        file_pairs: list[tuple] = []
+        seen: set[tuple[pd.Timestamp, int]] = set()
+        file_pairs: list[tuple[pd.Timestamp, int]] = []
         for t in timestamps:
-            init = t.floor("1h")
-            mins = int((t - init).total_seconds() / 60)
-            if mins == 0:
-                init = init - pd.Timedelta("1h")
-                mins = 60
-            ff = (mins + 59) // 60
-            key = (init, ff)
+            init_t, ff, _ = _resolve_subh_timestamp(t)
+            key = (init_t, ff)
             if key not in seen:
                 seen.add(key)
                 file_pairs.append(key)
         tasks = [
             _DownloadTask(
-                s3_uri=_hrrr_s3_uri(init_t, ff, product),
+                s3_entry_name=_hrrr_s3_entry_name(init_t, ff, product),
                 local_path=_hrrr_local_path(base_path, init_t, ff, product),
                 overwrite=overwrite,
             )
@@ -199,7 +208,7 @@ def download_hrrr(
     else:
         tasks = [
             _DownloadTask(
-                s3_uri=_hrrr_s3_uri(t, forecast_hour, product),
+                s3_entry_name=_hrrr_s3_entry_name(t, forecast_hour, product),
                 local_path=_hrrr_local_path(base_path, t, forecast_hour, product),
                 overwrite=overwrite,
             )
@@ -209,9 +218,11 @@ def download_hrrr(
     n_total = len(tasks)
     logger.info("Starting download: %d files, %d workers.", n_total, num_workers)
 
+    store = _start_s3_obstore(_S3_BUCKET)
+
     n_ok = n_skip = n_miss = 0
-    with mp.Pool(processes=num_workers) as pool:
-        for result in pool.imap_unordered(_download_one, tasks):
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        for result in executor.map(lambda task: _download_one(task, store), tasks):
             status = result[:4]
             logger.info(result)
             if status == "ok  ":
@@ -234,6 +245,7 @@ if __name__ == "__main__":
     """
     The code below defines the CLI for the HRRR download
     """
+    print()
 
     import argparse
 
@@ -265,3 +277,4 @@ if __name__ == "__main__":
         cfg["data"] = make_single_source_subconfig(cfg["data"], args.source_name)
 
     download_hrrr(cfg["data"], num_workers=args.num_workers, overwrite=args.overwrite)
+    print()

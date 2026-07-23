@@ -1,0 +1,281 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# CREDIT starter config — gen2 data schema, small HRRR subset, WxFormer
+#
+# Quick-start: edit the USER SETTINGS sections below, then:
+#
+#   # Preview the PBS script (no submission)
+#   credit submit --cluster casper -c config/example-v2026.2.yml --gpus 4 --chain 14 --dry-run
+#
+#   # Submit 14 chained jobs (~70 epochs at 5 epochs/job)
+#   credit submit --cluster casper  -c config/example-v2026.2.yml --gpus 4 --chain 14
+#   credit submit --cluster derecho -c config/example-v2026.2.yml --gpus 4 --nodes 1 --chain 14
+# --------------------------------------------------------------------------------------------------------------------- #
+
+# ---- USER SETTINGS: output directory ---- #
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr'
+seed: 1000
+
+
+# ---- USER SETTINGS: training data ---- #
+# Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
+data:
+  source:
+    # Example_HRRR:
+    #   base_path: '$SCRATCH/hrrr_download'
+    #   dataset_type: "hrrr"
+    #   product: "wrfprs"
+    #   mode: "remote"
+    #   level_coord: "level"
+    #   levels: [250, 500, 925, 1000]
+    #   variables:
+    #     # Prognostic: model both predicts and receives as input next step
+    #     prognostic:
+    #       vars_3D: ['T', 'U', 'V', 'Q']
+    #       vars_2D: ['sp']
+
+    #     # Diagnostic: model predicts these but does not feed them back as input
+    #     diagnostic: null
+
+    #     # Dynamic forcing: time-varying inputs (not predicted)
+    #     dynamic_forcing:
+    #       vars_3D: [ 'GH' ]
+
+    #     # Static: time-invariant inputs (not predicted)
+    #     static:
+    #       vars_2D: [ 'orog' ]
+    #   # [lon_min, lon_max, lat_min, lat_max]
+    #   extent: [-106.0, -104.5, 39.5, 41.0]  # Prime numbers of data points: 59 lat × 47 lon
+
+    Example_HRRR_SUBH:
+      base_path: '$SCRATCH/hrrr_download'
+      dataset_type: "hrrr"
+      product: "wrfsubh" # 2D only
+      mode: "remote"
+      variables:
+        prognostic:
+          vars_2D: ['t2m']
+        
+        diagnostic:
+          vars_2D: ['d2m']
+
+      # Extent to match the one above
+      extent: [-106.0, -104.5, 39.5, 41.0]
+
+  start_datetime: "2025-01-01"
+  end_datetime: "2025-01-02"
+  # timestep: "1h"
+  timestep: "15m"
+
+  # history_len: 1            # number of past states fed as input
+  forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
+
+  # one_shot: True
+  # lead_time_periods: 1
+  # skip_periods: null
+  # static_first: True
+  # scaler_type: 'std_new'
+
+
+# ---- USER SETTINGS: validation data ---- #
+validation_data:
+  start_datetime: "2025-01-03"
+  end_datetime: "2025-01-04"
+  timestep: "1h"
+
+# ---- USER SETTINGS: preblocks/postblocks before/after passed to model ---- #
+
+preblocks:
+  per_step:
+    pressure_log_transform:
+      type: "log_transform"
+      args:
+        variables:
+          - 'Example_HRRR/prognostic/2d/sp'
+        data_types:
+          - 'input'
+          - 'target'
+
+    q_sqrt_transform:
+        type: "sqrt_transform"
+        args:
+            variables:
+                  - 'Example_HRRR/prognostic/3d/Q'
+            data_types:
+              - 'input'
+              - 'target'
+
+    scaler:
+      # please run `credit preprocess` before `credit train`
+      type: "bridgescaler_transform"
+      args:
+        variables: []
+        scaler_path: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/scaler_quantile.json"
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
+
+    vars_concat:
+      type: "concat"
+
+postblocks:
+  per_step:
+    reconstruct:
+      type: "reconstruct"
+
+# ---- USER SETTINGS: training hyperparameters ---- #
+trainer:
+  type: gen2                # use the v2 trainer (new nested data schema)
+
+  parallelism:
+    data: none              # none | ddp | fsdp2
+    tensor: 1
+    domain: 1
+
+  activation_checkpoint: True
+
+  load_weights: False     # set True to resume from checkpoint
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: False
+
+  skip_validation: False
+  update_learning_rate: False
+
+  save_backup_weights: True
+  save_best_weights: True
+
+  learning_rate: 1.0e-03
+  weight_decay: 0
+
+  train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
+  valid_batch_size: 8
+
+  batches_per_epoch: 0    # 0 = use full dataset each epoch
+  valid_batches_per_epoch: 100
+  stopping_patience: 999
+
+  start_epoch: 0
+  num_epoch: 2            # epochs per qsub job (checkpoint after each)
+  epochs: &epochs 70      # total training target
+
+  use_tensorboard: True
+  use_ema: True           # exponential moving average of weights for validation
+  ema_decay: 0.9999
+
+  use_scheduler: True
+  scheduler:
+    scheduler_type: linear-warmup-cosine
+    warmup_steps: 1000
+    total_steps: 500000  # ~ batches/epoch × total epochs
+    min_lr: 1.0e-5
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 'dynamic'
+
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 2
+
+
+# ---- Architecture (based on HRRR Extent, A×B) ---- #
+# Most users should not need to change these. If you change the grid or
+# number of variables, update image_height/width, levels, channels, and
+# surface_channels to match your data.
+model:
+  type: "wxformer"
+  frames: 1
+  image_height: 59       # Custom HRRR extent has 59 latitudes (39.5 to 41.0 at 3km resolution)
+  image_width: 47        # Custom HRRR extent has 47 longitudes (-106.0 to -104.5 at 3km resolution)
+  levels: 4               # number of HRRR model levels (matches data.levels above)
+  channels: 4             # 3D prognostic variables (T, U, V, Q)
+  surface_channels: 2     # 2D prognostic variables (sp, t2m)
+  input_only_channels: 5  # dynamic_forcing (GH x4) + static (orog)
+  output_only_channels: 1 # diagnostic variables (d2m)
+
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+
+  # Model capacity: increase dim/depth for a larger model
+  dim: [32, 64, 128, 256]
+  depth: [ 2, 2, 8, 2 ]
+
+  # Window sizes — these must divide the padded spatial dims at each stage.
+  # With pad_lat=[30,30] and pad_lon=[12,12]:
+  #   stage dims H=[120,60,30,15], W=[192,96,48,24] — all divisible by 8 and 3.
+  global_window_size: [ 8, 4, 2, 1 ]
+  local_window_size: 4
+  cross_embed_kernel_sizes:
+    - [ 4, 8, 16, 32 ]
+    - [ 2, 4 ]
+    - [ 2, 4 ]
+    - [ 2, 4 ]
+  cross_embed_strides: [ 2, 2, 2, 2 ]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  interp: False
+  use_spectral_norm: True
+  upsample_with_ps: True            # Upsample with pixel shuffle
+
+  padding_conf:
+    activate: True
+    mode: mirror          # switch to mirror since it is a local extent
+    pad_lat: [ 3, 2 ]     # Produce dimensions of 59+3+2=64 ...
+    pad_lon: [ 9, 8 ]     # and 47+9+8=64, divisible by 8 and 4 (window sizes)
+
+  
+# ---- Loss ---- #
+loss:
+  training_loss: "mse"
+  validation_loss: "mse"
+
+  use_power_loss: False
+  use_spectral_loss: False
+  use_latitude_weights: False
+  use_variable_weights: False
+
+
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+inference:
+  run_mode: batch                   # batch | single
+  mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
+  num_save_workers: 4               # async write pool size (0 = synchronous)
+
+  batch_forecast:                   # active when run_mode: batch
+    length: "1d"                    # forecast duration per init (e.g. "10d", "1m", "1y")
+    initialization:
+      start_date: "2025-01-01"      # first init date (inclusive), ISO 8601
+      end_date: "2025-01-01"        # last init date (inclusive)
+      date_interval: "1d"           # step between init dates (e.g. "1d", "7d")
+      times: ["00:00", "12:00"]     # UTC init times each day (HH:MM)
+
+  single_forecast:                  # active when run_mode: single
+    length: "10d"                   # forecast duration
+    start_datetime: "2025-01-01T00:00Z"   # init time, ISO 8601
+
+  output:
+    format: netcdf                  # netcdf | zarr
+    output_freq: null               # write every Nth step; null = every step (e.g. "6h", "24h")
+    group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
+    variables: null                 # null = save all; or list of {name:, levels:} to subset
+    metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
+    encoding:
+      default:                      # applies to all variables
+        dtype: float32
+        zlib: true
+        complevel: 4                # 1 (fast) to 9 (small)
+
+pbs: #derecho
+  conda: "credit-derecho"
+  project: "NAML0001"
+  job_name: "credit_integration_test_hrrr_gen2"
+  walltime: "01:00:00"
+  nodes: 8
+  ncpus: 64
+  ngpus: 4
+  mem: '480GB'
+  queue: 'main'

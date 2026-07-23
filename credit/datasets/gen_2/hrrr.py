@@ -39,11 +39,10 @@ Both local and remote modes use the same ``.idx`` + byte-range pipeline:
 
 *Remote mode*:
 
-1. Fetch the sidecar ``.idx`` inventory (~100 KB) via HTTPS to get exact byte
+1. Fetch the sidecar ``.idx`` inventory (~100 KB) to get exact byte
    offsets for every GRIB message.
-2. Issue one HTTP Range GET per required message (~50-200 KB each) via
-   ``requests``, with all messages fetched in parallel using
-   :class:`concurrent.futures.ThreadPoolExecutor`.
+2. Issue one Obstore get_ranges request to pull all the relevant data
+   fields (based on the byte ranges from the idx file).
 
 *Local mode*: reads the ``.idx`` sidecar from disk, then uses
 ``file.seek()`` + ``file.read()`` — identical byte-range approach, no
@@ -127,7 +126,9 @@ from typing import Any, Callable, Literal, get_args
 
 import logging
 import os
+import time
 from collections import defaultdict
+
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -136,16 +137,13 @@ import torch
 
 from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
 from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+from credit.datasets.gen_2._utils import _start_s3_obstore
 
 logger = logging.getLogger(__name__)
-
-# VALID_FIELD_TYPES = {"prognostic", "diagnostic", "dynamic_forcing", "static"}
 
 # V3+ S3 path includes a 'conus/' subdirectory; v1/v2 does not
 _HRRR_V3_CUTOFF = pd.Timestamp("2018-07-12")
 _S3_BUCKET = "noaa-hrrr-bdp-pds"
-# Public HTTPS base — used for Range requests (faster than s3fs seek+read)
-_HRRR_HTTPS_BASE = f"https://{_S3_BUCKET}.s3.amazonaws.com"
 
 #: Variable registry mapping user-facing names to HRRR ``.idx`` lookup keys.
 #:
@@ -171,6 +169,7 @@ VAR_REGISTRY: dict[str, dict[str, str | None]] = {
     "W": {"idx_name": "VVEL", "idx_level": None},  # vertical velocity (Pa/s)
     "GH": {"idx_name": "HGT", "idx_level": None},  # geopotential height (gpm)
     "ABSV": {"idx_name": "ABSV", "idx_level": None},  # absolute vorticity (1/s)
+    "P": {"idx_name": "PRES", "idx_level": None},  # pressure (Pa)
     # Moisture
     "Q": {"idx_name": "SPFH", "idx_level": None},  # specific humidity (kg/kg)
     "RH": {"idx_name": "RH", "idx_level": None},  # relative humidity (%)
@@ -233,14 +232,9 @@ VAR_REGISTRY: dict[str, dict[str, str | None]] = {
     "goes12bt4": {"idx_name": "SBT124", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES East Chan. 4
 }
 
-# Maximum parallel workers for remote fetching
-_MAX_REMOTE_WORKERS = 8
 
-# Timeout (seconds) for HTTPS requests to AWS S3.
-# Passed as (connect_timeout, read_timeout) — requests treats them independently.
-# The read timeout covers waiting for S3 to begin streaming the response body;
-# large GRIB messages (~10 MB) over a slow or loaded connection can exceed 30 s.
-_HTTP_TIMEOUT: tuple[int, int] = (10, 120)  # (connect, read)
+# Maximum parallel threads for CPU-bound GRIB decompression
+_MAX_DECOMPRESS_WORKERS = 8
 
 #: Supported HRRR GRIB2 products.
 VALID_PRODUCTS = Literal["wrfprs", "wrfnat", "wrfsubh"]
@@ -249,24 +243,6 @@ VALID_PRODUCTS = Literal["wrfprs", "wrfnat", "wrfsubh"]
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
-
-
-def _hrrr_s3_uri(t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
-    """Construct the S3 URI for a HRRR grib2 file.
-
-    Args:
-        t (pd.Timestamp): Initialisation timestamp (UTC).
-        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
-        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
-
-    Returns:
-        str: S3 URI.
-    """
-    date_str = t.strftime("%Y%m%d")
-    hour_str = t.strftime("%H")
-    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
-    subdir = "conus/" if t >= _HRRR_V3_CUTOFF else ""
-    return f"s3://{_S3_BUCKET}/hrrr.{date_str}/{subdir}{fname}"
 
 
 def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
@@ -289,17 +265,29 @@ def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, produc
     return os.path.join(base_path, f"hrrr.{date_str}", fname)
 
 
-def _s3_uri_to_https(s3_uri: str) -> str:
-    """Convert an ``s3://noaa-hrrr-bdp-pds/...`` URI to a public HTTPS URL.
+def _hrrr_s3_entry_name(
+    t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs", region: str = "conus"
+) -> str:
+    """Construct the S3 URI for a HRRR grib2 file.
 
     Args:
-        s3_uri (str): SRI URI
+        t (pd.Timestamp): Initialisation timestamp (UTC).
+        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
 
     Returns:
-        str: Public HTTPS URL
+        str: S3 URI.
     """
-    key = s3_uri[len(f"s3://{_S3_BUCKET}/") :]
-    return f"{_HRRR_HTTPS_BASE}/{key}"
+    date_str = t.strftime("%Y%m%d")
+    hour_str = t.strftime("%H")
+    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
+
+    if t >= _HRRR_V3_CUTOFF:
+        assert region in ["conus", "alaska"]
+        subdir = f"{region}/"
+    else:
+        subdir = ""
+    return f"hrrr.{date_str}/{subdir}{fname}"
 
 
 # ---------------------------------------------------------------------------
@@ -343,67 +331,63 @@ def _parse_idx(text: str) -> list[dict[str, str | int | None]]:
     return entries
 
 
-def _fetch_idx(s3_uri: str) -> list[dict[str, str | int | None]]:
+def _fetch_obstore_idx(store, s3_entry_name: str) -> list[dict[str, str | int | None]]:
     """Fetch and parse the ``.idx`` sidecar for a HRRR grib2 file via HTTPS.
 
     Args:
-        s3_uri (str): S3 URI
-
-    Raises:
-        FileNotFoundError: If the ``.idx`` file is not found (older v1/v2 files
-            may lack sidecars; pre-download with ``hrrr_download.py`` and use
-            local mode instead).
+        store (obstore.store.S3Store): the obstore store object that houses the s3_entry of interest
+        s3_entry_name (str): S3 entry in the obstore
 
     Returns:
         list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
     """
-    import requests  # noqa: PLC0415
 
-    url = _s3_uri_to_https(s3_uri) + ".idx"
-    resp = requests.get(url, timeout=_HTTP_TIMEOUT)
-    if resp.status_code == 404:
+    if len(s3_entry_name) < 4:
+        raise ValueError(f"Invalid s3_entry_name passed (too short). Entry: {s3_entry_name}")
+
+    idx_entry_name = s3_entry_name + ".idx" if s3_entry_name[:-3] != ".idx" else s3_entry_name
+
+    try:
+        idx_data = store.get(idx_entry_name)
+        idx_data_bytes = idx_data.bytes()
+        idx_data_text = str(idx_data_bytes, "utf-8")
+    except FileNotFoundError:
         raise FileNotFoundError(
-            f"HRRR .idx file not found: {url}\n"
+            f"HRRR .idx file not found: {idx_entry_name}\n"
             "Older HRRR files (v1/v2) may lack .idx files. "
             "Pre-download with hrrr_download.py and use local mode."
         )
-    resp.raise_for_status()
-    return _parse_idx(resp.text)
+
+    return _parse_idx(idx_data_text)
 
 
-def _fetch_message(
-    https_url: str,
-    byte_start: int,
-    byte_end: int | None,
-    session=None,  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType] # We import requests inside
-) -> bytes:
-    """Fetch a single GRIB message via an HTTP Range request.
+def _fetch_obstore_messages(store, s3_entry_name: str, entries: list[dict[str, str | int | None]]) -> list[bytes]:
+    """Fetch multiple GRIB messages via store.get_ranges in a single batch request.
 
     Args:
-        https_url (str): Public HTTPS URL of the grib2 file.
-        byte_start (int): First byte of the message (inclusive).
-        byte_end (int | None): Last byte of the message (inclusive), or ``None`` for EOF.
-        session (_type_, optional): Optional ``requests.Session`` for connection reuse.  Falls
-            back to module-level ``requests.get`` if ``None``. Defaults to None
+        store: The obstore S3Store object.
+        s3_entry_name (str): S3 entry name in the obstore.
+        entries (list[dict]): List of entries containing byte_start and byte_end keys.
 
     Returns:
-        bytes: The raw bytes of the GRIB message for that byte range.
+        list[bytes]: List of raw bytes for each message.
     """
+    starts = []
+    ends = []
+    for entry in entries:
+        start = entry["byte_start"]
+        end = entry["byte_end"]
+        if end is None:
+            # Resolve EOF range using a HEAD request to get file size
+            meta = store.head(s3_entry_name)
+            end = meta.size
+        else:
+            end = end + 1  # end parameter in obstore is exclusive
+        starts.append(start)
+        ends.append(end)
 
-    import requests  # noqa: PLC0415
-
-    range_header = f"bytes={byte_start}-{byte_end}" if byte_end is not None else f"bytes={byte_start}-"
-    getter = session.get if session is not None else requests.get
-    try:
-        resp = getter(https_url, headers={"Range": range_header}, timeout=_HTTP_TIMEOUT)
-    except requests.exceptions.ConnectionError:
-        # AWS S3 closes idle keep-alive connections after ~20 s.  On the next
-        # request the session tries to reuse the stale socket and gets
-        # RemoteDisconnected.  One retry is enough — the second attempt opens
-        # a fresh connection.
-        resp = getter(https_url, headers={"Range": range_header}, timeout=_HTTP_TIMEOUT)
-    resp.raise_for_status()
-    return resp.content
+    results = store.get_ranges(s3_entry_name, starts=starts, ends=ends)
+    return [res.to_bytes() for res in results]
 
 
 def _build_prs_entry_map(
@@ -542,6 +526,34 @@ def _resolve_nat_levels(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_subh_timestamp(t: pd.Timestamp) -> tuple[pd.Timestamp, int, int]:
+    """Derive effective initialization time, forecast hour (ff), and sub-hourly step (in minutes) for wrfsubh.
+
+    For sub-hourly data, a timestamp `t` is mapped to its HRRR run init time and file number:
+    - ``init_hour = t.floor("1h")``
+    - ``step_min  = minutes since init`` (15, 30, 45, 60)
+    - ``ff        = ceil(step_min / 60)`` (forecast lead hour within the run)
+    - If `t` is exactly on the hour (`step_min == 0`), it is treated as the 60-min step of
+      the previous hour's run (`init_hour -= 1h`, `step_min = 60`).
+
+    Note: sub-hourly analysis files also exist, but are not pulled with the current code.
+
+    Args:
+        t (pd.Timestamp): Target timestamp.
+
+    Returns:
+        tuple[pd.Timestamp, int, int]: (init_hour, ff, step_min)
+    """
+    init_hour = t.floor("1h")
+    step_min = int((t - init_hour).total_seconds() / 60)
+    if step_min == 0:
+        # t is on the hour → 60-min step of the previous run
+        init_hour = init_hour - pd.Timedelta("1h")
+        step_min = 60
+    ff = (step_min + 59) // 60  # ceil: 1-60 → 1, 61-120 → 2, …
+    return init_hour, ff, step_min
+
+
 def _find_subhf_entry(
     idx_entries: list[dict[str, str | int | None]],
     idx_name: str,
@@ -596,6 +608,19 @@ def _fetch_bytes_local(path: str, byte_start: int, byte_end: int | None) -> byte
         if byte_end is not None:
             return f.read(byte_end - byte_start + 1)
         return f.read()
+
+
+def _fetch_bytes_local_batch(path: str, entries: list[dict[str, str | int | None]]) -> list[bytes]:
+    """Read multiple byte ranges directly from a local GRIB2 file.
+
+    Args:
+        path (str): Absolute path to the local grib2 file.
+        entries (list[dict]): List of entries containing byte_start and byte_end keys.
+
+    Returns:
+        list[bytes]: List of raw bytes for each message.
+    """
+    return [_fetch_bytes_local(path, entry["byte_start"], entry["byte_end"]) for entry in entries]
 
 
 def _load_idx_local(grib2_path: str) -> list[dict[str, str | int | None]]:
@@ -721,11 +746,18 @@ class HRRRDataset(BaseDataset):
         self.product: VALID_PRODUCTS = _validate_product_request(product_request)
 
         self.mode: str = self.curr_source_cfg.get("mode", "local")
-        self.base_path: str | None = self.curr_source_cfg.get("base_path", None)
+        # Resolve the path to allow for $USER or $SCRATCH or ~ in config
+        raw_base_path = self.curr_source_cfg.get("base_path", None)
+        self.base_path: str | None = (
+            os.path.expanduser(os.path.expandvars(raw_base_path)) if raw_base_path is not None else None
+        )
         self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
         self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
         self.global_levels: list[int] | None = self.curr_source_cfg.get("levels", None)
-        self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
+        # self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
+        self.num_decompress_workers: int = int(
+            self.curr_source_cfg.get("num_decompress_workers", _MAX_DECOMPRESS_WORKERS)
+        )
 
         if self.mode == "local" and self.base_path is None:
             raise ValueError(
@@ -743,29 +775,12 @@ class HRRRDataset(BaseDataset):
         # Caches — all created lazily so they are fork-safe when DataLoader
         # spins up worker processes after __init__.
         self._idx_cache: dict[str, list[dict[str, str | int | None]]] = {}
-        self._http_session = None  # requests.Session; built on first remote call
+        self._obstore = None
         self._spatial_slice: tuple[slice, slice] | None = None  # extent → (row, col) slices
 
     # ------------------------------------------------------------------
     # Dataset interface
     # ------------------------------------------------------------------
-
-    def _get_session(self):
-        """Return the shared ``requests.Session``, creating it on first call.
-
-        Created lazily so the session is never open before a DataLoader worker
-        forks — each worker ends up with its own independent connection pool.
-        """
-        import requests  # noqa: PLC0415
-
-        if self._http_session is None:
-            self._http_session = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=_MAX_REMOTE_WORKERS,
-                pool_maxsize=_MAX_REMOTE_WORKERS,
-            )
-            self._http_session.mount("https://", adapter)
-        return self._http_session
 
     def _get_spatial_slice(self, lats: np.ndarray, lons: np.ndarray) -> tuple[slice, slice]:
         """Return ``(row_slice, col_slice)`` for ``self.extent``, computed once.
@@ -896,31 +911,25 @@ class HRRRDataset(BaseDataset):
         # Compute effective init time, FF file number, and sub-step for subhf
         # ------------------------------------------------------------------
         if self.product == "wrfsubh":
-            init_hour = t.floor("1h")
-            step_min = int((t - init_hour).total_seconds() / 60)
-            if step_min == 0:
-                # t is on the hour → 60-min step of the previous run
-                init_hour = init_hour - pd.Timedelta("1h")
-                step_min = 60
-            ff = (step_min + 59) // 60  # ceil: 1-60 → 1, 61-120 → 2, …
-            file_t = init_hour
+            file_t, ff, step_min = _resolve_subh_timestamp(t)
         else:
+            file_t = t
             ff = self.forecast_hour
             step_min = None
-            file_t = t
 
         if self.mode == "remote":
-            s3_uri = _hrrr_s3_uri(file_t, ff, self.product)
-            if s3_uri not in self._idx_cache:
-                self._idx_cache[s3_uri] = _fetch_idx(s3_uri)
-            idx_entries = self._idx_cache[s3_uri]
-            https_url = _s3_uri_to_https(s3_uri)
-            session = self._get_session()
+            # Initialize Obstore if not done yet
+            if self._obstore is None:
+                self._obstore = _start_s3_obstore(_S3_BUCKET)
 
-            def _fetcher(entry: dict[str, str | int | None]) -> bytes:
-                assert isinstance(entry["byte_start"], int)
-                assert isinstance(entry["byte_end"], int) or entry["byte_end"] is None
-                return _fetch_message(https_url, entry["byte_start"], entry["byte_end"], session)
+            s3_entry_name = _hrrr_s3_entry_name(file_t, ff, self.product)
+            if s3_entry_name not in self._idx_cache:
+                self._idx_cache[s3_entry_name] = _fetch_obstore_idx(self._obstore, s3_entry_name)
+            idx_entries = self._idx_cache[s3_entry_name]
+
+            def _batch_fetcher(entries: list[dict[str, str | int | None]]) -> list[bytes]:
+                return _fetch_obstore_messages(self._obstore, s3_entry_name, entries)
+
         else:
             assert self.base_path is not None
             path = _hrrr_local_path(self.base_path, file_t, ff, self.product)
@@ -928,18 +937,16 @@ class HRRRDataset(BaseDataset):
                 self._idx_cache[path] = _load_idx_local(path)
             idx_entries = self._idx_cache[path]
 
-            def _fetcher(entry: dict[str, str | int | None]) -> bytes:
-                assert isinstance(entry["byte_start"], int)
-                assert isinstance(entry["byte_end"], int) or entry["byte_end"] is None
-                return _fetch_bytes_local(path, entry["byte_start"], entry["byte_end"])
+            def _batch_fetcher(entries: list[dict[str, str | int | None]]) -> list[bytes]:
+                return _fetch_bytes_local_batch(path, entries)
 
-        self._extract_from_idx(field_type, idx_entries, _fetcher, vd, sample, step_min=step_min)
+        self._extract_from_idx(field_type, idx_entries, _batch_fetcher, vd, sample, step_min=step_min)
 
     def _extract_from_idx(
         self,
         field_type: VALID_FIELD_TYPES,
         idx_entries: list[dict[str, str | int | None]],
-        fetcher: Callable[[dict[str, str | int | None]], bytes],
+        fetcher: Callable[[list[dict[str, str | int | None]]], list[bytes]],
         vd: dict[str, list[str | int]],
         sample: dict[str, Any],
         step_min: int | None = None,
@@ -965,6 +972,8 @@ class HRRRDataset(BaseDataset):
             import pygrib  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs]
         except ImportError as exc:
             raise ImportError("pygrib is required: pip install pygrib") from exc
+
+        t_start_idx = time.perf_counter()
 
         levels = vd["levels"]
 
@@ -1024,37 +1033,57 @@ class HRRRDataset(BaseDataset):
         #   sequentially.  Note that DataLoader num_workers already provides
         #   process-level parallelism across samples in local mode.
         # ------------------------------------------------------------------
-        if self.mode == "remote":
-            n_workers = min(len(fetch_plan), self.num_fetch_workers)
-            with ThreadPoolExecutor(max_workers=n_workers) as pool:
-                raw_messages = list(pool.map(lambda task: fetcher(task[3]), fetch_plan))
-        else:
-            raw_messages = [fetcher(task[3]) for task in fetch_plan]
+        t_start_fetch = time.perf_counter()
+        entries = [task[3] for task in fetch_plan]
+        raw_messages = fetcher(entries)
+        t_end_fetch = time.perf_counter()
 
+        t_start_decode = time.perf_counter()
         decoded = [pygrib.fromstring(raw) for raw in raw_messages]
+        t_end_decode = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Compute the spatial slice once from the first message's lat/lon grid.
         # The HRRR grid is fixed, so this result is cached for subsequent calls.
         # ------------------------------------------------------------------
-        lats, lons = decoded[0].latlons()
-        row_sl, col_sl = self._get_spatial_slice(lats, lons)
+        t_start_slice = time.perf_counter()
+        if self._spatial_slice is None:
+            lats, lons = decoded[0].latlons()
+            row_sl, col_sl = self._get_spatial_slice(lats, lons)
+        else:
+            row_sl, col_sl = self._spatial_slice
+        t_end_slice = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Group decoded arrays by variable name and build tensors
         # ------------------------------------------------------------------
+        t_start_decompress = time.perf_counter()
         arrs_3d: dict[str, list[np.ndarray]] = defaultdict(list)
         lvls_3d: dict[str, list] = defaultdict(list)
         arr_2d: dict[str, np.ndarray] = {}
 
-        for (vname, is_3d, lv, _), msg in zip(fetch_plan, decoded):
-            arr = _to_float32(msg.values)[row_sl, col_sl]
+        def _decompress_one_variable(plan_data_pair):
+            (vname, is_3d, lv, _), msg = plan_data_pair
+            arr = _to_float32(msg.values[row_sl, col_sl])
+            return vname, is_3d, lv, arr
+
+        n_workers = min(len(fetch_plan), self.num_decompress_workers)
+        if n_workers == 1:
+            logger.debug("Only 1 worker available for decompressing, skipping multithreading.")
+            results = [_decompress_one_variable(pair) for pair in zip(fetch_plan, decoded)]
+        else:
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(_decompress_one_variable, zip(fetch_plan, decoded)))
+
+        for vname, is_3d, lv, arr in results:
             if is_3d:
                 arrs_3d[vname].append(arr)
                 lvls_3d[vname].append(lv)
             else:
                 arr_2d[vname] = arr
+        t_end_decompress = time.perf_counter()
 
+        t_start_tensor = time.perf_counter()
         for vname in vd["vars_3D"]:
             stacked = np.stack(arrs_3d[vname])  # (n_levels, y, x)
             vname_key = self._get_field_name(field_type, "3d", vname)
@@ -1063,3 +1092,16 @@ class HRRRDataset(BaseDataset):
         for vname in vd["vars_2D"]:
             vname_key = self._get_field_name(field_type, "2d", vname)
             sample[vname_key] = torch.tensor(arr_2d[vname], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        t_end_tensor = time.perf_counter()
+
+        t_end_idx = time.perf_counter()
+        logger.debug(
+            f"[PROFILE] _extract_from_idx for {vname_key} ({field_type}, mode={self.mode}):\n        "
+            f"plan={t_start_fetch - t_start_idx:.3f}s | "
+            f"fetch={t_end_fetch - t_start_fetch:.3f}s | "
+            f"decode={t_end_decode - t_start_decode:.3f}s | "
+            f"slice={t_end_slice - t_start_slice:.3f}s | "
+            f"decompress={t_end_decompress - t_start_decompress:.3f}s | "
+            f"tensor={t_end_tensor - t_start_tensor:.3f}s | "
+            f"total={t_end_idx - t_start_idx:.3f}s"
+        )
