@@ -45,8 +45,8 @@ data:
       # extent: None # Full domain
 
 
-  start_datetime: "2024-01-01"
-  end_datetime: "2025-01-01"
+  start_datetime: "2020-12-03"
+  end_datetime: "2025-07-01"
   timestep: "1h"
 
   # history_len: 1            # number of past states fed as input
@@ -55,8 +55,8 @@ data:
 
 # ---- USER SETTINGS: validation data ---- #
 validation_data:
-  start_datetime: "2025-01-01"
-  end_datetime: "2026-01-01"
+  start_datetime: "2025-07-01"
+  end_datetime: "2026-07-01"
   timestep: "1h"
 
   forecast_len: 1
@@ -128,8 +128,8 @@ trainer:
   learning_rate: 1.0e-03
   weight_decay: 0
 
-  train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
-  valid_batch_size: 8
+  train_batch_size: 4     # per-GPU batch size; total = batch_size × n_gpus
+  valid_batch_size: 4
 
   batches_per_epoch: 0    # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
@@ -154,8 +154,8 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 4
-  valid_thread_workers: 4
+  thread_workers: 8
+  valid_thread_workers: 8
   prefetch_factor: 1
 
 
