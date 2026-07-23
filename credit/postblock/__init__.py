@@ -17,7 +17,7 @@ _POSTBLOCK_REGISTRY = {
     "square_transform": ("credit.postblock.square", "SquareTransform"),
     "wet_mask_samudra": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "mslp_diagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
-    "tracer_fixer": ("credit.postblock.gen1", "TracerFixer"),
+    "tracer_fixer": ("credit.postblock.conservation", "TracerFixer"),
     "global_mass_fixer": ("credit.postblock.conservation", "GlobalMassFixer"),
     "global_water_fixer": ("credit.postblock.conservation", "GlobalWaterFixer"),
     "global_energy_fixer": ("credit.postblock.conservation", "GlobalEnergyFixerUpDown"),
@@ -25,6 +25,8 @@ _POSTBLOCK_REGISTRY = {
     "geopotential_diagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
     "pressure_interp_diagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
     "hybrid_level_interp": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
+    "wind_artifact_filter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
+    "semilagrangian_advection": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -42,6 +44,8 @@ _CLASS_SOURCES = {
     "GeopotentialDiagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
     "PressureInterpDiagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
     "HybridLevelInterpPost": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
+    "WindArtifactFilter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
+    "SemiLagrangianAdvectionPost": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
 }
 
 

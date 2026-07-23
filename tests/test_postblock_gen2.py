@@ -1,7 +1,9 @@
 from credit.postblock.geopotential import GeopotentialDiagnostic
+from credit.postblock.advect import SemiLagrangianAdvectionPost
 from credit.trainers.utils import load_dataloader
 from credit.preblock import ConcatToTensor
 from credit.postblock import Reconstruct
+import math
 import yaml
 from copy import deepcopy
 from torch import isnan, all
@@ -158,3 +160,93 @@ def test_geopotential():
     temp = pred["ARCO_ERA5"]["ARCO_ERA5/prognostic/3d/temperature"]
     assert geo.shape == temp.shape
     assert all(~isnan(geo))
+
+
+def test_semilagrangian_advection():
+    """Integration test: run advection on the reconstructed gen2 prediction dict.
+
+    Mirrors ``test_geopotential`` — builds ``y_processed`` through the real
+    dataloader, ``ConcatToTensor`` and ``Reconstruct`` — then advects specific
+    humidity and checks the result is finite, shape-preserving, and (because the
+    tracer varies vertically and the winds are non-zero) actually changed.
+    """
+    msd = MockARCOERA5MultiSourceDataset(conf["data"])
+    mdl = load_dataloader(conf, msd, 0, 1, True)
+    batch = next(iter(mdl))
+    ic_raw = batch["input"]
+    ct = ConcatToTensor()
+    batch_tensor, meta = ct(batch)
+    meta_2 = deepcopy(meta)
+    meta_2["target"]["_channel_map"] = meta_2["input"]["_channel_map"]
+    recon = Reconstruct()
+    full_data_dict = recon({"y_pred": batch_tensor, "ic_raw": ic_raw, "metadata": meta_2})
+
+    src = "ARCO_ERA5"
+    tracer_var = f"{src}/prognostic/3d/specific_humidity"
+    q_before = full_data_dict["y_processed"][src][tracer_var].clone()
+
+    advect = SemiLagrangianAdvectionPost(
+        tracer_vars=[tracer_var],
+        u_var=f"{src}/prognostic/3d/u_component_of_wind",
+        v_var=f"{src}/prognostic/3d/v_component_of_wind",
+        surface_pressure_var=f"{src}/prognostic/2d/surface_pressure",
+        timestep_seconds=21600.0,
+        levels=list(range(1, MockARCOERA5MultiSourceDataset.N_LEVELS + 1)),
+    )
+    q_after = advect(full_data_dict)["y_processed"][src][tracer_var]
+
+    assert q_after.shape == q_before.shape
+    assert torch.isfinite(q_after).all()
+    assert not torch.allclose(q_after, q_before)
+
+
+def test_semilagrangian_advection_uniform_flow():
+    """A uniform eastward wind translates a tracer east by ``U * dt / dx`` grid cells.
+
+    Builds a synthetic ``y_processed`` directly (no dataloader): a Gaussian blob
+    in longitude under a constant zonal wind and no meridional/vertical motion.
+    The longitude centroid must shift eastward by the analytic displacement.
+    """
+    src = "ERA5"
+    u_var = f"{src}/prognostic/3d/u_component_of_wind"
+    v_var = f"{src}/prognostic/3d/v_component_of_wind"
+    sp_var = f"{src}/prognostic/2d/surface_pressure"
+    q_var = f"{src}/prognostic/3d/specific_humidity"
+
+    B, L, T, H, W = 1, 4, 1, 8, 64
+    u_speed, dt = 60.0, 21600.0
+    u = torch.full((B, L, T, H, W), u_speed)
+    v = torch.zeros((B, L, T, H, W))
+    sp = torch.full((B, 1, T, H, W), 101_325.0)
+    lon = torch.arange(W).float()
+    blob = torch.exp(-((lon - 20.0) ** 2) / (2 * 3.0**2))
+    q = blob.view(1, 1, 1, 1, W).expand(B, L, T, H, W).clone()
+
+    block = SemiLagrangianAdvectionPost(
+        tracer_vars=[q_var],
+        u_var=u_var,
+        v_var=v_var,
+        surface_pressure_var=sp_var,
+        timestep_seconds=dt,
+        levels=list(range(1, L + 1)),
+    )
+    batch = {"y_processed": {src: {u_var: u, v_var: v, sp_var: sp, q_var: q.clone()}}}
+    adv = block(batch)["y_processed"][src][q_var]
+
+    row = H // 2
+    before, after = q[0, 0, 0, row], adv[0, 0, 0, row]
+
+    def centroid(field):
+        return float((lon * field).sum() / field.sum())
+
+    measured = centroid(after) - centroid(before)
+
+    # the block falls back to a uniform global grid: lat = linspace(90, -90, H),
+    # dlon = 360 / W degrees; expected zonal displacement uses dx = R cos(lat) dlon.
+    lat = float(torch.linspace(90.0, -90.0, H)[row])
+    dx = 6_371_000.0 * math.cos(math.radians(lat)) * math.radians(360.0 / W)
+    expected = u_speed * dt / dx
+
+    assert torch.isfinite(adv).all()
+    assert measured > 0  # advected eastward
+    assert abs(measured - expected) < 0.05 * expected

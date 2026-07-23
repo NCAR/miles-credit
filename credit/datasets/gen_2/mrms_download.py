@@ -9,11 +9,11 @@ any renaming.
 
 Usage::
 
-    python -m credit.datasets.mrms_download --config config/my_conf.yaml
+    python -m credit.datasets.gen_2.mrms_download --config config/my_conf.yaml
 
 Or programmatically::
 
-    from credit.datasets.mrms_download import download_mrms
+    from credit.datasets.gen_2.mrms_download import download_mrms
     download_mrms(config, output_format="netcdf")
 
 Config section used (``data.source.MRMS``)::

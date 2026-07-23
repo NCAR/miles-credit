@@ -1,10 +1,10 @@
-"""Tests for credit.datasets.schema.ChannelSchema and its ConcatToTensor integration."""
+"""Tests for credit.datasets.gen_2.channel_utils.ChannelSchema and its ConcatToTensor integration."""
 
 import pytest
 import torch
 import yaml
 
-from credit.datasets.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.preblock import attach_channel_schema, build_preblocks
 from credit.preblock.concat import ConcatToTensor
 from credit.postblock.reconstruct import Reconstruct

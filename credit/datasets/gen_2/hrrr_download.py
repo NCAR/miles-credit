@@ -18,11 +18,11 @@ After downloading, switch ``mode`` to ``"local"`` in the config.
 
 Usage::
 
-    python -m credit.datasets.hrrr_download -c config/my_conf.yaml --num-workers 8
+    python -m credit.datasets.gen_2.hrrr_download -c config/my_conf.yaml --num-workers 8
 
 Or programmatically::
 
-    from credit.datasets.hrrr_download import download_hrrr
+    from credit.datasets.gen_2.hrrr_download import download_hrrr
     download_hrrr(config['data'], num_workers=8, overwrite=False)
 
 Config section used (``data.source``)::
@@ -50,7 +50,7 @@ from typing import NamedTuple, Any
 
 import pandas as pd
 
-from credit.datasets.hrrr import (
+from credit.datasets.gen_2.hrrr import (
     _S3_BUCKET,  # pyright: ignore[reportPrivateUsage]
     _hrrr_local_path,  # pyright: ignore[reportPrivateUsage]
     _hrrr_s3_entry_name,  # pyright: ignore[reportPrivateUsage]
@@ -58,7 +58,7 @@ from credit.datasets.hrrr import (
     _start_s3_obstore,  # pyright: ignore[reportPrivateUsage]
     _validate_product_request,  # pyright: ignore[reportPrivateUsage]
 )
-from credit.datasets.multi_source import make_single_source_subconfig
+from credit.datasets.gen_2.multi_source import make_single_source_subconfig
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,7 @@ def download_hrrr(
         seen: set[tuple[pd.Timestamp, int]] = set()
         file_pairs: list[tuple[pd.Timestamp, int]] = []
         for t in timestamps:
-            init_t, ff, mins = _resolve_subh_timestamp(t)
+            init_t, ff, _ = _resolve_subh_timestamp(t)
             key = (init_t, ff)
             if key not in seen:
                 seen.add(key)
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config file.")
     parser.add_argument("--source_name", default=None, help="Name of the source in the data config to download.")
     parser.add_argument(
-        "--num_workers",
+        "--num-workers",
         type=int,
         default=4,
         help="Number of parallel download workers (default: 4).",

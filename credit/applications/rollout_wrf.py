@@ -32,7 +32,7 @@ from credit.data import (
     get_forward_data,
 )
 
-from credit.datasets.wrf_singlestep import WRFPredict
+from credit.datasets.gen_1.wrf_singlestep import WRFPredict
 from credit.transforms.transforms_wrf import NormalizeWRF, ToTensorWRF
 
 from credit.pbs import launch_script, launch_script_mpi

@@ -339,10 +339,12 @@ class GlobalEnergyFixerUpDown(nn.Module):
         E_qgk_t0 = LH_WATER * q_input + GPH_surf + ken_t0
         E_qgk_t1 = LH_WATER * q_pred + GPH_surf + ken_t1
 
-        # TOA net flux: down SOLIN (input forcing) - up SW - up LW
-        TOA_down_solar = self._input(batch_dict, self.toa_down_solar_input_var)[:, 0, -1, ...].to(device)
-        TOA_up_solar = _pred(batch_dict, self.toa_up_solar_var)[:, 0, 0, ...]
-        TOA_up_OLR = _pred(batch_dict, self.toa_up_olr_var)[:, 0, 0, ...]
+        TOA_down_solar = (
+            self._input(batch_dict, self.toa_down_solar_input_var)[:, 0, -1, ...].to(device) * self.N_seconds
+        )
+        TOA_up_solar = _pred(batch_dict, self.toa_up_solar_var)[:, 0, 0, ...] * self.N_seconds
+        TOA_up_OLR = _pred(batch_dict, self.toa_up_olr_var)[:, 0, 0, ...] * self.N_seconds
+
         R_T = (TOA_down_solar - TOA_up_solar - TOA_up_OLR) / self.N_seconds
         R_T_sum = self.core.weighted_sum(R_T, axis=(-2, -1))
 
@@ -352,7 +354,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
         surf_up_LW = _pred(batch_dict, self.surf_up_lw_var)[:, 0, 0, ...]
         surf_SH = _pred(batch_dict, self.surf_sh_var)[:, 0, 0, ...]
         surf_LH = _pred(batch_dict, self.surf_lh_var)[:, 0, 0, ...]
-        F_S = (surf_down_solar - surf_up_solar + surf_down_LW - surf_up_LW - surf_SH - surf_LH) / self.N_seconds
+        F_S = (surf_down_solar - surf_up_solar + surf_down_LW - surf_up_LW + surf_SH + surf_LH) / self.N_seconds
         F_S_sum = self.core.weighted_sum(F_S, axis=(-2, -1))
 
         E_level_t0 = CP_t0 * T_input + E_qgk_t0

@@ -33,8 +33,8 @@ from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.parser import credit_main_parser, predict_data_check
-from credit.datasets.era5_multistep_batcher import Predict_Dataset_Batcher
-from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoader
+from credit.datasets.gen_1.era5_multistep_batcher import Predict_Dataset_Batcher
+from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
 from credit.ensemble.bred_vector import adjust_start_times
 from credit.ensemble.crps import calculate_crps_per_channel
 from credit.ensemble.bred_vector import BredVector

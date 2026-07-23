@@ -8,7 +8,7 @@ import pathlib
 import torch
 import numpy as np
 
-from credit.datasets.multi_source import MultiSourceDataset
+from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
 from credit.preblock import build_preblocks, apply_preblocks

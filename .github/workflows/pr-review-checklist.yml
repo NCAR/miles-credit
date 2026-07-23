@@ -43,6 +43,7 @@ jobs:
           - [ ] Tests have been updated to cover code changes.
           - [ ] Documentation has been updated to cover code changes and renders properly.
           - [ ] The dependency lists in pyproject.toml and requirements.txt have been updated.
+          - [ ] Paths in code and example config files are user generic. Data not included in the repository should have a cloud URL or be located in /glade/campaign/aiml/credit/.
           - [ ] The reviewer has provided both positive and constructive feedback in their review response.
           - [ ] Changes affecting GPU-related functionality have been run by the submitter on Casper and/or Derecho to verify that the code runs as expected.
 

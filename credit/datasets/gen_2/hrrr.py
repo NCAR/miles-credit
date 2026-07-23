@@ -55,7 +55,7 @@ transfers ~3 MB instead of ~200 MB (~60-100x reduction).
 Variable lookup is driven by :data:`VAR_REGISTRY`.  Extend it at import
 time to add variables without subclassing::
 
-    from credit.datasets.hrrr import VAR_REGISTRY
+    from credit.datasets.gen_2.hrrr import VAR_REGISTRY
     VAR_REGISTRY["MYVAR"] = {
         "shortName": "myvar", "typeOfLevel": "isobaricInhPa",
         "idx_name": "MYVAR", "idx_level": None,
@@ -135,8 +135,8 @@ import numpy as np
 import pandas as pd
 import torch
 
-from credit.datasets.base_dataset import BaseDataset, VALID_FIELD_TYPES
-from credit.datasets._utils import _start_s3_obstore
+from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets.gen_2.grid_utils import _start_s3_obstore, write_source_grid_schema_if_missing
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ _S3_BUCKET = "noaa-hrrr-bdp-pds"
 #:
 #: Extend at import time to add variables without subclassing::
 #:
-#:     from credit.datasets.hrrr import VAR_REGISTRY
+#:     from credit.datasets.gen_2.hrrr import VAR_REGISTRY
 #:     VAR_REGISTRY["MYVAR"] = {"idx_name": "MYVAR", "idx_level": "surface"}
 VAR_REGISTRY: dict[str, dict[str, str | None]] = {
     # -------------------------------------------------------------------------
@@ -805,31 +805,42 @@ class HRRRDataset(BaseDataset):
 
         if self.extent is None:
             self._spatial_slice = (slice(None), slice(None))
-            return self._spatial_slice
+        else:
+            if len(lats.shape) != 2 or len(lons.shape) != 2:
+                raise ValueError(f"Expected 2D lat/lon arrays, got shapes {lats.shape} and {lons.shape}")
 
-        if len(lats.shape) != 2 or len(lons.shape) != 2:
-            raise ValueError(f"Expected 2D lat/lon arrays, got shapes {lats.shape} and {lons.shape}")
+            if lats.shape != lons.shape:
+                raise ValueError(f"Latitude and longitude arrays have different shapes: {lats.shape} vs {lons.shape}")
 
-        if lats.shape != lons.shape:
-            raise ValueError(f"Latitude and longitude arrays have different shapes: {lats.shape} vs {lons.shape}")
+            min_lon, max_lon, min_lat, max_lat = self.extent
+            min_lon = (min_lon + 180.0) % 360.0 - 180.0
+            max_lon = (max_lon + 180.0) % 360.0 - 180.0
+            lon_norm = (lons + 180.0) % 360.0 - 180.0
 
-        min_lon, max_lon, min_lat, max_lat = self.extent
-        min_lon = (min_lon + 180.0) % 360.0 - 180.0
-        max_lon = (max_lon + 180.0) % 360.0 - 180.0
-        lon_norm = (lons + 180.0) % 360.0 - 180.0
+            mask = (lats >= min_lat) & (lats <= max_lat) & (lon_norm >= min_lon) & (lon_norm <= max_lon)
 
-        mask = (lats >= min_lat) & (lats <= max_lat) & (lon_norm >= min_lon) & (lon_norm <= max_lon)
+            rows = np.where(mask.any(axis=1))[0]
+            cols = np.where(mask.any(axis=0))[0]
 
-        rows = np.where(mask.any(axis=1))[0]
-        cols = np.where(mask.any(axis=0))[0]
+            if rows.size == 0 or cols.size == 0:
+                raise ValueError(f"extent {self.extent} does not intersect the HRRR CONUS domain.")
 
-        if rows.size == 0 or cols.size == 0:
-            raise ValueError(f"extent {self.extent} does not intersect the HRRR CONUS domain.")
+            self._spatial_slice = (
+                slice(int(rows[0]), int(rows[-1]) + 1),
+                slice(int(cols[0]), int(cols[-1]) + 1),
+            )
 
-        self._spatial_slice = (
-            slice(int(rows[0]), int(rows[-1]) + 1),
-            slice(int(cols[0]), int(cols[-1]) + 1),
-        )
+        # Reached exactly once per instance (the guard above short-circuits every
+        # later call) — debugging aid, not necessarily the grid actually written
+        # to output; a regridding preblock downstream may change that, see
+        # credit.datasets.gen_2.grid_utils.
+        grid = {
+            "grid_type": "curvilinear",
+            "lat": lats[self._spatial_slice],
+            "lon": lons[self._spatial_slice],
+        }
+        self.static_metadata["grid"] = grid
+        write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
         return self._spatial_slice
 
     # ------------------------------------------------------------------

@@ -35,8 +35,9 @@ import torch.distributed as dist
 import yaml
 from torch.utils.data import DataLoader
 
-from credit.datasets.multi_source import MultiSourceDataset
-from credit.datasets.schema import ChannelSchema
+from credit.datasets.gen_2.multi_source import MultiSourceDataset
+from credit.datasets.gen_2.channel_utils import ChannelSchema
+from credit.datasets.gen_2._utils import to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.distributed import get_rank_info, setup
 from credit.output_gen2 import ForecastWriter
 from credit.pbs import launch_script, launch_script_mpi
@@ -152,16 +153,21 @@ Examples:
 
     # ── Init times ───────────────────────────────────────────────────────────
     timestep = conf["data"]["timestep"]
+    # CF calendar for the init schedule. Config-declared here; if the config is
+    # silent and the data is non-standard, MultiSourceDataset finds it below and
+    # converts these init times into the master calendar (invalid labels such as
+    # a Feb 29 init against noleap data raise at dataset construction).
+    calendar = conf["data"].get("calendar", "standard")
     if run_mode == "batch":
         assert "batch_forecast" in inf_conf, "inference.batch_forecast is required for run_mode=batch."
-        all_init_times = batch_init_times(inf_conf["batch_forecast"])
+        all_init_times = batch_init_times(inf_conf["batch_forecast"], calendar=calendar)
         n_steps = parse_length(inf_conf["batch_forecast"]["forecast_length"], timestep)
     else:
         sf = inf_conf.get("single_forecast", {})
         assert "start_datetime" in sf, (
             "inference.single_forecast.start_datetime is required for run_mode=single (or pass --init-time on the CLI)."
         )
-        all_init_times = [pd.Timestamp(sf["start_datetime"])]
+        all_init_times = [to_calendar(pd.Timestamp(sf["start_datetime"]), calendar)]
         n_steps = parse_length(
             sf.get("forecast_length", inf_conf.get("batch_forecast", {}).get("forecast_length", "10d")), timestep
         )
@@ -229,11 +235,19 @@ Examples:
         **conf["data"],
         "forecast_len": n_steps,
         "datetimes": all_init_times,
+        # Forwarded into each sub-dataset's own config so dataset classes can
+        # best-effort persist their native grid to {save_loc}/{source}_grid_schema.nc
+        # the moment it's known — see credit.datasets.gen_2.grid_utils.
+        "save_loc": conf.get("save_loc"),
     }
     from credit.registry import load_custom_objects  # imported here to avoid a module-level credit.registry import
 
     load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     dataset = MultiSourceDataset(dataset_conf, return_target=False)
+    # Adopt the master-clock calendar the dataset resolved (it may have been
+    # found in the data files rather than declared in config); run_forecast
+    # needs it to decode the batch-metadata datetimes.
+    calendar = getattr(dataset, "calendar", calendar)
 
     # Plain (non-distributed) subset sampler: each rank takes every world_size-th
     # init time starting at its own rank, so no DistributedSampler-style padding
@@ -260,10 +274,17 @@ Examples:
     verbose = rank == 0 or args.log_all_ranks  # gates tqdm bars and save-path notifications
 
     # ── Output writer ─────────────────────────────────────────────────────────
+    # grid_schema resolution (real lat/lon, rectilinear vs curvilinear) is deferred
+    # to the writer's first forecast step, not done here — some sources (HRRR,
+    # remote ERA5) only know their native grid after the first real read, and this
+    # loader runs with num_workers=0 so that read happens in this process either way.
     writer = ForecastWriter(
         output_conf=inf_conf.get("output", {}),
         conf=conf,
         n_steps=n_steps,
+        dataset=dataset,
+        ic_preblocks=ic_preblocks,
+        step_preblocks=step_preblocks,
         verbose=verbose,
     )
 
@@ -292,6 +313,7 @@ Examples:
                 pool=pool,
                 save_output_fn=writer,
                 verbose=verbose,
+                calendar=calendar,
             )
 
         pool.close()
