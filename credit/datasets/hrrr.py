@@ -859,7 +859,11 @@ class HRRRDataset(BaseDataset):
         self.product: VALID_PRODUCTS = _validate_product_request(product_request)
 
         self.mode: str = self.curr_source_cfg.get("mode", "local")
-        self.base_path: str | None = self.curr_source_cfg.get("base_path", None)
+        # Resolve the path to allow for $USER or $SCRATCH or ~ in config
+        raw_base_path = self.curr_source_cfg.get("base_path", None)
+        self.base_path: str | None = (
+            os.path.expanduser(os.path.expandvars(raw_base_path)) if raw_base_path is not None else None
+        )
         self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
         self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
         self.global_levels: list[int] | None = self.curr_source_cfg.get("levels", None)
