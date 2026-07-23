@@ -232,6 +232,12 @@ class BaseDataset(AbstractBaseDataset):
             )
         self.curr_source_cfg = data_config["source"][self.curr_source_name]
 
+        # Where per-source grid files (and other run artifacts) get written, if at
+        # all — None for standalone dataset usage outside the full CREDIT pipeline,
+        # in which case writing them out is a no-op rather than an error. Forwarded
+        # into data_config by MultiSourceDataset.make_single_source_subconfig.
+        self.save_loc: str | None = data_config.get("save_loc")
+
         # You should definitely change this in an inherited dataset
         if type(self) is BaseDataset:
             self.dataset_type = "base"
@@ -245,8 +251,8 @@ class BaseDataset(AbstractBaseDataset):
         self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
 
         # CF calendar of this source's clock. Resolved from config (source-level
-        # `calendar:` key, then data-level) with a subclass hook for sniffing the
-        # data files (see LocalDataset). Standard-family calendars keep the plain
+        # `calendar:` key, then data-level) with a subclass hook for finding it in
+        # the data files (see LocalDataset). Standard-family calendars keep the plain
         # pandas path; non-standard calendars build a CFTimeIndex clock.
         self.calendar: str = self._resolve_calendar(data_config, self.curr_source_cfg) or "standard"
 
@@ -674,7 +680,7 @@ class BaseDataset(AbstractBaseDataset):
         master clock and is handled by MultiSourceDataset — letting it override
         per-source calendars would mislabel a source's data and defeat the
         mixed-calendar validation. Subclasses that can inspect their data files
-        should override this and fall back to sniffing the time coordinate when
+        should override this and fall back to finding the time coordinate when
         config gives no answer (see LocalDataset); ``__init__`` applies the
         final ``"standard"`` default.
 

@@ -21,7 +21,8 @@ from credit.parallel.domain import (
 )
 from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.fsdp2 import fsdp2_is_applied
-from credit.datasets.gen_2.schema import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
 from credit.postblock import build_postblocks, apply_postblocks
 from credit.preblock import attach_channel_schema, build_preblocks, apply_preblocks
 from credit.trainers.rollout_utils import assemble_rollout_batch
@@ -104,6 +105,11 @@ class TrainerERA5Gen2(BaseTrainer):
         attach_channel_schema(self.step_preblocks, self.channel_schema)
         if self.channel_schema is not None and rank == 0:
             self.channel_schema.save(os.path.join(os.path.expandvars(conf["save_loc"]), DEFAULT_SCHEMA_FILENAME))
+
+        # Grid schema: unlike channel_schema, no live dataset is available yet here
+        # (only inside train_one_epoch, via trainloader.dataset) — resolved and
+        # saved once there, on the first real batch. See train_one_epoch.
+        self._grid_schema_saved = False
 
         self.step_postblocks = build_postblocks(conf, phase="per_step")
         self.rollout_postblocks = build_postblocks(conf, phase="post_rollout")
@@ -344,6 +350,31 @@ class TrainerERA5Gen2(BaseTrainer):
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
+
+                if not self._grid_schema_saved and self.rank == 0:
+                    # Once, on the first real batch: trainloader.dataset has now
+                    # actually read data, so lazily-populated native grids (HRRR,
+                    # remote ERA5) are available if this process read them itself
+                    # (num_workers=0), or via the {source}_grid_schema.nc a worker
+                    # already wrote as a side effect of that same read (see
+                    # write_source_grid_schema_if_missing, called from each dataset
+                    # class) — that fallback is what makes this reliable regardless
+                    # of num_workers.
+                    self._grid_schema_saved = True
+                    try:
+                        save_loc = os.path.expandvars(self.conf["save_loc"])
+                        grid_schema = GridSchema.resolve(
+                            trainloader.dataset, self.ic_preblocks, self.step_preblocks, save_loc=save_loc
+                        )
+                        if grid_schema.origin == "regridded":
+                            # Only write output_grid_schema.nc when it actually differs
+                            # from the source's own file — no regridder means the
+                            # per-source {source}_grid_schema.nc already *is* the
+                            # effective output grid, so a second identical copy would
+                            # be pure duplication.
+                            grid_schema.save(os.path.join(save_loc, OUTPUT_GRID_SCHEMA_FILENAME))
+                    except (ValueError, AttributeError) as e:
+                        logger.warning("TrainerERA5Gen2: could not resolve grid schema (%s).", e)
 
                 if t == 1:
                     full_data_dict["ic_raw"] = batch["input"]

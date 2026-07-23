@@ -37,6 +37,7 @@ Output key format (flat, slash-delimited):
 from __future__ import annotations
 
 import cftime
+import logging
 from typing import Any
 
 from gcsfs import GCSFileSystem
@@ -47,6 +48,9 @@ import zarr
 
 from credit.datasets.gen_2._utils import _to_cftime  # pyright: ignore[reportPrivateUsage]
 from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets.gen_2.grid_utils import find_coord_pair, infer_grid_type, write_source_grid_schema_if_missing
+
+logger = logging.getLogger(__name__)
 
 
 class ARCOERA5Dataset(BaseDataset):
@@ -160,6 +164,22 @@ class ARCOERA5Dataset(BaseDataset):
         self.pres_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.pressure_lev_era5_path)
         self.mod_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.model_lev_era5_path)
 
+    def _cache_grid(self, ds: xr.Dataset) -> None:
+        """Cache this source's native grid, once — call only when not yet cached.
+
+        Debugging aid (``self.static_metadata["grid"]``); not necessarily the
+        grid actually written to output — see
+        ``credit.datasets.gen_2.grid_utils.GridSchema``.
+        """
+        try:
+            lon, lat, _, _ = find_coord_pair(ds)
+            grid = {"grid_type": infer_grid_type(lat, lon), "lat": lat, "lon": lon}
+            self.static_metadata["grid"] = grid
+            write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
+        except Exception as exc:
+            logger.warning("%s '%s': could not find grid (%s).", type(self).__name__, self.curr_source_name, exc)
+            self.static_metadata["grid"] = None
+
     def _extract_field(
         self,
         field_type: VALID_FIELD_TYPES,
@@ -190,6 +210,8 @@ class ARCOERA5Dataset(BaseDataset):
         vars_2D: list[str] = vd["vars_2D"]
         if self.level_coord == "level":
             with xr.open_zarr(self.pres_level_store, chunks=None) as ds:
+                if "grid" not in self.static_metadata:
+                    self._cache_grid(ds)
                 # Select the time step; static fields have no time dim
                 if "time" in ds.dims:
                     if isinstance(ds.time.values[0], cftime.datetime):
@@ -216,6 +238,8 @@ class ARCOERA5Dataset(BaseDataset):
                     sample[key] = tensor
         else:
             with xr.open_zarr(self.mod_level_store, chunks=None) as ds:
+                if "grid" not in self.static_metadata:
+                    self._cache_grid(ds)
                 # Select the time step; static fields have no time dim
                 if "time" in ds.dims:
                     if isinstance(ds.time.values[0], cftime.datetime):
@@ -415,6 +439,22 @@ class WeatherBench2ERA5Dataset(BaseDataset):
         self._fs = GCSFileSystem(**fs_config)
         self.store = zarr.storage.FsspecStore(fs=self._fs, path=self.store_path)
 
+    def _cache_grid(self, ds: xr.Dataset) -> None:
+        """Cache this source's native grid, once — call only when not yet cached.
+
+        Debugging aid (``self.static_metadata["grid"]``); not necessarily the
+        grid actually written to output — see
+        ``credit.datasets.gen_2.grid_utils.GridSchema``.
+        """
+        try:
+            lon, lat, _, _ = find_coord_pair(ds)
+            grid = {"grid_type": infer_grid_type(lat, lon), "lat": lat, "lon": lon}
+            self.static_metadata["grid"] = grid
+            write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
+        except Exception as exc:
+            logger.warning("%s '%s': could not find grid (%s).", type(self).__name__, self.curr_source_name, exc)
+            self.static_metadata["grid"] = None
+
     def _extract_field(
         self,
         field_type: VALID_FIELD_TYPES,
@@ -444,6 +484,8 @@ class WeatherBench2ERA5Dataset(BaseDataset):
         vars_2D: list[str] = vd["vars_2D"]
 
         with xr.open_zarr(self.store, chunks=None) as ds:
+            if "grid" not in self.static_metadata:
+                self._cache_grid(ds)
             if "time" in ds.dims:
                 if isinstance(ds.time.values[0], cftime.datetime):
                     calendar = ds.time.values[0].calendar
