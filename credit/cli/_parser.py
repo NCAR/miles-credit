@@ -94,8 +94,19 @@ def _build_parser() -> argparse.ArgumentParser:
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to v2 YAML config")
-    p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
-    p.add_argument("--jobs", type=int, default=1, metavar="N", help="Number of parallel PBS jobs (default: 1)")
+    p.add_argument(
+        "--cluster",
+        required=True,
+        metavar="CLUSTER",
+        help="Target HPC cluster (casper/derecho for PBS; any name for SLURM sites)",
+    )
+    p.add_argument(
+        "--scheduler",
+        default="pbs",
+        choices=["pbs", "slurm"],
+        help="Batch scheduler: pbs (default, qsub) or slurm (sbatch)",
+    )
+    p.add_argument("--jobs", type=int, default=1, metavar="N", help="Number of parallel jobs (default: 1)")
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per job")
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per job")
     p.add_argument("--mem", default=None, help="Memory per job")
@@ -119,10 +130,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- submit ----
     p = sub.add_parser(
         "submit",
-        help="Generate and submit a PBS training, rollout, or realtime job",
+        help="Generate and submit a PBS or SLURM training, rollout, or realtime job",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent("""\
-            Generate a PBS batch script and optionally submit it via qsub.
+            Generate a PBS or SLURM batch script and optionally submit it
+            (qsub for PBS, sbatch for SLURM).  Select with --scheduler.
             Use --dry-run to inspect the script before submitting.
 
             Modes:
@@ -145,10 +157,22 @@ def _build_parser() -> argparse.ArgumentParser:
               credit submit --cluster casper  -c config.yml --mode preprocess
               credit submit --cluster casper  -c config.yml --mode rollout --jobs 1
               credit submit --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00 --steps 40
+              credit submit --cluster perlmutter -c config.yml --scheduler slurm --gpus 4 --nodes 2 --dry-run
         """),
     )
     p.add_argument("-c", "--config", required=True, metavar="CONFIG")
-    p.add_argument("--cluster", required=True, choices=["casper", "derecho"], help="Target NCAR HPC cluster")
+    p.add_argument(
+        "--cluster",
+        required=True,
+        metavar="CLUSTER",
+        help="Target HPC cluster (casper/derecho for PBS; any name for SLURM sites)",
+    )
+    p.add_argument(
+        "--scheduler",
+        default="pbs",
+        choices=["pbs", "slurm"],
+        help="Batch scheduler: pbs (default, qsub) or slurm (sbatch)",
+    )
     p.add_argument(
         "--mode",
         dest="submit_mode",
@@ -162,7 +186,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mem", default=None, help="Memory per node")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime")
     p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
-    p.add_argument("--queue", metavar="QUEUE", help="PBS queue")
+    p.add_argument("--queue", metavar="QUEUE", help="PBS queue (SLURM partition)")
+    p.add_argument(
+        "--constraint",
+        metavar="LIST",
+        default=None,
+        help="SLURM node constraint (-C), e.g. 'gpu' on Perlmutter. Switches GPU requests to --gpus-per-node.",
+    )
+    p.add_argument("--qos", metavar="QOS", default=None, help="SLURM quality of service (-q), e.g. 'regular'/'debug'")
     p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type")
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")
