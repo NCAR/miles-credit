@@ -4,7 +4,7 @@ hrrr_download.py
 Standalone utility for downloading HRRR prs GRIB2 data from AWS S3 to local disk.
 
 Downloads are embarrassingly parallel: each timestamp is an independent task
-dispatched to a ``multiprocessing.Pool``.  Both the grib2 file and its ``.idx``
+dispatched to a ``ThreadPoolExecutor``.  Both the grib2 file and its ``.idx``
 sidecar are downloaded so that ``HRRRDataset`` in local mode can use byte-range
 reads rather than scanning the full file.
 
@@ -33,7 +33,7 @@ Config section used (``data.source``)::
           dataset_type: "hrrr"
           product: "wrfprs" # Options: "wrfprs", "wrfnat", "wrfsubh"
           mode: "local"          # mode to use after download
-          base_path: "/data/hrrr"
+          base_path: "$SCRATCH/data/hrrr"
           forecast_hour: 0
       start_datetime: "2022-01-01"
       end_datetime:   "2022-01-31"
@@ -176,12 +176,15 @@ def download_hrrr(
     forecast_hour: int = int(source_cfg.get("forecast_hour", 0))
 
     dt = pd.Timedelta(data_config["timestep"])
+    print(f"Timestep is {dt}")
     num_steps: int = data_config.get("forecast_len", 0)
     timestamps = pd.date_range(
         pd.Timestamp(data_config["start_datetime"]),
         pd.Timestamp(data_config["end_datetime"]) - num_steps * dt,
         freq=dt,
     )
+    print("Timestamps:")
+    print(timestamps)
 
     if product == "wrfsubh":
         # For sub-hourly, derive the unique set of (init_hour, ff) file pairs
@@ -194,8 +197,11 @@ def download_hrrr(
             if mins == 0:
                 init = init - pd.Timedelta("1h")
                 mins = 60
+
+            print(f"init = {init}, mins = {mins}")
             ff = (mins + 59) // 60
             key = (init, ff)
+            print(f"key = {key}")
             if key not in seen:
                 seen.add(key)
                 file_pairs.append(key)

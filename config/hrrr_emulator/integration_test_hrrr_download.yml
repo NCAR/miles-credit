@@ -20,49 +20,51 @@ seed: 1000
 # Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
 data:
   source:
-    Example_HRRR:
+    # Example_HRRR:
+    #   base_path: '$SCRATCH/hrrr_download'
+    #   dataset_type: "hrrr"
+    #   product: "wrfprs"
+    #   mode: "remote"
+    #   level_coord: "level"
+    #   levels: [250, 500, 925, 1000]
+    #   variables:
+    #     # Prognostic: model both predicts and receives as input next step
+    #     prognostic:
+    #       vars_3D: ['T', 'U', 'V', 'Q']
+    #       vars_2D: ['sp']
+
+    #     # Diagnostic: model predicts these but does not feed them back as input
+    #     diagnostic: null
+
+    #     # Dynamic forcing: time-varying inputs (not predicted)
+    #     dynamic_forcing:
+    #       vars_3D: [ 'GH' ]
+
+    #     # Static: time-invariant inputs (not predicted)
+    #     static:
+    #       vars_2D: [ 'orog' ]
+    #   # [lon_min, lon_max, lat_min, lat_max]
+    #   extent: [-106.0, -104.5, 39.5, 41.0]  # Prime numbers of data points: 59 lat × 47 lon
+
+    Example_HRRR_SUBH:
       base_path: '$SCRATCH/hrrr_download'
       dataset_type: "hrrr"
-      product: "wrfprs"
+      product: "wrfsubh" # 2D only
       mode: "remote"
-      level_coord: "level"
-      levels: [250, 500, 925, 1000]
       variables:
-        # Prognostic: model both predicts and receives as input next step
         prognostic:
-          vars_3D: ['T', 'U', 'V', 'Q']
-          vars_2D: ['sp']
-
-        # Diagnostic: model predicts these but does not feed them back as input
-        diagnostic: null
-
-        # Dynamic forcing: time-varying inputs (not predicted)
-        dynamic_forcing:
-          vars_3D: [ 'GH' ]
-
-        # Static: time-invariant inputs (not predicted)
-        static:
-          vars_2D: [ 'orog' ]
-      # [lon_min, lon_max, lat_min, lat_max]
-      extent: [-106.0, -104.5, 39.5, 41.0]  # Prime numbers of data points: 59 lat × 47 lon
-
-    # Example_HRRR_SUBH:
-    #   dataset_type: "hrrr"
-    #   product: "wrfsubh" # 2D only
-    #   mode: "remote"
-    #   variables:
-    #     prognostic:
-    #       vars_2D: ['t2m']
+          vars_2D: ['t2m']
         
-    #     diagnostic:
-    #       vars_2D: ['d2m']
+        diagnostic:
+          vars_2D: ['d2m']
 
-    #   # Extent to match the one above
-    #   extent: [-106.0, -104.5, 39.5, 41.0]
+      # Extent to match the one above
+      extent: [-106.0, -104.5, 39.5, 41.0]
 
   start_datetime: "2025-01-01"
   end_datetime: "2025-01-02"
-  timestep: "1h"
+  # timestep: "1h"
+  timestep: "15m"
 
   # history_len: 1            # number of past states fed as input
   forecast_len: 1           # autoregressive steps per training sample (1 = single-step)

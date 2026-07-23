@@ -20,16 +20,13 @@ import pytest
 
 from credit.datasets.hrrr import (
     VALID_PRODUCTS,
-    # _HRRR_HTTPS_BASE,  # pyright: ignore[reportPrivateUsage]
     _build_nat_entry_map,  # pyright: ignore[reportPrivateUsage]
     _build_prs_entry_map,  # pyright: ignore[reportPrivateUsage]
     _find_subhf_entry,  # pyright: ignore[reportPrivateUsage]
     _hrrr_local_path,  # pyright: ignore[reportPrivateUsage]
-    # _hrrr_s3_uri,  # pyright: ignore[reportPrivateUsage]
     _parse_idx,  # pyright: ignore[reportPrivateUsage]
     _resolve_nat_levels,  # pyright: ignore[reportPrivateUsage]
     _resolve_pressure_levels,  # pyright: ignore[reportPrivateUsage]
-    # _s3_uri_to_https,  # pyright: ignore[reportPrivateUsage]
     HRRRDataset,
 )
 
@@ -48,34 +45,6 @@ def test_valid_products():
 
 _T_V3 = pd.Timestamp("2022-01-01 06:00")  # v3/v4 (after cutoff)
 _T_V2 = pd.Timestamp("2018-01-01 12:00")  # v1/v2 (before cutoff)
-
-
-# def test_s3_uri_wrfprs_v3():
-#     uri = _hrrr_s3_uri(_T_V3, forecast_hour=0, product="wrfprs")
-#     assert uri == "s3://noaa-hrrr-bdp-pds/hrrr.20220101/conus/hrrr.t06z.wrfprsf00.grib2"
-
-
-# def test_s3_uri_wrfnat_v3():
-#     uri = _hrrr_s3_uri(_T_V3, forecast_hour=1, product="wrfnat")
-#     assert uri == "s3://noaa-hrrr-bdp-pds/hrrr.20220101/conus/hrrr.t06z.wrfnatf01.grib2"
-
-
-# def test_s3_uri_wrfsubh_v3():
-#     uri = _hrrr_s3_uri(_T_V3, forecast_hour=2, product="wrfsubh")
-#     assert uri == "s3://noaa-hrrr-bdp-pds/hrrr.20220101/conus/hrrr.t06z.wrfsubhf02.grib2"
-
-
-# def test_s3_uri_v2_no_conus():
-#     uri = _hrrr_s3_uri(_T_V2, forecast_hour=0, product="wrfprs")
-#     assert "conus" not in uri
-#     assert "hrrr.20180101/hrrr.t12z.wrfprsf00.grib2" in uri
-
-
-# def test_s3_uri_default_product():
-#     """Default product is wrfprs."""
-#     uri_explicit = _hrrr_s3_uri(_T_V3, forecast_hour=0, product="wrfprs")
-#     uri_default = _hrrr_s3_uri(_T_V3, forecast_hour=0)
-#     assert uri_explicit == uri_default
 
 
 def test_local_path_wrfnat():
