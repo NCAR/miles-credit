@@ -94,7 +94,9 @@ def main_cli():
         "train.py requires the Gen2 nested data schema (conf['data']['source']). "
         "For the legacy flat schema, use applications/train.py."
     )
-    loss_name = conf["loss"]["training_loss"]
+    # Loss sections are either legacy flat keys (training_loss: ...) or the
+    # new-style {type, args} structure (mirrors preblocks/postblocks).
+    loss_name = conf["loss"].get("training_loss") or conf["loss"].get("type")
     ensemble_size = int(conf["trainer"].get("ensemble_size", 1))
     if is_crps_loss(loss_name) and ensemble_size <= 1:
         raise ValueError(
@@ -235,6 +237,16 @@ def main_cli():
 
     train_criterion = load_loss(conf)
     valid_criterion = load_loss(conf, validation=True)
+
+    # BaseLoss with var_weighting="learnable" owns trainable per-variable
+    # log-variance parameters — they must join the optimizer explicitly.
+    # (Checkpointing of these parameters is not wired; they re-init on resume.)
+    from credit.losses import BaseLoss
+
+    if isinstance(train_criterion, BaseLoss) and train_criterion.log_variance is not None:
+        train_criterion.to(device)
+        optimizer.add_param_group({"params": list(train_criterion.parameters())})
+        logger.info("BaseLoss learnable variance weights added to the optimizer.")
     from credit.metrics import LatWeightedMetrics
 
     metrics = LatWeightedMetrics(conf)

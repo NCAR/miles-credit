@@ -31,31 +31,39 @@ from credit.postblock.base import BasePostblock
 
 
 class Reconstruct(BasePostblock):
-    """Splits ``batch_dict["y_pred"]`` into a nested variable dict at ``batch_dict["y_processed"]``.
+    """Splits a flat tensor into a nested variable dict.
+
+    Default: splits ``batch_dict["y_pred"]`` into ``batch_dict["y_processed"]``.
 
     Slices are read from ``batch_dict["metadata"]["target"]["_channel_map"]``, built
     by ``ConcatToTensor`` and covering only prognostic + diagnostic variables.
     Each slice is unflattened from ``(B, n_levels * n_time, H, W)`` back to
-    ``(B, n_levels, n_time, H, W)``. ``y_pred`` is left untouched. All other
+    ``(B, n_levels, n_time, H, W)``. The input tensor is left untouched. All other
     keys in ``batch_dict`` pass through unchanged.
 
     Args:
-        detach: when True (default) ``y_processed`` is detached from ``y_pred``'s
+        detach: when True (default) the output is detached from the input's
             autograd graph — appropriate when downstream postblocks only diagnose
             or produce output. Set ``detach=False`` when downstream postblocks
-            (e.g. the conservation fixers) must feed corrections back into the
-            training loss via ``FlattenToTensor``.
+            (e.g. the conservation fixers) or a loss (e.g. ``BaseLoss``) must
+            backpropagate through the reconstructed dict.
+        in_key: batch_dict key of the flat tensor to split (default ``"y_pred"``).
+            Use ``"y"`` to split the flat target tensor.
+        out_key: batch_dict key the nested dict is written to (default
+            ``"y_processed"``). Use e.g. ``"y_target_processed"`` for the target.
     """
 
-    def __init__(self, detach: bool = True):
+    def __init__(self, detach: bool = True, in_key: str = "y_pred", out_key: str = "y_processed"):
         super().__init__()
         self.detach = detach
+        self.in_key = in_key
+        self.out_key = out_key
 
     def forward(self, batch_dict: dict) -> dict:
-        y_pred = batch_dict["y_pred"]
+        y_pred = batch_dict[self.in_key]
         output_map = batch_dict["metadata"]["target"]["_channel_map"]
 
-        # Flatten time dim if y_pred arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
+        # Flatten time dim if input arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
         if y_pred.dim() == 5:
             y_pred = y_pred.flatten(1, 2)
 
@@ -75,7 +83,7 @@ class Reconstruct(BasePostblock):
             source = var_key.split("/")[0]
             y_processed.setdefault(source, {})[var_key] = var_tensor
 
-        batch_dict["y_processed"] = y_processed
+        batch_dict[self.out_key] = y_processed
         return batch_dict
 
 

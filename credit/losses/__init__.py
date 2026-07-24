@@ -1,5 +1,7 @@
 import importlib
+import inspect
 import logging
+
 import torch.nn as nn
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ _LOSS_REGISTRY = {
     "spectral": ("credit.losses.spectral", "SpectralLoss2D"),
     "power": ("credit.losses.power", "PSDLoss"),
     "covmse": ("credit.losses.covariance", "CovarianceWeightedMSELoss"),
+    "base": ("credit.losses.base", "BaseLoss"),
 }
 
 # Names of registered losses that are CRPS-family (ensemble) losses, used by
@@ -59,6 +62,10 @@ def __getattr__(name):
         from credit.losses.weighted_loss import VariableTotalLoss2D
 
         return VariableTotalLoss2D
+    if name == "BaseLoss":
+        from credit.losses.base import BaseLoss
+
+        return BaseLoss
     if name == "DownscalingLoss":
         from credit.losses.downscaling_loss import DownscalingLoss
 
@@ -184,7 +191,14 @@ def load_loss(conf, reduction="none", validation=False):
     config, that loss type will be used. Otherwise, the training loss is used.
 
     Args:
-        conf (dict): Configuration dictionary. Must contain a 'loss' section with keys like:
+        conf (dict): Configuration dictionary. Must contain a 'loss' section in one of two formats:
+
+                     New-style (Gen 2, mirrors preblocks/postblocks)::
+                         loss:
+                           type: base            # registry loss name
+                           args: {...}           # constructor kwargs
+
+                     Legacy flat keys:
                      - 'training_loss' (str): The primary loss function name.
                      - 'validation_loss' (optional, str): An alternate loss for validation.
                      - 'use_latitude_weights' (bool): Whether to use latitude-based weighting.
@@ -197,7 +211,8 @@ def load_loss(conf, reduction="none", validation=False):
         validation (bool, optional): Whether the loss is being used for validation. Defaults to False.
 
     Returns:
-        torch.nn.Module: A loss function instance: ``DownscalingLoss`` for downscaling configs,
+        torch.nn.Module: A loss function instance: ``BaseLoss`` (or another ``type``-dispatched
+                         loss) for new-style sections, ``DownscalingLoss`` for downscaling configs,
                          ``VariableTotalLoss2D`` when latitude/variable weights are enabled,
                          or a standard/custom loss from the registry otherwise.
 
@@ -214,9 +229,28 @@ def load_loss(conf, reduction="none", validation=False):
 
     loss_conf = conf["loss"]
 
+    mode = "validation" if validation else "train"
+
+    # New-style {type, args} loss section (Gen 2; mirrors the preblocks/
+    # postblocks structure). Self-contained: no latitude/variable-weight or
+    # downscaling wrapper dispatch applies.
+    if "type" in loss_conf:
+        loss_type = loss_conf["type"]
+        args = dict(loss_conf.get("args") or {})
+        if loss_type == "base":
+            from credit.datasets.gen_2.channel_utils import ChannelSchema
+            from credit.losses.base import BaseLoss
+
+            logger.info("Loaded BaseLoss (%s)", mode)
+            return BaseLoss(channel_schema=ChannelSchema.load_or_from_config(conf), validation=validation, **args)
+        cls = _load_loss_entry(loss_type)
+        if "reduction" in inspect.signature(cls.__init__).parameters:
+            args.setdefault("reduction", reduction)
+        logger.info(f"Loaded the {loss_type} loss function ({mode}) with parameters: {args}")
+        return cls(**args)
+
     is_downscaling = "datasets" in conf["data"]
     # downscaling could also use_variable_weights, so it needs to come first
-    mode = "validation" if validation else "train"
     if is_downscaling:
         from credit.losses.downscaling_loss import DownscalingLoss
 

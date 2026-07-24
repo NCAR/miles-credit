@@ -10,7 +10,7 @@ import tqdm
 
 import optuna
 
-from credit.losses import is_crps_loss
+from credit.losses import BaseLoss, is_crps_loss
 from credit.parallel.domain import (
     gather_spatial,
     get_domain_manager,
@@ -153,7 +153,7 @@ class TrainerERA5Gen2(BaseTrainer):
         # If True, log a warning on NaN loss instead of raising TrialPruned.
         self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
 
-        loss_name = conf.get("loss", {}).get("training_loss")
+        loss_name = conf.get("loss", {}).get("training_loss") or conf.get("loss", {}).get("type")
         if is_crps_loss(loss_name) and self.ensemble_size <= 1:
             raise ValueError(
                 f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "
@@ -417,21 +417,35 @@ class TrainerERA5Gen2(BaseTrainer):
                 _amp = self.amp and not self._fsdp2_active
                 self._sharded_forward(full_data_dict, _amp)
 
+                # BaseLoss scores the postblocks output (y_processed) against a target
+                # twin (y_target_processed) built from y by the same chain — clamp y
+                # before postblocks so the clamp propagates into it.
+                if isinstance(criterion, BaseLoss) and self.flag_clamp:
+                    full_data_dict["y"] = torch.clamp(
+                        full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                    )
+
                 full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
                 if t < self.forecast_len:
                     self._gather_for_next_step(full_data_dict)
 
                 if t in self.backprop_on_timestep:
-                    if self.flag_clamp:
-                        full_data_dict["y"] = torch.clamp(
-                            full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
-                        )
-                    with torch.autocast(device_type="cuda", enabled=_amp):
-                        loss = criterion(
-                            full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
-                            full_data_dict["y_pred"],
-                        ).mean()
+                    if isinstance(criterion, BaseLoss):
+                        with torch.autocast(device_type="cuda", enabled=_amp):
+                            loss = criterion(full_data_dict)
+                    else:
+                        if self.flag_clamp:
+                            full_data_dict["y"] = torch.clamp(
+                                full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                            )
+                        with torch.autocast(device_type="cuda", enabled=_amp):
+                            loss = criterion(
+                                full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
+                                full_data_dict["y_pred"],
+                            ).mean()
                     accum_log(logs, {"loss": loss.item()})
+                    if isinstance(criterion, BaseLoss):
+                        accum_log(logs, {f"loss_var/{k}": v for k, v in criterion.last_var_losses.items()})
                     if self.is_crps_ensemble:
                         # Ensemble spread proxy: std of member errors.
                         target = full_data_dict["y"]
@@ -500,6 +514,12 @@ class TrainerERA5Gen2(BaseTrainer):
             if self.distributed:
                 all_reduce_avg(batch_loss)
             results_dict["train_loss"].append(batch_loss[0].item())
+            if isinstance(criterion, BaseLoss):
+                for name in criterion.last_var_losses:
+                    var_loss = torch.Tensor([logs.get(f"loss_var/{name}", 0.0)]).to(self.device)
+                    if self.distributed:
+                        all_reduce_avg(var_loss)
+                    results_dict[f"train_loss_var/{name}"].append(var_loss[0].item())
             results_dict["train_forecast_len"].append(self.forecast_len)
             results_dict["train_history_len"].append(self.history_len)
 
@@ -616,19 +636,34 @@ class TrainerERA5Gen2(BaseTrainer):
                     # Validation runs full precision (no autocast), as before.
                     self._sharded_forward(full_data_dict, False)
 
+                    # BaseLoss: clamp y before postblocks so y_target_processed
+                    # (built by the same chain) inherits the clamp.
+                    if isinstance(criterion, BaseLoss) and self.flag_clamp and t == self.valid_forecast_len:
+                        full_data_dict["y"] = torch.clamp(
+                            full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                        )
+
                     full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
                     if t < self.valid_forecast_len:
                         self._gather_for_next_step(full_data_dict)
 
                     if t == self.valid_forecast_len:
-                        if self.flag_clamp:
-                            full_data_dict["y"] = torch.clamp(
-                                full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
-                            )
-                        loss = criterion(
-                            full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
-                            full_data_dict["y_pred"],
-                        ).mean()
+                        if isinstance(criterion, BaseLoss):
+                            loss = criterion(full_data_dict)
+                            for name, value in criterion.last_var_losses.items():
+                                value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                                if self.distributed:
+                                    all_reduce_avg(value)
+                                results_dict[f"valid_loss_var/{name}"].append(value[0].item())
+                        else:
+                            if self.flag_clamp:
+                                full_data_dict["y"] = torch.clamp(
+                                    full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                                )
+                            loss = criterion(
+                                full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
+                                full_data_dict["y_pred"],
+                            ).mean()
                         metrics_dict = metrics(full_data_dict["y_pred"].float(), full_data_dict["y"].float())
                         for name, value in metrics_dict.items():
                             value = torch.Tensor([value]).to(self.device, non_blocking=True)

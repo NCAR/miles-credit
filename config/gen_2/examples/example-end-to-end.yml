@@ -182,22 +182,45 @@ preblocks:
 
 postblocks:
   per_step:
+    # detach: false is REQUIRED — BaseLoss scores y_processed, so gradients must
+    # flow through the postblocks back into y_pred (and any physics fixers).
     reconstruct:
       type: reconstruct
+      args:
+        detach: false
+    # Inverse-transform ALL variables (empty list = all) so every scored
+    # variable is in physical units, matching the target twin below.
     scaler:
       type: bridgescaler_transform
       args:
         scaler_path: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
-        variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
-                    'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
-                    'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
-                    'ERA5/prognostic/2d/VAR_10V']
+        variables: []
         spatial_variables: ['ERA5/prognostic/2d/SP']
         method: inverse_transform
     log_trans:
       type: "exp_transform"
       args:
         variables: 'ERA5/diagnostic/2d/total_precipitation'
+    # Target twin: split + inverse-scale (+ exp) the flat target y into
+    # y_target_processed so BaseLoss compares variables in physical units.
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: 'y'
+        out_key: 'y_target_processed'
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        variables: []
+        spatial_variables: ['ERA5/prognostic/2d/SP']
+        method: inverse_transform
+        key: 'y_target_processed'
+    log_trans_target:
+      type: "exp_transform"
+      args:
+        variables: 'ERA5/diagnostic/2d/total_precipitation'
+        key: 'y_target_processed'
 
 
 # ---- Architecture (pre-filled for 1-degree ERA5, 181×360) ---- #
@@ -248,16 +271,33 @@ model:
 
 
 # ---- Loss ---- #
+# Follows the preblocks/postblocks structure: type + args. "base" = BaseLoss:
+# univariate loss per variable on the postblocks output (physical units),
+# combined across variables. Requires the reconstruct + scaler postblocks
+# above (including the y_target_processed twin).
 loss:
-  training_loss: "mse"
+  type: base
+  args:
+    training_loss: "mse"              # univariate loss per variable (mse | mae | huber | logcosh | ...)
+    base_loss_parameters: {}
+    # base_loss_overrides:            # optional per-variable univariate loss
+    #   ERA5/diagnostic/2d/total_precipitation: {loss: "mae"}
 
-  use_power_loss: False              # penalize spurious high-wavenumber content (anti-checkerboard); set False to disable
-  use_spectral_loss: False
+    # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
+    # inverse_variance weights each variable by 1/sigma^2 from the bridgescaler
+    # file (approximates normalized-space training). Options:
+    # inverse_variance | manual | learnable | none
+    var_weighting: "inverse_variance"
+    scaler_path: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+    variable_weights: {}              # manual multipliers per var_key (all modes)
+    normalize_weights: true           # rescale combination weights to mean 1
 
-  use_latitude_weights: True
-  latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+    # Data diagnostic variables are always scored; postblock-computed
+    # diagnostics (e.g. from mslp_diagnostic) only when true.
+    include_computed_diagnostics: true
 
-  use_variable_weights: False
+    use_latitude_weights: True        # cos(lat) spatial weighting per variable
+    latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
 
 
 # ---- Inference (used by rollout_gen2.py, not training) ---- #
