@@ -3,7 +3,7 @@ import torch
 import yaml
 from pathlib import Path
 
-from credit.datasets.downscaling_dataset import DownscalingDataset
+from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
 
 
 @pytest.fixture

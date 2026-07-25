@@ -52,7 +52,7 @@ def load_custom_objects(conf):
     Each custom class must inherit from the corresponding CREDIT base class,
     or registration will raise a ``TypeError``:
 
-    - ``credit.datasets.base_dataset.BaseDataset`` for datasets
+    - ``credit.datasets.gen_2.base_dataset.BaseDataset`` for datasets
     - ``credit.preblock.base.BasePreblock`` for preblocks
     - ``credit.models.base_model.BaseModel`` for models
     - ``credit.postblock.base.BasePostblock`` for postblocks

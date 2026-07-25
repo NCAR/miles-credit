@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Config-driven dispatch: maps config-file keys → class.
 # Currently empty — built-in Gen2 source types are registered in
-# credit.datasets.multi_source._SOURCE_REGISTRY instead. This registry is populated at
+# credit.datasets.gen_2.multi_source._SOURCE_REGISTRY instead. This registry is populated at
 # runtime by @register_dataset (via custom_objects) and consulted by
 # MultiSourceDataset.route_to_dataset_class as a fallback for dataset_type values that
 # aren't one of the built-in sources.
@@ -19,28 +19,27 @@ logger = logging.getLogger(__name__)
 _DATASET_REGISTRY = {}
 
 # Direct-import table: maps Python names → object for lazy module attribute access.
-# Enables ``from credit.datasets import ERA5Dataset`` without eager imports; kept for backward compatibility.
+# Enables ``from credit.datasets import ARCOERA5Dataset`` without eager imports; kept for backward compatibility.
 # Entries are mostly classes, but also includes functions (build_channel_layout, update_x).
 _CLASS_SOURCES = {
-    "BaseDataset": ("credit.datasets.base_dataset", "BaseDataset"),
-    "MultiSourceDataset": ("credit.datasets.multi_source", "MultiSourceDataset"),
-    "ERA5Dataset": ("credit.datasets.era5", "ERA5Dataset"),
-    "ARCOERA5Dataset": ("credit.datasets.era5", "ARCOERA5Dataset"),
-    "WeatherBench2ERA5Dataset": ("credit.datasets.era5", "WeatherBench2ERA5Dataset"),
-    "GOESDataset": ("credit.datasets.goes", "GOESDataset"),
-    "MRMSDataset": ("credit.datasets.mrms", "MRMSDataset"),
-    "HRRRDataset": ("credit.datasets.hrrr", "HRRRDataset"),
-    "TISRDataset": ("credit.datasets.tisr", "TISRDataset"),
-    "build_channel_layout": ("credit.datasets.channel_layout", "build_channel_layout"),
-    "update_x": ("credit.datasets.channel_layout", "update_x"),
+    "BaseDataset": ("credit.datasets.gen_2.base_dataset", "BaseDataset"),
+    "MultiSourceDataset": ("credit.datasets.gen_2.multi_source", "MultiSourceDataset"),
+    "ARCOERA5Dataset": ("credit.datasets.gen_2.era5", "ARCOERA5Dataset"),
+    "WeatherBench2ERA5Dataset": ("credit.datasets.gen_2.era5", "WeatherBench2ERA5Dataset"),
+    "GOESDataset": ("credit.datasets.gen_2.goes", "GOESDataset"),
+    "MRMSDataset": ("credit.datasets.gen_2.mrms", "MRMSDataset"),
+    "HRRRDataset": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "TISRDataset": ("credit.datasets.gen_2.tisr", "TISRDataset"),
+    "build_channel_layout": ("credit.datasets.gen_2.channel_utils", "build_channel_layout"),
+    "update_x": ("credit.datasets.gen_2.channel_utils", "update_x"),
 }
 
 
 # ---------------------------------------------------------------------------
 # Module __getattr__: called when a name is not found via normal attribute lookup.
 # Resolves names listed in _CLASS_SOURCES lazily so submodules are only imported on first access.
-# Example: ``from credit.datasets import ERA5Dataset`` triggers __getattr__("ERA5Dataset"),
-#          which imports credit.datasets.era5 on the spot and returns the class.
+# Example: ``from credit.datasets import ARCOERA5Dataset`` triggers __getattr__("ARCOERA5Dataset"),
+#          which imports credit.datasets.gen_2.era5 on the spot and returns the class.
 def __getattr__(name):
     if name in _CLASS_SOURCES:
         module_path, class_name = _CLASS_SOURCES[name]
@@ -57,7 +56,7 @@ def __getattr__(name):
 def register_dataset(dataset_type):
     """Decorator that adds an external dataset class to the dataset registry.
 
-    The class must inherit from :class:`credit.datasets.base_dataset.BaseDataset`
+    The class must inherit from :class:`credit.datasets.gen_2.base_dataset.BaseDataset`
     and will be instantiated with the signature::
 
         dataset = MyDataset(conf, rank=rank, world_size=world_size, is_train=is_train)
@@ -68,7 +67,7 @@ def register_dataset(dataset_type):
     Example::
 
         from credit.datasets import register_dataset
-        from credit.datasets.base_dataset import BaseDataset
+        from credit.datasets.gen_2.base_dataset import BaseDataset
 
         @register_dataset("my_dataset")
         class MyDataset(BaseDataset):
@@ -77,13 +76,15 @@ def register_dataset(dataset_type):
     """
 
     def decorator(cls):
-        from credit.datasets.base_dataset import BaseDataset  # imported here to avoid loading it at module import time
+        from credit.datasets.gen_2.base_dataset import (
+            BaseDataset,
+        )  # imported here to avoid loading it at module import time
 
         # isinstance(cls, type) guards against passing an instance or function;
         # issubclass then confirms it inherits the required base class.
         if not (isinstance(cls, type) and issubclass(cls, BaseDataset)):
             raise TypeError(
-                f"register_dataset: '{cls.__name__}' must inherit from credit.datasets.base_dataset.BaseDataset."
+                f"register_dataset: '{cls.__name__}' must inherit from credit.datasets.gen_2.base_dataset.BaseDataset."
             )
         if dataset_type in _DATASET_REGISTRY:  # warn instead of silently overwriting
             logger.warning(f"register_dataset: overwriting existing registry entry for '{dataset_type}'")
@@ -96,9 +97,9 @@ def register_dataset(dataset_type):
 def _load_dataset_entry(dataset_type):
     """Return the class for a registered dataset type, importing lazily if needed.
 
-    Used by ``credit.datasets.multi_source.route_to_dataset_class`` (the Gen2 dispatch
+    Used by ``credit.datasets.gen_2.multi_source.route_to_dataset_class`` (the Gen2 dispatch
     path) as a fallback when ``dataset_type`` isn't one of the built-in sources in
-    ``credit.datasets.multi_source._SOURCE_REGISTRY`` — i.e. for datasets registered via
+    ``credit.datasets.gen_2.multi_source._SOURCE_REGISTRY`` — i.e. for datasets registered via
     ``custom_objects``.
 
     Raises:

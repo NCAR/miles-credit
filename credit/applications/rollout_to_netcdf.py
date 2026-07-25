@@ -32,8 +32,8 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets.local import LocalDataset
-from credit.datasets.channel_layout import build_channel_layout, update_x
+from credit.datasets.gen_2.local import LocalDataset
+from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything

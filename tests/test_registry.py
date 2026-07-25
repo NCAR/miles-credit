@@ -10,7 +10,7 @@ import torch.nn as nn
 from credit.models.base_model import BaseModel
 from credit.preblock.base import BasePreblock
 from credit.postblock.base import BasePostblock
-from credit.datasets.base_dataset import BaseDataset
+from credit.datasets.gen_2.base_dataset import BaseDataset
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ class TestLoadCustomObjects:
         _make_installable_module(
             tmp_path,
             "reg_test_dataset_pkg",
-            "from credit.datasets.base_dataset import BaseDataset\n"
+            "from credit.datasets.gen_2.base_dataset import BaseDataset\n"
             "class RegTestDataset(BaseDataset):\n"
             "    def __init__(self, conf, rank=0, world_size=1, is_train=True): pass\n"
             "    def __len__(self): return 0\n"
@@ -381,11 +381,11 @@ class TestRegisterPreblock:
         assert isinstance(modules["my_block"], UTPBBuild)
 
     def test_unknown_preblock_type_friendly_error(self):
-        """build_preblocks raises KeyError with a helpful message for unknown types."""
+        """build_preblocks raises ValueError with a helpful message for unknown types."""
         from credit.preblock import build_preblocks
 
         conf = {"preblocks": {"per_step": {"bad_block": {"type": "this_type_does_not_exist"}}}}
-        with pytest.raises(KeyError, match="this_type_does_not_exist"):
+        with pytest.raises(ValueError, match="this_type_does_not_exist"):
             build_preblocks(conf, phase="per_step")
 
 
@@ -482,11 +482,11 @@ class TestRegisterPostblock:
         assert isinstance(modules["my_block"], UTPoBBuild)
 
     def test_unknown_postblock_type_friendly_error(self):
-        """build_postblocks raises KeyError with a helpful message for unknown types."""
+        """build_postblocks raises ValueError with a helpful message for unknown types."""
         from credit.postblock import build_postblocks
 
         conf = {"postblocks": {"per_step": {"bad_block": {"type": "this_type_does_not_exist"}}}}
-        with pytest.raises(KeyError, match="this_type_does_not_exist"):
+        with pytest.raises(ValueError, match="this_type_does_not_exist"):
             build_postblocks(conf, phase="per_step")
 
 
@@ -590,7 +590,7 @@ class TestLoadCustomObjectsIdempotency:
 class TestLoadDataloaderCustomDataset:
     def test_unknown_dataset_type_still_raises(self):
         """load_dataloader still raises ValueError for non-BaseDataset objects."""
-        from credit.datasets.load_dataset_and_dataloader import load_dataloader
+        from credit.datasets.gen_1.load_dataset_and_dataloader import load_dataloader
 
         conf = {
             "seed": 42,

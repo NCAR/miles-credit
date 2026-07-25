@@ -20,7 +20,7 @@ from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 from credit.seed import seed_everything
 
 from credit.losses.weighted_loss import VariableTotalLoss2D
-from credit.datasets.wrfmultistep import WRFMultiStep
+from credit.datasets.gen_1.wrfmultistep import WRFMultiStep
 from credit.transforms import load_transforms
 
 from credit.scheduler import load_scheduler

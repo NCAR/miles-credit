@@ -4,11 +4,18 @@ import argparse
 import copy
 import math
 import os
+import re
 import sys
 import textwrap
 import yaml
 
-from ._common import _PBS_DEFAULTS, _find_torchrun, _repo_root
+from ._common import (
+    _PBS_DEFAULTS,
+    _SLURM_CLUSTER_DEFAULTS,
+    _SLURM_DEFAULTS,
+    _repo_root,
+    _resolve_torchrun,
+)
 from ._convert import _write_reload_config
 
 logger = __import__("logging").getLogger(__name__)
@@ -115,6 +122,361 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     return r
 
 
+# ---------------------------------------------------------------------------
+# SLURM support (mirrors the PBS helpers above)
+# ---------------------------------------------------------------------------
+
+
+def _load_slurm_config(config_path: str) -> dict:
+    """Return the ``slurm:`` section from a YAML config, falling back to ``pbs:``."""
+    with open(config_path) as f:
+        conf = yaml.safe_load(f)
+
+    slurm = conf.get("slurm") or conf.get("pbs") or {}
+    if not slurm:
+        print(
+            f"ERROR: config '{config_path}' is missing a required 'slurm:' (or 'pbs:') section.\n"
+            "Add a slurm: block with at least a conda env and partition.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not (slurm.get("conda") or slurm.get("conda_env")):
+        print(
+            "ERROR: slurm.conda is required but not set in the config.\n"
+            "Specify the conda environment name or full path, e.g.:\n"
+            "  slurm:\n"
+            "    conda: /home/$USER/.conda/envs/credit",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return slurm
+
+
+def _as_list(val) -> list:
+    """Normalize a str / list / None env-setup value to a list of shell lines."""
+    if not val:
+        return []
+    if isinstance(val, str):
+        return [val]
+    return list(val)
+
+
+def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.Namespace:
+    """Return a copy of *args* with None fields filled from *slurm_cfg* then defaults."""
+    r = copy.copy(args)
+
+    def _first(*vals):
+        for v in vals:
+            if v is not None:
+                return v
+        return None
+
+    # Layer any per-cluster overrides (e.g. Perlmutter) on top of the generic defaults.
+    d = {**_SLURM_DEFAULTS, **_SLURM_CLUSTER_DEFAULTS.get(getattr(args, "cluster", ""), {})}
+    r.account = _first(
+        args.account,
+        slurm_cfg.get("project") or slurm_cfg.get("account"),
+        os.environ.get("SLURM_ACCOUNT"),
+        d["account"],
+    )
+    r.walltime = _first(args.walltime, slurm_cfg.get("walltime"), d["walltime"])
+    r.gpus = int(_first(args.gpus, slurm_cfg.get("ngpus") or slurm_cfg.get("gpus"), d["gpus"]))
+    r.nodes = int(_first(args.nodes, slurm_cfg.get("nodes"), d["nodes"]))
+    r.cpus = int(_first(args.cpus, slurm_cfg.get("ncpus") or slurm_cfg.get("cpus"), d["cpus"]))
+    r.mem = _first(args.mem, slurm_cfg.get("mem"), d["mem"])
+    # --queue doubles as the SLURM partition selector.
+    r.partition = _first(args.queue, slurm_cfg.get("partition") or slurm_cfg.get("queue"), d["partition"])
+    r.queue = r.partition
+    r.constraint = _first(getattr(args, "constraint", None), slurm_cfg.get("constraint"), d["constraint"])
+    r.qos = _first(getattr(args, "qos", None), slurm_cfg.get("qos"), d["qos"])
+    r.gpu_type = _first(args.gpu_type, slurm_cfg.get("gpu_type"), d["gpu_type"])
+    r.conda_env = _first(args.conda_env, slurm_cfg.get("conda") or slurm_cfg.get("conda_env"))
+    r.job_name = slurm_cfg.get("job_name", d["job_name"])
+    # ``modules`` falls back to the per-cluster default (e.g. Perlmutter's NCCL
+    # module) when the config does not set it.  ``env_setup`` *extends* the
+    # per-cluster default (e.g. Perlmutter's NCCL/libfabric exports) so a config
+    # can add its own lines (NCCL_DEBUG, etc.) without dropping the defaults.
+    r.modules = _first(slurm_cfg.get("modules"), d.get("modules"))
+    r.env_setup = _as_list(d.get("env_setup")) + _as_list(slurm_cfg.get("env_setup")) or None
+
+    # Perlmutter (NERSC) GPU allocations must charge a ``_g`` account.
+    if getattr(args, "cluster", "") == "perlmutter" and r.account and not r.account.endswith("_g"):
+        logger.info("Perlmutter GPU jobs require a *_g account; charging %s_g", r.account)
+        r.account = f"{r.account}_g"
+    return r
+
+
+def _slurm_gres(args: argparse.Namespace) -> str:
+    """Return a ``--gres=gpu:...`` value, pinned to a GPU type when requested."""
+    if getattr(args, "gpu_type", None):
+        return f"gpu:{args.gpu_type}:{args.gpus}"
+    return f"gpu:{args.gpus}"
+
+
+def _slurm_gpu_lines(args: argparse.Namespace) -> list:
+    """Return the ``#SBATCH`` lines that request GPUs and any constraint/qos.
+
+    Sites that set a ``constraint`` (e.g. Perlmutter's ``-C gpu``) reject
+    ``--gres=gpu:N`` and must request GPUs with ``--gpus-per-node``; generic
+    SLURM sites fall back to the portable ``--gres`` form.
+    """
+    lines = []
+    constraint = getattr(args, "constraint", None)
+    if constraint:
+        lines.append(f"#SBATCH --constraint={constraint}")
+    qos = getattr(args, "qos", None)
+    if qos:
+        lines.append(f"#SBATCH --qos={qos}")
+    if constraint:
+        lines.append(f"#SBATCH --gpus-per-node={args.gpus}")
+    else:
+        lines.append(f"#SBATCH --gres={_slurm_gres(args)}")
+    return lines
+
+
+def _slurm_directives(args: argparse.Namespace, job_name: str, save_loc: str = None, depend_on: str = None) -> str:
+    """Return the ``#SBATCH`` header block for a job."""
+    lines = ["#!/bin/bash -l", f"#SBATCH --job-name={job_name}"]
+    if getattr(args, "account", None):
+        lines.append(f"#SBATCH --account={args.account}")
+    if getattr(args, "partition", None):
+        lines.append(f"#SBATCH --partition={args.partition}")
+    lines += [
+        f"#SBATCH --nodes={args.nodes}",
+        "#SBATCH --ntasks-per-node=1",
+    ]
+    lines += _slurm_gpu_lines(args)
+    lines.append(f"#SBATCH --cpus-per-task={args.cpus}")
+    if getattr(args, "mem", None):
+        lines.append(f"#SBATCH --mem={args.mem}")
+    lines.append(f"#SBATCH --time={args.walltime}")
+    if save_loc:
+        logs_dir = os.path.join(os.path.expandvars(save_loc), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        lines.append(f"#SBATCH --output={logs_dir}/%x-%j.out")
+    if depend_on:
+        lines.append(f"#SBATCH --dependency=afterok:{depend_on}")
+    return "\n".join(lines)
+
+
+def _slurm_env(args: argparse.Namespace) -> str:
+    """Return the ``module load`` / ``conda activate`` / extra env lines."""
+    lines = ["source ~/.bashrc"]
+    modules = getattr(args, "modules", None)
+    if modules:
+        if isinstance(modules, (list, tuple)):
+            modules = " ".join(str(m) for m in modules)
+        lines.append(f"module load {modules}")
+    if getattr(args, "conda_env", None):
+        lines.append(f"conda activate {args.conda_env}")
+    env_setup = getattr(args, "env_setup", None)
+    if env_setup:
+        if isinstance(env_setup, str):
+            env_setup = [env_setup]
+        lines.extend(str(x) for x in env_setup)
+    return "\n".join(lines)
+
+
+def _slurm_torchrun(args: argparse.Namespace) -> str:
+    """Return the torchrun path, preferring the configured conda env."""
+    return _resolve_torchrun(getattr(args, "conda_env", None))
+
+
+def _slurm_launch(args: argparse.Namespace, torchrun: str, app: str, app_args: str = "") -> str:
+    """Return the torchrun launch command for single- or multi-node SLURM jobs."""
+    extra = f" {app_args}" if app_args else ""
+    if args.nodes == 1:
+        return textwrap.dedent(f"""\
+            {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+                ${{REPO}}/{app} -c ${{CONFIG}}{extra}""")
+    return textwrap.dedent(f"""\
+        nodes_arr=( $( scontrol show hostnames "$SLURM_JOB_NODELIST" ) )
+        head_node="${{nodes_arr[0]}}"
+        head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address | awk '{{print $1}}')
+        echo "Head node : ${{head_node_ip}}"
+
+        srun {torchrun} \\
+            --nnodes={args.nodes} \\
+            --nproc-per-node=${{NGPUS}} \\
+            --rdzv-id="$SLURM_JOB_ID" \\
+            --rdzv-backend=c10d \\
+            --rdzv-endpoint="${{head_node_ip}}:29500" \\
+            ${{REPO}}/{app} -c ${{CONFIG}}{extra}""")
+
+
+def _build_slurm_script(
+    args: argparse.Namespace,
+    config: str,
+    repo: str,
+    account: str = None,
+    depend_on: str = None,
+    save_loc: str = None,
+) -> str:
+    """Return a SLURM batch script string for a training job."""
+    if account is not None:
+        args = copy.copy(args)
+        args.account = account
+    directives = _slurm_directives(args, args.job_name, save_loc=save_loc, depend_on=depend_on)
+    env = _slurm_env(args)
+    torchrun = _slurm_torchrun(args)
+    launch = _slurm_launch(args, torchrun, "credit/applications/train_gen2.py")
+    return (
+        f"{directives}\n\n"
+        f"{env}\n\n"
+        f"REPO={repo}\n"
+        f"CONFIG={config}\n"
+        f"NGPUS={args.gpus}\n\n"
+        f'echo "Config    : ${{CONFIG}}"\n'
+        f'echo "Nodes     : {args.nodes}  GPUs/node: {args.gpus}"\n'
+        f'echo "Total GPUs: $(( {args.nodes} * {args.gpus} ))"\n'
+        f"cd ${{REPO}}\n\n"
+        f"{launch}\n"
+    )
+
+
+def _build_realtime_slurm_script(
+    args: argparse.Namespace,
+    config: str,
+    repo: str,
+    init_time: str,
+    steps: int,
+    save_loc: str = None,
+) -> str:
+    """Return a SLURM script that runs a single realtime forecast."""
+    job_name = getattr(args, "job_name", "credit_realtime")
+    directives = _slurm_directives(args, job_name, save_loc=save_loc)
+    env = _slurm_env(args)
+    torchrun = _slurm_torchrun(args)
+    launch = _slurm_launch(
+        args,
+        torchrun,
+        "credit/applications/rollout_realtime_gen2.py",
+        app_args=f"--init-time {init_time} --steps {steps}",
+    )
+    return (
+        f"{directives}\n\n"
+        f"{env}\n\n"
+        f"REPO={repo}\n"
+        f"CONFIG={config}\n"
+        f"NGPUS={args.gpus}\n\n"
+        f'echo "Realtime forecast - init: {init_time}  steps: {steps}"\n'
+        f'echo "Config  : ${{CONFIG}}"\n'
+        f"cd ${{REPO}}\n\n"
+        f"{launch}\n"
+    )
+
+
+def _build_preprocess_slurm_script(
+    args: argparse.Namespace,
+    config: str,
+    repo: str,
+    save_loc: str = None,
+) -> str:
+    """Return a SLURM script that runs the preprocessing / scaler-fitting job."""
+    job_name = getattr(args, "job_name", "credit_preprocess")
+    directives = _slurm_directives(args, job_name, save_loc=save_loc)
+    env = _slurm_env(args)
+    torchrun = _slurm_torchrun(args)
+    launch = _slurm_launch(args, torchrun, "credit/applications/preprocess.py")
+    return (
+        f"{directives}\n\n"
+        f"{env}\n\n"
+        f"REPO={repo}\n"
+        f"CONFIG={config}\n"
+        f"NGPUS={args.gpus}\n\n"
+        f'echo "Preprocessing - scaler fitting"\n'
+        f'echo "Config  : ${{CONFIG}}"\n'
+        f"cd ${{REPO}}\n\n"
+        f"{launch}\n"
+    )
+
+
+def _build_rollout_slurm_script(
+    args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int, save_loc: str = None
+) -> str:
+    """Return a SLURM script for one subset of an ensemble rollout."""
+    job_name = f"{args.job_name[:10]}-{subset:02d}of{n_subsets:02d}"
+    directives = _slurm_directives(args, job_name, save_loc=save_loc)
+    env = _slurm_env(args)
+    torchrun = _slurm_torchrun(args)
+    launch = _slurm_launch(args, torchrun, "credit/applications/rollout_gen2.py")
+    return (
+        f"{directives}\n\n"
+        f"{env}\n\n"
+        f"REPO={repo}\n"
+        f"CONFIG={config}\n"
+        f"NGPUS={args.gpus}\n\n"
+        f'echo "Ensemble rollout - subset {subset} of {n_subsets}"\n'
+        f'echo "Config  : ${{CONFIG}}"\n'
+        f"cd ${{REPO}}\n\n"
+        f"{launch}\n"
+    )
+
+
+def _sbatch(script: str, save_loc: str | None = None) -> str:
+    """Write *script*, call ``sbatch``, and return the numeric job ID string."""
+    import datetime
+    import subprocess
+    import tempfile
+
+    if save_loc:
+        scripts_dir = os.path.join(os.path.expandvars(save_loc), "slurm_scripts")
+        os.makedirs(scripts_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        script_path = os.path.join(scripts_dir, f"submit_{ts}.sh")
+        with open(script_path, "w") as f:
+            f.write(script)
+        delete_after = False
+    else:
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False)
+        tmp.write(script)
+        tmp.close()
+        script_path = tmp.name
+        delete_after = True
+
+    try:
+        result = subprocess.run(["sbatch", script_path], capture_output=True, text=True)
+    finally:
+        if delete_after:
+            os.unlink(script_path)
+
+    if result.returncode != 0:
+        print(f"sbatch failed:\n{result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+    out = result.stdout.strip()
+    # sbatch prints "Submitted batch job 123456"
+    match = re.search(r"(\d+)", out)
+    return match.group(1) if match else out
+
+
+def _scheduler_ctx(args: argparse.Namespace) -> dict:
+    """Return the loader/resolver/builder/submitter bundle for the chosen scheduler."""
+    if getattr(args, "scheduler", "pbs") == "slurm":
+        return {
+            "name": "SLURM",
+            "load": _load_slurm_config,
+            "resolve": _resolve_slurm_opts,
+            "submit": _sbatch,
+            "build_train": _build_slurm_script,
+            "build_realtime": _build_realtime_slurm_script,
+            "build_preprocess": _build_preprocess_slurm_script,
+            "build_rollout": _build_rollout_slurm_script,
+        }
+    return {
+        "name": "PBS",
+        "load": _load_pbs_config,
+        "resolve": _resolve_pbs_opts,
+        "submit": _qsub,
+        "build_train": _build_pbs_script,
+        "build_realtime": _build_realtime_pbs_script,
+        "build_preprocess": _build_preprocess_pbs_script,
+        "build_rollout": _build_rollout_pbs_script,
+    }
+
+
 def _build_pbs_script(
     args: argparse.Namespace,
     config: str,
@@ -200,7 +562,7 @@ def _build_pbs_script(
         """)
 
         conda_env = args.conda_env
-        torchrun = f"{conda_env}/bin/torchrun" if (conda_env and os.path.isdir(conda_env)) else _find_torchrun()
+        torchrun = _resolve_torchrun(conda_env)
         cuda_devices = ",".join(str(i) for i in range(args.gpus))
 
         if nodes == 1:
@@ -395,7 +757,7 @@ def _build_realtime_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
+            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Realtime forecast — init: {init_time}  steps: {steps}"
             echo "Config  : ${{CONFIG}}"
@@ -472,7 +834,7 @@ def _build_preprocess_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
+            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Preprocessing — scaler fitting"
             echo "Config  : ${{CONFIG}}"
@@ -483,16 +845,17 @@ def _build_preprocess_pbs_script(
 
 
 def _do_submit_preprocess(args: argparse.Namespace) -> None:
-    """Submit a single PBS job for preprocessing / scaler fitting."""
+    """Submit a single job for preprocessing / scaler fitting."""
     repo = _repo_root()
-    pbs_cfg = _load_pbs_config(args.config)
+    ctx = _scheduler_ctx(args)
+    sched_cfg = ctx["load"](args.config)
 
     if not hasattr(args, "nodes"):
         args.nodes = None
     if not hasattr(args, "torchrun"):
         args.torchrun = None
 
-    args = _resolve_pbs_opts(args, pbs_cfg)
+    args = ctx["resolve"](args, sched_cfg)
 
     with open(args.config) as f:
         conf = yaml.safe_load(f)
@@ -502,6 +865,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
     sep = "=" * 52
     logger.info(
         "\n%s\n  Preprocess job plan\n%s\n"
+        "  Scheduler : %s\n"
         "  Cluster   : %s\n"
         "  Account   : %s\n"
         "  Config    : %s\n"
@@ -510,6 +874,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
         "%s",
         sep,
         sep,
+        ctx["name"],
         args.cluster,
         args.account,
         args.config,
@@ -518,27 +883,28 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
         sep,
     )
 
-    script = _build_preprocess_pbs_script(args, config_abs, repo, save_loc=save_loc)
+    script = ctx["build_preprocess"](args, config_abs, repo, save_loc=save_loc)
 
     if args.dry_run:
         print(script)
         return
 
-    job_id = _qsub(script, save_loc=save_loc)
+    job_id = ctx["submit"](script, save_loc=save_loc)
     logger.info("Submitted: %s", job_id)
 
 
 def _do_submit_realtime(args: argparse.Namespace) -> None:
-    """Submit a single PBS job for a realtime forecast."""
+    """Submit a single job for a realtime forecast."""
     repo = _repo_root()
-    pbs_cfg = _load_pbs_config(args.config)
+    ctx = _scheduler_ctx(args)
+    sched_cfg = ctx["load"](args.config)
 
     if not hasattr(args, "nodes"):
         args.nodes = None
     if not hasattr(args, "torchrun"):
         args.torchrun = None
 
-    args = _resolve_pbs_opts(args, pbs_cfg)
+    args = ctx["resolve"](args, sched_cfg)
 
     with open(args.config) as f:
         conf = yaml.safe_load(f)
@@ -551,6 +917,7 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
     sep = "=" * 52
     logger.info(
         "\n%s\n  Realtime job plan\n%s\n"
+        "  Scheduler : %s\n"
         "  Cluster   : %s\n"
         "  Account   : %s\n"
         "  Config    : %s\n"
@@ -561,6 +928,7 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
         "%s",
         sep,
         sep,
+        ctx["name"],
         args.cluster,
         args.account,
         args.config,
@@ -571,13 +939,13 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
         sep,
     )
 
-    script = _build_realtime_pbs_script(args, config_abs, repo, init_time, steps, save_loc=save_loc)
+    script = ctx["build_realtime"](args, config_abs, repo, init_time, steps, save_loc=save_loc)
 
     if args.dry_run:
         print(script)
         return
 
-    job_id = _qsub(script, save_loc=save_loc)
+    job_id = ctx["submit"](script, save_loc=save_loc)
     logger.info("Submitted: %s", job_id)
 
 
@@ -595,8 +963,11 @@ def _submit(args: argparse.Namespace) -> None:
         return
 
     repo = _repo_root()
-    pbs_cfg = _load_pbs_config(args.config)
-    args = _resolve_pbs_opts(args, pbs_cfg)
+    ctx = _scheduler_ctx(args)
+    sched_cfg = ctx["load"](args.config)
+    args = ctx["resolve"](args, sched_cfg)
+    build = ctx["build_train"]
+    submit = ctx["submit"]
     with open(args.config) as f:
         _full_conf = yaml.safe_load(f)
     save_loc = os.path.expandvars(_full_conf.get("save_loc", "."))
@@ -612,22 +983,22 @@ def _submit(args: argparse.Namespace) -> None:
     reload_config = _write_reload_config(os.path.abspath(args.config)) if n_jobs > 1 else None
 
     if args.dry_run:
-        script = _build_pbs_script(args, first_config, repo, depend_on=None, save_loc=save_loc)
+        script = build(args, first_config, repo, depend_on=None, save_loc=save_loc)
         print(f"# --- Job 1/{n_jobs} ---")
         print(script)
         if n_jobs > 1:
-            script2 = _build_pbs_script(args, reload_config, repo, depend_on="<job_1_id>", save_loc=save_loc)
+            script2 = build(args, reload_config, repo, depend_on="<job_1_id>", save_loc=save_loc)
             print(f"# --- Jobs 2..{n_jobs}/{n_jobs} (afterok chained, reload config) ---")
             print(script2)
         return
 
-    script = _build_pbs_script(args, first_config, repo, depend_on=None, save_loc=save_loc)
-    job_id = _qsub(script, save_loc=save_loc)
+    script = build(args, first_config, repo, depend_on=None, save_loc=save_loc)
+    job_id = submit(script, save_loc=save_loc)
     logger.info("[1/%d] %s  %s", n_jobs, job_id, first_config)
 
     for i in range(2, n_jobs + 1):
-        script = _build_pbs_script(args, reload_config, repo, depend_on=job_id, save_loc=save_loc)
-        job_id = _qsub(script, save_loc=save_loc)
+        script = build(args, reload_config, repo, depend_on=job_id, save_loc=save_loc)
+        job_id = submit(script, save_loc=save_loc)
         logger.info("[%d/%d] %s  afterok  (reload)", i, n_jobs, job_id)
 
 
@@ -644,7 +1015,7 @@ def _build_rollout_pbs_script(
         output_line = ""
 
     if args.cluster == "casper":
-        torchrun = args.torchrun or _find_torchrun()
+        torchrun = args.torchrun or _resolve_torchrun(args.conda_env)
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {job_name}
@@ -695,7 +1066,7 @@ def _build_rollout_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={args.conda_env + "/bin/torchrun" if (args.conda_env and os.path.isdir(args.conda_env)) else _find_torchrun()}
+            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Ensemble rollout — subset {subset} of {n_subsets}"
             echo "Config  : ${{CONFIG}}"
@@ -763,9 +1134,10 @@ def _rollout_ensemble(args: argparse.Namespace) -> None:
 
 
 def _do_submit_rollout(args: argparse.Namespace) -> None:
-    """Submit N parallel PBS rollout jobs to cover all init times."""
+    """Submit N parallel rollout jobs to cover all init times."""
     repo = _repo_root()
-    pbs_cfg = _load_pbs_config(args.config)
+    ctx = _scheduler_ctx(args)
+    sched_cfg = ctx["load"](args.config)
 
     is_casper = args.cluster == "casper"
     _rollout_defaults = {
@@ -774,14 +1146,14 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
         "mem": "128GB",
         "walltime": "06:00:00",
     }
-    merged_pbs = {**_rollout_defaults, **{k: v for k, v in pbs_cfg.items() if v is not None}}
+    merged_cfg = {**_rollout_defaults, **{k: v for k, v in sched_cfg.items() if v is not None}}
 
     if not hasattr(args, "nodes"):
         args.nodes = None
     if not hasattr(args, "torchrun"):
         args.torchrun = None
 
-    args = _resolve_pbs_opts(args, merged_pbs)
+    args = ctx["resolve"](args, merged_cfg)
 
     n_jobs = args.jobs
 
@@ -818,21 +1190,23 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
             print(f"# {'=' * 50}")
             print(f"# Job {i}/{n_jobs}  (subset {i} of {n_jobs})")
             print(f"# {'=' * 50}")
-            print(_build_rollout_pbs_script(args, config_abs, repo, i, n_jobs, save_loc=rollout_save_loc))
+            print(ctx["build_rollout"](args, config_abs, repo, i, n_jobs, save_loc=rollout_save_loc))
         return
 
     job_ids = []
     for i in range(1, n_jobs + 1):
-        script = _build_rollout_pbs_script(args, config_abs, repo, i, n_jobs, save_loc=rollout_save_loc)
-        job_id = _qsub(script, save_loc=rollout_save_loc)
+        script = ctx["build_rollout"](args, config_abs, repo, i, n_jobs, save_loc=rollout_save_loc)
+        job_id = ctx["submit"](script, save_loc=rollout_save_loc)
         job_ids.append(job_id)
         logger.info("[%2d/%d] %s", i, n_jobs, job_id)
 
     save_forecast = conf.get("inference", {}).get("save_forecast") or conf.get("predict", {}).get(
         "save_forecast", "<save_forecast in config>"
     )
+    monitor = "squeue -u $USER" if ctx["name"] == "SLURM" else "qstat -u $USER"
     logger.info(
-        "\nSubmitted %d parallel rollout jobs.\nOutput will be written to: %s\nMonitor with:\n  qstat -u $USER",
+        "\nSubmitted %d parallel rollout jobs.\nOutput will be written to: %s\nMonitor with:\n  %s",
         n_jobs,
         save_forecast,
+        monitor,
     )

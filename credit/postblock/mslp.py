@@ -16,12 +16,10 @@ where sgp is geopotential (m² s⁻²); it must be `LAPSE_RATE * sgp / GRAVITY`
 to convert geopotential to height in metres.
 """
 
-from typing import Iterable
-
 import torch
-import torch.nn as nn
 
 from credit.physics_constants import GRAVITY, RDGAS
+from credit.postblock.base import BasePostblock
 
 # Trenberth 1993 standard atmosphere lapse rate
 _LAPSE_RATE = 0.0065  # K m⁻¹
@@ -82,60 +80,80 @@ def mslp_from_surface_pressure(
     return torch.where(near_flat, surface_pressure, mslp_computed)
 
 
-class MSLPDiagnostic(nn.Module):
+class MSLPDiagnostic(BasePostblock):
     """Postblock that computes MSLP from surface pressure, 2m temperature, and PHIS.
 
-    Follows the same data-dict protocol as ``GeopotentialDiagnostic``: all
-    inputs are accessed by variable name from the nested batch dict, and the
-    result is written back under ``output_name``.
+    Follows the same batch-dict protocol as ``Reconstruct`` and
+    ``BridgeScalerTransform``: it operates on the nested output dict at
+    ``batch_dict[key]`` (default ``"y_processed"``), which has the form
+    ``{source: {var_key: tensor}}`` where ``var_key`` is
+    ``"source/field_type/dim/varname"``. The source for each variable is
+    derived from the first path component of its ``var_key``. The static
+    surface geopotential is read from ``batch_dict[static_source_key]``
+    (default ``"ic_raw"``), which has the same nested form, since static
+    fields are not part of the reconstructed model output. The result is
+    written back into ``batch_dict[key]`` under ``output_name``.
+
+    Config example::
+
+        type: "mslp_diagnostic"
+        args:
+            output_name: "ARCO_ERA5/derived_diagnostic/2d/mean_sea_level_pressure"
+            surface_pressure_var: "ARCO_ERA5/prognostic/2d/surface_pressure"
+            temperature_var: "ARCO_ERA5/prognostic/2d/2m_temperature"
+            surface_geopotential_var: "ARCO_ERA5/static/2d/geopotential_at_surface"
 
     Args:
-        output_name: key written into ``data[dataset_name]`` for the result.
-        dataset_name: top-level key inside each ``data_type`` sub-dict.
-        data_keys: which top-level batch-dict keys to process (e.g.
-            ``("prediction", "target")``).
+        output_name: var_key written into ``batch_dict[key]`` for the result.
         surface_pressure_var: variable name for surface pressure (Pa).
         temperature_var: variable name for near-surface temperature (K).
         surface_geopotential_var: variable name for PHIS (m² s⁻²).
+        key: entry in ``batch_dict`` holding the nested output dict written
+            by ``Reconstruct`` (default: ``"y_processed"``).
+        static_source_key: entry in ``batch_dict`` holding the nested raw IC
+            dict that provides static fields (default: ``"ic_raw"``).
     """
 
     def __init__(
         self,
         output_name: str = "ARCO_ERA5/derived_diagnostic/2d/mean_sea_level_pressure",
-        dataset_name: str = "ARCO_ERA5",
-        data_keys: Iterable[str] = ("prediction", "target"),
         surface_pressure_var: str = "ARCO_ERA5/prognostic/2d/surface_pressure",
         temperature_var: str = "ARCO_ERA5/prognostic/2d/2m_temperature",
         surface_geopotential_var: str = "ARCO_ERA5/static/2d/geopotential_at_surface",
+        key: str = "y_processed",
+        static_source_key: str = "ic_raw",
     ):
         super().__init__()
         self.output_name = output_name
-        self.dataset_name = dataset_name
-        self.data_keys = data_keys
         self.surface_pressure_var = surface_pressure_var
         self.temperature_var = temperature_var
         self.surface_geopotential_var = surface_geopotential_var
+        self.key = key
+        self.static_source_key = static_source_key
 
-    def forward(self, data_dict: dict) -> dict:
-        """Compute MSLP for each requested data key and write into the batch dict.
+    def forward(self, batch_dict: dict) -> dict:
+        """Compute MSLP and write it into the nested output dict.
 
         Args:
-            data_dict: nested batch dict.  Each ``data_dict[data_type][dataset_name]``
-                must contain ``surface_pressure_var``, ``temperature_var``, and
-                ``surface_geopotential_var`` as tensors with shapes broadcastable
-                to ``(B, 1, n_time, H, W)``.
+            batch_dict: batch dict containing ``key`` and ``static_source_key``
+                entries, each of the form ``{source: {var_key: tensor}}``.
+                Prognostic inputs must have shapes broadcastable to
+                ``(B, 1, n_time, H, W)``; PHIS may have ``n_time == 1``.
 
         Returns:
-            The same ``data_dict`` with ``output_name`` added under each
-            processed ``data_type[dataset_name]``.
+            The same ``batch_dict`` with ``output_name`` added under
+            ``batch_dict[key][source]``.
         """
-        for data_type in self.data_keys:
-            if data_type not in data_dict:
-                raise ValueError(f"Data key {data_type!r} not found in data_dict.")
-            data = data_dict[data_type]
-            dsn = self.dataset_name
-            sp = data[dsn][self.surface_pressure_var]  # (B, 1, n_time, H, W)
-            t2m = data[dsn][self.temperature_var]  # (B, 1, n_time, H, W)
-            phis = data[dsn][self.surface_geopotential_var]  # (B, 1, 1_or_n_time, H, W)
-            data[dsn][self.output_name] = mslp_from_surface_pressure(sp, t2m, phis)
-        return data_dict
+        for required_key in (self.key, self.static_source_key):
+            if required_key not in batch_dict:
+                raise ValueError(f"Key {required_key!r} not found in batch_dict.")
+        nested = batch_dict[self.key]  # {source: {var_key: tensor}}
+        static_nested = batch_dict[self.static_source_key]
+        sp = nested[self.surface_pressure_var.split("/")[0]][self.surface_pressure_var]  # (B, 1, n_time, H, W)
+        t2m = nested[self.temperature_var.split("/")[0]][self.temperature_var]  # (B, 1, n_time, H, W)
+        phis = static_nested[self.surface_geopotential_var.split("/")[0]][
+            self.surface_geopotential_var
+        ]  # (B, 1, 1_or_n_time, H, W)
+        out_source = self.output_name.split("/")[0]
+        nested.setdefault(out_source, {})[self.output_name] = mslp_from_surface_pressure(sp, t2m, phis.to(sp.device))
+        return batch_dict

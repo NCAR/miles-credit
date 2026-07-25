@@ -404,10 +404,13 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
         "retain_graph": False,
         "scaler_type": "std_new",
         "source": {
-            "ERA5": {
+            # Source key and variable names must match what _FakeLoader emits
+            # (era5/prognostic/2d/v{i}) so the from-config ChannelSchema validates
+            # against the batch produced by the loader.
+            "era5": {
                 "levels": [],
                 "variables": {
-                    "prognostic": {"vars_3D": [], "vars_2D": ["a", "b", "c", "d"]},
+                    "prognostic": {"vars_3D": [], "vars_2D": ["v0", "v1", "v2", "v3"]},
                     "diagnostic": {"vars_3D": [], "vars_2D": []},
                     "dynamic_forcing": {"vars_2D": []},
                     "static": {"vars_2D": []},
@@ -597,7 +600,8 @@ class TestERA5Gen2MultiStepTraining:
             "forecast_len": 2,
             "retain_graph": False,
             "source": {
-                "ERA5": {
+                # Source key must match what _PartialLoader emits (era5/...).
+                "era5": {
                     "levels": [],
                     "variables": {
                         "prognostic": {"vars_3D": [], "vars_2D": [f"p{i}" for i in range(N_PROG)]},

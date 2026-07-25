@@ -25,7 +25,7 @@ from credit.data import (
     nanoseconds_to_year,
     ensure_numpy_datetime,
 )
-from credit.datasets.era5_multistep import worker
+from credit.datasets.gen_1.era5_multistep import worker
 
 logger = logging.getLogger(__name__)
 
