@@ -261,13 +261,24 @@ inference:
         zlib: true
         complevel: 4                # 1 (fast) to 9 (small)
 
-pbs: #derecho
-  conda: "credit-derecho"
+# pbs: #derecho
+#   conda: "credit-derecho"
+#   project: "NAML0001"
+#   job_name: "credit_integration_test_hrrr_gen2"
+#   walltime: "01:00:00"
+#   nodes: 8
+#   ncpus: 64
+#   ngpus: 4
+#   mem: '480GB'
+#   queue: 'main'
+
+pbs: #casper
+  conda: "credit"
   project: "NAML0001"
   job_name: "credit_integration_test_hrrr_gen2"
-  walltime: "01:00:00"
-  nodes: 8
-  ncpus: 64
-  ngpus: 4
-  mem: '480GB'
+  walltime: "08:00:00"
+  nodes: 1
+  ngpus: 1
+  ncpus: 4
+  mem: '12GB'
   queue: 'main'
