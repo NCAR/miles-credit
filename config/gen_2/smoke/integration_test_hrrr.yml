@@ -17,7 +17,6 @@ seed: 1000
 
 
 # ---- USER SETTINGS: training data ---- #
-# Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
 data:
   source:
     Example_HRRR:
@@ -42,6 +41,7 @@ data:
         # Static: time-invariant inputs (not predicted)
         static:
           vars_2D: [ 'orog' ]
+      
       # [lon_min, lon_max, lat_min, lat_max]
       extent: [-106.0, -104.5, 39.5, 41.0]  # Prime numbers of data points: 59 lat × 47 lon
 
@@ -59,18 +59,13 @@ data:
       # Extent to match the one above
       extent: [-106.0, -104.5, 39.5, 41.0]
 
+  # Dates follow ISO 8601: "YYYY-MM-DD".
   start_datetime: "2025-01-01"
   end_datetime: "2025-01-02"
   timestep: "1h"
 
   # history_len: 1            # number of past states fed as input
   forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
-
-  # one_shot: True
-  # lead_time_periods: 1
-  # skip_periods: null
-  # static_first: True
-  # scaler_type: 'std_new'
 
 
 # ---- USER SETTINGS: validation data ---- #
@@ -153,8 +148,8 @@ trainer:
   stopping_patience: 999
 
   start_epoch: 0
-  num_epoch: 2            # epochs per qsub job (checkpoint after each)
-  epochs: &epochs 70      # total training target
+  # num_epoch: 2            # epochs per qsub job (checkpoint after each)
+  epochs: &epochs 3      # total training target
 
   use_tensorboard: True
   use_ema: True           # exponential moving average of weights for validation
