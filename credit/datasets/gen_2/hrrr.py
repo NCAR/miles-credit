@@ -12,9 +12,9 @@ Supports three HRRR products (``VALID_PRODUCTS``):
 Tensor keys follow the pattern ``{user_provided_name}/{hrrr_product}/{field_type}/{dim}/{varname}``
 where *hrrr_product* is product-specific:
 
-    "wrfprs"  → `{user_provided_name}/`wrfprs/{field_type}/{dim}/{varname}``
-    "wrfnat"  → `{user_provided_name}/`wrfnat/{field_type}/{dim}/{varname}``
-    "wrfsubh" → `{user_provided_name}/`wrfsubh/{field_type}/2d/{varname}``
+* "wrfprs"  → `{user_provided_name}/`wrfprs/{field_type}/{dim}/{varname}``
+* "wrfnat"  → `{user_provided_name}/`wrfnat/{field_type}/{dim}/{varname}``
+* "wrfsubh" → `{user_provided_name}/`wrfsubh/{field_type}/2d/{varname}``
 
 *dim* is ``"3d"`` for multi-level variables and ``"2d"`` for surface variables.
 
@@ -44,9 +44,13 @@ Both local and remote modes use the same ``.idx`` + byte-range pipeline:
 2. Issue one Obstore get_ranges request to pull all the relevant data
    fields (based on the byte ranges from the idx file).
 
-*Local mode*: reads the ``.idx`` sidecar from disk, then uses
-``file.seek()`` + ``file.read()`` — identical byte-range approach, no
-full-file scan.  The ``.idx`` sidecar must be present alongside the grib2;
+*Local mode*: 
+
+1. Reads the ``.idx`` sidecar from disk, 
+2. Uses ``file.seek()`` + ``file.read()`` — identical byte-range approach, no
+full-file scan.  
+
+The ``.idx`` sidecar must be present alongside the grib2;
 download it with ``hrrr_download.py``.
 
 For a typical training sample (5 vars x 6 levels ≈ 30 messages) remote mode
@@ -268,15 +272,15 @@ def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, produc
 def _hrrr_s3_entry_name(
     t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs", region: str = "conus"
 ) -> str:
-    """Construct the S3 URI for a HRRR grib2 file.
+    """Construct the S3 entry key name for a HRRR grib2 file.
 
     Args:
-        t (pd.Timestamp): Initialisation timestamp (UTC).
+        t (pd.Timestamp): Initialization timestamp (UTC).
         forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
         product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
 
     Returns:
-        str: S3 URI.
+        str: S3 entry key name.
     """
     date_str = t.strftime("%Y%m%d")
     hour_str = t.strftime("%H")
@@ -720,7 +724,7 @@ class HRRRDataset(BaseDataset):
         dataset_type: Tensor key - `"HRRR"`
         product: Active HRRR product (``"HRRR_PRS" / "wrfprs"``, ``"HRRR_NAT" / "wrfnat"``,
             or ``"HRRR_SUBH" / "wrfsubh"``) with default value ``"HRRR_PRS"``.
-        datetimes: DatetimeIndex of valid initialisation timestamps.
+        datetimes: DatetimeIndex of valid initialization timestamps.
         static_metadata: Dataset-level metadata for MultiSourceDataset.
     """
 

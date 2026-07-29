@@ -16,7 +16,7 @@ in local mode, so they are immediately usable without any renaming::
 
 After downloading, switch ``mode`` to ``"local"`` in the config.
 
-Usage::
+Usage as script::
 
     python -m credit.datasets.gen_2.hrrr_download -c config/my_conf.yaml --num-workers 8
 
