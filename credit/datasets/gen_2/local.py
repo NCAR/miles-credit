@@ -94,7 +94,8 @@ class LocalDataset(BaseDataset):
           source:
             My_Surface_Data:  # User-provided name (arbitrary key)
               dataset_type: "local"
-              grid_type: "unstructured"         # Optional: explicit override (auto-inferred if absent)
+              grid_type: "unstructured"         # Recommended: explicit override (auto-detection is a
+                                                # size-based heuristic and can misfire -- see Assumptions)
               level_coord: "level"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
               variables:
@@ -129,7 +130,16 @@ class LocalDataset(BaseDataset):
         5. Static fields are automatically replicated along the time axis. If a static
            file contains a dummy time dimension, it is safely ignored.
         6. Finding lat/lon arrays (regardless of naming convention) is delegated to
-           `find_coord_pair`.
+           `find_coord_pair`. There is no required name for the flattened spatial
+           dimension itself (e.g. "ncol" above is illustrative, not enforced) --
+           auto-detection instead prefers lat/lon sharing one real dimension in the
+           file, falling back to a weaker same-length heuristic; set `grid_type:`
+           explicitly to bypass both.
+        7. An unstructured source's native grid cannot be resolved as an output grid
+           on its own (`credit.datasets.gen_2.grid_utils` only represents rectilinear/
+           curvilinear) -- an active `Regridder` preblock targeting a structured
+           destination grid is required for this source, or `GridSchema.resolve`
+           raises at training/rollout setup.
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
@@ -236,7 +246,7 @@ class LocalDataset(BaseDataset):
                 continue
             try:
                 with xr.open_dataset(files[0], engine=engine) as ds:
-                    lon, lat, _, _ = find_coord_pair(ds)
+                    lon, lat, lon_name, lat_name = find_coord_pair(ds)
 
                     # 1. Check for explicit YAML override
                     config_grid_type = source_cfg.get("grid_type")
@@ -244,22 +254,18 @@ class LocalDataset(BaseDataset):
                     # 2. Robust unstructured detection
                     if config_grid_type:
                         grid_type = config_grid_type
-                    elif (
-                        hasattr(lat, "dims")
-                        and hasattr(lon, "dims")
-                        and lat.ndim == 1
-                        and lon.ndim == 1
-                        and lat.dims == lon.dims
-                    ):
-                        # Ideal case: lat/lon are xarray DataArrays sharing the exact same 1D dimension (e.g. 'ncol')
+                    elif lat.ndim == 1 and lon.ndim == 1 and ds[lon_name].dims == ds[lat_name].dims:
+                        # Reliable structural signal: lat/lon share the exact same 1D
+                        # dimension in the file (e.g. 'ncol').
                         grid_type = "unstructured"
                     elif lat.ndim == 1 and lon.ndim == 1 and len(lat) == len(lon):
-                        # Fallback if find_coord_pair returns raw numpy arrays. Check if their length matches a single spatial dimension in the dataset.
+                        # Weaker fallback: lat/lon don't share a dimension, but happen to
+                        # be the same length and some dimension in the file matches it.
+                        # Prefer an explicit `grid_type:` override for anything the check
+                        # above doesn't catch -- this can misfire on a coincidental size
+                        # match (e.g. a square rectilinear grid).
                         shared_dims = [dim for dim, size in ds.sizes.items() if size == len(lat)]
-                        if shared_dims:
-                            grid_type = "unstructured"
-                        else:
-                            grid_type = infer_grid_type(lat, lon)
+                        grid_type = "unstructured" if shared_dims else infer_grid_type(lat, lon)
                     else:
                         grid_type = infer_grid_type(lat, lon)
 
