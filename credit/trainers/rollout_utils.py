@@ -48,12 +48,32 @@ def apply_inference_overrides(conf: dict) -> None:
     override of individual keys. A present-but-``null`` key (e.g. ``inference:
     {data: null}``, however that arises in YAML) is treated as absent, not as
     an override to ``None``.
+
+    Warns (does not raise) when ``data`` is overridden but ``preblocks``/
+    ``postblocks`` are not: the training preblock/postblock chain will then run
+    against the new data source unchanged, which is exactly the risky
+    combination if the new source's variable names, grid, or vertical levels
+    differ from training. ``ConcatToTensor`` (if a ``ChannelSchema`` is
+    attached) still catches an actual mismatch with a precise diff on the first
+    batch -- this warning is just the cheap, immediate heads-up before that.
     """
     inf_conf = conf.get("inference") or {}
+    overridden = set()
     for key in ("data", "preblocks", "postblocks"):
         override = inf_conf.get(key)
         if override is not None:
             conf[key] = override
+            overridden.add(key)
+
+    if "data" in overridden and not overridden & {"preblocks", "postblocks"}:
+        logger.warning(
+            "inference.data overrides the training data source, but inference.preblocks/"
+            "postblocks were not overridden -- the training preblock/postblock chain will "
+            "run against this new source unchanged. If variable names, grid, or vertical "
+            "levels differ from training, this will likely fail with a shape or key "
+            "mismatch. Consider adding inference.preblocks (e.g. a 'rename' and/or 'regrid' "
+            "step) to reconcile the new source with what the model was trained on."
+        )
 
 
 def with_inference_datetime_bounds(data_conf: dict, all_init_times: list, n_steps: int, timestep: str) -> dict:

@@ -14,10 +14,12 @@ from credit.preblock import apply_preblocks, build_preblocks
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.log import LogTransform
 from credit.preblock.regrid import Regridder
+from credit.preblock.rename import RenameVariables
 from credit.preblock.scaler import BridgeScalerTransform
 from credit.preblock.sqrt import SqrtTransform
 from credit.preblock._utils import _parse_variable_selection
 from credit.postblock import build_postblocks
+from credit.datasets.gen_2.channel_utils import ChannelSchema
 
 
 def create_synthetic_data() -> dict:
@@ -615,6 +617,101 @@ class TestConcatToTensorChannelOrder:
             covered.extend(range(s.start, s.stop))
 
         assert len(covered) == len(set(covered)), "Channel slices must not overlap"
+
+
+# ---------------------------------------------------------------------------
+# ConcatToTensor — input side ChannelSchema validation
+# ---------------------------------------------------------------------------
+
+
+class TestConcatToTensorInputSchemaValidation:
+    def _schema(self):
+        return ChannelSchema(
+            input_layout=[{"var_key": "era5/prognostic/2d/T", "n_levels": 1, "n_time": 1}],
+            target_layout=[{"var_key": "era5/prognostic/2d/T", "n_levels": 1, "n_time": 1}],
+        )
+
+    def test_matching_input_passes_with_schema_attached(self):
+        batch = {"input": {"era5": {"era5/prognostic/2d/T": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        tensor, _meta = ct(batch)  # must not raise
+        assert tensor.shape == (1, 1, 1, 4, 4)
+
+    def test_mismatched_input_raises_with_no_target_present(self):
+        """The inference (no-target) case this was added for: a renamed/extra/missing
+        input variable must be caught here, not surfaced as a shape mismatch later."""
+        batch = {"input": {"gfs": {"gfs/prognostic/2d/TMP": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        with pytest.raises(ValueError, match="ChannelSchema mismatch"):
+            ct(batch)
+
+    def test_input_schema_validated_only_once(self):
+        """A second batch with the same (already-validated) layout must not re-raise
+        or otherwise re-run the comparison."""
+        batch = {"input": {"era5": {"era5/prognostic/2d/T": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        ct(batch)
+        assert ct._input_schema_validated
+        ct(batch)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# RenameVariables
+# ---------------------------------------------------------------------------
+
+
+class TestRenameVariables:
+    def test_renames_across_source_boundary(self):
+        batch = {"input": {"GFS": {"GFS/prognostic/3d/TMP": torch.randn(1, 4, 1, 4, 4)}}}
+        rn = RenameVariables(mapping={"GFS/prognostic/3d/TMP": "ERA5/prognostic/3d/T"})
+        out = rn(batch)
+        assert list(out["input"]["ERA5"].keys()) == ["ERA5/prognostic/3d/T"]
+        assert out["input"]["GFS"] == {}
+        # original batch must be untouched (shallow-copy contract)
+        assert list(batch["input"]["GFS"].keys()) == ["GFS/prognostic/3d/TMP"]
+
+    def test_key_absent_in_a_data_type_is_skipped(self):
+        """A mapping entry that doesn't apply to a given data_type (e.g. a static-only
+        rename during a target pass) is silently skipped, matching other preblocks."""
+        batch = {"input": {"GFS": {"GFS/static/2d/z": torch.randn(1, 1, 1, 4, 4)}}, "target": {}}
+        rn = RenameVariables(mapping={"GFS/static/2d/z": "ERA5/static/2d/z"})
+        out = rn(batch)
+        assert "ERA5" in out["input"]
+        assert out["target"] == {}
+
+    def test_destination_collision_raises(self):
+        batch = {
+            "input": {
+                "GFS": {
+                    "GFS/prognostic/3d/A": torch.randn(1, 1, 1, 4, 4),
+                    "GFS/prognostic/3d/B": torch.randn(1, 1, 1, 4, 4),
+                }
+            }
+        }
+        rn = RenameVariables(
+            mapping={"GFS/prognostic/3d/A": "ERA5/prognostic/3d/T", "GFS/prognostic/3d/B": "ERA5/prognostic/3d/T"}
+        )
+        with pytest.raises(ValueError, match="already exists"):
+            rn(batch)
+
+    def test_mapping_file_loads_and_applies(self, tmp_path):
+        import yaml
+
+        path = tmp_path / "map.yaml"
+        path.write_text(yaml.safe_dump({"GFS/prognostic/3d/TMP": "ERA5/prognostic/3d/T"}))
+        rn = RenameVariables(mapping_file=str(path))
+        batch = {"input": {"GFS": {"GFS/prognostic/3d/TMP": torch.randn(1, 1, 1, 4, 4)}}}
+        out = rn(batch)
+        assert list(out["input"]["ERA5"].keys()) == ["ERA5/prognostic/3d/T"]
+
+    def test_requires_exactly_one_of_mapping_or_mapping_file(self):
+        with pytest.raises(ValueError, match="exactly one of"):
+            RenameVariables()
+        with pytest.raises(ValueError, match="exactly one of"):
+            RenameVariables(mapping={"a": "b"}, mapping_file="unused.yaml")
 
 
 # ---------------------------------------------------------------------------

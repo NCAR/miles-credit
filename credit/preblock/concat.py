@@ -79,13 +79,19 @@ class ConcatToTensor(BasePreblock):
         # target-less batches (inference) get the schema's full target map —
         # covering diagnostics — instead of the prognostic-only input-derived
         # fallback; batches WITH a target are validated against the schema once.
+        # The input side is always validated once regardless of whether a target
+        # is present -- this is what catches an inference.data source override
+        # (different variable names/grid/levels) with a clear diff, on the first
+        # rollout batch, instead of a shape mismatch deep inside the model.
         self._schema = None
         self._schema_validated = False
+        self._input_schema_validated = False
 
     def set_schema(self, schema) -> None:
         """Attach a ``credit.datasets.gen_2.channel_utils.ChannelSchema`` to this block."""
         self._schema = schema
         self._schema_validated = False
+        self._input_schema_validated = False
 
     def forward(self, batch: dict | tuple) -> tuple:
         if isinstance(batch, tuple):
@@ -165,6 +171,9 @@ class ConcatToTensor(BasePreblock):
             raise ValueError("No 'input' tensors found in batch.")
 
         metadata["input"]["_channel_map"] = input_channel_map
+        if self._schema is not None and not self._input_schema_validated:
+            self._schema.validate_channel_map(input_channel_map, which="input")
+            self._input_schema_validated = True
         # Target map priority:
         #   1. built from an actual target (training/validation) — exact; checked
         #      against the schema once so a layout drift fails loudly, not silently;
