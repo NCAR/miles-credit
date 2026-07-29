@@ -453,20 +453,39 @@ class LocalDataset(BaseDataset):
         selection if configured. Lazily caches ``self.levels`` on first use,
         matching the original single-step logic.
 
+        ``.sel()`` preserves the file's native dimension order, and callers
+        (``_write_field_tensors``/``_extract_field_window``) treat the result
+        positionally as ``(n_levels, spatial...)`` -- so the level dimension
+        must genuinely be first among the remaining (post-time-selection) dims,
+        or the level/spatial axes get silently swapped. Checked explicitly here
+        rather than assumed, since a shape/size mismatch wouldn't otherwise
+        surface until much later (or not at all, for e.g. a square grid).
+
         Args:
             ds_t: A single-time-slice dataset.
             vname: 3D variable name.
 
         Returns:
             numpy array of the 3D variable, level-selected if configured.
+
+        Raises:
+            ValueError: if ``level_coord`` is present but isn't the first
+                dimension of ``vname``.
         """
+        da = ds_t[vname]
+        if self.level_coord in da.dims and da.dims[0] != self.level_coord:
+            raise ValueError(
+                f"LocalDataset '{self.curr_source_name}': variable '{vname}' has dims {da.dims}, "
+                f"but '{self.level_coord}' must be first (after time selection) -- 3D reading "
+                "assumes (level, spatial...) order and treats the result positionally."
+            )
         if self.levels is None:
-            arr = ds_t[vname].values
+            arr = da.values
             if self.level_coord in ds_t.coords:
                 self.levels = ds_t[self.level_coord].values.tolist()
                 self.static_metadata["levels"] = self.levels
         else:
-            arr = ds_t[vname].sel({self.level_coord: self.levels}, method="nearest").values
+            arr = da.sel({self.level_coord: self.levels}, method="nearest").values
         return arr
 
     def _write_field_tensors(
