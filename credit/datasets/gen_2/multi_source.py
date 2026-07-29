@@ -225,14 +225,23 @@ class MultiSourceDataset(AbstractBaseDataset):
         under a less restrictive master clock is an init-time error — the
         sampler's step arithmetic would generate ticks (e.g. Feb 29) that the
         source cannot represent, and intersection cannot prevent that.
+
+        Cyclic sources (``temporal_mode: cyclic``) are exempt from this check:
+        their calendar describes one small, standalone climatology file (see
+        ``to_cycle_year``), not a constraint on the whole run's timestamps, and
+        every real timestamp is remapped onto that source's own cycle before
+        ever touching its calendar (see ``BaseDataset._resolve_cyclic_timestamp``).
         """
         source_calendars = {name: getattr(ds, "calendar", "standard") for name, ds in self.datasets.items()}
+        source_cfg = config.get("source", {})
         explicit = config.get("calendar")
         master_calendar = (
             normalize_calendar(explicit) if explicit else most_restrictive_calendar(source_calendars.values())
         )
 
         for name, cal in source_calendars.items():
+            if source_cfg.get(name, {}).get("temporal_mode") == "cyclic":
+                continue
             if not is_standard_calendar(cal) and normalize_calendar(cal) != master_calendar:
                 raise ValueError(
                     f"MultiSourceDataset: source '{name}' uses calendar '{cal}' but the master clock "
@@ -259,6 +268,13 @@ class MultiSourceDataset(AbstractBaseDataset):
           clipped to the source's coverage range.  Fine-resolution master-clock
           ticks are snapped to the last native timestamp inside
           ``BaseDataset.__getitem__``.
+        - **Cyclic sources** (``temporal_mode: cyclic``): the clock is left
+          entirely unfiltered/unclipped against this source — a cyclic source's
+          own ``datetimes``/coverage describe one representative cycle (e.g. one
+          year), not the run's real span, so it must answer for every master
+          timestamp regardless of that source's own range. Each real timestamp
+          is remapped onto the source's cycle independently inside
+          ``BaseDataset._load_sample``.
         """
         self.calendar: str = self._resolve_master_calendar(config)
 
@@ -301,6 +317,11 @@ class MultiSourceDataset(AbstractBaseDataset):
                 ds_start = to_calendar(ds.datetimes[0], self.calendar)
                 ds_end = to_calendar(ds.datetimes[-1], self.calendar)
                 master = master[(master >= ds_start) & (master <= ds_end + ds.dt)]
+            elif temporal_mode == "cyclic":
+                # No filtering/clipping at all: a cyclic source answers for any
+                # real timestamp by construction (its own datetimes only cover
+                # one representative cycle, not the run's real span).
+                pass
             else:
                 # Exact match required — warn if resolutions differ
                 if hasattr(ds, "dt") and ds.dt != master_dt:

@@ -112,6 +112,58 @@ def to_calendar(t, calendar: str | None):
         ) from exc
 
 
+def _is_leap_year(year: int, calendar: str) -> bool:
+    """Whether *year* has a Feb 29 in *calendar* (already normalized/checked-supported).
+
+    Every other (month, day) combination is a fixed length every year in the
+    calendars this module supports (Jan=31, Apr=30, ...), so Feb is the only
+    month whose length ever depends on the year -- this is the only leap-rule
+    lookup ``to_cycle_year`` needs.
+    """
+    if calendar == "noleap":
+        return False
+    if calendar == "all_leap":
+        return True
+    if calendar == "julian":
+        return year % 4 == 0
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)  # standard / gregorian / proleptic_gregorian
+
+
+def to_cycle_year(t, cycle_year: int, calendar: str | None):
+    """Rewrite *t* onto *cycle_year*, preserving (month, day, hour, minute, second).
+
+    Used by cyclic (``temporal_mode: "cyclic"``) sources to map an arbitrary
+    real timestamp onto the single representative year a climatology file
+    lives in. Unlike ``to_calendar``, this never raises for a nonexistent Feb
+    29: if *t* is Feb 29 and *cycle_year* doesn't have one in *calendar*, the
+    day is clamped to Feb 28 instead -- there both is and needs to be no
+    "which year is this climatology for" requirement on *cycle_year* (any year
+    works), since asof-lookup against the source's own native timestamps
+    already resolves Feb 28 (or the clamp target) to whatever's actually
+    there, exactly the "map to the previous time step" behavior wanted here.
+    A silent clamp is safe specifically because this is the one calendar-only
+    edge case that can never indicate a real data error, unlike ``to_calendar``
+    (which raises loudly, since there a mismatch usually does mean one).
+
+    Args:
+        t: ``pd.Timestamp`` or ``cftime.datetime``.
+        cycle_year: the single representative year the cyclic source's data lives in.
+        calendar: the cyclic source's own CF calendar (``None`` == standard).
+
+    Returns:
+        ``pd.Timestamp`` when *calendar* is standard, else ``cftime.datetime`` --
+        same convention as ``to_calendar``.
+    """
+    cal = _check_supported(calendar)
+    month, day = t.month, t.day
+    if month == 2 and day == 29 and not _is_leap_year(cycle_year, cal):
+        day = 28
+
+    if is_standard_calendar(calendar):
+        return pd.Timestamp(cycle_year, month, day, t.hour, t.minute, t.second, t.microsecond)
+    return cftime.datetime(cycle_year, month, day, t.hour, t.minute, t.second, t.microsecond, calendar=cal)
+
+
 def build_time_index(start, end, freq, calendar: str | None = "standard"):
     """Build the sampling clock for *calendar*.
 

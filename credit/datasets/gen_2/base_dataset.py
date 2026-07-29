@@ -28,6 +28,7 @@ from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage
     is_standard_calendar,
     normalize_calendar,
     to_calendar,
+    to_cycle_year,
 )
 
 # Expected types of fields
@@ -266,10 +267,25 @@ class BaseDataset(AbstractBaseDataset):
         if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
 
-        # temporal_mode: "exact" (default, exact timestamp match required) or
-        # "persist" (snap to last native timestamp via asof(); used for coarser sources)
+        # temporal_mode: "exact" (default, exact timestamp match required),
+        # "persist" (snap to last native timestamp via asof(); used for coarser
+        # sources), or "cyclic" (map any real timestamp onto this source's single
+        # cycle_year via to_cycle_year + asof; used for climatology/seasonal
+        # forcing that repeats every cycle without duplicating data across real
+        # years -- see _resolve_cyclic_timestamp).
         self.temporal_mode: str = self.curr_source_cfg.get("temporal_mode", "exact")
         self._persist_cache: dict = {}
+
+        # cycle_year: the single representative year a cyclic source's data lives
+        # in (e.g. 2000). Any year works -- to_cycle_year clamps Feb 29 to Feb 28
+        # when cycle_year doesn't have one, rather than requiring a leap year.
+        self.cycle_year: int | None = self.curr_source_cfg.get("cycle_year")
+        if self.temporal_mode == "cyclic" and self.cycle_year is None:
+            raise ValueError(
+                f"Source '{self.curr_source_name}': temporal_mode: cyclic requires 'cycle_year' "
+                "(the single representative year this source's climatology data lives in) "
+                "to be set in the source config."
+            )
 
         # Placeholder for static metadata. `datetime_fmt` tells metadata consumers
         # how to decode the input/target_datetime ints (see _utils.decode_time):
@@ -371,6 +387,29 @@ class BaseDataset(AbstractBaseDataset):
             )
         return resolved
 
+    def _resolve_cyclic_timestamp(self, t: pd.Timestamp):
+        """Map *t* onto this source's single ``cycle_year``, then snap to the
+        last native timestamp at or before that point.
+
+        Same "last available, not nearest" semantics as ``_resolve_persist_timestamp``
+        (``asof``), applied within one cycle instead of across the whole run. Unlike
+        persist, this never raises: a point before the cycle's first native timestamp
+        (e.g. the file starts at 06:00 on Jan 1 and the remapped point lands at 00:00)
+        wraps to the cycle's *last* entry instead -- this is periodic, not a bounded
+        series, so "before the start" really means "just after the end."
+
+        Args:
+            t: Real timestamp to resolve (any real year).
+
+        Returns:
+            The resolved native timestamp within ``cycle_year``.
+        """
+        t_cycle = to_cycle_year(t, self.cycle_year, self.calendar)
+        resolved = self.datetimes.asof(t_cycle)
+        if pd.isna(resolved):
+            resolved = self.datetimes[-1]
+        return resolved
+
     def _load_sample(self, t: pd.Timestamp, i: int) -> dict[str, Any]:
         """Build and return the sample dict for timestamp *t* and step index *i*.
 
@@ -385,7 +424,9 @@ class BaseDataset(AbstractBaseDataset):
         window. With ``history_len == 1`` behaviour is identical to the original.
 
         Args:
-            t: Timestamp to load (already resolved for persist sources).
+            t: Timestamp to load (already resolved for persist sources; the real,
+                un-remapped master timestamp for cyclic sources -- see the
+                cyclic lookup-remapping below).
             i: Within-sequence step index (0 = initial step).
 
         Returns:
@@ -409,29 +450,45 @@ class BaseDataset(AbstractBaseDataset):
             # pd.date_range cannot consume.
             t_history = build_time_index(t - (self.history_len - 1) * self.dt, t, self.dt, self.calendar)
 
+        # Cyclic sources: t / t_target / t_history above are real, monotonic
+        # master-clock timestamps -- computed exactly as for any other source,
+        # never wrapping. Only the *lookup* keys actually handed to the read
+        # calls below are remapped onto this source's single cycle_year, via
+        # _resolve_cyclic_timestamp, independently per timestamp (so a history
+        # window or target that crosses a real year boundary needs no special
+        # handling: each point is resolved on its own, regardless of how far
+        # apart its neighbors are in real time). Non-cyclic sources are
+        # unaffected -- the lookup values are just t / t_target / t_history
+        # themselves, no extra work.
+        is_cyclic = self.temporal_mode == "cyclic"
+        t_lookup = self._resolve_cyclic_timestamp(t) if is_cyclic else t
+        t_target_lookup = self._resolve_cyclic_timestamp(t_target) if is_cyclic else t_target
+        if use_history_window:
+            t_history_lookup = [self._resolve_cyclic_timestamp(x) for x in t_history] if is_cyclic else t_history
+
         # Dynamic forcing is loaded at every step.
         # At i == 0 we need the full history window so the trainer's x has H
         # time steps; at i > 0 we only need the newest step (the trainer slides
         # the previous history forward during rollout).
         if "dynamic_forcing" in self.var_dict:
             if i == 0 and use_history_window:
-                self._extract_field_window("dynamic_forcing", t_history, input_data)
+                self._extract_field_window("dynamic_forcing", t_history_lookup, input_data)
             else:
-                self._extract_field("dynamic_forcing", t, input_data)
+                self._extract_field("dynamic_forcing", t_lookup, input_data)
 
         # Prognostic + static are only needed at the initial step.
         # Both are loaded over the full history window so x starts with H steps.
         if i == 0:
             if "static" in self.var_dict:
                 if use_history_window:
-                    self._extract_field_window("static", t_history, input_data)
+                    self._extract_field_window("static", t_history_lookup, input_data)
                 else:
-                    self._extract_field("static", t, input_data)
+                    self._extract_field("static", t_lookup, input_data)
             if "prognostic" in self.var_dict:
                 if use_history_window:
-                    self._extract_field_window("prognostic", t_history, input_data)
+                    self._extract_field_window("prognostic", t_history_lookup, input_data)
                 else:
-                    self._extract_field("prognostic", t, input_data)
+                    self._extract_field("prognostic", t_lookup, input_data)
 
         sample: dict[str, Any] = {
             "input": input_data,
@@ -444,7 +501,7 @@ class BaseDataset(AbstractBaseDataset):
             target_data: dict[str, Any] = {}
             for field_type in ("prognostic", "diagnostic"):
                 if field_type in self.var_dict:
-                    self._extract_field(field_type, t_target, target_data)
+                    self._extract_field(field_type, t_target_lookup, target_data)
 
             sample["target"] = target_data
             sample["metadata"]["target_datetime"] = encode_time(t_target)
