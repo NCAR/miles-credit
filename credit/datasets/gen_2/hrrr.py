@@ -12,9 +12,9 @@ Supports three HRRR products (``VALID_PRODUCTS``):
 Tensor keys follow the pattern ``{user_provided_name}/{hrrr_product}/{field_type}/{dim}/{varname}``
 where *hrrr_product* is product-specific:
 
-* "wrfprs"  → `{user_provided_name}/`wrfprs/{field_type}/{dim}/{varname}``
-* "wrfnat"  → `{user_provided_name}/`wrfnat/{field_type}/{dim}/{varname}``
-* "wrfsubh" → `{user_provided_name}/`wrfsubh/{field_type}/2d/{varname}``
+* ``"wrfprs"``  → ``{user_provided_name}/wrfprs/{field_type}/{dim}/{varname}``
+* ``"wrfnat"``  → ``{user_provided_name}/wrfnat/{field_type}/{dim}/{varname}``
+* ``"wrfsubh"`` → ``{user_provided_name}/wrfsubh/{field_type}/2d/{varname}``
 
 *dim* is ``"3d"`` for multi-level variables and ``"2d"`` for surface variables.
 
@@ -44,11 +44,11 @@ Both local and remote modes use the same ``.idx`` + byte-range pipeline:
 2. Issue one Obstore get_ranges request to pull all the relevant data
    fields (based on the byte ranges from the idx file).
 
-*Local mode*: 
+*Local mode*:
 
-1. Reads the ``.idx`` sidecar from disk, 
+1. Reads the ``.idx`` sidecar from disk,
 2. Uses ``file.seek()`` + ``file.read()`` — identical byte-range approach, no
-full-file scan.  
+full-file scan.
 
 The ``.idx`` sidecar must be present alongside the grib2;
 download it with ``hrrr_download.py``.
