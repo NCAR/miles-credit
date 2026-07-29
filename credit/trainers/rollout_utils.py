@@ -31,6 +31,57 @@ def parse_length(length_str: str, timestep: str) -> int:
     return n
 
 
+def apply_inference_overrides(conf: dict) -> None:
+    """Override data:/preblocks:/postblocks: with blocks nested under inference:, if present.
+
+    Each of ``inference.data``, ``inference.preblocks``, ``inference.postblocks``
+    is optional and independent: if present, it wholesale-replaces the
+    corresponding top-level block (``conf["data"]``, ``conf["preblocks"]``,
+    ``conf["postblocks"]``) for the remainder of this process; if absent, the
+    top-level block used for training is left as-is. Mutates ``conf`` in
+    place — call once, before anything reads ``conf["data"]``/``preblocks``/
+    ``postblocks`` (dataset construction, ``build_preblocks``,
+    ``build_postblocks``, ``ChannelSchema``).
+
+    This is a full replacement, not a deep merge: an ``inference.data`` block
+    must be a complete ``data:``-shaped config on its own, not a partial
+    override of individual keys. A present-but-``null`` key (e.g. ``inference:
+    {data: null}``, however that arises in YAML) is treated as absent, not as
+    an override to ``None``.
+    """
+    inf_conf = conf.get("inference") or {}
+    for key in ("data", "preblocks", "postblocks"):
+        override = inf_conf.get(key)
+        if override is not None:
+            conf[key] = override
+
+
+def with_inference_datetime_bounds(data_conf: dict, all_init_times: list, n_steps: int, timestep: str) -> dict:
+    """Return a copy of *data_conf* with start_datetime/end_datetime derived, if absent.
+
+    ``BaseDataset.__init__`` unconditionally requires ``start_datetime``/
+    ``end_datetime``, but at inference the real init-time schedule
+    (``inference.batch_forecast``/``single_forecast``) already determines the
+    only dates that matter — a ``data:``/``inference.data`` block written for
+    inference-only use doesn't need to specify them separately. Derived as
+    ``start_datetime = min(all_init_times)``,
+    ``end_datetime = max(all_init_times) + n_steps * timestep`` — the exact
+    span of raw timestamps the rollout will ever request, covering both batch
+    (``all_init_times`` spans ``first_init_date``..``last_init_date``) and
+    single (``all_init_times`` is one timestamp) modes with the same formula.
+    An explicit value in *data_conf* always wins.
+
+    Note: for a source configured with ``temporal_mode: persist`` and
+    ``history_len > 1``, this span starts ``(history_len-1)*timestep`` later
+    than the true earliest lookback point, which could raise a "before first
+    available timestamp" error at the earliest edge — a narrow, pre-existing
+    edge case (fails loudly, not silently) that neither example config hits
+    (both use ``history_len: 1``).
+    """
+    end_datetime = max(all_init_times) + n_steps * pd.Timedelta(timestep)
+    return {"start_datetime": min(all_init_times), "end_datetime": end_datetime, **data_conf}
+
+
 def batch_init_times(batch_conf: dict, calendar: str = "standard") -> list:
     """Generate the ordered list of init timestamps from inference.batch_forecast.
 
