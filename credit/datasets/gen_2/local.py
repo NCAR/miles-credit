@@ -94,6 +94,7 @@ class LocalDataset(BaseDataset):
           source:
             My_Surface_Data:  # User-provided name (arbitrary key)
               dataset_type: "local"
+              grid_type: "unstructured"         # Optional: explicit override (auto-inferred if absent)
               level_coord: "level"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
               variables:
@@ -118,11 +119,17 @@ class LocalDataset(BaseDataset):
           forecast_len: 1
 
     Assumptions:
-        1. A "time" dimension / coordinate is present for non-static fields.
+        1. A "time" dimension / coordinate is present for non-static fields (defaults to
+           "time", configurable via `time_coord`).
         2. A level coordinate (name given by ``level_coord``) represents the
            vertical axis of 3D variables.
-        3. Dimension order: (time, level, latitude, longitude) for 3D;
-           (time, latitude, longitude) for 2D; (latitude, longitude) for static.
+        3. Dimension order for Structured: (time, level, latitude, longitude) for 3D;
+           (time, latitude, longitude) for 2D.
+        4. Dimension order for Unstructured: (time, level, ncol) for 3D; (time, ncol) for 2D.
+        5. Static fields are automatically replicated along the time axis. If a static
+           file contains a dummy time dimension, it is safely ignored.
+        6. Finding lat/lon arrays (regardless of naming convention) is delegated to
+           `find_coord_pair`.
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
@@ -140,11 +147,12 @@ class LocalDataset(BaseDataset):
         self.dataset_type = "local"
         self.level_coord: str | None = self.curr_source_cfg.get("level_coord")
         self.levels: list | None = self.curr_source_cfg.get("levels")
+        grid = self._find_grid(self.curr_source_cfg)  # also fills self.levels from the same open file, if absent
         self.static_metadata: dict[str, Any] = {
             "levels": self.levels,
             "calendar": self.calendar,
             "datetime_fmt": "unix_ns" if is_standard_calendar(self.calendar) else f"cf_ns:{self.calendar}",
-            "grid": self._find_grid(self.curr_source_cfg),
+            "grid": grid,
         }
         self.mode = "local"
         self.time_coord = self.curr_source_cfg.get("time_coord", "time")
@@ -209,6 +217,13 @@ class LocalDataset(BaseDataset):
         to ``{save_loc}/{source}_grid_schema.nc`` (see
         ``write_source_grid_schema_if_missing``). Failures are non-fatal: warn and
         return None.
+
+        While the file is open, also fills ``self.levels`` from the same
+        ``level_coord`` if it's still unset (absent from config) and present in
+        this file — piggybacking on the same open rather than a separate read.
+        If this particular file lacks the level coordinate (e.g. it happens to
+        be a 2D-only field type), ``self.levels`` stays ``None`` here and falls
+        back to ``_read_3d_array``'s lazy per-batch resolution.
         """
         engine = source_cfg.get("engine")
         variables = source_cfg.get("variables") or {}
@@ -222,9 +237,39 @@ class LocalDataset(BaseDataset):
             try:
                 with xr.open_dataset(files[0], engine=engine) as ds:
                     lon, lat, _, _ = find_coord_pair(ds)
-                    grid = {"grid_type": infer_grid_type(lat, lon), "lat": lat, "lon": lon}
+
+                    # 1. Check for explicit YAML override
+                    config_grid_type = source_cfg.get("grid_type")
+
+                    # 2. Robust unstructured detection
+                    if config_grid_type:
+                        grid_type = config_grid_type
+                    elif (
+                        hasattr(lat, "dims")
+                        and hasattr(lon, "dims")
+                        and lat.ndim == 1
+                        and lon.ndim == 1
+                        and lat.dims == lon.dims
+                    ):
+                        # Ideal case: lat/lon are xarray DataArrays sharing the exact same 1D dimension (e.g. 'ncol')
+                        grid_type = "unstructured"
+                    elif lat.ndim == 1 and lon.ndim == 1 and len(lat) == len(lon):
+                        # Fallback if find_coord_pair returns raw numpy arrays. Check if their length matches a single spatial dimension in the dataset.
+                        shared_dims = [dim for dim, size in ds.sizes.items() if size == len(lat)]
+                        if shared_dims:
+                            grid_type = "unstructured"
+                        else:
+                            grid_type = infer_grid_type(lat, lon)
+                    else:
+                        grid_type = infer_grid_type(lat, lon)
+
+                    grid = {"grid_type": grid_type, "lat": lat, "lon": lon}
                     write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
+
+                    if self.levels is None and self.level_coord in ds.coords:
+                        self.levels = ds[self.level_coord].values.tolist()
                     return grid
+
             except Exception as exc:
                 logger.warning(
                     "LocalDataset '%s': could not find grid in %s (%s).",
@@ -257,8 +302,8 @@ class LocalDataset(BaseDataset):
             sample: Dict to write variable tensors into (modified in place).
                 Tensor shapes (no batch dimension):
 
-                - 3D variable: ``(n_levels, 1, lat, lon)``
-                - 2D variable: ``(1, 1, lat, lon)``
+                - 3D variable: ``(n_levels, 1, spatial_dims...)``
+                - 2D variable: ``(1, 1, spatial_dims...)``
         """
         file_intervals = self.file_dict.get(field_type)
         if not file_intervals or field_type not in self.var_dict:
@@ -269,6 +314,10 @@ class LocalDataset(BaseDataset):
         vars_2D: list[str] = vd["vars_2D"]
 
         with xr.open_dataset(_find_file(file_intervals, t)) as ds:
+            # Bulletproof static fields: drop dummy time dimensions completely so `.sel` doesn't crash
+            if field_type == "static" and self.time_coord in ds.dims:
+                ds = ds.isel({self.time_coord: 0}, drop=True)
+
             ds_t = self._select_at_time(ds, t)
             self._write_field_tensors(ds_t, vars_3D, vars_2D, field_type, sample)
 
@@ -291,7 +340,7 @@ class LocalDataset(BaseDataset):
         axis ``len(t_history)`` times.
 
         Produces the same output as the generic reader: 3D →
-        ``(n_levels, len(t_history), lat, lon)``, 2D → ``(1, len(t_history), lat, lon)``.
+        ``(n_levels, len(t_history), spatial_dims...)``, 2D → ``(1, len(t_history), spatial_dims...)``.
 
         Args:
             field_type: One of ``"prognostic"``, ``"dynamic_forcing"``,
@@ -324,6 +373,10 @@ class LocalDataset(BaseDataset):
 
         for path, indices in groups.items():
             with xr.open_dataset(path) as ds:
+                # Bulletproof static fields: drop dummy time dimensions completely
+                if field_type == "static" and self.time_coord in ds.dims:
+                    ds = ds.isel({self.time_coord: 0}, drop=True)
+
                 has_time = self.time_coord in ds.dims
                 if not has_time:
                     # Static-style field: load once, replicate at each index.
@@ -345,8 +398,8 @@ class LocalDataset(BaseDataset):
                             arr = ds_t[v].values
                             per_var_2D[v][k] = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
 
-        # Concatenate along time dim (dim=1): list of (n_lev, 1, lat, lon)
-        # -> (n_lev, n_t, lat, lon); 2D analogously.
+        # Concatenate along time dim (dim=1): list of (n_lev, 1, spatial)
+        # -> (n_lev, n_t, spatial); 2D analogously.
         for v in vars_3D:
             key = self._get_field_name(field_type, "3d", v)
             sample[key] = torch.cat(per_var_3D[v], dim=1)
@@ -429,14 +482,14 @@ class LocalDataset(BaseDataset):
             field_type: The field type being written.
             sample: Dict to write tensors into (modified in place).
         """
-        # 3D variables: (n_levels, lat, lon) → (n_levels, 1, lat, lon)
+        # 3D variables: (n_levels, spatial) → (n_levels, 1, spatial)
         for vname in vars_3D:
             arr = self._read_3d_array(ds_t, vname)
             tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
             key = self._get_field_name(field_type, "3d", vname)
             sample[key] = tensor
 
-        # 2D variables: (lat, lon) → (1, 1, lat, lon)
+        # 2D variables: (spatial) → (1, 1, spatial)
         for vname in vars_2D:
             arr = ds_t[vname].values
             tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)

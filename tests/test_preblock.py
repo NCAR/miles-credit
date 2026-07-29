@@ -110,6 +110,28 @@ def test_regrid_output_shape(weight_file):
         assert result[split]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].shape == (100, 16, 1, n_dst_lat, n_dst_lon)
 
 
+def test_regrid_unstructured_input(weight_file):
+    """A source tensor with the spatial dims already flattened (e.g. an unstructured/
+    curvilinear source grid, or any pre-flattened (..., n_a) input) must regrid to the
+    exact same result as the structured (lat, lon) input -- _regrid detects spatial_dims
+    (1 vs 2) from the tensor shape rather than always assuming 2D."""
+    path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
+    variables = ["Test_ERA5/prognostic/3d/T"]
+    batch_2d = create_synthetic_data()
+    batch_flat = copy.deepcopy(batch_2d)
+    batch_flat["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"] = batch_flat["input"]["Test_ERA5"][
+        "Test_ERA5/prognostic/3d/T"
+    ].reshape(100, 16, 1, n_src_lat * n_src_lon)
+
+    result_2d = Regridder(path, variables=variables)(batch_2d)
+    result_flat = Regridder(path, variables=variables)(batch_flat)
+
+    t_2d = result_2d["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
+    t_flat = result_flat["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
+    assert t_flat.shape == (100, 16, 1, n_dst_lat, n_dst_lon)
+    assert torch.equal(t_flat, t_2d)
+
+
 def test_regrid_uniform_input(weight_file):
     """Block-average regrid: uniform input maps to uniform output of the same value."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
@@ -125,13 +147,15 @@ def test_regrid_uniform_input(weight_file):
 
 
 def test_regrid_reshape_false(weight_file):
-    """reshape_to_xy=False returns a flat (prod(lead_dims), n_b) tensor."""
+    """reshape_to_xy=False skips the (ny, nx) reshape but still preserves the
+    leading (batch, level, time) dims, returning (*lead_dims, n_b) — batch must
+    stay a distinct leading dim for downstream consumers (e.g. ConcatToTensor)."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
     variables = ["Test_ERA5/prognostic/3d/T"]
     regrid = Regridder(path, variables=variables, reshape_to_xy=False)
     batch = create_synthetic_data()
     result = regrid(batch)
-    assert result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].shape == (100 * 16 * 1, n_dst_lat * n_dst_lon)
+    assert result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].shape == (100, 16, 1, n_dst_lat * n_dst_lon)
 
 
 def test_regrid_flip_axis(weight_file):
