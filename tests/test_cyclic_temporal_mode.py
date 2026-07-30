@@ -10,12 +10,15 @@ source (constant output regardless of *t*) can't distinguish.
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 import torch
+import xarray as xr
 
 from credit.datasets import register_dataset
 from credit.datasets.gen_2.base_dataset import BaseDataset
+from credit.datasets.gen_2.local import LocalDataset
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
 
 
@@ -208,3 +211,82 @@ class TestCyclicMultiSourceDataset:
         clim_ds = ds.datasets["Clim"]
         assert len(clim_ds.recorded_calls) == 1
         assert clim_ds.recorded_calls[0][1] == pd.Timestamp(f"2000-{t.month:02d}-{t.day:02d}")
+
+
+# --------------------------------------------------------------------------- #
+# LocalDataset: inferring cycle_year/start_datetime/end_datetime/timestep
+# from the data itself, when the config omits them
+# --------------------------------------------------------------------------- #
+
+
+def _write_climatology_file(path, times):
+    ds = xr.Dataset(
+        {"sst": (("time", "latitude", "longitude"), np.random.rand(len(times), 4, 4).astype(np.float32))},
+        coords={"time": times, "latitude": np.linspace(-60, 60, 4), "longitude": np.linspace(0, 300, 4)},
+    )
+    ds.to_netcdf(path)
+    return str(path)
+
+
+def _cyclic_local_config(path, **source_overrides):
+    source = {
+        "dataset_type": "local",
+        "temporal_mode": "cyclic",
+        "variables": {"dynamic_forcing": {"vars_2D": ["sst"], "path": path}},
+        **source_overrides,
+    }
+    return {"source": {"SST_clim": source}, "forecast_len": 1}
+
+
+class TestCyclicLocalDatasetInference:
+    def test_infers_dt_start_end_cycle_year_from_file(self, tmp_path):
+        times = pd.date_range("2000-01-01", "2000-12-31", freq="1D")
+        path = _write_climatology_file(tmp_path / "sst_clim.nc", times)
+        ds = LocalDataset(_cyclic_local_config(path))
+
+        assert ds.cycle_year == 2000
+        assert ds.dt == pd.Timedelta("1D")
+        assert ds.start_datetime == pd.Timestamp("2000-01-01")
+        assert ds.end_datetime == pd.Timestamp("2000-12-31")
+
+    def test_inferred_source_answers_for_an_arbitrary_real_year(self, tmp_path):
+        times = pd.date_range("2000-01-01", "2000-12-31", freq="1D")
+        path = _write_climatology_file(tmp_path / "sst_clim.nc", times)
+        ds = LocalDataset(_cyclic_local_config(path))
+
+        sample = ds[(pd.Timestamp("1985-07-15"), 0)]
+        assert "SST_clim/dynamic_forcing/2d/sst" in sample["input"]
+
+    def test_explicit_cycle_year_overrides_inference(self, tmp_path):
+        times = pd.date_range("2000-01-01", "2000-12-31", freq="1D")
+        path = _write_climatology_file(tmp_path / "sst_clim.nc", times)
+        ds = LocalDataset(_cyclic_local_config(path, cycle_year=2004))
+        assert ds.cycle_year == 2004
+
+    def test_explicit_start_end_timestep_override_inference(self, tmp_path):
+        times = pd.date_range("2000-01-01", "2000-12-31", freq="1D")
+        path = _write_climatology_file(tmp_path / "sst_clim.nc", times)
+        ds = LocalDataset(
+            _cyclic_local_config(path, start_datetime="2000-01-01", end_datetime="2000-06-01", timestep="1D")
+        )
+        assert ds.start_datetime == pd.Timestamp("2000-01-01")
+        assert ds.end_datetime == pd.Timestamp("2000-06-01")
+
+    def test_file_spanning_multiple_years_raises(self, tmp_path):
+        times = pd.date_range("2000-06-01", "2001-06-01", freq="1D")
+        path = _write_climatology_file(tmp_path / "sst_clim.nc", times)
+        with pytest.raises(ValueError, match="spans more than one year"):
+            LocalDataset(_cyclic_local_config(path))
+
+    def test_single_timestamp_file_falls_back_to_required_config_error(self, tmp_path):
+        """No timestep can be inferred from one timestamp -- falls back to the
+        ordinary required-config error rather than guessing."""
+        path = _write_climatology_file(tmp_path / "sst_clim.nc", pd.date_range("2000-01-01", periods=1, freq="1D"))
+        with pytest.raises(KeyError, match="timestep"):
+            LocalDataset(_cyclic_local_config(path))
+
+    def test_cyclic_source_cannot_combine_with_date_ranges(self, tmp_path):
+        times = pd.date_range("2000-01-01", "2000-12-31", freq="1D")
+        path = _write_climatology_file(tmp_path / "sst_clim.nc", times)
+        with pytest.raises(ValueError, match="cannot be combined with"):
+            LocalDataset(_cyclic_local_config(path, date_ranges=[["2000-01-01", "2000-06-01"]]))

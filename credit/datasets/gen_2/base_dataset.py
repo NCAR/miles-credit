@@ -257,37 +257,56 @@ class BaseDataset(AbstractBaseDataset):
         # date_ranges (not a conflict): this is the normal case for persist/cyclic
         # sources, which almost always define their own independent coverage
         # regardless of what the overall run's date_ranges looks like.
-        has_source_date_range = self._in_source_config(data_config, self.curr_source_cfg, "start_datetime") or (
-            self._in_source_config(data_config, self.curr_source_cfg, "end_datetime")
-        )
-        source_has_date_ranges = "date_ranges" in self.curr_source_cfg
-        if has_source_date_range and source_has_date_ranges:
-            raise ValueError(
-                f"Source '{self.curr_source_name}': date_ranges cannot be combined with "
-                "start_datetime/end_datetime in the same source config -- use one or the other."
-            )
-
-        if has_source_date_range:
-            self.date_ranges = None
-            self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
-            self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
-        elif source_has_date_ranges:
-            self.date_ranges = self.curr_source_cfg["date_ranges"]
-            self.start_datetime = None
-            self.end_datetime = None
-        elif "date_ranges" in data_config:
-            if "start_datetime" in data_config or "end_datetime" in data_config:
+        temporal_mode = self.curr_source_cfg.get("temporal_mode", "exact")
+        if temporal_mode == "cyclic":
+            # A cyclic source's own coverage is always self-contained -- its
+            # own single representative cycle, either explicit
+            # (start_datetime/end_datetime) or inferred from its data (see
+            # LocalDataset._load_start_datetime/_load_end_datetime) -- never
+            # date_ranges, which describes the overall run's real multi-year
+            # span, a different concept entirely that a cyclic source must not
+            # accidentally inherit from the data level.
+            if "date_ranges" in self.curr_source_cfg:
                 raise ValueError(
-                    "date_ranges cannot be combined with start_datetime/end_datetime at the data level "
-                    "-- use one or the other."
+                    f"Source '{self.curr_source_name}': temporal_mode: cyclic cannot be combined with "
+                    "date_ranges -- its own start_datetime/end_datetime (explicit or inferred) already "
+                    "describes its single representative cycle."
                 )
-            self.date_ranges = data_config["date_ranges"]
-            self.start_datetime = None
-            self.end_datetime = None
-        else:
             self.date_ranges = None
             self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
             self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+        else:
+            has_source_date_range = self._in_source_config(data_config, self.curr_source_cfg, "start_datetime") or (
+                self._in_source_config(data_config, self.curr_source_cfg, "end_datetime")
+            )
+            source_has_date_ranges = "date_ranges" in self.curr_source_cfg
+            if has_source_date_range and source_has_date_ranges:
+                raise ValueError(
+                    f"Source '{self.curr_source_name}': date_ranges cannot be combined with "
+                    "start_datetime/end_datetime in the same source config -- use one or the other."
+                )
+
+            if has_source_date_range:
+                self.date_ranges = None
+                self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+                self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+            elif source_has_date_ranges:
+                self.date_ranges = self.curr_source_cfg["date_ranges"]
+                self.start_datetime = None
+                self.end_datetime = None
+            elif "date_ranges" in data_config:
+                if "start_datetime" in data_config or "end_datetime" in data_config:
+                    raise ValueError(
+                        "date_ranges cannot be combined with start_datetime/end_datetime at the data level "
+                        "-- use one or the other."
+                    )
+                self.date_ranges = data_config["date_ranges"]
+                self.start_datetime = None
+                self.end_datetime = None
+            else:
+                self.date_ranges = None
+                self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+                self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
 
         # CF calendar of this source's clock. Resolved from config (source-level
         # `calendar:` key, then data-level) with a subclass hook for finding it in
@@ -317,7 +336,9 @@ class BaseDataset(AbstractBaseDataset):
         # cycle_year: the single representative year a cyclic source's data lives
         # in (e.g. 2000). Any year works -- to_cycle_year clamps Feb 29 to Feb 28
         # when cycle_year doesn't have one, rather than requiring a leap year.
-        self.cycle_year: int | None = self.curr_source_cfg.get("cycle_year")
+        # Config wins if given; subclasses (e.g. LocalDataset) may override
+        # _load_cycle_year to infer it from the data instead.
+        self.cycle_year: int | None = self._load_cycle_year(data_config, self.curr_source_cfg)
         if self.temporal_mode == "cyclic" and self.cycle_year is None:
             raise ValueError(
                 f"Source '{self.curr_source_name}': temporal_mode: cyclic requires 'cycle_year' "
@@ -603,10 +624,19 @@ class BaseDataset(AbstractBaseDataset):
         Returns:
             pd.Timedelta: The timestep for the dataset
         """
-        self._check_in_data_config(data_config, dt_key)
+        has_source_dt = self._in_source_config(data_config, curr_source_config, dt_key)
+        if dt_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. a
+            # cyclic source whose timestep is inferred/declared independently
+            # of the overall run) -- the source-level value, if this source has
+            # its own, is authoritative on its own.
+            if not has_source_dt:
+                self._check_in_data_config(data_config, dt_key)  # raises with the standard message
+            return pd.Timedelta(curr_source_config[dt_key])
+
         dt_in_data = pd.Timedelta(data_config[dt_key])
 
-        if self._in_source_config(data_config, curr_source_config, dt_key):
+        if has_source_dt:
             dt_in_source = pd.Timedelta(curr_source_config[dt_key])
             if dt_in_source < dt_in_data:
                 logging.warning(
@@ -780,6 +810,23 @@ class BaseDataset(AbstractBaseDataset):
             return end_datetime_in_source
 
         return end_datetime_in_data
+
+    def _load_cycle_year(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> int | None:
+        """Resolve a cyclic source's cycle_year from config, or None when unset.
+
+        Config always wins if given. Subclasses that can inspect their data
+        files (see LocalDataset) should override this and fall back to
+        inferring it from the data's own time coordinate when config gives no
+        answer; ``__init__`` raises if this is still None for a cyclic source.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+
+        Returns:
+            int | None: The configured cycle_year, or None if unset.
+        """
+        return curr_source_config.get("cycle_year")
 
     def _resolve_calendar(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> str | None:
         """Resolve this source's CF calendar from config, or None when unset.
