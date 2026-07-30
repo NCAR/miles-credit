@@ -38,6 +38,8 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    :caption: Generation 2
 
    Overview <gen2_overview.md>
+   Datasets <Datasets.md>
+   
 
 .. toctree::
    :maxdepth: 2
@@ -71,10 +73,15 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
 
    Supported Model Architectures <Model_Architectures.md>
    Post Blocks <postblock.md>
-   Dataset Structure <Datasets.md>
    Data Pipeline for Downscaling <downscaling-pipeline.md>
    Prepare New Dataset <prepare_new_dataset.md>
    RAL GWC regional model <RAL-GWC-model.md>
+
+.. toctree::
+   :maxdepth: 1
+   :caption: API Reference
+
+   Overview <api/index>
 
 ----
 

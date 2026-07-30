@@ -38,6 +38,7 @@ myst_heading_anchors = 3
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
 autoapi_dirs = ["../../credit", "../../applications"]
+autoapi_root = "api"
 # Drop "imported-members" from the defaults so package __init__ re-exports are
 # not documented a second time under the package (they are already documented in
 # the submodule that defines them). This removes the "duplicate object
@@ -49,6 +50,12 @@ autoapi_options = [
     "show-module-summary",
     "special-members",
 ]
+# Left at the default True so autoapi still generates the api/index landing
+# page. index.rst declares its own toctree for api/index under an "API
+# Reference" caption; autoapi detects that entry and skips appending a second,
+# uncaptioned one to the last toctree on the page.
+autoapi_add_toctree_entry = True
+
 html_logo = "_static/credit_logo.png"
 
 # Warnings that cannot be cleanly resolved in the source docstrings:
