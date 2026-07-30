@@ -46,6 +46,7 @@ import pandas as pd
 from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
 from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
     build_time_index,
+    build_time_index_multi,
     filter_index_by_labels,
     is_standard_calendar,
     most_restrictive_calendar,
@@ -256,9 +257,11 @@ class MultiSourceDataset(AbstractBaseDataset):
         """Build the master sampling clock from the global config.
 
         The clock is anchored to the global ``start_datetime``, ``end_datetime``,
-        and ``timestep``, and built on the master calendar (see
-        ``_resolve_master_calendar``): a ``pd.DatetimeIndex`` for the standard
-        family, an ``xr.CFTimeIndex`` otherwise.  For each source:
+        and ``timestep`` (or, alternatively, a non-contiguous ``date_ranges``
+        list of ``(start, end)`` blocks -- see ``build_time_index_multi``), and
+        built on the master calendar (see ``_resolve_master_calendar``): a
+        ``pd.DatetimeIndex`` for the standard family, an ``xr.CFTimeIndex``
+        otherwise.  For each source:
 
         - **Normal sources** (no ``temporal_mode``): the clock is filtered to
           timestamps that exist exactly in that source's native datetimes.  A
@@ -295,14 +298,37 @@ class MultiSourceDataset(AbstractBaseDataset):
         master_dt = pd.Timedelta(config["timestep"])
         num_history_steps = config.get("history_len", 1)
         num_forecast_steps = config.get("forecast_len", 1)
-        # Convert bounds to the master calendar *before* the horizon/history
-        # arithmetic so it is calendar-correct near leap days.
-        master_start = (
-            to_calendar(pd.Timestamp(config["start_datetime"]), self.calendar) + (num_history_steps - 1) * master_dt
-        )
-        master_end = to_calendar(pd.Timestamp(config["end_datetime"]), self.calendar)
 
-        master = build_time_index(master_start, master_end - num_forecast_steps * master_dt, master_dt, self.calendar)
+        if "date_ranges" in config:
+            # Non-contiguous blocks (e.g. train on 1950-1965 + 1970-1985,
+            # skipping 1966-1969): the same history/forecast margin is applied
+            # to each block independently and the per-block indices are
+            # concatenated (see build_time_index_multi) -- mutually exclusive
+            # with start_datetime/end_datetime (validated at config parse time
+            # the same way BaseDataset validates it per-source).
+            if "start_datetime" in config or "end_datetime" in config:
+                raise ValueError(
+                    "MultiSourceDataset: date_ranges cannot be combined with start_datetime/"
+                    "end_datetime -- use one or the other."
+                )
+            master = build_time_index_multi(
+                config["date_ranges"],
+                master_dt,
+                self.calendar,
+                start_margin=(num_history_steps - 1) * master_dt,
+                end_margin=num_forecast_steps * master_dt,
+            )
+        else:
+            # Convert bounds to the master calendar *before* the horizon/history
+            # arithmetic so it is calendar-correct near leap days.
+            master_start = (
+                to_calendar(pd.Timestamp(config["start_datetime"]), self.calendar) + (num_history_steps - 1) * master_dt
+            )
+            master_end = to_calendar(pd.Timestamp(config["end_datetime"]), self.calendar)
+
+            master = build_time_index(
+                master_start, master_end - num_forecast_steps * master_dt, master_dt, self.calendar
+            )
 
         source_cfg = config.get("source", {})
         for name, ds in self.datasets.items():

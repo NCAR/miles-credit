@@ -187,6 +187,78 @@ def build_time_index(start, end, freq, calendar: str | None = "standard"):
     return xr.date_range(to_calendar(start, cal), to_calendar(end, cal), freq=freq_str, calendar=cal, use_cftime=True)
 
 
+def build_time_index_multi(
+    blocks,
+    freq,
+    calendar: str | None = "standard",
+    start_margin=pd.Timedelta(0),
+    end_margin=pd.Timedelta(0),
+):
+    """Build the sampling clock from one or more non-overlapping ``(start, end)`` blocks.
+
+    Generalizes ``build_time_index`` to non-contiguous date ranges (e.g. train on
+    1950-1965 + 1970-1985, skipping 1966-1969): *start_margin* is added to each
+    block's start and *end_margin* subtracted from each block's end -- exactly
+    the existing history_len/forecast_len safety margin
+    (``(history_len-1)*dt`` / ``num_forecast_steps*dt``), applied per block
+    instead of once globally -- then each block's own time index is built
+    independently and the results are concatenated. Because the margin is
+    applied per block, an init time drawn from anywhere in the resulting index
+    can never produce a history/rollout window that reaches outside that
+    block, into an excluded gap -- nothing downstream (sampler, per-source
+    persist/cyclic filtering) needs to know blocks exist at all.
+
+    Args:
+        blocks: list of ``(start, end)`` pairs (timestamp or parseable string
+            each). Must be sorted and non-overlapping (validated here, on the
+            raw/untrimmed bounds).
+        freq: ``pd.Timedelta`` or pandas frequency string.
+        calendar: CF calendar name.
+        start_margin: added to each block's start before building its index.
+        end_margin: subtracted from each block's end before building its index.
+
+    Raises:
+        ValueError: if ``blocks`` is empty, a block has end <= start, blocks
+            are unsorted/overlapping, or a block is too short to survive its
+            own ``start_margin``/``end_margin`` trim.
+    """
+    if not blocks:
+        raise ValueError("build_time_index_multi: `blocks` must be a non-empty list of (start, end) pairs.")
+
+    cal_blocks = []
+    for start, end in blocks:
+        s = to_calendar(pd.Timestamp(start), calendar)
+        e = to_calendar(pd.Timestamp(end), calendar)
+        if e <= s:
+            raise ValueError(f"build_time_index_multi: block ({start}, {end}) has end <= start.")
+        cal_blocks.append((s, e))
+
+    cal_blocks.sort(key=lambda b: b[0])
+    for (_, e1), (s2, _) in zip(cal_blocks, cal_blocks[1:]):
+        if s2 <= e1:
+            raise ValueError(
+                "build_time_index_multi: date_ranges blocks must be sorted and non-overlapping; "
+                f"block ending {e1} overlaps (or is out of order with) block starting {s2}."
+            )
+
+    all_ts = []
+    for s, e in cal_blocks:
+        trimmed_start = s + start_margin
+        trimmed_end = e - end_margin
+        if trimmed_end < trimmed_start:
+            raise ValueError(
+                f"build_time_index_multi: block ({s}, {e}) is too short for the configured "
+                f"history_len/forecast_len margin (needs at least {start_margin + end_margin})."
+            )
+        all_ts.extend(build_time_index(trimmed_start, trimmed_end, freq, calendar))
+
+    if is_standard_calendar(calendar):
+        return pd.DatetimeIndex(all_ts)
+    import xarray as xr  # deferred: keeps the standard path free of the import
+
+    return xr.CFTimeIndex(all_ts)
+
+
 def encode_time(t) -> int:
     """Encode a timestamp as int nanoseconds since 1970-01-01 *in its own calendar*.
 

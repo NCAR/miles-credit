@@ -24,6 +24,7 @@ from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage
     _map_files,
     _path_template_to_glob,
     build_time_index,
+    build_time_index_multi,
     encode_time,
     is_standard_calendar,
     normalize_calendar,
@@ -248,8 +249,45 @@ class BaseDataset(AbstractBaseDataset):
         self.num_forecast_steps: int = self._load_num_forecast_steps(data_config, self.curr_source_cfg)
         self.history_len: int = self._load_history_len(data_config, self.curr_source_cfg)
 
-        self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
-        self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+        # date_ranges is an optional alternative to start_datetime/end_datetime:
+        # a list of non-contiguous (start, end) blocks (e.g. train on
+        # 1950-1965 + 1970-1985, skipping 1966-1969). Mutually exclusive with
+        # start_datetime/end_datetime *at the same level* -- but an explicit
+        # source-level start_datetime/end_datetime always wins over a data-level
+        # date_ranges (not a conflict): this is the normal case for persist/cyclic
+        # sources, which almost always define their own independent coverage
+        # regardless of what the overall run's date_ranges looks like.
+        has_source_date_range = self._in_source_config(data_config, self.curr_source_cfg, "start_datetime") or (
+            self._in_source_config(data_config, self.curr_source_cfg, "end_datetime")
+        )
+        source_has_date_ranges = "date_ranges" in self.curr_source_cfg
+        if has_source_date_range and source_has_date_ranges:
+            raise ValueError(
+                f"Source '{self.curr_source_name}': date_ranges cannot be combined with "
+                "start_datetime/end_datetime in the same source config -- use one or the other."
+            )
+
+        if has_source_date_range:
+            self.date_ranges = None
+            self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+            self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+        elif source_has_date_ranges:
+            self.date_ranges = self.curr_source_cfg["date_ranges"]
+            self.start_datetime = None
+            self.end_datetime = None
+        elif "date_ranges" in data_config:
+            if "start_datetime" in data_config or "end_datetime" in data_config:
+                raise ValueError(
+                    "date_ranges cannot be combined with start_datetime/end_datetime at the data level "
+                    "-- use one or the other."
+                )
+            self.date_ranges = data_config["date_ranges"]
+            self.start_datetime = None
+            self.end_datetime = None
+        else:
+            self.date_ranges = None
+            self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+            self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
 
         # CF calendar of this source's clock. Resolved from config (source-level
         # `calendar:` key, then data-level) with a subclass hook for finding it in
@@ -677,11 +715,18 @@ class BaseDataset(AbstractBaseDataset):
         Returns:
             pd.Timestamp: The start datetime for the dataset
         """
+        has_source_date_range = self._in_source_config(data_config, curr_source_config, start_datetime_key)
+        if start_datetime_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. the
+            # data level uses date_ranges instead) -- the source-level value, if
+            # this source has its own, is authoritative on its own.
+            if not has_source_date_range:
+                self._check_in_data_config(data_config, start_datetime_key)  # raises with the standard message
+            return pd.Timestamp(curr_source_config[start_datetime_key])
 
-        self._check_in_data_config(data_config, start_datetime_key)
         start_datetime_in_data = pd.Timestamp(data_config[start_datetime_key])
 
-        if self._in_source_config(data_config, curr_source_config, start_datetime_key):
+        if has_source_date_range:
             start_datetime_in_source = pd.Timestamp(curr_source_config[start_datetime_key])
             if start_datetime_in_source < start_datetime_in_data:
                 logging.warning(
@@ -711,11 +756,18 @@ class BaseDataset(AbstractBaseDataset):
         Returns:
             pd.Timestamp: The end datetime for the dataset
         """
+        has_source_date_range = self._in_source_config(data_config, curr_source_config, end_datetime_key)
+        if end_datetime_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. the
+            # data level uses date_ranges instead) -- the source-level value, if
+            # this source has its own, is authoritative on its own.
+            if not has_source_date_range:
+                self._check_in_data_config(data_config, end_datetime_key)  # raises with the standard message
+            return pd.Timestamp(curr_source_config[end_datetime_key])
 
-        self._check_in_data_config(data_config, end_datetime_key)
         end_datetime_in_data = pd.Timestamp(data_config[end_datetime_key])
 
-        if self._in_source_config(data_config, curr_source_config, end_datetime_key):
+        if has_source_date_range:
             end_datetime_in_source = pd.Timestamp(curr_source_config[end_datetime_key])
             if end_datetime_in_source > end_datetime_in_data:
                 logging.warning(
@@ -770,11 +822,27 @@ class BaseDataset(AbstractBaseDataset):
         like to enforce time bounds automatically for your dataset. You can use
         super() to have base functionality in these cases.
 
+        When ``self.date_ranges`` is set (non-contiguous blocks, e.g. train on
+        1950-1965 + 1970-1985), the same history/forecast margin is applied to
+        each block independently and the per-block indices are concatenated
+        (see ``build_time_index_multi``) -- an init time drawn from anywhere in
+        the result can never produce a window that reaches outside its own
+        block, so nothing downstream needs to know blocks exist at all.
+
         Returns:
             pd.DatetimeIndex or xr.CFTimeIndex from ``start_datetime + (history_len-1)*dt``
                 to ``end_datetime`` minus the forecast horizon, at the configured
-                timestep frequency.
+                timestep frequency (or the per-block equivalent when ``date_ranges``
+                is set).
         """
+        if self.date_ranges is not None:
+            return build_time_index_multi(
+                self.date_ranges,
+                self.dt,
+                self.calendar,
+                start_margin=(self.history_len - 1) * self.dt,
+                end_margin=self.num_forecast_steps * self.dt,
+            )
         start = to_calendar(self.start_datetime, self.calendar) + (self.history_len - 1) * self.dt
         end = to_calendar(self.end_datetime, self.calendar) - self.num_forecast_steps * self.dt
         return build_time_index(start, end, self.dt, self.calendar)
