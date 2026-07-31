@@ -31,18 +31,10 @@ import warnings
 import numpy as np
 import pytest
 import torch
-
-try:
-    from bridgescaler import save_scaler_dict, scale_var_dict  # noqa: F401
-    from credit.preblock import build_preblocks, apply_preblocks_before_scaler
-    from credit.preblock.scaler import BridgeScalerTransform
-    from credit.trainers.utils import load_dataset, load_dataloader, cycle
-
-    _DEPS_AVAILABLE = True
-except (ImportError, Exception):  # pragma: no cover - environment dependent
-    _DEPS_AVAILABLE = False
-
-_skip_no_deps = pytest.mark.skipif(not _DEPS_AVAILABLE, reason="bridgescaler / credit deps unavailable")
+from bridgescaler import save_scaler_dict, scale_var_dict  # noqa: F401
+from credit.preblock import apply_preblocks_before_scaler, build_preblocks
+from credit.preblock.scaler import BridgeScalerTransform
+from credit.trainers.utils import cycle, load_dataloader, load_dataset
 
 # ---------------------------------------------------------------------------
 # Config / constants
@@ -136,7 +128,7 @@ def _fit_over_rounds(scaler_type: str, batches: list, scaler_path: str):
         scaler_type=scaler_type,
         scaler_params={"channels_last": False},
     )
-    combined = None
+    combined = {}
     for batch in batches:
         combined = transformer.fit_scaler_batch(batch)
     return transformer, combined
@@ -161,9 +153,6 @@ def processed_batches(tmp_path_factory):
     batches are fetched once and reused across the scaler tests to keep the suite
     fast. Skips if the public GCS store cannot be reached.
     """
-    if not _DEPS_AVAILABLE:
-        pytest.skip("dependencies unavailable")
-
     tmp = tmp_path_factory.mktemp("preprocess")
     conf = _make_conf(str(tmp), str(tmp / "scaler_placeholder.json"))
 
@@ -192,7 +181,6 @@ def processed_batches(tmp_path_factory):
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_deps
 def test_batches_have_expected_structure(processed_batches):
     """Each loaded batch is nested [data_type][source][var_key] with sane shapes."""
     batches, _ = processed_batches
@@ -209,7 +197,6 @@ def test_batches_have_expected_structure(processed_batches):
         assert not torch.isnan(inp[VAR_T]).any()
 
 
-@_skip_no_deps
 def test_log_transform_applied_to_specific_humidity(processed_batches):
     """The pre-scaler log transform alters specific humidity but not temperature."""
     batches, q_unlogged = processed_batches
@@ -232,7 +219,6 @@ def test_log_transform_applied_to_specific_humidity(processed_batches):
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_deps
 @pytest.mark.parametrize("scaler_type", SCALER_TYPES)
 def test_fit_scaler_no_nans_and_correct_order(scaler_type, processed_batches, tmp_path):
     """Fit each scaler over 5 rounds; check stats are finite and correctly ordered."""
@@ -269,7 +255,6 @@ def test_fit_scaler_no_nans_and_correct_order(scaler_type, processed_batches, tm
             assert (mn < mx).all(), "min must be strictly below max per level"
 
 
-@_skip_no_deps
 def test_fit_standard_temperature_values_reasonable(processed_batches, tmp_path):
     """The standard scaler's per-level temperature mean lands in a plausible range."""
     batches, _ = processed_batches
@@ -285,7 +270,6 @@ def test_fit_standard_temperature_values_reasonable(processed_batches, tmp_path)
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_deps
 @pytest.mark.parametrize("scaler_type", SCALER_TYPES)
 def test_transform_distribution_properties(scaler_type, processed_batches, tmp_path):
     """Save the fitted scaler, reload it through BridgeScalerTransform, and check
@@ -322,7 +306,6 @@ def test_transform_distribution_properties(scaler_type, processed_batches, tmp_p
             assert float(x.max()) <= 1.0 + 1e-4
 
 
-@_skip_no_deps
 def test_transform_inverse_round_trip(processed_batches, tmp_path):
     """transform followed by inverse_transform recovers the original tensors."""
     batches, _ = processed_batches
@@ -348,7 +331,6 @@ def test_transform_inverse_round_trip(processed_batches, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_deps
 def test_variable_selection_expands_empty_list(processed_batches, tmp_path):
     """An empty ``variables`` list expands to every variable in the batch on first fit."""
     batches, _ = processed_batches
@@ -367,7 +349,6 @@ def test_variable_selection_expands_empty_list(processed_batches, tmp_path):
     assert {VAR_T, VAR_Q, VAR_SP}.issubset(set(transformer.variables))
 
 
-@_skip_no_deps
 def test_fit_scaler_batch_returns_nested_scaler_dict(processed_batches, tmp_path):
     """fit_scaler_batch returns a nested [data_type][source][var] dict of fitted scalers."""
     batches, _ = processed_batches
@@ -385,7 +366,6 @@ def test_fit_scaler_batch_returns_nested_scaler_dict(processed_batches, tmp_path
     assert hasattr(leaf, "mean_x_") and np.isfinite(np.asarray(leaf.mean_x_)).all()
 
 
-@_skip_no_deps
 def test_fit_scaler_batch_accumulates_across_rounds(processed_batches, tmp_path):
     """Repeated fit_scaler_batch calls accumulate statistics (running merge), they
     do not overwrite the previous fit."""
@@ -413,7 +393,6 @@ def test_fit_scaler_batch_accumulates_across_rounds(processed_batches, tmp_path)
     assert transformer.scaler is not None
 
 
-@_skip_no_deps
 def test_fit_after_existing_scaler_file_raises(processed_batches, tmp_path):
     """Fitting when a scaler file already exists is rejected (no template to fit)."""
     batches, _ = processed_batches
@@ -430,13 +409,12 @@ def test_fit_after_existing_scaler_file_raises(processed_batches, tmp_path):
         loaded.fit_scaler_batch(batches[0])
 
 
-@_skip_no_deps
 def test_preprocess_main_end_to_end(tmp_path, monkeypatch):
     """Drive applications.preprocess.main single-process and confirm it writes a
     reasonable scaler file (exercises the full CLI workflow incl. the rank-0 save)."""
     import yaml
     from bridgescaler import load_scaler_dict
-    import credit.applications.preprocess as preprocess
+    from credit.applications import preprocess
 
     scaler_file = tmp_path / "scaler.json"
     conf = _make_conf(str(tmp_path / "save"), str(scaler_file))
