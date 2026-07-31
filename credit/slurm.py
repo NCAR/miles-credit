@@ -146,10 +146,17 @@ def _module_lines(options):
 
 
 def _resolve_torchrun(conda):
-    """Return the torchrun path for a conda env name or full path."""
+    """Return the torchrun path for a conda env name or full path.
+
+    A bare env name is resolved at run time from ``$CONDA_PREFIX`` (set by the
+    ``conda activate`` line above it), falling back to a ``conda info --envs``
+    lookup.  ``$(conda info --base)/envs/<name>`` is wrong for envs kept
+    outside the base install (``envs_dirs`` in ``~/.condarc``).
+    """
     if "/" in conda:
         return f"{conda}/bin/torchrun"
-    return f"$(conda info --base)/envs/{conda}/bin/torchrun"
+    lookup = f"conda info --envs | awk -v n={conda} '$1==n {{print $NF; exit}}'"
+    return f"${{CONDA_PREFIX:-$({lookup})}}/bin/torchrun"
 
 
 def _submit_script(script, save_loc, launch):

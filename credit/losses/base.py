@@ -224,6 +224,7 @@ class BaseLoss(nn.Module):
         latitude_weights: str | None = None,
         channel_schema=None,
         validation: bool = False,
+        **kwargs,
     ):
         super().__init__()
         self.validation = validation

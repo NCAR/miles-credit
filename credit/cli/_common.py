@@ -138,21 +138,40 @@ def _find_torchrun() -> str:
     return "torchrun"
 
 
+def _conda_prefix_expr(conda_env: str) -> str:
+    """Return a shell expression that expands to the prefix of *conda_env*.
+
+    A value containing a path separator is already a prefix and is returned as
+    is.  A bare environment *name* is resolved at run time, never at generation
+    time, so it is not mistaken for a same-named directory in the current
+    working directory (e.g. the repo's ``credit/`` package dir, which made a
+    ``conda: credit`` config yield a bogus ``credit/bin/torchrun``).
+
+    Resolution order in the generated script:
+
+    1. ``$CONDA_PREFIX`` — set by the ``conda activate`` line the scripts emit
+       just above this, and correct no matter where the env actually lives.
+    2. ``conda info --envs`` lookup by name — covers scripts that never
+       activate.  This honors ``envs_dirs`` from ``~/.condarc``, unlike
+       ``$(conda info --base)/envs/<name>``, which silently produced a
+       nonexistent path for envs kept outside the base install (e.g.
+       ``/glade/work/$USER/conda-envs``).
+    """
+    if "/" in conda_env:
+        return conda_env
+    lookup = f"conda info --envs | awk -v n={conda_env} '$1==n {{print $NF; exit}}'"
+    return f"${{CONDA_PREFIX:-$({lookup})}}"
+
+
 def _resolve_torchrun(conda_env) -> str:
     """Return a torchrun path for a conda env given as a name or a prefix path.
 
-    A value containing a path separator is treated as a full environment prefix
-    (``<prefix>/bin/torchrun``).  A bare environment *name* resolves at run time
-    via ``conda info --base`` so it is never mistaken for a same-named directory
-    in the current working directory (e.g. the repo's ``credit/`` package dir,
-    which made a ``conda: credit`` config yield a bogus ``credit/bin/torchrun``).
-    Falls back to :func:`_find_torchrun` when no env is configured.
+    See :func:`_conda_prefix_expr` for how the env prefix is resolved.  Falls
+    back to :func:`_find_torchrun` when no env is configured.
     """
     if not conda_env:
         return _find_torchrun()
-    if "/" in conda_env:
-        return f"{conda_env}/bin/torchrun"
-    return f"$(conda info --base)/envs/{conda_env}/bin/torchrun"
+    return f"{_conda_prefix_expr(conda_env)}/bin/torchrun"
 
 
 def _is_ncar_system() -> bool:

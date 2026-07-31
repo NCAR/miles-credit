@@ -455,16 +455,27 @@ class TestBuildPbsScript:
 
 
 class TestResolveTorchrun:
-    def test_bare_name_resolves_via_conda_base(self):
+    def test_bare_name_resolves_at_runtime(self):
         # A bare env name must NOT be treated as a CWD-relative directory
         # (the repo's ``credit/`` package dir made ``conda: credit`` yield a
         # bogus ``credit/bin/torchrun``); it resolves at runtime instead.
-        assert _resolve_torchrun("credit") == "$(conda info --base)/envs/credit/bin/torchrun"
+        tr = _resolve_torchrun("credit")
+        assert tr.endswith("/bin/torchrun")
+        assert tr.startswith("${CONDA_PREFIX:-")
+
+    def test_bare_name_does_not_assume_conda_base_envs_dir(self):
+        # envs living outside the base install (envs_dirs in ~/.condarc) are
+        # not under $(conda info --base)/envs, so that path must not be built.
+        tr = _resolve_torchrun("credit")
+        assert "conda info --base" not in tr
+        # $CONDA_PREFIX from the script's `conda activate`, else lookup by name
+        assert "conda info --envs" in tr
+        assert "n=credit " in tr
 
     def test_bare_name_ignores_matching_cwd_dir(self, monkeypatch, tmp_path):
         (tmp_path / "credit").mkdir()
         monkeypatch.chdir(tmp_path)
-        assert _resolve_torchrun("credit") == "$(conda info --base)/envs/credit/bin/torchrun"
+        assert not _resolve_torchrun("credit").startswith("credit/")
 
     def test_full_path_used_directly(self):
         assert _resolve_torchrun("/opt/envs/credit") == "/opt/envs/credit/bin/torchrun"

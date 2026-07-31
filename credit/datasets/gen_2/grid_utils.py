@@ -60,6 +60,7 @@ plain lat/lon coordinates are CF-valid on their own.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from typing import Any, Literal
@@ -345,7 +346,17 @@ class GridSchema:
     # ------------------------------------------------------------------
 
     def save(self, path: str) -> None:
-        """Write the schema as NetCDF (atomically: temp file + rename)."""
+        """Write the schema as NetCDF (atomically: temp file + rename).
+
+        The staging file is per-process. Every rank — and every DataLoader
+        worker under ``num_workers > 0`` — persists the grid it resolved (see
+        ``write_source_grid_schema_if_missing``), so several processes routinely
+        write the same *path* at once. A single shared ``<path>.tmp`` made them
+        collide inside HDF5, surfacing as ``[Errno 13] Permission denied`` for
+        every writer but the first. With one temp file each, the writes are
+        independent and the renames are atomic; the content is identical, so
+        last-writer-wins is harmless.
+        """
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
@@ -356,9 +367,15 @@ class GridSchema:
             ds = xr.Dataset(data_vars={"lat": (("y", "x"), self.lat), "lon": (("y", "x"), self.lon)})
         ds.attrs["grid_type"] = self.grid_type
 
-        tmp = path + ".tmp"
-        ds.to_netcdf(tmp)
-        os.replace(tmp, path)
+        tmp = f"{path}.tmp.{os.getpid()}"
+        try:
+            ds.to_netcdf(tmp)
+            os.replace(tmp, path)
+        except BaseException:
+            # Never leave a half-written .tmp.<pid> behind for the next run to trip over.
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+            raise
         logger.info("GridSchema saved to %s", path)
 
     @classmethod

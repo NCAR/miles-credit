@@ -61,6 +61,7 @@ the batch has no target — so ``Reconstruct`` recovers every predicted variable
 diagnostics included.
 """
 
+import contextlib
 import logging
 import os
 
@@ -283,7 +284,12 @@ class ChannelSchema:
     # ------------------------------------------------------------------
 
     def save(self, path: str) -> None:
-        """Write the schema as YAML (atomically: temp file + rename)."""
+        """Write the schema as YAML (atomically: temp file + rename).
+
+        The staging file is per-process: concurrent writers (multiple ranks
+        saving the schema at init) would otherwise interleave their dumps into
+        one shared ``<path>.tmp`` and rename a corrupted file into place.
+        """
         payload = {
             "schema_version": _SCHEMA_VERSION,
             "input": self.input_layout,
@@ -294,10 +300,15 @@ class ChannelSchema:
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w") as f:
-            yaml.safe_dump(payload, f, sort_keys=False)
-        os.replace(tmp, path)
+        tmp = f"{path}.tmp.{os.getpid()}"
+        try:
+            with open(tmp, "w") as f:
+                yaml.safe_dump(payload, f, sort_keys=False)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+            raise
         logger.info("ChannelSchema saved to %s", path)
 
     @classmethod
