@@ -30,8 +30,8 @@ _CLASS_SOURCES = {
     "MRMSDataset": ("credit.datasets.gen_2.mrms", "MRMSDataset"),
     "HRRRDataset": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
     "TISRDataset": ("credit.datasets.gen_2.tisr", "TISRDataset"),
-    "build_channel_layout": ("credit.datasets.gen_2.channel_layout", "build_channel_layout"),
-    "update_x": ("credit.datasets.gen_2.channel_layout", "update_x"),
+    "build_channel_layout": ("credit.datasets.gen_2.channel_utils", "build_channel_layout"),
+    "update_x": ("credit.datasets.gen_2.channel_utils", "update_x"),
 }
 
 

@@ -458,7 +458,7 @@ def load_dataset(conf: dict, is_train: bool) -> MultiSourceDataset:
         - validation_data missing other keys: raises ValueError listing missing keys
     """
     if is_train:
-        data_conf = conf["data"]
+        data_conf = dict(conf["data"])
     else:
         data_conf = dict(conf.get("validation_data") or conf["data"])
         if "source" not in data_conf:
@@ -469,6 +469,12 @@ def load_dataset(conf: dict, is_train: bool) -> MultiSourceDataset:
                 f"validation_data is missing keys: {missing}. "
                 "Either add them or remove validation_data to use training config."
             )
+
+    # Forwarded into each sub-dataset's own config (via
+    # MultiSourceDataset.make_single_source_subconfig) so dataset classes can
+    # best-effort persist their native grid to {save_loc}/{source}_grid_schema.nc
+    # the moment it's known — see credit.datasets.gen_2.grid_utils.
+    data_conf["save_loc"] = conf.get("save_loc")
 
     from credit.registry import load_custom_objects  # imported here to avoid a module-level credit.registry import
 

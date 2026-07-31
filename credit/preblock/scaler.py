@@ -4,7 +4,7 @@ from bridgescaler.distributed_tensor import DStandardScalerTensor, DQuantileScal
 from credit.preblock.base import BasePreblock
 from os.path import exists, expandvars
 from os import makedirs
-from ._utils import _parse_variable_selection
+from ._utils import _parse_variable_selection, _flatten_spatial_tensors, _unflatten_spatial_tensors
 
 _SCALER_REGISTRY = {
     "standard": DStandardScalerTensor,
@@ -122,6 +122,18 @@ class BridgeScalerTransform(BasePreblock):
             method: "transform"
             data_types:
                 - "target"
+
+        # Grid-wise scaling: variables in `spatial_variables` are scaled per
+        # gridpoint (one mean/variance per lat/lon cell) rather than per level.
+        # Their scaler's x_columns_/mean_x_/var_x_ must have length == n_lat * n_lon.
+        # `spatial_variables` entries must also be covered by `variables`.
+        type: "bridgescaler_transform"
+        args:
+            scaler_path: "/path/to/scaler.json"
+            variables: []
+            method: "transform"
+            spatial_variables:
+                - "cesm/prognostic/2d/some_var"
     """
 
     def __init__(
@@ -132,6 +144,7 @@ class BridgeScalerTransform(BasePreblock):
         scaler_type: str = "standard",
         scaler_params=None,
         data_types: list[str] = None,
+        spatial_variables: list[str] = None,
     ):
         super().__init__()
         self.variables = variables
@@ -139,6 +152,9 @@ class BridgeScalerTransform(BasePreblock):
         self.method = method
         self.scaler_path = expandvars(scaler_path)
         self.data_types = data_types
+        # Full keys or partial paths of variables that use grid-wise (per-gridpoint)
+        # scaling instead of per-level scaling. Must also be selected by `variables`.
+        self.spatial_variables = spatial_variables or []
         if scaler_params is None:
             scaler_params = {}
         self.scaler_params = scaler_params
@@ -154,19 +170,31 @@ class BridgeScalerTransform(BasePreblock):
             self.scaler = None
             self.scaler_template = _SCALER_REGISTRY[scaler_type](**scaler_params)
 
+    def _expand_variables(self, batch: dict) -> None:
+        self.variables = _parse_variable_selection(self.variables, batch, self.data_types)
+        if self.spatial_variables:
+            self.spatial_variables = _parse_variable_selection(self.spatial_variables, batch, self.data_types)
+            missing = set(self.spatial_variables) - set(self.variables)
+            if missing:
+                raise ValueError(f"spatial_variables must also be selected by `variables` (missing: {missing}).")
+        self.variables_expanded = True
+
     def forward(self, batch: dict) -> dict:
         if not self.variables_expanded:
-            self.variables = _parse_variable_selection(self.variables, batch, self.data_types)
-            self.variables_expanded = True
+            self._expand_variables(batch)
         batch = self._copy_batch(batch)  # shallow copy — avoids mutating the caller's dict
         if self.data_types is not None:
             # Slice to the requested data types — useful in multi-step training where
             # the input is already scaled but the target still needs to be scaled.
             sub_batch = {dt: batch[dt] for dt in self.data_types if dt in batch}
+            sub_batch, spatial_shapes = _flatten_spatial_tensors(sub_batch, self.spatial_variables)
             scaled = scale_var_dict(sub_batch, self.scaler, self.method, self.variables)
+            scaled = _unflatten_spatial_tensors(scaled, spatial_shapes)
             batch.update(scaled)  # write the scaled data types back into the full batch
             return batch
-        return scale_var_dict(batch, self.scaler, self.method, self.variables)
+        batch, spatial_shapes = _flatten_spatial_tensors(batch, self.spatial_variables)
+        scaled = scale_var_dict(batch, self.scaler, self.method, self.variables)
+        return _unflatten_spatial_tensors(scaled, spatial_shapes)
 
     def fit_scaler_batch(self, batch: dict) -> dict:
         """
@@ -186,10 +214,10 @@ class BridgeScalerTransform(BasePreblock):
                 f"Cannot fit: a scaler already exists at '{self.scaler_path}'. Remove it to refit from scratch."
             )
         if not self.variables_expanded:
-            self.variables = _parse_variable_selection(self.variables, batch, self.data_types)
-            self.variables_expanded = True
+            self._expand_variables(batch)
         # Fit only the requested data types; if data_types is None, fit the full batch.
         fit_batch = {dt: batch[dt] for dt in self.data_types if dt in batch} if self.data_types is not None else batch
+        fit_batch, _ = _flatten_spatial_tensors(fit_batch, self.spatial_variables)
         fitted = scale_var_dict(fit_batch, self.scaler_template, "fit", self.variables)
         # Merge this batch's fit into the running accumulation (running average of
         # the scaler statistics across batches).

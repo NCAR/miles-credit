@@ -17,7 +17,6 @@ seed: 1000
 
 
 # ---- USER SETTINGS: training data ---- #
-# Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
 data:
   source:
     Example_HRRR:
@@ -42,6 +41,7 @@ data:
         # Static: time-invariant inputs (not predicted)
         static:
           vars_2D: [ 'orog' ]
+      
       # [lon_min, lon_max, lat_min, lat_max]
       extent: [-106.0, -104.5, 39.5, 41.0]  # Prime numbers of data points: 59 lat × 47 lon
 
@@ -59,18 +59,13 @@ data:
       # Extent to match the one above
       extent: [-106.0, -104.5, 39.5, 41.0]
 
+  # Dates follow ISO 8601: "YYYY-MM-DD".
   start_datetime: "2025-01-01"
   end_datetime: "2025-01-02"
   timestep: "1h"
 
   # history_len: 1            # number of past states fed as input
   forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
-
-  # one_shot: True
-  # lead_time_periods: 1
-  # skip_periods: null
-  # static_first: True
-  # scaler_type: 'std_new'
 
 
 # ---- USER SETTINGS: validation data ---- #
@@ -136,7 +131,7 @@ trainer:
   load_scheduler: False
   reload_epoch: False
 
-  skip_validation: False
+  skip_validation: True
   update_learning_rate: False
 
   save_backup_weights: True
@@ -148,13 +143,13 @@ trainer:
   train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
   valid_batch_size: 8
 
-  batches_per_epoch: 0    # 0 = use full dataset each epoch
+  batches_per_epoch: 5    # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
   stopping_patience: 999
 
   start_epoch: 0
-  num_epoch: 2            # epochs per qsub job (checkpoint after each)
-  epochs: &epochs 70      # total training target
+  # num_epoch: 2            # epochs per qsub job (checkpoint after each)
+  epochs: &epochs 3      # total training target
 
   use_tensorboard: True
   use_ema: True           # exponential moving average of weights for validation
@@ -237,9 +232,9 @@ loss:
 
 # ---- Inference (used by rollout_gen2.py, not training) ---- #
 inference:
-  run_mode: batch                   # batch | single
+  run_mode: single                   # batch | single
   mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
-  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/rollout/'
   num_save_workers: 4               # async write pool size (0 = synchronous)
 
   batch_forecast:                   # active when run_mode: batch
@@ -251,7 +246,7 @@ inference:
       times: ["00:00", "12:00"]     # UTC init times each day (HH:MM)
 
   single_forecast:                  # active when run_mode: single
-    length: "10d"                   # forecast duration
+    length: "3d"                   # forecast duration
     start_datetime: "2025-01-01T00:00Z"   # init time, ISO 8601
 
   output:
@@ -266,13 +261,24 @@ inference:
         zlib: true
         complevel: 4                # 1 (fast) to 9 (small)
 
-pbs: #derecho
-  conda: "credit-derecho"
+# pbs: #derecho
+#   conda: "credit-derecho"
+#   project: "NAML0001"
+#   job_name: "credit_integration_test_hrrr_gen2"
+#   walltime: "01:00:00"
+#   nodes: 8
+#   ncpus: 64
+#   ngpus: 4
+#   mem: '480GB'
+#   queue: 'main'
+
+pbs: #casper
+  conda: "credit"
   project: "NAML0001"
   job_name: "credit_integration_test_hrrr_gen2"
-  walltime: "01:00:00"
-  nodes: 8
-  ncpus: 64
-  ngpus: 4
-  mem: '480GB'
+  walltime: "08:00:00"
+  nodes: 1
+  ngpus: 1
+  ncpus: 4
+  mem: '12GB'
   queue: 'main'

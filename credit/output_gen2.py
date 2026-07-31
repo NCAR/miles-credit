@@ -31,6 +31,8 @@ import tqdm
 import xarray as xr
 import yaml
 
+from credit.datasets.gen_2.grid_utils import GridSchema
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,14 +110,64 @@ class ForecastWriter:
 
     Args:
         output_conf: the ``inference.output`` config block.
-        conf: full model config (used to read grid dimensions and levels).
+        conf: full model config (used to read levels and ``save_loc`` for a
+            saved grid schema).
         n_steps: total forecast steps — needed so ``group_by="full"`` knows
             when to flush without an external flush() call.
+        grid_schema: resolved output grid (real lat/lon + rectilinear/curvilinear
+            type), if already known. Takes priority over *dataset* below.
+        dataset: live dataset (e.g. ``MultiSourceDataset``) to resolve the grid
+            from when *grid_schema* is not given and no saved grid schema exists
+            in ``conf["save_loc"]``. Grid resolution is deferred to the first
+            forecast step (not ``__init__``) so lazily-populated native grids
+            (e.g. HRRR, remote ERA5 — known only after the first real read) are
+            already available by the time this runs. Also supplies the real
+            output-time ``calendar`` (read eagerly here, in ``__init__`` — unlike
+            the grid, a dataset's ``.calendar`` is always resolved synchronously
+            at construction), overriding the output metadata YAML's static value.
+        ic_preblocks, step_preblocks: preblock groups to check for an active
+            ``Regridder`` when resolving from *dataset* (see ``GridSchema.resolve``).
+        verbose: gate tqdm progress bars and save-path notifications.
+
+    Raises:
+        ValueError: at construction, if neither *grid_schema* nor *dataset* is
+            given — there would be no way to ever determine output coordinates.
+            There is no fabricated fallback anywhere in this class; a real
+            grid is always required.
     """
 
-    def __init__(self, output_conf: dict, conf: dict, n_steps: int, verbose: bool = True) -> None:
+    def __init__(
+        self,
+        output_conf: dict,
+        conf: dict,
+        n_steps: int,
+        grid_schema: Optional[GridSchema] = None,
+        dataset=None,
+        ic_preblocks=None,
+        step_preblocks=None,
+        verbose: bool = True,
+    ) -> None:
+        if grid_schema is None and dataset is None:
+            raise ValueError(
+                "ForecastWriter: no way to determine output coordinates — pass either "
+                "grid_schema (a resolved GridSchema) or dataset (a live dataset to resolve "
+                "one from). There is no fabricated fallback."
+            )
         self._n_steps = n_steps
         self._conf = conf
+        self._grid_schema = grid_schema
+        self._grid_dataset = dataset
+        self._grid_ic_preblocks = ic_preblocks
+        self._grid_step_preblocks = step_preblocks
+        # Real calendar from the dataset — already resolved at dataset construction
+        # (synchronously; unlike the grid, no lazy/multi-worker concern here) —
+        # preferred over the metadata YAML's static value for the output time
+        # coordinate. Metadata YAMLs describe physical variables (e.g. temperature's
+        # units), not the time axis; a hardcoded calendar there is often simply wrong
+        # for the actual data (e.g. era5.yaml says "gregorian" even when applied to
+        # noleap CESM output). Falls back to the metadata YAML, then a sane default,
+        # when no dataset was given.
+        self._calendar: Optional[str] = getattr(dataset, "calendar", None)
 
         # output format
         fmt = (output_conf.get("format") or "netcdf").lower().strip()
@@ -191,9 +243,9 @@ class ForecastWriter:
         if self._output_freq_hrs is not None and fhr % self._output_freq_hrs != 0:
             return
 
-        # lazy coordinate init + one-time cross-parameter validation
+        # lazy coordinate resolution + one-time cross-parameter validation
         if self._coords is None:
-            self._coords = self._init_coords(y_processed)
+            self._coords = self._resolve_coords()
         if not self._validated:
             self._validate(fhr_per_step)
             self._validated = True
@@ -362,8 +414,17 @@ class ForecastWriter:
     # ------------------------------------------------------------------
 
     def _to_dataset(self, y_processed: dict, valid_time: pd.Timestamp) -> xr.Dataset:
-        """Convert one step of y_processed to an xr.Dataset."""
+        """Convert one step of y_processed to an xr.Dataset.
+
+        Rectilinear grids keep ``latitude``/``longitude`` as 1D dimension
+        coordinates. Curvilinear grids use generic ``y``/``x`` dims (the
+        convention this codebase already uses for HRRR, see
+        ``credit/datasets/gen_2/hrrr.py``) with ``latitude``/``longitude`` as
+        2D non-dimension coordinates, per CF conventions.
+        """
         coords = self._coords
+        curvilinear = coords["grid_type"] == "curvilinear"
+        xy_dims = ["y", "x"] if curvilinear else ["latitude", "longitude"]
         data_vars = {}
 
         for source_name, source_dict in y_processed.items():
@@ -390,55 +451,81 @@ class ForecastWriter:
                     else:
                         level_coord = source_levels if len(source_levels) else np.arange(arr.shape[0])
 
+                    da_coords = {"time": [valid_time], "level": level_coord}
+                    if not curvilinear:
+                        da_coords["latitude"] = coords["latitude"]
+                        da_coords["longitude"] = coords["longitude"]
                     data_vars[var_name] = xr.DataArray(
                         arr[np.newaxis],  # (1, L, H, W)
-                        dims=["time", "level", "latitude", "longitude"],
-                        coords={
-                            "time": [valid_time],
-                            "level": level_coord,
-                            "latitude": coords["latitude"],
-                            "longitude": coords["longitude"],
-                        },
+                        dims=["time", "level"] + xy_dims,
+                        coords=da_coords,
                     )
 
                 else:  # 2D — arr shape (1, H, W); squeeze the level dim
+                    da_coords = {"time": [valid_time]}
+                    if not curvilinear:
+                        da_coords["latitude"] = coords["latitude"]
+                        da_coords["longitude"] = coords["longitude"]
                     data_vars[var_name] = xr.DataArray(
                         arr[0][np.newaxis],  # (H, W) → (1, H, W)
-                        dims=["time", "latitude", "longitude"],
-                        coords={
-                            "time": [valid_time],
-                            "latitude": coords["latitude"],
-                            "longitude": coords["longitude"],
-                        },
+                        dims=["time"] + xy_dims,
+                        coords=da_coords,
                     )
 
         ds = xr.Dataset(data_vars)
         ds.attrs["Conventions"] = "CF-1.11"
+
+        if curvilinear:
+            ds = ds.assign_coords(
+                latitude=(("y", "x"), coords["latitude"]),
+                longitude=(("y", "x"), coords["longitude"]),
+            )
+            for var in ds.data_vars:
+                ds[var].attrs["coordinates"] = "latitude longitude"
+
         return ds
 
-    def _init_coords(self, y_processed: dict) -> dict:
-        """Build lat/lon/level arrays from model config, falling back to tensor shape."""
-        model_conf = self._conf.get("model", {})
-        H = model_conf.get("image_height")
-        W = model_conf.get("image_width")
+    def _resolve_coords(self) -> dict:
+        """Build lat/lon/level arrays from the resolved grid schema.
 
-        if H is None or W is None:
-            for source_dict in y_processed.values():
-                for tensor in source_dict.values():
-                    H, W = tensor.shape[-2], tensor.shape[-1]
-                    break
-                if H is not None:
-                    break
+        Called once (first forecast step) and cached by the caller — resolving
+        here rather than in ``__init__`` matters when a live *dataset* was
+        passed in: lazily-populated native grids (HRRR, remote ERA5) are only
+        known after the first real read, which has already happened by the
+        time the first step's output reaches this writer.
 
-        lat = np.linspace(-90.0, 90.0, H) if H else np.array([])
-        lon = np.linspace(0.0, 360.0 - 360.0 / W, W) if W else np.array([])
-
+        Raises:
+            ValueError: if no grid can be determined — no saved grid schema in
+                ``save_loc``, and *dataset* (if given) could not resolve one
+                live either. There is no fabricated fallback; wrong silent
+                coordinates are worse than a loud failure.
+        """
         source_levels = {}
         for src_name, src_conf in self._conf["data"]["source"].items():
             lvs = src_conf.get("levels")
             source_levels[src_name] = np.array(lvs) if lvs else np.array([])
 
-        return {"latitude": lat, "longitude": lon, "levels": source_levels}
+        if self._grid_schema is None and self._grid_dataset is not None:
+            self._grid_schema = GridSchema.load_or_resolve(
+                self._grid_dataset,
+                self._grid_ic_preblocks,
+                self._grid_step_preblocks,
+                save_loc=self._conf.get("save_loc"),
+            )
+
+        if self._grid_schema is None:
+            raise ValueError(
+                "ForecastWriter: could not determine output coordinates. No grid_schema was "
+                "given, no saved grid schema was found in save_loc, and the given dataset "
+                "could not resolve one live (see credit.datasets.gen_2.grid_utils.GridSchema)."
+            )
+
+        return {
+            "grid_type": self._grid_schema.grid_type,
+            "latitude": self._grid_schema.lat,
+            "longitude": self._grid_schema.lon,
+            "levels": source_levels,
+        }
 
     # ------------------------------------------------------------------
     # Encoding and metadata
@@ -455,13 +542,20 @@ class ForecastWriter:
                 if fill is not None:
                     ds[var].encoding["_FillValue"] = fill
 
+        # Real dataset calendar takes priority; metadata YAML and a sane default
+        # are fallbacks for when no dataset was given (see self._calendar in __init__).
+        # units is just a fixed numeric reference epoch for the int64 encoding below —
+        # unlike calendar it doesn't need to match the source, so it isn't derived.
+        time_meta = self._meta.get("time") or {}
+        calendar = self._calendar or time_meta.get("calendar", "proleptic_gregorian")
+        units = time_meta.get("units", "seconds since 1970-01-01")
+
         if self._fmt == "netcdf":
-            # Exact datetime64 round-trip: seconds since epoch, proleptic calendar
-            time_meta = self._meta.get("time") or {}
+            # Exact datetime64 round-trip: fixed epoch, real calendar.
             ds["time"].encoding.update(
                 {
-                    "units": time_meta.get("units", "seconds since 1970-01-01"),
-                    "calendar": time_meta.get("calendar", "proleptic_gregorian"),
+                    "units": units,
+                    "calendar": calendar,
                     "dtype": "int64",
                 }
             )
@@ -474,11 +568,10 @@ class ForecastWriter:
             # corrupted by a days/hours (x24) factor on read-back. Pin an explicit
             # fixed-epoch encoding (as in the netcdf branch) so every append encodes
             # consistently and round-trips exactly.
-            time_meta = self._meta.get("time") or {}
             ds["time"].encoding.update(
                 {
-                    "units": time_meta.get("units", "seconds since 1970-01-01"),
-                    "calendar": time_meta.get("calendar", "proleptic_gregorian"),
+                    "units": units,
+                    "calendar": calendar,
                     "dtype": "int64",
                     "chunks": 1,
                 }

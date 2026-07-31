@@ -27,7 +27,13 @@ from credit.datasets.gen_2.goes import (
     _validate_catalog_row_path,
     _variables_covers,
 )
+from credit.datasets.gen_2.grid_utils import GridSchema
 from credit.samplers import DistributedMultiStepBatchSampler
+
+# Captured at import time, before any test's patch_goes_io fixture monkeypatches
+# xr.open_dataset — used to read back a real written file (e.g. GridSchema.load)
+# from within a test that also fakes xr.open_dataset for GOES's own fake inputs.
+_REAL_OPEN_DATASET = xr.open_dataset
 
 CMI_C04 = "CMI_C04"
 CMI_C07 = "CMI_C07"
@@ -153,6 +159,35 @@ def test_goes_dataset_datetimes_type(minimal_config, patch_goes_io):
     """self.datetimes is a pandas DatetimeIndex."""
     ds = GOESDataset(minimal_config)
     assert isinstance(ds.datetimes, pd.DatetimeIndex)
+
+
+def test_goes_static_metadata_grid_is_curvilinear(minimal_config, patch_goes_io, latlon_xr_dataset):
+    """static_metadata['grid'] should carry the real 2D lat/lon, cropped to y_slice/x_slice."""
+    ds = GOESDataset(minimal_config)
+    grid = ds.static_metadata["grid"]
+
+    assert grid["grid_type"] == "curvilinear"
+    assert grid["lat"].ndim == 2
+    np.testing.assert_array_equal(grid["lat"], latlon_xr_dataset["latitude"].values[ds.y_slice, ds.x_slice])
+    np.testing.assert_array_equal(grid["lon"], latlon_xr_dataset["longitude"].values[ds.y_slice, ds.x_slice])
+
+
+def test_goes_grid_schema_written_to_save_loc(minimal_config, patch_goes_io, latlon_xr_dataset, tmp_path, monkeypatch):
+    """GOESDataset should best-effort persist its native grid to
+    {save_loc}/{source}_grid_schema.nc the moment it's found."""
+    cfg = {**minimal_config, "save_loc": str(tmp_path)}
+    ds = GOESDataset(cfg)
+
+    path = tmp_path / "TEST_GOES_grid_schema.nc"
+    assert path.is_file()
+
+    # patch_goes_io fakes xr.open_dataset for GOES's own inputs (keying off "lat_lon"
+    # in the path); restore the real one to actually read this written file back.
+    monkeypatch.setattr(xr, "open_dataset", _REAL_OPEN_DATASET)
+    schema = GridSchema.load(str(path))
+    assert schema.grid_type == "curvilinear"
+    np.testing.assert_array_equal(schema.lat, latlon_xr_dataset["latitude"].values[ds.y_slice, ds.x_slice])
+    np.testing.assert_array_equal(schema.lon, latlon_xr_dataset["longitude"].values[ds.y_slice, ds.x_slice])
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +367,34 @@ def test_goes_extent_applied(minimal_config, patch_goes_io, monkeypatch, latlon_
     assert tensor.shape[-1] < NX or tensor.shape[-2] < NY, (
         f"Expected cropped spatial dims, got full shape {tensor.shape}"
     )
+
+
+def test_goes_extent_crops_static_metadata_grid(minimal_config, patch_goes_io, latlon_xr_dataset):
+    """With extent set, static_metadata['grid'] should reflect the actual cropped
+    region — not the full grid. test_goes_extent_applied only checks the output
+    tensor shape; a bug in the grid-caching crop (e.g. caching lat/lon before
+    slicing, or slicing with the wrong indices) wouldn't be caught there."""
+    extent = [-130, -95, 20, 55]  # roughly half the fake lon range
+    cfg = {
+        **minimal_config,
+        "source": {
+            "TEST_GOES": {
+                **minimal_config["source"]["TEST_GOES"],
+                "extent": extent,
+            }
+        },
+    }
+
+    ds = GOESDataset(cfg)
+    grid = ds.static_metadata["grid"]
+
+    # Real crop happened (not a no-op slice(None) that would make the checks below vacuous).
+    assert grid["lat"].shape[0] < NY or grid["lat"].shape[1] < NX
+
+    # The cached grid must be sliced with the same y_slice/x_slice used for actual
+    # data — i.e. static_metadata["grid"] and the tensors it describes stay consistent.
+    np.testing.assert_array_equal(grid["lat"], latlon_xr_dataset["latitude"].values[ds.y_slice, ds.x_slice])
+    np.testing.assert_array_equal(grid["lon"], latlon_xr_dataset["longitude"].values[ds.y_slice, ds.x_slice])
 
 
 # ---------------------------------------------------------------------------

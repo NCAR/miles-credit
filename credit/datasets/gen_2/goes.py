@@ -70,6 +70,7 @@ import xarray as xr
 
 from credit.datasets.gen_2._utils import _infer_period_freq, _find_file, _start_s3_fs
 from credit.datasets.gen_2.base_dataset import BaseDataset
+from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
 
 logger = logging.getLogger(__name__)
 
@@ -625,13 +626,21 @@ class GOESDataset(BaseDataset):
 
         try:
             with xr.open_dataset(latlon2d_path) as ds:
-                self.y_slice, self.x_slice = _build_spatial_slices(
-                    self.extent,
-                    ds.latitude.values,
-                    ds.longitude.values,
-                )
+                lat2d = ds.latitude.values
+                lon2d = ds.longitude.values
+                self.y_slice, self.x_slice = _build_spatial_slices(self.extent, lat2d, lon2d)
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Latitude/longitude grid file not found at {latlon2d_path}") from e
+
+        # Debugging aid: this source's native (post-extent-crop) grid. Not necessarily
+        # the grid actually written to output — see credit.datasets.gen_2.grid_utils.
+        grid = {
+            "grid_type": "curvilinear",
+            "lat": lat2d[self.y_slice, self.x_slice],
+            "lon": lon2d[self.y_slice, self.x_slice],
+        }
+        self.static_metadata["grid"] = grid
+        write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
 
     # ---------------
     # Catalog & timestamp validation
