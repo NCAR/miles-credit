@@ -89,6 +89,8 @@ def weight_file(tmp_path):
             "row": xr.DataArray(rows.astype(np.int32), dims=("n_s",)),
             "col": xr.DataArray(cols.astype(np.int32), dims=("n_s",)),
             "S": xr.DataArray(vals.astype(np.float64), dims=("n_s",)),
+            "yc_b": xr.DataArray(np.repeat(np.arange(n_dst_lat), n_dst_lon).astype(np.float64), dims=("n_b",)),
+            "xc_b": xr.DataArray(np.tile(np.arange(n_dst_lon), n_dst_lat).astype(np.float64), dims=("n_b",)),
         }
     )
     path = tmp_path / "weights.nc"
@@ -187,6 +189,52 @@ def test_regrid_flip_axis_ignores_positive_leading_axes(weight_file, caplog):
 
     torch.testing.assert_close(result["input"]["Test_ERA5"][variable], baseline["input"]["Test_ERA5"][variable])
     assert "invalid flip_axis values [2]" in caplog.text
+
+
+def test_grid_schema_resolve_rejects_unstructured_native_grid():
+    from types import SimpleNamespace
+
+    from credit.datasets.gen_2.grid_utils import GridSchema
+
+    dataset = SimpleNamespace(
+        static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
+    )
+
+    with pytest.raises(ValueError, match="native grid_type='unstructured'"):
+        GridSchema.resolve(dataset)
+
+
+def test_grid_schema_resolve_regrids_unstructured_native_grid(weight_file):
+    from types import SimpleNamespace
+
+    from credit.datasets.gen_2.grid_utils import GridSchema
+
+    path, *_ = weight_file
+    regrid = Regridder(path, variables=["Test_ERA5/prognostic/3d/T"])
+    dataset = SimpleNamespace(
+        static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
+    )
+
+    schema = GridSchema.resolve(dataset, step_preblocks=nn.ModuleDict({"regrid": regrid}))
+
+    assert schema.origin == "regridded"
+    assert schema.grid_type == "rectilinear"
+    assert schema.lat.shape == (4,)
+    assert schema.lon.shape == (4,)
+
+
+def test_unstructured_source_grid_schema_is_skipped(tmp_path, caplog):
+    from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+
+    caplog.set_level("INFO")
+    write_source_grid_schema_if_missing(
+        "Test_Local",
+        {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)},
+        str(tmp_path),
+    )
+
+    assert not (tmp_path / "Test_Local_grid_schema.nc").exists()
+    assert "unstructured" in caplog.text
 
 
 # ---------------------------------------------------------------------------

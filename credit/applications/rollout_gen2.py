@@ -149,7 +149,7 @@ Examples:
     # independently replace the corresponding top-level block for this rollout,
     # falling back to the top-level (training) block when absent. Must run before
     # anything below reads conf["data"]/preblocks/postblocks.
-    apply_inference_overrides(conf)
+    schema_conf = apply_inference_overrides(conf)
 
     # ── PBS launch ───────────────────────────────────────────────────────────
     if args.launch:
@@ -222,7 +222,7 @@ Examples:
     # only in targets), so without a schema the reconstruction map would cover
     # prognostics only and every diagnostic would be silently dropped from the
     # output. Prefer the schema saved at training time in save_loc.
-    channel_schema = ChannelSchema.load_or_from_config(conf)
+    channel_schema = ChannelSchema.load_or_from_config(schema_conf)
     attach_channel_schema(ic_preblocks, channel_schema)
     attach_channel_schema(step_preblocks, channel_schema)
 

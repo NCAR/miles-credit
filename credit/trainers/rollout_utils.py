@@ -33,7 +33,7 @@ def parse_length(length_str: str, timestep: str) -> int:
     return n
 
 
-def apply_inference_overrides(conf: dict) -> None:
+def apply_inference_overrides(conf: dict) -> dict:
     """Override data:/preblocks:/postblocks: with blocks nested under inference:, if present.
 
     Each of ``inference.data``, ``inference.preblocks``, ``inference.postblocks``
@@ -43,7 +43,8 @@ def apply_inference_overrides(conf: dict) -> None:
     top-level block used for training is left as-is. Mutates ``conf`` in
     place — call once, before anything reads ``conf["data"]``/``preblocks``/
     ``postblocks`` (dataset construction, ``build_preblocks``,
-    ``build_postblocks``, ``ChannelSchema``).
+    ``build_postblocks``). Returns a shallow copy of the pre-override config
+    for deriving the training-time ``ChannelSchema`` when no saved schema exists.
 
     This is a full replacement, not a deep merge: an ``inference.data`` block
     must be a complete ``data:``-shaped config on its own, not a partial
@@ -59,6 +60,7 @@ def apply_inference_overrides(conf: dict) -> None:
     attached) still catches an actual mismatch with a precise diff on the first
     batch -- this warning is just the cheap, immediate heads-up before that.
     """
+    schema_conf = conf.copy()
     inf_conf = conf.get("inference") or {}
     overridden = set()
     for key in ("data", "preblocks", "postblocks"):
@@ -76,6 +78,8 @@ def apply_inference_overrides(conf: dict) -> None:
             "mismatch. Consider adding inference.preblocks (e.g. a 'rename' and/or 'regrid' "
             "step) to reconcile the new source with what the model was trained on."
         )
+
+    return schema_conf
 
 
 def with_inference_datetime_bounds(data_conf: dict, all_init_times: list, n_steps: int, timestep: str) -> dict:

@@ -155,6 +155,33 @@ class TestFromConfig:
         for entry in schema.input_layout:
             assert entry["n_time"] == 3, entry
 
+    def test_inference_override_preserves_training_schema_config(self):
+        """Fallback schema derivation uses training data, not inference overrides."""
+        from credit.trainers.rollout_utils import apply_inference_overrides
+
+        conf = yaml.safe_load(yaml.safe_dump(CONF))
+        conf["inference"] = {
+            "data": {
+                "source": {
+                    "GFS": {
+                        "variables": {"prognostic": {"vars_3D": [], "vars_2D": ["TMP"]}},
+                    }
+                }
+            }
+        }
+
+        schema_conf = apply_inference_overrides(conf)
+
+        assert list(schema_conf["data"]["source"]) == ["CESM"]
+        assert list(conf["data"]["source"]) == ["GFS"]
+        assert [entry["var_key"] for entry in ChannelSchema.from_config(schema_conf).target_layout] == [
+            "CESM/prognostic/3d/U",
+            "CESM/prognostic/3d/T",
+            "CESM/prognostic/2d/PS",
+            "CESM/diagnostic/2d/PRECT",
+            "CESM/diagnostic/2d/FLUT",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # Persistence
