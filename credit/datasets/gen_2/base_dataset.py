@@ -7,6 +7,26 @@ AbstractBaseDataset and BaseDataset: A PyTorch Dataset class for:
 3. Provide a minimal implementation of a Dataset for testing
 4. Avoid redundant code across dataset classes
 
+BaseDataset handles configuration, sampling clocks, field registration, file
+mapping, history windows, metadata, and input/target sample assembly for a
+single data source. Subclasses customize file discovery and field extraction;
+MultiSourceDataset coordinates multiple BaseDataset instances.
+
+Temporal behavior is selected with the source-level ``temporal_mode`` option:
+
+* ``exact`` (default): require source timestamps to match the master clock.
+* ``persist``: use the latest source timestamp at or before each master-clock
+  timestamp, which is useful for coarser-resolution data.
+* ``cyclic``: map each timestamp onto a representative ``cycle_year`` and
+  resolve it within a repeating annual cycle, which is useful for climatology
+  or seasonal forcing. February 29 is clamped to February 28 when the source
+  calendar or cycle year has no leap day.
+
+Sources may use standard pandas calendars or supported CF calendars such as
+``noleap``, ``all_leap``, and ``julian``. The sampling clock can use either a
+continuous ``start_datetime``/``end_datetime`` interval or non-contiguous
+``date_ranges``; history and forecast margins are applied to each range.
+
 """
 
 import logging
