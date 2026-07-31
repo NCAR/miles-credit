@@ -43,15 +43,16 @@ from typing import Any
 
 import pandas as pd
 
-from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
 from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
     build_time_index,
+    build_time_index_multi,
     filter_index_by_labels,
     is_standard_calendar,
     most_restrictive_calendar,
     normalize_calendar,
     to_calendar,
 )
+from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ class MultiSourceDataset(AbstractBaseDataset):
 
         # Loop through all the options in the source config. These will have user
         # provided (unique) names.
-        for user_dataset_name in source_cfg.keys():
+        for user_dataset_name in source_cfg:
             # Pass in just the sub-config for this source to avoid confusion
             # with multisource datasets (e.g., HRRR and HRRR_NAT)
             sub_config = make_single_source_subconfig(config, user_dataset_name)
@@ -219,20 +220,32 @@ class MultiSourceDataset(AbstractBaseDataset):
         """Resolve the master-clock calendar and validate it against the sources.
 
         An explicit data-level ``calendar:`` key wins; otherwise the most
-        restrictive calendar across sources is used (a non-standard calendar's
-        dates are a strict subset of the standard dates we support, so every
-        source can serve the master clock's labels). A non-standard source
-        under a less restrictive master clock is an init-time error — the
-        sampler's step arithmetic would generate ticks (e.g. Feb 29) that the
-        source cannot represent, and intersection cannot prevent that.
+        restrictive calendar across non-cyclic sources is used (a non-standard
+        calendar's dates are a strict subset of the standard dates we support,
+        so every source can serve the master clock's labels). A non-standard
+        source under a less restrictive master clock is an init-time error —
+        the sampler's step arithmetic would generate ticks (e.g. Feb 29) that
+        the source cannot represent, and intersection cannot prevent that.
+
+        Cyclic sources (``temporal_mode: cyclic``) are exempt from this check:
+        their calendar describes one small, standalone climatology file (see
+        ``to_cycle_year``), not a constraint on the whole run's timestamps, and
+        every real timestamp is remapped onto that source's own cycle before
+        ever touching its calendar (see ``BaseDataset._resolve_cyclic_timestamp``).
         """
         source_calendars = {name: getattr(ds, "calendar", "standard") for name, ds in self.datasets.items()}
+        source_cfg = config.get("source", {})
         explicit = config.get("calendar")
-        master_calendar = (
-            normalize_calendar(explicit) if explicit else most_restrictive_calendar(source_calendars.values())
-        )
+        non_cyclic_calendars = [
+            calendar
+            for name, calendar in source_calendars.items()
+            if source_cfg.get(name, {}).get("temporal_mode") != "cyclic"
+        ]
+        master_calendar = normalize_calendar(explicit) if explicit else most_restrictive_calendar(non_cyclic_calendars)
 
         for name, cal in source_calendars.items():
+            if source_cfg.get(name, {}).get("temporal_mode") == "cyclic":
+                continue
             if not is_standard_calendar(cal) and normalize_calendar(cal) != master_calendar:
                 raise ValueError(
                     f"MultiSourceDataset: source '{name}' uses calendar '{cal}' but the master clock "
@@ -247,9 +260,11 @@ class MultiSourceDataset(AbstractBaseDataset):
         """Build the master sampling clock from the global config.
 
         The clock is anchored to the global ``start_datetime``, ``end_datetime``,
-        and ``timestep``, and built on the master calendar (see
-        ``_resolve_master_calendar``): a ``pd.DatetimeIndex`` for the standard
-        family, an ``xr.CFTimeIndex`` otherwise.  For each source:
+        and ``timestep`` (or, alternatively, a non-contiguous ``date_ranges``
+        list of ``(start, end)`` blocks -- see ``build_time_index_multi``), and
+        built on the master calendar (see ``_resolve_master_calendar``): a
+        ``pd.DatetimeIndex`` for the standard family, an ``xr.CFTimeIndex``
+        otherwise.  For each source:
 
         - **Normal sources** (no ``temporal_mode``): the clock is filtered to
           timestamps that exist exactly in that source's native datetimes.  A
@@ -259,6 +274,13 @@ class MultiSourceDataset(AbstractBaseDataset):
           clipped to the source's coverage range.  Fine-resolution master-clock
           ticks are snapped to the last native timestamp inside
           ``BaseDataset.__getitem__``.
+        - **Cyclic sources** (``temporal_mode: cyclic``): the clock is left
+          entirely unfiltered/unclipped against this source — a cyclic source's
+          own ``datetimes``/coverage describe one representative cycle (e.g. one
+          year), not the run's real span, so it must answer for every master
+          timestamp regardless of that source's own range. Each real timestamp
+          is remapped onto the source's cycle independently inside
+          ``BaseDataset._load_sample``.
         """
         self.calendar: str = self._resolve_master_calendar(config)
 
@@ -279,14 +301,37 @@ class MultiSourceDataset(AbstractBaseDataset):
         master_dt = pd.Timedelta(config["timestep"])
         num_history_steps = config.get("history_len", 1)
         num_forecast_steps = config.get("forecast_len", 1)
-        # Convert bounds to the master calendar *before* the horizon/history
-        # arithmetic so it is calendar-correct near leap days.
-        master_start = (
-            to_calendar(pd.Timestamp(config["start_datetime"]), self.calendar) + (num_history_steps - 1) * master_dt
-        )
-        master_end = to_calendar(pd.Timestamp(config["end_datetime"]), self.calendar)
 
-        master = build_time_index(master_start, master_end - num_forecast_steps * master_dt, master_dt, self.calendar)
+        if "date_ranges" in config:
+            # Non-contiguous blocks (e.g. train on 1950-1965 + 1970-1985,
+            # skipping 1966-1969): the same history/forecast margin is applied
+            # to each block independently and the per-block indices are
+            # concatenated (see build_time_index_multi) -- mutually exclusive
+            # with start_datetime/end_datetime (validated at config parse time
+            # the same way BaseDataset validates it per-source).
+            if "start_datetime" in config or "end_datetime" in config:
+                raise ValueError(
+                    "MultiSourceDataset: date_ranges cannot be combined with start_datetime/"
+                    "end_datetime -- use one or the other."
+                )
+            master = build_time_index_multi(
+                config["date_ranges"],
+                master_dt,
+                self.calendar,
+                start_margin=(num_history_steps - 1) * master_dt,
+                end_margin=num_forecast_steps * master_dt,
+            )
+        else:
+            # Convert bounds to the master calendar *before* the horizon/history
+            # arithmetic so it is calendar-correct near leap days.
+            master_start = (
+                to_calendar(pd.Timestamp(config["start_datetime"]), self.calendar) + (num_history_steps - 1) * master_dt
+            )
+            master_end = to_calendar(pd.Timestamp(config["end_datetime"]), self.calendar)
+
+            master = build_time_index(
+                master_start, master_end - num_forecast_steps * master_dt, master_dt, self.calendar
+            )
 
         source_cfg = config.get("source", {})
         for name, ds in self.datasets.items():
@@ -301,6 +346,11 @@ class MultiSourceDataset(AbstractBaseDataset):
                 ds_start = to_calendar(ds.datetimes[0], self.calendar)
                 ds_end = to_calendar(ds.datetimes[-1], self.calendar)
                 master = master[(master >= ds_start) & (master <= ds_end + ds.dt)]
+            elif temporal_mode == "cyclic":
+                # No filtering/clipping at all: a cyclic source answers for any
+                # real timestamp by construction (its own datetimes only cover
+                # one representative cycle, not the run's real span).
+                pass
             else:
                 # Exact match required — warn if resolutions differ
                 if hasattr(ds, "dt") and ds.dt != master_dt:
