@@ -1,8 +1,13 @@
-import torch
-import numpy as np
-import xarray as xr
+import logging
 from os.path import expandvars
+
+import numpy as np
+import torch
+import xarray as xr
+
 from credit.preblock.base import BasePreblock
+
+logger = logging.getLogger(__name__)
 
 
 class Regridder(BasePreblock):
@@ -38,9 +43,9 @@ class Regridder(BasePreblock):
         self,
         weight_file: str,
         variables: list[str],
-        data_types: list[str] = None,
+        data_types: list[str] | None = None,
         reshape_to_xy: bool = True,
-        flip_axis: list[int] = None,
+        flip_axis: list[int] | None = None,
     ):
         super().__init__()
         dst_lat = None
@@ -87,6 +92,10 @@ class Regridder(BasePreblock):
         self.data_types = data_types or ["input", "target"]
         self.reshape_to_xy = reshape_to_xy
         self.flip_axis = flip_axis
+        # Real destination-grid coordinates (None when reshape_to_xy=False or the
+        # weight file lacks xc_b/yc_b) — consumed by GridSchema.resolve to determine
+        # the actual output grid when this preblock is active. Not a torch buffer:
+        # plain numpy, only used at grid-resolution time, not in forward().
         self.dst_grid_type = grid_type
         self.dst_lat = dst_lat
         self.dst_lon = dst_lon
@@ -102,6 +111,7 @@ class Regridder(BasePreblock):
         self.n_a = int(n_a)
         self.n_b = int(n_b)
         self.dst_shape = dst_shape
+        # Lazy sparse weight cache: built on first use and reused while the device stays the same.
         self._W = None
         self._W_device = None
 
@@ -140,7 +150,15 @@ class Regridder(BasePreblock):
         # 3. Safeguard flip_axis to prevent flipping non-spatial dimensions
         if self.flip_axis is not None:
             # Ensure we only flip dimensions that fall within our detected spatial dims
-            valid_flips = [d for d in self.flip_axis if d >= -spatial_dims]
+            requested_flips = list(self.flip_axis)
+            valid_flips = [d for d in requested_flips if -spatial_dims <= d < 0]
+            if valid_flips != requested_flips:
+                logger.warning(
+                    "Regridder: ignoring invalid flip_axis values %s; spatial axes must be negative "
+                    "indices in [%d, -1].",
+                    [d for d in requested_flips if d not in valid_flips],
+                    -spatial_dims,
+                )
             if valid_flips:
                 x = torch.flip(x, dims=valid_flips)
 

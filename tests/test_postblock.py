@@ -22,6 +22,7 @@ from credit.postblock.gen1 import (
     GlobalEnergyFixerUpDown,
 )
 from credit.postblock.scaler import BridgeScalerTransform as PostScaler
+from credit.preblock._utils import _flatten_spatial_tensors
 from credit.postblock.exp import ExpTransform
 from credit.postblock.reconstruct import Reconstruct
 from credit.postblock.square import SquareTransform
@@ -426,6 +427,65 @@ def test_postblock_scaler_partial_path_expansion(tmp_path):
         assert not torch.allclose(result["y_processed"][source][v].float(), originals[v].float()), (
             f"partial path '{source}' should have expanded to include {v}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Postblock scaler — spatial_variables (grid-wise scaling)
+# ---------------------------------------------------------------------------
+
+
+def _save_spatial_target_scaler(path, target_dict, spatial_variables):
+    """Fit and save a scaler on the ``"target"`` slice, flattening
+    *spatial_variables* per-gridpoint first (mirrors the preblock fit path)."""
+    x_dict = {"target": {src: {v: t.clone() for v, t in vs.items()} for src, vs in target_dict.items()}}
+    x_flat, _ = _flatten_spatial_tensors(x_dict, list(spatial_variables))
+    scaler_dict = scale_var_dict(x_flat, DStandardScalerTensor(channels_last=False), method="fit")
+    save_scaler_dict(scaler_dict, path)
+
+
+def test_postblock_scaler_spatial_round_trip(tmp_path):
+    """A spatial variable in y_processed transforms and inverse-transforms back
+    to its original values and shape, alongside an ordinary per-level variable."""
+    source = "Test_ERA5"
+    spatial_var = "Test_ERA5/prognostic/2d/SP"
+    level_var = "Test_ERA5/prognostic/3d/T"
+    B, L, H, W = 32, 4, 8, 8
+
+    target = {source: {spatial_var: torch.randn(B, 1, 1, H, W), level_var: torch.randn(B, L, 1, H, W)}}
+    path = str(tmp_path / "scaler.json")
+    _save_spatial_target_scaler(path, target, [spatial_var])
+
+    y = {source: {spatial_var: torch.randn(B, 1, 1, H, W), level_var: torch.randn(B, L, 1, H, W)}}
+    original = {v: t.clone() for v, t in y[source].items()}
+
+    fwd = PostScaler(scaler_path=path, variables=[], method="transform", spatial_variables=[spatial_var])
+    inv = PostScaler(scaler_path=path, variables=[], method="inverse_transform", spatial_variables=[spatial_var])
+    out = inv(fwd({"y_processed": y}))
+
+    for v in (spatial_var, level_var):
+        got = out["y_processed"][source][v]
+        assert got.shape == original[v].shape, f"{v} shape changed across round trip"
+        assert torch.allclose(got.float(), original[v].float(), atol=1e-4), f"{v} not recovered"
+
+
+def test_postblock_scaler_spatial_variables_must_be_subset(tmp_path):
+    """spatial_variables not covered by `variables` is a config error and raises."""
+    source = "Test_ERA5"
+    spatial_var = "Test_ERA5/prognostic/2d/SP"
+    level_var = "Test_ERA5/prognostic/3d/T"
+    target = {source: {spatial_var: torch.randn(2, 1, 1, 4, 4), level_var: torch.randn(2, 3, 1, 4, 4)}}
+    path = str(tmp_path / "scaler.json")
+    _save_spatial_target_scaler(path, target, [spatial_var])
+
+    block = PostScaler(
+        scaler_path=path,
+        variables=[level_var],  # SP deliberately omitted
+        method="transform",
+        spatial_variables=[spatial_var],
+    )
+    y = {source: {v: t.clone() for v, t in target[source].items()}}
+    with pytest.raises(ValueError, match="must also be selected"):
+        block({"y_processed": y})
 
 
 def test_exp_transform_round_trip_base_e():

@@ -83,10 +83,11 @@ def _flatten_spatial_tensors(state_dict: dict, spatial_variables: list) -> tuple
             if isinstance(value, dict):
                 new_d[key] = _walk(value)
             elif key in spatial_set:
-                assert value.shape[1] == 1 and value.shape[2] == 1, (
-                    f"Spatial scaling for '{key}' requires singleton level and time dims "
-                    f"(dims 1 and 2), got shape {tuple(value.shape)}."
-                )
+                if value.shape[1] != 1 or value.shape[2] != 1:
+                    raise ValueError(
+                        f"Spatial scaling for '{key}' requires singleton level and time dims "
+                        f"(dims 1 and 2), got shape {tuple(value.shape)}."
+                    )
                 original_shapes[key] = value.shape
                 new_d[key] = value.reshape(value.shape[0], -1)
             else:

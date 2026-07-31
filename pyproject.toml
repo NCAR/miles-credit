@@ -38,6 +38,7 @@ dependencies = [
     "fsspec",
     "gcsfs",
     "s3fs",
+    "obstore",
     "setuptools_scm",
     "setuptools",
     "numba",

@@ -1,0 +1,183 @@
+# Tiny end-to-end Gen2 config for Perlmutter NCCL/libfabric confirmation.
+# Data streams from the public WeatherBench2 ERA5 GCS store (anonymous), so no
+# local dataset is required. Kept deliberately small (2 levels, few variables,
+# a handful of batches) to exercise the full pipeline + NCCL quickly.
+
+save_loc: '/pscratch/sd/d/djgagne/CREDIT_runs/slurm_test/wb2_perlmutter_tiny'
+seed: 31415
+
+data:
+  source:
+    WBERA5:
+      dataset_type: "weatherbench2_era5"
+      resolution: "240x121"
+      level_coord: "level"
+      levels: [500, 850]
+      variables:
+        prognostic:
+          vars_3D: ["temperature", "specific_humidity"]
+          vars_2D: ["surface_pressure", "2m_temperature"]
+        diagnostic:
+          vars_2D: ['total_precipitation_6hr']
+        dynamic_forcing:
+          vars_2D: ["sea_surface_temperature"]
+        static:
+          vars_2D: ["land_sea_mask", "geopotential_at_surface"]
+  start_datetime: "2015-01-01"
+  end_datetime: "2016-12-31 18:00:00"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+preblocks:
+  per_step:
+    log_transform:
+      type: "log_transform"
+      args:
+        variables:
+          - 'WBERA5/prognostic/3d/specific_humidity'
+          - "WBERA5/prognostic/2d/surface_pressure"
+          - "WBERA5/diagnostic/2d/total_precipitation_6hr"
+        data_types:
+          - 'input'
+          - 'target'
+    fill_values:
+      type: "fill_values"
+      args:
+        rules:
+          - search: nan
+            fill: 0.0
+        variables: []
+        data_types:
+          - 'input'
+          - 'target'
+    scaler:
+      type: "bridgescaler_transform"
+      args:
+        variables: []
+        scaler_path: "/pscratch/sd/d/djgagne/CREDIT_runs/slurm_test/wb2_perlmutter_tiny/scaler_quantile.json"
+        scaler_type: "quantile"
+        scaler_params:
+          channels_last: False
+          compression: 500
+        method: transform
+    concat:
+      type: "concat"
+
+postblocks:
+  per_step:
+    reconstruct:
+      type: "reconstruct"
+
+model:
+  type: "wxformer"
+  frames: 1
+  image_height: 240        # data dim-2 = longitude (WB2 store order: lon, lat)
+  image_width: 121         # data dim-1 = latitude
+  levels: 2                # pressure levels [500, 850]
+  channels: 2              # 3D prognostic: temperature, specific_humidity
+  surface_channels: 2      # 2D prognostic: surface_pressure, 2m_temperature
+  input_only_channels: 3   # dynamic_forcing (1) + static (2)
+  output_only_channels: 1  # diagnostic: total_precipitation_6hr
+
+  patch_width: 1
+  patch_height: 1
+
+  dim: [32, 64, 128, 256]
+  depth: [2, 2, 2, 2]
+
+  # Data spatial layout is (longitude=240, latitude=121) -> model dim-2 = 240,
+  # dim-1 = 121. Padded: dim-2 240->256 (pad_lat [8,8]), dim-1 121->128
+  # (pad_lon [3,4]). stride-2 x4 -> dim-2 [128,64,32,16], dim-1 [64,32,16,8];
+  # all divisible by the global window sizes and local_window_size (4).
+  global_window_size: [8, 4, 2, 1]
+  local_window_size: 4
+  cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  interp: True
+  use_spectral_norm: True
+  upsample_with_ps: True
+
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: [8, 8]
+    pad_lon: [3, 4]
+
+loss:
+  training_loss: "mse"
+  validation_loss: "mse"
+  use_power_loss: False
+  use_spectral_loss: False
+  use_latitude_weights: False
+  use_variable_weights: False
+
+trainer:
+  type: gen2
+
+  parallelism:
+    data: ddp
+    tensor: 1
+    domain: 1
+
+  activation_checkpoint: False
+
+  load_weights: False
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: False
+
+  skip_validation: True
+  update_learning_rate: False
+
+  save_backup_weights: True
+  save_best_weights: True
+
+  learning_rate: 1.0e-03
+  weight_decay: 0
+
+  train_batch_size: 2
+  valid_batch_size: 2
+
+  batches_per_epoch: 3
+  valid_batches_per_epoch: 2
+  stopping_patience: 999
+
+  start_epoch: 0
+  num_epoch: 1
+  epochs: 1
+
+  use_tensorboard: False
+  use_ema: False
+
+  use_scheduler: False
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 'dynamic'
+
+  thread_workers: 2
+  valid_thread_workers: 1
+  prefetch_factor: 2
+
+slurm:
+  conda: "/global/common/software/m5388/djgagne/envs/credit-perlmutter"
+  project: "m5388"
+  job_name: "credit_wb2_tiny"
+  nodes: 1
+  ngpus: 2
+  ncpus: 64
+  walltime: "00:20:00"
+  qos: "debug"
+  constraint: "gpu"
+  env_setup:
+    - "export NCCL_DEBUG=INFO"

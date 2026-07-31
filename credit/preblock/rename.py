@@ -1,3 +1,5 @@
+"""Rename variable keys and their source namespaces in nested batch dictionaries."""
+
 import logging
 from os.path import expandvars
 from typing import Any
@@ -22,7 +24,8 @@ class RenameVariables(BasePreblock):
     not present in ``mapping`` are left untouched; a mapped key absent from a
     given ``data_type`` (e.g. a rename that only applies to ``"input"``) is
     silently skipped, matching every other preblock's convention for optional
-    per-data_type variables.
+    per-data_type variables. Mapping is resolved against the keys present at the
+    start of each pass, so chained mappings do not cascade.
 
     Exactly one of ``mapping`` / ``mapping_file`` must be given. Prefer
     ``mapping_file`` for anything reused across configs or runs (e.g. a
@@ -44,14 +47,14 @@ class RenameVariables(BasePreblock):
 
         type: "rename"
         args:
-          mapping_file: "credit/metadata/gfs_to_era5_rename.yaml"
+          mapping_file: "$SCRATCH/gfs_to_era5_rename.yaml"
     """
 
     def __init__(
         self,
         mapping: dict[str, str] | None = None,
         mapping_file: str | None = None,
-        data_types: list[str] = None,
+        data_types: list[str] | None = None,
     ):
         super().__init__()
         if (mapping is None) == (mapping_file is None):
@@ -78,23 +81,27 @@ class RenameVariables(BasePreblock):
 
     def forward(self, batch: dict) -> dict:
         batch = self._copy_batch(batch)  # shallow copy -- avoids mutating the caller's dict
-        for old_key, new_key in self.mapping.items():
-            old_source = old_key.split("/", 1)[0]
-            new_source = new_key.split("/", 1)[0]
+        for data_type in self.data_types:
+            if data_type not in batch:
+                continue
+            sources = batch[data_type]
+            if not isinstance(sources, dict):
+                continue
 
-            for data_type in self.data_types:
-                if data_type not in batch:
-                    continue
-                sources = batch[data_type]
-                if old_source not in sources or old_key not in sources[old_source]:
-                    continue  # absent in this data_type -- e.g. an input-only rename during a target pass
+            original = {source: dict(variables) for source, variables in sources.items()}
+            renamed = {source: {} for source in original}
+            for source, variables in original.items():
+                for old_key, tensor in variables.items():
+                    new_key = self.mapping.get(old_key, old_key)
+                    new_source = new_key.split("/", 1)[0]
+                    dest = renamed.setdefault(new_source, {})
+                    if new_key in dest:
+                        raise ValueError(
+                            f"RenameVariables: mapping target '{new_key}' already exists in "
+                            f"batch['{data_type}'] -- two variables would collide under the same key."
+                        )
+                    dest[new_key] = tensor
 
-                dest = sources.setdefault(new_source, {})
-                if new_key in dest:
-                    raise ValueError(
-                        f"RenameVariables: mapping target '{new_key}' already exists in "
-                        f"batch['{data_type}'] -- two variables would collide under the same key."
-                    )
-                dest[new_key] = sources[old_source].pop(old_key)
+            batch[data_type] = renamed
 
         return batch
