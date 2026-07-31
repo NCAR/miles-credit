@@ -60,11 +60,11 @@ File naming:
 
 from __future__ import annotations
 
-import cftime
 import logging
 from glob import glob
 from typing import Any
 
+import cftime
 import numpy as np
 import pandas as pd
 import torch
@@ -206,7 +206,7 @@ class LocalDataset(BaseDataset):
                     if time_coord not in ds:
                         continue
                     t0 = ds[time_coord].values.ravel()[0]
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "LocalDataset '%s': could not find calendar in %s (%s); assuming 'standard'. "
                     "Set an explicit `calendar:` key in the source config to silence this.",
@@ -269,7 +269,7 @@ class LocalDataset(BaseDataset):
                         times = list(pd.DatetimeIndex(raw).sort_values())
                     else:
                         times = sorted(raw.tolist())
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "LocalDataset '%s': could not infer cyclic time info from %s (%s). Set "
                     "cycle_year/start_datetime/end_datetime/timestep explicitly in the source config.",
@@ -443,7 +443,7 @@ class LocalDataset(BaseDataset):
                         self.levels = ds[self.level_coord].values.tolist()
                     return grid
 
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "LocalDataset '%s': could not find grid in %s (%s).",
                     self.curr_source_name,
@@ -584,7 +584,7 @@ class LocalDataset(BaseDataset):
     # Internal helpers for _extract_field
     # ------------------------------------------------------------------
 
-    def _select_at_time(self, ds: xr.Dataset, t: pd.Timestamp) -> xr.Dataset:
+    def _select_at_time(self, ds: xr.Dataset, t: pd.Timestamp | cftime.datetime) -> xr.Dataset:
         """Select a single time slice from *ds* at timestamp *t*.
 
         Handles both numpy datetime64 and cftime calendars, in both directions:
@@ -615,7 +615,7 @@ class LocalDataset(BaseDataset):
             t_sel = to_calendar(t, "standard")
         return ds.sel({self.time_coord: t_sel})
 
-    def _read_3d_array(self, ds_t: xr.Dataset, vname: str):
+    def _read_3d_array(self, ds_t: xr.Dataset, vname: str) -> np.ndarray:
         """Read a 3D variable from a per-time-slice dataset, applying level
         selection if configured. Lazily caches ``self.levels`` on first use,
         matching the original single-step logic.

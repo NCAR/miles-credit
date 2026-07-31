@@ -9,15 +9,14 @@ AbstractBaseDataset and BaseDataset: A PyTorch Dataset class for:
 
 """
 
-from glob import glob
 import logging
+from glob import glob
 from typing import Any, Literal, get_args
 
 import cftime
 import pandas as pd
-
-from torch.utils.data import Dataset
 import torch
+from torch.utils.data import Dataset
 
 from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
     _extract_time_fmt,
@@ -31,6 +30,8 @@ from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage
     to_calendar,
     to_cycle_year,
 )
+
+logger = logging.getLogger(__name__)
 
 # Expected types of fields
 # * ``prognostic``      — input at step 0 and target (autoregressive rollout)
@@ -446,7 +447,7 @@ class BaseDataset(AbstractBaseDataset):
             )
         return resolved
 
-    def _resolve_cyclic_timestamp(self, t: pd.Timestamp):
+    def _resolve_cyclic_timestamp(self, t: pd.Timestamp | cftime.datetime) -> pd.Timestamp | cftime.datetime:
         """Map *t* onto this source's single ``cycle_year``, then snap to the
         last native timestamp at or before that point.
 
@@ -639,7 +640,7 @@ class BaseDataset(AbstractBaseDataset):
         if has_source_dt:
             dt_in_source = pd.Timedelta(curr_source_config[dt_key])
             if dt_in_source < dt_in_data:
-                logging.warning(
+                logger.warning(
                     f"In loading for class {self.__class__.__name__}, "
                     + f"{dt_key} in source ({dt_in_source}) "
                     + f"is smaller than {dt_key} in data ({dt_in_data}). "
@@ -675,7 +676,7 @@ class BaseDataset(AbstractBaseDataset):
         if self._in_source_config(data_config, curr_source_config, num_forecast_steps_key):
             num_forecast_steps_in_source = curr_source_config[num_forecast_steps_key]
             if num_forecast_steps_in_source > num_forecast_steps_in_data:
-                logging.warning(
+                logger.warning(
                     f"In loading for class {self.__class__.__name__}, "
                     + f"{num_forecast_steps_key} in source ({num_forecast_steps_in_source}) "
                     + f"is greater than {num_forecast_steps_key} in data ({num_forecast_steps_in_data}). "
@@ -759,7 +760,7 @@ class BaseDataset(AbstractBaseDataset):
         if has_source_date_range:
             start_datetime_in_source = pd.Timestamp(curr_source_config[start_datetime_key])
             if start_datetime_in_source < start_datetime_in_data:
-                logging.warning(
+                logger.warning(
                     f"In loading for class {self.__class__.__name__}, "
                     + f"{start_datetime_key} in source ({start_datetime_in_source}) "
                     + f"is earlier than {start_datetime_key} in data ({start_datetime_in_data}). "
@@ -800,7 +801,7 @@ class BaseDataset(AbstractBaseDataset):
         if has_source_date_range:
             end_datetime_in_source = pd.Timestamp(curr_source_config[end_datetime_key])
             if end_datetime_in_source > end_datetime_in_data:
-                logging.warning(
+                logger.warning(
                     f"In loading for class {self.__class__.__name__}, "
                     + f"{end_datetime_key} in source ({end_datetime_in_source}) "
                     + f"is later than {end_datetime_key} in data ({end_datetime_in_data}). "
@@ -923,7 +924,7 @@ class BaseDataset(AbstractBaseDataset):
         """
 
         if self.dataset_type == "base":
-            logging.error(
+            logger.error(
                 f"You are currently using a dataset name of {self.dataset_type} for class {self.__class__.__name__}, "
                 "which is the default name for the BaseDataset class. Likely, you did not set the dataset_type attribute "
                 "in the __init__ method of your inherited dataset class, which may cause issues downstream! "
@@ -1076,7 +1077,7 @@ class BaseDataset(AbstractBaseDataset):
             t (pd.Timestamp): Query timestamp for which to extract the field data.
             sample (dict[str, Any]): The sample dict being built in __getitem__
         """
-        logging.error(
+        logger.error(
             "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "
             "You should implement this method in your inherited dataset class to extract the data for each field type. Your inherited "
             "class is of type: " + self.__class__.__name__ + ". "

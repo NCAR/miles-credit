@@ -15,7 +15,6 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
-
 from credit.datasets import register_dataset
 from credit.datasets.gen_2.base_dataset import BaseDataset
 from credit.datasets.gen_2.local import LocalDataset
@@ -211,6 +210,17 @@ class TestCyclicMultiSourceDataset:
         clim_ds = ds.datasets["Clim"]
         assert len(clim_ds.recorded_calls) == 1
         assert clim_ds.recorded_calls[0][1] == pd.Timestamp(f"2000-{t.month:02d}-{t.day:02d}")
+
+    def test_nonstandard_cyclic_calendar_does_not_constrain_master_clock(self, cyclic_multi_config):
+        """A cyclic noleap source must not remove Feb 29 from a standard real clock."""
+        cyclic_multi_config["source"]["Clim"]["calendar"] = "noleap"
+        cyclic_multi_config["start_datetime"] = "2000-02-28"
+        cyclic_multi_config["end_datetime"] = "2000-03-02"
+
+        ds = MultiSourceDataset(cyclic_multi_config)
+
+        assert ds.calendar == "standard"
+        assert pd.Timestamp("2000-02-29") in ds.datetimes
 
 
 # --------------------------------------------------------------------------- #

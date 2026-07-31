@@ -43,7 +43,6 @@ from typing import Any
 
 import pandas as pd
 
-from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
 from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
     build_time_index,
     build_time_index_multi,
@@ -53,6 +52,7 @@ from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage
     normalize_calendar,
     to_calendar,
 )
+from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +167,7 @@ class MultiSourceDataset(AbstractBaseDataset):
 
         # Loop through all the options in the source config. These will have user
         # provided (unique) names.
-        for user_dataset_name in source_cfg.keys():
+        for user_dataset_name in source_cfg:
             # Pass in just the sub-config for this source to avoid confusion
             # with multisource datasets (e.g., HRRR and HRRR_NAT)
             sub_config = make_single_source_subconfig(config, user_dataset_name)
@@ -220,12 +220,12 @@ class MultiSourceDataset(AbstractBaseDataset):
         """Resolve the master-clock calendar and validate it against the sources.
 
         An explicit data-level ``calendar:`` key wins; otherwise the most
-        restrictive calendar across sources is used (a non-standard calendar's
-        dates are a strict subset of the standard dates we support, so every
-        source can serve the master clock's labels). A non-standard source
-        under a less restrictive master clock is an init-time error — the
-        sampler's step arithmetic would generate ticks (e.g. Feb 29) that the
-        source cannot represent, and intersection cannot prevent that.
+        restrictive calendar across non-cyclic sources is used (a non-standard
+        calendar's dates are a strict subset of the standard dates we support,
+        so every source can serve the master clock's labels). A non-standard
+        source under a less restrictive master clock is an init-time error —
+        the sampler's step arithmetic would generate ticks (e.g. Feb 29) that
+        the source cannot represent, and intersection cannot prevent that.
 
         Cyclic sources (``temporal_mode: cyclic``) are exempt from this check:
         their calendar describes one small, standalone climatology file (see
@@ -236,9 +236,12 @@ class MultiSourceDataset(AbstractBaseDataset):
         source_calendars = {name: getattr(ds, "calendar", "standard") for name, ds in self.datasets.items()}
         source_cfg = config.get("source", {})
         explicit = config.get("calendar")
-        master_calendar = (
-            normalize_calendar(explicit) if explicit else most_restrictive_calendar(source_calendars.values())
-        )
+        non_cyclic_calendars = [
+            calendar
+            for name, calendar in source_calendars.items()
+            if source_cfg.get(name, {}).get("temporal_mode") != "cyclic"
+        ]
+        master_calendar = normalize_calendar(explicit) if explicit else most_restrictive_calendar(non_cyclic_calendars)
 
         for name, cal in source_calendars.items():
             if source_cfg.get(name, {}).get("temporal_mode") == "cyclic":
