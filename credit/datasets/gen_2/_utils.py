@@ -457,3 +457,21 @@ def _start_s3_fs():
         "default_block_size": 8**20,
     }
     return s3fs.S3FileSystem(**fs_config)
+
+
+def _start_s3_obstore(s3_bucket_name: str):
+    """Lazily initialize an anonymous ``obstore.store.S3S3Store`` instance.
+
+    Called automatically on the first ``__extract_field__`` (called within ``__getitem__``)
+    invocation when ``mode`` is ``"remote"``. The filesystem object is cached in ``_obstore``
+    for re-use across later calls.
+
+    """
+
+    try:
+        import obstore
+    except ImportError as exc:
+        raise ImportError("s3fs is required for remote dataset access. Install it with: pip install obstore") from exc
+
+    # Skip signature is important to create an anonymous client!
+    return obstore.store.S3Store(s3_bucket_name, skip_signature=True)
