@@ -47,7 +47,7 @@ class RenameVariables(BasePreblock):
 
         type: "rename"
         args:
-          mapping_file: "credit/metadata/gfs_to_era5_rename.yaml"
+          mapping_file: "$SCRATCH/gfs_to_era5_rename.yaml"
     """
 
     def __init__(
