@@ -175,6 +175,20 @@ def test_regrid_flip_axis(weight_file):
     )
 
 
+def test_regrid_flip_axis_ignores_positive_leading_axes(weight_file, caplog):
+    """Positive flip axes are rejected instead of flipping a leading dimension."""
+    path, n_src_lat, n_src_lon, _, _ = weight_file
+    variable = "Test_ERA5/prognostic/3d/T"
+    x = torch.arange(2 * 1 * 2 * n_src_lat * n_src_lon, dtype=torch.float32).reshape(2, 1, 2, n_src_lat, n_src_lon)
+    batch = {"input": {"Test_ERA5": {variable: x}}}
+    baseline = Regridder(path, variables=[variable])(batch)
+    caplog.set_level("WARNING")
+    result = Regridder(path, variables=[variable], flip_axis=[2])(batch)
+
+    torch.testing.assert_close(result["input"]["Test_ERA5"][variable], baseline["input"]["Test_ERA5"][variable])
+    assert "invalid flip_axis values [2]" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # Fixture — real DStandardScalerTensor fit on random data
 # ---------------------------------------------------------------------------
