@@ -92,6 +92,10 @@ class Regridder(BasePreblock):
         self.data_types = data_types or ["input", "target"]
         self.reshape_to_xy = reshape_to_xy
         self.flip_axis = flip_axis
+        # Real destination-grid coordinates (None when reshape_to_xy=False or the
+        # weight file lacks xc_b/yc_b) — consumed by GridSchema.resolve to determine
+        # the actual output grid when this preblock is active. Not a torch buffer:
+        # plain numpy, only used at grid-resolution time, not in forward().
         self.dst_grid_type = grid_type
         self.dst_lat = dst_lat
         self.dst_lon = dst_lon
@@ -107,6 +111,7 @@ class Regridder(BasePreblock):
         self.n_a = int(n_a)
         self.n_b = int(n_b)
         self.dst_shape = dst_shape
+        # Lazy sparse weight cache: built on first use and reused while the device stays the same.
         self._W = None
         self._W_device = None
 
