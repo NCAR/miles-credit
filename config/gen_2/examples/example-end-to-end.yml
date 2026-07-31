@@ -237,7 +237,6 @@ model:
   surface_channels: 4     # 2D prognostic variables (SP, 2T, 10U, 10V)
   input_only_channels: 4  # dynamic_forcing (2) + static (2)
   output_only_channels: 8 # diagnostic variables
-
   patch_width: 1
   patch_height: 1
 
@@ -310,6 +309,21 @@ loss:
 #   --run-mode batch|single     overrides run_mode
 #   --init-time YYYY-MM-DDTHH  overrides single_forecast.start_datetime
 #   --save-dir /path            overrides save_forecast
+#
+# Optional per-key overrides: inference.data / inference.preblocks /
+# inference.postblocks, if present, each wholesale-replace the corresponding
+# top-level data:/preblocks:/postblocks: block for rollout only (training is
+# unaffected). Each is independent -- e.g. set inference.data alone to run
+# inference against a different date range or source without touching
+# preblocks/postblocks. A present block must be complete on its own (this is
+# a replacement, not a merge with the top-level block). start_datetime/
+# end_datetime may be omitted from inference.data -- they're derived from
+# batch_forecast:/single_forecast: below (the real init-time schedule) rather
+# than needing a separately-specified date range. Example:
+#   inference:
+#     data:
+#       source: { ... }        # full data:-shaped block for inference
+#       timestep: "6h"
 #
 inference:
   run_mode: batch                   # batch | single

@@ -4,31 +4,31 @@ import os
 from collections import defaultdict
 
 import numpy as np
+import optuna
 import torch
 import torch.distributed as dist
 import tqdm
 
-import optuna
-
+from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
 from credit.losses import BaseLoss, is_crps_loss
+from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.domain import (
     gather_spatial,
     get_domain_manager,
     get_raw_model,
     shard_spatial,
-    unpad_shard_interp,
     sync_domain_gradients,
+    unpad_shard_interp,
 )
-from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.fsdp2 import fsdp2_is_applied
-from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
-from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
-from credit.postblock import build_postblocks, apply_postblocks
-from credit.preblock import attach_channel_schema, build_preblocks, apply_preblocks
-from credit.trainers.rollout_utils import assemble_rollout_batch
+from credit.postblock import apply_postblocks, build_postblocks
+from credit.preblock import apply_preblocks, attach_channel_schema, build_preblocks
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.rollout_utils import apply_rollout_renames, assemble_rollout_batch
 from credit.trainers.utils import accum_log, cycle
+
 
 logger = logging.getLogger(__name__)
 
@@ -381,6 +381,9 @@ class TrainerERA5Gen2(BaseTrainer):
                     full_data_dict["x_raw"] = batch["input"]
                     full_data_dict["y_raw"] = batch["target"]
                     full_data_dict["ic_preprocessed"] = apply_preblocks(self.ic_preblocks, batch, device=self.device)
+                    full_data_dict["ic_preprocessed"] = apply_rollout_renames(
+                        full_data_dict["ic_preprocessed"], self.step_preblocks
+                    )
                     step_input = full_data_dict["ic_preprocessed"]
                     # t0 physical, named input the model consumes this step (= IC
                     # for forecast_len=1); the conservation fixers read t0 here.
@@ -394,7 +397,8 @@ class TrainerERA5Gen2(BaseTrainer):
                 else:
                     full_data_dict["x_raw"] = batch["input"]
                     full_data_dict["y_raw"] = batch["target"]
-                    step_input = assemble_rollout_batch(full_data_dict, batch, history_len=self.history_len)
+                    rollout_batch = apply_rollout_renames(batch, self.ic_preblocks, self.step_preblocks)
+                    step_input = assemble_rollout_batch(full_data_dict, rollout_batch, history_len=self.history_len)
                     # At t>1 the t0 state is the previous step's predicted physical
                     # state plus this step's forcing, not the original IC.
                     full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
@@ -609,6 +613,9 @@ class TrainerERA5Gen2(BaseTrainer):
                         full_data_dict["ic_preprocessed"] = apply_preblocks(
                             self.ic_preblocks, batch, device=self.device
                         )
+                        full_data_dict["ic_preprocessed"] = apply_rollout_renames(
+                            full_data_dict["ic_preprocessed"], self.step_preblocks
+                        )
                         step_input = full_data_dict["ic_preprocessed"]
                         # t0 physical, named input (= IC for forecast_len=1).
                         full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
@@ -618,7 +625,10 @@ class TrainerERA5Gen2(BaseTrainer):
                     else:
                         full_data_dict["x_raw"] = batch["input"]
                         full_data_dict["y_raw"] = batch["target"]
-                        step_input = assemble_rollout_batch(full_data_dict, batch, history_len=self.valid_history_len)
+                        rollout_batch = apply_rollout_renames(batch, self.ic_preblocks, self.step_preblocks)
+                        step_input = assemble_rollout_batch(
+                            full_data_dict, rollout_batch, history_len=self.valid_history_len
+                        )
                         # t0 = previous step's predicted physical state + this
                         # step's forcing, not the original IC.
                         full_data_dict["x_physical"] = _copy_named_input(step_input["input"])

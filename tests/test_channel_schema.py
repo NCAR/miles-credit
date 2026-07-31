@@ -130,6 +130,58 @@ class TestFromConfig:
         assert cmap["CESM/diagnostic/2d/FLUT"]["slice"] == slice(8, 9)
         assert cmap["CESM/prognostic/3d/U"]["orig_shape"] == (3, 1)
 
+    def test_input_n_time_follows_history_len(self):
+        """history_len > 1 widens the input layout's time dim; target stays 1."""
+        conf = yaml.safe_load(yaml.safe_dump(CONF))
+        conf["data"]["history_len"] = 2
+        schema = ChannelSchema.from_config(conf)
+        for entry in schema.input_layout:
+            assert entry["n_time"] == 2, entry
+        for entry in schema.target_layout:
+            assert entry["n_time"] == 1, entry
+        cmap = schema.input_channel_map()
+        # U: 3 levels * 2 time = 6 channels
+        assert cmap["CESM/prognostic/3d/U"]["slice"] == slice(0, 6)
+        assert cmap["CESM/prognostic/3d/U"]["orig_shape"] == (3, 2)
+        # T: next 6 channels
+        assert cmap["CESM/prognostic/3d/T"]["slice"] == slice(6, 12)
+
+    def test_source_level_history_len_overrides_data_level(self):
+        """Source-level history_len wins over the data-level value."""
+        conf = yaml.safe_load(yaml.safe_dump(CONF))
+        conf["data"]["history_len"] = 1
+        conf["data"]["source"]["CESM"]["history_len"] = 3
+        schema = ChannelSchema.from_config(conf)
+        for entry in schema.input_layout:
+            assert entry["n_time"] == 3, entry
+
+    def test_inference_override_preserves_training_schema_config(self):
+        """Fallback schema derivation uses training data, not inference overrides."""
+        from credit.trainers.rollout_utils import apply_inference_overrides
+
+        conf = yaml.safe_load(yaml.safe_dump(CONF))
+        conf["inference"] = {
+            "data": {
+                "source": {
+                    "GFS": {
+                        "variables": {"prognostic": {"vars_3D": [], "vars_2D": ["TMP"]}},
+                    }
+                }
+            }
+        }
+
+        schema_conf = apply_inference_overrides(conf)
+
+        assert list(schema_conf["data"]["source"]) == ["CESM"]
+        assert list(conf["data"]["source"]) == ["GFS"]
+        assert [entry["var_key"] for entry in ChannelSchema.from_config(schema_conf).target_layout] == [
+            "CESM/prognostic/3d/U",
+            "CESM/prognostic/3d/T",
+            "CESM/prognostic/2d/PS",
+            "CESM/diagnostic/2d/PRECT",
+            "CESM/diagnostic/2d/FLUT",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # Persistence
@@ -208,6 +260,40 @@ class TestConcatIntegration:
         _, _, meta = concat(make_batch(with_target=True))
         schema = ChannelSchema.from_config(CONF)
         schema.validate_channel_map(meta["input"]["_channel_map"], which="input")
+
+    def test_schema_matches_data_derived_input_map_history_len_gt_1(self):
+        """history_len > 1: the schema's input n_time must match the tensor's T dim.
+
+        Regression for the spurious ``ChannelSchema mismatch (input map)`` that
+        broke ``credit_train`` and rollout whenever history_len > 1.
+        """
+        conf = yaml.safe_load(yaml.safe_dump(CONF))
+        conf["data"]["history_len"] = 2
+        h, w = 4, 5
+
+        def t3():
+            return torch.randn(1, 3, 2, h, w)
+
+        def t2():
+            return torch.randn(1, 1, 2, h, w)
+
+        batch = {
+            "input": {
+                "CESM": {
+                    "CESM/prognostic/3d/U": t3(),
+                    "CESM/prognostic/3d/T": t3(),
+                    "CESM/prognostic/2d/PS": t2(),
+                    "CESM/static/2d/z_norm": t2(),
+                    "CESM/dynamic_forcing/2d/SOLIN": t2(),
+                }
+            },
+        }
+        concat = ConcatToTensor(to_device=False)
+        concat.set_schema(ChannelSchema.from_config(conf))
+        _, meta = concat(batch)  # must not raise
+        # input map carries the full history width; target map stays single-step
+        assert meta["input"]["_channel_map"]["CESM/prognostic/3d/U"]["orig_shape"] == (3, 2)
+        assert meta["target"]["_channel_map"]["CESM/prognostic/3d/U"]["orig_shape"] == (3, 1)
 
     def test_no_target_no_schema_drops_diagnostics(self):
         """Legacy fallback: without a schema, the inference map is prognostic-only."""

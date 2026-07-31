@@ -1,14 +1,16 @@
 import logging
+import os
 
 import pandas as pd
 import torch
 from tqdm import tqdm
-import os
+
 from credit.datasets.gen_2._utils import decode_time, to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock import apply_postblocks
 from credit.preblock import apply_preblocks
+from credit.preblock.rename import RenameVariables
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,81 @@ def parse_length(length_str: str, timestep: str) -> int:
     if n <= 0:
         raise ValueError(f"Inference length '{length_str}' is not positive for timestep '{timestep}'.")
     return n
+
+
+def apply_inference_overrides(conf: dict) -> dict:
+    """Override data:/preblocks:/postblocks: with blocks nested under inference:, if present.
+
+    Each of ``inference.data``, ``inference.preblocks``, ``inference.postblocks``
+    is optional and independent: if present, it wholesale-replaces the
+    corresponding top-level block (``conf["data"]``, ``conf["preblocks"]``,
+    ``conf["postblocks"]``) for the remainder of this process; if absent, the
+    top-level block used for training is left as-is. Mutates ``conf`` in
+    place — call once, before anything reads ``conf["data"]``/``preblocks``/
+    ``postblocks`` (dataset construction, ``build_preblocks``,
+    ``build_postblocks``). Returns a shallow copy of the pre-override config
+    for deriving the training-time ``ChannelSchema`` when no saved schema exists.
+
+    This is a full replacement, not a deep merge: an ``inference.data`` block
+    must be a complete ``data:``-shaped config on its own, not a partial
+    override of individual keys. A present-but-``null`` key (e.g. ``inference:
+    {data: null}``, however that arises in YAML) is treated as absent, not as
+    an override to ``None``.
+
+    Warns (does not raise) when ``data`` is overridden but ``preblocks``/
+    ``postblocks`` are not: the training preblock/postblock chain will then run
+    against the new data source unchanged, which is exactly the risky
+    combination if the new source's variable names, grid, or vertical levels
+    differ from training. ``ConcatToTensor`` (if a ``ChannelSchema`` is
+    attached) still catches an actual mismatch with a precise diff on the first
+    batch -- this warning is just the cheap, immediate heads-up before that.
+    """
+    schema_conf = conf.copy()
+    inf_conf = conf.get("inference") or {}
+    overridden = set()
+    for key in ("data", "preblocks", "postblocks"):
+        override = inf_conf.get(key)
+        if override is not None:
+            conf[key] = override
+            overridden.add(key)
+
+    if "data" in overridden and not overridden & {"preblocks", "postblocks"}:
+        logger.warning(
+            "inference.data overrides the training data source, but inference.preblocks/"
+            "postblocks were not overridden -- the training preblock/postblock chain will "
+            "run against this new source unchanged. If variable names, grid, or vertical "
+            "levels differ from training, this will likely fail with a shape or key "
+            "mismatch. Consider adding inference.preblocks (e.g. a 'rename' and/or 'regrid' "
+            "step) to reconcile the new source with what the model was trained on."
+        )
+
+    return schema_conf
+
+
+def with_inference_datetime_bounds(data_conf: dict, all_init_times: list, n_steps: int, timestep: str) -> dict:
+    """Return a copy of *data_conf* with start_datetime/end_datetime derived, if absent.
+
+    ``BaseDataset.__init__`` unconditionally requires ``start_datetime``/
+    ``end_datetime``, but at inference the real init-time schedule
+    (``inference.batch_forecast``/``single_forecast``) already determines the
+    only dates that matter — a ``data:``/``inference.data`` block written for
+    inference-only use doesn't need to specify them separately. Derived as
+    ``start_datetime = min(all_init_times)``,
+    ``end_datetime = max(all_init_times) + n_steps * timestep`` — the exact
+    span of raw timestamps the rollout will ever request, covering both batch
+    (``all_init_times`` spans ``first_init_date``..``last_init_date``) and
+    single (``all_init_times`` is one timestamp) modes with the same formula.
+    An explicit value in *data_conf* always wins.
+
+    Note: for a source configured with ``temporal_mode: persist`` and
+    ``history_len > 1``, this span starts ``(history_len-1)*timestep`` later
+    than the true earliest lookback point, which could raise a "before first
+    available timestamp" error at the earliest edge — a narrow, pre-existing
+    edge case (fails loudly, not silently) that neither example config hits
+    (both use ``history_len: 1``).
+    """
+    end_datetime = max(all_init_times) + n_steps * pd.Timedelta(timestep)
+    return {"start_datetime": min(all_init_times), "end_datetime": end_datetime, **data_conf}
 
 
 def batch_init_times(batch_conf: dict, calendar: str = "standard") -> list:
@@ -110,6 +187,20 @@ def load_model_for_inference(conf: dict, device: torch.device) -> torch.nn.Modul
 # ---------------------------------------------------------------------------
 
 
+def apply_rollout_renames(batch: dict, *preblock_groups) -> dict:
+    """Apply configured variable renames before rollout batch assembly.
+
+    Assembly runs before the regular per-step preblocks, but it needs the same
+    variable namespace as the postblocks and the model schema. Only rename
+    blocks are applied here; the complete preblock groups still run afterward.
+    """
+    for group in preblock_groups:
+        for preblock in group.values():
+            if isinstance(preblock, RenameVariables):
+                batch = preblock(batch)
+    return batch
+
+
 def run_forecast(
     conf: dict,
     n_steps: int,
@@ -169,6 +260,7 @@ def run_forecast(
 
     full_data_dict["ic_raw"] = ic_batch.get("input", {})
     full_data_dict["ic_preprocessed"] = apply_preblocks(ic_preblocks, ic_batch, device=device)
+    full_data_dict["ic_preprocessed"] = apply_rollout_renames(full_data_dict["ic_preprocessed"], step_preblocks)
     full_data_dict["x_physical"] = full_data_dict["ic_preprocessed"]["input"]
     full_data_dict.update(apply_preblocks(step_preblocks, full_data_dict["ic_preprocessed"], device=device))
 
@@ -196,6 +288,7 @@ def run_forecast(
             if step < n_steps:
                 # Load dynamic forcing for the next step from the shared iterator.
                 frc_batch = next(batch_iter)
+                frc_batch = apply_rollout_renames(frc_batch, ic_preblocks, step_preblocks)
 
                 # route predictions → prognostic/diagnostic, new forcing → dynamic_forcing,
                 # IC statics → static
@@ -296,6 +389,8 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict, history_len: 
     assembled_input: dict = {}
 
     for source, source_vars in ic_preprocessed["input"].items():
+        if not source_vars:
+            continue
         assembled_input[source] = {}
         curr_source = curr_batch.get("input", {}).get(source, {})
         pred_source = corrected_pred.get(source, {})

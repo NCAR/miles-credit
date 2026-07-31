@@ -163,8 +163,27 @@ def write_source_grid_schema_if_missing(source_name: str, grid: dict[str, Any] |
     successful write. Failures (no ``save_loc``, read-only filesystem, ...)
     are logged and swallowed — this must never break the data-loading path
     it's piggybacked onto.
+
+    A source can report a native ``grid_type`` this module doesn't support as a
+    resolved output grid (e.g. ``"unstructured"`` — see the module docstring's
+    "Scope" note): that's expected, not a failure, so it's logged at info level
+    and skipped here rather than attempting (and swallowing the inevitable
+    failure of) a ``GridSchema`` construction. Such a source still needs an
+    active ``Regridder`` preblock for ``GridSchema.resolve`` to produce a
+    resolvable output grid (see its docstring).
     """
     if grid is None or not save_loc:
+        return
+    if grid["grid_type"] not in _VALID_GRID_TYPES:
+        logger.info(
+            "Source '%s' has a %r native grid; not persisted to %s (GridSchema only "
+            "represents %s). An active Regridder preblock is required to produce a "
+            "resolvable output grid for this source.",
+            source_name,
+            grid["grid_type"],
+            SOURCE_GRID_SCHEMA_FILENAME.format(source=source_name),
+            _VALID_GRID_TYPES,
+        )
         return
     path = os.path.join(os.path.expandvars(save_loc), SOURCE_GRID_SCHEMA_FILENAME.format(source=source_name))
     if os.path.isfile(path):
@@ -324,8 +343,10 @@ class GridSchema:
         ``"native"``.
 
         Raises:
-            ValueError: if no native grid is available, or if grids disagree
-                (see ``_native_grid`` / ``_find_regridder``).
+            ValueError: if no native grid is available, if grids disagree (see
+                ``_native_grid`` / ``_find_regridder``), or if the native grid_type
+                (e.g. ``"unstructured"``) isn't directly resolvable and no active
+                Regridder preblock provides a rectilinear/curvilinear destination.
         """
         native = _native_grid(dataset, save_loc)
         if native is None:
@@ -337,6 +358,12 @@ class GridSchema:
 
         regridder = _find_regridder(ic_preblocks, step_preblocks)
         if regridder is None:
+            if native["grid_type"] not in _VALID_GRID_TYPES:
+                raise ValueError(
+                    f"GridSchema.resolve: source's native grid_type={native['grid_type']!r} is not "
+                    f"directly resolvable as an output grid (supported: {_VALID_GRID_TYPES}). Add an "
+                    "active Regridder preblock targeting a rectilinear/curvilinear destination grid."
+                )
             return cls(native["grid_type"], native["lat"], native["lon"], origin="native")
 
         return cls(regridder.dst_grid_type, regridder.dst_lat, regridder.dst_lon, origin="regridded")

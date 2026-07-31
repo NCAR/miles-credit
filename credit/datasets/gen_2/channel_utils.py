@@ -244,7 +244,17 @@ class ChannelSchema:
             src_levels = src_conf.get("levels")
             n_levels = len(src_levels) if src_levels else model_levels
 
-            def _entries(field_type: str) -> list[dict]:
+            # Input tensors carry a time dim of length history_len (the dataset
+            # loads a history_len-step window for prognostic / dynamic_forcing /
+            # static fields at i == 0). The target is always a single step at
+            # t+dt, so its n_time stays 1. history_len resolution mirrors
+            # BaseDataset._load_history_len: source-level first, then data-level,
+            # default 1 — so history_len == 1 configs are unaffected.
+            history_len = src_conf.get("history_len", data_conf.get("history_len", 1))
+            if not isinstance(history_len, int) or history_len < 1:
+                raise ValueError(f"history_len must be a positive int, got {history_len!r}")
+
+            def _entries(field_type: str, n_time: int) -> list[dict]:
                 grp = variables.get(field_type) or {}
                 entries = []
                 for vname in grp.get("vars_3D") or []:
@@ -259,7 +269,7 @@ class ChannelSchema:
                         {
                             "var_key": f"{source_name}/{field_type}/3d/{vname}",
                             "n_levels": int(n_levels),
-                            "n_time": 1,
+                            "n_time": n_time,
                         }
                     )
                 for vname in grp.get("vars_2D") or []:
@@ -267,15 +277,15 @@ class ChannelSchema:
                         {
                             "var_key": f"{source_name}/{field_type}/2d/{vname}",
                             "n_levels": 1,
-                            "n_time": 1,
+                            "n_time": n_time,
                         }
                     )
                 return entries
 
             for field_type in _INPUT_FIELD_TYPES:
-                input_layout.extend(_entries(field_type))
+                input_layout.extend(_entries(field_type, history_len))
             for field_type in _TARGET_FIELD_TYPES:
-                target_layout.extend(_entries(field_type))
+                target_layout.extend(_entries(field_type, 1))
 
         return cls(input_layout, target_layout)
 
