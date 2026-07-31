@@ -744,6 +744,17 @@ class TestRenameVariables:
         assert "ERA5" in out["input"]
         assert out["target"] == {}
 
+    @pytest.mark.parametrize("mapping", [{"A/x": "B/x", "B/x": "C/x"}, {"B/x": "C/x", "A/x": "B/x"}])
+    def test_chained_mappings_use_original_keys_only(self, mapping):
+        """A mapped destination is not remapped again in the same pass."""
+        batch = {"input": {"A": {"A/x": torch.tensor(1.0)}}}
+
+        out = RenameVariables(mapping=mapping)(batch)
+
+        assert out["input"]["A"] == {}
+        assert torch.equal(out["input"]["B"]["B/x"], torch.tensor(1.0))
+        assert "C" not in out["input"]
+
     def test_destination_collision_raises(self):
         batch = {
             "input": {
