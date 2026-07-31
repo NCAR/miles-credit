@@ -1,14 +1,16 @@
 import logging
+import os
 
 import pandas as pd
 import torch
 from tqdm import tqdm
-import os
+
 from credit.datasets.gen_2._utils import decode_time, to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock import apply_postblocks
 from credit.preblock import apply_preblocks
+from credit.preblock.rename import RenameVariables
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,20 @@ def load_model_for_inference(conf: dict, device: torch.device) -> torch.nn.Modul
 # ---------------------------------------------------------------------------
 
 
+def apply_rollout_renames(batch: dict, *preblock_groups) -> dict:
+    """Apply configured variable renames before rollout batch assembly.
+
+    Assembly runs before the regular per-step preblocks, but it needs the same
+    variable namespace as the postblocks and the model schema. Only rename
+    blocks are applied here; the complete preblock groups still run afterward.
+    """
+    for group in preblock_groups:
+        for preblock in group.values():
+            if isinstance(preblock, RenameVariables):
+                batch = preblock(batch)
+    return batch
+
+
 def run_forecast(
     conf: dict,
     n_steps: int,
@@ -240,6 +256,7 @@ def run_forecast(
 
     full_data_dict["ic_raw"] = ic_batch.get("input", {})
     full_data_dict["ic_preprocessed"] = apply_preblocks(ic_preblocks, ic_batch, device=device)
+    full_data_dict["ic_preprocessed"] = apply_rollout_renames(full_data_dict["ic_preprocessed"], step_preblocks)
     full_data_dict["x_physical"] = full_data_dict["ic_preprocessed"]["input"]
     full_data_dict.update(apply_preblocks(step_preblocks, full_data_dict["ic_preprocessed"], device=device))
 
@@ -267,6 +284,7 @@ def run_forecast(
             if step < n_steps:
                 # Load dynamic forcing for the next step from the shared iterator.
                 frc_batch = next(batch_iter)
+                frc_batch = apply_rollout_renames(frc_batch, ic_preblocks, step_preblocks)
 
                 # route predictions → prognostic/diagnostic, new forcing → dynamic_forcing,
                 # IC statics → static
@@ -367,6 +385,8 @@ def assemble_rollout_batch(full_data_dict: dict, curr_batch: dict, history_len: 
     assembled_input: dict = {}
 
     for source, source_vars in ic_preprocessed["input"].items():
+        if not source_vars:
+            continue
         assembled_input[source] = {}
         curr_source = curr_batch.get("input", {}).get(source, {})
         pred_source = corrected_pred.get(source, {})

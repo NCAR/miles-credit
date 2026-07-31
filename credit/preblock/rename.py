@@ -51,7 +51,7 @@ class RenameVariables(BasePreblock):
         self,
         mapping: dict[str, str] | None = None,
         mapping_file: str | None = None,
-        data_types: list[str] = None,
+        data_types: list[str] | None = None,
     ):
         super().__init__()
         if (mapping is None) == (mapping_file is None):
@@ -86,6 +86,8 @@ class RenameVariables(BasePreblock):
                 if data_type not in batch:
                     continue
                 sources = batch[data_type]
+                if not isinstance(sources, dict):
+                    continue
                 if old_source not in sources or old_key not in sources[old_source]:
                     continue  # absent in this data_type -- e.g. an input-only rename during a target pass
 
