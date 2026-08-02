@@ -20,11 +20,15 @@ cftime objects are ever created and behavior is bit-identical.
 from __future__ import annotations
 
 import bisect
-import cftime
 import logging
 import re
+from collections.abc import Iterable, Sequence
 from datetime import datetime as dt_cls
+from itertools import pairwise
+from typing import TypeAlias
 
+import cftime
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -43,6 +47,9 @@ _UNSUPPORTED_CALENDARS = frozenset({"360_day"})
 # cftime accepts these aliases; normalize so equality checks work
 _CALENDAR_ALIASES = {"365_day": "noleap", "366_day": "all_leap"}
 _EPOCH_US = "microseconds since 1970-01-01T00:00:00"
+_ZERO_TIMEDELTA = pd.Timedelta(0)
+
+TimeLike: TypeAlias = pd.Timestamp | cftime.datetime | dt_cls | np.datetime64 | str
 
 
 def normalize_calendar(calendar: str | None) -> str:
@@ -70,7 +77,7 @@ def _check_supported(calendar: str) -> str:
     return cal
 
 
-def to_calendar(t, calendar: str | None):
+def to_calendar(t: TimeLike, calendar: str | None) -> pd.Timestamp | cftime.datetime:
     """Convert a timestamp to *calendar* by date fields (year, month, day, ...).
 
     The conversion preserves the calendar *label* (2000-03-01 stays 2000-03-01),
@@ -129,7 +136,7 @@ def _is_leap_year(year: int, calendar: str) -> bool:
     return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)  # standard / gregorian / proleptic_gregorian
 
 
-def to_cycle_year(t, cycle_year: int, calendar: str | None):
+def to_cycle_year(t: TimeLike, cycle_year: int, calendar: str | None) -> pd.Timestamp | cftime.datetime:
     """Rewrite *t* onto *cycle_year*, preserving (month, day, hour, minute, second).
 
     Used by cyclic (``temporal_mode: "cyclic"``) sources to map an arbitrary
@@ -164,7 +171,9 @@ def to_cycle_year(t, cycle_year: int, calendar: str | None):
     return cftime.datetime(cycle_year, month, day, t.hour, t.minute, t.second, t.microsecond, calendar=cal)
 
 
-def build_time_index(start, end, freq, calendar: str | None = "standard"):
+def build_time_index(
+    start: TimeLike, end: TimeLike, freq: pd.Timedelta | str, calendar: str | None = "standard"
+) -> pd.Index:
     """Build the sampling clock for *calendar*.
 
     Standard calendars return exactly ``pd.date_range(start, end, freq=freq)``
@@ -188,12 +197,12 @@ def build_time_index(start, end, freq, calendar: str | None = "standard"):
 
 
 def build_time_index_multi(
-    blocks,
-    freq,
+    blocks: Sequence[tuple[TimeLike, TimeLike]],
+    freq: pd.Timedelta | str,
     calendar: str | None = "standard",
-    start_margin=pd.Timedelta(0),
-    end_margin=pd.Timedelta(0),
-):
+    start_margin: pd.Timedelta = _ZERO_TIMEDELTA,
+    end_margin: pd.Timedelta = _ZERO_TIMEDELTA,
+) -> pd.Index:
     """Build the sampling clock from one or more non-overlapping ``(start, end)`` blocks.
 
     Generalizes ``build_time_index`` to non-contiguous date ranges (e.g. train on
@@ -234,7 +243,7 @@ def build_time_index_multi(
         cal_blocks.append((s, e))
 
     cal_blocks.sort(key=lambda b: b[0])
-    for (_, e1), (s2, _) in zip(cal_blocks, cal_blocks[1:]):
+    for (_, e1), (s2, _) in pairwise(cal_blocks):
         if s2 <= e1:
             raise ValueError(
                 "build_time_index_multi: date_ranges blocks must be sorted and non-overlapping; "
@@ -259,7 +268,7 @@ def build_time_index_multi(
     return xr.CFTimeIndex(all_ts)
 
 
-def encode_time(t) -> int:
+def encode_time(t: TimeLike) -> int:
     """Encode a timestamp as int nanoseconds since 1970-01-01 *in its own calendar*.
 
     For ``pd.Timestamp`` this is exactly ``int(t.value)`` (unix ns).  For cftime
@@ -270,7 +279,7 @@ def encode_time(t) -> int:
     datasets advertise the calendar via ``static_metadata``.
     """
     if isinstance(t, cftime.datetime):
-        return int(round(float(cftime.date2num(t, _EPOCH_US, calendar=t.calendar)))) * 1000
+        return round(float(cftime.date2num(t, _EPOCH_US, calendar=t.calendar))) * 1000
     return int(pd.Timestamp(t).value)
 
 
@@ -282,7 +291,7 @@ def decode_time(value: int, calendar: str | None = "standard"):
     return cftime.num2date(int(value) // 1000, _EPOCH_US, calendar=cal)
 
 
-def most_restrictive_calendar(calendars) -> str:
+def most_restrictive_calendar(calendars: Iterable[str | None]) -> str:
     """Pick the master-clock calendar from per-source calendars.
 
     Standard-family calendars impose no restriction; a single non-standard
@@ -300,12 +309,12 @@ def most_restrictive_calendar(calendars) -> str:
     return next(iter(non_standard))
 
 
-def _time_label(t) -> tuple:
+def _time_label(t: TimeLike) -> tuple[int, int, int, int, int, int]:
     """Calendar-agnostic identity of a timestamp: its date/time fields."""
     return (t.year, t.month, t.day, t.hour, t.minute, t.second)
 
 
-def filter_index_by_labels(index, other):
+def filter_index_by_labels(index: pd.Index, other: Iterable[TimeLike]) -> pd.Index:
     """Keep elements of *index* whose (Y,M,D,h,m,s) label occurs in *other*.
 
     Calendar-agnostic replacement for ``index.isin(other)`` when the two sides
@@ -502,7 +511,7 @@ def _map_files(
                 f"Time format '{time_fmt}' did not match path '{f}'. "
                 "Verify that your path contains strftime codes covering the date portion."
             )
-        parsed = dt_cls.strptime(m.group(group_key), time_fmt)
+        parsed = dt_cls.strptime(m.group(group_key), time_fmt)  # noqa: DTZ007
         period = pd.Period(parsed, freq)
         intervals.append((period.start_time, period.end_time, f))
 
@@ -511,7 +520,7 @@ def _map_files(
 
 def _find_file(
     intervals: list[tuple[pd.Timestamp, pd.Timestamp, str]],
-    t: pd.Timestamp,
+    t: TimeLike,
 ) -> str:
     """Binary-search for the file whose interval covers *t*.
 
@@ -581,3 +590,21 @@ def _start_s3_fs():
         "default_block_size": 8**20,
     }
     return s3fs.S3FileSystem(**fs_config)
+
+
+def _start_s3_obstore(s3_bucket_name: str):
+    """Lazily initialize an anonymous ``obstore.store.S3S3Store`` instance.
+
+    Called automatically on the first ``__extract_field__`` (called within ``__getitem__``)
+    invocation when ``mode`` is ``"remote"``. The filesystem object is cached in ``_obstore``
+    for re-use across later calls.
+
+    """
+
+    try:
+        import obstore
+    except ImportError as exc:
+        raise ImportError("s3fs is required for remote dataset access. Install it with: pip install obstore") from exc
+
+    # Skip signature is important to create an anonymous client!
+    return obstore.store.S3Store(s3_bucket_name, skip_signature=True)

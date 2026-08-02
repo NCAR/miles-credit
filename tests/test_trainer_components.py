@@ -803,6 +803,55 @@ class TestAssembleRolloutBatch:
             msg="dynamic_forcing must come from curr_batch",
         )
 
+    @pytest.mark.parametrize("placement", ["ic_only", "per_step", "both"])
+    def test_rename_variables_is_applied_before_assembly(self, placement):
+        """Renamed IC and forcing keys share the postblock namespace at t > 0."""
+        from credit.preblock import apply_preblocks, build_preblocks
+        from credit.trainers.rollout_utils import apply_rollout_renames, assemble_rollout_batch
+
+        B, H, W = 1, 2, 2
+        mapping = {
+            "GFS/prognostic/2d/TMP": "ERA5/prognostic/2d/T",
+            "GFS/dynamic_forcing/2d/TMP": "ERA5/dynamic_forcing/2d/T",
+        }
+        preblock_conf = {"preblocks": {}}
+        if placement in ("ic_only", "both"):
+            preblock_conf["preblocks"]["ic_only"] = {"rename": {"type": "rename", "args": {"mapping": mapping}}}
+        if placement in ("per_step", "both"):
+            preblock_conf["preblocks"]["per_step"] = {"rename": {"type": "rename", "args": {"mapping": mapping}}}
+
+        ic_raw = {
+            "input": {
+                "GFS": {
+                    "GFS/prognostic/2d/TMP": torch.full((B, 1, 1, H, W), 1.0),
+                    "GFS/dynamic_forcing/2d/TMP": torch.full((B, 1, 1, H, W), 2.0),
+                }
+            }
+        }
+        forcing_raw = {
+            "input": {"GFS": {"GFS/dynamic_forcing/2d/TMP": torch.full((B, 1, 1, H, W), 7.0)}},
+            "target": None,
+        }
+        ic_preblocks = build_preblocks(preblock_conf, phase="ic_only")
+        step_preblocks = build_preblocks(preblock_conf, phase="per_step")
+        ic_preprocessed = apply_preblocks(ic_preblocks, ic_raw)
+        ic_preprocessed = apply_rollout_renames(ic_preprocessed, step_preblocks)
+        rollout_batch = apply_rollout_renames(forcing_raw, ic_preblocks, step_preblocks)
+
+        result = assemble_rollout_batch(
+            {
+                "ic_preprocessed": ic_preprocessed,
+                "y_processed": {"ERA5": {"ERA5/prognostic/2d/T": torch.full((B, 1, 1, H, W), 9.0)}},
+            },
+            rollout_batch,
+        )
+
+        assert set(result["input"]) == {"ERA5"}
+        torch.testing.assert_close(result["input"]["ERA5"]["ERA5/prognostic/2d/T"], torch.full((B, 1, 1, H, W), 9.0))
+        torch.testing.assert_close(
+            result["input"]["ERA5"]["ERA5/dynamic_forcing/2d/T"], torch.full((B, 1, 1, H, W), 7.0)
+        )
+
     def test_y_processed_not_dict_raises_type_error(self):
         """TypeError raised when y_processed is not a dict (Reconstruct absent from chain)."""
         from credit.trainers.rollout_utils import assemble_rollout_batch

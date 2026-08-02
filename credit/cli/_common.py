@@ -35,6 +35,64 @@ _PBS_DEFAULTS = {
     },
 }
 
+# SLURM defaults are cluster-agnostic — SLURM sites vary too much to enumerate,
+# so module loads / partitions come from the config's ``slurm:`` section.  A
+# generic site requests GPUs with ``--gres=gpu:N`` and needs an explicit
+# partition; ``constraint``/``qos`` stay unset.
+_SLURM_DEFAULTS = {
+    "cpus": 8,
+    "mem": "128GB",
+    "partition": "gpu",
+    "qos": None,
+    "constraint": None,
+    "gpu_type": None,
+    "walltime": "12:00:00",
+    "gpus": 4,
+    "nodes": 1,
+    "account": None,
+    "job_name": "credit_gen2",
+}
+
+# Perlmutter (NERSC) runtime environment for NCCL over the Slingshot 11 fabric.
+# torch's bundled NCCL only reaches the high-speed network through the
+# system-provided AWS-OFI plugin (``libnccl-net.so``), which must be on
+# ``LD_LIBRARY_PATH``; the ``NCCL_*`` / ``FI_CXI_*`` vars select the ``hsn``
+# interface and the ``cxi`` libfabric provider and apply NERSC's recommended
+# tuning.  ``module load nccl`` alone is unreliable (it does not always export
+# these or add the plugin dir), so we set them explicitly.
+_PERLMUTTER_NCCL_PLUGIN_DIR = "/global/common/software/nersc9/nccl/2.24.3/plugin/lib"
+_PERLMUTTER_ENV_SETUP = [
+    f"export LD_LIBRARY_PATH={_PERLMUTTER_NCCL_PLUGIN_DIR}:$LD_LIBRARY_PATH",
+    'export NCCL_NET="AWS Libfabric"',
+    "export NCCL_NET_GDR_LEVEL=PHB",
+    "export NCCL_SOCKET_IFNAME=hsn",
+    "export NCCL_CROSS_NIC=1",
+    "export FI_CXI_DISABLE_HOST_REGISTER=1",
+    "export FI_MR_CACHE_MONITOR=userfaultfd",
+    "export MPICH_GPU_SUPPORT_ENABLED=1",
+]
+
+# Per-cluster SLURM overrides layered on top of ``_SLURM_DEFAULTS``.  Perlmutter
+# (NERSC) rejects ``--gres=gpu:N`` ("Job request does not match any supported
+# policy") and selects GPU nodes via ``--constraint=gpu`` + ``--qos`` +
+# ``--gpus-per-node``; it needs no ``--partition`` or ``--mem`` line, and GPU
+# allocations require the ``_g`` account suffix.
+_SLURM_CLUSTER_DEFAULTS = {
+    "perlmutter": {
+        "cpus": 64,
+        "mem": None,
+        "partition": None,
+        "qos": "regular",
+        "constraint": "gpu",
+        "walltime": "12:00:00",
+        "gpus": 4,
+        "nodes": 1,
+        "job_name": "credit_gen2",
+        "modules": "nccl/2.24.3",
+        "env_setup": _PERLMUTTER_ENV_SETUP,
+    },
+}
+
 
 def _prompt(prompt: str, default=None) -> str:
     """Print a prompt and return stripped input, or *default* if empty."""
@@ -78,6 +136,23 @@ def _find_torchrun() -> str:
     if os.path.isfile(fallback):
         return fallback
     return "torchrun"
+
+
+def _resolve_torchrun(conda_env) -> str:
+    """Return a torchrun path for a conda env given as a name or a prefix path.
+
+    A value containing a path separator is treated as a full environment prefix
+    (``<prefix>/bin/torchrun``).  A bare environment *name* resolves at run time
+    via ``conda info --base`` so it is never mistaken for a same-named directory
+    in the current working directory (e.g. the repo's ``credit/`` package dir,
+    which made a ``conda: credit`` config yield a bogus ``credit/bin/torchrun``).
+    Falls back to :func:`_find_torchrun` when no env is configured.
+    """
+    if not conda_env:
+        return _find_torchrun()
+    if "/" in conda_env:
+        return f"{conda_env}/bin/torchrun"
+    return f"$(conda info --base)/envs/{conda_env}/bin/torchrun"
 
 
 def _is_ncar_system() -> bool:

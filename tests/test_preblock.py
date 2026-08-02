@@ -17,7 +17,11 @@ from credit.preblock.regrid import Regridder
 from credit.preblock.rename import RenameVariables
 from credit.preblock.scaler import BridgeScalerTransform
 from credit.preblock.sqrt import SqrtTransform
-from credit.preblock._utils import _parse_variable_selection
+from credit.preblock._utils import (
+    _parse_variable_selection,
+    _flatten_spatial_tensors,
+    _unflatten_spatial_tensors,
+)
 from credit.postblock import build_postblocks
 from credit.datasets.gen_2.channel_utils import ChannelSchema
 
@@ -89,6 +93,8 @@ def weight_file(tmp_path):
             "row": xr.DataArray(rows.astype(np.int32), dims=("n_s",)),
             "col": xr.DataArray(cols.astype(np.int32), dims=("n_s",)),
             "S": xr.DataArray(vals.astype(np.float64), dims=("n_s",)),
+            "yc_b": xr.DataArray(np.repeat(np.arange(n_dst_lat), n_dst_lon).astype(np.float64), dims=("n_b",)),
+            "xc_b": xr.DataArray(np.tile(np.arange(n_dst_lon), n_dst_lat).astype(np.float64), dims=("n_b",)),
         }
     )
     path = tmp_path / "weights.nc"
@@ -173,6 +179,66 @@ def test_regrid_flip_axis(weight_file):
         result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
         result_flip["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
     )
+
+
+def test_regrid_flip_axis_ignores_positive_leading_axes(weight_file, caplog):
+    """Positive flip axes are rejected instead of flipping a leading dimension."""
+    path, n_src_lat, n_src_lon, _, _ = weight_file
+    variable = "Test_ERA5/prognostic/3d/T"
+    x = torch.arange(2 * 1 * 2 * n_src_lat * n_src_lon, dtype=torch.float32).reshape(2, 1, 2, n_src_lat, n_src_lon)
+    batch = {"input": {"Test_ERA5": {variable: x}}}
+    baseline = Regridder(path, variables=[variable])(batch)
+    caplog.set_level("WARNING")
+    result = Regridder(path, variables=[variable], flip_axis=[2])(batch)
+
+    torch.testing.assert_close(result["input"]["Test_ERA5"][variable], baseline["input"]["Test_ERA5"][variable])
+    assert "invalid flip_axis values [2]" in caplog.text
+
+
+def test_grid_schema_resolve_rejects_unstructured_native_grid():
+    from types import SimpleNamespace
+
+    from credit.datasets.gen_2.grid_utils import GridSchema
+
+    dataset = SimpleNamespace(
+        static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
+    )
+
+    with pytest.raises(ValueError, match="native grid_type='unstructured'"):
+        GridSchema.resolve(dataset)
+
+
+def test_grid_schema_resolve_regrids_unstructured_native_grid(weight_file):
+    from types import SimpleNamespace
+
+    from credit.datasets.gen_2.grid_utils import GridSchema
+
+    path, *_ = weight_file
+    regrid = Regridder(path, variables=["Test_ERA5/prognostic/3d/T"])
+    dataset = SimpleNamespace(
+        static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
+    )
+
+    schema = GridSchema.resolve(dataset, step_preblocks=nn.ModuleDict({"regrid": regrid}))
+
+    assert schema.origin == "regridded"
+    assert schema.grid_type == "rectilinear"
+    assert schema.lat.shape == (4,)
+    assert schema.lon.shape == (4,)
+
+
+def test_unstructured_source_grid_schema_is_skipped(tmp_path, caplog):
+    from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+
+    caplog.set_level("INFO")
+    write_source_grid_schema_if_missing(
+        "Test_Local",
+        {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)},
+        str(tmp_path),
+    )
+
+    assert not (tmp_path / "Test_Local_grid_schema.nc").exists()
+    assert "unstructured" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +356,200 @@ def test_scaler_data_types_none_scales_all(scaler_file):
     assert not torch.allclose(result["target"]["Test_ERA5"][var].float(), target_before.float()), (
         "target tensor should have been scaled with data_types=None"
     )
+
+
+# ---------------------------------------------------------------------------
+# _flatten_spatial_tensors / _unflatten_spatial_tensors  (grid-wise scaling)
+# ---------------------------------------------------------------------------
+
+
+def _spatial_state() -> dict:
+    """A nested state dict with one spatial-eligible (2D, singleton level/time)
+    variable and one ordinary per-level (3D) variable, under two sources."""
+    return {
+        "input": {
+            "src_a": {
+                "src_a/prognostic/2d/SP": torch.randn(3, 1, 1, 4, 5),
+                "src_a/prognostic/3d/T": torch.randn(3, 6, 1, 4, 5),
+            },
+            "src_b": {
+                "src_b/prognostic/2d/SP": torch.randn(3, 1, 1, 4, 5),
+            },
+        }
+    }
+
+
+def test_flatten_spatial_tensors_empty_is_noop():
+    """No spatial_variables -> the same dict object and an empty shape map."""
+    state = _spatial_state()
+    out, shapes = _flatten_spatial_tensors(state, [])
+    assert out is state
+    assert shapes == {}
+
+
+def test_flatten_spatial_tensors_folds_matched_vars_to_rank2():
+    """Matched vars fold (level, time, H, W) into one trailing axis -> (B, H*W);
+    unmatched vars are left untouched, and every source's copy is folded."""
+    state = _spatial_state()
+    spatial = ["src_a/prognostic/2d/SP", "src_b/prognostic/2d/SP"]
+    out, shapes = _flatten_spatial_tensors(state, spatial)
+
+    assert out["input"]["src_a"]["src_a/prognostic/2d/SP"].shape == (3, 20)
+    assert out["input"]["src_b"]["src_b/prognostic/2d/SP"].shape == (3, 20)
+    # ordinary per-level variable is not touched
+    assert out["input"]["src_a"]["src_a/prognostic/3d/T"].shape == (3, 6, 1, 4, 5)
+    # original shapes recorded for both matched vars
+    assert shapes["src_a/prognostic/2d/SP"] == (3, 1, 1, 4, 5)
+    assert shapes["src_b/prognostic/2d/SP"] == (3, 1, 1, 4, 5)
+
+
+def test_flatten_unflatten_round_trip_restores_shapes_and_values():
+    """Unflatten exactly reverses flatten: shapes and values are preserved."""
+    state = _spatial_state()
+    spatial = ["src_a/prognostic/2d/SP"]
+    original = state["input"]["src_a"]["src_a/prognostic/2d/SP"].clone()
+
+    flat, shapes = _flatten_spatial_tensors(state, spatial)
+    restored = _unflatten_spatial_tensors(flat, shapes)
+
+    got = restored["input"]["src_a"]["src_a/prognostic/2d/SP"]
+    assert got.shape == original.shape
+    assert torch.equal(got, original)
+
+
+def test_flatten_spatial_tensors_rejects_nonsingleton_level():
+    """Flattening a >1 level variable would blend distinct level slices into the
+    same per-gridpoint statistic, so it must raise."""
+    state = _spatial_state()
+    with pytest.raises(ValueError, match="singleton level and time"):
+        _flatten_spatial_tensors(state, ["src_a/prognostic/3d/T"])
+
+
+def test_flatten_spatial_tensors_rejects_nonsingleton_time():
+    """Same guard on the time dim (index 2)."""
+    state = {"input": {"src": {"src/prognostic/2d/SP": torch.randn(3, 1, 2, 4, 5)}}}
+    with pytest.raises(ValueError, match="singleton level and time"):
+        _flatten_spatial_tensors(state, ["src/prognostic/2d/SP"])
+
+
+def test_unflatten_spatial_tensors_empty_is_noop():
+    """No recorded shapes -> the same dict object, unchanged."""
+    state = _spatial_state()
+    assert _unflatten_spatial_tensors(state, {}) is state
+
+
+# ---------------------------------------------------------------------------
+# BridgeScalerTransform (preblock) — spatial_variables
+# ---------------------------------------------------------------------------
+
+
+def _fit_and_save_preblock_scaler(path, batch, spatial_variables):
+    """Fit a fresh standard scaler on *batch* (flattening *spatial_variables*
+    per-gridpoint) and persist it, returning the fitted block."""
+    block = BridgeScalerTransform(
+        scaler_path=path,
+        variables=[],
+        method="transform",
+        scaler_params={"channels_last": False},
+        spatial_variables=list(spatial_variables),
+    )
+    block.fit_scaler_batch(batch)
+    save_scaler_dict(block.scaler, path)
+    return block
+
+
+def test_preblock_scaler_spatial_round_trip(tmp_path):
+    """A spatial variable transforms and inverse-transforms back to its original
+    values and shape, alongside an ordinary per-level variable."""
+    source = "Test_ERA5"
+    spatial_var = "Test_ERA5/prognostic/2d/SP"
+    level_var = "Test_ERA5/prognostic/3d/T"
+    B, L, H, W = 64, 5, 8, 8
+
+    def make_side():
+        return {
+            spatial_var: torch.randn(B, 1, 1, H, W),
+            level_var: torch.randn(B, L, 1, H, W),
+        }
+
+    batch = {"input": {source: make_side()}, "target": {source: make_side()}}
+    path = str(tmp_path / "scaler.json")
+    _fit_and_save_preblock_scaler(path, copy.deepcopy(batch), [spatial_var])
+
+    fwd = BridgeScalerTransform(scaler_path=path, variables=[], method="transform", spatial_variables=[spatial_var])
+    inv = BridgeScalerTransform(
+        scaler_path=path, variables=[], method="inverse_transform", spatial_variables=[spatial_var]
+    )
+    original = {v: batch["input"][source][v].clone() for v in (spatial_var, level_var)}
+    out = inv(fwd(copy.deepcopy(batch)))
+
+    for v in (spatial_var, level_var):
+        got = out["input"][source][v]
+        assert got.shape == original[v].shape, f"{v} shape changed across round trip"
+        assert torch.allclose(got.float(), original[v].float(), atol=1e-4), f"{v} not recovered"
+
+
+def test_preblock_scaler_spatial_is_per_gridpoint(tmp_path):
+    """Spatial scaling centres each gridpoint independently (one stat per cell),
+    unlike ordinary per-level scaling which uses a single stat for the 2D field.
+
+    The field gives every gridpoint a large, distinct mean offset. After spatial
+    scaling, each gridpoint's mean over the batch collapses to ~0; a plain scaler
+    leaves those per-gridpoint means spread apart.
+    """
+    source = "Test_ERA5"
+    spatial_var = "Test_ERA5/prognostic/2d/SP"
+    B, H, W = 256, 4, 4
+
+    offsets = torch.arange(H * W, dtype=torch.float32).reshape(1, 1, 1, H, W) * 100.0
+    field = offsets + torch.randn(B, 1, 1, H, W)
+    batch = {
+        "input": {source: {spatial_var: field.clone()}},
+        "target": {source: {spatial_var: field.clone()}},
+    }
+
+    # Non-vacuous setup: raw per-gridpoint means span a wide range.
+    raw_gp_mean = field.reshape(B, H * W).mean(dim=0)
+    assert (raw_gp_mean.max() - raw_gp_mean.min()).item() > 100.0
+
+    spatial_path = str(tmp_path / "scaler_spatial.json")
+    _fit_and_save_preblock_scaler(spatial_path, copy.deepcopy(batch), [spatial_var])
+    spatial_fwd = BridgeScalerTransform(
+        scaler_path=spatial_path, variables=[], method="transform", spatial_variables=[spatial_var]
+    )
+    spatial_scaled = spatial_fwd(copy.deepcopy(batch))["input"][source][spatial_var]
+    spatial_gp_mean = spatial_scaled.reshape(B, H * W).mean(dim=0)
+    assert spatial_gp_mean.abs().max().item() < 1e-3, "each gridpoint should be independently centred"
+
+    # Contrast: a plain (non-spatial) scaler uses one stat for the whole field,
+    # so per-gridpoint means stay spread apart after scaling.
+    plain_path = str(tmp_path / "scaler_plain.json")
+    _fit_and_save_preblock_scaler(plain_path, copy.deepcopy(batch), [])
+    plain_fwd = BridgeScalerTransform(scaler_path=plain_path, variables=[], method="transform")
+    plain_scaled = plain_fwd(copy.deepcopy(batch))["input"][source][spatial_var]
+    plain_gp_mean = plain_scaled.reshape(B, H * W).mean(dim=0)
+    assert (plain_gp_mean.max() - plain_gp_mean.min()).item() > 1.0, "plain scaling should not centre per gridpoint"
+
+
+def test_preblock_scaler_spatial_variables_must_be_subset(tmp_path):
+    """spatial_variables not covered by `variables` is a config error and raises."""
+    source = "Test_ERA5"
+    batch = {
+        "input": {
+            source: {
+                "Test_ERA5/prognostic/2d/SP": torch.randn(2, 1, 1, 4, 4),
+                "Test_ERA5/prognostic/3d/T": torch.randn(2, 3, 1, 4, 4),
+            }
+        }
+    }
+    block = BridgeScalerTransform(
+        scaler_path=str(tmp_path / "scaler.json"),
+        variables=["Test_ERA5/prognostic/3d/T"],  # SP deliberately omitted
+        method="transform",
+        spatial_variables=["Test_ERA5/prognostic/2d/SP"],
+    )
+    with pytest.raises(ValueError, match="must also be selected"):
+        block(batch)
 
 
 # ---------------------------------------------------------------------------
@@ -681,6 +941,17 @@ class TestRenameVariables:
         out = rn(batch)
         assert "ERA5" in out["input"]
         assert out["target"] == {}
+
+    @pytest.mark.parametrize("mapping", [{"A/x": "B/x", "B/x": "C/x"}, {"B/x": "C/x", "A/x": "B/x"}])
+    def test_chained_mappings_use_original_keys_only(self, mapping):
+        """A mapped destination is not remapped again in the same pass."""
+        batch = {"input": {"A": {"A/x": torch.tensor(1.0)}}}
+
+        out = RenameVariables(mapping=mapping)(batch)
+
+        assert out["input"]["A"] == {}
+        assert torch.equal(out["input"]["B"]["B/x"], torch.tensor(1.0))
+        assert "C" not in out["input"]
 
     def test_destination_collision_raises(self):
         batch = {
