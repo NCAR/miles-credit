@@ -177,7 +177,29 @@ class _AnomalyMetricBase(BaseVariableMetric):
 
         if clim is not None:
             clim = clim.to(device=ref.device, dtype=ref.dtype)
-            # Reshape to broadcast against ref (B, C, T, H, W): prepend 1s.
+            if clim.ndim < ref.ndim and ref.ndim == 5:
+                # ref is (B, C, T, H, W): axis 1 is channel/level, axis 2 is
+                # time, and the last two axes are spatial. Climatology fields
+                # are stored without batch or time axes — (lat, lon) for 2-D
+                # variables and (level, lat, lon) for 3-D — so insert the
+                # missing axes at their correct positions. Left-padding with
+                # unsqueeze(0) instead would land `level` on the time axis,
+                # which fails to broadcast for every 3-D variable.
+                leading = clim.shape[:-2]
+                if len(leading) > 1:
+                    raise ValueError(
+                        f"{type(self).__name__}: climatology for '{var_key}' has shape "
+                        f"{tuple(clim.shape)}; expected (lat, lon) for a 2-D variable or "
+                        "(level, lat, lon) for a 3-D variable."
+                    )
+                n_levels = leading[0] if leading else 1
+                if n_levels not in (1, ref.shape[1]):
+                    raise ValueError(
+                        f"{type(self).__name__}: climatology for '{var_key}' has {n_levels} "
+                        f"levels but the field has {ref.shape[1]}. Check that the climatology "
+                        "file's level coordinate matches the data config."
+                    )
+                return clim.reshape(1, n_levels, 1, *clim.shape[-2:])
             while clim.ndim < ref.ndim:
                 clim = clim.unsqueeze(0)
             return clim

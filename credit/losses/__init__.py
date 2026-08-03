@@ -16,15 +16,15 @@ _LOSS_REGISTRY = {
     "mae": ("torch.nn", "L1Loss"),
     "msle": ("credit.losses.msle", "MSLELoss"),
     "huber": ("torch.nn", "HuberLoss"),
-    "logcosh": ("credit.losses.logcosh", "LogCoshLoss"),
-    "xtanh": ("credit.losses.xtanh", "XTanhLoss"),
-    "xsigmoid": ("credit.losses.xsigmoid", "XSigmoidLoss"),
-    "KCRPS": ("credit.losses.kcrps", "KCRPSLoss"),
-    "almost-fair-crps": ("credit.losses.almost_fair_crps", "AlmostFairKCRPSLoss"),
+    "logcosh": ("credit.losses.gen_1.logcosh", "LogCoshLoss"),
+    "xtanh": ("credit.losses.gen_1.xtanh", "XTanhLoss"),
+    "xsigmoid": ("credit.losses.gen_1.xsigmoid", "XSigmoidLoss"),
+    "KCRPS": ("credit.losses.gen_1.kcrps", "KCRPSLoss"),
+    "almost-fair-crps": ("credit.losses.gen_1.almost_fair_crps", "AlmostFairKCRPSLoss"),
     "ring-crps": ("credit.losses.crps", "RingCRPSLoss"),
-    "spectral": ("credit.losses.spectral", "SpectralLoss2D"),
-    "power": ("credit.losses.power", "PSDLoss"),
-    "covmse": ("credit.losses.covariance", "CovarianceWeightedMSELoss"),
+    "spectral": ("credit.losses.gen_1.spectral", "SpectralLoss2D"),
+    "power": ("credit.losses.gen_1.power", "PSDLoss"),
+    "covmse": ("credit.losses.gen_1.covariance", "CovarianceWeightedMSELoss"),
     "base": ("credit.losses.base", "BaseLoss"),
 }
 
@@ -41,14 +41,14 @@ def is_crps_loss(loss_type):
 # Enables ``from credit.losses import LogCoshLoss`` without eager imports; kept for backward compatibility.
 _CLASS_SOURCES = {
     "MSLELoss": ("credit.losses.msle", "MSLELoss"),
-    "LogCoshLoss": ("credit.losses.logcosh", "LogCoshLoss"),
-    "XTanhLoss": ("credit.losses.xtanh", "XTanhLoss"),
-    "XSigmoidLoss": ("credit.losses.xsigmoid", "XSigmoidLoss"),
-    "KCRPSLoss": ("credit.losses.kcrps", "KCRPSLoss"),
-    "AlmostFairKCRPSLoss": ("credit.losses.almost_fair_crps", "AlmostFairKCRPSLoss"),
-    "SpectralLoss2D": ("credit.losses.spectral", "SpectralLoss2D"),
-    "PSDLoss": ("credit.losses.power", "PSDLoss"),
-    "CovarianceWeightedMSELoss": ("credit.losses.covariance", "CovarianceWeightedMSELoss"),
+    "LogCoshLoss": ("credit.losses.gen_1.logcosh", "LogCoshLoss"),
+    "XTanhLoss": ("credit.losses.gen_1.xtanh", "XTanhLoss"),
+    "XSigmoidLoss": ("credit.losses.gen_1.xsigmoid", "XSigmoidLoss"),
+    "KCRPSLoss": ("credit.losses.gen_1.kcrps", "KCRPSLoss"),
+    "AlmostFairKCRPSLoss": ("credit.losses.gen_1.almost_fair_crps", "AlmostFairKCRPSLoss"),
+    "SpectralLoss2D": ("credit.losses.gen_1.spectral", "SpectralLoss2D"),
+    "PSDLoss": ("credit.losses.gen_1.power", "PSDLoss"),
+    "CovarianceWeightedMSELoss": ("credit.losses.gen_1.covariance", "CovarianceWeightedMSELoss"),
 }
 
 
@@ -56,7 +56,7 @@ _CLASS_SOURCES = {
 # Module __getattr__: called when a name is not found via normal attribute lookup.
 # Resolves names listed in _CLASS_SOURCES lazily so submodules are only imported on first access.
 # Example: ``from credit.losses import LogCoshLoss`` triggers __getattr__("LogCoshLoss"),
-#          which imports credit.losses.logcosh on the spot and returns the class.
+#          which imports credit.losses.gen_1.logcosh on the spot and returns the class.
 def __getattr__(name):
     if name == "VariableTotalLoss2D":
         from credit.losses.gen_1.weighted_loss import VariableTotalLoss2D
