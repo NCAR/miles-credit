@@ -108,6 +108,28 @@ def _make_conf(save_loc: str, scaler_path: str) -> dict:
     }
 
 
+def test_existing_scaler_is_moved_before_replacement(tmp_path):
+    from credit.applications.preprocess import _backup_existing_file
+
+    scaler_path = tmp_path / "scaler.json"
+    scaler_path.write_text("original scaler")
+
+    backup_path = _backup_existing_file(str(scaler_path))
+
+    assert backup_path is not None
+    assert not scaler_path.exists()
+    assert backup_path.endswith(".json")
+    assert "scaler_" in backup_path
+    with open(backup_path) as backup_file:
+        assert backup_file.read() == "original scaler"
+
+
+def test_missing_scaler_is_not_backed_up(tmp_path):
+    from credit.applications.preprocess import _backup_existing_file
+
+    assert _backup_existing_file(str(tmp_path / "missing.json")) is None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
