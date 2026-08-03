@@ -250,3 +250,265 @@ class MapPanel:
             pickable=False,
         )
         self.contour_actors[slot] = actor
+
+
+# ============================================================
+# TimeSeriesPanel
+# ============================================================
+class TimeSeriesPanel:
+    def __init__(self, plotter, row, col, border_actor=None):  # <-- Accept border_actor
+        self.plotter = plotter
+        self.row = row
+        self.col = col
+        self.border_actor = border_actor
+
+        self.plotter.subplot(row, col)
+        self.renderer = self.plotter.renderer
+        self.renderer.SetBackground(0.9, 0.9, 0.9)
+
+        # Hide the border initially
+        if self.border_actor:
+            self.border_actor.SetVisibility(False)
+
+        self.chart = pv.Chart2D()
+        self.chart.visible = False
+        self.plotter.add_chart(self.chart)
+        self._time_line = None
+
+        self.placeholder_actor = self.plotter.add_text(
+            "Time Series Panel\n(Enable Map Clicking and select a point)",
+            position=(0.5, 0.5),
+            viewport=True,
+            font_size=12,
+            color="#444444",
+        )
+        self.placeholder_actor.GetTextProperty().SetJustificationToCentered()
+        self.placeholder_actor.GetTextProperty().SetVerticalJustificationToCentered()
+        self.has_data = False
+
+    def update_chart(self, x_data, y_data, tick_locs, tick_labels, title, y_label):
+        if not self.has_data:
+            self.has_data = True
+            self.renderer.SetBackground(1.0, 1.0, 1.0)
+            self.placeholder_actor.SetVisibility(False)
+            self.chart.visible = True
+
+            # Show the border once data loads
+            if self.border_actor:
+                self.border_actor.SetVisibility(True)
+
+        self.chart.clear()
+        self.chart.line(x_data, y_data, color="blue", width=2.0)
+
+        self.chart.x_axis.tick_locations = tick_locs
+        self.chart.x_axis.tick_labels = tick_labels
+
+        self.chart.title = title
+        self.chart.y_axis.label = y_label
+        self._time_line = None
+
+    def update_multi_chart(self, x_data, series, tick_locs, tick_labels, title, y_label):
+        """Like update_chart, but draws several named/colored lines with a legend."""
+        if not self.has_data:
+            self.has_data = True
+            self.renderer.SetBackground(1.0, 1.0, 1.0)
+            self.placeholder_actor.SetVisibility(False)
+            self.chart.visible = True
+
+            if self.border_actor:
+                self.border_actor.SetVisibility(True)
+
+        self.chart.clear()
+        for s in series:
+            self.chart.line(
+                x_data, s["y"], color=s.get("color", "blue"), width=s.get("width", 2.0), label=s.get("label", "")
+            )
+        self.chart.legend_visible = True
+
+        self.chart.x_axis.tick_locations = tick_locs
+        self.chart.x_axis.tick_labels = tick_labels
+
+        self.chart.title = title
+        self.chart.y_axis.label = y_label
+        self._time_line = None
+
+    def update_time_indicator(self, t_idx, ymin, ymax):
+        # Do not attempt to draw the line if the chart hasn't been initialized
+        if not self.has_data:
+            return
+
+        if self._time_line is not None:
+            try:
+                self.chart.remove_plot(self._time_line)
+            except ValueError:
+                pass
+
+        if ymin is not None and ymax is not None:
+            self._time_line = self.chart.line([t_idx, t_idx], [ymin, ymax], color="red", width=2.0, style="--")
+
+
+# ============================================================
+# VerticalSlicePanel
+# ============================================================
+class VerticalSlicePanel:
+    def __init__(
+        self, plotter, row, col, title="Vertical Slice", cmap="viridis", border_actor=None
+    ):  # <-- Accept border_actor
+        self.plotter = plotter
+        self.row = row
+        self.col = col
+        self.title = title
+        self.cmap = cmap
+        self.is_active = False
+        self.border_actor = border_actor
+
+        self.plotter.subplot(row, col)
+        self.renderer = self.plotter.renderer
+        self.renderer.SetBackground(0.9, 0.9, 0.9)
+
+        # Hide the border initially
+        if self.border_actor:
+            self.border_actor.SetVisibility(False)
+
+        self.grid = None
+        self.actor = None
+        self.view_initialized = False
+        self._domain = None
+
+        self.title_actor = self.plotter.add_text(
+            title, position="upper_left", font_size=9, color="black", name=f"title_{row}_{col}"
+        )
+        self.title_actor.SetVisibility(False)
+
+        self.placeholder_actor = self.plotter.add_text(
+            "Vertical Slice Panel\n(Enable in sidebar)",
+            position=(0.5, 0.5),
+            viewport=True,
+            font_size=12,
+            color="#444444",
+        )
+        self.placeholder_actor.GetTextProperty().SetJustificationToCentered()
+        self.placeholder_actor.GetTextProperty().SetVerticalJustificationToCentered()
+
+    def toggle_visibility(self, visible):
+        self.is_active = visible
+
+        # Toggle border visibility
+        if self.border_actor:
+            self.border_actor.SetVisibility(visible)
+
+        if visible:
+            self.renderer.SetBackground(1.0, 1.0, 1.0)
+            self.placeholder_actor.SetVisibility(False)
+            self.title_actor.SetVisibility(True)
+            if self.actor is not None:
+                self.actor.SetVisibility(True)
+        else:
+            self.renderer.SetBackground(0.9, 0.9, 0.9)
+            self.placeholder_actor.SetVisibility(True)
+            self.title_actor.SetVisibility(False)
+            if self.actor is not None:
+                self.actor.SetVisibility(False)
+
+    def _make_grid(self, x, levels):
+        x = np.asarray(x, dtype=np.float32)
+        levels = np.asarray(levels, dtype=np.float32)
+
+        # Level index/pressure has no spatial correspondence to the horizontal
+        # degree axis (and no ticks are drawn for it), so under a true-aspect
+        # parallel projection it collapses into a thin band. Vertically exaggerate
+        # to match this panel's actual current viewport aspect ratio (not a fixed
+        # 1:1 square) so the slice fills the whole panel rectangle, same as the
+        # map panels, rather than being pillarboxed inside a square.
+        x_span = float(x.max() - x.min()) if len(x) > 1 else 1.0
+        level_span = float(levels.max() - levels.min()) if len(levels) > 1 else 1.0
+        w, h = self.renderer.GetSize()
+        viewport_aspect = (w / h) if h > 0 else 1.0
+        target_level_span = (x_span / viewport_aspect) if viewport_aspect > 0 else x_span
+        stretch = (target_level_span / level_span) if level_span > 0 else 1.0
+        levels_scaled = (levels - levels.min()) * stretch + levels.min()
+
+        X, Y = np.meshgrid(x, levels_scaled, indexing="ij")
+        Z = np.zeros_like(X, dtype=np.float32)
+        bounds = (float(x.min()), float(x.max()), float(levels_scaled.min()), float(levels_scaled.max()))
+        return pv.StructuredGrid(X.astype(np.float32), Y.astype(np.float32), Z), bounds
+
+    def set_slice(self, x, levels, arr, clim=None, title=None):
+        self.plotter.subplot(self.row, self.col)
+        if clim is None:
+            clim = (
+                float(np.nanpercentile(arr, 1)),
+                float(np.nanpercentile(arr, 99)),
+            )
+
+        self.grid, grid_bounds = self._make_grid(x, levels)
+        self.grid.point_data["slice_field"] = arr.ravel(order="F")
+
+        if self.actor is not None:
+            self.plotter.remove_actor(self.actor)
+
+        self.actor = self.plotter.add_mesh(
+            self.grid,
+            scalars="slice_field",
+            cmap=self.cmap,
+            clim=clim,
+            show_edges=False,
+            lighting=False,
+            show_scalar_bar=False,
+        )
+        self.actor.mapper.scalar_range = clim
+
+        # Ensure new mesh respects current panel visibility
+        self.actor.SetVisibility(self.is_active)
+
+        if title is not None:
+            self.title_actor = self.plotter.add_text(
+                title, position="upper_left", font_size=9, color="black", name=f"title_{self.row}_{self.col}"
+            )
+            self.title_actor.SetVisibility(self.is_active)
+
+        # x's meaning (and range) changes with slice orientation -- latitude vs.
+        # longitude span completely different domains -- so a camera framing fit
+        # for one is wrong for the other. Re-fit whenever the actual coordinate
+        # domain changes, not just on the very first call, but otherwise leave
+        # the camera alone so manual pan/zoom survives ordinary data updates.
+        domain = (float(x.min()), float(x.max()), float(levels.min()), float(levels.max()))
+        if not self.view_initialized or domain != self._domain:
+            self.plotter.view_xy()
+            cam = self.plotter.camera
+            cam.parallel_projection = True
+            # Not reset_camera(): VTK sizes parallel_scale off the bounding box's
+            # diagonal, not its height, which badly under-fills a wide/short
+            # panel (~45% for a 2:1 box). Set it explicitly from the known grid
+            # bounds instead -- _make_grid already matched their aspect ratio to
+            # this panel's viewport, so half-height fills it exactly.
+            x_min, x_max, y_min, y_max = grid_bounds
+            cx, cy = 0.5 * (x_min + x_max), 0.5 * (y_min + y_max)
+            pz = cam.position[2] or 1.0
+            cam.position = (cx, cy, pz)
+            cam.focal_point = (cx, cy, 0.0)
+            cam.parallel_scale = max((y_max - y_min) / 2.0, 1e-6)
+            self.view_initialized = True
+            self._domain = domain
+        self.save_camera_state()
+
+    def save_camera_state(self):
+        self.plotter.subplot(self.row, self.col)
+        cam = self.plotter.camera
+        self._locked_camera_state = {
+            "position": cam.position,
+            "focal_point": cam.focal_point,
+            "up": cam.up,
+            "parallel_scale": cam.parallel_scale,
+        }
+
+    def restore_camera_state(self):
+        if not hasattr(self, "_locked_camera_state"):
+            return
+        self.plotter.subplot(self.row, self.col)
+        cam = self.plotter.camera
+        s = self._locked_camera_state
+        cam.position = s["position"]
+        cam.focal_point = s["focal_point"]
+        cam.up = s["up"]
+        cam.parallel_scale = s["parallel_scale"]
